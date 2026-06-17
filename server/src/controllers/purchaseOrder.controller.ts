@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import {
@@ -58,6 +59,8 @@ export async function createPurchaseOrder(req: Request, res: Response) {
 
   const numLorries = data.lorryCount && data.lorryCount > 0 ? data.lorryCount : Math.max(1, Math.round(data.tonnageKg / 25000));
   const unitTonnageKg = Math.round(data.tonnageKg / numLorries);
+  // One shared id ties all the per-lorry POs from this order together.
+  const poGroupId = randomUUID();
   const createdPOs: any[] = [];
 
   await prisma.$transaction(async (tx) => {
@@ -90,6 +93,7 @@ export async function createPurchaseOrder(req: Request, res: Response) {
           pricePerKg: data.pricePerKg,
           tonnageKg: poTonnage,
           lorryCount: 1, // each PO represents exactly 1 lorry
+          poGroupId,
           createdBy: req.user!.userId,
         },
         include: { party: true },

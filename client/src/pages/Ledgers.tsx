@@ -67,7 +67,7 @@ export default function Ledgers() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-rose-600 dark:text-rose-500">{rupees(totalLiabilities)}</div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Supplier payables & accrued Hamali/Carter</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Supplier payables & accrued Hamali</p>
           </CardContent>
         </Card>
 

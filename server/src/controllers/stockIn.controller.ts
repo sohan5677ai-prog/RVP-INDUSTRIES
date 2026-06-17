@@ -70,7 +70,6 @@ export async function createStockIn(req: Request, res: Response) {
         partyKataKg: data.partyKataKg,
         invoiceFileUrl: fileUrl(req.file!.filename),
         loadingLocation: data.loadingLocation,
-        carterDistanceKm: data.carterDistanceKm,
       },
     });
 
@@ -114,7 +113,6 @@ export async function updateStockIn(req: Request, res: Response) {
       partyKataKg: data.partyKataKg,
       invoiceFileUrl,
       loadingLocation: data.loadingLocation,
-      carterDistanceKm: data.carterDistanceKm,
     },
   });
   res.json(updated);

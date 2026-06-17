@@ -118,13 +118,14 @@ export default function StockIn() {
     });
   }
 
-  // Group lorry arrivals under their purchase order so each PO shows as a single
-  // summary row that expands to reveal its individual lorry invoices/weights.
+  // Group lorry arrivals under their logical order (the per-lorry POs share a
+  // poGroupId) so each order shows as a single summary row that expands to
+  // reveal its individual lorry invoices/weights.
   const groups = useMemo(() => {
-    const map = new Map<string, { poId: string; po: StockInRow['purchaseOrder']; rows: StockInRow[] }>();
+    const map = new Map<string, { groupId: string; po: StockInRow['purchaseOrder']; rows: StockInRow[] }>();
     for (const s of items ?? []) {
-      const key = s.purchaseOrderId;
-      if (!map.has(key)) map.set(key, { poId: key, po: s.purchaseOrder, rows: [] });
+      const key = s.purchaseOrder?.poGroupId ?? s.purchaseOrderId;
+      if (!map.has(key)) map.set(key, { groupId: key, po: s.purchaseOrder, rows: [] });
       map.get(key)!.rows.push(s);
     }
     return [...map.values()];
@@ -290,22 +291,24 @@ export default function StockIn() {
             {!isLoading && groups.length === 0 && (
               <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">No stock-ins yet.</TableCell></TableRow>
             )}
-            {groups.map(({ poId, po, rows }) => {
-              const isOpen = expanded.has(poId);
-              const expected = po?.lorryCount || Math.max(1, Math.round((po?.tonnageKg ?? 0) / 25000));
+            {groups.map(({ groupId, po, rows }) => {
+              const isOpen = expanded.has(groupId);
               const totalRvp = rows.reduce((sum, r) => sum + r.rvpFirstWeightKg, 0);
               const totalBilling = rows.reduce((sum, r) => sum + r.billingWeightKg, 0);
               const totalParty = rows.reduce((sum, r) => sum + r.partyKataKg, 0);
               const purchasedCount = rows.filter((r) => r.purchase).length;
               const locations = [...new Set(rows.map((r) => r.loadingLocation))];
               const latestArrival = rows.reduce((d, r) => (r.arrivalDate > d ? r.arrivalDate : d), rows[0].arrivalDate);
+              // PO-number range across the lorries in this order (e.g. DCS-001 – DCS-003)
+              const poNums = rows.map((r) => r.purchaseOrder?.poNumber).filter(Boolean).sort() as string[];
+              const poLabel = poNums.length === 0 ? '—' : poNums.length === 1 ? poNums[0] : `${poNums[0]} – ${poNums[poNums.length - 1]}`;
 
               return (
-                <Fragment key={poId}>
-                  {/* PO summary row — click to expand the lorries underneath */}
+                <Fragment key={groupId}>
+                  {/* Order summary row — click to expand the lorries underneath */}
                   <TableRow
                     className="cursor-pointer bg-muted/30 hover:bg-muted/50 font-medium"
-                    onClick={() => toggleGroup(poId)}
+                    onClick={() => toggleGroup(groupId)}
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -315,7 +318,7 @@ export default function StockIn() {
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         )}
                         <div>
-                          <span className="font-mono font-semibold">{po?.poNumber ?? '—'}</span>
+                          <span className="font-mono font-semibold">{poLabel}</span>
                           <span className="block text-[11px] font-normal text-muted-foreground">
                             latest {shortDate(latestArrival)}
                           </span>
@@ -324,7 +327,7 @@ export default function StockIn() {
                     </TableCell>
                     <TableCell className="font-semibold">{po?.party?.name ?? '—'}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{rows.length} / {expected} lorries</Badge>
+                      <Badge variant="secondary">{rows.length} {rows.length === 1 ? 'lorry' : 'lorries'}</Badge>
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">{purchasedCount}/{rows.length} purchased</span>
@@ -347,7 +350,7 @@ export default function StockIn() {
                   {isOpen && rows.map((s) => (
                     <TableRow key={s.id} className="bg-background">
                       <TableCell className="pl-10 text-muted-foreground">{shortDate(s.arrivalDate)}</TableCell>
-                      <TableCell />
+                      <TableCell className="font-mono text-xs text-muted-foreground">{s.purchaseOrder?.poNumber ?? '—'}</TableCell>
                       <TableCell className="font-semibold">{s.invoiceNumber}</TableCell>
                       <TableCell>{s.lorryNumber}</TableCell>
                       <TableCell><Badge variant="outline">{s.loadingLocation}</Badge></TableCell>

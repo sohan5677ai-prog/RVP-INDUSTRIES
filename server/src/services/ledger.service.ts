@@ -83,7 +83,7 @@ export class LedgerService {
   /**
    * Post ledger when purchase is verified.
    * Debits Raw Material Inventory, Credits AP Suppliers.
-   * Accounts for Hamali (unloading) and Carter (freight) accruals.
+   * Accounts for Hamali (unloading) accrual.
    */
   static async postPurchaseVerification(tx: Prisma.TransactionClient, purchaseId: string) {
     const p = await tx.purchase.findUnique({
@@ -99,7 +99,6 @@ export class LedgerService {
     const baseCost = Number(p.verification.totalAmount);
     const discountVal = Number(p.discountValue);
     const hamali = Number(p.hamaliCharge);
-    const carter = Number(p.carterCharge);
     const supplierName = p.stockIn.purchaseOrder.party.name;
     const location = p.stockIn.loadingLocation;
 
@@ -142,21 +141,6 @@ export class LedgerService {
         accountCode: '20200', // Outstanding Labor Liability - Hamali
         debit: 0,
         credit: hamali,
-      });
-    }
-
-    // 3. Carter Accrual
-    if (carter > 0) {
-      lines.push({
-        accountCode: '50020', // Factory Labor Expense
-        debit: carter,
-        credit: 0,
-        costCenter: 'Carter Transports',
-      });
-      lines.push({
-        accountCode: '20300', // Outstanding Labor Liability - Carter
-        debit: 0,
-        credit: carter,
       });
     }
 

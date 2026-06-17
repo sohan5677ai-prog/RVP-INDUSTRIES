@@ -52,7 +52,6 @@ async function main() {
     { code: '10200', name: 'Transit Loss Claim Receivable', type: 'ASSET' as const },
     { code: '20100', name: 'Accounts Payable - Suppliers', type: 'LIABILITY' as const },
     { code: '20200', name: 'Outstanding Labor Liability - Hamali', type: 'LIABILITY' as const },
-    { code: '20300', name: 'Outstanding Labor Liability - Carter', type: 'LIABILITY' as const },
     { code: '40010', name: 'Sales Revenue', type: 'REVENUE' as const },
     { code: '40020', name: 'Purchase Discount', type: 'REVENUE' as const },
     { code: '50010', name: 'Cost of Goods Sold', type: 'EXPENSE' as const },

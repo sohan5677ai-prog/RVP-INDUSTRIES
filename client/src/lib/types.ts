@@ -83,7 +83,6 @@ export interface Purchase {
   kataFee: string;
   discountType?: DiscountType | null;
   discountValue?: string;
-  carterCharge?: string;
   createdAt: string;
   verification?: WeightVerification | null;
 }
@@ -101,7 +100,6 @@ export interface StockIn {
   partyKataKg: number;
   invoiceFileUrl: string;
   loadingLocation: 'At process' | 'Rampalli' | 'Murgan' | 'Multi';
-  carterDistanceKm: number;
   createdAt: string;
   purchase?: Purchase | null;
   purchaseOrder?: (PurchaseOrder & { party?: Party }) | null;
@@ -116,6 +114,7 @@ export interface PurchaseOrder {
   pricePerKg: string;
   tonnageKg: number;
   lorryCount?: number | null;
+  poGroupId?: string | null;
   status: POStatus;
   createdBy: string;
   createdAt: string;

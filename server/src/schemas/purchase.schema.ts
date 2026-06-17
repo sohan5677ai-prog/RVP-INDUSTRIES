@@ -25,7 +25,6 @@ export const createStockInSchema = z.object({
   billingWeightKg: z.coerce.number().int().positive(),
   partyKataKg: z.coerce.number().int().positive(),
   loadingLocation: z.enum(['At process', 'Rampalli', 'Murgan', 'Multi']).optional().default('At process'),
-  carterDistanceKm: z.coerce.number().int().nonnegative().optional().default(50),
 });
 
 export const createPurchaseSchema = z.object({
@@ -38,7 +37,6 @@ export const createVerificationSchema = z.object({
   purchaseId: z.string().min(1),
   discountType: z.enum(['WEIGHT', 'PRICE', 'AMOUNT']).optional().nullable(),
   discountValue: z.coerce.number().nonnegative().optional().default(0),
-  carterCharge: z.coerce.number().nonnegative().optional().default(0),
 });
 
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;

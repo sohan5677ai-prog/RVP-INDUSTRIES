@@ -69,6 +69,9 @@ model PurchaseOrder {
   pricePerKg    Decimal  @db.Decimal(12, 2) // approx
   tonnageKg     Int // approx, in kg
   lorryCount    Int? // approx number of lorries ordered
+  // Links all per-lorry POs created together from one order, so they can be
+  // grouped back into a single logical order in the UI.
+  poGroupId     String?
   status        POStatus @default(PENDING)
   createdBy     String
   createdAt     DateTime @default(now())
@@ -89,7 +92,6 @@ model StockIn {
   partyKataKg       Int // party weighbridge
   invoiceFileUrl    String // uploaded invoice
   loadingLocation   String        @default("At process")
-  carterDistanceKm  Int           @default(50)
   createdAt         DateTime      @default(now())
   purchase          Purchase?
 }
@@ -104,7 +106,6 @@ model Purchase {
   kataFee        Decimal             @default(0) @db.Decimal(12, 2) // computed
   discountType   DiscountType?
   discountValue  Decimal             @default(0) @db.Decimal(12, 2)
-  carterCharge   Decimal             @default(0) @db.Decimal(12, 2)
   createdAt      DateTime            @default(now())
   verification   WeightVerification?
   processing     Processing?

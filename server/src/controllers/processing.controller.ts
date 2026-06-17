@@ -3,8 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createProcessingSchema, createPappuPriceSchema } from '../schemas/processing.schema.js';
 import { calcPappu, DEFAULT_OUT_TURN_PCT } from '../lib/calc.js';
-import { InventoryService } from '../services/inventory.service.js';
-import { LedgerService } from '../services/ledger.service.js';
+import { ProcessingService } from '../services/processing.service.js';
 
 const processingInclude = {
   pappuPrice: true,
@@ -33,12 +32,6 @@ export async function listProcessing(_req: Request, res: Response) {
 
 export async function createProcessing(req: Request, res: Response) {
   const data = createProcessingSchema.parse(req.body);
-  const outTurn = data.outTurnPct ?? DEFAULT_OUT_TURN_PCT;
-  const pappuWeightKg = calcPappu(data.blackWeightKg, outTurn);
-  
-  const huskWeightKg = Math.round(data.blackWeightKg * 0.25);
-  const wasteWeightKg = Math.round(data.blackWeightKg * 0.10);
-  const lostWeightKg = Math.round(data.blackWeightKg * 0.05);
 
   if (data.purchaseId) {
     const existing = await prisma.processing.findUnique({
@@ -49,7 +42,8 @@ export async function createProcessing(req: Request, res: Response) {
     }
   }
 
-  // Determine raw seed location
+  // Determine raw seed location: a purchase-linked run mills from its arrival
+  // silo; a standalone run mills from the chosen pool.
   let finalLocation: string = data.loadingLocation || 'At process';
   if (data.purchaseId) {
     const purchase = await prisma.purchase.findUnique({
@@ -61,91 +55,28 @@ export async function createProcessing(req: Request, res: Response) {
     }
   }
 
-  const overheadElectricity = data.overheadElectricity ?? 0;
-  const overheadWages = data.overheadWages ?? 0;
-  const overheadMaintenance = data.overheadMaintenance ?? 0;
-  const totalOverheads = overheadElectricity + overheadWages + overheadMaintenance;
-
-  // Check yield anomaly
-  const actualPappuPct = (pappuWeightKg / data.blackWeightKg) * 100;
-  const actualLossPct = (lostWeightKg / data.blackWeightKg) * 100;
-  const isAnomaly = actualPappuPct < 59 || actualLossPct > 6;
-  const anomalyReason = isAnomaly 
-    ? `Yield deviation: Pappu yield is ${actualPappuPct.toFixed(1)}% (expected 60%) or lost shrinkage is ${actualLossPct.toFixed(1)}% (expected 5%).`
-    : null;
-
-  if (isAnomaly) {
-    console.warn(`[YIELD ANOMALY ALERT] Batch process flags efficiency warning: ${anomalyReason}`);
-  }
-
-  const result = await prisma.$transaction(async (tx) => {
-    // 1. Consume Raw stock from Silo Inventory
-    const rawCost = await InventoryService.consumeBlackSeedInventory(tx, finalLocation, data.blackWeightKg);
-    
-    // 2. Create processing record
-    const item = await tx.processing.create({
-      data: {
-        blackWeightKg: data.blackWeightKg,
-        outTurnPct: outTurn,
-        pappuWeightKg,
-        huskWeightKg,
-        wasteWeightKg,
-        lostWeightKg,
-        overheadElectricity,
-        overheadWages,
-        overheadMaintenance,
-        loadingLocation: finalLocation,
-        processDate: data.processDate,
-        purchaseId: data.purchaseId || null,
-      },
-    });
-
-    // 3. Post Ledger - Mill Start
-    await LedgerService.postMillingStart(tx, item.id, rawCost, finalLocation, data.blackWeightKg);
-
-    // 4. Calculate Finished Cost and Yield Variance (Abnormal Loss > 5%)
-    const standardShrinkage = Math.round(data.blackWeightKg * 0.05);
-    const huskValue = Math.round(huskWeightKg * 1.5 * 100) / 100;
-    const wasteValue = Math.round(wasteWeightKg * 1.0 * 100) / 100;
-    const byproductsCredit = huskValue + wasteValue;
-
-    // Actual loss (shrinkage)
-    const actualLostWeightKg = data.blackWeightKg - pappuWeightKg - huskWeightKg - wasteWeightKg;
-    const abnormalLostWeightKg = Math.max(0, actualLostWeightKg - standardShrinkage);
-    const avgRawCostPerKg = rawCost / data.blackWeightKg;
-    const abnormalLossCost = Math.round(abnormalLostWeightKg * avgRawCostPerKg * 100) / 100;
-
-    // finished cost = raw material cost + overheads - byproduct credits - abnormal loss written off
-    const finishedPappuCost = Math.max(0, rawCost + totalOverheads - byproductsCredit - abnormalLossCost);
-
-    // 5. Update finished Pappu inventory MAP
-    await InventoryService.updateFinishedPappuInventory(tx, pappuWeightKg, finishedPappuCost);
-
-    // 6. Post Ledger - Mill End
-    await LedgerService.postMillingEnd(tx, item.id, {
-      rawMaterialCost: rawCost,
-      pappuWeightKg,
-      finishedPappuCost,
-      huskWeightKg,
-      wasteWeightKg,
-      overheadElectricity,
-      overheadWages,
-      overheadMaintenance,
-      abnormalLossCost,
-    });
-
-    return item;
-  });
+  const result = await prisma.$transaction((tx) =>
+    ProcessingService.mill(tx, {
+      purchaseId: data.purchaseId || null,
+      blackWeightKg: data.blackWeightKg,
+      outTurnPct: data.outTurnPct ?? DEFAULT_OUT_TURN_PCT,
+      processDate: data.processDate,
+      loadingLocation: finalLocation,
+      overheadElectricity: data.overheadElectricity ?? 0,
+      overheadWages: data.overheadWages ?? 0,
+      overheadMaintenance: data.overheadMaintenance ?? 0,
+    })
+  );
 
   const fullItem = await prisma.processing.findUnique({
-    where: { id: result.id },
+    where: { id: result.item.id },
     include: processingInclude,
   });
 
   res.status(201).json({
     ...fullItem,
-    yieldAnomaly: isAnomaly,
-    yieldAnomalyReason: anomalyReason,
+    yieldAnomaly: result.yieldAnomaly,
+    yieldAnomalyReason: result.yieldAnomalyReason,
   });
 }
 

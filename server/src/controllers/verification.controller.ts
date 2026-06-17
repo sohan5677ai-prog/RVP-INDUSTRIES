@@ -2,9 +2,10 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createVerificationSchema } from '../schemas/purchase.schema.js';
-import { crossVerify } from '../lib/calc.js';
+import { crossVerify, DEFAULT_OUT_TURN_PCT } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { ProcessingService } from '../services/processing.service.js';
 
 const verificationInclude = {
   purchase: {
@@ -93,13 +94,12 @@ export async function createVerification(req: Request, res: Response) {
   }
 
   const verification = await prisma.$transaction(async (tx) => {
-    // 1. Update purchase with discounts & carter charges
+    // 1. Update purchase with discounts
     await tx.purchase.update({
       where: { id: purchase.id },
       data: {
         discountType: data.discountType || null,
         discountValue: data.discountValue,
-        carterCharge: data.carterCharge,
       },
     });
 
@@ -120,9 +120,9 @@ export async function createVerification(req: Request, res: Response) {
     });
 
     // 3. Update SiloInventory (Raw Black Seed MAP)
-    // Inventory cost includes raw seed payable, hamali, and carter charges
+    // Inventory cost includes raw seed payable and hamali.
     const hamali = Number(purchase.hamaliCharge);
-    const totalInventoryCost = totalAmount + hamali + data.carterCharge;
+    const totalInventoryCost = totalAmount + hamali;
     await InventoryService.updateBlackSeedInventory(
       tx,
       purchase.stockIn.loadingLocation,
@@ -132,6 +132,18 @@ export async function createVerification(req: Request, res: Response) {
 
     // 4. Post Ledger entry
     await LedgerService.postPurchaseVerification(tx, purchase.id);
+
+    // 5. Auto-transfer to processing: approving a verification immediately
+    // mills the verified raw weight into white pappu (no manual step).
+    if (finalWeight > 0) {
+      await ProcessingService.mill(tx, {
+        purchaseId: purchase.id,
+        blackWeightKg: finalWeight,
+        outTurnPct: DEFAULT_OUT_TURN_PCT,
+        processDate: createdVerification.createdAt,
+        loadingLocation: purchase.stockIn.loadingLocation,
+      });
+    }
 
     return createdVerification;
   });
@@ -154,6 +166,22 @@ export async function deleteVerification(req: Request, res: Response) {
     where: { id: req.params.id },
   });
   if (!verification) throw new HttpError(404, 'Verification not found');
-  await prisma.weightVerification.delete({ where: { id: req.params.id } });
+
+  // Removing a verification also removes the processing batch it auto-created
+  // (and any pappu pricing on it), so the purchase can be re-verified.
+  await prisma.$transaction(async (tx) => {
+    const processing = await tx.processing.findUnique({
+      where: { purchaseId: verification.purchaseId },
+      include: { pappuPrice: true },
+    });
+    if (processing) {
+      if (processing.pappuPrice) {
+        await tx.pappuPrice.delete({ where: { processingId: processing.id } });
+      }
+      await tx.processing.delete({ where: { id: processing.id } });
+    }
+    await tx.weightVerification.delete({ where: { id: req.params.id } });
+  });
+
   res.json({ message: 'Verification deleted' });
 }

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
@@ -65,6 +65,7 @@ export default function PurchaseOrders() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
   const [filter, setFilter] = useState<POStatus | 'ALL'>('ALL');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const { data: orders, isLoading } = useQuery({
     queryKey: ['purchase-orders', filter],
@@ -73,6 +74,27 @@ export default function PurchaseOrders() {
         `/purchase-orders${filter === 'ALL' ? '' : `?status=${filter}`}`
       ),
   });
+
+  function toggleGroup(groupId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  // One order is split into one PO per lorry; regroup them by their shared
+  // poGroupId so each order shows as a single expandable row.
+  const groups = useMemo(() => {
+    const map = new Map<string, { groupId: string; pos: PurchaseOrder[] }>();
+    for (const po of orders ?? []) {
+      const key = po.poGroupId ?? po.id;
+      if (!map.has(key)) map.set(key, { groupId: key, pos: [] });
+      map.get(key)!.pos.push(po);
+    }
+    return [...map.values()];
+  }, [orders]);
 
   const { data: parties } = useQuery({
     queryKey: ['parties'],
@@ -187,41 +209,80 @@ export default function PurchaseOrders() {
             {isLoading && (
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {orders?.length === 0 && (
+            {!isLoading && groups.length === 0 && (
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No purchase orders.</TableCell></TableRow>
             )}
-            {orders?.map((po) => (
-              <TableRow key={po.id}>
-                <TableCell>{shortDate(po.poDate)}</TableCell>
-                <TableCell className="font-mono font-semibold">{po.poNumber}</TableCell>
-                <TableCell className="font-medium">{po.party?.name ?? '—'}</TableCell>
-                <TableCell className="text-right">{rupees(po.pricePerKg)}</TableCell>
-                <TableCell className="text-right font-medium">
-                  {po.stockIns ? `${po.stockIns.length} / ` : ''}
-                  {po.lorryCount || Math.max(1, Math.round(po.tonnageKg / 25000))}
-                </TableCell>
-                <TableCell className="text-right">{kg(po.tonnageKg)}</TableCell>
-                <TableCell><Badge variant={statusVariant[po.status]}>{po.status}</Badge></TableCell>
-                <TableCell className="text-right">
-                  {po.status === 'PENDING' && (
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(po)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm('Delete this purchase order?')) deleteMutation.mutate(po.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+            {groups.map(({ groupId, pos }) => {
+              const ordered = [...pos].sort((a, b) => (a.poNumber || '').localeCompare(b.poNumber || ''));
+              const isOpen = expanded.has(groupId);
+              const party = ordered[0].party?.name ?? '—';
+              const totalTonnage = ordered.reduce((sum, p) => sum + p.tonnageKg, 0);
+              const arrived = ordered.reduce((sum, p) => sum + (p.stockIns?.length ?? 0), 0);
+              const statuses = [...new Set(ordered.map((p) => p.status))];
+              const combinedStatus = statuses.length === 1 ? statuses[0] : null;
+              const first = ordered[0].poNumber;
+              const last = ordered[ordered.length - 1].poNumber;
+              const label = ordered.length > 1 ? `${first} – ${last}` : first;
+
+              return (
+                <Fragment key={groupId}>
+                  {/* Order summary row — click to expand its per-lorry POs */}
+                  <TableRow className="cursor-pointer bg-muted/30 hover:bg-muted/50 font-medium" onClick={() => toggleGroup(groupId)}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                        {shortDate(ordered[0].poDate)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono font-semibold">{label}</TableCell>
+                    <TableCell className="font-semibold">{party}</TableCell>
+                    <TableCell className="text-right">{rupees(ordered[0].pricePerKg)}</TableCell>
+                    <TableCell className="text-right font-medium">{arrived} / {ordered.length}</TableCell>
+                    <TableCell className="text-right">{kg(totalTonnage)}</TableCell>
+                    <TableCell>
+                      {combinedStatus
+                        ? <Badge variant={statusVariant[combinedStatus]}>{combinedStatus}</Badge>
+                        : <Badge variant="outline">MIXED</Badge>}
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+
+                  {/* Individual per-lorry POs */}
+                  {isOpen && ordered.map((po) => (
+                    <TableRow key={po.id} className="bg-background">
+                      <TableCell className="pl-10 text-muted-foreground">{shortDate(po.poDate)}</TableCell>
+                      <TableCell className="font-mono font-semibold">{po.poNumber}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">Lorry</TableCell>
+                      <TableCell className="text-right">{rupees(po.pricePerKg)}</TableCell>
+                      <TableCell className="text-right text-xs">
+                        {po.stockIns?.length ? <span className="text-green-600">Arrived</span> : <span className="text-muted-foreground">Awaiting</span>}
+                      </TableCell>
+                      <TableCell className="text-right">{kg(po.tonnageKg)}</TableCell>
+                      <TableCell><Badge variant={statusVariant[po.status]}>{po.status}</Badge></TableCell>
+                      <TableCell className="text-right">
+                        {po.status === 'PENDING' && (
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEdit(po); }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm('Delete this purchase order?')) deleteMutation.mutate(po.id);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

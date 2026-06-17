@@ -50,15 +50,6 @@ export async function createPurchase(req: Request, res: Response) {
   const hamaliCharge = calcHamali(netWeightKg, hamaliRate);
   const kataFee = calcKataFee(netWeightKg);
 
-  const distance = stockIn.carterDistanceKm;
-  let carterRate = 400;
-  if (distance > 150) {
-    carterRate = 800;
-  } else if (distance >= 50) {
-    carterRate = 600;
-  }
-  const carterCharge = (netWeightKg / 1000) * carterRate;
-
   const purchase = await prisma.$transaction(async (tx) => {
     // 1. Update StockIn with rvpSecondWeightKg and rvpKataKg
     await tx.stockIn.update({
@@ -77,7 +68,6 @@ export async function createPurchase(req: Request, res: Response) {
         hamaliRate,
         hamaliCharge,
         kataFee,
-        carterCharge,
       },
       include: purchaseInclude,
     });
@@ -103,15 +93,6 @@ export async function updatePurchase(req: Request, res: Response) {
   const hamaliCharge = calcHamali(netWeightKg, hamaliRate);
   const kataFee = calcKataFee(netWeightKg);
 
-  const distance = purchase.stockIn.carterDistanceKm;
-  let carterRate = 400;
-  if (distance > 150) {
-    carterRate = 800;
-  } else if (distance >= 50) {
-    carterRate = 600;
-  }
-  const carterCharge = (netWeightKg / 1000) * carterRate;
-
   const updated = await prisma.$transaction(async (tx) => {
     // 1. Update StockIn
     await tx.stockIn.update({
@@ -130,7 +111,6 @@ export async function updatePurchase(req: Request, res: Response) {
         hamaliRate,
         hamaliCharge,
         kataFee,
-        carterCharge,
       },
       include: purchaseInclude,
     });

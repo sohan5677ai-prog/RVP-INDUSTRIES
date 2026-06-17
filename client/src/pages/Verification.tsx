@@ -27,7 +27,6 @@ type PurchaseRow = Purchase & {
     invoiceNumber?: string;
     billingWeightKg?: number;
     partyKataKg?: number;
-    carterDistanceKm?: number;
     purchaseOrder?: { poNumber?: string; pricePerKg?: string; party?: { name: string } };
   };
 };
@@ -72,10 +71,9 @@ export default function Verification() {
   const [selectedPurchase, setSelectedPurchase] = useState<PurchaseRow | null>(null);
   const [open, setOpen] = useState(false);
 
-  // States for discount and carter
+  // States for discount
   const [discountType, setDiscountType] = useState<'WEIGHT' | 'PRICE' | 'AMOUNT' | ''>('');
   const [discountValue, setDiscountValue] = useState('');
-  const [carterCharge, setCarterCharge] = useState('');
 
   const { data: purchases, isLoading } = useQuery({
     queryKey: ['purchases'],
@@ -83,12 +81,13 @@ export default function Verification() {
   });
 
   const verifyMutation = useMutation({
-    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number; carterCharge?: number }) =>
+    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number }) =>
       api('/verifications', { method: 'POST', body: args }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
-      toast.success('Weight verified — balance payable calculated');
+      qc.invalidateQueries({ queryKey: ['processing'] });
+      toast.success('Approved — balance payable calculated and batch sent to processing');
       setOpen(false);
       setSelectedPurchase(null);
     },
@@ -101,7 +100,8 @@ export default function Verification() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
-      toast.success('Verification removed — you can re-verify');
+      qc.invalidateQueries({ queryKey: ['processing'] });
+      toast.success('Verification removed (processing batch reversed) — you can re-verify');
       setOpen(false);
       setSelectedPurchase(null);
     },
@@ -113,17 +113,9 @@ export default function Verification() {
     if (p.verification) {
       setDiscountType(p.discountType || '');
       setDiscountValue(p.discountValue ? String(p.discountValue) : '');
-      setCarterCharge(p.carterCharge ? String(p.carterCharge) : '');
     } else {
       setDiscountType('');
       setDiscountValue('');
-      // Tiered Carter estimation based on distance
-      const dist = p.stockIn?.carterDistanceKm ?? 50;
-      let rate = 400;
-      if (dist > 150) rate = 800;
-      else if (dist >= 50) rate = 600;
-      const charge = (p.netWeightKg / 1000) * rate;
-      setCarterCharge(String(charge));
     }
     setOpen(true);
   }
@@ -317,8 +309,8 @@ export default function Verification() {
               {/* Adjustments & Overheads Input Section */}
               {!selectedPurchase.verification ? (
                 <div className="space-y-3 border-t pt-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ReceiptText className="h-4 w-4 text-muted-foreground" /> Quality Adjustments & Carter</h3>
-                  <div className="grid grid-cols-3 gap-3">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ReceiptText className="h-4 w-4 text-muted-foreground" /> Quality Adjustments</h3>
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-[10px] font-semibold text-muted-foreground uppercase">Discount Mode</label>
                       <select
@@ -350,16 +342,6 @@ export default function Verification() {
                         />
                       </div>
                     )}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-semibold text-muted-foreground uppercase">Carter Freight (₹)</label>
-                      <input
-                        type="number"
-                        value={carterCharge}
-                        onChange={(e) => setCarterCharge(e.target.value)}
-                        className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="0.00"
-                      />
-                    </div>
                   </div>
                 </div>
               ) : (
@@ -367,14 +349,10 @@ export default function Verification() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Quality Discount Applied:</span>
                     <span className="font-semibold text-foreground">
-                      {selectedPurchase.discountType 
+                      {selectedPurchase.discountType
                         ? `${selectedPurchase.discountType === 'WEIGHT' ? 'Weight Deduct' : selectedPurchase.discountType === 'PRICE' ? 'Price Deduct' : 'Flat Deduct'} (-${selectedPurchase.discountValue})`
                         : 'None'}
                     </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Carter Freight Liability:</span>
-                    <span className="font-semibold text-foreground">{rupees(Number(selectedPurchase.carterCharge || 0))}</span>
                   </div>
                 </div>
               )}
@@ -451,7 +429,6 @@ export default function Verification() {
                         purchaseId: selectedPurchase.id,
                         discountType: discountType || null,
                         discountValue: Number(discountValue) || 0,
-                        carterCharge: Number(carterCharge) || 0,
                       })}
                       disabled={verifyMutation.isPending}
                     >

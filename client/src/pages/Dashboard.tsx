@@ -94,8 +94,6 @@ export default function Dashboard() {
   // Contractor Efficiency report (mocked and combined turnaround scores)
   const contractors = [
     { name: 'Hindupur Unloading Team', type: 'Hamali', rate: '₹80 / tonne', avgTime: '42 mins', rating: '98% Excellent' },
-    { name: 'Krishna Carter Transports', type: 'Carter', rate: '₹400-800 / tonne', avgTime: '58 mins', rating: '91% Fast' },
-    { name: 'SVT Logistics Pool', type: 'Carter', rate: '₹400-800 / tonne', avgTime: '75 mins', rating: '84% Fair' },
   ];
 
   return (
@@ -146,7 +144,7 @@ export default function Dashboard() {
                     <span className="font-semibold text-rose-500">-{rupees(totalExpense)}</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground border-t pt-2 mt-1">
-                    *Factoring in live Moving Average Prices, Hamali/Carter accruals, and mill overheads.
+                    *Factoring in live Moving Average Prices, Hamali accruals, and mill overheads.
                   </p>
                 </div>
               </CardContent>

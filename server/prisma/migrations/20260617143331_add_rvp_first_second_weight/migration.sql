@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "StockIn" ADD COLUMN     "rvpFirstWeightKg" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "rvpSecondWeightKg" INTEGER NOT NULL DEFAULT 0;

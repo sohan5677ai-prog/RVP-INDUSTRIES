@@ -1,0 +1,234 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  OPERATOR
+}
+
+enum PartyType {
+  SUPPLIER
+  BUYER
+  BOTH
+}
+
+enum POStatus {
+  PENDING
+  ARRIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum SaleStatus {
+  PENDING
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(OPERATOR)
+  createdAt DateTime @default(now())
+}
+
+model Party {
+  id             String          @id @default(cuid())
+  name           String
+  type           PartyType       @default(SUPPLIER)
+  phone          String?
+  address        String?
+  createdAt      DateTime        @default(now())
+  purchaseOrders PurchaseOrder[]
+  saleOrders     SaleOrder[]
+}
+
+model Broker {
+  id         String      @id @default(cuid())
+  name       String
+  phone      String?
+  saleOrders SaleOrder[]
+}
+
+model PurchaseOrder {
+  id            String   @id @default(cuid())
+  poNumber      String?  @unique
+  poDate        DateTime
+  party         Party    @relation(fields: [partyId], references: [id])
+  partyId       String
+  pricePerKg    Decimal  @db.Decimal(12, 2) // approx
+  tonnageKg     Int // approx, in kg
+  lorryCount    Int? // approx number of lorries ordered
+  status        POStatus @default(PENDING)
+  createdBy     String
+  createdAt     DateTime @default(now())
+  stockIns      StockIn[]
+}
+
+model StockIn {
+  id              String        @id @default(cuid())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId String
+  arrivalDate       DateTime
+  lorryNumber       String
+  invoiceNumber     String // invoice number (e.g. "69")
+  rvpFirstWeightKg  Int      @default(0) // RVP weighbridge: loaded/gross weight
+  rvpSecondWeightKg Int      @default(0) // RVP weighbridge: empty/tare weight
+  rvpKataKg         Int // Net weight from our weighbridge (RVP Kata) = first - second
+  billingWeightKg   Int // invoice tonnage
+  partyKataKg       Int // party weighbridge
+  invoiceFileUrl    String // uploaded invoice
+  loadingLocation   String        @default("At process")
+  carterDistanceKm  Int           @default(50)
+  createdAt         DateTime      @default(now())
+  purchase          Purchase?
+}
+
+model Purchase {
+  id             String              @id @default(cuid())
+  stockIn        StockIn             @relation(fields: [stockInId], references: [id])
+  stockInId      String              @unique
+  netWeightKg    Int // StockIn.rvpKataKg
+  hamaliRate     Decimal             @default(80) @db.Decimal(8, 2) // per tonne
+  hamaliCharge   Decimal             @db.Decimal(12, 2) // computed
+  kataFee        Decimal             @default(0) @db.Decimal(12, 2) // computed
+  discountType   DiscountType?
+  discountValue  Decimal             @default(0) @db.Decimal(12, 2)
+  carterCharge   Decimal             @default(0) @db.Decimal(12, 2)
+  createdAt      DateTime            @default(now())
+  verification   WeightVerification?
+  processing     Processing?
+}
+
+model WeightVerification {
+  id              String   @id @default(cuid())
+  purchase        Purchase @relation(fields: [purchaseId], references: [id])
+  purchaseId      String   @unique
+  billingWeightKg Int
+  partyKataKg     Int
+  rvpKataKg       Int
+  referenceKg     Int
+  diffKg          Int
+  exempt          Boolean
+  finalWeightKg   Int
+  pricePerKg      Decimal  @db.Decimal(12, 2)
+  totalAmount     Decimal  @db.Decimal(14, 2)
+  createdAt       DateTime @default(now())
+}
+
+model Processing {
+  id                  String      @id @default(cuid())
+  // Optional link back to the verified Purchase this batch was milled from.
+  // Nullable so standalone (manually-entered) processing runs remain valid.
+  purchase            Purchase?   @relation(fields: [purchaseId], references: [id])
+  purchaseId          String?     @unique
+  blackWeightKg       Int // input weight processed in mill
+  outTurnPct          Decimal     @default(60) @db.Decimal(5, 2)
+  pappuWeightKg       Int // computed
+  huskWeightKg        Int         @default(0) // 25% yield
+  wasteWeightKg       Int         @default(0) // 10% yield
+  lostWeightKg        Int         @default(0) // 5% negligible waste
+  overheadElectricity Decimal     @default(0) @db.Decimal(12, 2)
+  overheadWages       Decimal     @default(0) @db.Decimal(12, 2)
+  overheadMaintenance Decimal     @default(0) @db.Decimal(12, 2)
+  loadingLocation     String      @default("At process")
+  processDate         DateTime
+  pappuPrice          PappuPrice?
+}
+
+model PappuPrice {
+  id           String     @id @default(cuid())
+  processing   Processing @relation(fields: [processingId], references: [id])
+  processingId String     @unique
+  pricePerKg   Decimal    @db.Decimal(12, 2)
+  pricedDate   DateTime   @default(now())
+}
+
+model SaleOrder {
+  id             String        @id @default(cuid())
+  saleDate       DateTime
+  buyer          Party         @relation(fields: [buyerId], references: [id])
+  buyerId        String
+  broker         Broker?       @relation(fields: [brokerId], references: [id])
+  brokerId       String?
+  tonnageKg      Int
+  ratePerKg      Decimal       @db.Decimal(12, 2)
+  status         SaleStatus    @default(PENDING)
+  marginOverride Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  dispatch       SaleDispatch?
+}
+
+model SaleDispatch {
+  id               String    @id @default(cuid())
+  saleOrder        SaleOrder @relation(fields: [saleOrderId], references: [id])
+  saleOrderId      String    @unique
+  invoiceFileUrl   String
+  dispatchWeightKg Int
+  buyerWeightKg    Int?
+  creditNoteAmount Decimal?  @db.Decimal(12, 2)
+  creditNoteReason String?
+  dispatchDate     DateTime
+  createdAt        DateTime  @default(now())
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum DiscountType {
+  WEIGHT
+  PRICE
+  AMOUNT
+}
+
+model Account {
+  id    String        @id @default(cuid())
+  code  String        @unique
+  name  String
+  type  AccountType
+  lines JournalLine[]
+}
+
+model JournalEntry {
+  id          String        @id @default(cuid())
+  date        DateTime
+  reference   String?
+  description String
+  createdAt   DateTime      @default(now())
+  lines       JournalLine[]
+}
+
+model JournalLine {
+  id             String       @id @default(cuid())
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  journalEntryId String
+  account        Account      @relation(fields: [accountId], references: [id])
+  accountId      String
+  debit          Decimal      @db.Decimal(12, 2)
+  credit         Decimal      @db.Decimal(12, 2)
+  costCenter     String?
+}
+
+model SiloInventory {
+  id         String   @id @default(cuid())
+  itemType   String // "BLACK_SEED" | "WHITE_PAPPU" | "HUSK" | "WASTE"
+  location   String // e.g. "At process", "Rampalli", "Murgan", "Multi", "Finished Silo"
+  weightKg   Int      @default(0)
+  totalValue Decimal  @default(0) @db.Decimal(12, 2)
+  updatedAt  DateTime @updatedAt
+}

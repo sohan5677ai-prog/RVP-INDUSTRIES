@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+
+# Prisma
+server/prisma/*.db
+
+# Uploads (invoice files)
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

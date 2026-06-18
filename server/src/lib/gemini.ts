@@ -37,11 +37,12 @@ Extract these fields and return them as JSON:
 Only include a field you can read with reasonable confidence. Do not guess.`,
 
   rvpWeight: `You are reading OUR OWN weighbridge slip ("RVP Kata") for a loaded lorry of tamarind seed.
-Extract this field and return it as JSON:
+Extract these fields and return them as JSON:
 - rvpFirstWeightKg: the FIRST / GROSS weight (the loaded lorry weight) in KILOGRAMS.
   Convert tonnes/quintals to kg (1 tonne = 1000 kg, 1 quintal = 100 kg). Whole number.
+- lorryNumber: the lorry / vehicle registration number if shown (e.g. "AP02AB1234"). Remove spaces.
 If the slip shows multiple weights, pick the larger (loaded) one as the first weight.
-Only include the field if you can read it with reasonable confidence. Do not guess.`,
+Only include a field you can read with reasonable confidence. Do not guess.`,
 };
 
 const SCHEMAS: Record<DocumentKind, object> = {
@@ -65,6 +66,7 @@ const SCHEMAS: Record<DocumentKind, object> = {
     type: Type.OBJECT,
     properties: {
       rvpFirstWeightKg: { type: Type.NUMBER },
+      lorryNumber: { type: Type.STRING },
     },
   },
 };

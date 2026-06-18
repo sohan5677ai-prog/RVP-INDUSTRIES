@@ -55,6 +55,7 @@ const poSchema = z.object({
   poDate: z.string().min(1, 'Date is required'),
   partyId: z.string().min(1, 'Party is required'),
   pricePerKg: z.string().min(1, 'Price is required').refine((v) => Number(v) > 0, 'Price must be positive'),
+  priceType: z.enum(['BASE', 'DELIVERY']),
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Tonnage must be positive'),
   lorries: z.string().optional(),
 });
@@ -103,12 +104,12 @@ export default function PurchaseOrders() {
 
   const form = useForm<POForm>({
     resolver: zodResolver(poSchema),
-    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', tonnes: '', lorries: '' },
+    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', tonnes: '', lorries: '' },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', tonnes: '', lorries: '' });
+    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', tonnes: '', lorries: '' });
     setOpen(true);
   }
 
@@ -118,6 +119,7 @@ export default function PurchaseOrders() {
       poDate: po.poDate.slice(0, 10),
       partyId: po.partyId,
       pricePerKg: String(po.pricePerKg),
+      priceType: po.priceType ?? 'DELIVERY',
       tonnes: String(po.tonnageKg / 1000),
       lorries: po.lorryCount ? String(po.lorryCount) : '',
     });
@@ -133,6 +135,7 @@ export default function PurchaseOrders() {
               poDate: v.poDate,
               partyId: v.partyId,
               pricePerKg: Number(v.pricePerKg),
+              priceType: v.priceType,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.round(Number(v.lorries)) : null,
             },
@@ -143,6 +146,7 @@ export default function PurchaseOrders() {
               poDate: v.poDate,
               partyId: v.partyId,
               pricePerKg: Number(v.pricePerKg),
+              priceType: v.priceType,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.round(Number(v.lorries)) : null,
             },
@@ -236,7 +240,10 @@ export default function PurchaseOrders() {
                     </TableCell>
                     <TableCell className="font-mono font-semibold">{label}</TableCell>
                     <TableCell className="font-semibold">{party}</TableCell>
-                    <TableCell className="text-right">{rupees(ordered[0].pricePerKg)}</TableCell>
+                    <TableCell className="text-right">
+                      {rupees(ordered[0].pricePerKg)}
+                      <span className="block text-[10px] font-normal text-muted-foreground">{ordered[0].priceType === 'BASE' ? 'Base price' : 'Delivery price'}</span>
+                    </TableCell>
                     <TableCell className="text-right font-medium">{arrived} / {ordered.length}</TableCell>
                     <TableCell className="text-right">{kg(totalTonnage)}</TableCell>
                     <TableCell>
@@ -323,18 +330,37 @@ export default function PurchaseOrders() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="pricePerKg"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Price per kg (₹) <span className="text-destructive">*</span></FormLabel>
-                    <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="pricePerKg"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Price per kg (₹) <span className="text-destructive">*</span></FormLabel>
+                      <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="priceType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Price basis <span className="text-destructive">*</span></FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select basis" /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="DELIVERY">Delivery (at our location)</SelectItem>
+                          <SelectItem value="BASE">Base (at supplier)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}

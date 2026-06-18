@@ -46,8 +46,17 @@ const partySchema = z.object({
   type: z.enum(['SUPPLIER', 'BUYER', 'BOTH']),
   phone: z.string().optional(),
   address: z.string().optional(),
+  state: z.string().optional(),
+  bankAccountNumber: z.string().optional(),
+  bankIfsc: z.string().optional(),
+  bankName: z.string().optional(),
 });
 type PartyForm = z.infer<typeof partySchema>;
+
+const emptyParty: PartyForm = {
+  name: '', type: 'SUPPLIER', phone: '', address: '', state: '',
+  bankAccountNumber: '', bankIfsc: '', bankName: '',
+};
 
 export default function Parties() {
   const qc = useQueryClient();
@@ -61,12 +70,12 @@ export default function Parties() {
 
   const form = useForm<PartyForm>({
     resolver: zodResolver(partySchema),
-    defaultValues: { name: '', type: 'SUPPLIER', phone: '', address: '' },
+    defaultValues: emptyParty,
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ name: '', type: 'SUPPLIER', phone: '', address: '' });
+    form.reset(emptyParty);
     setOpen(true);
   }
 
@@ -77,6 +86,10 @@ export default function Parties() {
       type: p.type,
       phone: p.phone ?? '',
       address: p.address ?? '',
+      state: p.state ?? '',
+      bankAccountNumber: p.bankAccountNumber ?? '',
+      bankIfsc: p.bankIfsc ?? '',
+      bankName: p.bankName ?? '',
     });
     setOpen(true);
   }
@@ -123,20 +136,22 @@ export default function Parties() {
               <TableHead>Type</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Address</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead>Bank Details</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {parties?.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   No parties yet.
                 </TableCell>
               </TableRow>
@@ -149,6 +164,15 @@ export default function Parties() {
                 </TableCell>
                 <TableCell>{p.phone ?? '—'}</TableCell>
                 <TableCell>{p.address ?? '—'}</TableCell>
+                <TableCell>{p.state ?? '—'}</TableCell>
+                <TableCell>
+                  {p.bankName || p.bankAccountNumber || p.bankIfsc ? (
+                    <div className="text-xs">
+                      <div className="font-medium">{p.bankName ?? '—'}</div>
+                      <div className="text-muted-foreground font-mono">{p.bankAccountNumber ?? '—'} · {p.bankIfsc ?? '—'}</div>
+                    </div>
+                  ) : '—'}
+                </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
@@ -229,19 +253,79 @@ export default function Parties() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Address</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="address"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Address</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="state"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>State</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Andhra Pradesh" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-3 bg-muted/20">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bank Account Details</p>
+                <FormField
+                  control={form.control}
+                  name="bankName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Bank Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. State Bank of India" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="bankAccountNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Account Number</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="bankIfsc"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>IFSC Code</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. SBIN0001234" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
               <DialogFooter>
                 <Button type="submit" disabled={saveMutation.isPending}>
                   {saveMutation.isPending ? 'Saving…' : 'Save'}

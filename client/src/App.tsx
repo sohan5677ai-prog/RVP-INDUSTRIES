@@ -15,6 +15,9 @@ const Processing = lazy(() => import('@/pages/Processing'));
 const PappuPricing = lazy(() => import('@/pages/PappuPricing'));
 const PappuCalculator = lazy(() => import('@/pages/PappuCalculator'));
 const StockLocation = lazy(() => import('@/pages/StockLocation'));
+const BlackSeedStock = lazy(() => import('@/pages/BlackSeedStock'));
+const StockByParty = lazy(() => import('@/pages/StockByParty'));
+const StockByState = lazy(() => import('@/pages/StockByState'));
 const SaleOrders = lazy(() => import('@/pages/SaleOrders'));
 const SaleDispatch = lazy(() => import('@/pages/SaleDispatch'));
 const PurchaseStatement = lazy(() => import('@/pages/PurchaseStatement'));
@@ -47,7 +50,10 @@ export default function App() {
               <Route path="/processing" element={<Processing />} />
               <Route path="/pappu-pricing" element={<PappuPricing />} />
               <Route path="/pappu-calculator" element={<PappuCalculator />} />
-              <Route path="/stock-location" element={<StockLocation />} />
+              <Route path="/stock/overview" element={<BlackSeedStock />} />
+              <Route path="/stock/location" element={<StockLocation />} />
+              <Route path="/stock/party" element={<StockByParty />} />
+              <Route path="/stock/state" element={<StockByState />} />
               <Route path="/sale-orders" element={<SaleOrders />} />
               <Route path="/sale-dispatch/:saleOrderId" element={<SaleDispatch />} />
               <Route path="/accounts/party-ledger" element={<PartyLedger />} />

@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 
 type PurchaseRow = Purchase & {
-  stockIn?: StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string } };
+  stockIn?: StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string; pricePerKg?: string; priceType?: 'BASE' | 'DELIVERY' } };
 };
 type StockInRow = StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string }; purchase?: Purchase | null };
 
@@ -121,6 +121,7 @@ export default function Purchases() {
               <TableHead>Date</TableHead>
               <TableHead>Party</TableHead>
               <TableHead>Invoice No</TableHead>
+              <TableHead className="text-right">Price/kg</TableHead>
               <TableHead className="text-right">Net (RVP)</TableHead>
               <TableHead className="text-right">Hamali</TableHead>
               <TableHead className="text-right">Kata Fee</TableHead>
@@ -129,10 +130,10 @@ export default function Purchases() {
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
             {items?.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No purchases yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No purchases yet.</TableCell></TableRow>
             )}
             {items?.map((p) => (
               <TableRow key={p.id}>
@@ -144,6 +145,12 @@ export default function Purchases() {
                   )}
                 </TableCell>
                 <TableCell className="font-semibold">{p.stockIn?.invoiceNumber ?? '—'}</TableCell>
+                <TableCell className="text-right">
+                  {p.stockIn?.purchaseOrder?.pricePerKg ? rupees(p.stockIn.purchaseOrder.pricePerKg) : '—'}
+                  {p.stockIn?.purchaseOrder?.priceType && (
+                    <span className="block text-[10px] text-muted-foreground">{p.stockIn.purchaseOrder.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right">{kg(p.netWeightKg)}</TableCell>
                 <TableCell className="text-right">{rupees(p.hamaliCharge)}</TableCell>
                 <TableCell className="text-right">{rupees(p.kataFee)}</TableCell>

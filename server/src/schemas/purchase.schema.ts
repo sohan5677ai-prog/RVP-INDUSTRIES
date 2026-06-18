@@ -6,6 +6,7 @@ export const createPurchaseOrderSchema = z.object({
   poDate: z.coerce.date(),
   partyId: z.string().min(1),
   pricePerKg: z.coerce.number().positive(),
+  priceType: z.enum(['BASE', 'DELIVERY']).optional().default('DELIVERY'),
   tonnageKg: z.coerce.number().int().positive(), // already in kg (FE converts tonnes -> kg)
   lorryCount: z.preprocess((val) => (val === null || val === undefined || val === '' ? null : Number(val)), z.number().int().positive().nullable().optional()),
 });

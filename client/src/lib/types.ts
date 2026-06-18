@@ -15,6 +15,10 @@ export interface Party {
   type: PartyType;
   phone: string | null;
   address: string | null;
+  state: string | null;
+  bankAccountNumber: string | null;
+  bankIfsc: string | null;
+  bankName: string | null;
   createdAt: string;
 }
 
@@ -112,6 +116,7 @@ export interface PurchaseOrder {
   partyId: string;
   party?: Party;
   pricePerKg: string;
+  priceType?: 'BASE' | 'DELIVERY';
   tonnageKg: number;
   lorryCount?: number | null;
   poGroupId?: string | null;

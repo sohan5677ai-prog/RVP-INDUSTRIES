@@ -7,7 +7,10 @@
 //   - amounts: rupees (number)
 
 export const EXEMPT_KG = 80;
-export const DEFAULT_HAMALI_RATE = 80; // ₹ per tonne
+export const DEFAULT_HAMALI_RATE = 160; // ₹ per tonne (full unloading charge)
+// Half of the hamali is paid by the lorry/transporter; the company bears the
+// other half. Only the company's share is capitalised into inventory value.
+export const COMPANY_HAMALI_SHARE = 0.5;
 export const DEFAULT_OUT_TURN_PCT = 60; // black -> white yield
 
 export interface CrossVerifyResult {
@@ -78,8 +81,12 @@ export function calcTotal(finalKg: number, pricePerKg: number): number {
 /** Weighbridge fee (kata fee) based on net weight tonnage. */
 export function calcKataFee(netKg: number): number {
   const tonnes = netKg / 1000;
-  if (tonnes < 10) return 50;
-  if (tonnes <= 15) return 100;
-  if (tonnes <= 30) return 150;
+  if (tonnes <= 15) return 50;
+  if (tonnes <= 25) return 150;
   return 200;
+}
+
+/** The company's share of the hamali charge (the half we actually bear). */
+export function companyHamaliShare(hamaliCharge: number): number {
+  return Math.round(hamaliCharge * COMPANY_HAMALI_SHARE * 100) / 100;
 }

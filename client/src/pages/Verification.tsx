@@ -46,7 +46,10 @@ function getCalculationDetails(p: PurchaseRow) {
   );
 
   const baseCost = reference * pricePerKg;
-  const igst = baseCost * 0.05;
+  // GST is charged on the invoice billing amount (billing weight x price), not
+  // on our recalculated payable.
+  const billingAmount = billingWeightKg * pricePerKg;
+  const igst = billingAmount * 0.05;
   const kataDiffDeduction = (reference - finalWeight) * pricePerKg;
   const totalAmount = baseCost + igst - kataDiffDeduction;
 
@@ -60,6 +63,7 @@ function getCalculationDetails(p: PurchaseRow) {
     finalWeightKg: finalWeight,
     pricePerKg,
     baseCost,
+    billingAmount,
     igst,
     kataDiffDeduction,
     totalAmount,
@@ -87,7 +91,7 @@ export default function Verification() {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
       qc.invalidateQueries({ queryKey: ['processing'] });
-      toast.success('Approved — balance payable calculated and batch sent to processing');
+      toast.success('Approved — balance payable calculated and black seed added to stock');
       setOpen(false);
       setSelectedPurchase(null);
     },
@@ -101,7 +105,7 @@ export default function Verification() {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
       qc.invalidateQueries({ queryKey: ['processing'] });
-      toast.success('Verification removed (processing batch reversed) — you can re-verify');
+      toast.success('Verification removed — you can re-verify');
       setOpen(false);
       setSelectedPurchase(null);
     },
@@ -142,7 +146,9 @@ export default function Verification() {
 
   const liveBasePayable = livePayableWeight * livePayablePrice;
   const liveNetBase = discountType === 'AMOUNT' ? Math.max(0, liveBasePayable - discountValNum) : liveBasePayable;
-  const liveIgst = liveNetBase * 0.05;
+  // GST is on the invoice billing amount, independent of weight/quality discounts.
+  const liveBillingAmount = (calc?.billingWeightKg ?? 0) * (calc?.pricePerKg ?? 0);
+  const liveIgst = Math.round(liveBillingAmount * 0.05 * 100) / 100;
   const liveTotalAmount = liveNetBase + liveIgst;
 
   return (
@@ -162,6 +168,7 @@ export default function Verification() {
               <TableHead>Party</TableHead>
               <TableHead>Invoice No</TableHead>
               <TableHead className="text-right">RVP Net Weight</TableHead>
+              <TableHead className="text-right">Price/kg</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Net Payable</TableHead>
               <TableHead className="w-36 text-center">Action</TableHead>
@@ -169,10 +176,10 @@ export default function Verification() {
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
             {purchases?.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No purchases to verify yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No purchases to verify yet.</TableCell></TableRow>
             )}
             {purchases?.map((p) => {
               const v = p.verification;
@@ -187,6 +194,7 @@ export default function Verification() {
                   </TableCell>
                   <TableCell className="font-semibold">{p.stockIn?.invoiceNumber ?? '—'}</TableCell>
                   <TableCell className="text-right">{kg(p.netWeightKg)}</TableCell>
+                  <TableCell className="text-right">{p.stockIn?.purchaseOrder?.pricePerKg ? `${rupees(p.stockIn.purchaseOrder.pricePerKg)}/kg` : '—'}</TableCell>
                   <TableCell>
                     {v ? (
                       <Badge variant={v.exempt ? 'default' : 'secondary'}>
@@ -382,7 +390,7 @@ export default function Verification() {
                     <span>{rupees(liveNetBase)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">IGST (5%)</span>
+                    <span className="text-muted-foreground">IGST (5% on invoice billing {rupees(liveBillingAmount)})</span>
                     <span>{rupees(liveIgst)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2 mt-2 text-sm">

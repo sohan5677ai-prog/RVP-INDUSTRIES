@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { crossVerify, calcHamali, calcPappu, calcTotal } from './calc';
+import { crossVerify, calcHamali, calcKataFee, calcPappu, calcTotal } from './calc';
 
 describe('crossVerify', () => {
   // Section 10 validation table (one-sided rules).
@@ -61,12 +61,20 @@ describe('crossVerify', () => {
 });
 
 describe('calcHamali', () => {
-  it('default rate 80/tonne with rounded tonnage', () => {
-    expect(calcHamali(10400)).toBe(800); // 10.4 -> 10 tonnes * 80 = 800
-    expect(calcHamali(10550)).toBe(880); // 10.55 -> 11 tonnes * 80 = 880
+  it('default rate 160/tonne with rounded tonnage', () => {
+    expect(calcHamali(10400)).toBe(1600); // 10.4 -> 10 tonnes * 160 = 1600
+    expect(calcHamali(10550)).toBe(1760); // 10.55 -> 11 tonnes * 160 = 1760
   });
   it('custom rate', () => {
     expect(calcHamali(5000, 100)).toBe(500);
+  });
+});
+
+describe('calcKataFee', () => {
+  it('tiered weighbridge fee', () => {
+    expect(calcKataFee(15000)).toBe(50); // <= 15t
+    expect(calcKataFee(20000)).toBe(150); // 15-25t
+    expect(calcKataFee(26000)).toBe(200); // > 25t
   });
 });
 

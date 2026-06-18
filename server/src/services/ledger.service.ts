@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
+import { companyHamaliShare } from '../lib/calc.js';
 
 export interface JournalLineInput {
   accountCode: string;
@@ -98,7 +99,9 @@ export class LedgerService {
 
     const baseCost = Number(p.verification.totalAmount);
     const discountVal = Number(p.discountValue);
-    const hamali = Number(p.hamaliCharge);
+    // Only the company's half of the hamali is our expense/liability; the lorry
+    // pays the other half.
+    const hamali = companyHamaliShare(Number(p.hamaliCharge));
     const supplierName = p.stockIn.purchaseOrder.party.name;
     const location = p.stockIn.loadingLocation;
 

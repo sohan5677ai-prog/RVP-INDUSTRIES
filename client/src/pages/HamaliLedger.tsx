@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Party, Purchase } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
+import { companyHamaliShare } from '@/lib/calc';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -66,6 +67,7 @@ export default function HamaliLedger() {
 
   // Metrics
   const totalHamali = filteredPurchases.reduce((acc, p) => acc + Number(p.hamaliCharge), 0);
+  const totalCompanyHamali = filteredPurchases.reduce((acc, p) => acc + companyHamaliShare(Number(p.hamaliCharge)), 0);
   const totalTons = filteredPurchases.reduce((acc, p) => acc + p.netWeightKg, 0) / 1000;
   const avgRate = filteredPurchases.length > 0
     ? filteredPurchases.reduce((acc, p) => acc + Number(p.hamaliRate), 0) / filteredPurchases.length
@@ -119,7 +121,9 @@ export default function HamaliLedger() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-primary">{rupees(totalHamali)}</div>
-                <p className="text-[10px] text-muted-foreground mt-1">Paid to loaders for unloading tamarind shipments</p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Full charge @ ₹160/tonne · <span className="text-amber-600 font-semibold">{rupees(totalCompanyHamali)} borne by us (50%)</span>
+                </p>
               </CardContent>
             </Card>
             <Card className="bg-card border shadow-sm">
@@ -155,14 +159,16 @@ export default function HamaliLedger() {
                   <TableHead>Lorry No</TableHead>
                   <TableHead>Invoice Reference</TableHead>
                   <TableHead className="text-right">Net Weight (kg)</TableHead>
-                  <TableHead className="text-right">Hamali Rate (₹/tonne)</TableHead>
-                  <TableHead className="text-right">Total Charge</TableHead>
+                  <TableHead className="text-right">Rate (₹/tonne)</TableHead>
+                  <TableHead className="text-right">Full Charge</TableHead>
+                  <TableHead className="text-right">Our Share (50%)</TableHead>
+                  <TableHead className="text-right">Lorry Share (50%)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredPurchases.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                       No hamali transactions match selected filters.
                     </TableCell>
                   </TableRow>
@@ -176,6 +182,8 @@ export default function HamaliLedger() {
                       <TableCell className="text-right font-medium">{kg(p.netWeightKg)}</TableCell>
                       <TableCell className="text-right">{rupees(p.hamaliRate)}</TableCell>
                       <TableCell className="text-right font-bold text-primary">{rupees(p.hamaliCharge)}</TableCell>
+                      <TableCell className="text-right font-semibold text-amber-600">{rupees(companyHamaliShare(Number(p.hamaliCharge)))}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{rupees(companyHamaliShare(Number(p.hamaliCharge)))}</TableCell>
                     </TableRow>
                   ))
                 )}

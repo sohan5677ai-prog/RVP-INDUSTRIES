@@ -18,6 +18,8 @@ import {
   Calculator,
   Landmark,
   FileSpreadsheet,
+  MapPin,
+  Globe,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -45,7 +47,15 @@ const sections: NavSection[] = [
       { to: '/processing', label: 'Processing', icon: Factory },
       { to: '/pappu-pricing', label: 'Pappu Pricing', icon: Tag },
       { to: '/pappu-calculator', label: 'Pappu Calculator', icon: Calculator },
-      { to: '/stock-location', label: 'Stock by Location', icon: Warehouse },
+    ],
+  },
+  {
+    heading: 'Stock',
+    items: [
+      { to: '/stock/overview', label: 'Black Seed Stock', icon: Warehouse },
+      { to: '/stock/location', label: 'Stock by Location', icon: MapPin },
+      { to: '/stock/party', label: 'Stock by Party', icon: Users },
+      { to: '/stock/state', label: 'Stock by State', icon: Globe },
     ],
   },
   {

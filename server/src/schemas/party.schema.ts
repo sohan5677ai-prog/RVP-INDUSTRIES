@@ -7,6 +7,10 @@ export const createPartySchema = z.object({
   type: partyTypeEnum.default('SUPPLIER'),
   phone: z.string().optional(),
   address: z.string().optional(),
+  state: z.string().optional(),
+  bankAccountNumber: z.string().optional(),
+  bankIfsc: z.string().optional(),
+  bankName: z.string().optional(),
 });
 
 export const updatePartySchema = createPartySchema.partial();

@@ -1,10 +1,10 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
-import { kg, shortDate } from '@/lib/format';
+import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -147,6 +147,9 @@ export default function StockIn() {
   const [loadingLocation, setLoadingLocation] = useState<'At process' | 'Rampalli' | 'Murgan' | 'Multi'>('At process');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [extractingKind, setExtractingKind] = useState<DocKind | null>(null);
+  // Vehicle (lorry) number read from each document, used to confirm the three
+  // documents belong to the same lorry.
+  const [docLorries, setDocLorries] = useState<Partial<Record<DocKind, string>>>({});
 
   /** Read a dropped document with Gemini (scoped to its kind) and pre-fill. */
   async function extractDoc(file: File, kind: DocKind) {
@@ -159,7 +162,12 @@ export default function StockIn() {
 
       const filled: string[] = [];
       if (data.invoiceNumber) { setInvoiceNumber(data.invoiceNumber); filled.push('invoice no'); }
-      if (data.lorryNumber) { setLorryNumber(data.lorryNumber); filled.push('lorry no'); }
+      if (data.lorryNumber) {
+        setLorryNumber(data.lorryNumber);
+        const ln = data.lorryNumber.toUpperCase().replace(/\s+/g, '');
+        setDocLorries((prev) => ({ ...prev, [kind]: ln }));
+        filled.push('lorry no');
+      }
       if (data.arrivalDate) { setArrivalDate(data.arrivalDate); filled.push('date'); }
       if (data.billingWeightKg) { setBillingWeightKg(String(data.billingWeightKg)); filled.push('billing weight'); }
       if (data.partyKataKg) { setPartyKataKg(String(data.partyKataKg)); filled.push('party kata'); }
@@ -184,6 +192,7 @@ export default function StockIn() {
     setPartyKataKg('');
     setLoadingLocation('At process');
     setInvoiceFile(null);
+    setDocLorries({});
   }
 
   function openCreate() {
@@ -252,6 +261,12 @@ export default function StockIn() {
     mutation.mutate();
   }
 
+  // Cross-check the lorry/vehicle number read from each uploaded document.
+  const docLabel: Record<DocKind, string> = { partyKata: 'Party Kata', invoice: 'Invoice', rvpWeight: 'RVP Weight' };
+  const detectedLorries = (Object.entries(docLorries) as [DocKind, string][]).filter(([, v]) => !!v);
+  const distinctLorries = [...new Set(detectedLorries.map(([, v]) => v))];
+  const vehicleMatched = distinctLorries.length <= 1;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -280,16 +295,17 @@ export default function StockIn() {
               <TableHead className="text-right">RVP First Wt</TableHead>
               <TableHead className="text-right">Billing</TableHead>
               <TableHead className="text-right">Party kata</TableHead>
+              <TableHead className="text-right">Price/kg</TableHead>
               <TableHead>Invoice</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
             {!isLoading && groups.length === 0 && (
-              <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">No stock-ins yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">No stock-ins yet.</TableCell></TableRow>
             )}
             {groups.map(({ groupId, po, rows }) => {
               const isOpen = expanded.has(groupId);
@@ -342,6 +358,10 @@ export default function StockIn() {
                     <TableCell className="text-right font-semibold">{kg(totalRvp)}</TableCell>
                     <TableCell className="text-right">{kg(totalBilling)}</TableCell>
                     <TableCell className="text-right">{kg(totalParty)}</TableCell>
+                    <TableCell className="text-right">
+                      {po?.pricePerKg ? rupees(po.pricePerKg) : '—'}
+                      {po?.priceType && <span className="block text-[10px] font-normal text-muted-foreground">{po.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>}
+                    </TableCell>
                     <TableCell />
                     <TableCell />
                   </TableRow>
@@ -357,6 +377,7 @@ export default function StockIn() {
                       <TableCell className="text-right font-semibold">{kg(s.rvpFirstWeightKg)}</TableCell>
                       <TableCell className="text-right">{kg(s.billingWeightKg)}</TableCell>
                       <TableCell className="text-right">{kg(s.partyKataKg)}</TableCell>
+                      <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '—'}</TableCell>
                       <TableCell>
                         <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
                           <FileText className="h-3 w-3" /> View
@@ -434,6 +455,26 @@ export default function StockIn() {
             </div>
             {invoiceFile && (
               <p className="text-xs text-muted-foreground">Invoice file to save: <span className="font-medium">{invoiceFile.name}</span></p>
+            )}
+
+            {detectedLorries.length > 0 && (
+              <div className={`rounded-lg border p-3 text-xs ${vehicleMatched ? 'border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/10' : 'border-red-500/40 bg-red-50/40 dark:bg-red-950/10'}`}>
+                <div className={`flex items-center gap-1.5 font-semibold ${vehicleMatched ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {vehicleMatched ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                  {vehicleMatched ? `Vehicle matched: ${distinctLorries[0]}` : 'Vehicle number mismatch across documents'}
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {(['partyKata', 'invoice', 'rvpWeight'] as DocKind[]).map((k) => (
+                    <div key={k} className="flex flex-col">
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{docLabel[k]}</span>
+                      <span className={`font-mono font-medium ${docLorries[k] && !vehicleMatched ? 'text-red-600' : ''}`}>{docLorries[k] ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+                {!vehicleMatched && (
+                  <p className="mt-1.5 text-[11px] text-red-600">These documents may belong to different lorries. Verify before saving.</p>
+                )}
+              </div>
             )}
 
              <div className="grid grid-cols-3 gap-4">

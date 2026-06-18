@@ -91,6 +91,7 @@ export async function createPurchaseOrder(req: Request, res: Response) {
           poDate: data.poDate,
           partyId: data.partyId,
           pricePerKg: data.pricePerKg,
+          priceType: data.priceType,
           tonnageKg: poTonnage,
           lorryCount: 1, // each PO represents exactly 1 lorry
           poGroupId,
@@ -121,6 +122,7 @@ export async function updatePurchaseOrder(req: Request, res: Response) {
       poDate: data.poDate,
       partyId: data.partyId,
       pricePerKg: data.pricePerKg,
+      priceType: data.priceType,
       tonnageKg: data.tonnageKg,
       lorryCount: data.lorryCount,
     },

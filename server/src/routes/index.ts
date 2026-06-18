@@ -9,6 +9,7 @@ import saleRoutes from './sale.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import systemRoutes from './system.routes.js';
 import ledgerRoutes from './ledger.routes.js';
+import inventoryRoutes from './inventory.routes.js';
 
 const router = Router();
 
@@ -25,6 +26,7 @@ router.use('/', processingRoutes);
 router.use('/', saleRoutes);
 router.use('/', dashboardRoutes);
 router.use('/', ledgerRoutes);
+router.use('/', inventoryRoutes);
 router.use('/system', systemRoutes);
 
 export default router;

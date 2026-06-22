@@ -10,6 +10,10 @@ import dashboardRoutes from './dashboard.routes.js';
 import systemRoutes from './system.routes.js';
 import ledgerRoutes from './ledger.routes.js';
 import inventoryRoutes from './inventory.routes.js';
+import settingsRoutes from './settings.routes.js';
+import paymentRoutes from './payment.routes.js';
+import receiptRoutes from './receipt.routes.js';
+import loanRoutes from './loan.routes.js';
 
 const router = Router();
 
@@ -27,6 +31,10 @@ router.use('/', saleRoutes);
 router.use('/', dashboardRoutes);
 router.use('/', ledgerRoutes);
 router.use('/', inventoryRoutes);
+router.use('/', settingsRoutes);
+router.use('/', paymentRoutes);
+router.use('/', receiptRoutes);
+router.use('/', loanRoutes);
 router.use('/system', systemRoutes);
 
 export default router;

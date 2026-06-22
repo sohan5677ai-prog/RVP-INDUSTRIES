@@ -29,6 +29,34 @@ interface Extracted {
   billingWeightKg?: number;
   partyKataKg?: number;
   rvpFirstWeightKg?: number;
+  partyName?: string;
+  pricePerKg?: number;
+  matchedPartyName?: string;
+}
+
+/** Loose name key for matching: lowercase, alphanumerics only. */
+function nameKey(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Normalise a vehicle plate: uppercase, alphanumerics only. */
+function plateKey(s: string) {
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Whether two vehicle numbers can be the same lorry, tolerating a partly-read
+ * plate (e.g. a half-printed "TN28BA49" vs the full "TN28BA4946"). They're
+ * compatible when equal or when the shorter is a leading part of the longer.
+ */
+function platesCompatible(a: string, b: string) {
+  const x = plateKey(a);
+  const y = plateKey(b);
+  if (!x || !y) return true; // nothing to compare against yet
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  // Require a reasonable overlap so unrelated short reads don't match by accident.
+  return short.length >= 5 && long.startsWith(short);
 }
 
 /** A single drag-and-drop document zone that runs AI extraction on drop/select. */
@@ -145,11 +173,61 @@ export default function StockIn() {
   const [billingWeightKg, setBillingWeightKg] = useState('');
   const [partyKataKg, setPartyKataKg] = useState('');
   const [loadingLocation, setLoadingLocation] = useState<'At process' | 'Rampalli' | 'Murgan' | 'Multi'>('At process');
+  const [freight, setFreight] = useState('0');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [extractingKind, setExtractingKind] = useState<DocKind | null>(null);
   // Vehicle (lorry) number read from each document, used to confirm the three
   // documents belong to the same lorry.
   const [docLorries, setDocLorries] = useState<Partial<Record<DocKind, string>>>({});
+
+  /**
+   * Find the pending PO an invoice belongs to, by supplier name (required) and
+   * price (used to disambiguate when one party has several pending POs).
+   */
+  function matchPendingPo(
+    matchedPartyName: string | undefined,
+    partyName: string | undefined,
+    pricePerKg?: number,
+  ): { status: 'matched'; po: PurchaseOrder } | { status: 'ambiguous' | 'none' } {
+    const pos = pendingPOs ?? [];
+    if (pos.length === 0) return { status: 'none' };
+
+    // Prefer Gemini's canonical match against our supplier list; fall back to a
+    // loose comparison on the raw supplier name read off the invoice.
+    const exactKey = matchedPartyName ? nameKey(matchedPartyName) : '';
+    const looseKey = partyName ? nameKey(partyName) : '';
+
+    let byName: PurchaseOrder[] = [];
+    if (exactKey) byName = pos.filter((po) => nameKey(po.party?.name ?? '') === exactKey);
+    if (byName.length === 0 && looseKey) {
+      byName = pos.filter((po) => {
+        const pk = nameKey(po.party?.name ?? '');
+        return pk !== '' && (pk === looseKey || pk.includes(looseKey) || looseKey.includes(pk));
+      });
+    }
+
+    if (byName.length === 0) return { status: 'none' };
+    if (byName.length === 1) return { status: 'matched', po: byName[0] };
+
+    // Several POs for this party. If they all carry the same price (e.g. per-lorry
+    // POs of one order), any will do — take the first. Otherwise use the invoice
+    // price to pick the closest.
+    const prices = new Set(byName.map((po) => Number(po.pricePerKg)));
+    if (prices.size === 1) return { status: 'matched', po: byName[0] };
+
+    if (pricePerKg && pricePerKg > 0) {
+      const sorted = [...byName].sort(
+        (a, b) =>
+          Math.abs(Number(a.pricePerKg) - pricePerKg) - Math.abs(Number(b.pricePerKg) - pricePerKg),
+      );
+      const best = sorted[0];
+      const tolerance = Math.max(1, pricePerKg * 0.02); // ₹1 or 2% of rate
+      if (Math.abs(Number(best.pricePerKg) - pricePerKg) <= tolerance) {
+        return { status: 'matched', po: best };
+      }
+    }
+    return { status: 'ambiguous' };
+  }
 
   /** Read a dropped document with Gemini (scoped to its kind) and pre-fill. */
   async function extractDoc(file: File, kind: DocKind) {
@@ -173,6 +251,21 @@ export default function StockIn() {
       if (data.partyKataKg) { setPartyKataKg(String(data.partyKataKg)); filled.push('party kata'); }
       if (data.rvpFirstWeightKg) { setRvpFirstWeightKg(String(data.rvpFirstWeightKg)); filled.push('RVP first weight'); }
 
+      // From the invoice, try to auto-match a pending PO by supplier (Gemini maps
+      // the seller to one of our master parties) and select it automatically.
+      if (kind === 'invoice' && (data.matchedPartyName || data.partyName)) {
+        const supplierLabel = data.matchedPartyName ?? data.partyName!;
+        const match = matchPendingPo(data.matchedPartyName, data.partyName, data.pricePerKg);
+        if (match.status === 'matched') {
+          setPoId(match.po.id);
+          filled.push(`PO ${match.po.poNumber} (${match.po.party?.name})`);
+        } else if (match.status === 'ambiguous') {
+          toast.warning(`Multiple pending POs match "${supplierLabel}". Select the right one manually.`);
+        } else {
+          toast.warning(`No pending PO matches "${supplierLabel}". Select the PO manually.`);
+        }
+      }
+
       if (filled.length) toast.success(`AI filled: ${filled.join(', ')}. Please verify.`);
       else toast.message('Could not read this document. Enter the values manually.');
     } catch (e) {
@@ -181,6 +274,12 @@ export default function StockIn() {
       setExtractingKind(null);
     }
   }
+
+  // Inward freight is only collected for BASE-priced POs (DELIVERY includes it).
+  // On edit the PO is no longer pending, so fall back to the stock-in's own PO.
+  const selectedPo = pendingPOs?.find((p) => p.id === poId);
+  const priceType = editing?.purchaseOrder?.priceType ?? selectedPo?.priceType;
+  const isBase = priceType === 'BASE';
 
   function resetForm() {
     setPoId('');
@@ -191,6 +290,7 @@ export default function StockIn() {
     setBillingWeightKg('');
     setPartyKataKg('');
     setLoadingLocation('At process');
+    setFreight('0');
     setInvoiceFile(null);
     setDocLorries({});
   }
@@ -211,6 +311,7 @@ export default function StockIn() {
     setBillingWeightKg(String(s.billingWeightKg));
     setPartyKataKg(String(s.partyKataKg));
     setLoadingLocation(s.loadingLocation ?? 'At process');
+    setFreight(String(s.freightCharge ?? 0));
     setInvoiceFile(null);
     setOpen(true);
   }
@@ -227,6 +328,7 @@ export default function StockIn() {
       fd.append('billingWeightKg', billingWeightKg);
       fd.append('partyKataKg', partyKataKg);
       fd.append('loadingLocation', loadingLocation);
+      fd.append('freightCharge', isBase ? (freight || '0') : '0');
       if (invoiceFile) fd.append('invoice', invoiceFile);
 
       const url = editing ? `/stock-in/${editing.id}` : '/stock-in';
@@ -256,7 +358,7 @@ export default function StockIn() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!poId) return toast.error('Select a purchase order');
-    if (!invoiceFile && !editing) return toast.error('Attach the lorry invoice');
+    // REMOVED FOR TESTING: if (!invoiceFile && !editing) return toast.error('Attach the lorry invoice');
     if ((Number(rvpFirstWeightKg) || 0) <= 0) return toast.error('RVP first weight must be positive');
     mutation.mutate();
   }
@@ -264,8 +366,11 @@ export default function StockIn() {
   // Cross-check the lorry/vehicle number read from each uploaded document.
   const docLabel: Record<DocKind, string> = { partyKata: 'Party Kata', invoice: 'Invoice', rvpWeight: 'RVP Weight' };
   const detectedLorries = (Object.entries(docLorries) as [DocKind, string][]).filter(([, v]) => !!v);
-  const distinctLorries = [...new Set(detectedLorries.map(([, v]) => v))];
-  const vehicleMatched = distinctLorries.length <= 1;
+  const detectedPlates = detectedLorries.map(([, v]) => v);
+  // Use the most complete (longest) read as the reference; a partly-printed plate
+  // on one document should still count as a match against the fuller one.
+  const referencePlate = detectedPlates.reduce((a, b) => (b.length > a.length ? b : a), detectedPlates[0] ?? '');
+  const vehicleMatched = detectedPlates.every((p) => platesCompatible(p, referencePlate));
 
   return (
     <div className="space-y-6">
@@ -379,9 +484,13 @@ export default function StockIn() {
                       <TableCell className="text-right">{kg(s.partyKataKg)}</TableCell>
                       <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '—'}</TableCell>
                       <TableCell>
-                        <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
-                          <FileText className="h-3 w-3" /> View
-                        </a>
+                        {s.invoiceFileUrl ? (
+                          <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
+                            <FileText className="h-3 w-3" /> View
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         {!s.purchase && (
@@ -461,13 +570,13 @@ export default function StockIn() {
               <div className={`rounded-lg border p-3 text-xs ${vehicleMatched ? 'border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/10' : 'border-red-500/40 bg-red-50/40 dark:bg-red-950/10'}`}>
                 <div className={`flex items-center gap-1.5 font-semibold ${vehicleMatched ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                   {vehicleMatched ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-                  {vehicleMatched ? `Vehicle matched: ${distinctLorries[0]}` : 'Vehicle number mismatch across documents'}
+                  {vehicleMatched ? `Vehicle matched: ${referencePlate}` : 'Vehicle number mismatch across documents'}
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2">
                   {(['partyKata', 'invoice', 'rvpWeight'] as DocKind[]).map((k) => (
                     <div key={k} className="flex flex-col">
                       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{docLabel[k]}</span>
-                      <span className={`font-mono font-medium ${docLorries[k] && !vehicleMatched ? 'text-red-600' : ''}`}>{docLorries[k] ?? '—'}</span>
+                      <span className={`font-mono font-medium ${docLorries[k] && !platesCompatible(docLorries[k]!, referencePlate) ? 'text-red-600' : ''}`}>{docLorries[k] ?? '—'}</span>
                     </div>
                   ))}
                 </div>
@@ -523,6 +632,14 @@ export default function StockIn() {
                 <Input id="billing" type="number" value={billingWeightKg} onChange={(e) => setBillingWeightKg(e.target.value)} required />
               </div>
             </div>
+
+            {isBase && (
+              <div className="space-y-2">
+                <Label htmlFor="freight">Inward freight (₹) — base-priced PO</Label>
+                <Input id="freight" type="number" step="0.01" value={freight} onChange={(e) => setFreight(e.target.value)} placeholder="freight to bring stock to our location" />
+                <p className="text-[11px] text-muted-foreground">Captured here at arrival; carried into the purchase and posted to the purchase-freight ledger. DELIVERY-priced POs already include freight.</p>
+              </div>
+            )}
 
             <div className="rounded-lg border bg-muted/40 px-4 py-2 text-sm flex justify-between">
               <span className="text-muted-foreground">RVP First Weight (gross)</span>

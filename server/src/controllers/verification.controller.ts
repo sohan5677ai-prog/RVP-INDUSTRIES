@@ -125,8 +125,11 @@ export async function createVerification(req: Request, res: Response) {
     // & cost. Inventory value carries only the company's half of the hamali.
     const originalPrice = Number(purchase.stockIn.purchaseOrder.pricePerKg);
     const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
-    const originalCost = purchase.netWeightKg * originalPrice + ourHamali;
-    const totalInventoryCost = totalAmount + ourHamali;
+    // Bag-cutting + inward freight are fixed at purchase recording and carry through.
+    const bagCut = Number(purchase.bagCuttingCharge);
+    const freight = Number(purchase.freightCharge);
+    const originalCost = purchase.netWeightKg * originalPrice + ourHamali + bagCut + freight;
+    const totalInventoryCost = totalAmount + ourHamali + bagCut + freight;
 
     // Subtract original purchase stock from inventory
     await InventoryService.updateBlackSeedInventory(
@@ -184,7 +187,9 @@ export async function deleteVerification(req: Request, res: Response) {
     const purchase = verification.purchase;
     const location = purchase.stockIn.loadingLocation;
     const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
-    const verifiedCost = Number(verification.totalAmount) + ourHamali;
+    const bagCut = Number(purchase.bagCuttingCharge);
+    const freight = Number(purchase.freightCharge);
+    const verifiedCost = Number(verification.totalAmount) + ourHamali + bagCut + freight;
 
     // 1. Subtract the verified weight and cost from SiloInventory
     await InventoryService.updateBlackSeedInventory(
@@ -196,7 +201,7 @@ export async function deleteVerification(req: Request, res: Response) {
 
     // 2. Add back the original purchase weight and cost to SiloInventory
     const originalPrice = Number(purchase.stockIn.purchaseOrder.pricePerKg);
-    const originalCost = purchase.netWeightKg * originalPrice + ourHamali;
+    const originalCost = purchase.netWeightKg * originalPrice + ourHamali + bagCut + freight;
 
     await InventoryService.updateBlackSeedInventory(
       tx,
@@ -208,12 +213,8 @@ export async function deleteVerification(req: Request, res: Response) {
     // 3. Cleanup processing if it exists
     const processing = await tx.processing.findUnique({
       where: { purchaseId: verification.purchaseId },
-      include: { pappuPrice: true },
     });
     if (processing) {
-      if (processing.pappuPrice) {
-        await tx.pappuPrice.delete({ where: { processingId: processing.id } });
-      }
       await tx.processing.delete({ where: { id: processing.id } });
     }
 

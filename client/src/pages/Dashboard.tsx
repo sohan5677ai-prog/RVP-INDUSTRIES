@@ -113,9 +113,9 @@ export default function Dashboard() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard to="/purchase-orders" icon={ClipboardList} label="Pending POs" value={String(data.pendingPOs)} hint="Awaiting arrival" />
             <StatCard to="/purchase-orders" icon={Truck} label="Stock arriving" value={String(data.arrivedPOs)} hint="Arrived, in pipeline" />
-            <StatCard to="/processing" icon={Boxes} label="Black stock on hand" value={kg(data.blackStockOnHandKg)} hint="Verified, not yet processed" />
-            <StatCard to="/stock-location" icon={Wheat} label="Pappu inventory" value={kg(data.pappuInventoryKg)} hint={`${kg(data.pappuProducedKg)} produced − ${kg(data.pappuDispatchedKg)} dispatched`} />
-            <StatCard to="/sale-orders" icon={ShoppingCart} label="Pending sales" value={String(data.pendingSales)} hint="Awaiting dispatch" />
+            <StatCard to="/processing" icon={Boxes} label="Black stock on hand" value={kg(data.blackStockOnHandKg)} hint="Received − seed used for pappu sold" />
+            <StatCard to="/stock-location" icon={Wheat} label="Pappu inventory" value={kg(data.pappuInventoryKg)} hint={`${kg(data.pappuProducedKg)} potential (60%) − ${kg(data.pappuDispatchedKg)} sold`} />
+            <StatCard to="/sales/pappu" icon={ShoppingCart} label="Pending sales" value={String(data.pendingSales)} hint="Awaiting dispatch" />
             <StatCard to="/purchase-orders" icon={Wallet} label="Supplier payable" value={rupees(data.supplierPayable)} hint="Verified purchase total" />
           </div>
 

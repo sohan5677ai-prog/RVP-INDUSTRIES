@@ -47,6 +47,8 @@ const partySchema = z.object({
   phone: z.string().optional(),
   address: z.string().optional(),
   state: z.string().optional(),
+  gstin: z.string().optional(),
+  destination: z.string().optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
@@ -54,7 +56,7 @@ const partySchema = z.object({
 type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
-  name: '', type: 'SUPPLIER', phone: '', address: '', state: '',
+  name: '', type: 'SUPPLIER', phone: '', address: '', state: '', gstin: '', destination: '',
   bankAccountNumber: '', bankIfsc: '', bankName: '',
 };
 
@@ -87,6 +89,8 @@ export default function Parties() {
       phone: p.phone ?? '',
       address: p.address ?? '',
       state: p.state ?? '',
+      gstin: p.gstin ?? '',
+      destination: p.destination ?? '',
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
@@ -137,6 +141,7 @@ export default function Parties() {
               <TableHead>Phone</TableHead>
               <TableHead>Address</TableHead>
               <TableHead>State</TableHead>
+              <TableHead>GSTIN</TableHead>
               <TableHead>Bank Details</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
@@ -144,14 +149,14 @@ export default function Parties() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {parties?.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   No parties yet.
                 </TableCell>
               </TableRow>
@@ -165,6 +170,7 @@ export default function Parties() {
                 <TableCell>{p.phone ?? '—'}</TableCell>
                 <TableCell>{p.address ?? '—'}</TableCell>
                 <TableCell>{p.state ?? '—'}</TableCell>
+                <TableCell className="font-mono text-xs">{p.gstin ?? '—'}</TableCell>
                 <TableCell>
                   {p.bankName || p.bankAccountNumber || p.bankIfsc ? (
                     <div className="text-xs">
@@ -275,6 +281,34 @@ export default function Parties() {
                       <FormLabel>State</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. Andhra Pradesh" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="gstin"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>GSTIN</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="destination"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Delivery destination</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Surat (for buyers)" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

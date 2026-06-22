@@ -29,8 +29,19 @@ enum POStatus {
 enum SaleStatus {
   PENDING
   DISPATCHED
-  COMPLETED
-  CANCELLED
+  REACHED
+  DELIVERED
+}
+
+// Products sold. Pappu depletes the black-seed pool; Husk/Waste deplete their
+// derived (25%/10%) availability; TPS (brokens) is revenue-only. Shell is a
+// production byproduct transferred to Rampalli and sold from that stock.
+enum SaleProduct {
+  PAPPU
+  HUSK
+  WASTE
+  TPS
+  SHELL
 }
 
 model User {
@@ -39,6 +50,9 @@ model User {
   email     String   @unique
   password  String
   role      Role     @default(OPERATOR)
+  // Slack member ID (e.g. "U0123ABCD") used to attribute Slack-driven actions to
+  // this ERP user. Null until an admin links the account.
+  slackUserId String? @unique
   createdAt DateTime @default(now())
 }
 
@@ -49,12 +63,17 @@ model Party {
   phone             String?
   address           String?
   state             String?
+  gstin             String?
+  // Default delivery destination for this buyer (maps to a freight rate).
+  destination       String?
   bankAccountNumber String?
   bankIfsc          String?
   bankName          String?
   createdAt         DateTime        @default(now())
   purchaseOrders    PurchaseOrder[]
   saleOrders        SaleOrder[]
+  payments          Payment[]
+  receipts          Receipt[]
 }
 
 model Broker {
@@ -62,6 +81,7 @@ model Broker {
   name       String
   phone      String?
   saleOrders SaleOrder[]
+  payments   Payment[]
 }
 
 model PurchaseOrder {
@@ -99,6 +119,9 @@ model StockIn {
   partyKataKg       Int // party weighbridge
   invoiceFileUrl    String // uploaded invoice
   loadingLocation   String        @default("At process")
+  // Inward freight (₹) captured at arrival, only for BASE-priced POs (DELIVERY
+  // already includes it). Carried into Purchase.freightCharge and capitalised.
+  freightCharge     Decimal       @default(0) @db.Decimal(12, 2)
   createdAt         DateTime      @default(now())
   purchase          Purchase?
 }
@@ -111,6 +134,14 @@ model Purchase {
   hamaliRate     Decimal             @default(80) @db.Decimal(8, 2) // per tonne
   hamaliCharge   Decimal             @db.Decimal(12, 2) // computed
   kataFee        Decimal             @default(0) @db.Decimal(12, 2) // computed
+  // Bag-cutting (pouring black seed into a process bunker). Only set when the
+  // stock lands directly at the process; storage stock gets it on transfer.
+  bunkerPlace      BunkerPlace?
+  bagCount         Int                @default(0) // round(netWeightKg / 65)
+  bagCuttingCharge Decimal            @default(0) @db.Decimal(12, 2) // bags × rate(place)
+  // Inward freight to bring BASE-priced stock to our location (capitalised into
+  // the seed). DELIVERY-priced POs already include freight in the price → 0.
+  freightCharge    Decimal            @default(0) @db.Decimal(12, 2)
   discountType   DiscountType?
   discountValue  Decimal             @default(0) @db.Decimal(12, 2)
   createdAt      DateTime            @default(now())
@@ -151,43 +182,51 @@ model Processing {
   overheadMaintenance Decimal     @default(0) @db.Decimal(12, 2)
   loadingLocation     String      @default("At process")
   processDate         DateTime
-  pappuPrice          PappuPrice?
-}
-
-model PappuPrice {
-  id           String     @id @default(cuid())
-  processing   Processing @relation(fields: [processingId], references: [id])
-  processingId String     @unique
-  pricePerKg   Decimal    @db.Decimal(12, 2)
-  pricedDate   DateTime   @default(now())
 }
 
 model SaleOrder {
-  id             String        @id @default(cuid())
+  id             String      @id @default(cuid())
   saleDate       DateTime
-  buyer          Party         @relation(fields: [buyerId], references: [id])
+  product        SaleProduct @default(PAPPU)
+  buyer          Party       @relation(fields: [buyerId], references: [id])
   buyerId        String
-  broker         Broker?       @relation(fields: [brokerId], references: [id])
+  broker         Broker?     @relation(fields: [brokerId], references: [id])
   brokerId       String?
-  tonnageKg      Int
-  ratePerKg      Decimal       @db.Decimal(12, 2)
-  status         SaleStatus    @default(PENDING)
-  marginOverride Boolean       @default(false)
-  createdAt      DateTime      @default(now())
-  dispatch       SaleDispatch?
-}
+  tonnageKg      Int // total weight sold, per RVP kata (kg)
+  ratePerKg      Decimal     @db.Decimal(12, 2)
+  gstAmount      Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate
+  brokerageRatePerKg Decimal   @default(0) @db.Decimal(12, 2)
+  // Delivery destination (Surat/Barshi/Nagar) and the outward freight we bear,
+  // since pappu etc. is sold at a delivery price. Freight is our selling expense.
+  destination    String?
+  freightCharge  Decimal     @default(0) @db.Decimal(12, 2)
+  status         SaleStatus  @default(PENDING)
+  marginOverride Boolean     @default(false)
+  // Payment terms: number of credit days. The clock starts from deliveredDate
+  // (when the order is marked DELIVERED), so dueDate = deliveredDate + dueDays.
+  dueDays        Int?
+  receivedDate   DateTime?
+  deliveredDate  DateTime?
+  // Captured at dispatch from the uploaded invoice + kata slip.
+  invoiceNumber  String?
+  vehicleNumber  String?
+  invoiceFileUrl String?
+  kataFileUrl    String?
+  
+  // Delivery matching (Kata slip sent by buyer after REACHED)
+  buyerKataKg    Int?
+  shortageKg     Int?
+  creditNoteAmount Decimal?    @db.Decimal(12, 2)
+  buyerKataFileUrl String?
 
-model SaleDispatch {
-  id               String    @id @default(cuid())
-  saleOrder        SaleOrder @relation(fields: [saleOrderId], references: [id])
-  saleOrderId      String    @unique
-  invoiceFileUrl   String
-  dispatchWeightKg Int
-  buyerWeightKg    Int?
-  creditNoteAmount Decimal?  @db.Decimal(12, 2)
-  creditNoteReason String?
-  dispatchDate     DateTime
-  createdAt        DateTime  @default(now())
+  // Generated tax invoice. Number = prefix/seq/FY; seq resets each financial year.
+  invoiceSeq     Int?
+  invoiceFy      String? // Indian financial year, e.g. "2026-27"
+  invoiceDate    DateTime?
+
+  createdAt      DateTime    @default(now())
+
+  @@unique([invoiceFy, invoiceSeq])
 }
 
 enum AccountType {
@@ -209,6 +248,13 @@ enum PriceType {
   DELIVERY
 }
 
+// Which bunker the black seed is poured into at the process. Drives the
+// bag-cutting hamali rate: A = ₹3/bag, B = ₹6/bag.
+enum BunkerPlace {
+  A
+  B
+}
+
 model Account {
   id    String        @id @default(cuid())
   code  String        @unique
@@ -224,6 +270,8 @@ model JournalEntry {
   description String
   createdAt   DateTime      @default(now())
   lines       JournalLine[]
+  payment     Payment?
+  receipt     Receipt?
 }
 
 model JournalLine {
@@ -237,6 +285,64 @@ model JournalLine {
   costCenter     String?
 }
 
+// Editable per-destination outward freight rates (₹/tonne), managed in Settings.
+model FreightRate {
+  id           String   @id @default(cuid())
+  destination  String   @unique
+  ratePerTonne Decimal  @default(0) @db.Decimal(12, 2)
+  updatedAt    DateTime @updatedAt
+}
+
+// Single-row seller profile printed on generated tax invoices. Edited in Settings.
+model CompanyProfile {
+  id                String   @id @default("default")
+  name              String   @default("RVP INDUSTRIES")
+  address           String? // multi-line seller address
+  gstin             String?
+  stateName         String?
+  stateCode         String? // GST state code, e.g. "37"
+  contact           String?
+  // Bank details printed in the invoice footer.
+  bankAccountName   String?
+  bankName          String?
+  bankAccountNumber String?
+  bankBranchIfsc    String?
+  // Invoice number = invoicePrefix/seq/FY (e.g. RVP/01/2026-27).
+  invoicePrefix     String   @default("RVP")
+  // JSON print-layout config (paper size, margins, font, column widths).
+  invoiceLayout     String?
+  // Comma or newline separated list of company vehicles exempt from kata & hamali
+  companyVehicles   String?
+  // ₹ held back from each sale lorry freight until delivery, then paid to Surya
+  // Roadlines once the kata slip is received (configurable; default ₹3000).
+  freightRetentionPerTrip Decimal @default(3000) @db.Decimal(12, 2)
+  // Standard annual bank-loan interest rate (%) used to capitalise the stock's
+  // carrying cost on storage→process transfers. Editable in the Loans section.
+  loanInterestRatePct     Decimal @default(0) @db.Decimal(6, 3)
+  updatedAt         DateTime @updatedAt
+}
+
+// User-defined per-kg production cost components (electricity, labour, etc.).
+// Their sum is the production cost per kg added on top of the black-seed cost
+// for pappu (drives the displayed cost, the 3% margin check, and COGS).
+model ProductionCostComponent {
+  id        String   @id @default(cuid())
+  name      String
+  ratePerKg Decimal  @default(0) @db.Decimal(12, 4)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// Per-product HSN/SAC code and invoice description, managed in Settings.
+model ProductTaxInfo {
+  id          String      @id @default(cuid())
+  product     SaleProduct @unique
+  hsn         String? // primary HSN/SAC (the GST-taxable code)
+  hsnExempt   String? // alternate HSN for the GST-exempt (without-GST) variant, e.g. husk
+  description String?
+  updatedAt   DateTime    @updatedAt
+}
+
 model SiloInventory {
   id         String   @id @default(cuid())
   itemType   String // "BLACK_SEED" | "WHITE_PAPPU" | "HUSK" | "WASTE"
@@ -244,4 +350,114 @@ model SiloInventory {
   weightKg   Int      @default(0)
   totalValue Decimal  @default(0) @db.Decimal(12, 2)
   updatedAt  DateTime @updatedAt
+}
+
+// Movement of black seed from a storage location (Rampalli/Murgan/Multi) to the
+// process. Each transfer incurs two hamali legs (storage loading + process
+// unloading), transfer transport, and bag-cutting at the destination bunker —
+// all 100% company-borne and capitalised into the seed's value at the process.
+model StockTransfer {
+  id               String       @id @default(cuid())
+  fromLocation     String
+  toLocation       String       @default("At process")
+  weightKg         Int
+  lorryNumber      String?
+  transportCharge  Decimal      @default(0) @db.Decimal(12, 2)
+  loadingHamali    Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg (₹80/t)
+  unloadingHamali  Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined (₹270/t)
+  bunkerPlace      BunkerPlace?
+  bagCount         Int          @default(0)
+  bagCuttingCharge Decimal      @default(0) @db.Decimal(12, 2)
+  hamaliMargin     Decimal      @default(0) @db.Decimal(12, 2) // company profit (₹10/t on the unload leg)
+  // Bank-loan carrying interest capitalised into the seed at the process:
+  // seedCostMoved × rate% × interestDays/365, where interestDays runs from the
+  // earliest open loan's drawdown date to the transfer date.
+  interestCharge   Decimal      @default(0) @db.Decimal(12, 2)
+  interestDays     Int          @default(0)
+  interestRatePct  Decimal      @default(0) @db.Decimal(6, 3)
+  seedCostMoved    Decimal      @default(0) @db.Decimal(12, 2) // value drawn from source silo (MAP)
+  movedValue       Decimal      @default(0) @db.Decimal(12, 2) // seedCostMoved + all transfer costs
+  transferDate     DateTime
+  createdAt        DateTime     @default(now())
+}
+
+enum LoanStatus {
+  OPEN
+  CLOSED
+}
+
+// A single bank-loan drawdown (~₹15 lakh) taken against the stored stock, from
+// one bank at a single standard rate. Interest accrues on the outstanding
+// balance from drawdownDate until repaid; the carrying cost is capitalised into
+// black seed when it moves storage→process (StockTransfer.interestCharge).
+model BankLoan {
+  id              String          @id @default(cuid())
+  loanRef         String? // bank loan/account reference
+  bankName        String?
+  principal       Decimal         @db.Decimal(14, 2)
+  drawdownDate    DateTime
+  interestRatePct Decimal         @db.Decimal(6, 3) // snapshot of the rate at drawdown
+  status          LoanStatus      @default(OPEN)
+  closedDate      DateTime?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  repayments      LoanRepayment[]
+}
+
+model LoanRepayment {
+  id        String   @id @default(cuid())
+  loan      BankLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  loanId    String
+  amount    Decimal  @db.Decimal(14, 2)
+  date      DateTime
+  reference String?
+  createdAt DateTime @default(now())
+}
+
+// Movement of tamarind shell (a production byproduct) from the factory/process
+// to the Rampalli storage, where it is later sold. Each transfer bears packing +
+// loading + unloading hamali (₹333/tonne) and a fixed ₹500 transport — both
+// capitalised into the shell's value at Rampalli.
+model ShellTransfer {
+  id              String   @id @default(cuid())
+  fromLocation    String   @default("At process")
+  toLocation      String   @default("Rampalli")
+  weightKg        Int
+  lorryNumber     String?
+  hamaliCharge    Decimal  @default(0) @db.Decimal(12, 2) // ₹333/t packing+loading+unloading
+  transportCharge Decimal  @default(0) @db.Decimal(12, 2) // fixed ₹500
+  totalCost       Decimal  @default(0) @db.Decimal(12, 2) // hamali + transport, capitalised at Rampalli
+  transferDate    DateTime
+  createdAt       DateTime @default(now())
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  date           DateTime
+  amount         Decimal       @db.Decimal(12, 2)
+  type           String        // 'SUPPLIER', 'TRANSPORTER', 'BROKER', 'OTHER'
+  partyId        String?
+  party          Party?        @relation(fields: [partyId], references: [id])
+  brokerId       String?
+  broker         Broker?       @relation(fields: [brokerId], references: [id])
+  lorryNumber    String?
+  reference      String?
+  description    String?
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+}
+
+model Receipt {
+  id             String        @id @default(cuid())
+  date           DateTime
+  amount         Decimal       @db.Decimal(12, 2)
+  type           String        // 'BUYER', 'OTHER'
+  partyId        String?
+  party          Party?        @relation(fields: [partyId], references: [id])
+  reference      String?
+  description    String?
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
 }

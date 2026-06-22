@@ -3,13 +3,12 @@ import { prisma } from '../lib/prisma.js';
 
 export async function clearTransactions(_req: Request, res: Response) {
   await prisma.$transaction([
-    prisma.pappuPrice.deleteMany(),
     prisma.processing.deleteMany(),
     prisma.weightVerification.deleteMany(),
     prisma.purchase.deleteMany(),
     prisma.stockIn.deleteMany(),
+    prisma.stockTransfer.deleteMany(),
     prisma.purchaseOrder.deleteMany(),
-    prisma.saleDispatch.deleteMany(),
     prisma.saleOrder.deleteMany(),
     prisma.journalLine.deleteMany(),
     prisma.journalEntry.deleteMany(),

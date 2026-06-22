@@ -6,13 +6,16 @@ async function main() {
   console.log('Starting transaction cleanup...');
 
   await prisma.$transaction([
-    // Delete pricing & dispatch details
-    prisma.pappuPrice.deleteMany(),
-    prisma.saleDispatch.deleteMany(),
+    // Delete sale orders
     prisma.saleOrder.deleteMany(),
 
-    // Delete processing batches
+    // Delete stock transfers + processing batches
+    prisma.stockTransfer.deleteMany(),
     prisma.processing.deleteMany(),
+
+    // Delete bank loans + repayments (repayments cascade, but be explicit)
+    prisma.loanRepayment.deleteMany(),
+    prisma.bankLoan.deleteMany(),
 
     // Delete purchase transactional models
     prisma.weightVerification.deleteMany(),

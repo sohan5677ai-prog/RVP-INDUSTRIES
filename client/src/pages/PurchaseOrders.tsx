@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
@@ -170,6 +170,16 @@ export default function PurchaseOrders() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const voidMutation = useMutation({
+    mutationFn: (id: string) =>
+      api(`/purchase-orders/${id}/void`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      toast.success('Purchase order voided (Cancelled)');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -271,6 +281,17 @@ export default function PurchaseOrders() {
                           <div className="flex justify-end gap-1">
                             <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEdit(po); }}>
                               <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Void (cancel) this PO"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm('Void this purchase order? It will be marked as Cancelled.')) voidMutation.mutate(po.id);
+                              }}
+                            >
+                              <Ban className="h-4 w-4 text-amber-600" />
                             </Button>
                             <Button
                               variant="ghost"

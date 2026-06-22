@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { crossVerify, calcHamali, calcKataFee, calcPappu, calcTotal } from './calc';
+import { crossVerify, calcHamali, calcKataFee, calcPappu, calcTotal, daysBetween, loanInterest } from './calc';
 
 describe('crossVerify', () => {
   // Section 10 validation table (one-sided rules).
@@ -52,10 +52,10 @@ describe('crossVerify', () => {
     expect(r.finalWeight).toBe(9950); // 10000 - (130 - 80)
   });
 
-  it('does not deduct if RVP is heavier than reference', () => {
+  it('pays at RVP weight if RVP is heavier than reference', () => {
     const r = crossVerify(10000, 10000, 10130); // rvp 130 over
     expect(r.diff).toBe(0);
-    expect(r.finalWeight).toBe(10000);
+    expect(r.finalWeight).toBe(10130);
     expect(r.exempt).toBe(true);
   });
 });
@@ -96,5 +96,30 @@ describe('calcTotal', () => {
   });
   it('partial weight', () => {
     expect(calcTotal(9680, 50)).toBe(484000);
+  });
+});
+
+describe('daysBetween', () => {
+  it('counts whole days', () => {
+    expect(daysBetween(new Date('2026-01-01'), new Date('2026-01-31'))).toBe(30);
+  });
+  it('clamps negatives to 0 (to before from)', () => {
+    expect(daysBetween(new Date('2026-02-01'), new Date('2026-01-01'))).toBe(0);
+  });
+  it('same day -> 0', () => {
+    expect(daysBetween(new Date('2026-01-01'), new Date('2026-01-01'))).toBe(0);
+  });
+});
+
+describe('loanInterest', () => {
+  it('value × rate% × days/365, rounded to paise', () => {
+    // 15,00,000 × 12% × 60/365 = 29,589.04
+    expect(loanInterest(1500000, 12, 60)).toBeCloseTo(29589.04, 2);
+  });
+  it('zero days -> zero interest', () => {
+    expect(loanInterest(1500000, 12, 0)).toBe(0);
+  });
+  it('zero rate -> zero interest', () => {
+    expect(loanInterest(1500000, 0, 60)).toBe(0);
   });
 });

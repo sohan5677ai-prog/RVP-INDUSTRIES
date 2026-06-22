@@ -7,6 +7,7 @@ import {
   createPurchaseOrder,
   updatePurchaseOrder,
   deletePurchaseOrder,
+  voidPurchaseOrder,
 } from '../controllers/purchaseOrder.controller.js';
 import {
   createStockIn,
@@ -38,6 +39,7 @@ router.get('/purchase-orders/:id', asyncHandler(getPurchaseOrder));
 router.post('/purchase-orders', asyncHandler(createPurchaseOrder));
 router.put('/purchase-orders/:id', asyncHandler(updatePurchaseOrder));
 router.delete('/purchase-orders/:id', asyncHandler(deletePurchaseOrder));
+router.post('/purchase-orders/:id/void', asyncHandler(voidPurchaseOrder));
 
 // Stock-in (multipart invoice upload)
 router.post('/stock-in/extract', memoryUpload.single('invoice'), asyncHandler(extractStockInInvoice));

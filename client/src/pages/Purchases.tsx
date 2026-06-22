@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Purchase, StockIn } from '@/lib/types';
-import { calcHamali, calcKataFee, DEFAULT_HAMALI_RATE } from '@/lib/calc';
+import type { Purchase, StockIn, BunkerPlace } from '@/lib/types';
+import { calcHamali, calcKataFee, calcBags, calcBagCutting, BAG_RATE, DEFAULT_HAMALI_RATE, isVehicleExempt } from '@/lib/calc';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,11 +18,12 @@ import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import type { CompanyProfile } from '@/lib/types';
 
 type PurchaseRow = Purchase & {
   stockIn?: StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string; pricePerKg?: string; priceType?: 'BASE' | 'DELIVERY' } };
 };
-type StockInRow = StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string }; purchase?: Purchase | null };
+type StockInRow = StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string; priceType?: 'BASE' | 'DELIVERY' }; purchase?: Purchase | null };
 
 export default function Purchases() {
   const qc = useQueryClient();
@@ -38,25 +39,46 @@ export default function Purchases() {
     queryKey: ['stock-in'],
     queryFn: () => api<StockInRow[]>('/stock-in'),
   });
+  
+  const { data: companyProfile } = useQuery({
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
+  });
+  
   const available = stockIns?.filter((s) => !s.purchase) ?? [];
 
   const [stockInId, setStockInId] = useState('');
   const [rvpSecondWeight, setRvpSecondWeight] = useState('');
   const [hamaliRate, setHamaliRate] = useState(String(DEFAULT_HAMALI_RATE));
+  const [bunkerPlace, setBunkerPlace] = useState<BunkerPlace | ''>('');
 
   const selected = available.find((s) => s.id === stockInId);
   const rvpFirst = editing ? (editing.stockIn?.rvpFirstWeightKg ?? 0) : (selected?.rvpFirstWeightKg ?? 0);
+  const lorryNumber = editing ? editing.stockIn?.lorryNumber : selected?.lorryNumber;
+  const isCompanyVehicle = isVehicleExempt(lorryNumber, companyProfile?.companyVehicles);
+
   const net = rvpFirst - (Number(rvpSecondWeight) || 0);
   const rate = Number(hamaliRate) || 0;
   const netValid = net > 0 && (Number(rvpSecondWeight) || 0) > 0;
-  const hamali = netValid ? calcHamali(net, rate) : 0;
-  const kataFeeVal = netValid ? calcKataFee(net) : 0;
+  const hamali = netValid ? calcHamali(net, rate, isCompanyVehicle) : 0;
+  const kataFeeVal = netValid ? calcKataFee(net, isCompanyVehicle) : 0;
+  // Bag-cutting only applies when the seed lands directly at the process bunker.
+  const location = editing ? editing.stockIn?.loadingLocation : selected?.loadingLocation;
+  const isAtProcess = location === 'At process';
+  const bags = netValid ? calcBags(net) : 0;
+  const bagCutting = netValid && isAtProcess && bunkerPlace ? calcBagCutting(net, bunkerPlace) : 0;
+  // Inward freight is captured at Stock In (BASE-priced POs only); shown here
+  // read-only, sourced from the stock-in record.
+  const priceType = editing ? editing.stockIn?.purchaseOrder?.priceType : selected?.purchaseOrder?.priceType;
+  const isBase = priceType === 'BASE';
+  const freightVal = isBase ? Number((editing ? editing.stockIn?.freightCharge : selected?.freightCharge) ?? 0) : 0;
 
   function resetForm() {
     setEditing(null);
     setStockInId('');
     setRvpSecondWeight('');
     setHamaliRate(String(DEFAULT_HAMALI_RATE));
+    setBunkerPlace('');
   }
 
   function openEdit(p: PurchaseRow) {
@@ -64,6 +86,7 @@ export default function Purchases() {
     setStockInId(p.stockInId);
     setRvpSecondWeight(p.stockIn ? String(p.stockIn.rvpSecondWeightKg) : '');
     setHamaliRate(String(p.hamaliRate));
+    setBunkerPlace((p.bunkerPlace as BunkerPlace) ?? '');
     setOpen(true);
   }
 
@@ -71,9 +94,10 @@ export default function Purchases() {
     mutationFn: () => {
       const url = editing ? `/purchases/${editing.id}` : '/purchases';
       const method = editing ? 'PUT' : 'POST';
+      const place = isAtProcess && bunkerPlace ? bunkerPlace : null;
       const body = editing
-        ? { stockInId: editing.stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate }
-        : { stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate };
+        ? { stockInId: editing.stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate, bunkerPlace: place }
+        : { stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate, bunkerPlace: place };
       return api<PurchaseRow>(url, { method, body });
     },
     onSuccess: () => {
@@ -214,6 +238,29 @@ export default function Purchases() {
               <Input id="rate" type="number" step="0.01" value={hamaliRate} onChange={(e) => setHamaliRate(e.target.value)} />
             </div>
 
+            {isAtProcess ? (
+              <div className="space-y-2">
+                <Label>Bunker place (bag-cutting)</Label>
+                <Select value={bunkerPlace} onValueChange={(v: any) => setBunkerPlace(v)}>
+                  <SelectTrigger><SelectValue placeholder="Select place A or B" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="A">Place A — ₹{BAG_RATE.A}/bag</SelectItem>
+                    <SelectItem value="B">Place B — ₹{BAG_RATE.B}/bag</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : location ? (
+              <p className="text-xs text-muted-foreground">
+                Stock is at <span className="font-medium">{location}</span> — bag-cutting is charged later, on the Stock Transfer to the process.
+              </p>
+            ) : null}
+
+            {isBase && (
+              <p className="text-xs text-muted-foreground">
+                Inward freight {freightVal > 0 ? <span className="font-medium">{rupees(freightVal)}</span> : 'is'} captured at Stock In (base-priced PO){freightVal > 0 ? '' : ' — none entered'}; it's capitalised into the seed and tracked in the Purchase Freight ledger.
+              </p>
+            )}
+
              <div className="rounded-lg border bg-muted/40 p-4 space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">RVP First Weight (gross)</span>
@@ -229,14 +276,40 @@ export default function Purchases() {
               </div>
               <div className="flex justify-between border-t pt-2">
                 <span className="text-muted-foreground">Hamali = rounded(net/1000) × rate</span>
-                <span className="font-semibold">{netValid ? rupees(hamali) : '—'}</span>
+                <span className="font-semibold text-right">
+                  {isCompanyVehicle ? (
+                    <span className="text-emerald-600 dark:text-emerald-400 text-xs">Exempted<br />{rupees(0)}</span>
+                  ) : (
+                    netValid ? rupees(hamali) : '—'
+                  )}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Kata Fee (weighbridge)</span>
-                <span className="font-semibold">{netValid ? rupees(kataFeeVal) : '—'}</span>
+                <span className="font-semibold text-right">
+                  {isCompanyVehicle ? (
+                    <span className="text-emerald-600 dark:text-emerald-400 text-xs">Exempted<br />{rupees(0)}</span>
+                  ) : (
+                    netValid ? rupees(kataFeeVal) : '—'
+                  )}
+                </span>
               </div>
+              {isAtProcess && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">
+                    Bag-cutting {bunkerPlace ? `(${bags} bags @ ₹${BAG_RATE[bunkerPlace]})` : '(select place)'}
+                  </span>
+                  <span className="font-semibold">{bagCutting > 0 ? rupees(bagCutting) : '—'}</span>
+                </div>
+              )}
+              {isBase && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Inward freight (base price)</span>
+                  <span className="font-semibold">{freightVal > 0 ? rupees(freightVal) : '—'}</span>
+                </div>
+              )}
               <p className="text-xs text-muted-foreground pt-1 border-t mt-1">
-                Saves the purchase with the calculated net weight, hamali, and kata fee. Run weight verification afterwards on the Verification page.
+                Saves the purchase with net weight, hamali, kata fee{isBase ? ', and inward freight' : ''}. Run weight verification afterwards on the Verification page.
               </p>
             </div>
 

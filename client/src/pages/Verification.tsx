@@ -45,13 +45,17 @@ function getCalculationDetails(p: PurchaseRow) {
     rvpKataKg
   );
 
-  const baseCost = reference * pricePerKg;
+  const hasPenalty = finalWeight < reference;
+  const displayBaseWeightKg = hasPenalty ? reference : finalWeight;
+  const baseCost = displayBaseWeightKg * pricePerKg;
+  
   // GST is charged on the invoice billing amount (billing weight x price), not
   // on our recalculated payable.
   const billingAmount = billingWeightKg * pricePerKg;
   const igst = billingAmount * 0.05;
-  const kataDiffDeduction = (reference - finalWeight) * pricePerKg;
-  const totalAmount = baseCost + igst - kataDiffDeduction;
+  
+  const kataDiffDeduction = hasPenalty ? (reference - finalWeight) * pricePerKg : 0;
+  const totalAmount = baseCost - kataDiffDeduction + igst;
 
   return {
     billingWeightKg,
@@ -61,6 +65,7 @@ function getCalculationDetails(p: PurchaseRow) {
     diffKg: diff,
     exempt,
     finalWeightKg: finalWeight,
+    displayBaseWeightKg,
     pricePerKg,
     baseCost,
     billingAmount,
@@ -370,7 +375,7 @@ export default function Verification() {
                 <h3 className="text-sm font-semibold">Payment Details</h3>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Base cost ({kg(calc.referenceKg)} @ {rupees(calc.pricePerKg)}/kg)</span>
+                    <span className="text-muted-foreground">Base cost ({kg(calc.displayBaseWeightKg)} @ {rupees(calc.pricePerKg)}/kg)</span>
                     <span>{rupees(calc.baseCost)}</span>
                   </div>
                   {calc.kataDiffDeduction > 0 && (

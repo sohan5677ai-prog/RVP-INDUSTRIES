@@ -16,6 +16,8 @@ export interface Party {
   phone: string | null;
   address: string | null;
   state: string | null;
+  gstin: string | null;
+  destination: string | null;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;
@@ -61,7 +63,6 @@ export interface Processing {
   yieldAnomaly?: boolean;
   yieldAnomalyReason?: string | null;
   processDate: string;
-  pappuPrice?: PappuPrice | null;
   purchase?: (Purchase & {
     stockIn?: (StockIn & {
       purchaseOrder?: (PurchaseOrder & {
@@ -71,12 +72,7 @@ export interface Processing {
   }) | null;
 }
 
-export interface PappuPrice {
-  id: string;
-  processingId: string;
-  pricePerKg: string;
-  pricedDate: string;
-}
+export type BunkerPlace = 'A' | 'B';
 
 export interface Purchase {
   id: string;
@@ -85,10 +81,92 @@ export interface Purchase {
   hamaliRate: string;
   hamaliCharge: string;
   kataFee: string;
+  bunkerPlace?: BunkerPlace | null;
+  bagCount?: number;
+  bagCuttingCharge?: string;
+  freightCharge?: string;
   discountType?: DiscountType | null;
   discountValue?: string;
   createdAt: string;
   verification?: WeightVerification | null;
+  processing?: Processing | null;
+}
+
+export interface StockTransfer {
+  id: string;
+  fromLocation: string;
+  toLocation: string;
+  weightKg: number;
+  lorryNumber: string | null;
+  transportCharge: string;
+  loadingHamali: string;
+  unloadingHamali: string;
+  bunkerPlace: BunkerPlace | null;
+  bagCount: number;
+  bagCuttingCharge: string;
+  hamaliMargin: string;
+  interestCharge: string;
+  interestDays: number;
+  interestRatePct: string;
+  seedCostMoved: string;
+  movedValue: string;
+  transferDate: string;
+  createdAt: string;
+}
+
+export type LoanStatus = 'OPEN' | 'CLOSED';
+
+export interface LoanRepayment {
+  id: string;
+  loanId: string;
+  amount: string;
+  date: string;
+  reference: string | null;
+  createdAt: string;
+}
+
+export interface BankLoan {
+  id: string;
+  loanRef: string | null;
+  bankName: string | null;
+  principal: string;
+  drawdownDate: string;
+  interestRatePct: string;
+  status: LoanStatus;
+  closedDate: string | null;
+  notes: string | null;
+  createdAt: string;
+  repayments: LoanRepayment[];
+  // Server-computed
+  repaidAmount: number;
+  outstanding: number;
+  accruedInterestToDate: number;
+}
+
+export interface LoanSummary {
+  rate: number;
+  totalOutstanding: number;
+  totalAccruedInterest: number;
+  interestCapitalised: number;
+  earliestOpenLoanDate: string | null;
+}
+
+export interface LoansResponse {
+  loans: BankLoan[];
+  summary: LoanSummary;
+}
+
+export interface ShellTransfer {
+  id: string;
+  fromLocation: string;
+  toLocation: string;
+  weightKg: number;
+  lorryNumber: string | null;
+  hamaliCharge: string;
+  transportCharge: string;
+  totalCost: string;
+  transferDate: string;
+  createdAt: string;
 }
 
 export interface StockIn {
@@ -104,6 +182,7 @@ export interface StockIn {
   partyKataKg: number;
   invoiceFileUrl: string;
   loadingLocation: 'At process' | 'Rampalli' | 'Murgan' | 'Multi';
+  freightCharge: string;
   createdAt: string;
   purchase?: Purchase | null;
   purchaseOrder?: (PurchaseOrder & { party?: Party }) | null;
@@ -127,33 +206,72 @@ export interface PurchaseOrder {
   stockIns?: { id: string }[] | null;
 }
 
-export type SaleStatus = 'PENDING' | 'DISPATCHED' | 'COMPLETED' | 'CANCELLED';
-
-export interface SaleDispatch {
-  id: string;
-  saleOrderId: string;
-  invoiceFileUrl: string;
-  dispatchWeightKg: number;
-  buyerWeightKg?: number | null;
-  creditNoteAmount?: string | null;
-  creditNoteReason?: string | null;
-  dispatchDate: string;
-  createdAt: string;
-}
+export type SaleStatus = 'PENDING' | 'DISPATCHED' | 'REACHED' | 'DELIVERED';
+export type SaleProduct = 'PAPPU' | 'HUSK' | 'WASTE' | 'TPS' | 'SHELL';
 
 export interface SaleOrder {
   id: string;
   saleDate: string;
+  product: SaleProduct;
   buyerId: string;
   buyer?: Party;
   brokerId: string | null;
   broker?: Broker | null;
-  tonnageKg: number;
+  tonnageKg: number; // total weight sold, per RVP kata (kg)
   ratePerKg: string;
+  gstAmount: string;
+  brokerageRatePerKg: string;
+  destination: string | null;
+  freightCharge: string;
   status: SaleStatus;
   marginOverride: boolean;
+  dueDays?: number | null;
+  receivedDate?: string | null;
+  invoiceNumber: string | null;
+  vehicleNumber: string | null;
+  invoiceFileUrl?: string;
+  kataFileUrl?: string;
+  buyerKataKg?: number;
+  shortageKg?: number;
+  creditNoteAmount?: string | number;
+  buyerKataFileUrl?: string;
+  invoiceSeq?: number | null;
+  invoiceFy?: string | null;
+  invoiceDate?: string | null;
+  deliveredDate?: string | null;
   createdAt: string;
-  dispatch?: SaleDispatch | null;
+}
+
+export interface CompanyProfile {
+  id: string;
+  name: string;
+  address: string | null;
+  gstin: string | null;
+  stateName: string | null;
+  stateCode: string | null;
+  contact: string | null;
+  bankAccountName: string | null;
+  bankName: string | null;
+  bankAccountNumber: string | null;
+  bankBranchIfsc: string | null;
+  invoicePrefix: string;
+  companyVehicles?: string | null;
+  freightRetentionPerTrip?: string | number;
+}
+
+export interface ProductionCostComponent {
+  id?: string;
+  name: string;
+  ratePerKg: string | number;
+  sortOrder?: number;
+}
+
+export interface ProductTaxInfo {
+  id: string;
+  product: SaleProduct;
+  hsn: string | null;
+  hsnExempt: string | null;
+  description: string | null;
 }
 
 export type AccountType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
@@ -188,6 +306,13 @@ export interface JournalLine {
   costCenter: string | null;
 }
 
+export interface FreightRate {
+  id: string;
+  destination: string;
+  ratePerTonne: string;
+  updatedAt: string;
+}
+
 export interface SiloInventory {
   id: string;
   itemType: string;
@@ -195,4 +320,80 @@ export interface SiloInventory {
   weightKg: number;
   totalValue: string;
   updatedAt: string;
+}
+
+export interface Payment {
+  id: string;
+  date: string;
+  amount: string;
+  type: 'SUPPLIER' | 'TRANSPORTER' | 'BROKER' | 'OTHER';
+  partyId: string | null;
+  party?: Party | null;
+  brokerId: string | null;
+  broker?: Broker | null;
+  lorryNumber: string | null;
+  reference: string | null;
+  description: string | null;
+  journalEntryId: string | null;
+  createdAt: string;
+}
+
+export interface Receipt {
+  id: string;
+  date: string;
+  amount: string;
+  type: 'BUYER' | 'OTHER';
+  partyId: string | null;
+  party?: Party | null;
+  reference: string | null;
+  description: string | null;
+  journalEntryId: string | null;
+  createdAt: string;
+}
+
+// --- Party Ledger -----------------------------------------------------------
+
+export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE';
+export type BalanceType = 'DR' | 'CR';
+
+export interface PartyLedgerSummary {
+  totalDebit: number;
+  totalCredit: number;
+  balance: number; // absolute value
+  balanceType: BalanceType;
+  purchaseTotal: number;
+  saleTotal: number;
+  paidTotal: number;
+  receivedTotal: number;
+  totalBusiness: number;
+  transactionCount: number;
+  pendingCount: number;
+  lastTxnDate: string | null;
+}
+
+export type PartyLedgerRow = Party & PartyLedgerSummary;
+
+export interface PartyLedgerTxn {
+  id: string;
+  date: string;
+  kind: LedgerKind;
+  particulars: string;
+  invoiceNumber: string | null;
+  vehicleNumber: string | null;
+  reference: string | null;
+  utr: string | null;
+  transferredDate: string | null;
+  weightKg: number | null;
+  ratePerKg: number | null;
+  product: string | null;
+  debit: number;
+  credit: number;
+  status: string;
+  runningBalance: number;
+}
+
+export interface PartyLedgerDetail {
+  party: Party;
+  summary: PartyLedgerSummary;
+  transactions: PartyLedgerTxn[];
 }

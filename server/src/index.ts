@@ -29,4 +29,12 @@ app.use(errorHandler);
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, "0.0.0.0", () => {
   console.log(`rvp-server listening on http://localhost:${port}`);
+
+  // Optionally start the Slack bot (Socket Mode) in the same process. A failure
+  // here must never take down the API server, so it's isolated in try/catch.
+  if (process.env.SLACK_ENABLED === "true") {
+    import("./slack/app.js")
+      .then(({ startSlackBot }) => startSlackBot())
+      .catch((err) => console.error("[slack] failed to start:", err));
+  }
 });

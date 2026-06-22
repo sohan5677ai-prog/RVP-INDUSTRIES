@@ -8,6 +8,8 @@ export const createPartySchema = z.object({
   phone: z.string().optional(),
   address: z.string().optional(),
   state: z.string().optional(),
+  gstin: z.string().optional(),
+  destination: z.string().optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),

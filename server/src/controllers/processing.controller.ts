@@ -1,12 +1,11 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { createProcessingSchema, createPappuPriceSchema } from '../schemas/processing.schema.js';
+import { createProcessingSchema } from '../schemas/processing.schema.js';
 import { calcPappu, DEFAULT_OUT_TURN_PCT } from '../lib/calc.js';
 import { ProcessingService } from '../services/processing.service.js';
 
 const processingInclude = {
-  pappuPrice: true,
   purchase: {
     include: {
       stockIn: {
@@ -80,47 +79,6 @@ export async function createProcessing(req: Request, res: Response) {
   });
 }
 
-export async function createPappuPrice(req: Request, res: Response) {
-  const data = createPappuPriceSchema.parse(req.body);
-
-  const processing = await prisma.processing.findUnique({
-    where: { id: data.processingId },
-    include: { pappuPrice: true },
-  });
-  if (!processing) throw new HttpError(400, 'Processing batch not found');
-  if (processing.pappuPrice) throw new HttpError(409, 'Price already set for this batch');
-
-  const price = await prisma.pappuPrice.create({
-    data: { processingId: data.processingId, pricePerKg: data.pricePerKg },
-  });
-  res.status(201).json(price);
-}
-
-export async function updatePappuPrice(req: Request, res: Response) {
-  const price = await prisma.pappuPrice.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!price) throw new HttpError(404, 'Price not found');
-
-  const updated = await prisma.pappuPrice.update({
-    where: { id: req.params.id },
-    data: { pricePerKg: req.body.pricePerKg },
-  });
-  res.json(updated);
-}
-
-export async function deletePappuPrice(req: Request, res: Response) {
-  const price = await prisma.pappuPrice.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!price) throw new HttpError(404, 'Price not found');
-
-  await prisma.pappuPrice.delete({
-    where: { id: req.params.id },
-  });
-  res.json({ message: 'Price deleted' });
-}
-
 export async function updateProcessing(req: Request, res: Response) {
   const data = createProcessingSchema.parse(req.body);
   const p = await prisma.processing.findUnique({
@@ -164,15 +122,9 @@ export async function updateProcessing(req: Request, res: Response) {
 export async function deleteProcessing(req: Request, res: Response) {
   const p = await prisma.processing.findUnique({
     where: { id: req.params.id },
-    include: { pappuPrice: true },
   });
   if (!p) throw new HttpError(404, 'Processing run not found');
 
-  await prisma.$transaction(async (tx) => {
-    if (p.pappuPrice) {
-      await tx.pappuPrice.delete({ where: { processingId: req.params.id } });
-    }
-    await tx.processing.delete({ where: { id: req.params.id } });
-  });
+  await prisma.processing.delete({ where: { id: req.params.id } });
   res.json({ message: 'Processing run deleted' });
 }

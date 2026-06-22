@@ -27,7 +27,7 @@ export async function getPurchaseOrder(req: Request, res: Response) {
           purchase: {
             include: {
               verification: true,
-              processing: { include: { pappuPrice: true } },
+              processing: true,
             },
           },
         },
@@ -144,4 +144,28 @@ export async function deletePurchaseOrder(req: Request, res: Response) {
     where: { id: req.params.id },
   });
   res.json({ message: 'Purchase order deleted' });
+}
+
+/**
+ * Void a purchase order — set status to CANCELLED without deleting. Allows
+ * tracking cancelled orders in the history. Works on any PENDING PO.
+ */
+export async function voidPurchaseOrder(req: Request, res: Response) {
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id: req.params.id },
+    include: { party: true },
+  });
+  if (!po) throw new HttpError(404, 'Purchase order not found');
+  if (po.status === 'CANCELLED') {
+    throw new HttpError(400, 'Purchase order is already cancelled');
+  }
+  if (po.status === 'COMPLETED') {
+    throw new HttpError(400, 'Cannot void a completed purchase order');
+  }
+  const updated = await prisma.purchaseOrder.update({
+    where: { id: req.params.id },
+    data: { status: 'CANCELLED' },
+    include: { party: true },
+  });
+  res.json(updated);
 }

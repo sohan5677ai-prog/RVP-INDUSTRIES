@@ -11,10 +11,4 @@ export const createProcessingSchema = z.object({
   loadingLocation: z.enum(['At process', 'Rampalli', 'Murgan', 'Multi']).optional().default('At process'),
 });
 
-export const createPappuPriceSchema = z.object({
-  processingId: z.string().min(1),
-  pricePerKg: z.coerce.number().positive(),
-});
-
 export type CreateProcessingInput = z.infer<typeof createProcessingSchema>;
-export type CreatePappuPriceInput = z.infer<typeof createPappuPriceSchema>;

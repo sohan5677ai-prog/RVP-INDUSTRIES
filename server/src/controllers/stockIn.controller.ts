@@ -8,7 +8,10 @@ import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 export async function listStockIns(_req: Request, res: Response) {
   const stockIns = await prisma.stockIn.findMany({
     orderBy: { createdAt: 'desc' },
-    include: { purchaseOrder: { include: { party: true } }, purchase: true },
+    include: {
+      purchaseOrder: { include: { party: true } },
+      purchase: { include: { verification: true, processing: true } },
+    },
   });
   res.json(stockIns);
 }
@@ -16,7 +19,10 @@ export async function listStockIns(_req: Request, res: Response) {
 export async function getStockIn(req: Request, res: Response) {
   const stockIn = await prisma.stockIn.findUnique({
     where: { id: req.params.id },
-    include: { purchaseOrder: { include: { party: true } }, purchase: true },
+    include: {
+      purchaseOrder: { include: { party: true } },
+      purchase: { include: { verification: true, processing: true } },
+    },
   });
   if (!stockIn) throw new HttpError(404, 'Stock-in not found');
   res.json(stockIn);
@@ -32,12 +38,24 @@ export async function extractStockInInvoice(req: Request, res: Response) {
   const allowed: DocumentKind[] = ['invoice', 'partyKata', 'rvpWeight'];
   const kind = (req.body?.kind as DocumentKind) ?? 'invoice';
   if (!allowed.includes(kind)) throw new HttpError(400, 'Invalid document kind');
-  const data = await extractInvoiceData(req.file.buffer, req.file.mimetype, kind);
+
+  // For an invoice, give Gemini the suppliers behind currently-pending POs so it
+  // can map the seller to one of our master parties (handling abbreviations etc).
+  let candidates: string[] = [];
+  if (kind === 'invoice') {
+    const pendingPOs = await prisma.purchaseOrder.findMany({
+      where: { status: 'PENDING' },
+      select: { party: { select: { name: true } } },
+    });
+    candidates = [...new Set(pendingPOs.map((po) => po.party?.name).filter((n): n is string => !!n))];
+  }
+
+  const data = await extractInvoiceData(req.file.buffer, req.file.mimetype, kind, candidates);
+  console.log(`[extract:${kind}]`, JSON.stringify(data));
   res.json(data);
 }
 
 export async function createStockIn(req: Request, res: Response) {
-  if (!req.file) throw new HttpError(400, 'Invoice file is required');
   const data = createStockInSchema.parse(req.body);
 
   // Previous stage must exist and not already have reached its lorryCount limit.
@@ -68,8 +86,10 @@ export async function createStockIn(req: Request, res: Response) {
         rvpKataKg,
         billingWeightKg: data.billingWeightKg,
         partyKataKg: data.partyKataKg,
-        invoiceFileUrl: fileUrl(req.file!.filename),
+        invoiceFileUrl: req.file ? fileUrl(req.file.filename) : "",
         loadingLocation: data.loadingLocation,
+        // Only BASE-priced POs carry inward freight; DELIVERY already includes it.
+        freightCharge: po.priceType === 'BASE' ? data.freightCharge : 0,
       },
     });
 
@@ -88,7 +108,7 @@ export async function updateStockIn(req: Request, res: Response) {
   const data = createStockInSchema.parse(req.body);
   const stockIn = await prisma.stockIn.findUnique({
     where: { id: req.params.id },
-    include: { purchase: true },
+    include: { purchase: true, purchaseOrder: true },
   });
   if (!stockIn) throw new HttpError(404, 'Stock-in not found');
   if (stockIn.purchase) {
@@ -113,6 +133,7 @@ export async function updateStockIn(req: Request, res: Response) {
       partyKataKg: data.partyKataKg,
       invoiceFileUrl,
       loadingLocation: data.loadingLocation,
+      freightCharge: stockIn.purchaseOrder.priceType === 'BASE' ? data.freightCharge : 0,
     },
   });
   res.json(updated);

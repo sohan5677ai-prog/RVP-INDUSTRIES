@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Party, Purchase } from '@/lib/types';
+import type { Party, Purchase, SaleOrder } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
+import { calcKataFee } from '@/lib/calc';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Loader2, Scale, Truck, PieChart } from 'lucide-react';
 
 type PurchaseRow = Purchase & {
@@ -28,6 +30,18 @@ type PurchaseRow = Purchase & {
   };
 };
 
+interface KataEntry {
+  id: string;
+  date: string;
+  source: 'PURCHASE' | 'SALE';
+  partyId: string | null;
+  partyName: string;
+  lorryNumber: string | null;
+  reference: string;
+  netWeightKg: number;
+  kataFee: number;
+}
+
 function getWeightBracket(weightKg: number): string {
   const tonnes = weightKg / 1000;
   if (tonnes <= 15) return '≤ 15 tonnes (₹50)';
@@ -45,40 +59,67 @@ export default function KataFeeLedger() {
     queryFn: () => api<Party[]>('/parties'),
   });
 
-  const { data: purchases, isLoading } = useQuery({
+  const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases'],
     queryFn: () => api<PurchaseRow[]>('/purchases'),
   });
 
+  const { data: saleOrders, isLoading: loadingSales } = useQuery({
+    queryKey: ['sale-orders'],
+    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+  });
+
+  const isLoading = loadingPurchases || loadingSales;
   const suppliers = parties?.filter((p) => p.type !== 'BUYER') ?? [];
 
-  // Filter transactions
-  const filteredPurchases = purchases?.filter((p) => {
-    // 1. Party Filter
-    if (partyId !== 'ALL' && p.stockIn?.purchaseOrder?.partyId !== partyId) {
-      return false;
-    }
-    // 2. Start Date Filter
-    if (startDate) {
-      const date = new Date(p.createdAt).toISOString().slice(0, 10);
-      if (date < startDate) return false;
-    }
-    // 3. End Date Filter
-    if (endDate) {
-      const date = new Date(p.createdAt).toISOString().slice(0, 10);
-      if (date > endDate) return false;
-    }
-    return true;
-  }) ?? [];
+  // Purchase (inward) kata fees from the weighbridge on arrival.
+  const purchaseEntries: KataEntry[] = (purchases ?? []).map((p) => ({
+    id: `PUR-${p.id}`,
+    date: p.stockIn?.arrivalDate ?? p.createdAt,
+    source: 'PURCHASE',
+    partyId: p.stockIn?.purchaseOrder?.partyId ?? null,
+    partyName: p.stockIn?.purchaseOrder?.party?.name ?? '—',
+    lorryNumber: p.stockIn?.lorryNumber ?? null,
+    reference: `Inv ${p.stockIn?.invoiceNumber ?? '—'}`,
+    netWeightKg: p.netWeightKg,
+    kataFee: Number(p.kataFee),
+  }));
+
+  // Sale (outward) kata fees deducted from the lorry's delivery freight.
+  const saleEntries: KataEntry[] = (saleOrders ?? [])
+    .filter((o) => Number(o.freightCharge) > 0 && o.status !== 'PENDING')
+    .map((o) => ({
+      id: `SALE-${o.id}`,
+      date: o.saleDate,
+      source: 'SALE',
+      partyId: o.buyerId,
+      partyName: o.buyer?.name ?? '—',
+      lorryNumber: o.vehicleNumber ?? null,
+      reference: o.invoiceNumber ?? '—',
+      netWeightKg: o.tonnageKg,
+      kataFee: calcKataFee(o.tonnageKg),
+    }));
+
+  const allEntries = [...purchaseEntries, ...saleEntries];
+
+  const filtered = allEntries
+    .filter((e) => {
+      if (partyId !== 'ALL' && e.partyId !== partyId) return false;
+      const d = new Date(e.date).toISOString().slice(0, 10);
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      return true;
+    })
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   // Metrics
-  const totalKataFee = filteredPurchases.reduce((acc, p) => acc + Number(p.kataFee), 0);
-  const lorryCount = filteredPurchases.length;
+  const totalKataFee = filtered.reduce((acc, e) => acc + e.kataFee, 0);
+  const lorryCount = filtered.length;
 
   // Bracket counts
-  const brackets = filteredPurchases.reduce(
-    (acc, p) => {
-      const tonnes = p.netWeightKg / 1000;
+  const brackets = filtered.reduce(
+    (acc, e) => {
+      const tonnes = e.netWeightKg / 1000;
       if (tonnes <= 15) acc.bracket1 += 1;
       else if (tonnes <= 25) acc.bracket2 += 1;
       else acc.bracket3 += 1;
@@ -91,7 +132,7 @@ export default function KataFeeLedger() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Kata Fee Ledger</h1>
-        <p className="text-muted-foreground">Monitor weighbridge expenses and categories incurred per shipment</p>
+        <p className="text-muted-foreground">Weighbridge fees from purchases and outward sale freight</p>
       </div>
 
       {/* Filters Bar */}
@@ -179,31 +220,37 @@ export default function KataFeeLedger() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
-                  <TableHead>Supplier</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Party</TableHead>
                   <TableHead>Lorry No</TableHead>
-                  <TableHead>Invoice Reference</TableHead>
+                  <TableHead>Reference</TableHead>
                   <TableHead className="text-right">Net Weight (kg)</TableHead>
                   <TableHead>Weight Bracket</TableHead>
                   <TableHead className="text-right">Kata Fee</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPurchases.length === 0 ? (
+                {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                       No kata fee transactions match selected filters.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredPurchases.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell>{shortDate(p.createdAt)}</TableCell>
-                      <TableCell className="font-semibold">{p.stockIn?.purchaseOrder?.party?.name ?? '—'}</TableCell>
-                      <TableCell>{p.stockIn?.lorryNumber ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">Inv {p.stockIn?.invoiceNumber ?? '—'}</TableCell>
-                      <TableCell className="text-right font-medium">{kg(p.netWeightKg)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{getWeightBracket(p.netWeightKg)}</TableCell>
-                      <TableCell className="text-right font-bold text-primary">{rupees(p.kataFee)}</TableCell>
+                  filtered.map((e) => (
+                    <TableRow key={e.id}>
+                      <TableCell>{shortDate(e.date)}</TableCell>
+                      <TableCell>
+                        <Badge variant={e.source === 'SALE' ? 'default' : 'outline'} className="text-[10px]">
+                          {e.source === 'SALE' ? 'Sale Freight' : 'Purchase'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-semibold">{e.partyName}</TableCell>
+                      <TableCell>{e.lorryNumber ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{e.reference}</TableCell>
+                      <TableCell className="text-right font-medium">{kg(e.netWeightKg)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{getWeightBracket(e.netWeightKg)}</TableCell>
+                      <TableCell className="text-right font-bold text-primary">{rupees(e.kataFee)}</TableCell>
                     </TableRow>
                   ))
                 )}

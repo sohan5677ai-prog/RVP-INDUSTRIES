@@ -6,7 +6,7 @@ Monorepo: `client/` (React + Vite + TS) and `server/` (Express + TS + Prisma). P
 
 ```
 Purchase Order → Stock In → Purchase → Weight Cross-Verification → Payment
-      → Processing (out-turn) → Pappu Pricing → Sale Order → Sale Dispatch
+      → Processing (out-turn) → Sale Order → Sale Dispatch
 ```
 
 ## Quick start

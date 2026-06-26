@@ -5,7 +5,7 @@ import { HttpError } from '../lib/httpError.js';
 import {
   createSaleOrderSchema,
   listSaleOrdersSchema,
-  advanceSaleStatusSchema,
+  deliverSaleDispatchSchema,
   dispatchSaleOrderSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
@@ -30,23 +30,42 @@ async function deriveDestinationFreight(buyer: Party, weightKg: number) {
   return { destination, freightCharge: calcSaleFreight(weightKg, rate) };
 }
 
+/**
+ * Attach computed fulfilment fields. `dispatchedKg` is the sum of all dispatch
+ * weights; `remainingKg` is the still-to-ship balance against the ordered weight.
+ */
+function withFulfilment<T extends { tonnageKg: number; dispatches?: { weightKg: number }[] }>(order: T) {
+  const dispatchedKg = (order.dispatches ?? []).reduce((s, d) => s + d.weightKg, 0);
+  return { ...order, dispatchedKg, remainingKg: Math.max(0, order.tonnageKg - dispatchedKg) };
+}
+
 export async function listSaleOrders(req: Request, res: Response) {
   const { status, product } = listSaleOrdersSchema.parse(req.query);
   const orders = await prisma.saleOrder.findMany({
     where: { ...(status ? { status } : {}), ...(product ? { product } : {}) },
     orderBy: { saleDate: 'desc' },
-    include: { buyer: true, broker: true },
+    include: { buyer: true, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
   });
-  res.json(orders);
+  res.json(orders.map(withFulfilment));
 }
 
 export async function getSaleOrder(req: Request, res: Response) {
   const order = await prisma.saleOrder.findUnique({
     where: { id: req.params.id },
-    include: { buyer: true, broker: true },
+    include: { buyer: true, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
   });
   if (!order) throw new HttpError(404, 'Sale order not found');
-  res.json(order);
+  res.json(withFulfilment(order));
+}
+
+/** Fetch a single dispatch (with its order + buyer + broker) for the invoice view. */
+export async function getSaleDispatch(req: Request, res: Response) {
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: req.params.id },
+    include: { saleOrder: { include: { buyer: true, broker: true } } },
+  });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+  res.json(dispatch);
 }
 
 /**
@@ -166,10 +185,12 @@ export async function extractSaleDoc(req: Request, res: Response) {
 }
 
 /**
- * Dispatch a sale order: store the uploaded kata slip, record the confirmed
- * vehicle no / kata tonnage, set that tonnage as the actual sold weight, then bill
+ * Dispatch a (partial) quantity of a sale order: store the uploaded kata slip,
+ * record the confirmed vehicle no / kata tonnage as one SaleDispatch, then bill
  * (revenue + GST + freight) and — for Pappu — deplete the pool with COGS. The tax
- * invoice is raised separately afterwards. PENDING -> DISPATCHED.
+ * invoice is raised per dispatch separately afterwards. The order's ordered weight
+ * is never overwritten; its status moves PENDING/PARTIAL -> PARTIAL/DISPATCHED as
+ * the remaining balance shrinks to zero.
  */
 export async function dispatchSaleOrder(req: Request, res: Response) {
   const data = dispatchSaleOrderSchema.parse(req.body);
@@ -178,12 +199,21 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   const order = await prisma.saleOrder.findUnique({
     where: { id: req.params.id },
-    include: { buyer: true },
+    include: { buyer: true, dispatches: true },
   });
   if (!order) throw new HttpError(404, 'Sale order not found');
-  if (order.status !== 'PENDING') throw new HttpError(400, 'Sale order is not pending dispatch');
+  if (order.status === 'DISPATCHED') throw new HttpError(400, 'Sale order is already fully dispatched');
 
+  const alreadyDispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
   const weightKg = data.tonnageKg;
+  let internalWeightKg = data.internalWeightKg ?? null;
+  if (!internalWeightKg && order.product === 'PAPPU') {
+    if (weightKg >= 35000) internalWeightKg = weightKg - 250;
+    else if (weightKg >= 30000) internalWeightKg = weightKg - 200;
+    else if (weightKg >= 25000) internalWeightKg = weightKg - 150;
+    else if (weightKg >= 15000) internalWeightKg = weightKg - 50;
+    else internalWeightKg = weightKg;
+  }
   const baseAmount = weightKg * Number(order.ratePerKg);
   const gstAmount = calcGst(weightKg, Number(order.ratePerKg));
   const { freightCharge } = await deriveDestinationFreight(order.buyer, weightKg);
@@ -224,7 +254,10 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   const productionCostAmount =
     order.product === 'PAPPU' ? Math.round(weightKg * productionCostPerKg * 100) / 100 : 0;
 
-  const updated = await prisma.$transaction(async (tx) => {
+  // Fully dispatched once this lorry takes the remaining balance to (or below) zero.
+  const fullyDispatched = alreadyDispatchedKg + weightKg >= order.tonnageKg;
+
+  const dispatch = await prisma.$transaction(async (tx) => {
     let cogsAmount = 0;
     let cogsInventoryAccount: string | undefined;
     let cogsCostCenter: string | undefined;
@@ -237,7 +270,21 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       cogsCostCenter = 'Rampalli';
     }
 
-    await LedgerService.postSale(tx, order.id, {
+    const created = await tx.saleDispatch.create({
+      data: {
+        saleOrderId: order.id,
+        weightKg,
+        internalWeightKg,
+        gstAmount,
+        freightCharge,
+        status: 'DISPATCHED',
+        vehicleNumber: data.vehicleNumber ?? null,
+        kataFileUrl: kataFile ? fileUrl(kataFile.filename) : null,
+      },
+    });
+
+    // Ledger is keyed per dispatch so each lorry posts its own sale.
+    await LedgerService.postSale(tx, created.id, {
       buyerName: order.buyer.name,
       product: order.product,
       baseAmount,
@@ -257,42 +304,30 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       brokerageAmount: order.brokerId ? 2000 : 0,
     });
 
-    return tx.saleOrder.update({
+    await tx.saleOrder.update({
       where: { id: order.id },
-      data: {
-        status: 'DISPATCHED',
-        tonnageKg: weightKg,
-        gstAmount,
-        freightCharge,
-        vehicleNumber: data.vehicleNumber ?? null,
-        kataFileUrl: kataFile ? fileUrl(kataFile.filename) : order.kataFileUrl,
-      },
-      include: { buyer: true, broker: true },
+      data: { status: fullyDispatched ? 'DISPATCHED' : 'PARTIAL' },
     });
+
+    return created;
   });
 
-  res.json(updated);
+  res.status(201).json(dispatch);
 }
 
 /**
- * Raise the tax invoice for an already-dispatched order. Auto-assigns the next
+ * Raise the tax invoice for an already-dispatched shipment. Auto-assigns the next
  * invoice number (prefix/seq/FY, sequence resets each financial year) and stamps
  * the invoice date. The sale was already billed at dispatch, so no new ledger
  * entry is posted. Idempotent — re-raising keeps the existing number.
  */
 export async function raiseSaleInvoice(req: Request, res: Response) {
-  const order = await prisma.saleOrder.findUnique({ where: { id: req.params.id } });
-  if (!order) throw new HttpError(404, 'Sale order not found');
-  if (order.status === 'PENDING') {
-    throw new HttpError(400, 'Dispatch the order before raising its invoice');
-  }
-  if (order.invoiceNumber) {
-    const existing = await prisma.saleOrder.findUnique({
-      where: { id: order.id },
-      include: { buyer: true, broker: true },
-    });
-    return res.json(existing);
-  }
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: req.params.id },
+    include: { saleOrder: { include: { buyer: true, broker: true } } },
+  });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+  if (dispatch.invoiceNumber) return res.json(dispatch);
 
   const company = await getCompanyProfileRow();
   const prefix = company.invoicePrefix || 'RVP';
@@ -300,133 +335,109 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
   const fy = indianFinancialYear(invoiceDate);
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Next sequence within this financial year.
-    const last = await tx.saleOrder.aggregate({
+    // Next sequence within this financial year (across all dispatches).
+    const last = await tx.saleDispatch.aggregate({
       where: { invoiceFy: fy },
       _max: { invoiceSeq: true },
     });
     const seq = (last._max.invoiceSeq ?? 0) + 1;
     const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fy}`;
 
-    return tx.saleOrder.update({
-      where: { id: order.id },
+    return tx.saleDispatch.update({
+      where: { id: dispatch.id },
       data: { invoiceSeq: seq, invoiceFy: fy, invoiceDate, invoiceNumber },
-      include: { buyer: true, broker: true },
+      include: { saleOrder: { include: { buyer: true, broker: true } } },
     });
   });
 
   res.json(updated);
 }
 
-
 /**
- * Mark a dispatched order as reached (DISPATCHED -> REACHED). The transition is
- * fixed, so we don't take a status from the client — we just record the buyer's
- * kata weight to settle any shortage with a credit note.
+ * Mark a dispatched shipment as delivered (DISPATCHED -> DELIVERED). Records the
+ * deliveredDate (the payment-due-date anchor), captures the buyer's kata weight to
+ * settle any shortage with a credit note, releases the freight retention held at
+ * dispatch, and optionally stores the buyer's kata slip.
  */
-export async function advanceSaleStatus(req: Request, res: Response) {
-  const data = advanceSaleStatusSchema.parse(req.body);
+export async function deliverSaleDispatch(req: Request, res: Response) {
+  const data = deliverSaleDispatchSchema.parse(req.body);
   const files = req.files as Record<string, Express.Multer.File[]> | undefined;
   const kataFile = files?.kata?.[0];
 
-  const order = await prisma.saleOrder.findUnique({
+  const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: req.params.id },
-    include: { buyer: true }
+    include: { saleOrder: { include: { buyer: true } } },
   });
-  if (!order) throw new HttpError(404, 'Sale order not found');
-
-  if (order.status !== 'DISPATCHED') {
-    throw new HttpError(400, `Cannot mark a ${order.status} order as reached`);
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+  if (dispatch.status !== 'DISPATCHED') {
+    throw new HttpError(400, `Cannot mark a ${dispatch.status} shipment as delivered`);
   }
+
+  const order = dispatch.saleOrder;
+  const rate = Number(order.ratePerKg);
 
   let shortageKg: number | null = null;
   let creditNoteAmount: number | null = null;
+  let internalWeightProfitAmount: number | null = null;
+  let profitWeightKg = 0;
 
   if (data.buyerKataKg !== undefined) {
-    if (data.buyerKataKg > order.tonnageKg) {
+    if (data.buyerKataKg > dispatch.weightKg) {
       throw new HttpError(400, "Buyer's Kata weight cannot be greater than dispatched weight. Contact admin.");
     }
-    if (data.buyerKataKg < order.tonnageKg) {
-      shortageKg = order.tonnageKg - data.buyerKataKg;
-      const rate = Number(order.ratePerKg);
-      const baseAmount = shortageKg * rate;
-      const gstAmount = calcGst(shortageKg, rate);
-      creditNoteAmount = baseAmount + gstAmount;
-    } else {
-      shortageKg = 0;
-      creditNoteAmount = 0;
+    shortageKg = dispatch.weightKg - data.buyerKataKg;
+    creditNoteAmount = shortageKg > 0 ? shortageKg * rate + calcGst(shortageKg, rate) : 0;
+    
+    if (dispatch.internalWeightKg && order.product === 'PAPPU') {
+      profitWeightKg = data.buyerKataKg - dispatch.internalWeightKg;
+      if (profitWeightKg > 0) {
+        internalWeightProfitAmount = profitWeightKg * rate;
+      }
     }
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    if (shortageKg && creditNoteAmount && shortageKg > 0) {
-      const rate = Number(order.ratePerKg);
-      const baseAmount = shortageKg * rate;
-      const gstAmount = calcGst(shortageKg, rate);
+  // Release the freight retention held back at dispatch to Surya Roadlines.
+  const company = await getCompanyProfileRow();
+  const freightRetention =
+    Number(dispatch.freightCharge) > 0 ? Number(company.freightRetentionPerTrip ?? 3000) : 0;
 
-      await LedgerService.postSaleCreditNote(tx, order.id, {
+  const updated = await prisma.$transaction(async (tx) => {
+    if (shortageKg && shortageKg > 0) {
+      await LedgerService.postSaleCreditNote(tx, dispatch.id, {
         buyerName: order.buyer.name,
         product: order.product,
         shortageKg,
-        baseAmount,
-        gstAmount,
+        baseAmount: shortageKg * rate,
+        gstAmount: calcGst(shortageKg, rate),
       });
     }
 
-    return tx.saleOrder.update({
-      where: { id: order.id },
+    if (internalWeightProfitAmount && internalWeightProfitAmount > 0) {
+      await LedgerService.postInternalWeightProfit(tx, dispatch.id, {
+        buyerName: order.buyer.name,
+        product: order.product,
+        profitWeightKg,
+        amount: internalWeightProfitAmount,
+      });
+    }
+
+    await LedgerService.postFreightRetentionRelease(tx, dispatch.id, freightRetention);
+
+    return tx.saleDispatch.update({
+      where: { id: dispatch.id },
       data: {
-        status: 'REACHED',
-        receivedDate: new Date(),
+        status: 'DELIVERED',
+        receivedDate: dispatch.receivedDate ?? new Date(),
+        deliveredDate: new Date(),
         ...(data.buyerKataKg !== undefined && {
           buyerKataKg: data.buyerKataKg,
           shortageKg,
           creditNoteAmount,
+          internalWeightProfitAmount,
         }),
         ...(kataFile && { buyerKataFileUrl: fileUrl(kataFile.filename) }),
       },
-      include: { buyer: true, broker: true },
-    });
-  });
-
-  res.json(updated);
-}
-
-/**
- * Mark a reached order as delivered (REACHED -> DELIVERED). Records the
- * deliveredDate which is used as the anchor for the payment due date.
- * Optionally stores the buyer's kata slip file.
- */
-export async function deliverSaleOrder(req: Request, res: Response) {
-  const files = req.files as Record<string, Express.Multer.File[]> | undefined;
-  const kataFile = files?.kata?.[0];
-
-  const order = await prisma.saleOrder.findUnique({
-    where: { id: req.params.id },
-    include: { buyer: true, broker: true },
-  });
-  if (!order) throw new HttpError(404, 'Sale order not found');
-  if (order.status !== 'REACHED') {
-    throw new HttpError(400, `Cannot mark a ${order.status} order as delivered`);
-  }
-
-  // Delivery confirmed (buyer's kata slip in): release the freight retention
-  // held back at dispatch to Surya Roadlines. Mirrors the retention held there.
-  const company = await getCompanyProfileRow();
-  const freightRetention =
-    Number(order.freightCharge) > 0 ? Number(company.freightRetentionPerTrip ?? 3000) : 0;
-
-  const updated = await prisma.$transaction(async (tx) => {
-    await LedgerService.postFreightRetentionRelease(tx, order.id, freightRetention);
-
-    return tx.saleOrder.update({
-      where: { id: order.id },
-      data: {
-        status: 'DELIVERED',
-        deliveredDate: new Date(),
-        ...(kataFile && { buyerKataFileUrl: fileUrl(kataFile.filename) }),
-      },
-      include: { buyer: true, broker: true },
+      include: { saleOrder: { include: { buyer: true, broker: true } } },
     });
   });
 

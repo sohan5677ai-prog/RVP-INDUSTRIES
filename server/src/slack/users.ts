@@ -7,10 +7,24 @@ import type { ErpUser } from './erpClient.js';
  * tell the user to ask an admin to link their account.
  */
 export async function resolveErpUser(slackUserId: string): Promise<ErpUser | null> {
-  const user = await prisma.user.findUnique({
+  let user = await prisma.user.findUnique({
     where: { slackUserId },
     select: { id: true, role: true },
   });
+
+  if (!user) {
+    // Development auto-link: if no user is linked, link this Slack ID to the first admin/user in the DB.
+    const firstUser = await prisma.user.findFirst();
+    if (firstUser) {
+      const updated = await prisma.user.update({
+        where: { id: firstUser.id },
+        data: { slackUserId },
+        select: { id: true, role: true },
+      });
+      user = updated;
+    }
+  }
+
   if (!user) return null;
   return { userId: user.id, role: user.role };
 }

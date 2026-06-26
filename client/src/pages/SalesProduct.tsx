@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, CheckCircle2, PackageCheck, Upload, Loader2, FileText, Printer } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleStatus, SaleProduct, Party, Broker } from '@/lib/types';
+import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -13,9 +13,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { PageHeader } from '@/components/PageHeader';
+import { Segmented } from '@/components/ui/segmented';
+import { Combobox } from '@/components/ui/combobox';
+import { cn } from '@/lib/utils';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -30,21 +31,23 @@ const PRODUCT_META: Record<SaleProduct, { title: string; noun: string }> = {
   SHELL: { title: 'Tamarind Shell Sales', noun: 'Tamarind Shell' },
 };
 
-const statusVariant: Record<SaleStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  PENDING: 'secondary',
-  DISPATCHED: 'default',
-  REACHED: 'outline',
-  DELIVERED: 'destructive',
+const statusVariant: Record<SaleStatus, 'soft' | 'warning' | 'success' | 'outline'> = {
+  PENDING: 'warning',
+  PARTIAL: 'outline',
+  DISPATCHED: 'soft',
+  DELIVERED: 'success',
 };
 
-const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'DISPATCHED', 'REACHED', 'DELIVERED'];
+const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED'];
 const NO_BROKER = '__none__';
 
+const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
+
 /** Due date = deliveredDate + dueDays. Null until both are known. */
-function dueDateIso(o: SaleOrder): string | null {
-  if (!o.deliveredDate || o.dueDays == null) return null;
-  const d = new Date(o.deliveredDate);
-  d.setDate(d.getDate() + o.dueDays);
+function dueDateIso(deliveredDate: string | null | undefined, dueDays: number | null | undefined): string | null {
+  if (!deliveredDate || dueDays == null) return null;
+  const d = new Date(deliveredDate);
+  d.setDate(d.getDate() + dueDays);
   return d.toISOString();
 }
 
@@ -59,16 +62,40 @@ function isOverdue(iso: string | null): boolean {
   return new Date(iso).getTime() < Date.now();
 }
 
-export default function SalesProduct({ product }: { product: SaleProduct }) {
+/** Dispatched (sum of shipments) — falls back to summing if the server field is absent. */
+function dispatchedKgOf(o: SaleOrder): number {
+  if (o.dispatchedKg != null) return o.dispatchedKg;
+  return (o.dispatches ?? []).reduce((s, d) => s + d.weightKg, 0);
+}
+function remainingKgOf(o: SaleOrder): number {
+  if (o.remainingKg != null) return o.remainingKg;
+  return Math.max(0, o.tonnageKg - dispatchedKgOf(o));
+}
+
+export default function SalesProduct({ product, hideHeader }: { product: SaleProduct; hideHeader?: boolean }) {
   const meta = PRODUCT_META[product];
   const navigate = useNavigate();
   const qc = useQueryClient();
+
+  const hasBroker = !['WASTE', 'TPS', 'SHELL'].includes(product);
+  const isPappu = product === 'PAPPU';
+  // Order row: ⌄ Date · Shipments · Party · [Broker] · Destination · Ordered ·
+  // Dispatched · Remaining · Price · Status · Actions. Per-shipment detail lives
+  // in the expandable panel.
+  const colCount = 10 + (hasBroker ? 1 : 0);
 
   const [statusFilter, setStatusFilter] = useState<'ALL' | SaleStatus>('ALL');
   const [brokerFilter, setBrokerFilter] = useState<string>('ALL');
   const [partyFilter, setPartyFilter] = useState<string>('ALL');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleRow = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   const { data: orders, isLoading: loadingOrders } = useQuery({
     queryKey: ['sale-orders', product],
@@ -97,13 +124,19 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
   const [kataFile, setKataFile] = useState<File | null>(null);
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [dispatchTonnes, setDispatchTonnes] = useState('');
+  const [internalWeightTonnes, setInternalWeightTonnes] = useState('');
   const [extractingKata, setExtractingKata] = useState(false);
+
+  const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
+  const dispatchTonnesNum = Number(dispatchTonnes) || 0;
+  const dispatchOverflow = dispatchOrder ? Math.round(dispatchTonnesNum * 1000) > dispatchRemaining : false;
 
   function openDispatch(o: SaleOrder) {
     setDispatchOrder(o);
     setKataFile(null);
     setVehicleNumber('');
-    setDispatchTonnes(String(o.tonnageKg / 1000));
+    setDispatchTonnes(String(remainingKgOf(o) / 1000));
+    setInternalWeightTonnes('');
   }
 
   async function extractKata(file: File) {
@@ -131,6 +164,7 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
       if (kataFile) fd.append('kata', kataFile);
       fd.append('vehicleNumber', vehicleNumber);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
+      if (internalWeightTonnes) fd.append('internalWeightKg', String(Math.round((Number(internalWeightTonnes) || 0) * 1000)));
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -143,327 +177,419 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // ── Mark Reached dialog ────────────────────────────────────────────────────
-  const [reachOrder, setReachOrder] = useState<SaleOrder | null>(null);
-  const [buyerKataFile, setBuyerKataFile] = useState<File | null>(null);
-  const [buyerKataTonnes, setBuyerKataTonnes] = useState('');
-
-  function openReach(o: SaleOrder) {
-    setReachOrder(o);
-    setBuyerKataFile(null);
-    setBuyerKataTonnes(String(o.tonnageKg / 1000));
-  }
-
-  const reachMutation = useMutation({
-    mutationFn: () => {
-      const fd = new FormData();
-      if (buyerKataFile) fd.append('kata', buyerKataFile);
-      const val = Number(buyerKataTonnes);
-      if (val > 0) fd.append('buyerKataKg', String(Math.round(val * 1000)));
-      return api(`/sale-orders/${reachOrder!.id}/advance`, { method: 'POST', body: fd, multipart: true });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Marked reached & delivery matched');
-      setReachOrder(null);
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  const reachTonnes = Number(buyerKataTonnes) || 0;
-  const reachKg = Math.round(reachTonnes * 1000);
-  const reachShortageKg = reachOrder ? Math.max(0, reachOrder.tonnageKg - reachKg) : 0;
-  const reachCreditAmount = reachOrder ? reachShortageKg * Number(reachOrder.ratePerKg) * (1 + GST_RATE) : 0;
-
-  // ── Mark Delivered dialog ──────────────────────────────────────────────────
-  const [deliverOrder, setDeliverOrder] = useState<SaleOrder | null>(null);
-  const [deliverKataFile, setDeliverKataFile] = useState<File | null>(null);
-
-  function openDeliver(o: SaleOrder) {
-    setDeliverOrder(o);
-    setDeliverKataFile(null);
-  }
-
-  const deliverMutation = useMutation({
-    mutationFn: () => {
-      // Only send multipart when a kata slip is attached — an empty FormData
-      // produces a malformed multipart body that multer rejects on the server.
-      if (deliverKataFile) {
-        const fd = new FormData();
-        fd.append('kata', deliverKataFile);
-        return api(`/sale-orders/${deliverOrder!.id}/deliver`, { method: 'POST', body: fd, multipart: true });
-      }
-      return api(`/sale-orders/${deliverOrder!.id}/deliver`, { method: 'POST' });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Order marked as Delivered');
-      setDeliverOrder(null);
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  // ── Raise Invoice ──────────────────────────────────────────────────────────
-  const [invoiceOrder, setInvoiceOrder] = useState<SaleOrder | null>(null);
+  // ── Raise Invoice (per dispatch) ────────────────────────────────────────────
+  const [invoiceDispatch, setInvoiceDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
 
   const raiseInvoiceMutation = useMutation({
-    mutationFn: () => api<SaleOrder>(`/sale-orders/${invoiceOrder!.id}/invoice`, { method: 'POST' }),
+    mutationFn: () => api<SaleDispatch>(`/sale-dispatches/${invoiceDispatch!.dispatch.id}/invoice`, { method: 'POST' }),
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(`Invoice ${saved.invoiceNumber} generated`);
-      setInvoiceOrder(null);
-      navigate(`/sale-orders/${saved.id}/invoice`);
+      setInvoiceDispatch(null);
+      navigate(`/sale-dispatches/${saved.id}/invoice`);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  const invoiceBase = invoiceOrder ? invoiceOrder.tonnageKg * Number(invoiceOrder.ratePerKg) : 0;
+  const invoiceBase = invoiceDispatch ? invoiceDispatch.dispatch.weightKg * Number(invoiceDispatch.order.ratePerKg) : 0;
   const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
-  const invoiceCn = Number(invoiceOrder?.creditNoteAmount || 0);
+  const invoiceCn = Number(invoiceDispatch?.dispatch.creditNoteAmount || 0);
   const invoiceNet = invoiceBase + invoiceGst - invoiceCn;
 
-  // ── Simple view for non-Pappu products ────────────────────────────────────
-  if (product !== 'PAPPU') {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">{meta.title}</h1>
-          <p className="text-muted-foreground">{meta.noun} sales from sale orders · create &amp; dispatch on the Sale Orders page.</p>
-        </div>
-        <div className="flex flex-wrap items-end gap-3 mb-2">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Status</Label>
-            <div className="flex gap-1">
-              {STATUS_FILTERS.map((s) => (
-                <Button key={s} variant={statusFilter === s ? 'default' : 'outline'} size="sm" onClick={() => setStatusFilter(s)} className="h-9">
-                  {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Party (Buyer)</Label>
-            <Select value={partyFilter} onValueChange={setPartyFilter}>
-              <SelectTrigger className="w-48 bg-card h-9"><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All parties</SelectItem>
-                {parties?.filter(p => p.type !== 'SUPPLIER').map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="from-date" className="text-xs text-muted-foreground">From</Label>
-            <Input id="from-date" type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} className="w-36 h-9" />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="to-date" className="text-xs text-muted-foreground">To</Label>
-            <Input id="to-date" type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="w-36 h-9" />
-          </div>
-        </div>
-        <div className="rounded-lg border bg-card overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Invoice No</TableHead>
-                <TableHead>Party</TableHead>
-                <TableHead>Broker</TableHead>
-                <TableHead>Destination</TableHead>
-                <TableHead className="text-right">Total Weight</TableHead>
-                <TableHead className="text-right">Price</TableHead>
-                <TableHead className="text-right">GST (5%)</TableHead>
-                <TableHead className="text-right">Freight (ours)</TableHead>
-                <TableHead className="text-right">Value</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-              {!isLoading && visible.length === 0 && (
-                <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No {meta.noun.toLowerCase()} sales matching filters.</TableCell></TableRow>
-              )}
-              {visible.map((o) => {
-                const price = Number(o.ratePerKg);
-                const gstAmt = Number(o.gstAmount);
-                const val = o.tonnageKg * price + gstAmt;
-                return (
-                  <TableRow key={o.id}>
-                    <TableCell>{shortDate(o.saleDate)}</TableCell>
-                    <TableCell className="font-mono text-sm">{o.invoiceNumber ?? '—'}</TableCell>
-                    <TableCell className="font-medium">{o.buyer?.name ?? '—'}</TableCell>
-                    <TableCell>{o.broker?.name ?? '—'}</TableCell>
-                    <TableCell>{o.destination ?? '—'}</TableCell>
-                    <TableCell className="text-right font-semibold">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
-                    <TableCell className="text-right">{rupees(price)}/kg</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{rupees(gstAmt)}</TableCell>
-                    <TableCell className="text-right text-amber-600">{Number(o.freightCharge) > 0 ? rupees(o.freightCharge) : '—'}</TableCell>
-                    <TableCell className="text-right font-semibold text-emerald-600">{rupees(val)}</TableCell>
-                    <TableCell><Badge variant={statusVariant[o.status]}>{o.status.charAt(0) + o.status.slice(1).toLowerCase()}</Badge></TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-    );
+  // ── Mark Delivered dialog (captures buyer kata + shortage) ───────────────────
+  const [deliverDispatch, setDeliverDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+  const [deliverKataFile, setDeliverKataFile] = useState<File | null>(null);
+  const [buyerKataTonnes, setBuyerKataTonnes] = useState('');
+
+  function openDeliver(dispatch: SaleDispatch, order: SaleOrder) {
+    setDeliverDispatch({ dispatch, order });
+    setDeliverKataFile(null);
+    setBuyerKataTonnes(String(dispatch.weightKg / 1000));
   }
 
-  // ── Full Pappu workflow view ────────────────────────────────────────────────
+  const deliverRate = deliverDispatch ? Number(deliverDispatch.order.ratePerKg) : 0;
+  const buyerKataKg = Math.round((Number(buyerKataTonnes) || 0) * 1000);
+  const deliverShortageKg = deliverDispatch ? Math.max(0, deliverDispatch.dispatch.weightKg - buyerKataKg) : 0;
+  const deliverOverweight = deliverDispatch ? buyerKataKg > deliverDispatch.dispatch.weightKg : false;
+  const deliverCreditAmount = deliverShortageKg * deliverRate * (1 + GST_RATE);
+
+  const deliverMutation = useMutation({
+    mutationFn: () => {
+      const fd = new FormData();
+      if (deliverKataFile) fd.append('kata', deliverKataFile);
+      if (buyerKataKg > 0) fd.append('buyerKataKg', String(buyerKataKg));
+      return api(`/sale-dispatches/${deliverDispatch!.dispatch.id}/deliver`, { method: 'POST', body: fd, multipart: true });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Shipment marked as Delivered');
+      setDeliverDispatch(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  // ── E-Invoice / E-Way Bill (TaxPro GSP) actions ───────────────────────────
+  const [ewbDispatch, setEwbDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+  const [transporterId, setTransporterId] = useState('');
+  const [transporterName, setTransporterName] = useState('');
+  const [transDistance, setTransDistance] = useState('100');
+  const [transMode, setTransMode] = useState('1');
+  const [ewbVehicleNo, setEwbVehicleNo] = useState('');
+  const [vehicleType, setVehicleType] = useState('R');
+
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; type: 'einvoice' | 'ewaybill' } | null>(null);
+  const [cancelReason, setCancelReason] = useState('2'); // default "2" - Data Entry Mistake
+  const [cancelRemarks, setCancelRemarks] = useState('Cancelled from ERP');
+
+  const generateIrnMutation = useMutation({
+    mutationFn: (id: string) => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${id}/einvoice`, { method: 'POST' }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const cancelIrnMutation = useMutation({
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${cancelTarget!.id}/einvoice/cancel`, {
+      method: 'POST',
+      body: { cancelReason, cancelRemarks },
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message);
+      setCancelTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const generateEwbMutation = useMutation({
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${ewbDispatch!.dispatch.id}/ewaybill`, {
+      method: 'POST',
+      body: {
+        transporterId,
+        transporterName,
+        transDistance,
+        transMode,
+        vehicleNumber: ewbVehicleNo,
+        vehicleType,
+      },
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message);
+      setEwbDispatch(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const cancelEwbMutation = useMutation({
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${cancelTarget!.id}/ewaybill/cancel`, {
+      method: 'POST',
+      body: { cancelReason, cancelRemarks },
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message);
+      setCancelTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  function openEwb(dispatch: SaleDispatch, order: SaleOrder) {
+    setEwbDispatch({ dispatch, order });
+    setTransporterId('');
+    setTransporterName('');
+    setTransDistance('100');
+    setTransMode('1');
+    setEwbVehicleNo(dispatch.vehicleNumber || '');
+    setVehicleType('R');
+  }
+
+  function openCancel(id: string, type: 'einvoice' | 'ewaybill') {
+    setCancelTarget({ id, type });
+    setCancelReason(type === 'einvoice' ? '2' : '3');
+    setCancelRemarks('Cancelled from ERP');
+  }
+
+  // ── Full workflow view ────────────────────────────────────────────────
+  const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || !!fromDate || !!toDate;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Pappu Sales</h1>
-        <p className="text-muted-foreground">Manage the full pappu dispatch lifecycle — dispatch, match delivery &amp; mark delivered.</p>
-      </div>
+      {!hideHeader && (
+        <PageHeader
+          icon={ShoppingCart}
+          title={meta.title}
+          description={`Manage the full ${meta.noun.toLowerCase()} lifecycle — dispatch lorries against each order, invoice every shipment, and mark delivered.`}
+        />
+      )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Status</Label>
-          <div className="flex gap-1">
-            {STATUS_FILTERS.map((s) => (
-              <Button key={s} variant={statusFilter === s ? 'default' : 'outline'} size="sm" onClick={() => setStatusFilter(s)} className="h-9">
-                {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
-              </Button>
-            ))}
-          </div>
+      <div className="glass rounded-2xl p-3 flex flex-wrap items-center gap-2.5">
+        <Segmented
+          options={STATUS_FILTERS.map((s) => ({ label: s === 'ALL' ? 'All' : titleCase(s), value: s }))}
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          size="sm"
+        />
+        <Combobox
+          options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name }))]}
+          value={partyFilter}
+          onChange={setPartyFilter}
+          placeholder="All parties"
+          searchPlaceholder="Search party…"
+          ariaLabel="Filter by party"
+          className="w-52"
+        />
+        {hasBroker && (
+          <Combobox
+            options={[{ value: 'ALL', label: 'All brokers' }, { value: NO_BROKER, label: 'No broker' }, ...(brokers ?? []).map((b) => ({ value: b.id, label: b.name }))]}
+            value={brokerFilter}
+            onChange={setBrokerFilter}
+            placeholder="All brokers"
+            searchPlaceholder="Search broker…"
+            ariaLabel="Filter by broker"
+            className="w-44"
+          />
+        )}
+        <div className="flex items-center gap-1.5">
+          <Input aria-label="From date" type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} className="w-40" />
+          <span className="text-muted-foreground text-xs">→</span>
+          <Input aria-label="To date" type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="w-40" />
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Party (Buyer)</Label>
-          <Select value={partyFilter} onValueChange={setPartyFilter}>
-            <SelectTrigger className="w-48 bg-card h-9"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All parties</SelectItem>
-              {parties?.filter(p => p.type !== 'SUPPLIER').map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Broker</Label>
-          <Select value={brokerFilter} onValueChange={setBrokerFilter}>
-            <SelectTrigger className="w-40 bg-card h-9"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All brokers</SelectItem>
-              <SelectItem value={NO_BROKER}>No broker</SelectItem>
-              {brokers?.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="p-from" className="text-xs text-muted-foreground">From</Label>
-          <Input id="p-from" type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} className="w-36 h-9" />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="p-to" className="text-xs text-muted-foreground">To</Label>
-          <Input id="p-to" type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="w-36 h-9" />
-        </div>
-        {(statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || fromDate || toDate) && (
+        {filtersActive && (
           <button type="button" onClick={() => { setStatusFilter('ALL'); setPartyFilter('ALL'); setBrokerFilter('ALL'); setFromDate(''); setToDate(''); }}
-            className="text-xs text-muted-foreground underline-offset-2 hover:underline pb-2.5">Clear</button>
+            className="ml-auto text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Clear filters</button>
         )}
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="glass rounded-2xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
-              <TableHead>Invoice No</TableHead>
+              <TableHead>Shipments</TableHead>
               <TableHead>Party</TableHead>
-              <TableHead>Broker</TableHead>
+              {hasBroker && <TableHead>Broker</TableHead>}
               <TableHead>Destination</TableHead>
-              <TableHead className="text-right">Tonnage</TableHead>
-              <TableHead className="text-right">Price</TableHead>
-              <TableHead className="text-right">Shortage</TableHead>
-              <TableHead className="text-right">TDS (0.1%)</TableHead>
-              <TableHead className="text-right">Net Due</TableHead>
-              <TableHead>Due Date</TableHead>
+              <TableHead className="text-right">Ordered</TableHead>
+              <TableHead className="text-right">Dispatched</TableHead>
+              <TableHead className="text-right">Remaining</TableHead>
+              <TableHead className="text-right">Price/kg</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="w-44 text-right">Actions</TableHead>
+              <TableHead className="w-32 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+            {isLoading && <TableRow><TableCell colSpan={colCount} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
             {!isLoading && visible.length === 0 && (
-              <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No pappu sales matching filters.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={colCount} className="h-28 text-center text-muted-foreground">No {meta.noun.toLowerCase()} sales matching filters.</TableCell></TableRow>
             )}
             {visible.map((o) => {
-              const dueIso = dueDateIso(o);
-              const overdue = isOverdue(dueIso);
-              const soon = isDueSoon(dueIso);
-              const netDue = (o.tonnageKg * Number(o.ratePerKg) * (1 + GST_RATE)) - Number(o.creditNoteAmount || 0);
-              const tds = o.tonnageKg * Number(o.ratePerKg) * 0.001; // 0.1% of base sale value
-              const shortageAmount = Number(o.creditNoteAmount || 0); // shortage value (incl. GST)
+              const dispatchedKg = dispatchedKgOf(o);
+              const remainingKg = remainingKgOf(o);
+              const dispatches = o.dispatches ?? [];
+              const isOpen = expanded.has(o.id);
               return (
-                <TableRow key={o.id}>
-                  <TableCell>{shortDate(o.saleDate)}</TableCell>
-                  <TableCell className="font-mono text-sm">
-                    {o.invoiceNumber ?? (o.status === 'PENDING' ? '—' : <span className="text-[10px] text-amber-600 font-sans">not raised</span>)}
-                    {o.invoiceFileUrl && <a href={o.invoiceFileUrl} target="_blank" rel="noreferrer" className="block text-[10px] text-blue-500 hover:underline font-sans">Invoice</a>}
-                    {o.kataFileUrl && <a href={o.kataFileUrl} target="_blank" rel="noreferrer" className="block text-[10px] text-blue-500 hover:underline font-sans">Dispatch Kata</a>}
-                    {o.buyerKataFileUrl && <a href={o.buyerKataFileUrl} target="_blank" rel="noreferrer" className="block text-[10px] text-blue-500 hover:underline font-sans">Buyer Kata</a>}
-                  </TableCell>
-                  <TableCell className="font-medium">{o.buyer?.name ?? '—'}</TableCell>
-                  <TableCell>{o.broker?.name ?? '—'}</TableCell>
-                  <TableCell>{o.destination ?? '—'}</TableCell>
-                  <TableCell className="text-right font-semibold">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
-                  <TableCell className="text-right">{rupees(o.ratePerKg)}/kg</TableCell>
-                  <TableCell className="text-right">
-                    {shortageAmount > 0
-                      ? <span className="text-destructive font-medium">−{rupees(shortageAmount)}</span>
-                      : <span className="text-muted-foreground">—</span>}
-                    {o.shortageKg ? <div className="text-[10px] text-muted-foreground">{toTonnes(o.shortageKg).toFixed(3)} t</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right text-rose-600 dark:text-rose-400">{rupees(tds)}</TableCell>
-                  <TableCell className="text-right font-bold text-emerald-600">{rupees(netDue)}</TableCell>
-                  <TableCell>
-                    {dueIso ? (
-                      <span className={`text-xs font-medium ${overdue ? 'text-destructive' : soon ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                        {overdue ? 'OVERDUE ' : ''}{shortDate(dueIso)}{o.dueDays != null ? ` (${o.dueDays}d)` : ''}
-                      </span>
-                    ) : <span className="text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusVariant[o.status]}>{o.status.charAt(0) + o.status.slice(1).toLowerCase()}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1 flex-wrap">
-                      {o.status === 'PENDING' && (
-                        <Button size="sm" variant="outline" className="h-8" onClick={() => openDispatch(o)}>
-                          <Truck className="h-3.5 w-3.5" /> Dispatch
-                        </Button>
-                      )}
-                      {(o.status === 'DISPATCHED' || o.status === 'REACHED' || o.status === 'DELIVERED') && (
-                        o.invoiceNumber ? (
-                          <Button size="sm" variant="ghost" className="h-8" onClick={() => navigate(`/sale-orders/${o.id}/invoice`)}>
-                            <Printer className="h-3.5 w-3.5" /> Invoice
-                          </Button>
-                        ) : (
-                          <Button size="sm" variant="outline" className="h-8" onClick={() => setInvoiceOrder(o)}>
-                            <FileText className="h-3.5 w-3.5" /> Raise Invoice
-                          </Button>
-                        )
-                      )}
-                      {o.status === 'DISPATCHED' && (
-                        <Button size="sm" variant="outline" className="h-8" onClick={() => openReach(o)}>
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Mark Reached
-                        </Button>
-                      )}
-                      {o.status === 'REACHED' && (
-                        <Button size="sm" variant="default" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => openDeliver(o)}>
-                          <PackageCheck className="h-3.5 w-3.5" /> Mark Delivered
-                        </Button>
-                      )}
-                      {o.status === 'DELIVERED' && (
-                        <span className="text-xs text-emerald-600 font-semibold pr-1">✓ Delivered</span>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
+                <Fragment key={o.id}>
+                  {/* Order row — click to expand its shipments */}
+                  <TableRow
+                    className={cn('cursor-pointer transition-colors', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                    onClick={() => toggleRow(o.id)}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
+                        <span className="text-muted-foreground">{shortDate(o.saleDate)}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {dispatches.length > 0
+                        ? <Badge variant="soft">{dispatches.length} shipment{dispatches.length > 1 ? 's' : ''}</Badge>
+                        : <span className="text-xs text-muted-foreground">none yet</span>}
+                    </TableCell>
+                    <TableCell className="font-medium text-foreground">{o.buyer?.name ?? '—'}</TableCell>
+                    {hasBroker && <TableCell className="text-muted-foreground">{o.broker?.name ?? '—'}</TableCell>}
+                    <TableCell className="text-muted-foreground">{o.destination ?? '—'}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums font-medium">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">{toTonnes(dispatchedKg).toFixed(2)} t</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {remainingKg > 0
+                        ? <span className="text-amber-600 dark:text-amber-400">{toTonnes(remainingKg).toFixed(2)} t</span>
+                        : <span className="text-emerald-600 dark:text-emerald-400">0.00 t</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">{rupees(o.ratePerKg)}</TableCell>
+                    <TableCell><Badge variant={statusVariant[o.status]}>{titleCase(o.status)}</Badge></TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                        {remainingKg > 0
+                          ? <Button size="sm" variant="outline" onClick={() => openDispatch(o)}><Truck className="h-3.5 w-3.5" /> Dispatch</Button>
+                          : dispatches.length > 0 ? <Badge variant="success">Fully dispatched</Badge> : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Expanded shipments panel */}
+                  {isOpen && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={colCount} className="p-0">
+                        <div className="border-t border-border/60 bg-muted/25 px-5 py-4">
+                          <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Shipments · {dispatches.length}
+                          </div>
+                          {dispatches.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                              No shipments yet. Use <span className="font-medium text-foreground">Dispatch</span> to ship a lorry against this order.
+                            </div>
+                          ) : (
+                            <div className="space-y-2.5">
+                              {dispatches.map((d) => {
+                                const cnAmt = Number(d.creditNoteAmount || 0);
+                                const netDue = (d.weightKg * Number(o.ratePerKg) * (1 + GST_RATE)) - cnAmt;
+                                const tds = d.weightKg * Number(o.ratePerKg) * 0.001;
+                                const dueIso = dueDateIso(d.deliveredDate, o.dueDays);
+                                const overdue = isOverdue(dueIso);
+                                const soon = isDueSoon(dueIso);
+                                return (
+                                  <div key={d.id} className="glass rounded-xl p-3.5">
+                                    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+                                      {/* identity */}
+                                      <div className="flex min-w-0 items-center gap-3">
+                                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                          <Truck className="h-5 w-5" />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-mono text-sm font-semibold">
+                                              {d.invoiceNumber ?? <span className="font-sans text-xs font-medium text-amber-600 dark:text-amber-400">Invoice not raised</span>}
+                                            </span>
+                                            <Badge variant={statusVariant[d.status]}>{titleCase(d.status)}</Badge>
+                                          </div>
+                                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                                            <span>{shortDate(d.dispatchDate)}</span><span className="opacity-40">·</span>
+                                            <span>{d.vehicleNumber ?? 'no vehicle'}</span><span className="opacity-40">·</span>
+                                            <span className="font-mono">{toTonnes(d.weightKg).toFixed(2)} t</span>
+                                            {d.internalWeightKg != null && (
+                                              <>
+                                                <span className="opacity-40">·</span>
+                                                <span className="font-mono text-emerald-600 dark:text-emerald-400">{toTonnes(d.internalWeightKg).toFixed(2)} t internal</span>
+                                              </>
+                                            )}
+                                            {d.kataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.kataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Dispatch kata</a>}
+                                            {d.buyerKataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.buyerKataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Buyer kata</a>}
+                                          </div>
+                                          {/* E-Invoice and E-Way Bill Status Info */}
+                                          {d.invoiceNumber && (
+                                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                              {d.irn ? (
+                                                <div className={cn(
+                                                  "px-2 py-0.5 rounded flex items-center gap-1.5 border font-mono text-[10px]",
+                                                  d.irnStatus === 'CANCELLED' 
+                                                    ? "bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900" 
+                                                    : "bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/20 dark:border-indigo-900"
+                                                )}>
+                                                  <span className="font-semibold font-sans">E-Invoice:</span>
+                                                  <span>{d.irn.slice(0, 8)}...{d.irn.slice(-6)}</span>
+                                                  <Badge variant="outline" className={cn("text-[9px] px-1 py-0 h-4", d.irnStatus === 'CANCELLED' ? "text-rose-600 border-rose-200" : "text-indigo-600 border-indigo-200")}>
+                                                    {d.irnStatus}
+                                                  </Badge>
+                                                </div>
+                                              ) : (
+                                                <span className="text-muted-foreground text-[10px] italic">E-Invoice not generated</span>
+                                              )}
+                                              {d.ewbNumber && (
+                                                <div className={cn(
+                                                  "px-2 py-0.5 rounded flex items-center gap-1.5 border font-mono text-[10px]",
+                                                  d.ewbStatus === 'CANCELLED' 
+                                                    ? "bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900" 
+                                                    : "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-900"
+                                                )}>
+                                                  <span className="font-semibold font-sans">E-Way Bill:</span>
+                                                  <span>{d.ewbNumber}</span>
+                                                  <Badge variant="outline" className={cn("text-[9px] px-1 py-0 h-4", d.ewbStatus === 'CANCELLED' ? "text-rose-600 border-rose-200" : "text-emerald-600 border-emerald-200")}>
+                                                    {d.ewbStatus}
+                                                  </Badge>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {/* figures */}
+                                      <div className="flex items-center gap-5">
+                                        <Figure label="Net due" value={rupees(netDue)} valueClass="text-forest" />
+                                        {isPappu && <Figure label="TDS 0.1%" value={rupees(tds)} valueClass="text-rose-600 dark:text-rose-400" />}
+                                        {cnAmt > 0 && <Figure label="Credit note" value={`−${rupees(cnAmt)}`} valueClass="text-destructive" />}
+                                        <div className="text-right">
+                                          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Due</div>
+                                          <div className="mt-0.5 flex items-center justify-end gap-1 text-sm font-medium">
+                                            {dueIso ? (
+                                              <span className={overdue ? 'text-destructive' : soon ? 'text-amber-600 dark:text-amber-400' : ''}>
+                                                {overdue && <CalendarClock className="mr-0.5 inline h-3.5 w-3.5" />}
+                                                {shortDate(dueIso)}{o.dueDays != null ? ` · ${o.dueDays}d` : ''}
+                                              </span>
+                                            ) : <span className="text-muted-foreground">—</span>}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      {/* actions */}
+                                      <div className="flex items-center gap-1.5 flex-wrap justify-end max-w-sm">
+                                        {d.invoiceNumber ? (
+                                          <>
+                                            <Button size="sm" variant="outline" onClick={() => navigate(`/sale-dispatches/${d.id}/invoice`)}>
+                                              <Printer className="h-3.5 w-3.5" /> Invoice
+                                            </Button>
+                                            
+                                            {/* E-Invoice Action Buttons */}
+                                            {!d.irn && (
+                                              <Button size="sm" variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => generateIrnMutation.mutate(d.id)} disabled={generateIrnMutation.isPending}>
+                                                {generateIrnMutation.isPending ? 'IRN...' : 'Gen IRN'}
+                                              </Button>
+                                            )}
+                                            {d.irn && d.irnStatus !== 'CANCELLED' && (
+                                              <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'einvoice')}>
+                                                Cancel IRN
+                                              </Button>
+                                            )}
+
+                                            {/* E-Way Bill Action Buttons */}
+                                            {d.irn && d.irnStatus !== 'CANCELLED' && !d.ewbNumber && (
+                                              <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openEwb(d, o)}>
+                                                Gen EWB
+                                              </Button>
+                                            )}
+                                            {d.ewbNumber && d.ewbStatus !== 'CANCELLED' && (
+                                              <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'ewaybill')}>
+                                                Cancel EWB
+                                              </Button>
+                                            )}
+                                          </>
+                                        ) : (
+                                          <Button size="sm" variant="outline" onClick={() => setInvoiceDispatch({ dispatch: d, order: o })}>
+                                            <FileText className="h-3.5 w-3.5" /> Raise invoice
+                                          </Button>
+                                        )}
+                                        {d.status === 'DISPATCHED' && (
+                                          <Button size="sm" variant="forest" onClick={() => openDeliver(d, o)}>
+                                            <PackageCheck className="h-3.5 w-3.5" /> Mark delivered
+                                          </Button>
+                                        )}
+                                        {d.status === 'DELIVERED' && <Badge variant="success">Delivered</Badge>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               );
             })}
           </TableBody>
@@ -475,7 +601,11 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
         <DialogContent>
           <DialogHeader><DialogTitle>Dispatch — {dispatchOrder?.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Drop the kata slip. We'll read the vehicle no and weight — edit if needed, then dispatch.</p>
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm flex justify-between">
+              <span className="text-muted-foreground">Remaining on this order</span>
+              <span className="font-semibold">{dispatchOrder ? toTonnes(dispatchRemaining).toFixed(2) : 0} t</span>
+            </div>
+            <p className="text-sm text-muted-foreground">Drop the kata slip. We'll read the vehicle no and weight — edit if needed, then dispatch this lorry against the order.</p>
             <div className="space-y-1.5">
               <Label className="text-xs">Kata slip {extractingKata && <Loader2 className="inline h-3 w-3 animate-spin" />}</Label>
               <label className="flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:bg-accent">
@@ -488,9 +618,19 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
               <Label className="text-xs">Tonnage from kata (tonnes)</Label>
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">This actual weight bills the sale and depletes the black-seed pool.</p>
+              {dispatchOverflow && (
+                <p className="text-[11px] text-destructive">Exceeds the {toTonnes(dispatchRemaining).toFixed(2)} t remaining on this order.</p>
+              )}
             </div>
+            {dispatchOrder?.product === 'PAPPU' && (
+              <div className="space-y-1.5 border-t border-border pt-3 mt-3">
+                <Label className="text-xs">Internal Weight (tonnes)</Label>
+                <Input type="number" step="0.001" value={internalWeightTonnes} onChange={(e) => setInternalWeightTonnes(e.target.value)} placeholder="Auto-calculated if left blank" />
+                <p className="text-[11px] text-muted-foreground">Actual weight without moisture gain. Leave blank to auto-calculate (e.g. 25t = 150kg short).</p>
+              </div>
+            )}
             <DialogFooter>
-              <Button onClick={() => dispatchMutation.mutate()} disabled={(Number(dispatchTonnes) || 0) <= 0 || dispatchMutation.isPending}>
+              <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchOverflow || dispatchMutation.isPending}>
                 {dispatchMutation.isPending ? 'Dispatching…' : 'Confirm Dispatch'}
               </Button>
             </DialogFooter>
@@ -499,13 +639,13 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
       </Dialog>
 
       {/* Raise Invoice dialog */}
-      <Dialog open={!!invoiceOrder} onOpenChange={(v) => !v && setInvoiceOrder(null)}>
+      <Dialog open={!!invoiceDispatch} onOpenChange={(v) => !v && setInvoiceDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Raise Invoice — {invoiceOrder?.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Raise Invoice — {invoiceDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">A tax invoice will be generated with the next auto number.</p>
+            <p className="text-sm text-muted-foreground">A tax invoice will be generated for this shipment with the next auto number.</p>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
-              <div className="flex justify-between"><span className="text-muted-foreground">Base ({invoiceOrder ? toTonnes(invoiceOrder.tonnageKg).toFixed(2) : 0} t × {rupees(invoiceOrder?.ratePerKg ?? 0)})</span><span className="font-medium">{rupees(invoiceBase)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Base ({invoiceDispatch ? toTonnes(invoiceDispatch.dispatch.weightKg).toFixed(2) : 0} t × {rupees(invoiceDispatch?.order.ratePerKg ?? 0)})</span><span className="font-medium">{rupees(invoiceBase)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{rupees(invoiceGst)}</span></div>
               {invoiceCn > 0 && <div className="flex justify-between text-rose-600"><span>Shortage CN (separate)</span><span>−{rupees(invoiceCn)}</span></div>}
               <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
@@ -520,20 +660,22 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
         </DialogContent>
       </Dialog>
 
-      {/* Mark Reached dialog */}
-      <Dialog open={!!reachOrder} onOpenChange={(v) => !v && setReachOrder(null)}>
+      {/* Mark Delivered dialog (buyer kata + shortage) */}
+      <Dialog open={!!deliverDispatch} onOpenChange={(v) => !v && setDeliverDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Match Delivery — {reachOrder?.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Mark as Delivered — {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Lorry has reached. Enter buyer's kata weight to auto-calculate shortage &amp; credit note.</p>
+            <p className="text-sm text-muted-foreground">
+              Confirm the buyer received this shipment. Enter the buyer's kata weight to auto-calculate any shortage &amp; credit note. The delivered date is set to today and the payment due date is calculated from it.
+            </p>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label className="text-xs">Dispatched Weight</Label>
-                <div className="text-sm font-semibold">{reachOrder ? toTonnes(reachOrder.tonnageKg).toFixed(2) : 0} tonnes</div>
+                <div className="text-sm font-semibold">{deliverDispatch ? toTonnes(deliverDispatch.dispatch.weightKg).toFixed(2) : 0} tonnes</div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Invoice Rate</Label>
-                <div className="text-sm font-medium">{reachOrder ? rupees(reachOrder.ratePerKg) : 0}/kg + 5% GST</div>
+                <div className="text-sm font-medium">{deliverDispatch ? rupees(deliverDispatch.order.ratePerKg) : 0}/kg + 5% GST</div>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -543,70 +685,158 @@ export default function SalesProduct({ product }: { product: SaleProduct }) {
             <div className="space-y-1.5">
               <Label className="text-xs">Buyer's Kata Slip (optional)</Label>
               <label className="flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:bg-accent">
-                <Upload className="h-3.5 w-3.5" /> {buyerKataFile ? buyerKataFile.name.slice(0, 25) : 'Drop kata slip'}
-                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setBuyerKataFile(f); }} />
+                <Upload className="h-3.5 w-3.5" /> {deliverKataFile ? deliverKataFile.name.slice(0, 25) : 'Drop kata slip'}
+                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setDeliverKataFile(f); }} />
               </label>
             </div>
-            {reachShortageKg > 0 && (
+            {deliverShortageKg > 0 && (
               <div className="rounded-lg border bg-rose-50/50 dark:bg-rose-950/20 p-3 text-sm space-y-1.5">
                 <div className="font-semibold text-rose-700 mb-2">Shortage Detected</div>
-                <div className="flex justify-between text-rose-600"><span>Weight difference:</span><span className="font-medium">−{reachShortageKg} kg</span></div>
-                <div className="flex justify-between text-rose-600"><span>Value loss (base):</span><span className="font-medium">−{rupees(reachShortageKg * Number(reachOrder?.ratePerKg || 0))}</span></div>
-                <div className="flex justify-between border-t border-rose-200 pt-1.5 font-semibold text-rose-700"><span>Auto credit note (incl. GST)</span><span>{rupees(reachCreditAmount)}</span></div>
+                <div className="flex justify-between text-rose-600"><span>Weight difference:</span><span className="font-medium">−{deliverShortageKg} kg</span></div>
+                <div className="flex justify-between text-rose-600"><span>Value loss (base):</span><span className="font-medium">−{rupees(deliverShortageKg * deliverRate)}</span></div>
+                <div className="flex justify-between border-t border-rose-200 pt-1.5 font-semibold text-rose-700"><span>Auto credit note (incl. GST)</span><span>{rupees(deliverCreditAmount)}</span></div>
               </div>
             )}
-            {reachShortageKg === 0 && reachTonnes > 0 && (
+            {deliverDispatch?.dispatch.internalWeightKg && deliverDispatch.order.product === 'PAPPU' && buyerKataKg > deliverDispatch.dispatch.internalWeightKg && (
+              <div className="rounded-lg border bg-emerald-50/50 dark:bg-emerald-950/20 p-3 text-sm space-y-1.5">
+                <div className="font-semibold text-emerald-700 mb-2">Moisture Gain Profit</div>
+                <div className="flex justify-between text-emerald-600"><span>Weight gained:</span><span className="font-medium">+{buyerKataKg - deliverDispatch.dispatch.internalWeightKg} kg</span></div>
+                <div className="flex justify-between border-t border-emerald-200 pt-1.5 font-semibold text-emerald-700"><span>Profit to record</span><span>{rupees((buyerKataKg - deliverDispatch.dispatch.internalWeightKg) * deliverRate)}</span></div>
+              </div>
+            )}
+            {deliverShortageKg === 0 && buyerKataKg > 0 && !deliverOverweight && (
               <div className="rounded-lg border bg-emerald-50/50 p-3 text-sm text-emerald-700 font-medium text-center">Weights match. No credit note needed.</div>
             )}
-            {reachShortageKg < 0 && (
-              <div className="rounded-lg border bg-rose-50/50 p-3 text-sm text-rose-700 font-medium text-center">Buyer weight cannot exceed dispatch weight.</div>
+            {deliverOverweight && (
+              <div className="rounded-lg border bg-rose-50/50 p-3 text-sm text-rose-700 font-medium text-center">Buyer weight cannot exceed dispatched weight.</div>
             )}
             <DialogFooter>
-              <Button onClick={() => reachMutation.mutate()} disabled={reachMutation.isPending || reachTonnes <= 0 || reachShortageKg < 0}>
-                {reachMutation.isPending ? 'Saving…' : reachShortageKg > 0 ? 'Match Delivery & Raise CN' : 'Match Delivery'}
+              <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverOverweight} variant="forest">
+                <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : deliverShortageKg > 0 ? 'Confirm Delivered & Raise CN' : 'Confirm Delivered'}
               </Button>
             </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Mark Delivered dialog */}
-      <Dialog open={!!deliverOrder} onOpenChange={(v) => !v && setDeliverOrder(null)}>
+      {/* E-Way Bill Dialog */}
+      <Dialog open={!!ewbDispatch} onOpenChange={(v) => !v && setEwbDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Mark as Delivered — {deliverOrder?.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Generate E-Way Bill — {ewbDispatch?.order.buyer?.name}</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Confirm that the buyer has received the goods. The delivered date will be set to today and the payment due date will be calculated from it.
-            </p>
-            {deliverOrder?.dueDays && (
-              <div className="rounded-lg border bg-muted/40 p-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Payment due in</span>
-                  <span className="font-semibold">{deliverOrder.dueDays} days from today</span>
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-muted-foreground">Due date</span>
-                  <span className="font-bold text-primary">
-                    {shortDate(new Date(Date.now() + deliverOrder.dueDays * 86400000).toISOString())}
-                  </span>
-                </div>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label className="text-xs">Buyer's Kata Slip (optional)</Label>
-              <label className="flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:bg-accent">
-                <Upload className="h-3.5 w-3.5" /> {deliverKataFile ? deliverKataFile.name.slice(0, 28) : 'Attach buyer kata slip'}
-                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setDeliverKataFile(f); }} />
-              </label>
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm flex flex-col gap-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">IRN Ack No</span><span className="font-semibold text-indigo-600 font-mono">{ewbDispatch?.dispatch.irnAckNo || 'ACTIVE'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Vehicle Number</span><span className="font-semibold">{ewbDispatch?.dispatch.vehicleNumber || 'Not specified'}</span></div>
             </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Transporter GSTIN/ID (optional)</Label>
+                <Input value={transporterId} onChange={(e) => setTransporterId(e.target.value)} placeholder="e.g. 27AAAAA1111A1Z1" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Transporter Name (optional)</Label>
+                <Input value={transporterName} onChange={(e) => setTransporterName(e.target.value)} placeholder="Surya Roadlines" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Distance (in Km) *</Label>
+                <Input type="number" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder="e.g. 250" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Transport Mode</Label>
+                <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={transMode} onChange={(e) => setTransMode(e.target.value)}>
+                  <option value="1">Road</option>
+                  <option value="2">Rail</option>
+                  <option value="3">Air</option>
+                  <option value="4">Ship</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Vehicle Number (if different)</Label>
+                <Input value={ewbVehicleNo} onChange={(e) => setEwbVehicleNo(e.target.value)} placeholder="e.g. AP03XX1234" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Vehicle Type</Label>
+                <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={vehicleType} onChange={(e) => setVehicleType(e.target.value)}>
+                  <option value="R">Regular</option>
+                  <option value="O">Over Dimensional Cargo</option>
+                </select>
+              </div>
+            </div>
+
             <DialogFooter>
-              <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending} className="bg-emerald-600 hover:bg-emerald-700">
-                <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : 'Confirm Delivered'}
+              <Button onClick={() => generateEwbMutation.mutate()} disabled={generateEwbMutation.isPending || !transDistance}>
+                {generateEwbMutation.isPending ? 'Generating...' : 'Generate E-Way Bill'}
               </Button>
             </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Dialog (Shared for IRN and EWB) */}
+      <Dialog open={!!cancelTarget} onOpenChange={(v) => !v && setCancelTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel {cancelTarget?.type === 'einvoice' ? 'E-Invoice (IRN)' : 'E-Way Bill'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to cancel the generated {cancelTarget?.type === 'einvoice' ? 'E-Invoice' : 'E-Way Bill'}? This action is reported to the government portal.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Cancellation Reason Code</Label>
+              <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
+                {cancelTarget?.type === 'einvoice' ? (
+                  <>
+                    <option value="1">1 - Duplicate</option>
+                    <option value="2">2 - Data Entry Mistake</option>
+                    <option value="3">3 - Order Cancelled</option>
+                    <option value="4">4 - Others</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="1">1 - Duplicate</option>
+                    <option value="2">2 - Order Cancelled</option>
+                    <option value="3">3 - Mistake in EWB</option>
+                    <option value="4">4 - Others</option>
+                  </>
+                )}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Cancellation Remarks</Label>
+              <textarea
+                value={cancelRemarks}
+                onChange={(e) => setCancelRemarks(e.target.value)}
+                rows={3}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Explain the reason for cancellation..."
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="destructive"
+                onClick={() => cancelTarget?.type === 'einvoice' ? cancelIrnMutation.mutate() : cancelEwbMutation.mutate()}
+                disabled={cancelIrnMutation.isPending || cancelEwbMutation.isPending}
+              >
+                {cancelIrnMutation.isPending || cancelEwbMutation.isPending ? 'Cancelling...' : 'Confirm Cancellation'}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/** Compact label + mono figure used inside the shipment panel. */
+function Figure({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+  return (
+    <div className="text-right">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn('mt-0.5 font-mono text-sm font-semibold tabular-nums', valueClass)}>{value}</div>
     </div>
   );
 }

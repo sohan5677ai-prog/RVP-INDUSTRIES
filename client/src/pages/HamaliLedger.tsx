@@ -95,23 +95,24 @@ export default function HamaliLedger() {
   // Sale (outward) loading hamali. Pappu uses the ₹220/t split (our 140 / lorry
   // 80, crew 210 / P/L 10); other products keep the flat ₹160/t fully on the lorry.
   const saleEntries: HamaliEntry[] = (saleOrders ?? [])
-    .filter((o) => Number(o.freightCharge) > 0 && o.status !== 'PENDING')
-    .map((o) => {
+    .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+    .filter(({ d }) => Number(d.freightCharge) > 0)
+    .map(({ o, d }) => {
       const base = {
-        id: `SALE-${o.id}`,
-        date: o.saleDate,
+        id: `SALE-${d.id}`,
+        date: d.dispatchDate,
         source: 'SALE' as const,
         partyId: o.buyerId,
         partyName: o.buyer?.name ?? '—',
-        lorryNumber: o.vehicleNumber ?? null,
-        reference: o.invoiceNumber ?? '—',
-        netWeightKg: o.tonnageKg,
+        lorryNumber: d.vehicleNumber ?? null,
+        reference: d.invoiceNumber ?? '—',
+        netWeightKg: d.weightKg,
       };
       if (o.product === 'PAPPU') {
-        const lh = pappuLoadingHamali(o.tonnageKg);
+        const lh = pappuLoadingHamali(d.weightKg);
         return { ...base, fullCharge: lh.total, ourShare: lh.company, lorryShare: lh.lorry, crew: lh.crew, pl: lh.margin };
       }
-      const full = calcHamali(o.tonnageKg);
+      const full = calcHamali(d.weightKg);
       return { ...base, fullCharge: full, ourShare: 0, lorryShare: full, crew: full, pl: 0 };
     });
 
@@ -133,7 +134,7 @@ export default function HamaliLedger() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Hamali Expense Ledger</h1>
+        <h1 className="text-2xl font-bold">Hamali Report</h1>
         <p className="text-muted-foreground">Unloading &amp; loading labor charges from purchases and outward sale freight</p>
       </div>
 

@@ -1,10 +1,10 @@
-export type Role = 'ADMIN' | 'MANAGER' | 'OPERATOR';
+export type Role = 'ADMIN' | 'USER' | 'OWNER' | 'DEVELOPER';
 export type PartyType = 'SUPPLIER' | 'BUYER' | 'BOTH';
 
 export interface User {
   id: string;
   name: string;
-  email: string;
+  username: string;
   role: Role;
   createdAt?: string;
 }
@@ -129,6 +129,7 @@ export interface BankLoan {
   id: string;
   loanRef: string | null;
   bankName: string | null;
+  location?: string | null;
   principal: string;
   drawdownDate: string;
   interestRatePct: string;
@@ -206,8 +207,50 @@ export interface PurchaseOrder {
   stockIns?: { id: string }[] | null;
 }
 
-export type SaleStatus = 'PENDING' | 'DISPATCHED' | 'REACHED' | 'DELIVERED';
+// Order-level: PENDING → PARTIAL (some dispatched) → DISPATCHED (fully).
+// Dispatch-level: DISPATCHED → DELIVERED.
+export type SaleStatus = 'PENDING' | 'PARTIAL' | 'DISPATCHED' | 'DELIVERED';
 export type SaleProduct = 'PAPPU' | 'HUSK' | 'WASTE' | 'TPS' | 'SHELL';
+
+// A single physical dispatch (one lorry) shipped against a SaleOrder.
+export interface SaleDispatch {
+  id: string;
+  saleOrderId: string;
+  saleOrder?: SaleOrder;
+  dispatchDate: string;
+  weightKg: number; // actual dispatched weight, per RVP kata (kg)
+  gstAmount: string;
+  freightCharge: string;
+  status: SaleStatus; // DISPATCHED | DELIVERED
+  vehicleNumber: string | null;
+  kataFileUrl?: string | null;
+  receivedDate?: string | null;
+  deliveredDate?: string | null;
+  buyerKataKg?: number | null;
+  shortageKg?: number | null;
+  creditNoteAmount?: string | number | null;
+  buyerKataFileUrl?: string | null;
+  invoiceNumber: string | null;
+  invoiceSeq?: number | null;
+  invoiceFy?: string | null;
+  invoiceDate?: string | null;
+  createdAt: string;
+
+  // E-Invoice (IRN) details
+  irn?: string | null;
+  irnAckNo?: string | null;
+  irnAckDate?: string | null;
+  irnSignedQr?: string | null;
+  irnStatus?: string | null;
+  irnCancelledDate?: string | null;
+
+  // E-Way Bill details
+  ewbNumber?: string | null;
+  ewbDate?: string | null;
+  ewbValidUpto?: string | null;
+  ewbStatus?: string | null;
+  ewbCancelledDate?: string | null;
+}
 
 export interface SaleOrder {
   id: string;
@@ -217,7 +260,7 @@ export interface SaleOrder {
   buyer?: Party;
   brokerId: string | null;
   broker?: Broker | null;
-  tonnageKg: number; // total weight sold, per RVP kata (kg)
+  tonnageKg: number; // total weight ORDERED, per RVP kata (kg)
   ratePerKg: string;
   gstAmount: string;
   brokerageRatePerKg: string;
@@ -226,19 +269,10 @@ export interface SaleOrder {
   status: SaleStatus;
   marginOverride: boolean;
   dueDays?: number | null;
-  receivedDate?: string | null;
-  invoiceNumber: string | null;
-  vehicleNumber: string | null;
-  invoiceFileUrl?: string;
-  kataFileUrl?: string;
-  buyerKataKg?: number;
-  shortageKg?: number;
-  creditNoteAmount?: string | number;
-  buyerKataFileUrl?: string;
-  invoiceSeq?: number | null;
-  invoiceFy?: string | null;
-  invoiceDate?: string | null;
-  deliveredDate?: string | null;
+  // Dispatches (shipments) + server-computed fulfilment fields.
+  dispatches?: SaleDispatch[];
+  dispatchedKg?: number;
+  remainingKg?: number;
   createdAt: string;
 }
 
@@ -257,6 +291,14 @@ export interface CompanyProfile {
   invoicePrefix: string;
   companyVehicles?: string | null;
   freightRetentionPerTrip?: string | number;
+  invoiceLayout?: string | null;
+
+  // TaxPro GSP Config
+  taxproGspId?: string | null;
+  taxproGspSecret?: string | null;
+  taxproGstUser?: string | null;
+  taxproGstPass?: string | null;
+  taxproSandbox?: boolean;
 }
 
 export interface ProductionCostComponent {

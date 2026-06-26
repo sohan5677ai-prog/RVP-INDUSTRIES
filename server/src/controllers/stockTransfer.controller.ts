@@ -44,7 +44,9 @@ export async function createStockTransfer(req: Request, res: Response) {
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;
   const legMargin = hamali.margin;
-  const addedCost = legCharge + transportCharge + bagCuttingCharge;
+  
+  // Expenses are no longer capitalized into the seed. They are expensed immediately.
+  const addedCost = 0; 
 
   // Bank-loan carrying interest: charged on the seed value moved, for the days
   // it sat in storage (from the earliest open loan's drawdown to this transfer),
@@ -64,16 +66,14 @@ export async function createStockTransfer(req: Request, res: Response) {
       addedCost
     );
 
-    // Interest is computed on the actual seed value drawn from the source silo,
-    // then added to the destination silo's value (0 extra weight, more value).
     const interestCharge = interestDays > 0
       ? loanInterest(seedCostMoved, interestRatePct, interestDays)
       : 0;
-    if (interestCharge > 0) {
-      await InventoryService.updateBlackSeedInventory(tx, data.toLocation, 0, interestCharge);
-    }
 
-    const movedValue = Math.round((seedCostMoved + addedCost + interestCharge) * 100) / 100;
+    // We no longer update the destination silo with the interest cost.
+    // It remains pure seed cost.
+
+    const movedValue = Math.round(seedCostMoved * 100) / 100;
 
     const created = await tx.stockTransfer.create({
       data: {

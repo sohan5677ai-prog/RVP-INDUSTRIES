@@ -1,11 +1,13 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Truck, ClipboardList, PackageCheck, Weight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/PageHeader';
+import { StatCard } from '@/components/StatCard';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -251,18 +253,15 @@ export default function StockIn() {
       if (data.partyKataKg) { setPartyKataKg(String(data.partyKataKg)); filled.push('party kata'); }
       if (data.rvpFirstWeightKg) { setRvpFirstWeightKg(String(data.rvpFirstWeightKg)); filled.push('RVP first weight'); }
 
-      // From the invoice, try to auto-match a pending PO by supplier (Gemini maps
-      // the seller to one of our master parties) and select it automatically.
-      if (kind === 'invoice' && (data.matchedPartyName || data.partyName)) {
-        const supplierLabel = data.matchedPartyName ?? data.partyName!;
+      // From the invoice, best-effort auto-match a pending PO by supplier — but
+      // only as a convenience when the user hasn't already picked one. The PO
+      // dropdown is the source of truth, so we never override a manual choice
+      // and never warn on a miss (the user just picks it themselves).
+      if (kind === 'invoice' && !poId && (data.matchedPartyName || data.partyName)) {
         const match = matchPendingPo(data.matchedPartyName, data.partyName, data.pricePerKg);
         if (match.status === 'matched') {
           setPoId(match.po.id);
           filled.push(`PO ${match.po.poNumber} (${match.po.party?.name})`);
-        } else if (match.status === 'ambiguous') {
-          toast.warning(`Multiple pending POs match "${supplierLabel}". Select the right one manually.`);
-        } else {
-          toast.warning(`No pending PO matches "${supplierLabel}". Select the PO manually.`);
         }
       }
 
@@ -372,23 +371,38 @@ export default function StockIn() {
   const referencePlate = detectedPlates.reduce((a, b) => (b.length > a.length ? b : a), detectedPlates[0] ?? '');
   const vehicleMatched = detectedPlates.every((p) => platesCompatible(p, referencePlate));
 
+  const allRows = items ?? [];
+  const purchasedRows = allRows.filter((r) => r.purchase).length;
+  const totalRvpAll = allRows.reduce((s, r) => s + r.rvpFirstWeightKg, 0);
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Stock In</h1>
-          <p className="text-muted-foreground">RVP Kata weights and lorry invoice details on arrival</p>
-        </div>
-        <Button onClick={openCreate} disabled={!pendingPOs?.length && !editing}>
-          <Plus className="h-4 w-4" /> Record Stock In
-        </Button>
+    <div className="space-y-8">
+      <PageHeader
+        icon={Truck}
+        title="Stock In"
+        description="RVP Kata weights and lorry invoice details captured on arrival, grouped per order."
+        actions={
+          <Button onClick={openCreate} disabled={!pendingPOs?.length && !editing}>
+            <Plus className="h-4 w-4" /> Record Stock In
+          </Button>
+        }
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+        <StatCard label="Lorries in" value={allRows.length} icon={Truck} tone="taupe" hint="arrivals recorded" />
+        <StatCard label="Orders" value={groups.length} icon={ClipboardList} tone="amber" hint="grouped" />
+        <StatCard label="Purchased" value={purchasedRows} icon={PackageCheck} tone="forest" hint={`of ${allRows.length} lorries`} />
+        <StatCard label="RVP weight" value={kg(totalRvpAll)} icon={Weight} tone="clay" hint="first weight total" />
       </div>
 
       {pendingPOs?.length === 0 && !editing && (
-        <p className="text-sm text-muted-foreground">No pending purchase orders awaiting arrival.</p>
+        <p className="-mt-4 text-sm text-muted-foreground">No pending purchase orders awaiting arrival.</p>
       )}
 
-      <div className="rounded-lg border bg-card">
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
+          <h2 className="text-sm font-semibold text-foreground">Arrivals</h2>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>

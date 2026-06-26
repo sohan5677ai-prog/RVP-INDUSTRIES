@@ -87,17 +87,18 @@ export default function KataFeeLedger() {
 
   // Sale (outward) kata fees deducted from the lorry's delivery freight.
   const saleEntries: KataEntry[] = (saleOrders ?? [])
-    .filter((o) => Number(o.freightCharge) > 0 && o.status !== 'PENDING')
-    .map((o) => ({
-      id: `SALE-${o.id}`,
-      date: o.saleDate,
+    .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+    .filter(({ d }) => Number(d.freightCharge) > 0)
+    .map(({ o, d }) => ({
+      id: `SALE-${d.id}`,
+      date: d.dispatchDate,
       source: 'SALE',
       partyId: o.buyerId,
       partyName: o.buyer?.name ?? '—',
-      lorryNumber: o.vehicleNumber ?? null,
-      reference: o.invoiceNumber ?? '—',
-      netWeightKg: o.tonnageKg,
-      kataFee: calcKataFee(o.tonnageKg),
+      lorryNumber: d.vehicleNumber ?? null,
+      reference: d.invoiceNumber ?? '—',
+      netWeightKg: d.weightKg,
+      kataFee: calcKataFee(d.weightKg),
     }));
 
   const allEntries = [...purchaseEntries, ...saleEntries];
@@ -131,7 +132,7 @@ export default function KataFeeLedger() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Kata Fee Ledger</h1>
+        <h1 className="text-2xl font-bold">Kata Report</h1>
         <p className="text-muted-foreground">Weighbridge fees from purchases and outward sale freight</p>
       </div>
 

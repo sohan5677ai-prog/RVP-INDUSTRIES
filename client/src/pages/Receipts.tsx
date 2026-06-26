@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Receipt } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import type { Receipt as ReceiptType, Party } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,30 @@ export default function ReceiptsPage() {
     setPartyId('');
     setReference('');
     setDescription('');
+  }
+
+  /** Pre-fill the form from a receipt screenshot read by the server OCR. */
+  function applyExtracted(data: ExtractedTransaction) {
+    const filled: string[] = [];
+    if (data.amount) { setAmount(String(data.amount)); filled.push('amount'); }
+    if (data.date) { setDate(data.date.slice(0, 10)); filled.push('date'); }
+    if (data.reference) { setReference(data.reference); filled.push('reference'); }
+    if (data.description) { setDescription(data.description); filled.push('note'); }
+
+    // Match the counterparty (whoever paid us) to a known buyer.
+    const matchName = data.matchedPartyName ?? data.counterpartyName;
+    if (matchName) {
+      const key = nameKey(matchName);
+      const buyer = buyers.find((b) => nameKey(b.name) === key)
+        ?? buyers.find((b) => { const k = nameKey(b.name); return k !== '' && (k.includes(key) || key.includes(k)); });
+      if (buyer) {
+        setType('BUYER'); setPartyId(buyer.id);
+        filled.push(buyer.name);
+      }
+    }
+
+    if (filled.length) toast.success(`Read: ${filled.join(', ')}. Verify and record.`);
+    else toast.message('Could not read the screenshot. Enter details manually.');
   }
 
   const mutation = useMutation({
@@ -173,6 +198,12 @@ export default function ReceiptsPage() {
             <DialogTitle>Record Receipt</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <ScreenshotUpload
+              endpoint="/receipts/extract"
+              hint="Drop a receipt screenshot to auto-fill"
+              onExtracted={applyExtracted}
+            />
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="date">Receipt Date</Label>

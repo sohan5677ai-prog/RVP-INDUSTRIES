@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -51,12 +52,14 @@ export default function BankLoansPage() {
   const [drawdownDate, setDrawdownDate] = useState(today());
   const [bankName, setBankName] = useState('');
   const [loanRef, setLoanRef] = useState('');
+  const [location, setLocation] = useState<string>('');
 
   function resetLoanForm() {
     setPrincipal('');
     setDrawdownDate(today());
     setBankName('');
     setLoanRef('');
+    setLocation('');
   }
 
   const loanMutation = useMutation({
@@ -68,6 +71,7 @@ export default function BankLoansPage() {
           drawdownDate,
           bankName: bankName || null,
           loanRef: loanRef || null,
+          location: location || null,
         },
       }),
     onSuccess: () => {
@@ -190,6 +194,7 @@ export default function BankLoansPage() {
               <TableHead className="w-8" />
               <TableHead>Date</TableHead>
               <TableHead>Bank / Ref</TableHead>
+              <TableHead>Location</TableHead>
               <TableHead className="text-right">Principal</TableHead>
               <TableHead className="text-right">Rate</TableHead>
               <TableHead className="text-right">Repaid</TableHead>
@@ -201,10 +206,10 @@ export default function BankLoansPage() {
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
             {!isLoading && loans.length === 0 && (
-              <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">No loans yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">No loans yet.</TableCell></TableRow>
             )}
             {loans.map((loan) => (
               <Fragment key={loan.id}>
@@ -218,6 +223,9 @@ export default function BankLoansPage() {
                   <TableCell>
                     <div className="font-medium">{loan.bankName ?? '—'}</div>
                     {loan.loanRef && <div className="text-xs text-muted-foreground font-mono">{loan.loanRef}</div>}
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm">{loan.location ?? '—'}</span>
                   </TableCell>
                   <TableCell className="text-right">{rupees(loan.principal)}</TableCell>
                   <TableCell className="text-right">{Number(loan.interestRatePct)}%</TableCell>
@@ -257,7 +265,7 @@ export default function BankLoansPage() {
                 {expanded[loan.id] && (
                   <TableRow>
                     <TableCell />
-                    <TableCell colSpan={9} className="bg-muted/30">
+                    <TableCell colSpan={10} className="bg-muted/30">
                       {loan.repayments.length === 0 ? (
                         <div className="text-sm text-muted-foreground py-1">No repayments yet.</div>
                       ) : (
@@ -313,6 +321,22 @@ export default function BankLoansPage() {
               <div className="space-y-2">
                 <Label htmlFor="ref">Loan / account ref</Label>
                 <Input id="ref" value={loanRef} onChange={(e) => setLoanRef(e.target.value)} placeholder="optional" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="location">Storage Location</Label>
+                <Select value={location} onValueChange={setLocation}>
+                  <SelectTrigger id="location">
+                    <SelectValue placeholder="Select location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="At process">At process</SelectItem>
+                    <SelectItem value="Rampalli">Rampalli</SelectItem>
+                    <SelectItem value="Murgan">Murgan</SelectItem>
+                    <SelectItem value="Multi">Multi</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="rounded-lg border bg-muted/40 p-4 space-y-1 text-sm">

@@ -2,47 +2,78 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { registerPreload } from '@/lib/preload';
 
-const Login = lazy(() => import('@/pages/Login'));
-const Dashboard = lazy(() => import('@/pages/Dashboard'));
-const Parties = lazy(() => import('@/pages/Parties'));
-const Brokers = lazy(() => import('@/pages/Brokers'));
-const PurchaseOrders = lazy(() => import('@/pages/PurchaseOrders'));
-const StockIn = lazy(() => import('@/pages/StockIn'));
-const Purchases = lazy(() => import('@/pages/Purchases'));
-const Verification = lazy(() => import('@/pages/Verification'));
-const Processing = lazy(() => import('@/pages/Processing'));
-const ProcessingOutput = lazy(() => import('@/pages/ProcessingOutput'));
-const PappuCalculator = lazy(() => import('@/pages/PappuCalculator'));
-const StockLocation = lazy(() => import('@/pages/StockLocation'));
-const StockTransfer = lazy(() => import('@/pages/StockTransfer'));
-const BlackSeedStock = lazy(() => import('@/pages/BlackSeedStock'));
-const StockByDate = lazy(() => import('@/pages/StockByDate'));
-const StockByParty = lazy(() => import('@/pages/StockByParty'));
-const BankLoans = lazy(() => import('@/pages/BankLoans'));
-const StockByState = lazy(() => import('@/pages/StockByState'));
-const SaleOrders = lazy(() => import('@/pages/SaleOrders'));
-const InvoiceView = lazy(() => import('@/pages/InvoiceView'));
-const SalesProduct = lazy(() => import('@/pages/SalesProduct'));
-const TamarindShell = lazy(() => import('@/pages/TamarindShell'));
-const PurchaseStatement = lazy(() => import('@/pages/PurchaseStatement'));
-const PartyLedger = lazy(() => import('@/pages/PartyLedger'));
-const HamaliLedger = lazy(() => import('@/pages/HamaliLedger'));
-const KataFeeLedger = lazy(() => import('@/pages/KataFeeLedger'));
-const SuryaRoadTransport = lazy(() => import('@/pages/SuryaRoadTransport'));
-const BrokerageLedger = lazy(() => import('@/pages/BrokerageLedger'));
-const Ledgers = lazy(() => import('@/pages/Ledgers'));
-const JournalEntries = lazy(() => import('@/pages/JournalEntries'));
-const Settings = lazy(() => import('@/pages/Settings'));
-const Payments = lazy(() => import('@/pages/Payments'));
-const Receipts = lazy(() => import('@/pages/Receipts'));
-const SaleDues = lazy(() => import('@/pages/SaleDues'));
-const PurchaseDues = lazy(() => import('@/pages/PurchaseDues'));
-const BrokerageDues = lazy(() => import('@/pages/BrokerageDues'));
-const FreightDues = lazy(() => import('@/pages/FreightDues'));
+function lazyWithPreload(paths: string | string[], importFn: () => Promise<any>) {
+  if (Array.isArray(paths)) {
+    paths.forEach((p) => registerPreload(p, importFn));
+  } else {
+    registerPreload(paths, importFn);
+  }
+  return lazy(importFn);
+}
+
+const Login = lazyWithPreload('/login', () => import('@/pages/Login'));
+const Home = lazyWithPreload('/', () => import('@/pages/Home'));
+const Dashboard = lazyWithPreload('/dashboard', () => import('@/pages/Dashboard'));
+const Parties = lazyWithPreload('/parties', () => import('@/pages/Parties'));
+const Brokers = lazyWithPreload('/brokers', () => import('@/pages/Brokers'));
+const PurchaseOrders = lazyWithPreload('/purchase-orders', () => import('@/pages/PurchaseOrders'));
+const StockIn = lazyWithPreload('/stock-in', () => import('@/pages/StockIn'));
+const Purchases = lazyWithPreload('/purchases', () => import('@/pages/Purchases'));
+const Verification = lazyWithPreload('/verification', () => import('@/pages/Verification'));
+const Processing = lazyWithPreload('/processing', () => import('@/pages/Processing'));
+const ProcessingOutput = lazyWithPreload(
+  ['/processing/pappu', '/processing/husk', '/processing/waste'],
+  () => import('@/pages/ProcessingOutput')
+);
+const PappuCalculator = lazyWithPreload('/pappu-calculator', () => import('@/pages/PappuCalculator'));
+const StockLocation = lazyWithPreload('/stock/location', () => import('@/pages/StockLocation'));
+const StockTransfer = lazyWithPreload('/stock/transfer', () => import('@/pages/StockTransfer'));
+const BlackSeedStock = lazyWithPreload('/stock/overview', () => import('@/pages/BlackSeedStock'));
+const StockByDate = lazyWithPreload('/stock/date', () => import('@/pages/StockByDate'));
+const StockByParty = lazyWithPreload('/stock/party', () => import('@/pages/StockByParty'));
+const StockByPrice = lazyWithPreload('/stock/price', () => import('@/pages/StockByPrice'));
+const BankLoans = lazyWithPreload('/loans', () => import('@/pages/BankLoans'));
+const Banking = lazyWithPreload('/banking/limits', () => import('@/pages/Banking'));
+const StockByState = lazyWithPreload('/stock/state', () => import('@/pages/StockByState'));
+const SaleOrders = lazyWithPreload('/sale-orders', () => import('@/pages/SaleOrders'));
+const InvoiceView = lazyWithPreload('/sale-dispatches/:id/invoice', () => import('@/pages/InvoiceView'));
+const SalesProduct = lazyWithPreload(
+  ['/sales/pappu', '/sales/husk', '/sales/waste', '/sales/tps'],
+  () => import('@/pages/SalesProduct')
+);
+const TamarindShell = lazyWithPreload('/sales/shell', () => import('@/pages/TamarindShell'));
+const PurchaseStatement = lazyWithPreload('/purchases/:purchaseId/statement', () => import('@/pages/PurchaseStatement'));
+const PartyLedger = lazyWithPreload('/accounts/party-ledger', () => import('@/pages/PartyLedger'));
+const HamaliLedger = lazyWithPreload('/accounts/hamali-ledger', () => import('@/pages/HamaliLedger'));
+const KataFeeLedger = lazyWithPreload('/accounts/kata-fee-ledger', () => import('@/pages/KataFeeLedger'));
+const SuryaRoadTransport = lazyWithPreload('/accounts/surya-road-transport', () => import('@/pages/SuryaRoadTransport'));
+const BrokerageLedger = lazyWithPreload('/accounts/brokerage-ledger', () => import('@/pages/BrokerageLedger'));
+const Ledgers = lazyWithPreload('/accounts/chart-of-accounts', () => import('@/pages/Ledgers'));
+const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
+const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
+const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
+const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
+const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
+const PurchaseDues = lazyWithPreload('/reports/purchase-dues', () => import('@/pages/PurchaseDues'));
+const BrokerageDues = lazyWithPreload('/reports/brokerage-dues', () => import('@/pages/BrokerageDues'));
+const FreightDues = lazyWithPreload('/reports/freight-dues', () => import('@/pages/FreightDues'));
+const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
 
 function Fallback() {
-  return <div className="p-8 text-muted-foreground">Loading…</div>;
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#1b1510] text-[#c8bba6]">
+      <div className="flex flex-col items-center space-y-4">
+        <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-black/50 ring-1 ring-amber-300/20 animate-pulse">
+          <span className="font-display font-semibold text-lg text-amber-50 leading-none">R</span>
+        </div>
+        <p className="text-xs uppercase tracking-[0.2em] text-[#c8bba6]/60 animate-pulse">
+          RVP Industries
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -52,9 +83,10 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
-            <Route path="/sale-orders/:id/invoice" element={<InvoiceView />} />
+            <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
             <Route element={<Layout />}>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<Home />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/parties" element={<Parties />} />
               <Route path="/brokers" element={<Brokers />} />
               <Route path="/purchase-orders" element={<PurchaseOrders />} />
@@ -72,7 +104,9 @@ export default function App() {
               <Route path="/stock/transfer" element={<StockTransfer />} />
               <Route path="/stock/date" element={<StockByDate />} />
               <Route path="/stock/party" element={<StockByParty />} />
+              <Route path="/stock/price" element={<StockByPrice />} />
               <Route path="/stock/state" element={<StockByState />} />
+              <Route path="/banking/limits" element={<Banking />} />
               <Route path="/loans" element={<BankLoans />} />
               <Route path="/sale-orders" element={<SaleOrders />} />
               <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
@@ -93,7 +127,8 @@ export default function App() {
               <Route path="/reports/purchase-dues" element={<PurchaseDues />} />
               <Route path="/reports/brokerage-dues" element={<BrokerageDues />} />
               <Route path="/reports/freight-dues" element={<FreightDues />} />
-              <Route path="/settings/freight-rates" element={<Settings />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/users" element={<Users />} />
             </Route>
           </Route>
         </Routes>

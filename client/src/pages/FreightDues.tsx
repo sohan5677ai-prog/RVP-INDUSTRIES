@@ -162,22 +162,23 @@ export default function FreightDuesPage() {
   // share of the loading hamali (pappu ₹80/t, else flat ₹160/t); Transport = the
   // ₹3,000 retention held for Surya Road Transport. Net = lorry owner's payable.
   const outwardRows: FreightRow[] = (saleOrders ?? [])
-    .filter((o) => Number(o.freightCharge) > 0 && o.status !== 'PENDING')
-    .map((o) => {
-      const freight = Number(o.freightCharge);
-      const hamali = o.product === 'PAPPU' ? pappuLoadingHamali(o.tonnageKg).lorry : calcHamali(o.tonnageKg);
-      const kata = calcKataFee(o.tonnageKg);
+    .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+    .filter(({ d }) => Number(d.freightCharge) > 0)
+    .map(({ o, d }) => {
+      const freight = Number(d.freightCharge);
+      const hamali = o.product === 'PAPPU' ? pappuLoadingHamali(d.weightKg).lorry : calcHamali(d.weightKg);
+      const kata = calcKataFee(d.weightKg);
       return {
-        id: o.id,
-        date: o.saleDate,
-        lorry: o.vehicleNumber?.trim().toUpperCase() ?? null,
-        invoice: o.invoiceNumber ?? null,
+        id: d.id,
+        date: d.dispatchDate,
+        lorry: d.vehicleNumber?.trim().toUpperCase() ?? null,
+        invoice: d.invoiceNumber ?? null,
         freight,
         hamali,
         kata,
         transport: retention,
         net: round2(freight - hamali - kata - retention),
-        deliveryStatus: o.status as SaleStatus,
+        deliveryStatus: d.status as SaleStatus,
       };
     });
 

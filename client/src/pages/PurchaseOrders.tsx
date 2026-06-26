@@ -4,11 +4,17 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/PageHeader';
+import { StatCard } from '@/components/StatCard';
+import { Segmented } from '@/components/ui/segmented';
+import { SearchInput } from '@/components/ui/search-input';
+import { DatePicker } from '@/components/ui/date-picker';
+import { Combobox } from '@/components/ui/combobox';
 import {
   Table,
   TableBody,
@@ -42,10 +48,10 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 
-const statusVariant: Record<POStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  PENDING: 'secondary',
-  ARRIVED: 'default',
-  COMPLETED: 'outline',
+const statusVariant: Record<POStatus, 'soft' | 'success' | 'warning' | 'outline' | 'destructive'> = {
+  PENDING: 'warning',
+  ARRIVED: 'soft',
+  COMPLETED: 'success',
   CANCELLED: 'destructive',
 };
 
@@ -66,6 +72,7 @@ export default function PurchaseOrders() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
   const [filter, setFilter] = useState<POStatus | 'ALL'>('ALL');
+  const [q, setQ] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const { data: orders, isLoading } = useQuery({
@@ -180,32 +187,50 @@ export default function PurchaseOrders() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const allPos = orders ?? [];
+  const lorriesTotal = allPos.length;
+  const lorriesArrived = allPos.reduce((s, p) => s + (p.stockIns?.length ? 1 : 0), 0);
+  const pendingCount = allPos.filter((p) => p.status === 'PENDING').length;
+  const totalTonnageAll = allPos.reduce((s, p) => s + p.tonnageKg, 0);
+
+  const filterOptions: { label: string; value: POStatus | 'ALL' }[] = (['ALL', ...STATUSES] as const).map((s) => ({
+    label: s === 'ALL' ? 'All' : s[0] + s.slice(1).toLowerCase(),
+    value: s,
+  }));
+
+  // Search filters the grouped orders by party name or PO number.
+  const shown = q.trim()
+    ? groups.filter(({ pos }) => {
+        const hay = `${pos[0].party?.name ?? ''} ${pos.map((p) => p.poNumber).join(' ')}`.toLowerCase();
+        return hay.includes(q.trim().toLowerCase());
+      })
+    : groups;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Purchase Orders</h1>
-          <p className="text-muted-foreground">Approximate orders from suppliers</p>
-        </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New PO
-        </Button>
-      </div>
-
-      <div className="flex gap-2">
-        {(['ALL', ...STATUSES] as const).map((s) => (
-          <Button
-            key={s}
-            variant={filter === s ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter(s)}
-          >
-            {s}
+    <div className="space-y-8">
+      <PageHeader
+        icon={ClipboardList}
+        title="Purchase Orders"
+        description="Approximate orders raised to suppliers, split one PO per lorry."
+        actions={
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New PO
           </Button>
-        ))}
+        }
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+        <StatCard label="Orders" value={groups.length} icon={ClipboardList} tone="taupe" hint={`${lorriesTotal} lorries`} />
+        <StatCard label="Pending" value={pendingCount} icon={Clock} tone="amber" hint="awaiting arrival" />
+        <StatCard label="Arrived" value={lorriesArrived} icon={Truck} tone="forest" hint={`of ${lorriesTotal} lorries`} />
+        <StatCard label="Total tonnage" value={kg(totalTonnageAll)} icon={Scale} tone="clay" hint="ordered" />
       </div>
 
-      <div className="rounded-lg border bg-card">
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
+          <SearchInput value={q} onValueChange={setQ} placeholder="Search party or PO number…" containerClassName="w-full sm:w-72" />
+          <Segmented options={filterOptions} value={filter} onValueChange={setFilter} />
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
@@ -223,10 +248,10 @@ export default function PurchaseOrders() {
             {isLoading && (
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {!isLoading && groups.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No purchase orders.</TableCell></TableRow>
+            {!isLoading && shown.length === 0 && (
+              <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">{q ? 'No orders match your search.' : 'No purchase orders.'}</TableCell></TableRow>
             )}
-            {groups.map(({ groupId, pos }) => {
+            {shown.map(({ groupId, pos }) => {
               const ordered = [...pos].sort((a, b) => (a.poNumber || '').localeCompare(b.poNumber || ''));
               const isOpen = expanded.has(groupId);
               const party = ordered[0].party?.name ?? '—';
@@ -328,7 +353,16 @@ export default function PurchaseOrders() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>PO Date <span className="text-destructive">*</span></FormLabel>
-                    <FormControl><Input type="date" {...field} /></FormControl>
+                    <FormControl>
+                      <DatePicker
+                        value={field.value ? new Date(field.value + 'T00:00:00') : undefined}
+                        onChange={(d) =>
+                          field.onChange(
+                            d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : ''
+                          )
+                        }
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -339,14 +373,16 @@ export default function PurchaseOrders() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Party (supplier) <span className="text-destructive">*</span></FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Select party" /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {parties?.filter((p) => p.type !== 'BUYER').map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <Combobox
+                        options={(parties ?? []).filter((p) => p.type !== 'BUYER').map((p) => ({ value: p.id, label: p.name }))}
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="Select party"
+                        searchPlaceholder="Search supplier…"
+                        className="w-full"
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

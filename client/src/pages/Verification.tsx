@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator } from 'lucide-react';
+import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clock, IndianRupee } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, WeightVerification } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/PageHeader';
+import { StatCard } from '@/components/StatCard';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -79,6 +81,7 @@ export default function Verification() {
   const qc = useQueryClient();
   const [selectedPurchase, setSelectedPurchase] = useState<PurchaseRow | null>(null);
   const [open, setOpen] = useState(false);
+  const [forceExempt, setForceExempt] = useState(false);
 
   // States for discount
   const [discountType, setDiscountType] = useState<'WEIGHT' | 'PRICE' | 'AMOUNT' | ''>('');
@@ -90,7 +93,7 @@ export default function Verification() {
   });
 
   const verifyMutation = useMutation({
-    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number }) =>
+    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number; forceExempt: boolean }) =>
       api('/verifications', { method: 'POST', body: args }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
@@ -126,24 +129,32 @@ export default function Verification() {
       setDiscountType('');
       setDiscountValue('');
     }
+    setForceExempt(false);
     setOpen(true);
   }
 
   const calc = selectedPurchase ? getCalculationDetails(selectedPurchase) : null;
 
   // Live calculation overrides for the verification modal
+  let liveExempt = calc?.exempt ?? true;
+  let liveCalcFinalWeight = calc?.finalWeightKg ?? 0;
+  if (calc && forceExempt && !calc.exempt) {
+    liveExempt = true;
+    liveCalcFinalWeight = calc.referenceKg;
+  }
+
   const discountValNum = Number(discountValue) || 0;
-  let livePayableWeight = calc?.finalWeightKg ?? 0;
+  let livePayableWeight = liveCalcFinalWeight;
   let livePayablePrice = calc?.pricePerKg ?? 0;
   let liveDiscountAmount = 0;
 
   if (calc) {
     if (discountType === 'WEIGHT') {
-      livePayableWeight = Math.max(0, calc.finalWeightKg - discountValNum);
+      livePayableWeight = Math.max(0, liveCalcFinalWeight - discountValNum);
       liveDiscountAmount = discountValNum * calc.pricePerKg;
     } else if (discountType === 'PRICE') {
       livePayablePrice = Math.max(0, calc.pricePerKg - discountValNum);
-      liveDiscountAmount = calc.finalWeightKg * discountValNum;
+      liveDiscountAmount = liveCalcFinalWeight * discountValNum;
     } else if (discountType === 'AMOUNT') {
       liveDiscountAmount = discountValNum;
     }
@@ -156,16 +167,32 @@ export default function Verification() {
   const liveIgst = Math.round(liveBillingAmount * 0.05 * 100) / 100;
   const liveTotalAmount = liveNetBase + liveIgst;
 
+  const allPurchases = purchases ?? [];
+  const verifiedCount = allPurchases.filter((p) => p.verification).length;
+  const pendingCount = allPurchases.length - verifiedCount;
+  const totalPayable = allPurchases.reduce((s, p) => s + (p.verification ? Number(p.verification.totalAmount) : 0), 0);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Weight Verification</h1>
-        <p className="text-muted-foreground">
-          Cross-verify billing vs party-kata vs RVP-kata and compute the supplier's balance payable.
-        </p>
+    <div className="space-y-8">
+      <PageHeader
+        icon={BadgeCheck}
+        title="Weight Verification"
+        description="Cross-verify billing vs party-kata vs RVP-kata and compute the supplier's balance payable."
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+        <StatCard label="To verify" value={pendingCount} icon={Clock} tone="amber" hint="awaiting approval" />
+        <StatCard label="Approved" value={verifiedCount} icon={BadgeCheck} tone="forest" hint="verified purchases" />
+        <StatCard label="Total" value={allPurchases.length} icon={Scale} tone="taupe" hint="purchases" />
+        <StatCard label="Net payable" value={rupees(totalPayable)} icon={IndianRupee} tone="gold" hint="approved balances" />
       </div>
 
-      <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
+          <h2 className="text-sm font-semibold text-foreground">Purchases to verify</h2>
+          {pendingCount > 0 && <Badge variant="warning">{pendingCount} pending</Badge>}
+        </div>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -202,7 +229,7 @@ export default function Verification() {
                   <TableCell className="text-right">{p.stockIn?.purchaseOrder?.pricePerKg ? `${rupees(p.stockIn.purchaseOrder.pricePerKg)}/kg` : '—'}</TableCell>
                   <TableCell>
                     {v ? (
-                      <Badge variant={v.exempt ? 'default' : 'secondary'}>
+                      <Badge variant={v.exempt ? 'success' : 'warning'}>
                         {v.exempt ? 'Exempt' : 'Deducted'}
                       </Badge>
                     ) : (
@@ -227,6 +254,7 @@ export default function Verification() {
             })}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -236,8 +264,8 @@ export default function Verification() {
 
       {/* Verification Preview Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
+        <DialogContent className="max-w-xl max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Scale className="h-5 w-5 text-primary" />
               Weight Calculation & Approval
@@ -247,8 +275,9 @@ export default function Verification() {
             </DialogDescription>
           </DialogHeader>
 
-          {selectedPurchase && calc && (
-            <div className="space-y-4 my-2">
+          <div className="flex-1 overflow-y-auto px-6 py-2">
+            {selectedPurchase && calc && (
+              <div className="space-y-4">
               {/* Party Info */}
               <div className="flex justify-between items-center bg-muted/40 p-3 rounded-lg border text-sm">
                 <div>
@@ -306,8 +335,8 @@ export default function Verification() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <span className={`font-semibold ${calc.exempt ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                      {calc.exempt ? 'Exempt' : 'Deduction applies'}
+                    <span className={`font-semibold ${liveExempt ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      {liveExempt ? 'Exempt' : 'Deduction applies'}
                     </span>
                   </div>
                 </div>
@@ -315,8 +344,22 @@ export default function Verification() {
                 {/* Step 3: Final Payable Weight */}
                 <div className="flex justify-between items-center font-medium">
                   <span>Payable Weight (Final Weight)</span>
-                  <span className="font-bold text-foreground text-sm">{kg(calc.finalWeightKg)}</span>
+                  <span className="font-bold text-foreground text-sm">{kg(liveCalcFinalWeight)}</span>
                 </div>
+                
+                {!selectedPurchase.verification && !calc.exempt && (
+                  <div className="pt-2 border-t flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-foreground hover:text-primary transition-colors">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+                        checked={forceExempt}
+                        onChange={(e) => setForceExempt(e.target.checked)}
+                      />
+                      Force Exempt (Override deduction)
+                    </label>
+                  </div>
+                )}
               </div>
 
               {/* Adjustments & Overheads Input Section */}
@@ -375,13 +418,13 @@ export default function Verification() {
                 <h3 className="text-sm font-semibold">Payment Details</h3>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Base cost ({kg(calc.displayBaseWeightKg)} @ {rupees(calc.pricePerKg)}/kg)</span>
-                    <span>{rupees(calc.baseCost)}</span>
+                    <span className="text-muted-foreground">Base cost ({kg(liveExempt ? calc.referenceKg : calc.displayBaseWeightKg)} @ {rupees(calc.pricePerKg)}/kg)</span>
+                    <span>{rupees(liveExempt ? (calc.referenceKg * calc.pricePerKg) : calc.baseCost)}</span>
                   </div>
-                  {calc.kataDiffDeduction > 0 && (
+                  {(calc.referenceKg - liveCalcFinalWeight) > 0 && (
                     <div className="flex justify-between text-destructive font-medium">
-                      <span>Kata discrepancy deduction ({kg(calc.referenceKg - calc.finalWeightKg)} penalty)</span>
-                      <span>-{rupees(calc.kataDiffDeduction)}</span>
+                      <span>Kata discrepancy deduction ({kg(calc.referenceKg - liveCalcFinalWeight)} penalty)</span>
+                      <span>-{rupees((calc.referenceKg - liveCalcFinalWeight) * calc.pricePerKg)}</span>
                     </div>
                   )}
                   {liveDiscountAmount > 0 && (
@@ -404,10 +447,11 @@ export default function Verification() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
-          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+          <DialogFooter className="px-6 pb-6 pt-2 shrink-0 border-t">
             {selectedPurchase && (
               <>
                 {selectedPurchase.verification ? (
@@ -442,6 +486,7 @@ export default function Verification() {
                         purchaseId: selectedPurchase.id,
                         discountType: discountType || null,
                         discountValue: Number(discountValue) || 0,
+                        forceExempt: forceExempt,
                       })}
                       disabled={verifyMutation.isPending}
                     >

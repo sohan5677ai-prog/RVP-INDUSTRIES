@@ -33,6 +33,20 @@ export function getDraft<T = Record<string, any>>(key: string): Draft<T> | undef
   return drafts.get(key) as Draft<T> | undefined;
 }
 
+/**
+ * Find the first draft matching a predicate. Used as a fallback when a file is
+ * uploaded into a channel but NOT as a reply inside the flow's thread — we locate
+ * the user's active flow by channel + user instead of by thread key.
+ */
+export function findDraft<T = Record<string, any>>(
+  predicate: (d: Draft) => boolean
+): Draft<T> | undefined {
+  for (const d of drafts.values()) {
+    if (predicate(d)) return d as Draft<T>;
+  }
+  return undefined;
+}
+
 export function clearDraft(key: string): void {
   drafts.delete(key);
 }

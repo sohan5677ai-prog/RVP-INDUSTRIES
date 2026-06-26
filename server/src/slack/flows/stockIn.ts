@@ -1,8 +1,8 @@
 import type { App } from '@slack/bolt';
 import type { KnownBlock } from '@slack/types';
-import { extractInvoiceData } from '../../lib/gemini.js';
+import { extractInvoiceData, type DocumentKind } from '../../lib/gemini.js';
 import { resolveErpUser, NOT_LINKED_MESSAGE } from '../users.js';
-import { apiGet, apiPostMultipart, ErpApiError } from '../erpClient.js';
+import { apiGet, apiPostMultipart, ErpApiError, type ErpUser } from '../erpClient.js';
 import { getDraft, setDraft, clearDraft } from '../state.js';
 import { downloadSlackFile, type DownloadedFile } from '../slackFiles.js';
 import {
@@ -10,22 +10,34 @@ import {
   contextBlock,
   fieldsSection,
   approveEditCancel,
-  selectSection,
 } from '../blocks.js';
 import { fmtDate, rupees } from '../parse.js';
+import { startPurchaseForStockIn } from './purchase.js';
 
 const FLOW = 'stockin';
 const LOCATIONS = ['At process', 'Rampalli', 'Murgan', 'Multi'];
 
-type Step = 'await_invoice' | 'await_partykata' | 'await_rvp' | 'review';
+// The flow now PICKS THE PO FIRST (reliable manual choice from the pending list)
+// and then reads each slip on demand, ONE document = ONE Gemini call. This avoids
+// the old three-call burst (which tripped Gemini's rate limit) and removes the
+// fragile invoice→PO auto-matching that often failed. Every slip is optional:
+// anything not read can be typed via Edit.
+
+// The three readable slips. (Same DocumentKind values the OCR layer understands.)
+type ReadKind = Extract<DocumentKind, 'invoice' | 'partyKata' | 'rvpWeight'>;
+const DOC_LABEL: Record<ReadKind, string> = {
+  invoice: 'Supplier invoice',
+  partyKata: 'Party kata (weighbridge) slip',
+  rvpWeight: 'Our RVP kata (first-weight) slip',
+};
 
 interface StockInDraftData {
+  // The PO is chosen up front, so these are always set on the review card.
   poId: string;
   poNumber: string;
   partyName: string;
   priceType: 'BASE' | 'DELIVERY';
-  step: Step;
-  // OCR'd fields
+  // Fields filled by OCR or typed on the Edit modal.
   arrivalDate?: string; // ISO
   lorryNumber?: string;
   invoiceNumber?: string;
@@ -42,11 +54,86 @@ function keyFor(channel: string, threadTs: string): string {
   return `${FLOW}:${channel}:${threadTs}`;
 }
 
-const STEP_PROMPT: Record<Exclude<Step, 'review'>, string> = {
-  await_invoice: ':arrow_up: Upload the *supplier invoice* in this thread.',
-  await_partykata: ':arrow_up: Now upload the *party kata (weighbridge) slip*.',
-  await_rvp: ':arrow_up: Now upload the *RVP first-weight slip*.',
-};
+/** Build the initial draft once a PO has been picked. */
+function draftFromPo(po: any, location: string): StockInDraftData {
+  return {
+    poId: po.id,
+    poNumber: po.poNumber ?? po.id,
+    partyName: po.party?.name ?? '?',
+    priceType: po.priceType === 'BASE' ? 'BASE' : 'DELIVERY',
+    loadingLocation: location,
+    freightCharge: 0,
+    arrivalDate: new Date().toISOString().slice(0, 10),
+  };
+}
+
+/** Step 1 modal: pick the pending PO this lorry is against + loading location. */
+function poPickModal(pos: any[], channel: string) {
+  return {
+    type: 'modal' as const,
+    callback_id: `${FLOW}:po_submit`,
+    private_metadata: JSON.stringify({ channel }),
+    title: { type: 'plain_text' as const, text: 'Stock-in' },
+    submit: { type: 'plain_text' as const, text: 'Start' },
+    close: { type: 'plain_text' as const, text: 'Cancel' },
+    blocks: [
+      contextBlock(
+        ":package: Pick the purchase order this lorry is against. On the next card you can read each slip with AI — *one at a time* — or just type the values."
+      ),
+      {
+        type: 'input',
+        block_id: 'po',
+        label: { type: 'plain_text', text: 'Purchase order' },
+        element: {
+          type: 'static_select',
+          action_id: 'v',
+          // Slack caps a static_select at 100 options. Pending POs come back
+          // newest-first, so the 100 most recent are the ones a lorry is most
+          // likely against; older ones can still be received via the web ERP.
+          options: pos.slice(0, 100).map((p) => ({
+            text: {
+              type: 'plain_text',
+              text: `${p.poNumber ?? p.id} · ${p.party?.name ?? '?'} · ${Math.round((p.tonnageKg ?? 0) / 1000)}t · ₹${Number(p.pricePerKg)}/kg`.slice(0, 75),
+            },
+            value: p.id,
+          })),
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'location',
+        label: { type: 'plain_text', text: 'Loading location' },
+        element: {
+          type: 'static_select',
+          action_id: 'v',
+          initial_option: { text: { type: 'plain_text', text: 'At process' }, value: 'At process' },
+          options: LOCATIONS.map((l) => ({ text: { type: 'plain_text', text: l }, value: l })),
+        },
+      },
+    ],
+  };
+}
+
+/** A single-file upload modal for one slip kind (one Gemini call on submit). */
+function readDocModal(kind: ReadKind, channel: string, threadTs: string) {
+  return {
+    type: 'modal' as const,
+    callback_id: `${FLOW}:read_submit`,
+    private_metadata: JSON.stringify({ channel, threadTs, kind }),
+    title: { type: 'plain_text' as const, text: 'Read slip' },
+    submit: { type: 'plain_text' as const, text: 'Read' },
+    close: { type: 'plain_text' as const, text: 'Cancel' },
+    blocks: [
+      contextBlock(`:mag: Attach the *${DOC_LABEL[kind]}* — I'll read it and fill the matching fields.`),
+      {
+        type: 'input',
+        block_id: 'file',
+        label: { type: 'plain_text', text: DOC_LABEL[kind] },
+        element: { type: 'file_input', action_id: 'f', max_files: 1 },
+      },
+    ],
+  };
+}
 
 function reviewMissing(d: StockInDraftData): string[] {
   const missing: string[] = [];
@@ -59,7 +146,19 @@ function reviewMissing(d: StockInDraftData): string[] {
   return missing;
 }
 
-function reviewBlocks(d: StockInDraftData): KnownBlock[] {
+/** Action row of the three "read a slip" buttons (one Gemini call each). */
+function readButtons(): KnownBlock {
+  return {
+    type: 'actions',
+    elements: [
+      { type: 'button', text: { type: 'plain_text', text: '📄 Read invoice', emoji: true }, action_id: `${FLOW}:read_invoice` },
+      { type: 'button', text: { type: 'plain_text', text: '⚖️ Read party kata', emoji: true }, action_id: `${FLOW}:read_partykata` },
+      { type: 'button', text: { type: 'plain_text', text: '🏭 Read RVP weight', emoji: true }, action_id: `${FLOW}:read_rvp` },
+    ],
+  };
+}
+
+function reviewBlocks(d: StockInDraftData, note?: string): KnownBlock[] {
   const blocks: KnownBlock[] = [
     headerBlock('Stock-in'),
     contextBlock(`PO *${d.poNumber}* · ${d.partyName}`),
@@ -74,10 +173,12 @@ function reviewBlocks(d: StockInDraftData): KnownBlock[] {
       ...(d.priceType === 'BASE' ? [{ label: 'Inward freight', value: rupees(d.freightCharge) }] : []),
     ]),
   ];
+  if (note) blocks.push(contextBlock(note));
   const missing = reviewMissing(d);
   if (missing.length > 0) {
-    blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — use *Edit* to fill in.`));
+    blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — read the slip above or tap *Edit* to type it.`));
   }
+  blocks.push(readButtons());
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
   return blocks;
 }
@@ -152,7 +253,7 @@ function editModal(d: StockInDraftData, channel: string, messageTs: string, thre
 }
 
 export function registerStockInFlow(app: App): void {
-  // /stockin → pick a pending PO
+  // /stockin → pick the pending PO first (reliable), then read slips on demand.
   app.command('/stockin', async ({ command, ack, client, respond }) => {
     await ack();
     const user = await resolveErpUser(command.user_id);
@@ -168,117 +269,114 @@ export function registerStockInFlow(app: App): void {
       return;
     }
     if (!pos.length) {
-      await respond({ response_type: 'ephemeral', text: 'No pending purchase orders to receive against.' });
+      await respond({ response_type: 'ephemeral', text: 'No pending purchase orders to receive against. Create one with `/po` first.' });
       return;
     }
-    await client.chat.postMessage({
-      channel: command.channel_id,
-      text: 'Start a stock-in',
-      blocks: [
-        headerBlock('Stock-in'),
-        selectSection(
-          `${FLOW}:po_select`,
-          'Which lorry / PO is arriving?',
-          'Select PO',
-          pos.map((p) => ({
-            text: `${p.poNumber ?? p.id} · ${p.party?.name ?? '?'} · ${Math.round((p.tonnageKg ?? 0) / 1000)}t`,
-            value: p.id,
-          }))
-        ),
-      ],
-    });
+    await client.views.open({ trigger_id: command.trigger_id, view: poPickModal(pos, command.channel_id) });
   });
 
-  // PO selected → open the upload thread.
-  app.action(`${FLOW}:po_select`, async ({ ack, body, client }) => {
+  // PO picked → post the review card (no OCR yet; slips are read on demand).
+  app.view(`${FLOW}:po_submit`, async ({ ack, body, view, client }) => {
     await ack();
-    const b = body as any;
-    const user = await resolveErpUser(b.user.id);
+    const meta = JSON.parse(view.private_metadata || '{}');
+    const channel = meta.channel as string;
+    const user = await resolveErpUser(body.user.id);
     if (!user) return;
-    const poId = b.actions[0].selected_option.value;
-    const po = await apiGet(`/purchase-orders/${poId}`, user);
-
-    const threadTs = b.message.ts as string;
-    const data: StockInDraftData = {
-      poId,
-      poNumber: po.poNumber ?? poId,
-      partyName: po.party?.name ?? '?',
-      priceType: po.priceType === 'BASE' ? 'BASE' : 'DELIVERY',
-      step: 'await_invoice',
-      loadingLocation: 'At process',
-      freightCharge: 0,
-    };
-    setDraft(keyFor(b.channel.id, threadTs), {
+    const v = view.state.values as any;
+    const poId = v.po?.v?.selected_option?.value;
+    const location = v.location?.v?.selected_option?.value ?? 'At process';
+    let po: any;
+    try {
+      po = await apiGet(`/purchase-orders/${poId}`, user);
+    } catch (err) {
+      await client.chat.postMessage({ channel, text: `:x: ${(err as Error).message}` });
+      return;
+    }
+    const data = draftFromPo(po, location);
+    const posted = await client.chat.postMessage({ channel, text: 'Review stock-in', blocks: reviewBlocks(data) });
+    setDraft(keyFor(channel, posted.ts as string), {
       flow: FLOW,
       user,
-      slackUserId: b.user.id,
-      channel: b.channel.id,
-      threadTs,
+      slackUserId: body.user.id,
+      channel,
+      threadTs: posted.ts as string,
       data,
-    });
-
-    await client.chat.update({
-      channel: b.channel.id,
-      ts: threadTs,
-      text: 'Stock-in started',
-      blocks: [
-        headerBlock('Stock-in'),
-        contextBlock(`PO *${data.poNumber}* · ${data.partyName}`),
-        contextBlock(STEP_PROMPT.await_invoice),
-      ],
     });
   });
 
-  // Files uploaded into an active stock-in thread.
-  app.message(async ({ message, client }) => {
-    const m = message as any;
-    if (m.bot_id || !m.files?.length || !m.thread_ts) return;
-    const key = keyFor(m.channel, m.thread_ts);
+  // "Read <slip>" buttons → open a single-file upload modal for that slip kind.
+  const READ_ACTIONS: Record<string, ReadKind> = {
+    read_invoice: 'invoice',
+    read_partykata: 'partyKata',
+    read_rvp: 'rvpWeight',
+  };
+  for (const [action, kind] of Object.entries(READ_ACTIONS)) {
+    app.action(`${FLOW}:${action}`, async ({ ack, body, client }) => {
+      await ack();
+      const b = body as any;
+      const threadTs = b.message.thread_ts ?? b.message.ts;
+      await client.views.open({ trigger_id: b.trigger_id, view: readDocModal(kind, b.channel.id, threadTs) });
+    });
+  }
+
+  // Slip uploaded → ONE Gemini call, fill the relevant fields, refresh the card.
+  app.view(`${FLOW}:read_submit`, async ({ ack, view, client }) => {
+    await ack();
+    const meta = JSON.parse(view.private_metadata || '{}');
+    const channel = meta.channel as string;
+    const threadTs = meta.threadTs as string;
+    const kind = meta.kind as ReadKind;
+    const key = keyFor(channel, threadTs);
     const draft = getDraft<StockInDraftData>(key);
-    if (!draft || draft.data.step === 'review') return;
-
+    if (!draft) return;
     const d = draft.data;
-    const file = m.files[0];
-    let downloaded: DownloadedFile;
-    try {
-      downloaded = await downloadSlackFile(file);
-    } catch (err) {
-      await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: `:x: ${(err as Error).message}` });
-      return;
-    }
+    const v = view.state.values as any;
+    const file = v.file?.f?.files?.[0];
+    if (!file) return;
+
+    // Show progress while Gemini reads (the modal has already closed on ack).
+    await client.chat.update({
+      channel,
+      ts: threadTs,
+      text: 'Reading slip…',
+      blocks: reviewBlocks(d, `:hourglass_flowing_sand: Reading the ${DOC_LABEL[kind]}…`),
+    });
 
     try {
-      if (d.step === 'await_invoice') {
-        const r = await extractInvoiceData(downloaded.buffer, downloaded.mimetype, 'invoice', [d.partyName]);
+      const f = await downloadSlackFile(file);
+      // The PO is already chosen, so the invoice read needs no supplier matching.
+      const r = await extractInvoiceData(f.buffer, f.mimetype, kind);
+      if (kind === 'invoice') {
+        d.invoiceFile = f; // persist the invoice file even if some fields didn't read
         if (r.invoiceNumber) d.invoiceNumber = r.invoiceNumber;
-        if (r.lorryNumber) d.lorryNumber = r.lorryNumber;
-        if (r.arrivalDate) d.arrivalDate = r.arrivalDate;
         if (r.billingWeightKg) d.billingWeightKg = r.billingWeightKg;
-        d.invoiceFile = downloaded;
-        d.step = 'await_partykata';
-      } else if (d.step === 'await_partykata') {
-        const r = await extractInvoiceData(downloaded.buffer, downloaded.mimetype, 'partyKata');
+        if (r.arrivalDate) d.arrivalDate = r.arrivalDate;
+        if (!d.lorryNumber && r.lorryNumber) d.lorryNumber = r.lorryNumber;
+      } else if (kind === 'partyKata') {
         if (r.partyKataKg) d.partyKataKg = r.partyKataKg;
         if (!d.lorryNumber && r.lorryNumber) d.lorryNumber = r.lorryNumber;
-        d.step = 'await_rvp';
-      } else if (d.step === 'await_rvp') {
-        const r = await extractInvoiceData(downloaded.buffer, downloaded.mimetype, 'rvpWeight');
+      } else if (kind === 'rvpWeight') {
         if (r.rvpFirstWeightKg) d.rvpFirstWeightKg = r.rvpFirstWeightKg;
         if (!d.lorryNumber && r.lorryNumber) d.lorryNumber = r.lorryNumber;
-        d.step = 'review';
       }
+      setDraft(key, draft);
+      await client.chat.update({
+        channel,
+        ts: threadTs,
+        text: 'Review stock-in',
+        blocks: reviewBlocks(d, `:white_check_mark: Read the ${DOC_LABEL[kind]}. Check the values below.`),
+      });
     } catch (err) {
-      await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: `:x: Couldn't read that document: ${(err as Error).message}. Try again.` });
-      return;
-    }
-
-    if (!d.arrivalDate) d.arrivalDate = new Date().toISOString().slice(0, 10);
-    setDraft(key, draft);
-
-    if (d.step === 'review') {
-      await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: 'Review stock-in', blocks: reviewBlocks(d) });
-    } else {
-      await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: STEP_PROMPT[d.step], blocks: [contextBlock(STEP_PROMPT[d.step as Exclude<Step, 'review'>])] });
+      // A single failed read is non-fatal — keep the PO/other fields and let the
+      // user type this one. (Common cause: Gemini quota/billing — far rarer now
+      // that we make one call at a time.)
+      setDraft(key, draft);
+      await client.chat.update({
+        channel,
+        ts: threadTs,
+        text: 'Review stock-in',
+        blocks: reviewBlocks(d, `:warning: Couldn't read the ${DOC_LABEL[kind]} (${(err as Error).message}). Tap *Edit* to type it.`),
+      });
     }
   });
 
@@ -335,12 +433,13 @@ export function registerStockInFlow(app: App): void {
       await respond({ response_type: 'ephemeral', replace_original: false, text: `:x: Still missing: ${missing.join(', ')}. Use *Edit*.` });
       return;
     }
-    if (!d.invoiceFile) {
-      await respond({ response_type: 'ephemeral', replace_original: false, text: ':x: The invoice file is missing — re-run `/stockin` and upload the invoice.' });
-      return;
-    }
 
     try {
+      // The invoice file is optional (the ERP stores a blank URL when absent —
+      // e.g. the invoice values were typed rather than read from a photo).
+      const files = d.invoiceFile
+        ? [{ field: 'invoice', buffer: d.invoiceFile.buffer, filename: d.invoiceFile.filename, mimetype: d.invoiceFile.mimetype }]
+        : [];
       const created = await apiPostMultipart(
         '/stock-in',
         {
@@ -354,7 +453,7 @@ export function registerStockInFlow(app: App): void {
           loadingLocation: d.loadingLocation,
           freightCharge: d.priceType === 'BASE' ? d.freightCharge : 0,
         },
-        [{ field: 'invoice', buffer: d.invoiceFile.buffer, filename: d.invoiceFile.filename, mimetype: d.invoiceFile.mimetype }],
+        files,
         draft.user
       );
 
@@ -374,15 +473,28 @@ export function registerStockInFlow(app: App): void {
         text: 'Stock-in recorded',
         blocks: [
           headerBlock('✅ Stock-in recorded'),
+          contextBlock(`PO *${d.poNumber}* · ${d.partyName}`),
           fieldsSection([
-            { label: 'PO', value: d.poNumber },
+            { label: 'Arrival date', value: d.arrivalDate ? fmtDate(d.arrivalDate) : '—' },
             { label: 'Lorry', value: d.lorryNumber ?? '—' },
             { label: 'Invoice #', value: d.invoiceNumber ?? '—' },
+            { label: 'Billing weight', value: `${d.billingWeightKg} kg` },
+            { label: 'Party kata', value: `${d.partyKataKg} kg` },
             { label: 'RVP first weight', value: `${d.rvpFirstWeightKg} kg` },
+            { label: 'Location', value: d.loadingLocation },
+            ...(d.priceType === 'BASE' ? [{ label: 'Inward freight', value: rupees(d.freightCharge) }] : []),
           ]),
-          contextBlock(`Stock-in \`${created.id}\` created by <@${b.user.id}>${status}.`),
+          contextBlock(`Stock-in \`${created.id}\` created by <@${b.user.id}>${status}. :arrow_down: Now record the purchase.`),
         ],
       });
+
+      // Auto-chain into the purchase step (upload the RVP second-weight kata).
+      try {
+        const fullStockIn = await apiGet(`/stock-in/${created.id}`, draft.user);
+        await startPurchaseForStockIn(fullStockIn, draft.user, b.user.id, b.channel.id, client);
+      } catch {
+        /* non-fatal — the user can still run /purchase manually */
+      }
     } catch (err) {
       const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
       await respond({ response_type: 'ephemeral', replace_original: false, text: `:x: Couldn't record the stock-in: ${msg}` });

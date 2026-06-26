@@ -25,6 +25,7 @@ interface PoDraftData {
   partyId?: string;
   partyName?: string;
   tonnageTonnes?: number;
+  lorryCount?: number;
   pricePerKg?: number;
   priceType: 'BASE' | 'DELIVERY';
   rawText: string;
@@ -60,6 +61,7 @@ function summaryBlocks(d: PoDraftData): KnownBlock[] {
         label: 'Tonnage',
         value: d.tonnageTonnes ? `${d.tonnageTonnes} t (${tonnesToKg(d.tonnageTonnes)} kg)` : '_not set_',
       },
+      { label: 'Lorries', value: d.lorryCount ? String(d.lorryCount) : '_not set_' },
       { label: 'Price', value: d.pricePerKg ? `${rupees(d.pricePerKg)}/kg` : '_not set_' },
       { label: 'Price type', value: d.priceType },
     ])
@@ -77,19 +79,20 @@ function poMissing(d: PoDraftData): string[] {
   const missing: string[] = [];
   if (!d.partyId) missing.push('party');
   if (!d.poDate) missing.push('date');
-  if (!d.tonnageTonnes) missing.push('tonnage');
+  if (!d.tonnageTonnes && !d.lorryCount) missing.push('tonnage or lorries');
   if (!d.pricePerKg) missing.push('price');
   return missing;
 }
 
-/** Modal for editing PO fields. private_metadata carries channel + message ts. */
-function editModal(d: PoDraftData, channel: string, messageTs: string) {
+/** Modal for editing or creating PO fields. private_metadata carries channel + message ts. */
+function editModal(d: PoDraftData, channel: string, messageTs?: string) {
+  const isCreate = !messageTs;
   return {
     type: 'modal' as const,
-    callback_id: `${FLOW}:edit_submit`,
-    private_metadata: JSON.stringify({ channel, messageTs }),
-    title: { type: 'plain_text' as const, text: 'Edit Purchase Order' },
-    submit: { type: 'plain_text' as const, text: 'Save' },
+    callback_id: isCreate ? `${FLOW}:create_submit` : `${FLOW}:edit_submit`,
+    private_metadata: JSON.stringify(isCreate ? { channel } : { channel, messageTs }),
+    title: { type: 'plain_text' as const, text: isCreate ? 'Create Purchase Order' : 'Edit Purchase Order' },
+    submit: { type: 'plain_text' as const, text: isCreate ? 'Create' : 'Save' },
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
       {
@@ -107,10 +110,12 @@ function editModal(d: PoDraftData, channel: string, messageTs: string) {
                 },
               }
             : {}),
-          options: d.suppliers.map((s) => ({
-            text: { type: 'plain_text', text: s.name.slice(0, 75) },
-            value: s.id,
-          })),
+          options: d.suppliers.length > 0 
+            ? d.suppliers.map((s) => ({
+                text: { type: 'plain_text', text: s.name.slice(0, 75) },
+                value: s.id,
+              }))
+            : [{ text: { type: 'plain_text', text: 'No suppliers found' }, value: 'none' }],
         },
       },
       {
@@ -126,11 +131,23 @@ function editModal(d: PoDraftData, channel: string, messageTs: string) {
       {
         type: 'input',
         block_id: 'tonnage',
+        optional: true,
         label: { type: 'plain_text', text: 'Tonnage (tonnes)' },
         element: {
           type: 'plain_text_input',
           action_id: 'v',
           ...(d.tonnageTonnes ? { initial_value: String(d.tonnageTonnes) } : {}),
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'lorryCount',
+        optional: true,
+        label: { type: 'plain_text', text: 'Lorry count' },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'v',
+          ...(d.lorryCount ? { initial_value: String(d.lorryCount) } : {}),
         },
       },
       {
@@ -182,9 +199,22 @@ export function registerPurchaseOrderFlow(app: App): void {
     }
     const text = (command.text || '').trim();
     if (!text) {
-      await respond({
-        response_type: 'ephemeral',
-        text: 'Usage: `/po <date>, <party>, <tonnage>, <price>` — e.g. `/po 22 Jun, DCS Traders, 50 tonnes, 25.5/kg`',
+      let suppliers: Supplier[];
+      try {
+        suppliers = await loadSuppliers(user);
+      } catch (err) {
+        await respond({ response_type: 'ephemeral', text: `:x: Couldn't load suppliers: ${(err as Error).message}` });
+        return;
+      }
+      const data: PoDraftData = {
+        poDate: new Date().toISOString().slice(0, 10),
+        priceType: 'DELIVERY',
+        rawText: '',
+        suppliers,
+      };
+      await client.views.open({
+        trigger_id: command.trigger_id,
+        view: editModal(data, command.channel_id),
       });
       return;
     }
@@ -229,6 +259,7 @@ export function registerPurchaseOrderFlow(app: App): void {
       partyId,
       partyName,
       tonnageTonnes: parsed.tonnageTonnes,
+      lorryCount: parsed.lorryCount,
       pricePerKg: parsed.pricePerKg,
       priceType: parsed.priceType ?? 'DELIVERY',
       rawText: text,
@@ -283,6 +314,75 @@ export function registerPurchaseOrderFlow(app: App): void {
     });
   });
 
+  // Create modal submitted (direct from /po without text).
+  app.view(`${FLOW}:create_submit`, async ({ ack, body, view, client }) => {
+    const v = view.state.values as any;
+    const t = parseFloat(v.tonnage?.v?.value);
+    const lc = parseInt(v.lorryCount?.v?.value, 10);
+    const isValidT = !isNaN(t) && t > 0;
+    const isValidLc = !isNaN(lc) && lc > 0;
+    
+    if (!isValidT && !isValidLc) {
+      await ack({
+        response_action: 'errors',
+        errors: {
+          tonnage: 'Provide either tonnage or lorry count',
+          lorryCount: 'Provide either tonnage or lorry count',
+        },
+      });
+      return;
+    }
+    await ack();
+
+    const meta = JSON.parse(view.private_metadata || '{}');
+    const user = await resolveErpUser(body.user.id);
+    if (!user) return; // shouldn't happen, checked at command time
+    
+    const partyId = v.party?.v?.selected_option?.value;
+    const partyName = v.party?.v?.selected_option?.text?.text;
+    const poDate = v.date?.v?.selected_date ?? new Date().toISOString().slice(0, 10);
+    const pricePerKg = parseFloat(v.price?.v?.value);
+    const priceType = v.priceType?.v?.selected_option?.value === 'BASE' ? 'BASE' : 'DELIVERY';
+
+    try {
+      const created = await apiPost(
+        '/purchase-orders',
+        {
+          poDate,
+          partyId,
+          pricePerKg,
+          priceType,
+          tonnageKg: isValidT ? tonnesToKg(t) : (isValidLc ? lc * 25000 : 0),
+          lorryCount: isValidLc ? lc : undefined,
+        },
+        user
+      );
+      
+      await client.chat.postMessage({
+        channel: meta.channel,
+        text: 'Purchase Order created',
+        blocks: [
+          headerBlock('✅ Purchase Order created'),
+          fieldsSection([
+            { label: 'PO number', value: created.poNumber ?? created.id },
+            { label: 'Party', value: partyName ?? '—' },
+            { label: 'PO date', value: poDate ? fmtDate(poDate) : '—' },
+            { label: 'Tonnage', value: isValidT ? `${t} t` : `${lc} lorries` },
+            { label: 'Price', value: `${rupees(pricePerKg)}/kg (${priceType})` },
+          ]),
+          contextBlock(`Created directly by <@${body.user.id}>. When a lorry arrives, run \`/stockin\` to receive it.`),
+        ],
+      });
+    } catch (err) {
+      const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
+      await client.chat.postEphemeral({
+        channel: meta.channel,
+        user: body.user.id,
+        text: `:x: Couldn't create the PO: ${msg}`
+      });
+    }
+  });
+
   // Edit modal submitted.
   app.view(`${FLOW}:edit_submit`, async ({ ack, body, view, client }) => {
     await ack();
@@ -297,6 +397,8 @@ export function registerPurchaseOrderFlow(app: App): void {
     draft.data.poDate = v.date?.v?.selected_date ?? draft.data.poDate;
     const t = parseFloat(v.tonnage?.v?.value);
     if (!isNaN(t) && t > 0) draft.data.tonnageTonnes = t;
+    const lc = parseInt(v.lorryCount?.v?.value, 10);
+    if (!isNaN(lc) && lc > 0) draft.data.lorryCount = lc;
     const p = parseFloat(v.price?.v?.value);
     if (!isNaN(p) && p > 0) draft.data.pricePerKg = p;
     draft.data.priceType = v.priceType?.v?.selected_option?.value === 'BASE' ? 'BASE' : 'DELIVERY';
@@ -334,11 +436,13 @@ export function registerPurchaseOrderFlow(app: App): void {
           partyId: d.partyId,
           pricePerKg: d.pricePerKg,
           priceType: d.priceType,
-          tonnageKg: tonnesToKg(d.tonnageTonnes!),
+          tonnageKg: d.tonnageTonnes ? tonnesToKg(d.tonnageTonnes) : (d.lorryCount ? d.lorryCount * 25000 : 0),
+          lorryCount: d.lorryCount,
         },
         draft.user
       );
       clearDraft(key);
+      const tonnage = d.tonnageTonnes ? `${d.tonnageTonnes} t (${tonnesToKg(d.tonnageTonnes)} kg)` : `${d.lorryCount} lorries`;
       await client.chat.update({
         channel: b.channel.id,
         ts: b.message.ts,
@@ -348,10 +452,12 @@ export function registerPurchaseOrderFlow(app: App): void {
           fieldsSection([
             { label: 'PO number', value: created.poNumber ?? created.id },
             { label: 'Party', value: d.partyName ?? '—' },
-            { label: 'Tonnage', value: `${d.tonnageTonnes} t` },
+            { label: 'PO date', value: d.poDate ? fmtDate(d.poDate) : '—' },
+            { label: 'Tonnage', value: tonnage },
+            { label: 'Lorries', value: d.lorryCount ? String(d.lorryCount) : '1' },
             { label: 'Price', value: `${rupees(d.pricePerKg!)}/kg (${d.priceType})` },
           ]),
-          contextBlock(`Created by <@${b.user.id}> · split per-lorry under one order group.`),
+          contextBlock(`Created by <@${b.user.id}> · split per-lorry under one order group. When a lorry arrives, run \`/stockin\` to receive it.`),
         ],
       });
     } catch (err) {

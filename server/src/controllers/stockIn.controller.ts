@@ -35,7 +35,7 @@ export async function getStockIn(req: Request, res: Response) {
  */
 export async function extractStockInInvoice(req: Request, res: Response) {
   if (!req.file) throw new HttpError(400, 'Document file is required');
-  const allowed: DocumentKind[] = ['invoice', 'partyKata', 'rvpWeight'];
+  const allowed: DocumentKind[] = ['invoice', 'partyKata', 'rvpWeight', 'rvpSecondWeight'];
   const kind = (req.body?.kind as DocumentKind) ?? 'invoice';
   if (!allowed.includes(kind)) throw new HttpError(400, 'Invalid document kind');
 

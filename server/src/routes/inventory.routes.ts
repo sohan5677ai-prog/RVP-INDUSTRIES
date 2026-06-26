@@ -3,6 +3,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import {
   getStockByParty,
   getStockByState,
+  getStockByPrice,
   getBlackSeedStock,
   getSilos,
 } from '../controllers/inventory.controller.js';
@@ -22,6 +23,7 @@ const router = Router();
 router.get('/inventory/black-seed', asyncHandler(getBlackSeedStock));
 router.get('/inventory/by-party', asyncHandler(getStockByParty));
 router.get('/inventory/by-state', asyncHandler(getStockByState));
+router.get('/inventory/by-price', asyncHandler(getStockByPrice));
 router.get('/inventory/silos', asyncHandler(getSilos));
 
 router.get('/stock-transfers', asyncHandler(listStockTransfers));

@@ -13,13 +13,14 @@ export interface ExtractedInvoice {
   billingWeightKg?: number;
   partyKataKg?: number;
   rvpFirstWeightKg?: number;
+  rvpSecondWeightKg?: number; // empty/tare lorry weight (RVP second kata)
   partyName?: string; // supplier/seller name printed on the invoice
   pricePerKg?: number; // rate per kg quoted on the invoice
   matchedPartyName?: string; // exact known-supplier name this invoice maps to, if any
 }
 
 /** Which stock-in document is being read. */
-export type DocumentKind = 'invoice' | 'partyKata' | 'rvpWeight';
+export type DocumentKind = 'invoice' | 'partyKata' | 'rvpWeight' | 'rvpSecondWeight';
 
 const PROMPTS: Record<DocumentKind, string> = {
   invoice: `You are reading a supplier's lorry INVOICE for a tamarind/agro trading business.
@@ -67,6 +68,15 @@ Extract these fields and return them as JSON:
 - lorryNumber: the lorry / vehicle registration number if shown (e.g. "AP02AB1234"). Remove spaces.
 If the slip shows multiple weights, pick the larger (loaded) one as the first weight.
 Only include a field you can read with reasonable confidence. Do not guess.`,
+
+  rvpSecondWeight: `You are reading OUR OWN weighbridge slip ("RVP Kata") for a lorry of tamarind seed
+AFTER it has been UNLOADED — this is the SECOND / TARE weighing of the now-empty lorry.
+Extract these fields and return them as JSON:
+- rvpSecondWeightKg: the SECOND / TARE / EMPTY-lorry weight in KILOGRAMS.
+  Convert tonnes/quintals to kg (1 tonne = 1000 kg, 1 quintal = 100 kg). Whole number.
+- lorryNumber: the lorry / vehicle registration number if shown (e.g. "AP02AB1234"). Remove spaces.
+If the slip shows multiple weights, pick the SMALLER (empty) one as the second/tare weight.
+Only include a field you can read with reasonable confidence. Do not guess.`,
 };
 
 /**
@@ -113,6 +123,13 @@ const SCHEMAS: Record<DocumentKind, object> = {
       lorryNumber: { type: Type.STRING },
     },
   },
+  rvpSecondWeight: {
+    type: Type.OBJECT,
+    properties: {
+      rvpSecondWeightKg: { type: Type.NUMBER },
+      lorryNumber: { type: Type.STRING },
+    },
+  },
 };
 
 let client: GoogleGenAI | null = null;
@@ -148,56 +165,91 @@ export async function extractInvoiceData(
       : PROMPTS[kind];
 
   let response;
-  try {
-    response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType, data: buffer.toString('base64') } },
-          ],
+  let lastErr: Error | unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType, data: buffer.toString('base64') } },
+            ],
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: SCHEMAS[kind],
         },
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: SCHEMAS[kind],
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    throw new HttpError(502, `Gemini could not read the document: ${message}`);
+      });
+      break; // Success
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || msg.includes('503') || msg.includes('Too Many Requests')) {
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+          continue;
+        }
+      }
+      throw new HttpError(502, `Gemini could not read the document: ${msg}`);
+    }
+  }
+
+  if (!response) {
+    const msg = lastErr instanceof Error ? lastErr.message : 'Unknown error';
+    throw new HttpError(502, `Gemini could not read the document after retries: ${msg}`);
   }
 
   const text = response.text;
   if (!text) throw new HttpError(502, 'Gemini returned an empty response');
 
-  let parsed: ExtractedInvoice;
+  let parsed: any;
   try {
-    parsed = JSON.parse(text) as ExtractedInvoice;
+    parsed = JSON.parse(text);
   } catch {
     throw new HttpError(502, 'Gemini returned an unreadable response');
   }
+
+  // Helper to parse weights robustly, even if Gemini returns a string despite the schema
+  const parseWeight = (val: any): number | undefined => {
+    if (typeof val === 'number' && val > 0) return Math.round(val);
+    if (typeof val === 'string') {
+      const num = parseInt(val.replace(/[^\d.]/g, ''), 10);
+      if (!isNaN(num) && num > 0) return Math.round(num);
+    }
+    return undefined;
+  };
 
   // Normalise: trim strings, round weights to whole positive kg, drop blanks.
   const clean: ExtractedInvoice = {};
   if (parsed.invoiceNumber?.toString().trim()) clean.invoiceNumber = parsed.invoiceNumber.toString().trim();
   if (parsed.lorryNumber?.toString().trim()) clean.lorryNumber = parsed.lorryNumber.toString().replace(/\s+/g, '').trim();
   if (parsed.arrivalDate?.toString().trim()) clean.arrivalDate = parsed.arrivalDate.toString().trim();
-  if (typeof parsed.billingWeightKg === 'number' && parsed.billingWeightKg > 0) {
-    clean.billingWeightKg = Math.round(parsed.billingWeightKg);
-  }
-  if (typeof parsed.partyKataKg === 'number' && parsed.partyKataKg > 0) {
-    clean.partyKataKg = Math.round(parsed.partyKataKg);
-  }
-  if (typeof parsed.rvpFirstWeightKg === 'number' && parsed.rvpFirstWeightKg > 0) {
-    clean.rvpFirstWeightKg = Math.round(parsed.rvpFirstWeightKg);
-  }
+  
+  const bw = parseWeight(parsed.billingWeightKg);
+  if (bw) clean.billingWeightKg = bw;
+  
+  const pk = parseWeight(parsed.partyKataKg);
+  if (pk) clean.partyKataKg = pk;
+  
+  const r1 = parseWeight(parsed.rvpFirstWeightKg);
+  if (r1) clean.rvpFirstWeightKg = r1;
+  
+  const r2 = parseWeight(parsed.rvpSecondWeightKg);
+  if (r2) clean.rvpSecondWeightKg = r2;
+
   if (parsed.partyName?.toString().trim()) clean.partyName = parsed.partyName.toString().trim();
+  
   if (typeof parsed.pricePerKg === 'number' && parsed.pricePerKg > 0) {
     clean.pricePerKg = parsed.pricePerKg;
+  } else if (typeof parsed.pricePerKg === 'string') {
+    const p = parseFloat(parsed.pricePerKg.replace(/[^\d.]/g, ''));
+    if (!isNaN(p) && p > 0) clean.pricePerKg = p;
   }
+
   // Only trust matchedPartyName if it is exactly one of the candidates we sent
   // (case-insensitive), so Gemini can't invent a supplier. Return the canonical
   // spelling from our list, not Gemini's echo.
@@ -219,6 +271,7 @@ export interface ExtractedPurchaseOrder {
   partyName?: string; // raw party name as written in the message
   matchedPartyName?: string; // exact known-supplier name this maps to, if any
   tonnageTonnes?: number; // committed quantity in TONNES
+  lorryCount?: number; // number of lorries, if specified
   pricePerKg?: number; // rate per kg
   priceType?: 'BASE' | 'DELIVERY';
 }
@@ -230,6 +283,7 @@ const PO_TEXT_SCHEMA = {
     partyName: { type: Type.STRING },
     matchedPartyName: { type: Type.STRING },
     tonnageTonnes: { type: Type.NUMBER },
+    lorryCount: { type: Type.NUMBER },
     pricePerKg: { type: Type.NUMBER },
     priceType: { type: Type.STRING },
   },
@@ -251,8 +305,8 @@ business. Today's date is ${today}. Extract these fields and return them as JSON
 - poDate: the order date in ISO format yyyy-mm-dd. If only a day/month is given, assume the
   current or most recent matching date relative to today. If no date is given, use today.
 - partyName: the SUPPLIER / party name exactly as written in the message.
-- tonnageTonnes: the committed quantity in TONNES. If the quantity is stated in kg or quintals,
-  convert to tonnes (1000 kg = 1 tonne, 1 quintal = 0.1 tonne). A plain number.
+- lorryCount: the number of lorries. If the user gives a comma separated format like <date>,<party>,<lorries>,<price>, the 3rd value is the number of lorries (e.g. "2").
+- tonnageTonnes: the committed quantity in TONNES. If the user specifies the number of lorries instead, assume 1 lorry = 25 tonnes (so 2 lorries = 50 tonnes). If explicitly stated in kg or quintals, convert to tonnes (1000 kg = 1 tonne). A plain number.
 - pricePerKg: the rate per KILOGRAM. If quoted per tonne or per quintal, convert to per-kg
   (1 tonne = 1000 kg, 1 quintal = 100 kg). A plain number.
 - priceType: "BASE" if the price is at the supplier's location / ex-works / loading point
@@ -298,6 +352,9 @@ Message: ${JSON.stringify(text)}`;
   if (parsed.partyName?.toString().trim()) clean.partyName = parsed.partyName.toString().trim();
   if (typeof parsed.tonnageTonnes === 'number' && parsed.tonnageTonnes > 0) {
     clean.tonnageTonnes = parsed.tonnageTonnes;
+  }
+  if (typeof parsed.lorryCount === 'number' && parsed.lorryCount > 0) {
+    clean.lorryCount = parsed.lorryCount;
   }
   if (typeof parsed.pricePerKg === 'number' && parsed.pricePerKg > 0) {
     clean.pricePerKg = parsed.pricePerKg;
@@ -433,6 +490,141 @@ Message: ${JSON.stringify(text)}`;
   if (brokerEcho) {
     const canonical = brokers.find((c) => c.trim().toLowerCase() === brokerEcho);
     if (canonical) clean.matchedBrokerName = canonical;
+  }
+  return clean;
+}
+
+/**
+ * Fields read off a bank-transfer / UPI / cheque payment screenshot, used to
+ * pre-fill a Payment (money out) or Receipt (money in) before it's recorded to
+ * the party account. Every field is optional — the user confirms before saving.
+ */
+export interface ExtractedTransaction {
+  amount?: number; // the transaction amount in rupees
+  date?: string; // ISO yyyy-mm-dd
+  reference?: string; // UTR / UPI txn id / cheque number / RRN
+  counterpartyName?: string; // the OTHER party's name as printed on the screenshot
+  matchedPartyName?: string; // exact known-party name this maps to, if any
+  description?: string; // any note / remark / narration on the screenshot
+}
+
+const TXN_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    amount: { type: Type.NUMBER },
+    date: { type: Type.STRING },
+    reference: { type: Type.STRING },
+    counterpartyName: { type: Type.STRING },
+    matchedPartyName: { type: Type.STRING },
+    description: { type: Type.STRING },
+  },
+} as const;
+
+/**
+ * Read a payment/receipt transaction screenshot (bank app, UPI, NEFT/RTGS
+ * confirmation, or a cheque photo) and extract the fields needed to record it.
+ * `perspective` tells Gemini who the counterparty is: for a 'payment' the
+ * counterparty is the BENEFICIARY we sent money to; for a 'receipt' it is the
+ * SENDER we received money from. When `candidates` is given, Gemini maps the
+ * counterparty to one of our known parties (handling abbreviations/spelling).
+ */
+export async function extractTransactionData(
+  buffer: Buffer,
+  mimeType: string,
+  perspective: 'payment' | 'receipt',
+  candidates: string[] = []
+): Promise<ExtractedTransaction> {
+  const ai = getClient();
+
+  const counterpartyDesc =
+    perspective === 'payment'
+      ? `the BENEFICIARY / payee / "To" account — the party WE PAID money to. Ignore our own
+  account/sender details (the debited account is ours, not the counterparty).`
+      : `the SENDER / remitter / "From" account — the party WE RECEIVED money from. Ignore our
+  own account/beneficiary details (the credited account is ours, not the counterparty).`;
+
+  const prompt = `You are reading a screenshot (or photo) of a single bank / UPI / NEFT / RTGS / IMPS
+transfer confirmation or a cheque, for an Indian tamarind/agro trading business. Extract these
+fields and return them as JSON:
+- amount: the transaction amount in RUPEES as a plain number (strip "₹", "Rs.", commas).
+- date: the transaction date in ISO format yyyy-mm-dd. If a time is shown, ignore it.
+- reference: the transaction reference — the UTR / UPI transaction id / RRN / cheque number /
+  bank reference number. Prefer the UTR/UPI id if several are present. A string.
+- counterpartyName: ${counterpartyDesc} Return the name exactly as printed.
+- description: any short narration / remark / note shown on the transfer, if present.
+Only include a field you can read with reasonable confidence. Do not guess.
+${
+  candidates.length > 0
+    ? `\nBelow is a list of KNOWN PARTIES in our system. Decide which one (if any) is the
+counterparty described above. Match by meaning, allowing for abbreviations, initials, "M/s",
+dots, punctuation and minor spelling differences.
+- matchedPartyName: copy the matching entry EXACTLY as written below. If none clearly
+  corresponds, omit this field entirely. Never invent a name.
+Known parties: ${JSON.stringify(candidates)}`
+    : ''
+}`;
+
+  let response;
+  let lastErr: Error | unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType, data: buffer.toString('base64') } },
+            ],
+          },
+        ],
+        config: { responseMimeType: 'application/json', responseSchema: TXN_SCHEMA },
+      });
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if ((msg.includes('429') || msg.includes('503') || msg.includes('Too Many Requests')) && attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+        continue;
+      }
+      throw new HttpError(502, `Gemini could not read the screenshot: ${msg}`);
+    }
+  }
+
+  if (!response) {
+    const msg = lastErr instanceof Error ? lastErr.message : 'Unknown error';
+    throw new HttpError(502, `Gemini could not read the screenshot after retries: ${msg}`);
+  }
+
+  const out = response.text;
+  if (!out) throw new HttpError(502, 'Gemini returned an empty response');
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    throw new HttpError(502, 'Gemini returned an unreadable response');
+  }
+
+  const clean: ExtractedTransaction = {};
+  if (typeof parsed.amount === 'number' && parsed.amount > 0) {
+    clean.amount = parsed.amount;
+  } else if (typeof parsed.amount === 'string') {
+    const a = parseFloat(parsed.amount.replace(/[^\d.]/g, ''));
+    if (!isNaN(a) && a > 0) clean.amount = a;
+  }
+  if (parsed.date?.toString().trim()) clean.date = parsed.date.toString().trim();
+  if (parsed.reference?.toString().trim()) clean.reference = parsed.reference.toString().trim();
+  if (parsed.counterpartyName?.toString().trim()) clean.counterpartyName = parsed.counterpartyName.toString().trim();
+  if (parsed.description?.toString().trim()) clean.description = parsed.description.toString().trim();
+
+  // Only trust a match that is exactly one of the candidates (case-insensitive).
+  const matchEcho = parsed.matchedPartyName?.toString().trim().toLowerCase();
+  if (matchEcho) {
+    const canonical = candidates.find((c) => c.trim().toLowerCase() === matchEcho);
+    if (canonical) clean.matchedPartyName = canonical;
   }
   return clean;
 }

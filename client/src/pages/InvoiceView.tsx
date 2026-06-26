@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Printer, Save, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, CompanyProfile, ProductTaxInfo } from '@/lib/types';
+import type { SaleDispatch, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { inr, rupeesInWords } from '@/lib/invoiceWords';
 import { Button } from '@/components/ui/button';
 
@@ -41,7 +41,8 @@ export default function InvoiceView() {
   const navigate = useNavigate();
   const [showControls, setShowControls] = useState(true);
 
-  const { data: order } = useQuery({ queryKey: ['sale-order', id], queryFn: () => api<SaleOrder>(`/sale-orders/${id}`), enabled: !!id });
+  const { data: dispatch } = useQuery({ queryKey: ['sale-dispatch', id], queryFn: () => api<SaleDispatch>(`/sale-dispatches/${id}`), enabled: !!id });
+  const order = dispatch?.saleOrder;
   const { data: company } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
   const { data: taxRows } = useQuery({ queryKey: ['product-tax'], queryFn: () => api<ProductTaxInfo[]>('/settings/product-tax') });
 
@@ -61,13 +62,13 @@ export default function InvoiceView() {
 
   const tax = taxRows?.find((t) => t.product === order?.product);
   const amounts = useMemo(() => {
-    if (!order) return { base: 0, gst: 0, total: 0 };
-    const base = order.tonnageKg * Number(order.ratePerKg);
+    if (!dispatch || !order) return { base: 0, gst: 0, total: 0 };
+    const base = dispatch.weightKg * Number(order.ratePerKg);
     const gst = Math.round(base * GST_RATE * 100) / 100;
     return { base, gst, total: base + gst };
-  }, [order]);
+  }, [dispatch, order]);
 
-  if (!order || !company) return <div className="p-8 text-muted-foreground">Loading invoice…</div>;
+  if (!dispatch || !order || !company) return <div className="p-8 text-muted-foreground">Loading invoice…</div>;
 
   const paperW = PAPER_W[layout.paperSize] ?? 210;
   const gstPct = Math.round(GST_RATE * 100);
@@ -75,7 +76,7 @@ export default function InvoiceView() {
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
   const description = tax?.description || PRODUCT_FALLBACK[order.product] || order.product;
   const hsn = tax?.hsn || '';
-  const qtyStr = `${order.tonnageKg.toLocaleString('en-IN')} Kgs`;
+  const qtyStr = `${dispatch.weightKg.toLocaleString('en-IN')} Kgs`;
   const c = layout.cols;
 
   return (
@@ -103,7 +104,7 @@ export default function InvoiceView() {
         <Button variant="ghost" size="sm" onClick={() => navigate('/sale-orders')}><ArrowLeft className="h-4 w-4" /> Back</Button>
         <Button size="sm" onClick={() => window.print()}><Printer className="h-4 w-4" /> Print / Save PDF</Button>
         <Button size="sm" variant="outline" onClick={() => setShowControls((s) => !s)}><SlidersHorizontal className="h-4 w-4" /> {showControls ? 'Hide' : 'Adjust'} layout</Button>
-        <span className="ml-auto text-sm text-muted-foreground">Invoice {order.invoiceNumber ?? '(not raised)'}</span>
+        <span className="ml-auto text-sm text-muted-foreground">Invoice {dispatch.invoiceNumber ?? '(not raised)'}</span>
       </div>
 
       {showControls && (
@@ -139,6 +140,27 @@ export default function InvoiceView() {
         >
           <div className="center" style={{ fontWeight: 'bold', fontSize: '1.5em', marginBottom: 4 }}>Tax Invoice</div>
 
+          {dispatch.irn && (
+            <div style={{ display: 'flex', gap: 12, border: '1px solid #000', padding: '4px 8px', marginBottom: 6, fontSize: '0.85em', alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <div><span style={{ fontWeight: 'bold' }}>IRN:</span> <span style={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '1.05em' }}>{dispatch.irn}</span></div>
+                <div style={{ display: 'flex', gap: 30, marginTop: 4 }}>
+                  <div><span style={{ fontWeight: 'bold' }}>Ack No:</span> {dispatch.irnAckNo}</div>
+                  <div><span style={{ fontWeight: 'bold' }}>Ack Date:</span> {dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : ''}</div>
+                </div>
+              </div>
+              {dispatch.irnSignedQr && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid #ddd', paddingLeft: 8 }}>
+                  <img 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=${encodeURIComponent(dispatch.irnSignedQr)}`} 
+                    alt="E-Invoice QR Code"
+                    style={{ width: 64, height: 64 }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Header: seller/buyer + meta grid */}
           <table>
             <colgroup>
@@ -166,16 +188,16 @@ export default function InvoiceView() {
                     {order.buyer?.state && <div className="lbl">Place of Supply : {order.buyer.state}</div>}
                   </div>
                 </td>
-                <MetaCell label="Invoice No." value={order.invoiceNumber ?? ''} />
-                <MetaCell label="e-Way Bill No." value="" />
-                <MetaCell label="Dated" value={order.invoiceDate ? fmtDate(new Date(order.invoiceDate)) : ''} />
+                <MetaCell label="Invoice No." value={dispatch.invoiceNumber ?? ''} />
+                <MetaCell label="e-Way Bill No." value={dispatch.ewbNumber ?? ''} />
+                <MetaCell label="Dated" value={dispatch.invoiceDate ? fmtDate(new Date(dispatch.invoiceDate)) : ''} />
               </tr>
               <tr><MetaCell colSpan={2} label="Delivery Note" value="" /><MetaCell label="Mode/Terms of Payment" value="" /></tr>
               <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell label="Other References" value="" /></tr>
               <tr><MetaCell colSpan={2} label="Buyer's Order No." value="" /><MetaCell label="Dated" value="" /></tr>
               <tr><MetaCell colSpan={2} label="Dispatch Doc No." value="" /><MetaCell label="Delivery Note Date" value="" /></tr>
               <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" /><MetaCell label="Destination" value={order.destination ?? ''} /></tr>
-              <tr><MetaCell colSpan={2} label="Bill of Lading/LR-RR No." value="" /><MetaCell label="Motor Vehicle No." value={order.vehicleNumber ?? ''} /></tr>
+              <tr><MetaCell colSpan={2} label="Bill of Lading/LR-RR No." value="" /><MetaCell label="Motor Vehicle No." value={dispatch.vehicleNumber ?? ''} /></tr>
               <tr><MetaCell colSpan={3} label="Terms of Delivery" value="" /></tr>
             </tbody>
           </table>

@@ -9,8 +9,9 @@ datasource db {
 
 enum Role {
   ADMIN
-  MANAGER
-  OPERATOR
+  USER
+  OWNER
+  DEVELOPER
 }
 
 enum PartyType {
@@ -28,8 +29,8 @@ enum POStatus {
 
 enum SaleStatus {
   PENDING
+  PARTIAL
   DISPATCHED
-  REACHED
   DELIVERED
 }
 
@@ -47,9 +48,9 @@ enum SaleProduct {
 model User {
   id        String   @id @default(cuid())
   name      String
-  email     String   @unique
+  username  String   @unique
   password  String
-  role      Role     @default(OPERATOR)
+  role      Role     @default(USER)
   // Slack member ID (e.g. "U0123ABCD") used to attribute Slack-driven actions to
   // this ERP user. Null until an admin links the account.
   slackUserId String? @unique
@@ -192,7 +193,7 @@ model SaleOrder {
   buyerId        String
   broker         Broker?     @relation(fields: [brokerId], references: [id])
   brokerId       String?
-  tonnageKg      Int // total weight sold, per RVP kata (kg)
+  tonnageKg      Int // total weight ORDERED, per RVP kata (kg) — never overwritten
   ratePerKg      Decimal     @db.Decimal(12, 2)
   gstAmount      Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate
   brokerageRatePerKg Decimal   @default(0) @db.Decimal(12, 2)
@@ -200,32 +201,87 @@ model SaleOrder {
   // since pappu etc. is sold at a delivery price. Freight is our selling expense.
   destination    String?
   freightCharge  Decimal     @default(0) @db.Decimal(12, 2)
+  // PENDING (nothing dispatched) → PARTIAL (some, remaining > 0) → DISPATCHED
+  // (fully dispatched). The order itself is never DELIVERED; delivery is tracked
+  // per dispatch (shipment).
   status         SaleStatus  @default(PENDING)
   marginOverride Boolean     @default(false)
-  // Payment terms: number of credit days. The clock starts from deliveredDate
-  // (when the order is marked DELIVERED), so dueDate = deliveredDate + dueDays.
+  // Payment terms: number of credit days. The clock starts from each dispatch's
+  // deliveredDate, so dueDate = dispatch.deliveredDate + dueDays.
   dueDays        Int?
+
+  // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
+  dispatches     SaleDispatch[]
+
+  // --- Legacy columns (pre multi-dispatch). No longer written; kept so the
+  // backfill migration can copy them into the first SaleDispatch row. ---
   receivedDate   DateTime?
   deliveredDate  DateTime?
-  // Captured at dispatch from the uploaded invoice + kata slip.
   invoiceNumber  String?
   vehicleNumber  String?
   invoiceFileUrl String?
   kataFileUrl    String?
-  
-  // Delivery matching (Kata slip sent by buyer after REACHED)
   buyerKataKg    Int?
   shortageKg     Int?
   creditNoteAmount Decimal?    @db.Decimal(12, 2)
   buyerKataFileUrl String?
+  invoiceSeq     Int?
+  invoiceFy      String?
+  invoiceDate    DateTime?
+
+  createdAt      DateTime    @default(now())
+}
+
+// A single physical dispatch (one lorry) shipped against a SaleOrder. Carries the
+// actual kata weight, the sale's ledger posting, its own tax invoice, and the
+// delivery + buyer-kata shortage settlement. An order may have many of these.
+model SaleDispatch {
+  id             String     @id @default(cuid())
+  saleOrder      SaleOrder  @relation(fields: [saleOrderId], references: [id])
+  saleOrderId    String
+  dispatchDate   DateTime   @default(now())
+  weightKg       Int // actual dispatched weight, per RVP kata (kg)
+  internalWeightKg Int? // weight before kata (without moisture gain)
+  gstAmount      Decimal    @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate
+  freightCharge  Decimal    @default(0) @db.Decimal(12, 2)
+  // DISPATCHED → DELIVERED.
+  status         SaleStatus @default(DISPATCHED)
+  vehicleNumber  String?
+  kataFileUrl    String?
+
+  // Delivery matching (buyer's kata slip captured at delivery).
+  receivedDate     DateTime?
+  deliveredDate    DateTime?
+  buyerKataKg      Int?
+  shortageKg       Int?
+  internalWeightProfitAmount Decimal? @db.Decimal(12, 2)
+  creditNoteAmount Decimal?  @db.Decimal(12, 2)
+  buyerKataFileUrl String?
 
   // Generated tax invoice. Number = prefix/seq/FY; seq resets each financial year.
+  invoiceNumber  String?
   invoiceSeq     Int?
   invoiceFy      String? // Indian financial year, e.g. "2026-27"
   invoiceDate    DateTime?
 
-  createdAt      DateTime    @default(now())
+  // E-Invoice (IRN) details
+  irn            String?
+  irnAckNo       String?
+  irnAckDate     DateTime?
+  irnSignedQr    String?
+  irnStatus      String?    // 'GENERATED', 'CANCELLED'
+  irnCancelledDate DateTime?
 
+  // E-Way Bill details
+  ewbNumber      String?
+  ewbDate        DateTime?
+  ewbValidUpto   DateTime?
+  ewbStatus      String?    // 'GENERATED', 'CANCELLED'
+  ewbCancelledDate DateTime?
+
+  createdAt      DateTime   @default(now())
+
+  @@index([saleOrderId])
   @@unique([invoiceFy, invoiceSeq])
 }
 
@@ -319,6 +375,14 @@ model CompanyProfile {
   // Standard annual bank-loan interest rate (%) used to capitalise the stock's
   // carrying cost on storage→process transfers. Editable in the Loans section.
   loanInterestRatePct     Decimal @default(0) @db.Decimal(6, 3)
+
+  // TaxPro GSP configuration
+  taxproGspId             String?
+  taxproGspSecret         String?
+  taxproGstUser           String?
+  taxproGstPass           String?
+  taxproSandbox           Boolean  @default(true)
+
   updatedAt         DateTime @updatedAt
 }
 
@@ -394,6 +458,7 @@ model BankLoan {
   id              String          @id @default(cuid())
   loanRef         String? // bank loan/account reference
   bankName        String?
+  location        String?
   principal       Decimal         @db.Decimal(14, 2)
   drawdownDate    DateTime
   interestRatePct Decimal         @db.Decimal(6, 3) // snapshot of the rate at drawdown

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Warehouse, Scale, IndianRupee, Package, ClipboardList, TrendingUp } from 'lucide-react';
+import { Loader2, Warehouse, IndianRupee, Package, ClipboardList, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
-import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
+import { kg, rupees, rupeesShort, shortDate, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +22,7 @@ interface BlackSeedRow {
   hamaliCharge: number;
   companyHamali: number;
   value: number;
+  valueExclHamali: number;
   verified: boolean;
 }
 
@@ -37,6 +38,7 @@ const PAPPU_OUTTURN = 0.6;
 export default function BlackSeedStock() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [partySearch, setPartySearch] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['black-seed-stock'],
@@ -49,6 +51,7 @@ export default function BlackSeedStock() {
     const d = r.date.slice(0, 10);
     if (fromDate && d < fromDate) return false;
     if (toDate && d > toDate) return false;
+    if (partySearch && !r.partyName.toLowerCase().includes(partySearch.toLowerCase())) return false;
     return true;
   });
 
@@ -60,8 +63,7 @@ export default function BlackSeedStock() {
   const poTonnageKg = data?.poTonnageKg ?? 0;
   // Black seed received (purchased). Milling does NOT reduce this — only sales do.
   const receivedWeightKg = allItems.reduce((sum, r) => sum + r.rvpNetWeightKg, 0);
-  const totalValue = allItems.reduce((sum, r) => sum + r.value, 0);
-  const totalHamali = allItems.reduce((sum, r) => sum + r.companyHamali, 0);
+  const totalValue = allItems.reduce((sum, r) => sum + r.valueExclHamali, 0);
 
   // Selling pappu depletes everything. Each kg of pappu sold consumed
   // (1 / 60%) kg of black seed to produce.
@@ -86,7 +88,7 @@ export default function BlackSeedStock() {
       <div>
         <h1 className="text-2xl font-bold">Black Seed Stock</h1>
         <p className="text-muted-foreground">
-          Raw black seed on hand, lorry by lorry. Value includes the company's 50% share of hamali.
+          Raw black seed on hand, lorry by lorry.
         </p>
       </div>
 
@@ -114,10 +116,27 @@ export default function BlackSeedStock() {
             className="w-40"
           />
         </div>
-        {(fromDate || toDate) && (
+        <div className="space-y-1">
+          <Label htmlFor="party-search" className="text-xs text-muted-foreground">Party Name</Label>
+          <Input
+            id="party-search"
+            type="search"
+            list="parties-list"
+            placeholder="Search party..."
+            value={partySearch}
+            onChange={(e) => setPartySearch(e.target.value)}
+            className="w-48"
+          />
+          <datalist id="parties-list">
+            {Array.from(new Set(allItems.map(r => r.partyName))).map(p => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+        </div>
+        {(fromDate || toDate || partySearch) && (
           <button
             type="button"
-            onClick={() => { setFromDate(''); setToDate(''); }}
+            onClick={() => { setFromDate(''); setToDate(''); setPartySearch(''); }}
             className="text-xs text-muted-foreground underline-offset-2 hover:underline pb-2.5"
           >
             Clear
@@ -126,7 +145,7 @@ export default function BlackSeedStock() {
       </div>
 
       {/* KPI summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Raw Stock</CardTitle>
@@ -169,8 +188,8 @@ export default function BlackSeedStock() {
             <IndianRupee className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-600">{rupees(totalValue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Seed cost + our hamali share</p>
+            <div className="text-2xl font-bold text-emerald-600" title={rupees(totalValue)}>{rupeesShort(totalValue)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Seed cost + freight (if BASE price)</p>
           </CardContent>
         </Card>
         <Card>
@@ -183,16 +202,6 @@ export default function BlackSeedStock() {
             <p className="text-[10px] text-muted-foreground mt-1">
               {fromDate || toDate ? 'Filtered' : 'All'} stock · {toTonnes(filteredWeightKg).toFixed(2)} MT
             </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Hamali Borne by Us (50%)</CardTitle>
-            <Scale className="h-4 w-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600">{rupees(totalHamali)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Capitalised into stock value</p>
           </CardContent>
         </Card>
       </div>
@@ -209,7 +218,7 @@ export default function BlackSeedStock() {
               <TableHead className="text-right">RVP Net Weight</TableHead>
               <TableHead className="text-right">Price</TableHead>
               <TableHead>Location</TableHead>
-              <TableHead className="text-right">Value (incl. hamali)</TableHead>
+              <TableHead className="text-right">Value</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -235,11 +244,10 @@ export default function BlackSeedStock() {
                 <TableCell className="text-right font-medium">{rupees(r.pricePerKg)}/kg</TableCell>
                 <TableCell><Badge variant="outline">{r.location}</Badge></TableCell>
                 <TableCell className="text-right">
-                  <div className="font-semibold text-emerald-600">{rupees(r.value)}</div>
-                  <div className="text-[10px] text-muted-foreground">
-                    incl. {rupees(r.companyHamali)} hamali
-                    {!r.verified && <span className="ml-1 text-amber-600">· unverified</span>}
-                  </div>
+                  <div className="font-semibold text-emerald-600">{rupees(r.valueExclHamali)}</div>
+                  {!r.verified && (
+                    <div className="text-[10px] text-amber-600">unverified</div>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

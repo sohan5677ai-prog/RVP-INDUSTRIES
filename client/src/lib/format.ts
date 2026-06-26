@@ -20,6 +20,24 @@ export function rupees(value: number | string | null | undefined): string {
   }).format(n);
 }
 
+/** Format rupees using Indian abbreviations (Lakhs, Crores) for large numbers. */
+export function rupeesShort(value: number | string | null | undefined): string {
+  if (value == null) return '—';
+  const n = typeof value === 'string' ? Number(value) : value;
+  
+  if (n >= 10000000) {
+    return `₹${(n / 10000000).toFixed(2)} Cr`;
+  }
+  if (n >= 100000) {
+    return `₹${(n / 100000).toFixed(2)} L`;
+  }
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
 export function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', {
     day: '2-digit',

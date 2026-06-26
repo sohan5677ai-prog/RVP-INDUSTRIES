@@ -10,6 +10,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
+    "import-data": "tsx prisma/importTestData.ts",
+    "import-sales": "tsx prisma/importPappuSales.ts",
+    "import-husk-sales": "tsx addHuskSales.ts",
+    "delete-sales": "tsx deleteSales.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -65,7 +65,7 @@ export async function getCompanyProfile(_req: Request, res: Response) {
 }
 
 const companyProfileSchema = z.object({
-  name: z.string().trim().min(1),
+  name: z.string().trim().min(1, 'Company name is required'),
   address: z.string().optional().nullable(),
   gstin: z.string().optional().nullable(),
   stateName: z.string().optional().nullable(),
@@ -78,6 +78,11 @@ const companyProfileSchema = z.object({
   invoicePrefix: z.string().trim().min(1).default('RVP'),
   companyVehicles: z.string().optional().nullable(),
   freightRetentionPerTrip: z.coerce.number().nonnegative().optional(),
+  taxproGspId: z.string().optional().nullable(),
+  taxproGspSecret: z.string().optional().nullable(),
+  taxproGstUser: z.string().optional().nullable(),
+  taxproGstPass: z.string().optional().nullable(),
+  taxproSandbox: z.boolean().optional().default(true),
 });
 
 export async function updateCompanyProfile(req: Request, res: Response) {

@@ -101,7 +101,7 @@ function loadPurchaseOrders() {
   });
 }
 function loadSales() {
-  return prisma.saleOrder.findMany();
+  return prisma.saleOrder.findMany({ include: { dispatches: true } });
 }
 function loadPayments() {
   return prisma.payment.findMany({ where: { partyId: { not: null } } });
@@ -170,49 +170,54 @@ function buildPartyLedger(
     }
   }
 
-  // 2. Sales — buyer takes goods → they owe us (DEBIT). Credit note reduces it.
+  // 2. Sales — buyer takes goods → they owe us (DEBIT). Each dispatch (lorry) is a
+  //    billed shipment; an order is only a receivable once dispatched. Credit note
+  //    (delivery shortage) reduces it.
   for (const s of sales.filter((x) => x.buyerId === partyId)) {
-    const base = round2((s.tonnageKg * Number(s.ratePerKg)));
-    const gst = round2(Number(s.gstAmount));
-    const invoiceLabel =
-      s.invoiceNumber ?? (s.invoiceSeq && s.invoiceFy ? `${s.invoiceSeq}/${s.invoiceFy}` : null);
-    txns.push({
-      id: `SALE-${s.id}`,
-      date: (s.invoiceDate ?? s.saleDate).toISOString(),
-      kind: 'SALE',
-      particulars: `Sale — ${s.product}`,
-      invoiceNumber: invoiceLabel,
-      vehicleNumber: s.vehicleNumber,
-      reference: s.destination,
-      utr: null,
-      transferredDate: null,
-      weightKg: s.tonnageKg,
-      ratePerKg: Number(s.ratePerKg),
-      product: s.product,
-      debit: round2(base + gst),
-      credit: 0,
-      status: s.status,
-    });
-
-    const cn = Number(s.creditNoteAmount ?? 0);
-    if (cn > 0) {
+    const rate = Number(s.ratePerKg);
+    for (const d of s.dispatches) {
+      const base = round2(d.weightKg * rate);
+      const gst = round2(Number(d.gstAmount));
+      const invoiceLabel =
+        d.invoiceNumber ?? (d.invoiceSeq && d.invoiceFy ? `${d.invoiceSeq}/${d.invoiceFy}` : null);
       txns.push({
-        id: `CN-${s.id}`,
-        date: (s.receivedDate ?? s.saleDate).toISOString(),
-        kind: 'CREDIT_NOTE',
-        particulars: `Credit note — shortage ${s.shortageKg ?? 0} kg`,
+        id: `SALE-${d.id}`,
+        date: (d.invoiceDate ?? d.dispatchDate).toISOString(),
+        kind: 'SALE',
+        particulars: `Sale — ${s.product}`,
         invoiceNumber: invoiceLabel,
-        vehicleNumber: s.vehicleNumber,
+        vehicleNumber: d.vehicleNumber,
         reference: s.destination,
         utr: null,
         transferredDate: null,
-        weightKg: s.shortageKg ?? null,
-        ratePerKg: Number(s.ratePerKg),
+        weightKg: d.weightKg,
+        ratePerKg: rate,
         product: s.product,
-        debit: 0,
-        credit: round2(cn),
-        status: 'POSTED',
+        debit: round2(base + gst),
+        credit: 0,
+        status: d.status,
       });
+
+      const cn = Number(d.creditNoteAmount ?? 0);
+      if (cn > 0) {
+        txns.push({
+          id: `CN-${d.id}`,
+          date: (d.receivedDate ?? d.deliveredDate ?? d.dispatchDate).toISOString(),
+          kind: 'CREDIT_NOTE',
+          particulars: `Credit note — shortage ${d.shortageKg ?? 0} kg`,
+          invoiceNumber: invoiceLabel,
+          vehicleNumber: d.vehicleNumber,
+          reference: s.destination,
+          utr: null,
+          transferredDate: null,
+          weightKg: d.shortageKg ?? null,
+          ratePerKg: rate,
+          product: s.product,
+          debit: 0,
+          credit: round2(cn),
+          status: 'POSTED',
+        });
+      }
     }
   }
 

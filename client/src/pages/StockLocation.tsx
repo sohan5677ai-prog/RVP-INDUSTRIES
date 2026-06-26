@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, Warehouse, TrendingUp, IndianRupee, Package } from 'lucide-react';
+import { Search, Loader2, Warehouse, TrendingUp, IndianRupee, Package, Landmark } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { StockTransfer } from '@/lib/types';
+import type { StockTransfer, LoansResponse } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,6 +21,7 @@ interface BlackSeedRow {
   date: string;       // arrival date ISO
   rvpNetWeightKg: number;
   value: number;
+  valueExclGstAndHamali: number;
   location: string;   // loading location
 }
 
@@ -60,7 +61,7 @@ function buildDateLots(rows: BlackSeedRow[]): DateLot[] {
     };
     g.lorries += 1;
     g.recvWeightKg += r.rvpNetWeightKg;
-    g.recvValue += r.value;
+    g.recvValue += r.valueExclGstAndHamali;
     groups.set(d, g);
   }
   const ordered = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date));
@@ -115,6 +116,11 @@ export default function StockLocation() {
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
   });
 
+  const { data: loanData, isLoading: loadingLoans } = useQuery({
+    queryKey: ['loans'],
+    queryFn: () => api<LoansResponse>('/loans'),
+  });
+
   // Build per-location FIFO lots.
   const locationData = useMemo(() => {
     const allRows = data?.rows ?? [];
@@ -148,7 +154,7 @@ export default function StockLocation() {
         toLocation: t.toLocation,
         date: t.transferDate.slice(0, 10),
         weightKg: t.weightKg,
-        value: Number(t.movedValue),
+        value: Number(t.seedCostMoved) + Number(t.interestCharge),
       });
     }
 
@@ -210,9 +216,20 @@ export default function StockLocation() {
       allLots = allLots.concat(lots);
     }
 
+    let totalOutstandingLoan = 0;
+    if (loanData?.loans) {
+      for (const loan of loanData.loans) {
+        if (loan.status === 'OPEN' && loan.location) {
+          if (loc === 'All' || loan.location === loc) {
+            totalOutstandingLoan += loan.outstanding;
+          }
+        }
+      }
+    }
+
     const overallAvg = totalRemWeightKg > 0 ? totalRemValue / totalRemWeightKg : 0;
     const pappuToConvertKg = totalRemWeightKg * PAPPU_OUTTURN;
-    return { totalRemWeightKg, totalRemValue, totalRecvWeightKg, totalRecvValue, overallAvg, pappuToConvertKg, allLots };
+    return { totalRemWeightKg, totalRemValue, totalRecvWeightKg, totalRecvValue, overallAvg, pappuToConvertKg, allLots, totalOutstandingLoan };
   };
 
   const metrics = getMetrics(selectedLoc);
@@ -226,7 +243,7 @@ export default function StockLocation() {
     return true;
   });
 
-  const isLoading = loadingSeed || loadingTransfers;
+  const isLoading = loadingSeed || loadingTransfers || loadingLoans;
 
   if (isLoading) {
     return (
@@ -243,12 +260,12 @@ export default function StockLocation() {
         <p className="text-muted-foreground">
           Location-wise black-seed lots on a first-in-first-out basis. Transfers out of storage
           deplete the oldest lots first; pappu sold depletes the oldest stock at the process —
-          so the weighted-average price reflects the pooled stock still on hand at each location.
+          so the weighted-average price reflects the pooled stock still on hand at each location. Valuation excludes GST.
         </p>
       </div>
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Stock on Hand</CardTitle>
@@ -269,7 +286,7 @@ export default function StockLocation() {
           <CardContent>
             <div className="text-2xl font-bold text-emerald-600">{rupees(metrics.totalRemValue)}</div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              Value of remaining stock only
+              Seed cost + freight (if BASE price, excl. GST)
               {metrics.totalRecvValue !== metrics.totalRemValue && (
                 <span className="block">of {rupees(metrics.totalRecvValue)} total received</span>
               )}
@@ -294,6 +311,16 @@ export default function StockLocation() {
           <CardContent>
             <div className="text-2xl font-bold text-sky-600">{toTonnes(metrics.pappuToConvertKg).toFixed(2)} MT</div>
             <p className="text-[10px] text-muted-foreground mt-1">60% out-turn of stock on hand</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Outstanding Loans</CardTitle>
+            <Landmark className="h-4 w-4 text-violet-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-violet-600">{rupees(metrics.totalOutstandingLoan)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Principal owed to bank against stock</p>
           </CardContent>
         </Card>
       </div>
@@ -360,7 +387,8 @@ export default function StockLocation() {
               >
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{loc}</div>
                 <div className="text-lg font-bold text-primary mt-1">{toTonnes(m.totalRemWeightKg).toFixed(2)} MT</div>
-                <div className="text-xs text-emerald-600 font-medium">{rupees(m.totalRemValue)}</div>
+                <div className="text-xs text-emerald-600 font-medium">{rupees(m.totalRemValue)} stock</div>
+                <div className="text-xs text-violet-600 font-medium">{rupees(m.totalOutstandingLoan)} loan</div>
                 <div className="text-xs text-muted-foreground">
                   {rupees(m.overallAvg)}/kg avg
                 </div>

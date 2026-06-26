@@ -9,6 +9,7 @@ export async function clearTransactions(_req: Request, res: Response) {
     prisma.stockIn.deleteMany(),
     prisma.stockTransfer.deleteMany(),
     prisma.purchaseOrder.deleteMany(),
+    prisma.saleDispatch.deleteMany(),
     prisma.saleOrder.deleteMany(),
     prisma.journalLine.deleteMany(),
     prisma.journalEntry.deleteMany(),

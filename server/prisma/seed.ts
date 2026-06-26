@@ -6,15 +6,15 @@ const prisma = new PrismaClient();
 
 async function main() {
   // --- Admin user ---
-  const adminEmail = 'admin@rvp.local';
+  const adminUsername = 'admin';
   const passwordHash = await bcrypt.hash('admin123', 10);
 
   await prisma.user.upsert({
-    where: { email: adminEmail },
+    where: { username: adminUsername },
     update: {},
     create: {
       name: 'RVP Admin',
-      email: adminEmail,
+      username: adminUsername,
       password: passwordHash,
       role: 'ADMIN',
     },
@@ -60,6 +60,7 @@ async function main() {
     { code: '40010', name: 'Sales Revenue', type: 'REVENUE' as const },
     { code: '40020', name: 'Purchase Discount', type: 'REVENUE' as const },
     { code: '40030', name: 'Hamali Income', type: 'REVENUE' as const },
+    { code: '40040', name: 'Internal Weight Profit', type: 'REVENUE' as const },
     { code: '50010', name: 'Cost of Goods Sold', type: 'EXPENSE' as const },
     { code: '50020', name: 'Factory Labor Expense', type: 'EXPENSE' as const },
     { code: '50030', name: 'Factory Overhead Expense', type: 'EXPENSE' as const },
@@ -95,7 +96,7 @@ async function main() {
   }
 
   console.log('Seed complete.');
-  console.log('  Admin login → admin@rvp.local / admin123');
+  console.log('  Admin login → admin / admin123');
 }
 
 main()

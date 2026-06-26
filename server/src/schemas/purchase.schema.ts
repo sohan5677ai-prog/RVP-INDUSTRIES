@@ -67,6 +67,7 @@ export const createVerificationSchema = z.object({
   purchaseId: z.string().min(1),
   discountType: z.enum(['WEIGHT', 'PRICE', 'AMOUNT']).optional().nullable(),
   discountValue: z.coerce.number().nonnegative().optional().default(0),
+  forceExempt: z.boolean().optional().default(false),
 });
 
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;

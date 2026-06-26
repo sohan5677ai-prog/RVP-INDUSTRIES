@@ -14,6 +14,9 @@ import settingsRoutes from './settings.routes.js';
 import paymentRoutes from './payment.routes.js';
 import receiptRoutes from './receipt.routes.js';
 import loanRoutes from './loan.routes.js';
+import chatRoutes from './chat.routes.js';
+import userRoutes from './user.routes.js';
+import taxproRoutes from './taxpro.routes.js';
 
 const router = Router();
 
@@ -36,5 +39,8 @@ router.use('/', paymentRoutes);
 router.use('/', receiptRoutes);
 router.use('/', loanRoutes);
 router.use('/system', systemRoutes);
+router.use('/chat', chatRoutes);
+router.use('/users', userRoutes);
+router.use('/', taxproRoutes);
 
 export default router;

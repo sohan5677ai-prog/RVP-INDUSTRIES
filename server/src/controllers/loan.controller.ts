@@ -98,6 +98,7 @@ export async function createLoan(req: Request, res: Response) {
         drawdownDate: data.drawdownDate,
         loanRef: data.loanRef ?? null,
         bankName: data.bankName ?? null,
+        location: data.location ?? null,
         interestRatePct: rate,
         notes: data.notes ?? null,
       },

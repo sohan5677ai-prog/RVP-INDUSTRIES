@@ -39,17 +39,20 @@ export default function BrokerageDuesPage() {
   let totalPaymentsAll = 0;
 
   brokers?.forEach((b) => {
-    // 1. Get all dispatched/reached orders with this broker, sorted oldest first
-    const activeOrders = saleOrders?.filter((o) => o.brokerId === b.id && o.status !== 'PENDING')
-      .sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime())
-      .map((o) => {
-        // Flat ₹2000 brokerage per order as requested
-        return {
-          ...o,
-          totalBrokerage: 2000,
-          remainingBrokerage: 2000,
-        };
-      }) ?? [];
+    // 1. Flat ₹2000 brokerage per dispatched shipment under this broker, oldest first.
+    const activeOrders = (saleOrders ?? [])
+      .filter((o) => o.brokerId === b.id)
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+      .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
+      .map(({ o, d }) => ({
+        id: d.id,
+        saleDate: d.dispatchDate,
+        invoiceNumber: d.invoiceNumber,
+        buyerName: o.buyer?.name ?? '—',
+        vehicleNumber: d.vehicleNumber,
+        totalBrokerage: 2000,
+        remainingBrokerage: 2000,
+      }));
 
     activeOrders.forEach((o) => {
       totalEarnedAll += o.totalBrokerage;
@@ -83,7 +86,7 @@ export default function BrokerageDuesPage() {
           brokerName: b.name,
           saleDate: o.saleDate,
           invoiceNumber: o.invoiceNumber,
-          buyerName: o.buyer?.name ?? '—',
+          buyerName: o.buyerName,
           vehicleNumber: o.vehicleNumber,
           brokerageAmount: o.remainingBrokerage,
         });

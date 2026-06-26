@@ -54,11 +54,16 @@ export async function createVerification(req: Request, res: Response) {
   const rvpKataKg = purchase.netWeightKg;
   const pricePerKg = Number(purchase.stockIn.purchaseOrder.pricePerKg);
 
-  const { reference, diff, exempt, finalWeight } = crossVerify(
+  let { reference, diff, exempt, finalWeight } = crossVerify(
     billingWeightKg,
     partyKataKg,
     rvpKataKg
   );
+
+  if (data.forceExempt && !exempt) {
+    exempt = true;
+    finalWeight = reference;
+  }
 
   // Triple-mode discounts:
   let payableWeight = finalWeight;

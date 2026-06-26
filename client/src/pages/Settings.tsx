@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText } from 'lucide-react';
+import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, ProductionCostComponent } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -29,10 +30,35 @@ export default function Settings() {
         <p className="text-muted-foreground">Company details, bank, invoice setup and rates used across the app.</p>
       </div>
 
-      <CompanySection qc={qc} />
-      <InvoiceTaxSection qc={qc} />
-      <FreightSection qc={qc} />
-      <ProductionCostSection qc={qc} />
+      <Tabs defaultValue="company" className="space-y-4">
+        <TabsList className="flex flex-wrap h-auto">
+          <TabsTrigger value="company">Company</TabsTrigger>
+          <TabsTrigger value="invoice">Invoice Setup</TabsTrigger>
+          <TabsTrigger value="freight">Freight Rates</TabsTrigger>
+          <TabsTrigger value="production">Production Cost</TabsTrigger>
+          <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="company" className="focus-visible:outline-none focus-visible:ring-0">
+          <CompanySection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="invoice" className="focus-visible:outline-none focus-visible:ring-0">
+          <InvoiceTaxSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="freight" className="focus-visible:outline-none focus-visible:ring-0">
+          <FreightSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="production" className="focus-visible:outline-none focus-visible:ring-0">
+          <ProductionCostSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">
+          <TaxproGspSection qc={qc} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -128,6 +154,7 @@ const emptyCompany: CompanyProfile = {
   id: 'default', name: '', address: '', gstin: '', stateName: '', stateCode: '', contact: '',
   bankAccountName: '', bankName: '', bankAccountNumber: '', bankBranchIfsc: '', invoicePrefix: 'RVP',
   freightRetentionPerTrip: 3000,
+  taxproGspId: '', taxproGspSecret: '', taxproGstUser: '', taxproGstPass: '', taxproSandbox: true,
 };
 
 function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
@@ -376,3 +403,75 @@ function FreightSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
     </Card>
   );
 }
+
+function TaxproGspSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
+  const { data, isLoading } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
+  const [form, setForm] = useState<CompanyProfile>(emptyCompany);
+  useEffect(() => { if (data) setForm({ ...emptyCompany, ...data }); }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => api<CompanyProfile>('/settings/company', { method: 'PUT', body: form }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company'] }); toast.success('TaxPro GSP settings saved'); },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const set = (k: keyof CompanyProfile) => (e: { target: { value: string } }) => setForm((p) => ({ ...p, [k]: e.target.value }));
+  
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <ShieldCheck className="h-5 w-5 text-indigo-500" />
+        <CardTitle className="text-base">TaxPro GSP Credentials</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Configure your TaxPro GSP credentials and GST portal credentials for automated E-Invoice (IRN) and E-Way Bill generation.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">TaxPro ASP GSP Client ID</Label>
+                <Input value={form.taxproGspId ?? ''} onChange={set('taxproGspId')} placeholder="Enter client_id" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">TaxPro ASP GSP Client Secret</Label>
+                <Input type="password" value={form.taxproGspSecret ?? ''} onChange={set('taxproGspSecret')} placeholder="Enter client_secret" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">GST Portal API Username</Label>
+                <Input value={form.taxproGstUser ?? ''} onChange={set('taxproGstUser')} placeholder="Enter username created for API on portal" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">GST Portal API Password</Label>
+                <Input type="password" value={form.taxproGstPass ?? ''} onChange={set('taxproGstPass')} placeholder="Enter API password" />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!form.taxproSandbox}
+                  onChange={(e) => setForm((p) => ({ ...p, taxproSandbox: e.target.checked }))}
+                  className="rounded border border-input text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                />
+                <span className="text-sm font-medium">Sandbox Mode (Simulated responses for testing)</span>
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              When Sandbox Mode is enabled, the system will bypass the actual GSP APIs and return simulated successful IRNs, E-Way Bills, and QR codes for testing your invoice print layout safely.
+            </p>
+
+            <div className="flex justify-end pt-2">
+              <Button onClick={() => save.mutate()} disabled={save.isPending}>
+                <Save className="h-4 w-4" /> {save.isPending ? 'Saving…' : 'Save TaxPro settings'}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+

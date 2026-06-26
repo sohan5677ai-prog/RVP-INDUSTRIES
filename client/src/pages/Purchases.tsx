@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Scale, PackageCheck, Coins, Weight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, StockIn, BunkerPlace } from '@/lib/types';
 import { calcHamali, calcKataFee, calcBags, calcBagCutting, BAG_RATE, DEFAULT_HAMALI_RATE, isVehicleExempt } from '@/lib/calc';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/PageHeader';
+import { StatCard } from '@/components/StatCard';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -15,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -120,86 +123,100 @@ export default function Purchases() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const totalNet = items?.reduce((s, p) => s + Number(p.netWeightKg || 0), 0) ?? 0;
+  const totalCharges = items?.reduce((s, p) => s + Number(p.hamaliCharge || 0) + Number(p.kataFee || 0), 0) ?? 0;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Purchase</h1>
-          <p className="text-muted-foreground">
-            Record purchases from stock-ins and set the hamali rate. Weight verification is done on the Verification page.
-          </p>
-        </div>
-        <Button onClick={() => { resetForm(); setOpen(true); }} disabled={!available.length}>
-          <Plus className="h-4 w-4" /> Record Purchase
-        </Button>
+    <div className="space-y-8">
+      <PageHeader
+        icon={Scale}
+        title="Purchase"
+        description="Record purchases from stock-ins and set the hamali rate. Weight verification is done on the Verification page."
+        actions={
+          <Button onClick={() => { resetForm(); setOpen(true); }} disabled={!available.length}>
+            <Plus className="h-4 w-4" /> Record Purchase
+          </Button>
+        }
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+        <StatCard label="Recorded" value={items?.length ?? 0} icon={PackageCheck} tone="taupe" hint="purchase records" />
+        <StatCard label="Awaiting" value={available.length} icon={Scale} tone="amber" hint="stock-ins to record" />
+        <StatCard label="Net weight" value={kg(totalNet)} icon={Weight} tone="forest" hint="across purchases" />
+        <StatCard label="Hamali + Kata" value={rupees(totalCharges)} icon={Coins} tone="clay" hint="total charges" />
       </div>
 
-      {available.length === 0 && (
-        <p className="text-sm text-muted-foreground">No stock-ins awaiting purchase completion.</p>
-      )}
-
-      <div className="rounded-lg border bg-card overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Party</TableHead>
-              <TableHead>Invoice No</TableHead>
-              <TableHead className="text-right">Price/kg</TableHead>
-              <TableHead className="text-right">Net (RVP)</TableHead>
-              <TableHead className="text-right">Hamali</TableHead>
-              <TableHead className="text-right">Kata Fee</TableHead>
-              <TableHead className="w-24 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
-            )}
-            {items?.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No purchases yet.</TableCell></TableRow>
-            )}
-            {items?.map((p) => (
-              <TableRow key={p.id}>
-                 <TableCell>{shortDate(p.createdAt)}</TableCell>
-                <TableCell className="font-medium">
-                  {p.stockIn?.purchaseOrder?.party?.name ?? '—'}
-                  {p.stockIn?.purchaseOrder?.poNumber && (
-                    <span className="ml-2 text-xs text-muted-foreground font-mono">({p.stockIn.purchaseOrder.poNumber})</span>
-                  )}
-                </TableCell>
-                <TableCell className="font-semibold">{p.stockIn?.invoiceNumber ?? '—'}</TableCell>
-                <TableCell className="text-right">
-                  {p.stockIn?.purchaseOrder?.pricePerKg ? rupees(p.stockIn.purchaseOrder.pricePerKg) : '—'}
-                  {p.stockIn?.purchaseOrder?.priceType && (
-                    <span className="block text-[10px] text-muted-foreground">{p.stockIn.purchaseOrder.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">{kg(p.netWeightKg)}</TableCell>
-                <TableCell className="text-right">{rupees(p.hamaliCharge)}</TableCell>
-                <TableCell className="text-right">{rupees(p.kataFee)}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        if (confirm('Delete this purchase record? This will release the Stock-In for re-purchase.')) {
-                          deleteMutation.mutate(p.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </TableCell>
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
+          <h2 className="text-sm font-semibold text-foreground">Purchase records</h2>
+          {available.length > 0 && (
+            <Badge variant="warning">{available.length} awaiting</Badge>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Party</TableHead>
+                <TableHead>Invoice No</TableHead>
+                <TableHead className="text-right">Price/kg</TableHead>
+                <TableHead className="text-right">Net (RVP)</TableHead>
+                <TableHead className="text-right">Hamali</TableHead>
+                <TableHead className="text-right">Kata Fee</TableHead>
+                <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {isLoading && (
+                <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              )}
+              {items?.length === 0 && (
+                <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">No purchases yet.</TableCell></TableRow>
+              )}
+              {items?.map((p) => (
+                <TableRow key={p.id} className="group">
+                  <TableCell className="text-muted-foreground">{shortDate(p.createdAt)}</TableCell>
+                  <TableCell className="font-medium text-foreground">
+                    {p.stockIn?.purchaseOrder?.party?.name ?? '—'}
+                    {p.stockIn?.purchaseOrder?.poNumber && (
+                      <span className="ml-2 text-xs text-muted-foreground font-mono">({p.stockIn.purchaseOrder.poNumber})</span>
+                    )}
+                  </TableCell>
+                  <TableCell><span className="font-mono text-xs font-semibold">{p.stockIn?.invoiceNumber ?? '—'}</span></TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {p.stockIn?.purchaseOrder?.pricePerKg ? rupees(p.stockIn.purchaseOrder.pricePerKg) : '—'}
+                    {p.stockIn?.purchaseOrder?.priceType && (
+                      <span className="block text-[10px] text-muted-foreground">{p.stockIn.purchaseOrder.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">{kg(p.netWeightKg)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{rupees(p.hamaliCharge)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{rupees(p.kataFee)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(p)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => {
+                          if (confirm('Delete this purchase record? This will release the Stock-In for re-purchase.')) {
+                            deleteMutation.mutate(p.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

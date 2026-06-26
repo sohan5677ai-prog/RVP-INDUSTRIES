@@ -2,46 +2,130 @@ import type { App } from '@slack/bolt';
 import type { KnownBlock } from '@slack/types';
 import { extractInvoiceData } from '../../lib/gemini.js';
 import { resolveErpUser, NOT_LINKED_MESSAGE } from '../users.js';
-import { apiGet, apiPostMultipart, apiPost, ErpApiError } from '../erpClient.js';
+import { apiGet, apiPostMultipart, apiPost, ErpApiError, type ErpUser } from '../erpClient.js';
 import { getDraft, setDraft, clearDraft } from '../state.js';
 import { downloadSlackFile, type DownloadedFile } from '../slackFiles.js';
 import { headerBlock, contextBlock, fieldsSection, approveEditCancel, selectSection } from '../blocks.js';
 import { rupees } from '../parse.js';
 
 const FLOW = 'dispatch';
-type Step = 'await_kata' | 'review';
 
-interface DispatchDraftData {
-  saleOrderId: string;
+/** A sale order with weight still to ship, summarised for the picker. */
+interface OpenOrder {
+  id: string;
   label: string;
+  buyerName: string;
   product: string;
   ratePerKg: number;
-  step: Step;
+  remainingKg: number;
+}
+
+interface DispatchDraftData {
+  step: 'review';
+  // Resolved once a sale order is matched/picked (undefined until then).
+  saleOrderId?: string;
+  label?: string;
+  product?: string;
+  ratePerKg?: number;
+  // OCR'd / typed off the kata slip.
   vehicleNumber?: string;
   tonnageKg?: number;
   kataFile?: DownloadedFile;
+  // Open sale orders, kept so the review-card dropdown can resolve a pick.
+  openOrders: OpenOrder[];
 }
 
 function keyFor(channel: string, threadTs: string): string {
   return `${FLOW}:${channel}:${threadTs}`;
 }
 
-function reviewBlocks(d: DispatchDraftData): KnownBlock[] {
-  const base = d.tonnageKg ? d.tonnageKg * d.ratePerKg : 0;
+function toOpenOrder(o: any): OpenOrder {
+  return {
+    id: o.id,
+    buyerName: o.buyer?.name ?? '?',
+    product: o.product,
+    ratePerKg: Number(o.ratePerKg),
+    remainingKg: o.remainingKg ?? 0,
+    label: `${o.buyer?.name ?? '?'} · ${o.product} · ${Math.round((o.remainingKg ?? 0) / 1000)}t left · ${rupees(Number(o.ratePerKg))}/kg`,
+  };
+}
+
+/** Apply a matched/picked sale order onto the draft. */
+function applyOrder(d: DispatchDraftData, o: OpenOrder): void {
+  d.saleOrderId = o.id;
+  d.product = o.product;
+  d.ratePerKg = o.ratePerKg;
+  d.label = `${o.buyerName} · ${o.product} · ${rupees(o.ratePerKg)}/kg`;
+}
+
+/** Dropdown listing open sale orders, shown on the review card until one is chosen. */
+function soSelectBlock(orders: OpenOrder[]): KnownBlock {
+  return selectSection(
+    `${FLOW}:so_select`,
+    'Which sale order is this dispatch against?',
+    'Select sale order',
+    orders.map((o) => ({ text: o.label, value: o.id }))
+  );
+}
+
+/**
+ * The upload modal: attach the RVP weighbridge / carter slip (read for weight +
+ * lorry number) and optionally type the vehicle. This workspace doesn't deliver
+ * message/file events, so files come in via a modal file_input (like stock-in).
+ */
+function uploadModal(channel: string) {
+  return {
+    type: 'modal' as const,
+    callback_id: `${FLOW}:modal_submit`,
+    private_metadata: JSON.stringify({ channel }),
+    title: { type: 'plain_text' as const, text: 'Dispatch' },
+    submit: { type: 'plain_text' as const, text: 'Read kata' },
+    close: { type: 'plain_text' as const, text: 'Cancel' },
+    blocks: [
+      contextBlock(":mag: Attach the *RVP weighbridge / carter slip* — I'll read the dispatched weight and lorry number. Anything I can't read, you can type on the next card."),
+      {
+        type: 'input',
+        block_id: 'kata',
+        optional: true,
+        label: { type: 'plain_text', text: 'RVP kata / carter slip' },
+        element: { type: 'file_input', action_id: 'f', max_files: 1 },
+      },
+      {
+        type: 'input',
+        block_id: 'vehicle',
+        optional: true,
+        label: { type: 'plain_text', text: 'Vehicle number' },
+        element: { type: 'plain_text_input', action_id: 'v' },
+      },
+    ],
+  };
+}
+
+function reviewBlocks(d: DispatchDraftData, note?: string): KnownBlock[] {
+  const base = d.tonnageKg && d.ratePerKg ? d.tonnageKg * d.ratePerKg : 0;
   const gst = Math.round(base * 0.05 * 100) / 100;
-  const blocks: KnownBlock[] = [
-    headerBlock('Dispatch'),
-    contextBlock(d.label),
+  const blocks: KnownBlock[] = [headerBlock('Dispatch')];
+  if (note) blocks.push(contextBlock(note));
+  if (d.saleOrderId) {
+    blocks.push(contextBlock(d.label ?? ''));
+  } else {
+    blocks.push(soSelectBlock(d.openOrders));
+  }
+  blocks.push(
     fieldsSection([
-      { label: 'Product', value: d.product },
-      { label: 'Rate', value: `${rupees(d.ratePerKg)}/kg` },
+      { label: 'Buyer / order', value: d.saleOrderId ? (d.label ?? '—') : '_pick above_' },
+      { label: 'Product', value: d.product ?? '—' },
+      { label: 'Rate', value: d.ratePerKg ? `${rupees(d.ratePerKg)}/kg` : '—' },
       { label: 'Vehicle', value: d.vehicleNumber ?? '_not set_' },
       { label: 'Dispatched weight', value: d.tonnageKg ? `${d.tonnageKg} kg` : '_not set_' },
-      { label: 'Amount', value: d.tonnageKg ? rupees(base) : '—' },
-      { label: 'GST (5%)', value: d.tonnageKg ? rupees(gst) : '—' },
-    ]),
-  ];
-  if (!d.tonnageKg) blocks.push(contextBlock(':pencil2: Dispatched weight missing — use *Edit*.'));
+      { label: 'Amount', value: base ? rupees(base) : '—' },
+      { label: 'GST (5%)', value: base ? rupees(gst) : '—' },
+    ])
+  );
+  const missing: string[] = [];
+  if (!d.saleOrderId) missing.push('sale order');
+  if (!d.tonnageKg) missing.push('dispatched weight');
+  if (missing.length) blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — pick above or use *Edit*.`));
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
   return blocks;
 }
@@ -72,8 +156,36 @@ function editModal(d: DispatchDraftData, channel: string, messageTs: string, thr
   };
 }
 
+/** Raise the tax invoice for a dispatch and render the final card. */
+async function raiseInvoiceCard(
+  dispatchId: string,
+  user: ErpUser,
+  channel: string,
+  messageTs: string,
+  byUserId: string,
+  client: any
+): Promise<void> {
+  const invoice = await apiPost(`/sale-dispatches/${dispatchId}/invoice`, {}, user);
+  await client.chat.update({
+    channel,
+    ts: messageTs,
+    text: 'Dispatched & invoiced',
+    blocks: [
+      headerBlock('🧾 Dispatched & invoiced'),
+      fieldsSection([
+        { label: 'Invoice number', value: invoice.invoiceNumber ?? '—' },
+        { label: 'Buyer', value: invoice.saleOrder?.buyer?.name ?? '—' },
+        { label: 'Weight', value: `${invoice.weightKg} kg` },
+        { label: 'GST (5%)', value: rupees(Number(invoice.gstAmount)) },
+        { label: 'Status', value: invoice.status },
+      ]),
+      contextBlock(`Dispatched & invoiced by <@${byUserId}>. Print/render the invoice from the web app.`),
+    ],
+  });
+}
+
 export function registerDispatchFlow(app: App): void {
-  // /dispatch → pick a pending sale order.
+  // /dispatch → open the kata-upload modal straight away (no sale-order picker first).
   app.command('/dispatch', async ({ command, ack, client, respond }) => {
     await ack();
     const user = await resolveErpUser(command.user_id);
@@ -83,97 +195,91 @@ export function registerDispatchFlow(app: App): void {
     }
     let orders: any[];
     try {
-      orders = await apiGet('/sale-orders?status=PENDING', user);
+      orders = await apiGet('/sale-orders', user);
     } catch (err) {
       await respond({ response_type: 'ephemeral', text: `:x: Couldn't load sale orders: ${(err as Error).message}` });
       return;
     }
-    if (!orders.length) {
-      await respond({ response_type: 'ephemeral', text: 'No pending sale orders to dispatch.' });
+    // Anything not yet fully dispatched (PENDING or PARTIAL) can take another lorry.
+    const open = orders.filter((o) => (o.remainingKg ?? 0) > 0);
+    if (!open.length) {
+      await respond({ response_type: 'ephemeral', text: 'No sale orders with weight left to dispatch. Create one with `/sale` first.' });
       return;
     }
-    await client.chat.postMessage({
-      channel: command.channel_id,
-      text: 'Dispatch a sale order',
-      blocks: [
-        headerBlock('Dispatch'),
-        selectSection(
-          `${FLOW}:select`,
-          'Which sale order are you dispatching?',
-          'Select sale order',
-          orders.map((o) => ({
-            text: `${o.buyer?.name ?? '?'} · ${o.product} · ${Math.round((o.tonnageKg ?? 0) / 1000)}t · ${rupees(Number(o.ratePerKg))}/kg`,
-            value: o.id,
-          }))
-        ),
-      ],
-    });
+    await client.views.open({ trigger_id: command.trigger_id, view: uploadModal(command.channel_id) });
   });
 
-  // Order selected → open the kata-upload thread.
-  app.action(`${FLOW}:select`, async ({ ack, body, client }) => {
+  // Upload modal submitted → read the kata, auto-match the sale order, post review.
+  app.view(`${FLOW}:modal_submit`, async ({ ack, body, view, client }) => {
     await ack();
-    const b = body as any;
-    const user = await resolveErpUser(b.user.id);
+    const meta = JSON.parse(view.private_metadata || '{}');
+    const channel = meta.channel as string;
+    const user = await resolveErpUser(body.user.id);
     if (!user) return;
-    const orderId = b.actions[0].selected_option.value;
-    const order = await apiGet(`/sale-orders/${orderId}`, user);
-    const threadTs = b.message.ts as string;
 
-    setDraft(keyFor(b.channel.id, threadTs), {
+    let openOrders: OpenOrder[] = [];
+    try {
+      const orders = (await apiGet('/sale-orders', user)) as any[];
+      openOrders = orders.filter((o) => (o.remainingKg ?? 0) > 0).map(toOpenOrder);
+    } catch (err) {
+      await client.chat.postMessage({ channel, text: `:x: Couldn't load sale orders: ${(err as Error).message}` });
+      return;
+    }
+    if (!openOrders.length) {
+      await client.chat.postMessage({ channel, text: 'No sale orders with weight left to dispatch.' });
+      return;
+    }
+
+    const data: DispatchDraftData = { step: 'review', openOrders };
+
+    const file = (view.state.values as any).kata?.f?.files?.[0];
+    let readError: string | undefined;
+    if (file) {
+      try {
+        const f: DownloadedFile = await downloadSlackFile(file);
+        data.kataFile = f; // keep the buffer even if OCR fails — approve re-uploads it
+        const r = await extractInvoiceData(f.buffer, f.mimetype, 'partyKata');
+        if (r.partyKataKg) data.tonnageKg = r.partyKataKg;
+        if (r.lorryNumber) data.vehicleNumber = r.lorryNumber;
+      } catch (err) {
+        readError = (err as Error).message;
+      }
+    }
+    const vehicleTyped = (view.state.values as any).vehicle?.v?.value?.trim();
+    if (vehicleTyped) data.vehicleNumber = vehicleTyped;
+
+    // Auto-fetch the sale order when there's only one open — otherwise the
+    // review card shows a dropdown to pick it (a kata slip carries no buyer/rate).
+    if (openOrders.length === 1) applyOrder(data, openOrders[0]);
+
+    const note = !data.tonnageKg
+      ? readError
+        ? `:warning: Couldn't read the slip (${readError}) — type the weight via *Edit*.`
+        : ":warning: Couldn't read a weight off that slip — type it via *Edit*."
+      : undefined;
+    const posted = await client.chat.postMessage({ channel, text: 'Review dispatch', blocks: reviewBlocks(data, note) });
+    setDraft(keyFor(channel, posted.ts as string), {
       flow: FLOW,
       user,
-      slackUserId: b.user.id,
-      channel: b.channel.id,
-      threadTs,
-      data: {
-        saleOrderId: orderId,
-        label: `${order.buyer?.name ?? ''} · ${order.product} · ${rupees(Number(order.ratePerKg))}/kg`,
-        product: order.product,
-        ratePerKg: Number(order.ratePerKg),
-        step: 'await_kata',
-      } as DispatchDraftData,
-    });
-
-    await client.chat.update({
-      channel: b.channel.id,
-      ts: threadTs,
-      text: 'Dispatch started',
-      blocks: [
-        headerBlock('Dispatch'),
-        contextBlock(`${order.buyer?.name ?? ''} · ${order.product}`),
-        contextBlock(':arrow_up: Upload the *RVP kata / carter slip* in this thread.'),
-      ],
+      slackUserId: body.user.id,
+      channel,
+      threadTs: posted.ts as string,
+      data,
     });
   });
 
-  // Kata slip uploaded into a dispatch thread.
-  app.message(async ({ message, client }) => {
-    const m = message as any;
-    if (m.bot_id || !m.files?.length || !m.thread_ts) return;
-    const key = keyFor(m.channel, m.thread_ts);
+  // Sale order chosen from the review-card dropdown.
+  app.action(`${FLOW}:so_select`, async ({ ack, body, client }) => {
+    await ack();
+    const b = body as any;
+    const threadTs = b.message.thread_ts ?? b.message.ts;
+    const key = keyFor(b.channel.id, threadTs);
     const draft = getDraft<DispatchDraftData>(key);
-    if (!draft || draft.data.step !== 'await_kata') return;
-
-    let downloaded: DownloadedFile;
-    try {
-      downloaded = await downloadSlackFile(m.files[0]);
-    } catch (err) {
-      await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: `:x: ${(err as Error).message}` });
-      return;
-    }
-    try {
-      const r = await extractInvoiceData(downloaded.buffer, downloaded.mimetype, 'partyKata');
-      if (r.partyKataKg) draft.data.tonnageKg = r.partyKataKg;
-      if (r.lorryNumber) draft.data.vehicleNumber = r.lorryNumber;
-    } catch (err) {
-      await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: `:x: Couldn't read the kata slip: ${(err as Error).message}. Try again.` });
-      return;
-    }
-    draft.data.kataFile = downloaded;
-    draft.data.step = 'review';
+    if (!draft) return;
+    const o = draft.data.openOrders.find((x) => x.id === b.actions[0].selected_option.value);
+    if (o) applyOrder(draft.data, o);
     setDraft(key, draft);
-    await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, text: 'Review dispatch', blocks: reviewBlocks(draft.data) });
+    await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Review dispatch', blocks: reviewBlocks(draft.data) });
   });
 
   app.action(`${FLOW}:edit`, async ({ ack, body, client }) => {
@@ -202,7 +308,7 @@ export function registerDispatchFlow(app: App): void {
     await client.chat.update({ channel: meta.channel, ts: meta.messageTs, text: 'Review dispatch', blocks: reviewBlocks(draft.data) });
   });
 
-  // Approve → dispatch (multipart kata) → show Raise Invoice button.
+  // Approve → dispatch (multipart kata) → auto-raise the invoice.
   app.action(`${FLOW}:approve`, async ({ ack, body, client, respond }) => {
     await ack();
     const b = body as any;
@@ -214,31 +320,50 @@ export function registerDispatchFlow(app: App): void {
       return;
     }
     const d = draft.data;
+    if (!d.saleOrderId) {
+      await respond({ response_type: 'ephemeral', replace_original: false, text: ':x: Pick the sale order first (dropdown on the card).' });
+      return;
+    }
     if (!d.tonnageKg) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: ':x: Dispatched weight missing — use *Edit*.' });
       return;
     }
+    let dispatch: any;
     try {
-      const order = await apiPostMultipart(
+      dispatch = await apiPostMultipart(
         `/sale-orders/${d.saleOrderId}/dispatch`,
         { vehicleNumber: d.vehicleNumber, tonnageKg: d.tonnageKg },
         d.kataFile ? [{ field: 'kata', buffer: d.kataFile.buffer, filename: d.kataFile.filename, mimetype: d.kataFile.mimetype }] : [],
         draft.user
       );
-      clearDraft(key);
+    } catch (err) {
+      const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
+      await respond({ response_type: 'ephemeral', replace_original: false, text: `:x: Couldn't dispatch: ${msg}` });
+      return;
+    }
+
+    clearDraft(key);
+    // Auto-raise the invoice so the dispatch is immediately tracked/numbered.
+    try {
+      await raiseInvoiceCard(dispatch.id, draft.user, b.channel.id, b.message.ts, b.user.id, client);
+    } catch (err) {
+      // Dispatch succeeded but invoicing failed — show the dispatched card with a
+      // manual Raise Invoice button so it can be retried.
+      const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
       await client.chat.update({
         channel: b.channel.id,
         ts: b.message.ts,
         text: 'Dispatched',
         blocks: [
           headerBlock('✅ Dispatched'),
-          contextBlock(d.label),
+          contextBlock(d.label ?? ''),
           fieldsSection([
             { label: 'Vehicle', value: d.vehicleNumber ?? '—' },
-            { label: 'Weight', value: `${order.tonnageKg} kg` },
-            { label: 'GST (5%)', value: rupees(Number(order.gstAmount)) },
-            { label: 'Status', value: order.status },
+            { label: 'Weight', value: `${dispatch.weightKg} kg` },
+            { label: 'GST (5%)', value: rupees(Number(dispatch.gstAmount)) },
+            { label: 'Status', value: dispatch.status },
           ]),
+          contextBlock(`:warning: Couldn't auto-raise the invoice (${msg}).`),
           {
             type: 'actions',
             elements: [
@@ -247,42 +372,23 @@ export function registerDispatchFlow(app: App): void {
                 text: { type: 'plain_text', text: 'Raise Invoice', emoji: true },
                 style: 'primary',
                 action_id: `${FLOW}:raise_invoice`,
-                value: d.saleOrderId,
+                value: dispatch.id,
               },
             ],
           },
         ],
       });
-    } catch (err) {
-      const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
-      await respond({ response_type: 'ephemeral', replace_original: false, text: `:x: Couldn't dispatch: ${msg}` });
     }
   });
 
-  // Raise the tax invoice (auto-numbered).
+  // Manual Raise Invoice (fallback when auto-raise failed at approve).
   app.action(`${FLOW}:raise_invoice`, async ({ ack, body, client, respond }) => {
     await ack();
     const b = body as any;
     const user = await resolveErpUser(b.user.id);
     if (!user) return;
-    const saleOrderId = b.actions[0].value;
     try {
-      const order = await apiPost(`/sale-orders/${saleOrderId}/invoice`, {}, user);
-      await client.chat.update({
-        channel: b.channel.id,
-        ts: b.message.ts,
-        text: 'Invoice raised',
-        blocks: [
-          headerBlock('🧾 Invoice raised'),
-          fieldsSection([
-            { label: 'Invoice number', value: order.invoiceNumber ?? '—' },
-            { label: 'Buyer', value: order.buyer?.name ?? '—' },
-            { label: 'Weight', value: `${order.tonnageKg} kg` },
-            { label: 'Status', value: order.status },
-          ]),
-          contextBlock('Print/render the invoice from the web app.'),
-        ],
-      });
+      await raiseInvoiceCard(b.actions[0].value, user, b.channel.id, b.message.ts, b.user.id, client);
     } catch (err) {
       const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
       await respond({ response_type: 'ephemeral', replace_original: false, text: `:x: Couldn't raise the invoice: ${msg}` });

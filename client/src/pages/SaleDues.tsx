@@ -45,23 +45,22 @@ export default function SaleDuesPage() {
   let totalReceiptsAll = 0;
 
   buyers.forEach((b) => {
-    // 1. Get all dispatched/reached orders, sorted oldest first
-    const activeOrders = saleOrders?.filter((o) => o.buyerId === b.id && o.status !== 'PENDING')
-      .sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime())
-      .map((o) => {
-        const orderAmount = Number(o.tonnageKg) * Number(o.ratePerKg);
-        const gst = Number(o.gstAmount) || 0;
-        const cn = Number(o.creditNoteAmount) || 0;
-        const total = orderAmount + gst - cn;
-        return {
-          ...o,
-          totalAmount: total,
-          remainingAmount: total,
-        };
-      }) ?? [];
+    // 1. Each dispatch (shipment) is a billed invoice line. Gather them across the
+    //    buyer's orders, sorted oldest first.
+    const shipments = (saleOrders ?? [])
+      .filter((o) => o.buyerId === b.id)
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })))
+      .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
+      .map(({ d, o }) => {
+        const base = Number(d.weightKg) * Number(o.ratePerKg);
+        const gst = Number(d.gstAmount) || 0;
+        const cn = Number(d.creditNoteAmount) || 0;
+        const total = base + gst - cn;
+        return { d, o, billAmount: base + gst, shortage: cn, totalAmount: total, remainingAmount: total };
+      });
 
-    activeOrders.forEach((o) => {
-      totalBillingAll += o.totalAmount;
+    shipments.forEach((s) => {
+      totalBillingAll += s.totalAmount;
     });
 
     // 2. Fetch receipts for this buyer
@@ -72,13 +71,13 @@ export default function SaleDuesPage() {
     let unallocatedReceipts = totalCollected;
 
     // 3. FIFO Allocation
-    activeOrders.forEach((o) => {
+    shipments.forEach((s) => {
       if (unallocatedReceipts > 0) {
-        if (unallocatedReceipts >= o.remainingAmount) {
-          unallocatedReceipts -= o.remainingAmount;
-          o.remainingAmount = 0;
+        if (unallocatedReceipts >= s.remainingAmount) {
+          unallocatedReceipts -= s.remainingAmount;
+          s.remainingAmount = 0;
         } else {
-          o.remainingAmount -= unallocatedReceipts;
+          s.remainingAmount -= unallocatedReceipts;
           unallocatedReceipts = 0;
         }
       }
@@ -86,10 +85,10 @@ export default function SaleDuesPage() {
 
     // 4. Push outstanding items to flat list
     const today = new Date();
-    activeOrders.forEach((o) => {
-      if (o.remainingAmount > 0.01) { // ignore floating point dust
-        const start = o.receivedDate || o.saleDate;
-        const limitDays = o.dueDays || 0;
+    shipments.forEach((s) => {
+      if (s.remainingAmount > 0.01) { // ignore floating point dust
+        const start = s.d.deliveredDate || s.d.dispatchDate;
+        const limitDays = s.o.dueDays || 0;
         const dueDate = new Date(start);
         dueDate.setDate(dueDate.getDate() + limitDays);
 
@@ -99,16 +98,16 @@ export default function SaleDuesPage() {
         const dueDaysAfter = diffDays > 0 ? diffDays : 0;
 
         outstandingInvoices.push({
-          id: o.id,
-          brokerName: o.broker?.name ?? null,
+          id: s.d.id,
+          brokerName: s.o.broker?.name ?? null,
           dueDate,
           partyName: b.name,
-          invoiceNumber: o.invoiceNumber,
-          billDate: new Date(o.saleDate),
-          billAmount: Number(o.tonnageKg) * Number(o.ratePerKg) + (Number(o.gstAmount) || 0),
-          shortage: Number(o.creditNoteAmount) || 0,
+          invoiceNumber: s.d.invoiceNumber,
+          billDate: new Date(s.d.dispatchDate),
+          billAmount: s.billAmount,
+          shortage: s.shortage,
           discount: 0,
-          netAmount: o.remainingAmount,
+          netAmount: s.remainingAmount,
           dueDaysAfter,
         });
       }

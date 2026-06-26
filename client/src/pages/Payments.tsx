@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Wallet } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import type { Payment, Party, Broker } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -65,6 +66,36 @@ export default function PaymentsPage() {
     setLorryNumber('');
     setReference('');
     setDescription('');
+  }
+
+  /** Pre-fill the form from a payment screenshot read by the server OCR. */
+  function applyExtracted(data: ExtractedTransaction) {
+    const filled: string[] = [];
+    if (data.amount) { setAmount(String(data.amount)); filled.push('amount'); }
+    if (data.date) { setDate(data.date.slice(0, 10)); filled.push('date'); }
+    if (data.reference) { setReference(data.reference); filled.push('reference'); }
+    if (data.description) { setDescription(data.description); filled.push('note'); }
+
+    // Match the counterparty (whoever we paid) to a supplier first, then a broker.
+    const matchName = data.matchedPartyName ?? data.counterpartyName;
+    if (matchName) {
+      const key = nameKey(matchName);
+      const looseEq = (n: string) => { const k = nameKey(n); return k !== '' && (k === key || k.includes(key) || key.includes(k)); };
+      const supplier = suppliers.find((s) => nameKey(s.name) === key) ?? suppliers.find((s) => looseEq(s.name));
+      if (supplier) {
+        setType('SUPPLIER'); setPartyId(supplier.id); setBrokerId('');
+        filled.push(supplier.name);
+      } else {
+        const broker = brokers?.find((b) => nameKey(b.name) === key) ?? brokers?.find((b) => looseEq(b.name));
+        if (broker) {
+          setType('BROKER'); setBrokerId(broker.id); setPartyId('');
+          filled.push(broker.name);
+        }
+      }
+    }
+
+    if (filled.length) toast.success(`Read: ${filled.join(', ')}. Verify and record.`);
+    else toast.message('Could not read the screenshot. Enter details manually.');
   }
 
   const mutation = useMutation({
@@ -191,6 +222,12 @@ export default function PaymentsPage() {
             <DialogTitle>Record Payment</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <ScreenshotUpload
+              endpoint="/payments/extract"
+              hint="Drop a payment screenshot to auto-fill"
+              onExtracted={applyExtracted}
+            />
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="date">Payment Date</Label>

@@ -41,16 +41,17 @@ export default function SuryaRoadTransport() {
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
 
   const rows: RetentionRow[] = (saleOrders ?? [])
-    .filter((o) => Number(o.freightCharge) > 0 && o.status !== 'PENDING')
-    .map((o) => ({
-      id: o.id,
-      date: o.saleDate,
+    .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+    .filter(({ d }) => Number(d.freightCharge) > 0)
+    .map(({ o, d }) => ({
+      id: d.id,
+      date: d.dispatchDate,
       buyer: o.buyer?.name ?? '—',
-      lorryNumber: o.vehicleNumber ?? null,
-      invoice: o.invoiceNumber ?? null,
+      lorryNumber: d.vehicleNumber ?? null,
+      invoice: d.invoiceNumber ?? null,
       destination: o.destination ?? null,
       amount: retention,
-      released: o.status === 'DELIVERED',
+      released: d.status === 'DELIVERED',
     }))
     .filter((r) => {
       const d = new Date(r.date).toISOString().slice(0, 10);
@@ -66,7 +67,7 @@ export default function SuryaRoadTransport() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Surya Road Transport Ledger</h1>
+        <h1 className="text-2xl font-bold">Transport Report</h1>
         <p className="text-muted-foreground">Per-trip freight retention held at dispatch and released to Surya on delivery</p>
       </div>
 

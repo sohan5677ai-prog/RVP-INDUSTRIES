@@ -5,6 +5,7 @@ export const createLoanSchema = z.object({
   drawdownDate: z.coerce.date(),
   loanRef: z.string().trim().optional().nullable(),
   bankName: z.string().trim().optional().nullable(),
+  location: z.string().trim().optional().nullable(),
   // Optional per-loan rate; defaults to the global CompanyProfile rate.
   interestRatePct: z.coerce.number().nonnegative().optional(),
   notes: z.string().trim().optional().nullable(),

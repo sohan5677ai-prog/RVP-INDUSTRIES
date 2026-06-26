@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 
 const GST_RATE = 0.05;
@@ -37,12 +38,12 @@ const PRODUCTS: { value: SaleProduct; label: string }[] = [
 
 const statusVariant: Record<SaleStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   PENDING: 'secondary',
+  PARTIAL: 'outline',
   DISPATCHED: 'default',
-  REACHED: 'outline',
   DELIVERED: 'destructive',
 };
 
-const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'DISPATCHED', 'REACHED', 'DELIVERED'];
+const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED'];
 
 const NO_BROKER = '__none__';
 
@@ -203,24 +204,27 @@ export default function SaleOrders() {
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Party (Buyer)</Label>
-          <Select value={partyFilter} onValueChange={setPartyFilter}>
-            <SelectTrigger className="w-48 bg-card h-9"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All parties</SelectItem>
-              {parties?.filter(p => p.type !== 'SUPPLIER').map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Combobox
+            options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name }))]}
+            value={partyFilter}
+            onChange={setPartyFilter}
+            placeholder="All parties"
+            searchPlaceholder="Search party…"
+            ariaLabel="Filter by party"
+            className="w-48"
+          />
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Broker</Label>
-          <Select value={brokerFilter} onValueChange={setBrokerFilter}>
-            <SelectTrigger className="w-40 bg-card h-9"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All brokers</SelectItem>
-              <SelectItem value={NO_BROKER}>No broker</SelectItem>
-              {brokers?.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Combobox
+            options={[{ value: 'ALL', label: 'All brokers' }, { value: NO_BROKER, label: 'No broker' }, ...(brokers ?? []).map((b) => ({ value: b.id, label: b.name }))]}
+            value={brokerFilter}
+            onChange={setBrokerFilter}
+            placeholder="All brokers"
+            searchPlaceholder="Search broker…"
+            ariaLabel="Filter by broker"
+            className="w-40"
+          />
         </div>
         <div className="space-y-1">
           <Label htmlFor="from-date" className="text-xs text-muted-foreground">From</Label>
@@ -250,16 +254,18 @@ export default function SaleOrders() {
               <TableHead>Party</TableHead>
               <TableHead>Broker</TableHead>
               <TableHead>Destination</TableHead>
-              <TableHead className="text-right">Tonnage</TableHead>
+              <TableHead className="text-right">Ordered</TableHead>
+              <TableHead className="text-right">Dispatched</TableHead>
+              <TableHead className="text-right">Remaining</TableHead>
               <TableHead className="text-right">Price</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+            {isLoading && <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>}
             {!isLoading && visible.length === 0 && (
-              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No sale orders matching filters.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No sale orders matching filters.</TableCell></TableRow>
             )}
             {visible.map((o) => (
               <TableRow key={o.id}>
@@ -269,6 +275,12 @@ export default function SaleOrders() {
                 <TableCell>{o.broker?.name ?? '—'}</TableCell>
                 <TableCell>{o.destination ?? '—'}</TableCell>
                 <TableCell className="text-right font-semibold">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
+                <TableCell className="text-right">{toTonnes(o.dispatchedKg ?? 0).toFixed(2)} t</TableCell>
+                <TableCell className="text-right font-semibold">
+                  {(o.remainingKg ?? o.tonnageKg) > 0
+                    ? <span className="text-amber-600">{toTonnes(o.remainingKg ?? o.tonnageKg).toFixed(2)} t</span>
+                    : <span className="text-emerald-600">0.00 t</span>}
+                </TableCell>
                 <TableCell className="text-right">{rupees(o.ratePerKg)}/kg</TableCell>
                 <TableCell>
                   <Badge variant={statusVariant[o.status]}>
@@ -318,10 +330,16 @@ export default function SaleOrders() {
               <FormField control={form.control} name="buyerId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Party (buyer) <span className="text-destructive">*</span></FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Select buyer" /></SelectTrigger></FormControl>
-                    <SelectContent>{parties?.filter((p) => p.type !== 'SUPPLIER').map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                  </Select>
+                  <FormControl>
+                    <Combobox
+                      options={(parties ?? []).filter((p) => p.type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name }))}
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="Select buyer"
+                      searchPlaceholder="Search buyer…"
+                      className="w-full"
+                    />
+                  </FormControl>
                   {buyerId && (
                     <p className="text-xs text-muted-foreground">
                       Destination: <span className="font-medium">{buyerDestination ?? 'none set on party'}</span> · freight auto-applied from Settings
@@ -333,13 +351,16 @@ export default function SaleOrders() {
               <FormField control={form.control} name="brokerId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Broker (optional)</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="No broker" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <SelectItem value={NO_BROKER}>No broker</SelectItem>
-                      {brokers?.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <FormControl>
+                    <Combobox
+                      options={[{ value: NO_BROKER, label: 'No broker' }, ...(brokers ?? []).map((b) => ({ value: b.id, label: b.name }))]}
+                      value={field.value ?? NO_BROKER}
+                      onChange={field.onChange}
+                      placeholder="No broker"
+                      searchPlaceholder="Search broker…"
+                      className="w-full"
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

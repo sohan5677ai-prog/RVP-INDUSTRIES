@@ -301,19 +301,21 @@ export default function Parties() {
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="destination"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delivery destination</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Surat (for buyers)" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {form.watch('type') !== 'SUPPLIER' && (
+                  <FormField
+                    control={form.control}
+                    name="destination"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Delivery destination</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. Surat (for buyers)" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
               </div>
 
               <div className="space-y-3 rounded-lg border p-3 bg-muted/20">

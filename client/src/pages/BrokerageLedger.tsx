@@ -49,8 +49,16 @@ export default function BrokerageLedger() {
 
   const rows: LedgerRow[] = [];
   brokers?.forEach((b) => {
+    // One ₹2000 brokerage line per dispatched shipment under this broker.
     const activeOrders = (saleOrders ?? [])
-      .filter((o) => o.brokerId === b.id && o.status !== 'PENDING')
+      .filter((o) => o.brokerId === b.id)
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({
+        id: d.id,
+        saleDate: d.dispatchDate,
+        invoiceNumber: d.invoiceNumber,
+        buyer: o.buyer,
+        vehicleNumber: d.vehicleNumber,
+      })))
       .sort((a, c) => new Date(a.saleDate).getTime() - new Date(c.saleDate).getTime());
 
     const totalPaid = (payments ?? [])
@@ -94,7 +102,7 @@ export default function BrokerageLedger() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Brokerage Ledger</h1>
+        <h1 className="text-2xl font-bold">Brokerage Report</h1>
         <p className="text-muted-foreground">Brokerage due, paid &amp; balance per sale order (₹2,000 flat per order, payments allocated FIFO).</p>
       </div>
 

@@ -86,17 +86,19 @@ function summaryBlocks(d: SaleDraftData, marginError?: string): KnownBlock[] {
   return blocks;
 }
 
-function editModal(d: SaleDraftData, channel: string, messageTs: string) {
+/** Modal for creating (no messageTs) or editing (with messageTs) a sale order. */
+function editModal(d: SaleDraftData, channel: string, messageTs?: string) {
+  const isCreate = !messageTs;
   const brokerOptions = [
     { text: { type: 'plain_text', text: '— none —' }, value: 'NONE' },
     ...d.brokers.map((b) => ({ text: { type: 'plain_text', text: b.name.slice(0, 75) }, value: b.id })),
   ];
   return {
     type: 'modal' as const,
-    callback_id: `${FLOW}:edit_submit`,
-    private_metadata: JSON.stringify({ channel, messageTs }),
-    title: { type: 'plain_text' as const, text: 'Edit Sale Order' },
-    submit: { type: 'plain_text' as const, text: 'Save' },
+    callback_id: isCreate ? `${FLOW}:create_submit` : `${FLOW}:edit_submit`,
+    private_metadata: JSON.stringify(isCreate ? { channel } : { channel, messageTs }),
+    title: { type: 'plain_text' as const, text: isCreate ? 'Create Sale Order' : 'Edit Sale Order' },
+    submit: { type: 'plain_text' as const, text: isCreate ? 'Review' : 'Save' },
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
       {
@@ -238,19 +240,26 @@ export function registerSaleFlow(app: App): void {
       return;
     }
     const text = (command.text || '').trim();
-    if (!text) {
-      await respond({
-        response_type: 'ephemeral',
-        text: 'Usage: `/sale <buyer>, broker <name>, <tonnage> <product>, <rate>` — e.g. `/sale Krishna Exports, broker Ramesh, 20t pappu, 95/kg`',
-      });
-      return;
-    }
 
     let refs;
     try {
       refs = await loadRefs(user);
     } catch (err) {
       await respond({ response_type: 'ephemeral', text: `:x: Couldn't load buyers/brokers: ${(err as Error).message}` });
+      return;
+    }
+
+    // No text → open the create dialog straight away (like /po).
+    if (!text) {
+      const data: SaleDraftData = {
+        saleDate: new Date().toISOString().slice(0, 10),
+        product: 'PAPPU',
+        brokerageRatePerKg: 0,
+        marginOverride: false,
+        buyers: refs.buyers,
+        brokers: refs.brokers,
+      };
+      await client.views.open({ trigger_id: command.trigger_id, view: editModal(data, command.channel_id) });
       return;
     }
 
@@ -325,6 +334,50 @@ export function registerSaleFlow(app: App): void {
     const draft = getDraft<SaleDraftData>(keyFor(b.channel.id, b.user.id));
     if (!draft) return;
     await client.views.open({ trigger_id: b.trigger_id, view: editModal(draft.data, b.channel.id, b.message.ts) });
+  });
+
+  // Create dialog submitted (from `/sale` with no text) → post the confirm card.
+  app.view(`${FLOW}:create_submit`, async ({ ack, body, view, client }) => {
+    await ack();
+    const meta = JSON.parse(view.private_metadata || '{}');
+    const channel = meta.channel as string;
+    const user = await resolveErpUser(body.user.id);
+    if (!user) return;
+    let refs;
+    try {
+      refs = await loadRefs(user);
+    } catch (err) {
+      await client.chat.postMessage({ channel, text: `:x: Couldn't load buyers/brokers: ${(err as Error).message}` });
+      return;
+    }
+    const v = view.state.values as any;
+    const data: SaleDraftData = {
+      saleDate: v.date?.v?.selected_date ?? new Date().toISOString().slice(0, 10),
+      product: v.product?.v?.selected_option?.value ?? 'PAPPU',
+      brokerageRatePerKg: 0,
+      marginOverride: false,
+      buyers: refs.buyers,
+      brokers: refs.brokers,
+    };
+    const buyerId = v.buyer?.v?.selected_option?.value;
+    if (buyerId) { data.buyerId = buyerId; data.buyerName = refs.buyers.find((x) => x.id === buyerId)?.name; }
+    const brokerVal = v.broker?.v?.selected_option?.value;
+    if (brokerVal && brokerVal !== 'NONE') { data.brokerId = brokerVal; data.brokerName = refs.brokers.find((x) => x.id === brokerVal)?.name; }
+    const t = parseFloat(v.tonnage?.v?.value);
+    if (!isNaN(t) && t > 0) data.tonnageTonnes = t;
+    const p = parseFloat(v.price?.v?.value);
+    if (!isNaN(p) && p > 0) data.pricePerKg = p;
+    const dd = parseInt(v.dueDays?.v?.value, 10);
+    if (!isNaN(dd)) data.dueDays = dd;
+    const posted = await client.chat.postMessage({ channel, text: 'Sale Order draft', blocks: summaryBlocks(data) });
+    setDraft(keyFor(channel, body.user.id), {
+      flow: FLOW,
+      user,
+      slackUserId: body.user.id,
+      channel,
+      threadTs: posted.ts as string,
+      data,
+    });
   });
 
   app.view(`${FLOW}:edit_submit`, async ({ ack, body, view, client }) => {

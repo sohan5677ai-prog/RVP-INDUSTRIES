@@ -36,6 +36,19 @@ export async function startSlackBot(): Promise<void> {
     console.error('[slack] error:', error);
   });
 
+  // Global trace: logs EVERY incoming payload (commands, events, interactions),
+  // so we can see whether Slack is delivering file/message events at all. Remove
+  // once the bot is confirmed working.
+  app.use(async (args) => {
+    const body: any = (args as any).body ?? {};
+    const evt = body.event ?? {};
+    const kind = body.type ?? 'unknown';
+    const detail = evt.type ? `event=${evt.type}${evt.subtype ? `/${evt.subtype}` : ''}` : (body.command ?? body.actions?.[0]?.action_id ?? '');
+    const files = Array.isArray(evt.files) ? ` files=${evt.files.length}` : '';
+    console.log(`[slack] ← ${kind} ${detail}${files}`);
+    await args.next();
+  });
+
   registerPurchaseOrderFlow(app);
   registerStockInFlow(app);
   registerPurchaseFlow(app);

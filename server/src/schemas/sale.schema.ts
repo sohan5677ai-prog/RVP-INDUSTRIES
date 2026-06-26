@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const saleStatusEnum = z.enum(['PENDING', 'DISPATCHED', 'REACHED']);
+export const saleStatusEnum = z.enum(['PENDING', 'PARTIAL', 'DISPATCHED', 'DELIVERED']);
 export const saleProductEnum = z.enum(['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL']);
 
 export const createSaleOrderSchema = z.object({
@@ -24,6 +24,7 @@ export const createSaleOrderSchema = z.object({
 export const dispatchSaleOrderSchema = z.object({
   vehicleNumber: z.string().optional().nullable(),
   tonnageKg: z.coerce.number().int().positive(),
+  internalWeightKg: z.coerce.number().int().positive().optional().nullable(),
 });
 
 export const listSaleOrdersSchema = z.object({
@@ -31,13 +32,13 @@ export const listSaleOrdersSchema = z.object({
   product: saleProductEnum.optional(),
 });
 
-// Mark a dispatched order as reached. The only valid transition is
-// DISPATCHED -> REACHED, so status is not taken from the client — we just record
+// Mark a dispatched shipment as delivered. The only valid transition is
+// DISPATCHED -> DELIVERED, so status is not taken from the client — we just record
 // the buyer's kata weight (optional) to compute any shortage credit note.
-export const advanceSaleStatusSchema = z.object({
+export const deliverSaleDispatchSchema = z.object({
   buyerKataKg: z.coerce.number().int().positive().optional(),
 });
 
 export type CreateSaleOrderInput = z.infer<typeof createSaleOrderSchema>;
-export type AdvanceSaleStatusInput = z.infer<typeof advanceSaleStatusSchema>;
+export type DeliverSaleDispatchInput = z.infer<typeof deliverSaleDispatchSchema>;
 export type DispatchSaleOrderInput = z.infer<typeof dispatchSaleOrderSchema>;

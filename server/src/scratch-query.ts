@@ -1,68 +1,37 @@
 import { prisma } from './lib/prisma.js';
+import fs from 'fs';
 
 async function main() {
-  const party = await prisma.party.findFirst({
-    where: { name: { contains: 'DCS', mode: 'insensitive' } },
+  const stockIns = await prisma.stockIn.findMany({
     include: {
-      purchaseOrders: {
+      purchase: {
         include: {
-          stockIns: {
-            include: {
-              purchase: {
-                include: {
-                  verification: true,
-                  processing: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (!party) {
-    console.log('No party with DCS name found.');
-    return;
-  }
-
-  console.log('--- Party Details ---');
-  console.log(`ID: ${party.id}`);
-  console.log(`Name: ${party.name}`);
-  console.log(`Type: ${party.type}`);
-  console.log(`Number of POs: ${party.purchaseOrders.length}`);
-
-  for (const po of party.purchaseOrders) {
-    console.log(`\n  --- PO ${po.poNumber} ---`);
-    console.log(`  ID: ${po.id}`);
-    console.log(`  PricePerKg: ${po.pricePerKg}`);
-    console.log(`  TonnageKg: ${po.tonnageKg}`);
-    console.log(`  Status: ${po.status}`);
-    console.log(`  StockIns count: ${po.stockIns.length}`);
-
-    for (const stockIn of po.stockIns) {
-      console.log(`    --- StockIn ---`);
-      console.log(`    ID: ${stockIn.id}`);
-      console.log(`    Lorry: ${stockIn.lorryNumber}`);
-      console.log(`    Invoice: ${stockIn.invoiceNumber}`);
-      console.log(`    rvpKataKg: ${stockIn.rvpKataKg}`);
-      console.log(`    Has Purchase: ${!!stockIn.purchase}`);
-      if (stockIn.purchase) {
-        const p = stockIn.purchase;
-        console.log(`      Purchase ID: ${p.id}`);
-        console.log(`      NetWeightKg: ${p.netWeightKg}`);
-        console.log(`      Has Verification: ${!!p.verification}`);
-        if (p.verification) {
-          console.log(`        Verif PricePerKg: ${p.verification.pricePerKg}`);
-          console.log(`        Verif FinalWeightKg: ${p.verification.finalWeightKg}`);
+          verification: true
         }
-        console.log(`      Has Processing: ${!!p.processing}`);
-        if (p.processing) {
-          console.log(`        Milled Weight: ${p.processing.blackWeightKg}`);
+      },
+      purchaseOrder: {
+        include: {
+          party: true
         }
       }
+    },
+    orderBy: {
+      arrivalDate: 'desc'
+    }
+  });
+
+  let output = `Found ${stockIns.length} StockIns:\n`;
+  for (const s of stockIns) {
+    output += `StockIn: ID=${s.id}, Date=${s.arrivalDate.toISOString().slice(0, 10)}, Lorry=${s.lorryNumber}, Party=${s.purchaseOrder?.party?.name}, Invoice=${s.invoiceNumber}\n`;
+    output += `  Weight Info: Billing=${s.billingWeightKg}kg, Party=${s.partyKataKg}kg, RVP-1st=${s.rvpFirstWeightKg}kg, RVP-2nd=${s.rvpSecondWeightKg}kg, RVP-Kata=${s.rvpKataKg}kg\n`;
+    output += `  Purchase: ${s.purchase ? 'Yes (ID=' + s.purchase.id + ')' : 'No'}\n`;
+    if (s.purchase) {
+      output += `    Verification: ${s.purchase.verification ? 'Yes (Amt=' + s.purchase.verification.totalAmount + ', FinalWeight=' + s.purchase.verification.finalWeightKg + 'kg)' : 'No'}\n`;
     }
   }
+
+  fs.writeFileSync('scratch-output.txt', output);
+  console.log('Done!');
 }
 
 main()

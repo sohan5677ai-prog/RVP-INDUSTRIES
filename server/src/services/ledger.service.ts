@@ -253,28 +253,28 @@ export class LedgerService {
 
     // 2. Hamali legs (loading + unloading), 100% company-borne.
     if (data.legCharge > 0) {
-      lines.push({ accountCode: '10010', debit: data.legCharge, credit: 0, costCenter: data.toLocation });
+      lines.push({ accountCode: '50020', debit: data.legCharge, credit: 0, costCenter: data.toLocation }); // Factory Labor Expense
       lines.push({ accountCode: '20200', debit: 0, credit: data.legCrew, costCenter: 'Hamali Team' });
       if (data.legMargin > 0) {
         lines.push({ accountCode: '40030', debit: 0, credit: data.legMargin });
       }
     }
 
-    // 3. Transfer transport — capitalised, owed to the transporter.
+    // 3. Transfer transport — expensed, owed to the transporter.
     if (data.transportCharge > 0) {
-      lines.push({ accountCode: '10010', debit: data.transportCharge, credit: 0, costCenter: data.toLocation });
+      lines.push({ accountCode: '50090', debit: data.transportCharge, credit: 0, costCenter: data.toLocation }); // Transport Expense (Internal)
       lines.push({ accountCode: '20210', debit: 0, credit: data.transportCharge });
     }
 
-    // 4. Bag-cutting at the destination bunker — fully crew, capitalised.
+    // 4. Bag-cutting at the destination bunker — fully crew, expensed.
     if (data.bagCuttingCharge > 0) {
-      lines.push({ accountCode: '10010', debit: data.bagCuttingCharge, credit: 0, costCenter: data.toLocation });
+      lines.push({ accountCode: '50030', debit: data.bagCuttingCharge, credit: 0, costCenter: data.toLocation }); // Factory Overhead
       lines.push({ accountCode: '20200', debit: 0, credit: data.bagCuttingCharge, costCenter: 'Hamali Team' });
     }
 
-    // 5. Bank-loan carrying interest — capitalised into the seed, owed to the bank.
+    // 5. Bank-loan carrying interest — expensed, owed to the bank.
     if (data.interestCharge && data.interestCharge > 0) {
-      lines.push({ accountCode: '10010', debit: data.interestCharge, credit: 0, costCenter: data.toLocation });
+      lines.push({ accountCode: '50080', debit: data.interestCharge, credit: 0, costCenter: data.toLocation }); // Interest Expense
       lines.push({ accountCode: '20280', debit: 0, credit: data.interestCharge }); // Bank Loan Interest Payable
     }
 
@@ -422,7 +422,7 @@ export class LedgerService {
     const overheadTotal =
       data.overheadElectricity + data.overheadWages + data.overheadMaintenance;
 
-    const huskCredit = Math.round(data.huskWeightKg * 1.5 * 100) / 100;
+    const huskCredit = 0; // Value Husk at 0 so it does not reduce Pappu's cost.
     const wasteCredit = Math.round(data.wasteWeightKg * 1.0 * 100) / 100;
 
     // Debit finished goods
@@ -725,6 +725,39 @@ export class LedgerService {
       reference: `CN-${saleOrderId}`,
       description: `Credit Note for delivery shortage of ${data.shortageKg} kg on sale to ${data.buyerName}`,
       lines,
+    });
+  }
+
+  static async postInternalWeightProfit(
+    tx: Prisma.TransactionClient,
+    saleOrderId: string,
+    data: {
+      buyerName: string;
+      product: string;
+      profitWeightKg: number;
+      amount: number;
+    }
+  ) {
+    if (data.amount <= 0) return;
+    
+    await this.postJournalEntry(tx, {
+      date: new Date(),
+      reference: `IWP-${saleOrderId}`,
+      description: `Internal weight profit of ${data.profitWeightKg} kg on delivery to ${data.buyerName}`,
+      lines: [
+        {
+          accountCode: '50010', // Cost of Goods Sold (Debit increases the expense)
+          debit: data.amount,
+          credit: 0,
+          costCenter: data.product,
+        },
+        {
+          accountCode: '40040', // Internal Weight Profit (Credit increases revenue)
+          debit: 0,
+          credit: data.amount,
+          costCenter: data.product,
+        },
+      ],
     });
   }
 

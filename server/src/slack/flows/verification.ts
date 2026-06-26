@@ -40,33 +40,111 @@ function toDraftData(purchase: any): VerifyDraftData {
   };
 }
 
-/** Estimated payable for the preview (no discount): final × price + 5% IGST on billing. */
-function estPayable(d: VerifyDraftData, finalWeight: number): number {
-  const igst = Math.round(d.billingWeightKg * d.pricePerKg * 0.05 * 100) / 100;
-  return finalWeight * d.pricePerKg + igst;
+interface VerifyBreakdown {
+  reference: number;
+  diff: number;
+  exempt: boolean;
+  finalWeight: number;
+  hasPenalty: boolean;
+  displayBaseWeight: number;
+  baseCost: number;
+  kataDiffDeduction: number;
+  discountAmount: number;
+  netBase: number;
+  billingAmount: number;
+  igst: number;
+  total: number;
+  shortageKg: number;
+  debitNote: number;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Full payment breakdown mirroring the ERP "Verify & Approve" dialog and the
+ * server's createVerification math: base cost on the (possibly penalised)
+ * reference weight, the kata-discrepancy deduction, the chosen quality discount,
+ * IGST (5%) charged on the invoice billing amount, and the shortage debit note.
+ */
+function computeBreakdown(d: VerifyDraftData): VerifyBreakdown {
+  const cv = crossVerify(d.billingWeightKg, d.partyKataKg, d.rvpKataKg);
+  const price = d.pricePerKg;
+
+  const hasPenalty = cv.finalWeight < cv.reference;
+  const displayBaseWeight = hasPenalty ? cv.reference : cv.finalWeight;
+  const baseCost = displayBaseWeight * price;
+  const kataDiffDeduction = hasPenalty ? (cv.reference - cv.finalWeight) * price : 0;
+
+  let discountAmount = 0;
+  if (d.discountType === 'WEIGHT') discountAmount = d.discountValue * price;
+  else if (d.discountType === 'PRICE') discountAmount = cv.finalWeight * d.discountValue;
+  else if (d.discountType === 'AMOUNT') discountAmount = d.discountValue;
+
+  const netBase = Math.max(0, baseCost - kataDiffDeduction - discountAmount);
+  const billingAmount = d.billingWeightKg * price;
+  const igst = round2(billingAmount * 0.05);
+  const total = round2(netBase + igst);
+
+  const shortageKg = d.billingWeightKg - d.rvpKataKg;
+  const toleranceExceeded = shortageKg > 0 && shortageKg / d.billingWeightKg > 0.005;
+  const debitNote = toleranceExceeded ? round2(shortageKg * price) : 0;
+
+  return {
+    reference: cv.reference,
+    diff: cv.diff,
+    exempt: cv.exempt,
+    finalWeight: cv.finalWeight,
+    hasPenalty,
+    displayBaseWeight,
+    baseCost,
+    kataDiffDeduction,
+    discountAmount,
+    netBase,
+    billingAmount,
+    igst,
+    total,
+    shortageKg,
+    debitNote,
+  };
 }
 
 function previewBlocks(d: VerifyDraftData): KnownBlock[] {
-  const cv = crossVerify(d.billingWeightKg, d.partyKataKg, d.rvpKataKg);
+  const b = computeBreakdown(d);
   const discountLabel = d.discountType
     ? `${d.discountType} · ${d.discountType === 'PRICE' ? `${rupees(d.discountValue)}/kg` : d.discountType === 'WEIGHT' ? `${d.discountValue} kg` : rupees(d.discountValue)}`
     : 'None';
-  return [
+
+  // Payment-details lines, mirroring the ERP approval dialog.
+  const payLines: string[] = [
+    `*Payment details*`,
+    `Base cost (${b.displayBaseWeight} kg @ ${rupees(d.pricePerKg)}/kg):  ${rupees(b.baseCost)}`,
+  ];
+  if (b.kataDiffDeduction > 0) {
+    payLines.push(`Kata discrepancy deduction (${b.reference - b.finalWeight} kg penalty):  −${rupees(b.kataDiffDeduction)}`);
+  }
+  if (b.discountAmount > 0) {
+    payLines.push(`Quality discount (${d.discountType}):  −${rupees(b.discountAmount)}`);
+  }
+  payLines.push(`Net base cost (payable):  ${rupees(b.netBase)}`);
+  payLines.push(`IGST (5% on invoice billing ${rupees(b.billingAmount)}):  ${rupees(b.igst)}`);
+  payLines.push(`*Net balance payable:  ${rupees(b.total)}*`);
+
+  const blocks: KnownBlock[] = [
     headerBlock('Weight Verification'),
     contextBlock(d.label),
     fieldsSection([
-      { label: 'Billing weight', value: `${d.billingWeightKg} kg` },
+      { label: 'Billing (invoice)', value: `${d.billingWeightKg} kg` },
       { label: 'Party kata', value: `${d.partyKataKg} kg` },
-      { label: 'RVP kata', value: `${d.rvpKataKg} kg` },
-      { label: 'Reference', value: `${cv.reference} kg` },
-      { label: 'Difference', value: `${cv.diff} kg${cv.exempt ? ' · exempt' : ''}` },
-      { label: 'Final weight', value: `${cv.finalWeight} kg` },
+      { label: 'RVP net kata', value: `${d.rvpKataKg} kg` },
+      { label: 'Reference', value: `${b.reference} kg` },
+      { label: 'Difference', value: `${b.diff} kg (limit 80)` },
+      { label: 'Status', value: b.exempt ? ':white_check_mark: Exempt' : ':warning: Deduction applies' },
+      { label: 'Final weight', value: `${b.finalWeight} kg` },
       { label: 'Price', value: `${rupees(d.pricePerKg)}/kg` },
-      { label: 'Est. payable', value: `${rupees(estPayable(d, cv.finalWeight))} _(before discount)_` },
     ]),
     selectSection(
       `${FLOW}:discount_select`,
-      'Discount?',
+      `Quality discount?  _(current: ${discountLabel})_`,
       'No discount',
       [
         { text: 'None', value: 'NONE' },
@@ -75,15 +153,23 @@ function previewBlocks(d: VerifyDraftData): KnownBlock[] {
         { text: 'Amount (₹ off)', value: 'AMOUNT' },
       ]
     ),
-    contextBlock(`:information_source: Discount: *${discountLabel}*. Final payable + any shortage debit note are computed on approve.`),
-    {
-      type: 'actions',
-      elements: [
-        { type: 'button', text: { type: 'plain_text', text: 'Approve', emoji: true }, style: 'primary', action_id: `${FLOW}:approve` },
-        { type: 'button', text: { type: 'plain_text', text: 'Cancel', emoji: true }, style: 'danger', action_id: `${FLOW}:cancel` },
-      ],
-    },
+    { type: 'section', text: { type: 'mrkdwn', text: payLines.join('\n') } },
   ];
+  if (b.debitNote > 0) {
+    blocks.push(
+      contextBlock(
+        `:warning: Shortage of ${b.shortageKg} kg exceeds the 0.5% tolerance — a *debit note of ${rupees(b.debitNote)}* will be raised to the supplier on approve.`
+      )
+    );
+  }
+  blocks.push({
+    type: 'actions',
+    elements: [
+      { type: 'button', text: { type: 'plain_text', text: 'Verify & Approve', emoji: true }, style: 'primary', action_id: `${FLOW}:approve` },
+      { type: 'button', text: { type: 'plain_text', text: 'Cancel', emoji: true }, style: 'danger', action_id: `${FLOW}:cancel` },
+    ],
+  });
+  return blocks;
 }
 
 function discountValueModal(type: DiscountType, channel: string, messageTs: string, user: string) {
@@ -107,7 +193,7 @@ function discountValueModal(type: DiscountType, channel: string, messageTs: stri
   };
 }
 
-async function startVerification(
+export async function startVerification(
   purchaseId: string,
   user: ErpUser,
   slackUserId: string,
@@ -251,14 +337,18 @@ export function registerVerificationFlow(app: App): void {
         draft.user
       );
       clearDraft(key);
+      const igst = round2(d.billingWeightKg * d.pricePerKg * 0.05);
       const blocks: KnownBlock[] = [
         headerBlock('✅ Verification approved'),
         contextBlock(d.label),
         fieldsSection([
+          { label: 'Billing / Party / RVP', value: `${d.billingWeightKg} / ${d.partyKataKg} / ${d.rvpKataKg} kg` },
+          { label: 'Reference', value: `${result.referenceKg ?? '—'} kg` },
           { label: 'Final weight', value: `${result.finalWeightKg} kg` },
-          { label: 'Exempt', value: result.exempt ? 'Yes' : 'No' },
-          { label: 'Payable (incl. 5% IGST)', value: rupees(Number(result.totalAmount)) },
+          { label: 'Status', value: result.exempt ? 'Exempt' : 'Deduction applied' },
           { label: 'Price', value: `${rupees(Number(result.pricePerKg))}/kg` },
+          { label: 'IGST (5% on billing)', value: rupees(igst) },
+          { label: 'Net balance payable', value: `*${rupees(Number(result.totalAmount))}*` },
         ]),
       ];
       if (result.debitNoteAmount) {

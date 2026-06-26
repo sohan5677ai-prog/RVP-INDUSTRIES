@@ -6,9 +6,9 @@ import { HttpError } from '../lib/httpError.js';
 import { loginSchema } from '../schemas/auth.schema.js';
 
 export async function login(req: Request, res: Response) {
-  const { email, password } = loginSchema.parse(req.body);
+  const { username, password } = loginSchema.parse(req.body);
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { username } });
   if (!user) throw new HttpError(401, 'Invalid credentials');
 
   const ok = await bcrypt.compare(password, user.password);
@@ -17,7 +17,7 @@ export async function login(req: Request, res: Response) {
   const token = signToken({ userId: user.id, role: user.role });
   res.json({
     token,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: { id: user.id, name: user.name, username: user.username, role: user.role },
   });
 }
 
@@ -26,7 +26,7 @@ export async function me(req: Request, res: Response) {
 
   const user = await prisma.user.findUnique({
     where: { id: req.user.userId },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: { id: true, name: true, username: true, role: true, createdAt: true },
   });
   if (!user) throw new HttpError(404, 'User not found');
 

@@ -30,6 +30,29 @@ const port = Number(process.env.PORT ?? 4000);
 app.listen(port, "0.0.0.0", () => {
   console.log(`rvp-server listening on http://localhost:${port}`);
 
+  // Bootstrap missing accounts
+  import("./lib/prisma.js").then(async ({ prisma }) => {
+    try {
+      await prisma.account.upsert({
+        where: { code: '40040' },
+        update: { name: 'Internal Weight Profit', type: 'REVENUE' },
+        create: { code: '40040', name: 'Internal Weight Profit', type: 'REVENUE' },
+      });
+      await prisma.account.upsert({
+        where: { code: '50080' },
+        update: { name: 'Interest Expense', type: 'EXPENSE' },
+        create: { code: '50080', name: 'Interest Expense', type: 'EXPENSE' },
+      });
+      await prisma.account.upsert({
+        where: { code: '50090' },
+        update: { name: 'Transport Expense (Internal)', type: 'EXPENSE' },
+        create: { code: '50090', name: 'Transport Expense (Internal)', type: 'EXPENSE' },
+      });
+    } catch(e) {
+      console.error(e);
+    }
+  });
+
   // Optionally start the Slack bot (Socket Mode) in the same process. A failure
   // here must never take down the API server, so it's isolated in try/catch.
   if (process.env.SLACK_ENABLED === "true") {

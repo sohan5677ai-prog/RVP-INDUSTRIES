@@ -3,47 +3,110 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ──────────────────────────────────────────────────────────────
+   RVP ERP — "Tamarind & Bone"
+   Agricultural heritage × premium editorial.
+   Espresso · warm bone · tamarind amber · forest green.
+────────────────────────────────────────────────────────────── */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --radius: 0.7rem;
+
+  --background: #f3eee3;        /* warm bone canvas */
+  --foreground: #251c12;        /* espresso ink */
+  --card: #fffcf6;              /* cream */
+  --card-foreground: #251c12;
+  --popover: #fffcf6;
+  --popover-foreground: #251c12;
+
+  --primary: #ad4f0a;           /* tamarind amber */
+  --primary-foreground: #fdf6ea;
+  --secondary: #ece2d1;         /* warm sand */
+  --secondary-foreground: #3b2e1e;
+  --muted: #ebe1d0;
+  --muted-foreground: #897a63;  /* warm taupe */
+  --accent: #f2e6d1;            /* soft amber hover-tint */
+  --accent-foreground: #8a430b;
+
+  --forest: #1f5b41;            /* forest green */
+  --forest-foreground: #f1f6f2;
+
+  --destructive: #b23a22;       /* warm brick */
+  --destructive-foreground: #fff5f1;
+  --success: #1f5b41;
+  --success-foreground: #f1f6f2;
+  --warning: #c07c12;
+  --warning-foreground: #fff8ec;
+
+  --border: #e5d9c2;            /* warm hairline */
+  --input: #ddd0b6;
+  --ring: #ad4f0a;
+
+  /* Espresso sidebar */
+  --sidebar: #1b1510;
+  --sidebar-foreground: #c8bba6;
+  --sidebar-border: #2c231a;
+  --sidebar-accent: #db8c3f;
+  --sidebar-hover: #241c14;
+
+  /* Warm, espresso-tinted elevation (not gray — the premium tell) */
+  --shadow-color: 30 22 14;
+  --shadow-xs: 0 1px 2px rgb(var(--shadow-color) / 0.05);
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.05), 0 1px 1px rgb(var(--shadow-color) / 0.04);
+  --shadow-md: 0 4px 14px -3px rgb(var(--shadow-color) / 0.09), 0 2px 6px -2px rgb(var(--shadow-color) / 0.05);
+  --shadow-lg: 0 14px 36px -10px rgb(var(--shadow-color) / 0.14), 0 5px 14px -6px rgb(var(--shadow-color) / 0.07);
+
+  /* Frosted glass (iOS-style) */
+  --glass-bg: rgb(255 253 248 / 0.72);
+  --glass-border: rgb(255 255 255 / 0.6);
+  --glass-highlight: rgb(255 255 255 / 0.7);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: #14100b;
+  --foreground: #ece4d6;
+  --card: #1f1810;
+  --card-foreground: #ece4d6;
+  --popover: #1f1810;
+  --popover-foreground: #ece4d6;
+
+  --primary: #e0922e;
+  --primary-foreground: #1a1107;
+  --secondary: #2a2117;
+  --secondary-foreground: #ece4d6;
+  --muted: #261e15;
+  --muted-foreground: #a3927a;
+  --accent: #2f2417;
+  --accent-foreground: #ecc893;
+
+  --forest: #4fa882;
+  --forest-foreground: #0e1a14;
+
+  --destructive: #d85a41;
+  --destructive-foreground: #fff5f1;
+  --success: #4fa882;
+  --success-foreground: #0e1a14;
+  --warning: #e0a53a;
+  --warning-foreground: #1a1107;
+
+  --border: #33291a;
+  --input: #3a2f1e;
+  --ring: #e0922e;
+
+  --sidebar: #0f0c08;
+  --sidebar-foreground: #b6aa90;
+  --sidebar-border: #221b12;
+  --sidebar-accent: #e0922e;
+  --sidebar-hover: #1a140d;
+
+  --shadow-color: 0 0 0;
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35), 0 1px 1px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 14px -3px rgb(0 0 0 / 0.45), 0 2px 6px -2px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 14px 36px -10px rgb(0 0 0 / 0.55), 0 5px 14px -6px rgb(0 0 0 / 0.4);
+
+  --glass-bg: rgb(31 24 16 / 0.62);
+  --glass-border: rgb(255 255 255 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.06);
 }
 
 @theme inline {
@@ -51,6 +114,12 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --font-sans: "Hanken Grotesk Variable", system-ui, -apple-system, sans-serif;
+  --font-display: "Fraunces Variable", "Hanken Grotesk Variable", Georgia, serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -65,10 +134,27 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-forest: var(--forest);
+  --color-forest-foreground: var(--forest-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-hover: var(--sidebar-hover);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
 }
 
 @layer base {
@@ -76,8 +162,206 @@
     border-color: var(--border);
     outline-color: var(--ring);
   }
+  html {
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     background-color: var(--background);
     color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  /* Editorial serif headings */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 0, "WONK" 0;
+    letter-spacing: -0.01em;
+  }
+  /* Aligned figures everywhere numbers live */
+  .font-mono, .tabular-nums { font-feature-settings: "tnum", "cv01"; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background-color: #cdbfa3;
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: #b3a285; }
+  .dark ::-webkit-scrollbar-thumb { background-color: #3a2f1e; }
+  .dark ::-webkit-scrollbar-thumb:hover { background-color: #4d3f28; }
+
+  ::selection { background-color: color-mix(in srgb, var(--primary) 22%, transparent); }
+}
+
+/* Utility: warm elevation classes */
+@layer utilities {
+  .shadow-elev-sm { box-shadow: var(--shadow-sm); }
+  .shadow-elev-md { box-shadow: var(--shadow-md); }
+  .shadow-elev-lg { box-shadow: var(--shadow-lg); }
+  .font-display { font-family: var(--font-display); }
+
+  /* iOS-style frosted glass surfaces */
+  .glass {
+    background-color: var(--glass-bg);
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-md), inset 0 1px 0 0 var(--glass-highlight);
+  }
+  .glass-strong {
+    background-color: color-mix(in srgb, var(--card) 86%, transparent);
+    backdrop-filter: blur(30px) saturate(185%);
+    -webkit-backdrop-filter: blur(30px) saturate(185%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-lg), inset 0 1px 0 0 var(--glass-highlight);
+  }
+  /* lighter blur for bars/inputs */
+  .glass-thin {
+    background-color: color-mix(in srgb, var(--card) 55%, transparent);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+  }
+  /* numeric values that must never overflow their tile */
+  .num-fit {
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Premium canvas — warm bone with paper grain + soft amber bloom
+────────────────────────────────────────────────────────────── */
+.premium-bg {
+  position: relative;
+  background:
+    radial-gradient(120% 60% at 12% -8%, color-mix(in srgb, var(--primary) 10%, transparent) 0%, transparent 42%),
+    radial-gradient(100% 55% at 100% 0%, color-mix(in srgb, var(--forest) 7%, transparent) 0%, transparent 45%),
+    var(--background);
+}
+/* fine paper grain */
+.premium-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+.premium-bg > * { position: relative; z-index: 1; }
+.dark .premium-bg::before { opacity: 0.35; }
+
+/* ──────────────────────────────────────────────────────────────
+   Motion — refined, spring-leaning
+────────────────────────────────────────────────────────────── */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+.animate-fade-in { animation: fade-in 0.5s ease-out both; }
+.animate-rise { animation: rise-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-scale-in { animation: scale-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+.stagger > * { animation: rise-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.11s; }
+.stagger > *:nth-child(3) { animation-delay: 0.17s; }
+.stagger > *:nth-child(4) { animation-delay: 0.23s; }
+.stagger > *:nth-child(5) { animation-delay: 0.29s; }
+.stagger > *:nth-child(n+6) { animation-delay: 0.34s; }
+
+/* Skeleton shimmer */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--muted);
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--card) 60%, transparent), transparent);
+  animation: sweep 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, .animate-fade-in, .animate-rise, .animate-scale-in, .stagger > *, .shimmer::after {
+    animation: none !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Calendar (react-day-picker) — Tamarind & Bone theme
+────────────────────────────────────────────────────────────── */
+.rdp-premium {
+  --rdp-accent-color: var(--primary);
+  --rdp-accent-background-color: color-mix(in srgb, var(--primary) 14%, transparent);
+  --rdp-today-color: var(--primary);
+  --rdp-day-width: 2.25rem;
+  --rdp-day-height: 2.25rem;
+  --rdp-day_button-width: 2.25rem;
+  --rdp-day_button-height: 2.25rem;
+  --rdp-day_button-border-radius: 0.6rem;
+  --rdp-outside-opacity: 0.4;
+  --rdp-disabled-opacity: 0.35;
+  font-family: var(--font-sans);
+  margin: 0;
+}
+.rdp-premium .rdp-month_caption,
+.rdp-premium .rdp-caption_label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-size: 0.9rem;
+  color: var(--foreground);
+}
+.rdp-premium .rdp-weekday {
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.rdp-premium .rdp-day_button {
+  border-radius: 0.6rem;
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+  font-variant-numeric: tabular-nums;
+}
+.rdp-premium .rdp-day_button:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.rdp-premium .rdp-selected .rdp-day_button {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  font-weight: 600;
+}
+.rdp-premium .rdp-today:not(.rdp-selected) .rdp-day_button {
+  color: var(--primary);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.rdp-premium .rdp-chevron { fill: var(--muted-foreground); }
+.rdp-premium .rdp-button_previous,
+.rdp-premium .rdp-button_next { border-radius: 0.5rem; }
+.rdp-premium .rdp-button_previous:hover,
+.rdp-premium .rdp-button_next:hover { background: var(--accent); }

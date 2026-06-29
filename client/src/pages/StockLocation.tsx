@@ -28,6 +28,8 @@ interface BlackSeedRow {
 interface BlackSeedStockResponse {
   rows: BlackSeedRow[];
   pappuSoldKg: number;
+  pappuCommittedKg: number;
+  totalMilledKg: number;
   poTonnageKg: number;
 }
 
@@ -125,7 +127,9 @@ export default function StockLocation() {
   const locationData = useMemo(() => {
     const allRows = data?.rows ?? [];
     const allTransfers = transfers ?? [];
-    const pappuSoldKg = data?.pappuSoldKg ?? 0;
+    // Seed is drawn down by COMMITTED pappu sales (booked orders, max of ordered vs
+    // dispatched): each kg consumes 1/0.6 kg of seed (60% out-turn). Mirrors Stock by Price.
+    const seedConsumedByPappuKg = (data?.pappuCommittedKg ?? 0) / PAPPU_OUTTURN;
 
     // Step 1: Group purchase rows by location, then build date-wise lots.
     const locLots: Record<string, DateLot[]> = {};
@@ -188,10 +192,9 @@ export default function StockLocation() {
       lots.sort((a, b) => a.date.localeCompare(b.date));
     }
 
-    // Step 4: Deplete "At process" FIFO by pappu sold.
+    // Step 4: Deplete "At process" FIFO by seed consumed for pappu sold.
     const processLots = locLots['At process'] ?? [];
-    const consumeKg = Math.round(pappuSoldKg / PAPPU_OUTTURN);
-    depleteFifo(processLots, consumeKg);
+    depleteFifo(processLots, Math.round(seedConsumedByPappuKg));
 
     return locLots;
   }, [data, transfers]);

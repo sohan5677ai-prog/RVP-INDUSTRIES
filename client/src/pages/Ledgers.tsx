@@ -1,150 +1,198 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Landmark, Wallet, TrendingUp, TrendingDown, RefreshCcw } from 'lucide-react';
+import { Landmark, Wallet, TrendingUp, TrendingDown, RefreshCcw, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { Account } from '@/lib/types';
+import type { GroupNode, LedgerNode } from '@/lib/types';
 import { rupees } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
+
+// Signed amount → { value, Dr/Cr }. +Dr / −Cr.
+function drcr(signed: number) {
+  return { value: rupees(Math.abs(signed)), side: signed >= 0 ? 'Dr' : 'Cr' as const, isDr: signed >= 0 };
+}
+
+function sumByNature(roots: GroupNode[], nature: GroupNode['nature'], statement?: GroupNode['statement']) {
+  return roots
+    .filter((g) => g.nature === nature && (!statement || g.statement === statement))
+    .reduce((s, g) => s + g.subtotal, 0);
+}
+
+function collectGroupIds(nodes: GroupNode[], acc: string[] = []): string[] {
+  for (const n of nodes) {
+    acc.push(n.id);
+    collectGroupIds(n.children, acc);
+  }
+  return acc;
+}
+
+function LedgerRow({ ledger, depth }: { ledger: LedgerNode; depth: number }) {
+  const d = drcr(ledger.closing);
+  return (
+    <TableRow className="hover:bg-muted/40">
+      <TableCell style={{ paddingLeft: `${depth * 20 + 28}px` }} className="py-1.5">
+        <span className="font-mono text-[10px] text-muted-foreground mr-2">{ledger.code}</span>
+        <span className="text-sm text-foreground">{ledger.name}</span>
+      </TableCell>
+      <TableCell className="text-right font-mono text-xs text-muted-foreground tabular-nums">
+        {ledger.openingBalance ? rupees(Math.abs(ledger.openingBalance)) : '—'}
+      </TableCell>
+      <TableCell className={cn('text-right font-mono text-sm tabular-nums', d.isDr ? 'text-foreground' : 'text-foreground')}>
+        {Math.abs(ledger.closing) < 0.005 ? '—' : (
+          <>
+            {d.value} <span className="text-[10px] text-muted-foreground font-semibold">{d.side}</span>
+          </>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function GroupRows({ group, depth, open, toggle }: {
+  group: GroupNode;
+  depth: number;
+  open: Set<string>;
+  toggle: (id: string) => void;
+}) {
+  const isOpen = open.has(group.id);
+  const d = drcr(group.subtotal);
+  const isPrimary = depth === 0;
+
+  return (
+    <>
+      <TableRow
+        className={cn('cursor-pointer transition-colors', isPrimary ? 'bg-muted/60 hover:bg-muted' : 'bg-muted/20 hover:bg-muted/40')}
+        onClick={() => toggle(group.id)}
+      >
+        <TableCell style={{ paddingLeft: `${depth * 20 + 8}px` }} className="py-2">
+          <span className="inline-flex items-center gap-1.5">
+            <ChevronRight className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+            <span className={cn(isPrimary ? 'font-bold text-foreground tracking-tight' : 'font-semibold text-foreground/90', 'text-sm')}>
+              {group.name}
+            </span>
+          </span>
+        </TableCell>
+        <TableCell />
+        <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
+          {Math.abs(group.subtotal) < 0.005 ? '—' : (
+            <>
+              {d.value} <span className="text-[10px] text-muted-foreground font-semibold">{d.side}</span>
+            </>
+          )}
+        </TableCell>
+      </TableRow>
+      {isOpen && (
+        <>
+          {group.children.map((c) => (
+            <GroupRows key={c.id} group={c} depth={depth + 1} open={open} toggle={toggle} />
+          ))}
+          {group.ledgers.map((l) => (
+            <LedgerRow key={l.id} ledger={l} depth={depth + 1} />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
 
 export default function Ledgers() {
-  const [activeTab, setActiveTab] = useState<string>('ALL');
-
-  const { data: accounts, isLoading, refetch, isRefetching } = useQuery({
+  const { data: roots, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['ledger-accounts'],
-    queryFn: () => api<Account[]>('/ledger/accounts'),
+    queryFn: () => api<GroupNode[]>('/ledger/accounts'),
   });
 
-  const filteredAccounts = accounts?.filter((a) => activeTab === 'ALL' || a.type === activeTab) ?? [];
+  const tree = roots ?? [];
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
-  // Calculate high-level financial summary cards
-  const totalAssets = accounts?.filter(a => a.type === 'ASSET').reduce((sum, a) => sum + a.balance, 0) ?? 0;
-  const totalLiabilities = accounts?.filter(a => a.type === 'LIABILITY').reduce((sum, a) => sum + a.balance, 0) ?? 0;
-  const totalRevenue = accounts?.filter(a => a.type === 'REVENUE').reduce((sum, a) => sum + a.balance, 0) ?? 0;
-  const totalExpense = accounts?.filter(a => a.type === 'EXPENSE').reduce((sum, a) => sum + a.balance, 0) ?? 0;
-  const netEarnings = totalRevenue - totalExpense;
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const expandAll = () => setOpen(new Set(collectGroupIds(tree)));
+  const collapseAll = () => setOpen(new Set());
+
+  // Summary (signed subtotals): assets +Dr, liabilities/capital −Cr.
+  const totalAssets = sumByNature(tree, 'ASSETS', 'BALANCE_SHEET');
+  const totalLiabilities = -sumByNature(tree, 'LIABILITIES', 'BALANCE_SHEET');
+  const totalIncome = -sumByNature(tree, 'INCOME', 'PROFIT_LOSS');
+  const totalExpense = sumByNature(tree, 'EXPENSES', 'PROFIT_LOSS');
+  const netProfit = totalIncome - totalExpense;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Chart of Accounts</h1>
-          <p className="text-muted-foreground">General ledger balances and double-entry trial balance details</p>
+          <p className="text-muted-foreground">Tally-style grouped ledger with opening balances and live closing balances</p>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={() => refetch()} 
-          disabled={isLoading || isRefetching}
-          className="gap-1.5"
-        >
-          <RefreshCcw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={expandAll} className="gap-1.5">
+            <ChevronsUpDown className="h-4 w-4" /> Expand all
+          </Button>
+          <Button variant="outline" size="sm" onClick={collapseAll} className="gap-1.5">
+            <ChevronsDownUp className="h-4 w-4" /> Collapse
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading || isRefetching} className="gap-1.5">
+            <RefreshCcw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* Financial Summary Cards */}
+      {/* Financial summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border bg-card shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Assets</CardTitle>
-            <Landmark className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-500">{rupees(totalAssets)}</div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Inventory silos & receivables</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border bg-card shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Liabilities</CardTitle>
-            <Wallet className="h-4 w-4 text-rose-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-rose-600 dark:text-rose-500">{rupees(totalLiabilities)}</div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Supplier payables & accrued Hamali</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border bg-card shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Milling Revenues</CardTitle>
-            <TrendingUp className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-primary">{rupees(totalRevenue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Pappu sales revenue & byproduct resale</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border bg-card shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Net Earnings (P&L)</CardTitle>
-            <TrendingDown className="h-4 w-4 text-indigo-500" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${netEarnings >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-500'}`}>
-              {rupees(netEarnings)}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Revenues minus factory labor & overheads</p>
-          </CardContent>
-        </Card>
+        <SummaryCard title="Total Assets" value={totalAssets} icon={<Landmark className="h-4 w-4 text-emerald-500" />} accent="text-emerald-600 dark:text-emerald-500" hint="Fixed assets, investments & current assets" />
+        <SummaryCard title="Liabilities & Capital" value={totalLiabilities} icon={<Wallet className="h-4 w-4 text-rose-500" />} accent="text-rose-600 dark:text-rose-500" hint="Capital, loans & current liabilities" />
+        <SummaryCard title="Income (Current Period)" value={totalIncome} icon={<TrendingUp className="h-4 w-4 text-primary" />} accent="text-primary" hint="Sales & other income" />
+        <SummaryCard title="Net Profit (Current Period)" value={netProfit} icon={<TrendingDown className="h-4 w-4 text-indigo-500" />} accent={netProfit >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-500'} hint="Income minus expenses" />
       </div>
 
-      {/* Chart of Accounts list */}
-      <Tabs defaultValue="ALL" onValueChange={setActiveTab} className="space-y-4">
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="ALL">All Accounts</TabsTrigger>
-            <TabsTrigger value="ASSET">Assets</TabsTrigger>
-            <TabsTrigger value="LIABILITY">Liabilities</TabsTrigger>
-            <TabsTrigger value="REVENUE">Revenues</TabsTrigger>
-            <TabsTrigger value="EXPENSE">Expenses</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value={activeTab} className="rounded-lg border bg-card overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-24">Code</TableHead>
-                <TableHead>Account Name</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead className="text-right">Total Debits</TableHead>
-                <TableHead className="text-right">Total Credits</TableHead>
-                <TableHead className="text-right">Balance</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Loading general ledger balances…</TableCell></TableRow>
-              )}
-              {!isLoading && filteredAccounts.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No ledger accounts found.</TableCell></TableRow>
-              )}
-              {filteredAccounts.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell className="font-mono font-medium text-xs text-muted-foreground">{a.code}</TableCell>
-                  <TableCell className="font-semibold text-foreground">{a.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10px] uppercase font-bold tracking-wider">
-                      {a.type}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">{rupees(a.debits)}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">{rupees(a.credits)}</TableCell>
-                  <TableCell className="text-right font-semibold text-primary font-mono">{rupees(a.balance)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TabsContent>
-      </Tabs>
+      {/* Grouped chart of accounts */}
+      <div className="rounded-lg border bg-card overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Group / Ledger</TableHead>
+              <TableHead className="text-right w-40">Opening</TableHead>
+              <TableHead className="text-right w-48">Closing Balance</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading && (
+              <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-8">Loading chart of accounts…</TableCell></TableRow>
+            )}
+            {!isLoading && tree.length === 0 && (
+              <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-8">No account groups found. Run the seed to load the chart of accounts.</TableCell></TableRow>
+            )}
+            {tree.map((g) => (
+              <GroupRows key={g.id} group={g} depth={0} open={open} toggle={toggle} />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
+  );
+}
+
+function SummaryCard({ title, value, icon, accent, hint }: {
+  title: string; value: number; icon: React.ReactNode; accent: string; hint: string;
+}) {
+  return (
+    <Card className="border bg-card shadow-sm">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</CardTitle>
+        {icon}
+      </CardHeader>
+      <CardContent>
+        <div className={`text-2xl font-bold ${accent}`}>{rupees(Math.abs(value))}</div>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
+      </CardContent>
+    </Card>
   );
 }

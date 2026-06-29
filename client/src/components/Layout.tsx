@@ -72,11 +72,11 @@ const sections: NavSection[] = [
     heading: 'Stock',
     items: [
       { to: '/stock/overview', label: 'Black Seed Stock', icon: Warehouse },
+      { to: '/stock/price', label: 'Order Planner', icon: Tag },
       { to: '/stock/date', label: 'Stock by Date (FIFO)', icon: CalendarDays },
       { to: '/stock/location', label: 'Stock by Location (FIFO)', icon: MapPin },
       { to: '/stock/transfer', label: 'Stock Transfer', icon: ArrowLeftRight },
       { to: '/stock/party', label: 'Stock by Party', icon: Users },
-      { to: '/stock/price', label: 'Stock by Price', icon: Tag },
       { to: '/stock/state', label: 'Stock by State', icon: Globe },
     ],
   },
@@ -104,15 +104,15 @@ const sections: NavSection[] = [
   {
     heading: 'Reports',
     items: [
-      { to: '/reports/sale-dues', label: 'Sale Dues', icon: TrendingUp },
+      { to: '/reports/allocation-health', label: 'Allocation Health', icon: ClipboardList },
       { to: '/reports/purchase-dues', label: 'Purchase Dues', icon: TrendingDown },
-      { to: '/reports/brokerage-dues', label: 'Brokerage Dues', icon: Handshake },
+      { to: '/reports/sale-dues', label: 'Sale Dues', icon: TrendingUp },
       { to: '/reports/freight-dues', label: 'Freight Dues', icon: Truck },
+      { to: '/accounts/brokerage-ledger', label: 'Brokerage Report', icon: Handshake },
       { to: '/accounts/party-ledger', label: 'Party Ledger', icon: BookOpen },
       { to: '/accounts/hamali-ledger', label: 'Hamali Report', icon: Coins },
       { to: '/accounts/kata-fee-ledger', label: 'Kata Report', icon: Receipt },
       { to: '/accounts/surya-road-transport', label: 'Transport Report', icon: Truck },
-      { to: '/accounts/brokerage-ledger', label: 'Brokerage Report', icon: Handshake },
     ],
   },
   {
@@ -133,6 +133,8 @@ const sections: NavSection[] = [
     heading: 'Accounts',
     items: [
       { to: '/accounts/chart-of-accounts', label: 'Chart of Accounts', icon: Landmark },
+      { to: '/accounts/balance-sheet', label: 'Balance Sheet', icon: Scale },
+      { to: '/accounts/profit-loss', label: 'Profit & Loss', icon: TrendingUp },
       { to: '/accounts/journal-entries', label: 'General Journal', icon: FileSpreadsheet },
     ],
   },

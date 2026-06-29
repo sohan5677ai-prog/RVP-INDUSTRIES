@@ -219,8 +219,7 @@ async function main() {
         stockInId: stockIn.id,
         netWeightKg: weightKg,
         hamaliCharge: 0,
-        bagCount: 0,
-        bagCuttingCharge: 0,
+
         freightCharge: 0,
       },
     });

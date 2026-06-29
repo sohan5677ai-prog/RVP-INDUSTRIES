@@ -6,6 +6,7 @@ import {
   createPurchaseOrderSchema,
   listPurchaseOrdersSchema,
 } from '../schemas/purchase.schema.js';
+import { AllocationService } from '../services/allocation.service.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
   const { status } = listPurchaseOrdersSchema.parse(req.query);
@@ -106,6 +107,84 @@ export async function createPurchaseOrder(req: Request, res: Response) {
   res.status(201).json(createdPOs[0]);
 }
 
+export async function bulkCreatePurchaseOrders(req: Request, res: Response) {
+  const { orders } = req.body as {
+    orders: Array<{
+      poDate: string;
+      partyId: string;
+      pricePerKg: number;
+      priceType?: 'BASE' | 'DELIVERY';
+      tonnageKg: number;
+      lorryCount?: number;
+    }>;
+  };
+  if (!Array.isArray(orders) || orders.length === 0) throw new HttpError(400, 'orders array is required');
+
+  const results: Array<{ index: number; success: boolean; poNumber?: string; error?: string }> = [];
+
+  for (let i = 0; i < orders.length; i++) {
+    try {
+      // Re-use the same core create logic by constructing a minimal mock req/res
+      const row = orders[i];
+      const parsed = createPurchaseOrderSchema.parse({
+        poDate: row.poDate,
+        partyId: row.partyId,
+        pricePerKg: row.pricePerKg,
+        priceType: row.priceType ?? 'DELIVERY',
+        tonnageKg: row.tonnageKg,
+        lorryCount: row.lorryCount,
+      });
+
+      const party = await prisma.party.findUnique({ where: { id: parsed.partyId } });
+      if (!party) throw new Error('Party not found');
+
+      const numLorries = parsed.lorryCount && parsed.lorryCount > 0 ? parsed.lorryCount : Math.max(1, Math.round(parsed.tonnageKg / 25000));
+      const unitTonnageKg = Math.round(parsed.tonnageKg / numLorries);
+      const poGroupId = randomUUID();
+      let firstPoNumber = '';
+
+      await prisma.$transaction(async (tx) => {
+        const prefix = getPartyPrefix(party.name);
+        const lastPo = await tx.purchaseOrder.findFirst({
+          where: { poNumber: { startsWith: `${prefix}-` } },
+          orderBy: { poNumber: 'desc' },
+        });
+        let nextNum = 1;
+        if (lastPo?.poNumber) {
+          const parts = lastPo.poNumber.split('-');
+          const num = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(num)) nextNum = num + 1;
+        }
+        for (let j = 0; j < numLorries; j++) {
+          const poNumber = `${prefix}-${(nextNum + j).toString().padStart(3, '0')}`;
+          const isLast = j === numLorries - 1;
+          const poTonnage = isLast ? (parsed.tonnageKg - unitTonnageKg * (numLorries - 1)) : unitTonnageKg;
+          if (j === 0) firstPoNumber = poNumber;
+          await tx.purchaseOrder.create({
+            data: {
+              poNumber,
+              poDate: parsed.poDate,
+              partyId: parsed.partyId,
+              pricePerKg: parsed.pricePerKg,
+              priceType: parsed.priceType,
+              tonnageKg: poTonnage,
+              lorryCount: 1,
+              poGroupId,
+              createdBy: req.user!.userId,
+            },
+          });
+        }
+      });
+
+      results.push({ index: i, success: true, poNumber: firstPoNumber });
+    } catch (err: any) {
+      results.push({ index: i, success: false, error: err?.message ?? 'Unknown error' });
+    }
+  }
+
+  res.json({ results });
+}
+
 export async function updatePurchaseOrder(req: Request, res: Response) {
   const data = createPurchaseOrderSchema.parse(req.body);
   const po = await prisma.purchaseOrder.findUnique({
@@ -113,9 +192,17 @@ export async function updatePurchaseOrder(req: Request, res: Response) {
     include: { stockIns: true },
   });
   if (!po) throw new HttpError(404, 'Purchase order not found');
+  
   if (po.stockIns.length > 0) {
-    throw new HttpError(400, 'Cannot edit purchase order that has already arrived (has stock-in)');
+    if (data.partyId !== po.partyId || Number(data.pricePerKg) !== Number(po.pricePerKg) || data.priceType !== po.priceType) {
+      throw new HttpError(400, 'Cannot change Party or Price after lorries have arrived.');
+    }
+    const arrivedKg = po.stockIns.reduce((sum, si) => sum + Math.max(si.rvpKataKg, si.rvpFirstWeightKg), 0);
+    if (data.tonnageKg < arrivedKg) {
+      throw new HttpError(400, `Cannot reduce tonnage below arrived quantity (${arrivedKg} kg)`);
+    }
   }
+
   const updated = await prisma.purchaseOrder.update({
     where: { id: req.params.id },
     data: {
@@ -128,6 +215,10 @@ export async function updatePurchaseOrder(req: Request, res: Response) {
     },
     include: { party: true },
   });
+
+  const { AllocationService } = await import('../services/allocation.service.js');
+  await AllocationService.checkAndRebalancePO(updated.id);
+
   res.json(updated);
 }
 
@@ -167,5 +258,9 @@ export async function voidPurchaseOrder(req: Request, res: Response) {
     data: { status: 'CANCELLED' },
     include: { party: true },
   });
+
+  // Re-allocate all sale orders that were counting on this PO
+  await AllocationService.handlePoCancellation(req.params.id);
+
   res.json(updated);
 }

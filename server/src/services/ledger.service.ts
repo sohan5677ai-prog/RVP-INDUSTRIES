@@ -50,10 +50,11 @@ export class LedgerService {
     const knownAccounts = {
       '10400': { name: 'Bank / Cash Account', type: 'ASSET' as const },
       '20240': { name: 'Brokerage Payable', type: 'LIABILITY' as const },
-      '50060': { name: 'Brokerage Expense', type: 'EXPENSE' as const },
       '50070': { name: 'Loading Hamali Expense (Selling)', type: 'EXPENSE' as const },
       '20280': { name: 'Bank Loan Interest Payable', type: 'LIABILITY' as const },
-      '20290': { name: 'Bank Loan Payable (Principal)', type: 'LIABILITY' as const }
+      '20290': { name: 'Bank Loan Payable (Principal)', type: 'LIABILITY' as const },
+      '10500': { name: 'TDS Receivable', type: 'ASSET' as const },
+      '50100': { name: 'Sales Shortage & Allowances', type: 'EXPENSE' as const }
     };
     for (const code of requiredCodes) {
       if (code in knownAccounts) {
@@ -123,7 +124,6 @@ export class LedgerService {
     // Arrival hamali profit-centre split: the seed bears its share, the lorry
     // funds the rest, the crew is paid, and the company keeps the margin.
     const h = hamaliSplit(Number(p.hamaliCharge));
-    const bagCut = Number(p.bagCuttingCharge);
     const freight = Number(p.freightCharge);
     const supplierName = p.stockIn.purchaseOrder.party.name;
     const location = p.stockIn.loadingLocation;
@@ -182,22 +182,6 @@ export class LedgerService {
       });
     }
 
-    // 3. Bag-cutting (pour into bunker) — fully crew, capitalised into the seed.
-    if (bagCut > 0) {
-      lines.push({
-        accountCode: '10010', // Raw Material Inventory
-        debit: bagCut,
-        credit: 0,
-        costCenter: location,
-      });
-      lines.push({
-        accountCode: '20200', // crew payable
-        debit: 0,
-        credit: bagCut,
-        costCenter: 'Hamali Team',
-      });
-    }
-
     // 4. Inward freight (BASE-priced POs) — capitalised into the seed.
     if (freight > 0) {
       lines.push({
@@ -224,7 +208,7 @@ export class LedgerService {
   /**
    * Post a storage→process stock transfer. The seed's value moves between silos
    * (Raw Material Inventory, different cost centres), and the transfer costs —
-   * two hamali legs, transport, and bag-cutting — are capitalised onto the seed
+   * two hamali legs and transport — are capitalised onto the seed
    * at the destination. Hamali legs recognise the company's margin as income.
    */
   static async postStockTransfer(
@@ -239,7 +223,6 @@ export class LedgerService {
       legCrew: number; // crew paid across both legs
       legMargin: number; // company hamali margin across both legs
       transportCharge: number;
-      bagCuttingCharge: number;
       interestCharge?: number; // bank-loan carrying interest, capitalised into the seed
     }
   ) {
@@ -264,12 +247,6 @@ export class LedgerService {
     if (data.transportCharge > 0) {
       lines.push({ accountCode: '50090', debit: data.transportCharge, credit: 0, costCenter: data.toLocation }); // Transport Expense (Internal)
       lines.push({ accountCode: '20210', debit: 0, credit: data.transportCharge });
-    }
-
-    // 4. Bag-cutting at the destination bunker — fully crew, expensed.
-    if (data.bagCuttingCharge > 0) {
-      lines.push({ accountCode: '50030', debit: data.bagCuttingCharge, credit: 0, costCenter: data.toLocation }); // Factory Overhead
-      lines.push({ accountCode: '20200', debit: 0, credit: data.bagCuttingCharge, costCenter: 'Hamali Team' });
     }
 
     // 5. Bank-loan carrying interest — expensed, owed to the bank.
@@ -368,122 +345,11 @@ export class LedgerService {
     });
   }
 
-  /**
-   * Post journal entry when raw seed is sent to the mill.
-   * Debits WIP Inventory, Credits Raw Material Inventory.
-   */
-  static async postMillingStart(
-    tx: Prisma.TransactionClient,
-    processingId: string,
-    rawSeedCost: number,
-    location: string,
-    blackWeightKg: number
-  ) {
-    await this.postJournalEntry(tx, {
-      date: new Date(),
-      reference: `MILL-START-${processingId}`,
-      description: `Issued ${blackWeightKg} kg of Black Seed from ${location} silo to milling`,
-      lines: [
-        {
-          accountCode: '10020', // WIP Inventory
-          debit: rawSeedCost,
-          credit: 0,
-          costCenter: 'Mill Line 1',
-        },
-        {
-          accountCode: '10010', // Raw Material Inventory
-          debit: 0,
-          credit: rawSeedCost,
-          costCenter: location,
-        },
-      ],
-    });
-  }
-
-  /**
-   * Post finished yields, byproduct credits, overhead absorption, and yield variances.
-   */
-  static async postMillingEnd(
-    tx: Prisma.TransactionClient,
-    processingId: string,
-    data: {
-      rawMaterialCost: number;
-      pappuWeightKg: number;
-      finishedPappuCost: number;
-      huskWeightKg: number;
-      wasteWeightKg: number;
-      overheadElectricity: number;
-      overheadWages: number;
-      overheadMaintenance: number;
-      abnormalLossCost: number;
-    }
-  ) {
-    const lines: JournalLineInput[] = [];
-    const overheadTotal =
-      data.overheadElectricity + data.overheadWages + data.overheadMaintenance;
-
-    const huskCredit = 0; // Value Husk at 0 so it does not reduce Pappu's cost.
-    const wasteCredit = Math.round(data.wasteWeightKg * 1.0 * 100) / 100;
-
-    // Debit finished goods
-    lines.push({
-      accountCode: '10030', // White Pappu finished goods
-      debit: data.finishedPappuCost,
-      credit: 0,
-      costCenter: 'Warehouse Finished',
-    });
-
-    // Debit byproducts credits
-    if (huskCredit > 0) {
-      lines.push({
-        accountCode: '10040', // Husk Inventory
-        debit: huskCredit,
-        credit: 0,
-      });
-    }
-    if (wasteCredit > 0) {
-      lines.push({
-        accountCode: '10050', // Waste Inventory
-        debit: wasteCredit,
-        credit: 0,
-      });
-    }
-
-    // Debit abnormal yield loss variance
-    if (data.abnormalLossCost > 0) {
-      lines.push({
-        accountCode: '50040', // Yield Variance Loss
-        debit: data.abnormalLossCost,
-        credit: 0,
-        costCenter: 'Mill Line 1',
-      });
-    }
-
-    // Credit WIP Inventory (amount issued + abnormal loss)
-    lines.push({
-      accountCode: '10020', // WIP Inventory
-      debit: 0,
-      credit: data.rawMaterialCost,
-      costCenter: 'Mill Line 1',
-    });
-
-    // Credit Overhead absorption
-    if (overheadTotal > 0) {
-      lines.push({
-        accountCode: '50030', // Factory Overhead Expense (Absorption Credit)
-        debit: 0,
-        credit: overheadTotal,
-        costCenter: 'Mill Line 1',
-      });
-    }
-
-    await this.postJournalEntry(tx, {
-      date: new Date(),
-      reference: `MILL-END-${processingId}`,
-      description: `Milling completed: Produced ${data.pappuWeightKg} kg Pappu, ${data.huskWeightKg} kg Husk, and ${data.wasteWeightKg} kg Waste`,
-      lines,
-    });
-  }
+  // Milling no longer posts to the financial ledger. WIP / White Pappu / Husk /
+  // Waste inventory heads were decommissioned in the Tally chart; the seed's
+  // value stays in the single Raw Material / Closing Stock pool (10010) and the
+  // physical conversion is tracked operationally (Processing / Silo inventory).
+  // COGS still relieves 10010 on sale, so the books stay balanced.
 
   /**
    * Post a sale on dispatch: A/R for the gross (base + GST), revenue for the base,
@@ -501,7 +367,6 @@ export class LedgerService {
       cogsAmount: number;
       freightAmount: number;
       weightKg: number;
-      brokerageAmount?: number;
       // COGS inventory credit account/cost-centre. Defaults to the black-seed
       // pool (pappu); shell sales relieve the shell inventory instead.
       cogsInventoryAccount?: string;
@@ -611,7 +476,7 @@ export class LedgerService {
       }
       if (retention > 0) {
         lines.push({
-          accountCode: '20260', // Freight Retention Held (released at delivery)
+          accountCode: '20255', // Surya Roadlines Payable (retained freight, owed directly)
           debit: 0,
           credit: retention,
         });
@@ -641,19 +506,8 @@ export class LedgerService {
       }
     }
 
-    // Brokerage accrual if applicable
-    if (data.brokerageAmount && data.brokerageAmount > 0) {
-      lines.push({
-        accountCode: '50060', // Brokerage Expense
-        debit: data.brokerageAmount,
-        credit: 0,
-      });
-      lines.push({
-        accountCode: '20240', // Brokerage Payable
-        debit: 0,
-        credit: data.brokerageAmount,
-      });
-    }
+    // Brokerage is no longer accrued to the financial ledger — it is tracked
+    // operationally (Brokerage Ledger / Dues) from sale orders and broker payments.
 
     await this.postJournalEntry(tx, {
       date: new Date(),
@@ -663,26 +517,9 @@ export class LedgerService {
     });
   }
 
-  /**
-   * On delivery (kata slip received at REACHED), release the held freight
-   * retention to Surya Roadlines: Dr Freight Retention Held / Cr Surya Roadlines.
-   */
-  static async postFreightRetentionRelease(
-    tx: Prisma.TransactionClient,
-    saleOrderId: string,
-    amount: number
-  ) {
-    if (amount <= 0) return;
-    await this.postJournalEntry(tx, {
-      date: new Date(),
-      reference: `FREIGHT-RELEASE-${saleOrderId}`,
-      description: `Released ₹${amount.toFixed(2)} freight retention to Surya Roadlines on delivery`,
-      lines: [
-        { accountCode: '20260', debit: amount, credit: 0 }, // Freight Retention Held
-        { accountCode: '20255', debit: 0, credit: amount }, // Surya Roadlines Payable
-      ],
-    });
-  }
+  // The "Freight Retention Held" head was decommissioned. The retained freight
+  // is now credited directly to Surya Roadlines Payable (20255) at dispatch in
+  // postSale, so there is no separate held balance to release on delivery.
 
   static async postSaleCreditNote(
     tx: Prisma.TransactionClient,
@@ -728,38 +565,10 @@ export class LedgerService {
     });
   }
 
-  static async postInternalWeightProfit(
-    tx: Prisma.TransactionClient,
-    saleOrderId: string,
-    data: {
-      buyerName: string;
-      product: string;
-      profitWeightKg: number;
-      amount: number;
-    }
-  ) {
-    if (data.amount <= 0) return;
-    
-    await this.postJournalEntry(tx, {
-      date: new Date(),
-      reference: `IWP-${saleOrderId}`,
-      description: `Internal weight profit of ${data.profitWeightKg} kg on delivery to ${data.buyerName}`,
-      lines: [
-        {
-          accountCode: '50010', // Cost of Goods Sold (Debit increases the expense)
-          debit: data.amount,
-          credit: 0,
-          costCenter: data.product,
-        },
-        {
-          accountCode: '40040', // Internal Weight Profit (Credit increases revenue)
-          debit: 0,
-          credit: data.amount,
-          costCenter: data.product,
-        },
-      ],
-    });
-  }
+  // Internal Weight Profit (40040) was decommissioned from the chart of accounts.
+  // The moisture-gain figure is still computed and saved on the dispatch record
+  // and shown in the operational Internal Weight Ledger report, but is no longer
+  // posted to the financial ledger.
 
   static async postPayment(
     tx: Prisma.TransactionClient,
@@ -842,10 +651,78 @@ export class LedgerService {
       },
     ];
 
-    await this.postJournalEntry(tx, {
+    return this.postJournalEntry(tx, {
       date: data.date,
       reference: `RECEIPT-${receiptId}`,
-      description: `Receipt from ${data.type} ${partyRef}. Ref: ${data.reference || '—'}. ${data.description || ''}`.trim(),
+      description: `Receipt from ${data.partyName || 'Other'}${data.reference ? ` (Ref: ${data.reference})` : ''}`,
+      lines,
+    });
+  }
+
+  static async postSaleTdsDeduction(
+    tx: Prisma.TransactionClient,
+    dispatchId: string,
+    data: {
+      date: Date;
+      buyerName: string;
+      tdsAmount: number;
+    }
+  ) {
+    if (data.tdsAmount <= 0) return;
+    const lines: JournalLineInput[] = [];
+
+    // Debit TDS Receivable (Asset)
+    lines.push({
+      accountCode: '10500', // TDS Receivable
+      debit: data.tdsAmount,
+      credit: 0,
+    });
+
+    // Credit Accounts Receivable - Buyers
+    lines.push({
+      accountCode: '10100', // Accounts Receivable - Buyers
+      debit: 0,
+      credit: data.tdsAmount,
+    });
+
+    return this.postJournalEntry(tx, {
+      date: data.date,
+      reference: `TDS-${dispatchId}`,
+      description: `TDS Deducted by ${data.buyerName}`,
+      lines,
+    });
+  }
+
+  static async postSaleShortageDeduction(
+    tx: Prisma.TransactionClient,
+    dispatchId: string,
+    data: {
+      date: Date;
+      buyerName: string;
+      shortageAmount: number;
+    }
+  ) {
+    if (data.shortageAmount <= 0) return;
+    const lines: JournalLineInput[] = [];
+
+    // Debit Sales Shortage & Allowances (Expense)
+    lines.push({
+      accountCode: '50100',
+      debit: data.shortageAmount,
+      credit: 0,
+    });
+
+    // Credit Accounts Receivable - Buyers
+    lines.push({
+      accountCode: '10100', // Accounts Receivable - Buyers
+      debit: 0,
+      credit: data.shortageAmount,
+    });
+
+    return this.postJournalEntry(tx, {
+      date: data.date,
+      reference: `SHORTAGE-${dispatchId}`,
+      description: `Shortage / Allowance claimed by ${data.buyerName}`,
       lines,
     });
   }

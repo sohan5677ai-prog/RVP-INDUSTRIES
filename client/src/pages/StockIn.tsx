@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Truck, ClipboardList, PackageCheck, Weight } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Truck, ClipboardList, PackageCheck, Weight, Clock } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
@@ -392,7 +392,7 @@ export default function StockIn() {
         <StatCard label="Lorries in" value={allRows.length} icon={Truck} tone="taupe" hint="arrivals recorded" />
         <StatCard label="Orders" value={groups.length} icon={ClipboardList} tone="amber" hint="grouped" />
         <StatCard label="Purchased" value={purchasedRows} icon={PackageCheck} tone="forest" hint={`of ${allRows.length} lorries`} />
-        <StatCard label="RVP weight" value={kg(totalRvpAll)} icon={Weight} tone="clay" hint="first weight total" />
+        <StatCard label="Pending POs" value={pendingPOs?.length ?? 0} icon={Clock} tone="rose" hint="awaiting arrival" />
       </div>
 
       {pendingPOs?.length === 0 && !editing && (
@@ -545,7 +545,7 @@ export default function StockIn() {
                 <SelectContent>
                   {pendingPOs?.map((po) => (
                     <SelectItem key={po.id} value={po.id}>
-                      {po.poNumber} · {po.party?.name} — {shortDate(po.poDate)}
+                      {po.poNumber} · {po.party?.name} — {shortDate(po.poDate)} — {rupees(po.pricePerKg)}/kg
                     </SelectItem>
                   ))}
                 </SelectContent>

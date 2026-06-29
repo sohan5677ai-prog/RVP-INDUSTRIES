@@ -1,7 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { calcPappu, DEFAULT_OUT_TURN_PCT } from '../lib/calc.js';
 import { InventoryService } from './inventory.service.js';
-import { LedgerService } from './ledger.service.js';
 
 export interface MillInput {
   purchaseId?: string | null;
@@ -69,8 +68,8 @@ export class ProcessingService {
       },
     });
 
-    // 3. Ledger - mill start
-    await LedgerService.postMillingStart(tx, item.id, rawCost, input.loadingLocation, blackWeightKg);
+    // 3. Milling no longer posts to the financial ledger (WIP/finished-goods heads
+    //    decommissioned); the seed's value stays in the Closing Stock pool (10010).
 
     // 4. Finished cost + abnormal loss variance
     const standardShrinkage = Math.round(blackWeightKg * 0.05);
@@ -85,21 +84,8 @@ export class ProcessingService {
 
     const finishedPappuCost = Math.max(0, rawCost + totalOverheads - byproductsCredit - abnormalLossCost);
 
-    // 5. Update finished pappu inventory MAP
+    // 5. Update finished pappu inventory MAP (operational stock valuation only)
     await InventoryService.updateFinishedPappuInventory(tx, pappuWeightKg, finishedPappuCost);
-
-    // 6. Ledger - mill end
-    await LedgerService.postMillingEnd(tx, item.id, {
-      rawMaterialCost: rawCost,
-      pappuWeightKg,
-      finishedPappuCost,
-      huskWeightKg,
-      wasteWeightKg,
-      overheadElectricity,
-      overheadWages,
-      overheadMaintenance,
-      abnormalLossCost,
-    });
 
     return { item, yieldAnomaly: isAnomaly, yieldAnomalyReason: anomalyReason };
   }

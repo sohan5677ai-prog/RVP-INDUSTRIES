@@ -41,7 +41,7 @@ export const Combobox = forwardRef<HTMLButtonElement, ComboboxProps>(function Co
   }
 
   return (
-    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(''); }}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(''); }} modal={true}>
       <PopoverTrigger asChild>
         <button
           ref={ref}

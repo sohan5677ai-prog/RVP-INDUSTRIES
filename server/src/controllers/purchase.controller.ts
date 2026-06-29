@@ -2,22 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createPurchaseSchema } from '../schemas/purchase.schema.js';
-import { calcHamali, calcKataFee, companyHamaliShare, calcBags, calcBagCutting, DEFAULT_HAMALI_RATE } from '../lib/calc.js';
-
-/**
- * Bag-cutting is only charged when seed lands directly at the process bunker.
- * Storage stock (Rampalli/Murgan/Multi) gets it later on the Stock Transfer.
- */
-function bagCutting(location: string, netWeightKg: number, place: 'A' | 'B' | null | undefined) {
-  if (location !== 'At process' || !place) {
-    return { bunkerPlace: null as 'A' | 'B' | null, bagCount: 0, bagCuttingCharge: 0 };
-  }
-  return {
-    bunkerPlace: place,
-    bagCount: calcBags(netWeightKg),
-    bagCuttingCharge: calcBagCutting(netWeightKg, place),
-  };
-}
+import { calcHamali, calcKataFee, companyHamaliShare, DEFAULT_HAMALI_RATE } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 
 const purchaseInclude = {
@@ -70,7 +55,6 @@ export async function createPurchase(req: Request, res: Response) {
   const hamaliRate = data.hamaliRate ?? DEFAULT_HAMALI_RATE;
   const hamaliCharge = calcHamali(netWeightKg, hamaliRate, isCompanyVehicle);
   const kataFee = calcKataFee(netWeightKg, isCompanyVehicle);
-  const bag = bagCutting(stockIn.loadingLocation, netWeightKg, data.bunkerPlace);
   // Inward freight is captured at Stock In (BASE-priced POs only) and carried
   // through here; DELIVERY-priced POs already include freight in the price.
   const freightCharge = stockIn.purchaseOrder.priceType === 'BASE' ? Number(stockIn.freightCharge) : 0;
@@ -93,20 +77,18 @@ export async function createPurchase(req: Request, res: Response) {
         hamaliRate,
         hamaliCharge,
         kataFee,
-        bunkerPlace: bag.bunkerPlace,
-        bagCount: bag.bagCount,
-        bagCuttingCharge: bag.bagCuttingCharge,
+        bunkerPlace: data.bunkerPlace,
         freightCharge,
       },
       include: purchaseInclude,
     });
 
     // 3. Update SiloInventory (Raw Black Seed MAP) immediately on recording
-    // purchase. Inventory value carries the company's half of the hamali, the
-    // bag-cutting charge, and the inward freight (all capitalised into the seed).
+    // purchase. Inventory value carries the company's half of the hamali,
+    // and the inward freight (all capitalised into the seed).
     const pricePerKg = Number(stockIn.purchaseOrder.pricePerKg);
     const originalCost =
-      netWeightKg * pricePerKg + companyHamaliShare(Number(hamaliCharge)) + bag.bagCuttingCharge + freightCharge;
+      netWeightKg * pricePerKg + companyHamaliShare(Number(hamaliCharge)) + freightCharge;
     await InventoryService.updateBlackSeedInventory(
       tx,
       stockIn.loadingLocation,
@@ -116,6 +98,9 @@ export async function createPurchase(req: Request, res: Response) {
 
     return createdPurchase;
   });
+
+  const { AllocationService } = await import('../services/allocation.service.js');
+  await AllocationService.checkAndRebalancePO(stockIn.purchaseOrderId);
 
   res.status(201).json(purchase);
 }
@@ -143,7 +128,6 @@ export async function updatePurchase(req: Request, res: Response) {
   const kataFee = calcKataFee(netWeightKg, isCompanyVehicle);
   // Re-pick the place: caller may change it, otherwise keep the existing one.
   const place = data.bunkerPlace !== undefined ? data.bunkerPlace : (purchase.bunkerPlace as 'A' | 'B' | null);
-  const bag = bagCutting(purchase.stockIn.loadingLocation, netWeightKg, place);
   // Inward freight is sourced from the StockIn record (captured at arrival).
   const freightCharge = purchase.stockIn.purchaseOrder.priceType === 'BASE' ? Number(purchase.stockIn.freightCharge) : 0;
 
@@ -153,7 +137,6 @@ export async function updatePurchase(req: Request, res: Response) {
     const oldCost =
       purchase.netWeightKg * pricePerKg +
       companyHamaliShare(Number(purchase.hamaliCharge)) +
-      Number(purchase.bagCuttingCharge) +
       Number(purchase.freightCharge);
     await InventoryService.updateBlackSeedInventory(
       tx,
@@ -179,9 +162,7 @@ export async function updatePurchase(req: Request, res: Response) {
         hamaliRate,
         hamaliCharge,
         kataFee,
-        bunkerPlace: bag.bunkerPlace,
-        bagCount: bag.bagCount,
-        bagCuttingCharge: bag.bagCuttingCharge,
+        bunkerPlace: place,
         freightCharge,
       },
       include: purchaseInclude,
@@ -189,7 +170,7 @@ export async function updatePurchase(req: Request, res: Response) {
 
     // 4. Add the new inventory weight and cost
     const newCost =
-      netWeightKg * pricePerKg + companyHamaliShare(Number(hamaliCharge)) + bag.bagCuttingCharge + freightCharge;
+      netWeightKg * pricePerKg + companyHamaliShare(Number(hamaliCharge)) + freightCharge;
     await InventoryService.updateBlackSeedInventory(
       tx,
       purchase.stockIn.loadingLocation,
@@ -199,6 +180,9 @@ export async function updatePurchase(req: Request, res: Response) {
 
     return updatedPurchase;
   });
+
+  const { AllocationService } = await import('../services/allocation.service.js');
+  await AllocationService.checkAndRebalancePO(purchase.stockIn.purchaseOrderId);
 
   res.json(updated);
 }
@@ -217,11 +201,10 @@ export async function deletePurchase(req: Request, res: Response) {
     // 1. Revert inventory (subtract from SiloInventory)
     const pricePerKg = Number(purchase.stockIn.purchaseOrder.pricePerKg);
     const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
-    const bagCut = Number(purchase.bagCuttingCharge);
     const freight = Number(purchase.freightCharge);
 
     if (purchase.verification) {
-      const verifiedCost = Number(purchase.verification.totalAmount) + ourHamali + bagCut + freight;
+      const verifiedCost = Number(purchase.verification.totalAmount) + ourHamali + freight;
       await InventoryService.updateBlackSeedInventory(
         tx,
         purchase.stockIn.loadingLocation,
@@ -230,7 +213,7 @@ export async function deletePurchase(req: Request, res: Response) {
       );
       await tx.weightVerification.delete({ where: { purchaseId: req.params.id } });
     } else {
-      const originalCost = purchase.netWeightKg * pricePerKg + ourHamali + bagCut + freight;
+      const originalCost = purchase.netWeightKg * pricePerKg + ourHamali + freight;
       await InventoryService.updateBlackSeedInventory(
         tx,
         purchase.stockIn.loadingLocation,

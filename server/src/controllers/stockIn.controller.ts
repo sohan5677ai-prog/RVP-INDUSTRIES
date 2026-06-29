@@ -4,6 +4,7 @@ import { HttpError } from '../lib/httpError.js';
 import { createStockInSchema } from '../schemas/purchase.schema.js';
 import { fileUrl } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
+import { AllocationService } from '../services/allocation.service.js';
 
 export async function listStockIns(_req: Request, res: Response) {
   const stockIns = await prisma.stockIn.findMany({
@@ -96,10 +97,14 @@ export async function createStockIn(req: Request, res: Response) {
     const nextStatus = (arrivedCount + 1 >= lorryCount) ? 'ARRIVED' : 'PENDING';
     await tx.purchaseOrder.update({
       where: { id: data.purchaseOrderId },
-      data: { status: nextStatus },
+      data: {
+        status: nextStatus,
+      },
     });
     return created;
   });
+
+  await AllocationService.checkAndRebalancePO(data.purchaseOrderId);
 
   res.status(201).json(stockIn);
 }
@@ -136,6 +141,7 @@ export async function updateStockIn(req: Request, res: Response) {
       freightCharge: stockIn.purchaseOrder.priceType === 'BASE' ? data.freightCharge : 0,
     },
   });
+  await AllocationService.checkAndRebalancePO(stockIn.purchaseOrderId);
   res.json(updated);
 }
 

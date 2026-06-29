@@ -130,11 +130,10 @@ export async function createVerification(req: Request, res: Response) {
     // & cost. Inventory value carries only the company's half of the hamali.
     const originalPrice = Number(purchase.stockIn.purchaseOrder.pricePerKg);
     const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
-    // Bag-cutting + inward freight are fixed at purchase recording and carry through.
-    const bagCut = Number(purchase.bagCuttingCharge);
+    // Inward freight is fixed at purchase recording and carries through.
     const freight = Number(purchase.freightCharge);
-    const originalCost = purchase.netWeightKg * originalPrice + ourHamali + bagCut + freight;
-    const totalInventoryCost = totalAmount + ourHamali + bagCut + freight;
+    const originalCost = purchase.netWeightKg * originalPrice + ourHamali + freight;
+    const totalInventoryCost = totalAmount + ourHamali + freight;
 
     // Subtract original purchase stock from inventory
     await InventoryService.updateBlackSeedInventory(
@@ -192,9 +191,8 @@ export async function deleteVerification(req: Request, res: Response) {
     const purchase = verification.purchase;
     const location = purchase.stockIn.loadingLocation;
     const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
-    const bagCut = Number(purchase.bagCuttingCharge);
     const freight = Number(purchase.freightCharge);
-    const verifiedCost = Number(verification.totalAmount) + ourHamali + bagCut + freight;
+    const verifiedCost = Number(verification.totalAmount) + ourHamali + freight;
 
     // 1. Subtract the verified weight and cost from SiloInventory
     await InventoryService.updateBlackSeedInventory(
@@ -206,7 +204,7 @@ export async function deleteVerification(req: Request, res: Response) {
 
     // 2. Add back the original purchase weight and cost to SiloInventory
     const originalPrice = Number(purchase.stockIn.purchaseOrder.pricePerKg);
-    const originalCost = purchase.netWeightKg * originalPrice + ourHamali + bagCut + freight;
+    const originalCost = purchase.netWeightKg * originalPrice + ourHamali + freight;
 
     await InventoryService.updateBlackSeedInventory(
       tx,

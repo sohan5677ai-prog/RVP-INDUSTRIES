@@ -51,14 +51,18 @@ const KataFeeLedger = lazyWithPreload('/accounts/kata-fee-ledger', () => import(
 const SuryaRoadTransport = lazyWithPreload('/accounts/surya-road-transport', () => import('@/pages/SuryaRoadTransport'));
 const BrokerageLedger = lazyWithPreload('/accounts/brokerage-ledger', () => import('@/pages/BrokerageLedger'));
 const Ledgers = lazyWithPreload('/accounts/chart-of-accounts', () => import('@/pages/Ledgers'));
+const BalanceSheet = lazyWithPreload('/accounts/balance-sheet', () => import('@/pages/BalanceSheet'));
+const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/pages/ProfitLoss'));
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
 const PurchaseDues = lazyWithPreload('/reports/purchase-dues', () => import('@/pages/PurchaseDues'));
+const InternalWeightLedger = lazyWithPreload('/reports/internal-weight-ledger', () => import('@/pages/InternalWeightLedger'));
 const BrokerageDues = lazyWithPreload('/reports/brokerage-dues', () => import('@/pages/BrokerageDues'));
 const FreightDues = lazyWithPreload('/reports/freight-dues', () => import('@/pages/FreightDues'));
+const AllocationHealth = lazyWithPreload('/reports/allocation-health', () => import('@/pages/AllocationHealth'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
 
 function Fallback() {
@@ -120,13 +124,17 @@ export default function App() {
               <Route path="/accounts/surya-road-transport" element={<SuryaRoadTransport />} />
               <Route path="/accounts/brokerage-ledger" element={<BrokerageLedger />} />
               <Route path="/accounts/chart-of-accounts" element={<Ledgers />} />
+              <Route path="/accounts/balance-sheet" element={<BalanceSheet />} />
+              <Route path="/accounts/profit-loss" element={<ProfitLoss />} />
               <Route path="/accounts/journal-entries" element={<JournalEntries />} />
               <Route path="/transactions/payments" element={<Payments />} />
               <Route path="/transactions/receipts" element={<Receipts />} />
               <Route path="/reports/sale-dues" element={<SaleDues />} />
+              <Route path="/reports/internal-weight-ledger" element={<InternalWeightLedger />} />
               <Route path="/reports/purchase-dues" element={<PurchaseDues />} />
               <Route path="/reports/brokerage-dues" element={<BrokerageDues />} />
               <Route path="/reports/freight-dues" element={<FreightDues />} />
+              <Route path="/reports/allocation-health" element={<AllocationHealth />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
             </Route>

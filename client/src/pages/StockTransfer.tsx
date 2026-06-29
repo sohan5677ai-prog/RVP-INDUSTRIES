@@ -5,7 +5,7 @@ import { Plus, Trash2, ArrowRight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { StockTransfer, SiloInventory, BunkerPlace, LoansResponse } from '@/lib/types';
 import {
-  transferHamali, calcBags, calcBagCutting, BAG_RATE,
+  transferHamali,
   TRANSFER_STORAGE_UNLOAD_RATE, TRANSFER_STORAGE_UNLOAD_MARGIN, TRANSFER_HANDLING_RATE, TRANSFER_TRANSPORT,
   loanInterest, daysBetween,
 } from '@/lib/calc';
@@ -52,7 +52,6 @@ export default function StockTransferPage() {
   const [fromLocation, setFromLocation] = useState<string>('');
   const [weight, setWeight] = useState('');
   const [lorryNumber, setLorryNumber] = useState('');
-  const [bunkerPlace, setBunkerPlace] = useState<BunkerPlace | ''>('');
   const [transferDate, setTransferDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const weightKg = Number(weight) || 0;
@@ -60,8 +59,7 @@ export default function StockTransferPage() {
   const weightValid = weightKg > 0 && weightKg <= available;
 
   const hamali = weightValid ? transferHamali(weightKg) : { unloadCharge: 0, handlingCharge: 0, charge: 0, crew: 0, margin: 0 };
-  const bags = weightValid ? calcBags(weightKg) : 0;
-  const bagCutting = weightValid && bunkerPlace ? calcBagCutting(weightKg, bunkerPlace) : 0;
+
   const transportCharge = weightValid ? TRANSFER_TRANSPORT : 0;
 
   // Bank-loan carrying interest preview. Seed value moved is estimated from the
@@ -76,13 +74,12 @@ export default function StockTransferPage() {
   const estSeedValue = weightValid ? srcMap * weightKg : 0;
   const interestCharge = weightValid && interestDays > 0 ? loanInterest(estSeedValue, loanRate, interestDays) : 0;
 
-  const totalAdded = hamali.charge + transportCharge + bagCutting + interestCharge;
+  const totalAdded = hamali.charge + transportCharge + interestCharge;
 
   function resetForm() {
     setFromLocation('');
     setWeight('');
     setLorryNumber('');
-    setBunkerPlace('');
     setTransferDate(new Date().toISOString().slice(0, 10));
   }
 
@@ -94,7 +91,6 @@ export default function StockTransferPage() {
           fromLocation,
           weightKg,
           lorryNumber: lorryNumber || null,
-          bunkerPlace: bunkerPlace || null,
           transferDate,
         },
       }),
@@ -126,7 +122,7 @@ export default function StockTransferPage() {
           <p className="text-muted-foreground">
             Move black seed from a storage (Rampalli/Murgan/Multi) to the process. Adds a fixed hamali
             (₹{TRANSFER_STORAGE_UNLOAD_RATE}/t storage unload + ₹{TRANSFER_HANDLING_RATE}/t load &amp; unload),
-            ₹{TRANSFER_TRANSPORT} transport, and bag-cutting to the seed's value.
+            and ₹{TRANSFER_TRANSPORT} transport to the seed's value.
           </p>
         </div>
         <Button onClick={() => { resetForm(); setOpen(true); }}>
@@ -154,7 +150,7 @@ export default function StockTransferPage() {
               <TableHead className="text-right">Weight</TableHead>
               <TableHead className="text-right">Hamali</TableHead>
               <TableHead className="text-right">Transport</TableHead>
-              <TableHead className="text-right">Bag-cutting</TableHead>
+
               <TableHead className="text-right">Interest</TableHead>
               <TableHead className="text-right">Moved value</TableHead>
               <TableHead className="w-16 text-right">Actions</TableHead>
@@ -179,11 +175,7 @@ export default function StockTransferPage() {
                 <TableCell className="text-right">{kg(t.weightKg)}</TableCell>
                 <TableCell className="text-right">{rupees(Number(t.loadingHamali) + Number(t.unloadingHamali))}</TableCell>
                 <TableCell className="text-right">{rupees(t.transportCharge)}</TableCell>
-                <TableCell className="text-right">
-                  {Number(t.bagCuttingCharge) > 0 ? (
-                    <>{rupees(t.bagCuttingCharge)}<span className="block text-[10px] text-muted-foreground">Place {t.bunkerPlace} · {t.bagCount} bags</span></>
-                  ) : '—'}
-                </TableCell>
+
                 <TableCell className="text-right">
                   {Number(t.interestCharge) > 0 ? (
                     <>{rupees(t.interestCharge)}<span className="block text-[10px] text-muted-foreground">{t.interestDays} days @ {Number(t.interestRatePct)}%</span></>
@@ -241,16 +233,7 @@ export default function StockTransferPage() {
                 <Input id="tdate" type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Bunker place (bag-cutting at process)</Label>
-              <Select value={bunkerPlace} onValueChange={(v: any) => setBunkerPlace(v)}>
-                <SelectTrigger><SelectValue placeholder="Select place A or B" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="A">Place A — ₹{BAG_RATE.A}/bag</SelectItem>
-                  <SelectItem value="B">Place B — ₹{BAG_RATE.B}/bag</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+
 
             <div className="rounded-lg border bg-muted/40 p-4 space-y-2 text-sm">
               <div className="flex justify-between">
@@ -265,12 +248,7 @@ export default function StockTransferPage() {
                 <span className="text-muted-foreground">Transfer transport (fixed)</span>
                 <span className="font-medium">{rupees(transportCharge)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Bag-cutting {bunkerPlace ? `(${bags} bags @ ₹${BAG_RATE[bunkerPlace]})` : '(select place)'}
-                </span>
-                <span className="font-medium">{bagCutting > 0 ? rupees(bagCutting) : '—'}</span>
-              </div>
+
               <div className="flex justify-between">
                 <span className="text-muted-foreground">
                   Bank-loan interest {interestDays > 0 ? `(${interestDays} days @ ${loanRate}%)` : '(no open loan)'}

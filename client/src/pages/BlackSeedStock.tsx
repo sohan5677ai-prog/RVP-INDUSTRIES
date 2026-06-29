@@ -29,6 +29,8 @@ interface BlackSeedRow {
 interface BlackSeedStockResponse {
   rows: BlackSeedRow[];
   pappuSoldKg: number;
+  pappuCommittedKg: number;
+  totalMilledKg: number;
   poTonnageKg: number;
 }
 
@@ -60,16 +62,17 @@ export default function BlackSeedStock() {
   const weightedPriceSum = items.reduce((sum, r) => sum + r.pricePerKg * r.rvpNetWeightKg, 0);
   const weightedAvgPrice = filteredWeightKg > 0 ? weightedPriceSum / filteredWeightKg : 0;
   const pappuSoldKg = data?.pappuSoldKg ?? 0;
+  const pappuCommittedKg = data?.pappuCommittedKg ?? 0;
   const poTonnageKg = data?.poTonnageKg ?? 0;
-  // Black seed received (purchased). Milling does NOT reduce this — only sales do.
   const receivedWeightKg = allItems.reduce((sum, r) => sum + r.rvpNetWeightKg, 0);
   const totalValue = allItems.reduce((sum, r) => sum + r.valueExclHamali, 0);
 
-  // Selling pappu depletes everything. Each kg of pappu sold consumed
-  // (1 / 60%) kg of black seed to produce.
-  const seedConsumedBySalesKg = pappuSoldKg / PAPPU_OUTTURN;
-  // Raw black seed on hand = received − seed used to make the pappu already sold.
-  const rawStockOnHandKg = Math.max(0, receivedWeightKg - seedConsumedBySalesKg);
+  // Raw black seed on hand = received − seed consumed by COMMITTED pappu sales.
+  // Seed is drawn down the moment a pappu sale is booked (max of ordered vs
+  // dispatched): each kg of committed pappu consumes 1/0.6 kg of seed (60% out-turn).
+  // Mirrors Stock by Price — milling on arrival does NOT deplete raw stock.
+  const seedConsumedByPappuKg = pappuCommittedKg / PAPPU_OUTTURN;
+  const rawStockOnHandKg = Math.max(0, receivedWeightKg - seedConsumedByPappuKg);
   // Pappu available = 60% of received seed, less pappu already sold.
   const availablePappuKg = Math.max(0, receivedWeightKg * PAPPU_OUTTURN - pappuSoldKg);
   // Pappu committed = 60% of all ordered tonnage, less pappu already sold.
@@ -154,7 +157,7 @@ export default function BlackSeedStock() {
           <CardContent>
             <div className="text-2xl font-bold text-primary">{toTonnes(rawStockOnHandKg).toFixed(2)} MT</div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              {kg(receivedWeightKg)} received{seedConsumedBySalesKg > 0 ? ` − ${kg(Math.round(seedConsumedBySalesKg))} used for pappu sold` : ` across ${allItems.length} lorries`}
+              {kg(receivedWeightKg)} received{seedConsumedByPappuKg > 0 ? ` − ${kg(Math.round(seedConsumedByPappuKg))} for pappu sold` : ` across ${allItems.length} lorries`}
             </p>
           </CardContent>
         </Card>

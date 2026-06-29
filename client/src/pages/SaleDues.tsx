@@ -38,7 +38,9 @@ export default function SaleDuesPage() {
     shortage: number;
     discount: number;
     netAmount: number;
+    totalAmount: number;
     dueDaysAfter: number;
+    status: string;
   }> = [];
 
   let totalBillingAll = 0;
@@ -55,8 +57,8 @@ export default function SaleDuesPage() {
         const base = Number(d.weightKg) * Number(o.ratePerKg);
         const gst = Number(d.gstAmount) || 0;
         const cn = Number(d.creditNoteAmount) || 0;
-        const total = base + gst - cn;
-        return { d, o, billAmount: base + gst, shortage: cn, totalAmount: total, remainingAmount: total };
+        const total = base + gst;
+        return { d, o, billAmount: base + gst, totalAmount: total, remainingAmount: total };
       });
 
     shipments.forEach((s) => {
@@ -83,34 +85,37 @@ export default function SaleDuesPage() {
       }
     });
 
-    // 4. Push outstanding items to flat list
+    // 4. Push all items to flat list with status
     const today = new Date();
     shipments.forEach((s) => {
-      if (s.remainingAmount > 0.01) { // ignore floating point dust
-        const start = s.d.deliveredDate || s.d.dispatchDate;
-        const limitDays = s.o.dueDays || 0;
-        const dueDate = new Date(start);
-        dueDate.setDate(dueDate.getDate() + limitDays);
+      let status = 'Unpaid';
+      if (s.remainingAmount <= 0.01) status = 'Paid';
+      else if (s.remainingAmount < s.totalAmount - 0.01) status = 'Partially Paid';
 
-        // Calculate days overdue
-        const diffTime = today.getTime() - dueDate.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        const dueDaysAfter = diffDays > 0 ? diffDays : 0;
+      const start = s.d.deliveredDate || s.d.dispatchDate;
+      const limitDays = s.o.dueDays || 0;
+      const dueDate = new Date(start);
+      dueDate.setDate(dueDate.getDate() + limitDays);
 
-        outstandingInvoices.push({
-          id: s.d.id,
-          brokerName: s.o.broker?.name ?? null,
-          dueDate,
-          partyName: b.name,
-          invoiceNumber: s.d.invoiceNumber,
-          billDate: new Date(s.d.dispatchDate),
-          billAmount: s.billAmount,
-          shortage: s.shortage,
-          discount: 0,
-          netAmount: s.remainingAmount,
-          dueDaysAfter,
-        });
-      }
+      // Calculate days overdue
+      const diffTime = today.getTime() - dueDate.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const dueDaysAfter = diffDays > 0 ? diffDays : 0;
+
+      outstandingInvoices.push({
+        id: s.d.id,
+        brokerName: s.o.broker?.name ?? null,
+        dueDate,
+        partyName: b.name,
+        invoiceNumber: s.d.invoiceNumber,
+        billDate: new Date(s.d.dispatchDate),
+        billAmount: s.billAmount,
+        discount: 0,
+        netAmount: s.remainingAmount,
+        totalAmount: s.totalAmount,
+        dueDaysAfter,
+        status,
+      });
     });
   });
 
@@ -161,7 +166,7 @@ export default function SaleDuesPage() {
           </div>
 
           <div className="rounded-lg border bg-card">
-            <div className="px-5 py-4 border-b font-semibold text-sm">Outstanding Sales Aging List</div>
+            <div className="px-5 py-4 border-b font-semibold text-sm">Sales Aging List</div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -171,15 +176,15 @@ export default function SaleDuesPage() {
                   <TableHead>Invoice No</TableHead>
                   <TableHead>Bill Date</TableHead>
                   <TableHead className="text-right">Bill Amount</TableHead>
-                  <TableHead className="text-right">Shortage</TableHead>
                   <TableHead className="text-right">Discount</TableHead>
                   <TableHead className="text-right">Net Amount</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-center">Due Days</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {outstandingInvoices.length === 0 ? (
-                  <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No outstanding sales dues.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No sales dues found.</TableCell></TableRow>
                 ) : (
                   outstandingInvoices.map((inv) => (
                     <TableRow key={inv.id}>
@@ -189,9 +194,6 @@ export default function SaleDuesPage() {
                       <TableCell className="font-mono text-xs">{inv.invoiceNumber ?? '—'}</TableCell>
                       <TableCell>{shortDate(inv.billDate.toISOString())}</TableCell>
                       <TableCell className="text-right">{rupees(inv.billAmount)}</TableCell>
-                      <TableCell className="text-right text-rose-600 dark:text-rose-400">
-                        {inv.shortage > 0 ? `−${rupees(inv.shortage)}` : '—'}
-                      </TableCell>
                       <TableCell className="text-right text-muted-foreground">
                         {inv.discount > 0 ? `−${rupees(inv.discount)}` : '—'}
                       </TableCell>
@@ -199,10 +201,19 @@ export default function SaleDuesPage() {
                         {rupees(inv.netAmount)}
                       </TableCell>
                       <TableCell className="text-center">
-                        {inv.dueDaysAfter > 0 ? (
-                          <span className="text-rose-600 dark:text-rose-400 font-bold">{inv.dueDaysAfter} days</span>
+                        <span className={`font-semibold ${inv.status === 'Paid' ? 'text-emerald-600 dark:text-emerald-400' : inv.status === 'Unpaid' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                          {inv.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {inv.status !== 'Paid' ? (
+                          inv.dueDaysAfter > 0 ? (
+                            <span className="text-rose-600 dark:text-rose-400 font-bold">{inv.dueDaysAfter} days</span>
+                          ) : (
+                            <span className="text-muted-foreground">Not due</span>
+                          )
                         ) : (
-                          <span className="text-muted-foreground">Not due</span>
+                          <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
                     </TableRow>

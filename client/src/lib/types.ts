@@ -21,8 +21,11 @@ export interface Party {
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;
+  commodities: Commodity[];
   createdAt: string;
 }
+
+export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS';
 
 export interface Broker {
   id: string;
@@ -72,7 +75,6 @@ export interface Processing {
   }) | null;
 }
 
-export type BunkerPlace = 'A' | 'B';
 
 export interface Purchase {
   id: string;
@@ -81,9 +83,7 @@ export interface Purchase {
   hamaliRate: string;
   hamaliCharge: string;
   kataFee: string;
-  bunkerPlace?: BunkerPlace | null;
-  bagCount?: number;
-  bagCuttingCharge?: string;
+
   freightCharge?: string;
   discountType?: DiscountType | null;
   discountValue?: string;
@@ -101,9 +101,7 @@ export interface StockTransfer {
   transportCharge: string;
   loadingHamali: string;
   unloadingHamali: string;
-  bunkerPlace: BunkerPlace | null;
-  bagCount: number;
-  bagCuttingCharge: string;
+
   hamaliMargin: string;
   interestCharge: string;
   interestDays: number;
@@ -127,6 +125,8 @@ export interface LoanRepayment {
 
 export interface BankLoan {
   id: string;
+  name: string | null;
+  personName: string | null;
   loanRef: string | null;
   bankName: string | null;
   location?: string | null;
@@ -346,6 +346,59 @@ export interface JournalLine {
   debit: string;
   credit: string;
   costCenter: string | null;
+}
+
+// ── Tally-style grouped chart of accounts ──
+export type GroupNature = 'ASSETS' | 'LIABILITIES' | 'INCOME' | 'EXPENSES';
+export type StatementType = 'BALANCE_SHEET' | 'PROFIT_LOSS';
+
+export interface LedgerNode {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  openingBalance: number;
+  debits: number;
+  credits: number;
+  closing: number; // signed: +Dr / −Cr
+}
+
+export interface GroupNode {
+  id: string;
+  name: string;
+  nature: GroupNature;
+  statement: StatementType;
+  sortOrder: number;
+  ledgers: LedgerNode[];
+  children: GroupNode[];
+  subtotal: number; // signed
+}
+
+// ── Balance Sheet / Profit & Loss report payloads (display amounts: normal-positive) ──
+export interface ReportLedger {
+  code: string;
+  name: string;
+  amount: number;
+}
+export interface ReportGroup {
+  name: string;
+  amount: number;
+  code?: string;
+  ledgers?: ReportLedger[];
+  children?: ReportGroup[];
+}
+export interface BalanceSheet {
+  asOf: string;
+  liabilities: ReportGroup[];
+  assets: ReportGroup[];
+  totals: { liabilities: number; assets: number; difference: number; balanced: boolean };
+  profitAndLoss: { totalIncome: number; totalExpenses: number; netProfit: number };
+}
+export interface ProfitLoss {
+  period: string;
+  income: ReportGroup[];
+  expenses: ReportGroup[];
+  totals: { income: number; expenses: number; netProfit: number; isProfit: boolean };
 }
 
 export interface FreightRate {

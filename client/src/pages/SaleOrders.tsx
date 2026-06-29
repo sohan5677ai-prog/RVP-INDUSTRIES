@@ -4,9 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Table2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Party, Broker, SaleOrder, SaleStatus, SaleProduct } from '@/lib/types';
+import { BulkImportDialog } from '@/components/BulkImportDialog';
+import type { Party, Broker, SaleOrder, SaleStatus, SaleProduct, Commodity } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,6 +37,14 @@ const PRODUCTS: { value: SaleProduct; label: string }[] = [
   { value: 'SHELL', label: 'Tamarind Shell' },
 ];
 
+const PRODUCT_TO_COMMODITY: Record<SaleProduct, Commodity> = {
+  PAPPU: 'PAPPU',
+  HUSK: 'HUSK',
+  WASTE: 'TAMARIND_WASTE',
+  TPS: 'TPS_BROKENS',
+  SHELL: 'TAMARIND_SHELL',
+};
+
 const statusVariant: Record<SaleStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   PENDING: 'secondary',
   PARTIAL: 'outline',
@@ -61,6 +70,7 @@ type SaleForm = z.infer<typeof saleSchema>;
 export default function SaleOrders() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState<SaleOrder | null>(null);
   const [statusFilter, setStatusFilter] = useState<'ALL' | SaleStatus>('ALL');
   const [productFilter, setProductFilter] = useState<'ALL' | SaleProduct>('ALL');
@@ -145,9 +155,13 @@ export default function SaleOrders() {
         },
       });
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      toast.success(editing ? 'Sale order updated' : 'Sale order created');
+      if (data?.allocationSummary?.warning) {
+        toast.warning(data.allocationSummary.warning, { duration: 10000 });
+      } else {
+        toast.success(editing ? 'Sale order updated' : 'Sale order created');
+      }
       setOpen(false);
       form.reset();
     },
@@ -176,9 +190,14 @@ export default function SaleOrders() {
           <h1 className="text-2xl font-bold">Sale Orders</h1>
           <p className="text-muted-foreground">Take orders to sell products. Dispatch captures the invoice + kata slip.</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New Sale Order
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setBulkOpen(true)}>
+            <Table2 className="h-4 w-4" /> Bulk Entry
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New Sale Order
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -205,7 +224,7 @@ export default function SaleOrders() {
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Party (Buyer)</Label>
           <Combobox
-            options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name }))]}
+            options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && (productFilter === 'ALL' || p.commodities?.includes(PRODUCT_TO_COMMODITY[productFilter]))).map((p) => ({ value: p.id, label: p.name }))]}
             value={partyFilter}
             onChange={setPartyFilter}
             placeholder="All parties"
@@ -332,7 +351,7 @@ export default function SaleOrders() {
                   <FormLabel>Party (buyer) <span className="text-destructive">*</span></FormLabel>
                   <FormControl>
                     <Combobox
-                      options={(parties ?? []).filter((p) => p.type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name }))}
+                      options={(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && p.commodities?.includes(PRODUCT_TO_COMMODITY[watchedProduct])).map((p) => ({ value: p.id, label: p.name }))}
                       value={field.value}
                       onChange={field.onChange}
                       placeholder="Select buyer"
@@ -402,6 +421,13 @@ export default function SaleOrders() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      <BulkImportDialog
+        type="sale"
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['sale-orders'] })}
+      />
     </div>
   );
 }

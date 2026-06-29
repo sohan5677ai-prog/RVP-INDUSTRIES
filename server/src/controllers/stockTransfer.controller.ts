@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createStockTransferSchema } from '../schemas/purchase.schema.js';
-import { transferHamali, calcBags, calcBagCutting, TRANSFER_TRANSPORT, daysBetween, loanInterest } from '../lib/calc.js';
+import { transferHamali, TRANSFER_TRANSPORT, daysBetween, loanInterest } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { getEarliestOpenLoanDate, getCurrentLoanRate } from './loan.controller.js';
@@ -17,8 +17,7 @@ export async function listStockTransfers(_req: Request, res: Response) {
 /**
  * Record a black-seed transfer from a storage location to the process. Incurs a
  * fixed hamali (₹80/t storage unload split ₹70 crew + ₹10 profit, plus ₹270/t
- * load+unload all crew), a fixed ₹500 transport, and bag-cutting at the
- * destination bunker — all 100% company-borne and capitalised into the seed's
+ * load+unload all crew), and a fixed ₹500 transport. — all 100% company-borne and capitalised into the seed's
  * value at the process silo. Company-vehicle exemption does not apply to
  * transfers (only to arrivals).
  */
@@ -37,8 +36,6 @@ export async function createStockTransfer(req: Request, res: Response) {
   }
 
   const hamali = transferHamali(data.weightKg);
-  const bagCount = data.bunkerPlace ? calcBags(data.weightKg) : 0;
-  const bagCuttingCharge = data.bunkerPlace ? calcBagCutting(data.weightKg, data.bunkerPlace) : 0;
   const transportCharge = TRANSFER_TRANSPORT;
 
   const legCharge = hamali.charge;
@@ -84,9 +81,6 @@ export async function createStockTransfer(req: Request, res: Response) {
         transportCharge,
         loadingHamali: hamali.unloadCharge, // storage unload leg (₹80/t)
         unloadingHamali: hamali.handlingCharge, // load + unload combined (₹270/t)
-        bunkerPlace: data.bunkerPlace ?? null,
-        bagCount,
-        bagCuttingCharge,
         hamaliMargin: legMargin,
         interestCharge,
         interestDays,
@@ -106,7 +100,6 @@ export async function createStockTransfer(req: Request, res: Response) {
       legCrew,
       legMargin,
       transportCharge,
-      bagCuttingCharge,
       interestCharge,
     });
 

@@ -24,7 +24,7 @@ export async function handleChat(req: Request, res: Response) {
     "- Raw materials: 'Black Seed' (itemType: BLACK_SEED). Stored in storage locations (Rampalli, Murgan, Multi) or at the factory ('At process').\n" +
     "- Milling/Processing: Processing input black seed yields 'White Pappu' (the primary kernel product, ~60% out-turn yield), 'Husk' (~25% yield), 'Waste' (~10% yield), and negligible loss (~5%).\n" +
     "- Tamarind Shell (SHELL) is a processing byproduct sent to Rampalli and sold from there.\n" +
-    "- Internal Logistics: Seeds move storage -> process via StockTransfer (capitalizing transport, loading/unloading hamali, and bag-cutting costs into the process stock value).\n" +
+    "- Internal Logistics: Seeds move storage -> process via StockTransfer (capitalizing transport and loading/unloading hamali costs into the process stock value).\n" +
     "- Sales: A SaleOrder specifies product, customer, total weight, and credit days. Actual deliveries are made via one or more physical lorry shipments called 'SaleDispatch'. Each dispatch tracks actual weight, vehicle, generated Tax Invoice, E-Invoice IRN, and E-Way Bill (EWB).\n" +
     "- Accounting: Double-entry ledger with cost centers, accounts (Asset, Liability, Equity, Revenue, Expense) and Journal Entries. Hamali expenses are tracked under account code 20200.\n" +
     "- Outstanding loans: Principal bank loans taken against storage stock. Carrying interest is capitalized on transfer to process.\n\n" +

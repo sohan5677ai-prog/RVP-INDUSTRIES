@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const partyTypeEnum = z.enum(['SUPPLIER', 'BUYER', 'BOTH']);
+export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SHELL', 'TAMARIND_WASTE', 'TPS_BROKENS']);
 
 export const createPartySchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -13,6 +14,7 @@ export const createPartySchema = z.object({
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
+  commodities: z.array(commodityEnum).default([]),
 });
 
 export const updatePartySchema = createPartySchema.partial();

@@ -1,14 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
-async function main() {
-  await prisma.account.upsert({
-    where: { code: '40040' },
-    update: { name: 'Internal Weight Profit', type: 'REVENUE' },
-    create: { code: '40040', name: 'Internal Weight Profit', type: 'REVENUE' },
-  });
-  console.log('Account 40040 created/updated');
-}
-
-main().catch(console.error).finally(() => prisma.$disconnect());
+// Deprecated. This one-off script used to create account 40040 (Internal Weight
+// Profit), which has since been decommissioned from the Tally chart of accounts.
+// Kept as a no-op so a stray run cannot resurrect the removed ledger head.
+console.log('addAccount.ts is deprecated — account 40040 (Internal Weight Profit) was removed.');

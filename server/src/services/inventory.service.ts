@@ -77,7 +77,7 @@ export class InventoryService {
   /**
    * Move black seed from one silo to another. Draws `weightKg` out of the source
    * at its MAP, then adds it to the destination valued at that drawn cost plus
-   * `addedCost` (the transfer's capitalised hamali/transport/bag-cutting).
+   * `addedCost` (the transfer's capitalised hamali/transport).
    * Returns the seed value drawn from the source.
    */
   static async transferBlackSeed(

@@ -7,9 +7,11 @@ import {
   listSaleOrdersSchema,
   deliverSaleDispatchSchema,
   dispatchSaleOrderSchema,
+  markPaidSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { AllocationService } from '../services/allocation.service.js';
 import { calcSaleFreight, calcHamali, calcKataFee, pappuLoadingHamali } from '../lib/calc.js';
 import { getFreightRateForDestination, getCompanyProfileRow } from './settings.controller.js';
 import { fileUrl } from '../lib/upload.js';
@@ -97,6 +99,21 @@ export async function createSaleOrder(req: Request, res: Response) {
   }
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
+
+  // Gap 5: Block PAPPU sale order creation if there are no POs to back it
+  if (data.product === 'PAPPU') {
+    const capacity = await AllocationService.checkAllocationCapacity(
+      data.tonnageKg,
+      Number(data.ratePerKg)
+    );
+    if (!capacity.canAllocate) {
+      throw new HttpError(
+        409,
+        capacity.reason ?? 'Insufficient PO capacity to create this sale order.'
+      );
+    }
+  }
+
   const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
 
   const order = await prisma.saleOrder.create({
@@ -116,7 +133,89 @@ export async function createSaleOrder(req: Request, res: Response) {
     },
     include: { buyer: true, broker: true },
   });
-  res.status(201).json(order);
+
+  let allocationSummary = null;
+  if (data.product === 'PAPPU') {
+    // Trigger Soft Allocation
+    const totalAllocated = await AllocationService.allocateSaleOrder(order.id, data.tonnageKg);
+    const unallocatedKg = data.tonnageKg - totalAllocated;
+
+    allocationSummary = {
+      totalAllocatedKg: Math.round(totalAllocated),
+      unallocatedKg: Math.round(unallocatedKg),
+      warning: unallocatedKg > 0
+        ? `⚠️ Only ${Math.round(totalAllocated / 1000)}T of ${Math.round(data.tonnageKg / 1000)}T could be allocated against existing POs. ${Math.round(unallocatedKg / 1000)}T is UNALLOCATED.`
+        : null,
+    };
+  }
+
+  res.status(201).json({ ...order, allocationSummary });
+}
+
+export async function bulkCreateSaleOrders(req: Request, res: Response) {
+  const { orders } = req.body as {
+    orders: Array<{
+      saleDate: string;
+      buyerId: string;
+      product?: string;
+      tonnageKg: number;
+      ratePerKg: number;
+      dueDays?: number;
+      marginOverride?: boolean;
+    }>;
+  };
+  if (!Array.isArray(orders) || orders.length === 0) throw new HttpError(400, 'orders array is required');
+
+  const results: Array<{ index: number; success: boolean; id?: string; error?: string }> = [];
+
+  for (let i = 0; i < orders.length; i++) {
+    try {
+      const row = orders[i];
+      const data = createSaleOrderSchema.parse({
+        saleDate: row.saleDate,
+        product: row.product ?? 'PAPPU',
+        buyerId: row.buyerId,
+        tonnageKg: row.tonnageKg,
+        ratePerKg: row.ratePerKg,
+        dueDays: row.dueDays,
+        marginOverride: row.marginOverride ?? false,
+        brokerageRatePerKg: 0,
+      });
+
+      const buyer = await prisma.party.findUnique({ where: { id: data.buyerId } });
+      if (!buyer) throw new Error('Buyer not found');
+
+      await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
+
+      const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+
+      const order = await prisma.saleOrder.create({
+        data: {
+          saleDate: data.saleDate,
+          product: data.product,
+          buyerId: data.buyerId,
+          tonnageKg: data.tonnageKg,
+          ratePerKg: data.ratePerKg,
+          dueDays: data.dueDays ?? null,
+          gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg)),
+          brokerageRatePerKg: 0,
+          destination,
+          freightCharge,
+          marginOverride: data.marginOverride || false,
+        },
+      });
+
+      if (data.product === 'PAPPU') {
+        await AllocationService.allocateSaleOrder(order.id, data.tonnageKg);
+      }
+
+      results.push({ index: i, success: true, id: order.id });
+    } catch (err: any) {
+      results.push({ index: i, success: false, error: err?.message ?? 'Unknown error' });
+    }
+  }
+
+  res.json({ results });
 }
 
 export async function updateSaleOrder(req: Request, res: Response) {
@@ -132,6 +231,20 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
   const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+
+  if (data.product === 'PAPPU') {
+    const capacity = await AllocationService.checkAllocationCapacity(
+      data.tonnageKg,
+      Number(data.ratePerKg),
+      order.id
+    );
+    if (!capacity.canAllocate) {
+      throw new HttpError(
+        409,
+        capacity.reason ?? 'Insufficient PO capacity to update this sale order.'
+      );
+    }
+  }
 
   const updated = await prisma.saleOrder.update({
     where: { id: req.params.id },
@@ -151,7 +264,28 @@ export async function updateSaleOrder(req: Request, res: Response) {
     },
     include: { buyer: true, broker: true },
   });
-  res.json(updated);
+
+  let allocationSummary = null;
+  if (data.product === 'PAPPU') {
+    // Delete existing allocations since we are re-allocating
+    await prisma.saleAllocation.deleteMany({
+      where: { saleOrderId: updated.id }
+    });
+    
+    // Trigger Soft Allocation
+    const totalAllocated = await AllocationService.allocateSaleOrder(updated.id, data.tonnageKg);
+    const unallocatedKg = data.tonnageKg - totalAllocated;
+
+    allocationSummary = {
+      totalAllocatedKg: Math.round(totalAllocated),
+      unallocatedKg: Math.round(unallocatedKg),
+      warning: unallocatedKg > 0
+        ? `⚠️ Only ${Math.round(totalAllocated / 1000)}T of ${Math.round(data.tonnageKg / 1000)}T could be allocated against existing POs. ${Math.round(unallocatedKg / 1000)}T is UNALLOCATED.`
+        : null,
+    };
+  }
+
+  res.json({ ...updated, allocationSummary });
 }
 
 export async function deleteSaleOrder(req: Request, res: Response) {
@@ -160,7 +294,10 @@ export async function deleteSaleOrder(req: Request, res: Response) {
   if (order.status !== 'PENDING') {
     throw new HttpError(400, 'Cannot delete a sale order that is already dispatched');
   }
-  await prisma.saleOrder.delete({ where: { id: req.params.id } });
+  await prisma.$transaction([
+    prisma.saleAllocation.deleteMany({ where: { saleOrderId: req.params.id } }),
+    prisma.saleOrder.delete({ where: { id: req.params.id } })
+  ]);
   res.json({ message: 'Sale order deleted' });
 }
 
@@ -301,7 +438,6 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       hamaliCompanyExpense,
       hamaliMargin,
       weightKg,
-      brokerageAmount: order.brokerId ? 2000 : 0,
     });
 
     await tx.saleOrder.update({
@@ -396,32 +532,14 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     }
   }
 
-  // Release the freight retention held back at dispatch to Surya Roadlines.
-  const company = await getCompanyProfileRow();
-  const freightRetention =
-    Number(dispatch.freightCharge) > 0 ? Number(company.freightRetentionPerTrip ?? 3000) : 0;
-
   const updated = await prisma.$transaction(async (tx) => {
-    if (shortageKg && shortageKg > 0) {
-      await LedgerService.postSaleCreditNote(tx, dispatch.id, {
-        buyerName: order.buyer.name,
-        product: order.product,
-        shortageKg,
-        baseAmount: shortageKg * rate,
-        gstAmount: calcGst(shortageKg, rate),
-      });
-    }
+    // We intentionally do not post a Credit Note to the ledger here anymore.
+    // The shortage is recorded on the dispatch, but A/R is maintained at the full billed amount.
+    // Deductions will be handled at the time of Receipt if the party doesn't pay the full amount.
 
-    if (internalWeightProfitAmount && internalWeightProfitAmount > 0) {
-      await LedgerService.postInternalWeightProfit(tx, dispatch.id, {
-        buyerName: order.buyer.name,
-        product: order.product,
-        profitWeightKg,
-        amount: internalWeightProfitAmount,
-      });
-    }
-
-    await LedgerService.postFreightRetentionRelease(tx, dispatch.id, freightRetention);
+    // Internal Weight Profit is saved on the dispatch record and shown in the
+    // Internal Weight Ledger report, but is no longer posted to the ledger.
+    // The retained freight was already credited to Surya Roadlines at dispatch.
 
     return tx.saleDispatch.update({
       where: { id: dispatch.id },
@@ -436,6 +554,81 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
           internalWeightProfitAmount,
         }),
         ...(kataFile && { buyerKataFileUrl: fileUrl(kataFile.filename) }),
+      },
+      include: { saleOrder: { include: { buyer: true, broker: true } } },
+    });
+  });
+
+  res.json(updated);
+}
+
+export async function markDispatchPaid(req: Request, res: Response) {
+  const data = markPaidSchema.parse(req.body);
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: req.params.id },
+    include: { saleOrder: { include: { buyer: true } } },
+  });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+  const buyer = dispatch.saleOrder.buyer;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // 1. Create Receipt if amount > 0
+    if (data.amount > 0) {
+      const createdReceipt = await tx.receipt.create({
+        data: {
+          date: data.date,
+          amount: data.amount,
+          type: 'BUYER',
+          partyId: buyer.id,
+          description: `Payment for Invoice ${dispatch.invoiceNumber ?? dispatch.id}`,
+        },
+      });
+
+      await LedgerService.postReceipt(tx, createdReceipt.id, {
+        date: data.date,
+        amount: data.amount,
+        type: 'BUYER',
+        partyName: buyer.name,
+        description: `Payment for Invoice ${dispatch.invoiceNumber ?? dispatch.id}`,
+      });
+
+      const journalEntry = await tx.journalEntry.findFirst({
+        where: { reference: `RECEIPT-${createdReceipt.id}` },
+      });
+      
+      if (journalEntry) {
+        await tx.receipt.update({
+          where: { id: createdReceipt.id },
+          data: { journalEntryId: journalEntry.id },
+        });
+      }
+    }
+
+    // 2. Post TDS Deduction if any
+    if (data.tdsAmount > 0) {
+      await LedgerService.postSaleTdsDeduction(tx, dispatch.id, {
+        date: data.date,
+        buyerName: buyer.name,
+        tdsAmount: data.tdsAmount,
+      });
+    }
+
+    // 3. Post Shortage Deduction if any
+    if (data.shortageAmount > 0) {
+      await LedgerService.postSaleShortageDeduction(tx, dispatch.id, {
+        date: data.date,
+        buyerName: buyer.name,
+        shortageAmount: data.shortageAmount,
+      });
+    }
+
+    // 4. Update dispatch with tdsAmount and creditNoteAmount (shortage)
+    return tx.saleDispatch.update({
+      where: { id: dispatch.id },
+      data: {
+        tdsAmount: data.tdsAmount,
+        creditNoteAmount: data.shortageAmount > 0 ? data.shortageAmount : dispatch.creditNoteAmount,
       },
       include: { saleOrder: { include: { buyer: true, broker: true } } },
     });

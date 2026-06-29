@@ -5,6 +5,7 @@ import {
   listPurchaseOrders,
   getPurchaseOrder,
   createPurchaseOrder,
+  bulkCreatePurchaseOrders,
   updatePurchaseOrder,
   deletePurchaseOrder,
   voidPurchaseOrder,
@@ -36,6 +37,7 @@ const router = Router();
 // Purchase orders
 router.get('/purchase-orders', asyncHandler(listPurchaseOrders));
 router.get('/purchase-orders/:id', asyncHandler(getPurchaseOrder));
+router.post('/purchase-orders/bulk', asyncHandler(bulkCreatePurchaseOrders));
 router.post('/purchase-orders', asyncHandler(createPurchaseOrder));
 router.put('/purchase-orders/:id', asyncHandler(updatePurchaseOrder));
 router.delete('/purchase-orders/:id', asyncHandler(deletePurchaseOrder));

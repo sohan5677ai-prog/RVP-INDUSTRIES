@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js';
 
 export async function clearTransactions(_req: Request, res: Response) {
   await prisma.$transaction([
+    prisma.saleAllocation.deleteMany(),
     prisma.processing.deleteMany(),
     prisma.weightVerification.deleteMany(),
     prisma.purchase.deleteMany(),

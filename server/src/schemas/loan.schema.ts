@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const createLoanSchema = z.object({
   principal: z.coerce.number().positive(),
+  name: z.string().trim().optional().nullable(),
+  personName: z.string().trim().optional().nullable(),
   drawdownDate: z.coerce.date(),
   loanRef: z.string().trim().optional().nullable(),
   bankName: z.string().trim().optional().nullable(),

@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -193,8 +193,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const invoiceBase = invoiceDispatch ? invoiceDispatch.dispatch.weightKg * Number(invoiceDispatch.order.ratePerKg) : 0;
   const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
-  const invoiceCn = Number(invoiceDispatch?.dispatch.creditNoteAmount || 0);
-  const invoiceNet = invoiceBase + invoiceGst - invoiceCn;
+  const invoiceNet = invoiceBase + invoiceGst;
 
   // ── Mark Delivered dialog (captures buyer kata + shortage) ───────────────────
   const [deliverDispatch, setDeliverDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
@@ -225,6 +224,86 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success('Shipment marked as Delivered');
       setDeliverDispatch(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  // ── Mark Paid dialog (captures TDS + receipt amount) ───────────────────
+  const [payDispatch, setPayDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payAmount, setPayAmount] = useState('');
+  const [payTds, setPayTds] = useState('');
+  const [payShortage, setPayShortage] = useState('');
+
+  function openPaymentDialog(dispatch: SaleDispatch, order: SaleOrder) {
+    setPayDispatch({ dispatch, order });
+    setPayDate(new Date().toISOString().slice(0, 10));
+    
+    // Auto calculate defaults
+    const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
+    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+    const invoiceTotal = invoiceBase + invoiceGst;
+    const shortageDeduction = Number(dispatch.creditNoteAmount) || 0;
+    const expectedNet = invoiceTotal - shortageDeduction - Number(dispatch.tdsAmount || 0);
+    
+    setPayAmount(String(expectedNet));
+    setPayTds(dispatch.tdsAmount ? String(dispatch.tdsAmount) : '');
+    setPayShortage(shortageDeduction > 0 ? String(shortageDeduction) : '');
+  }
+
+  function handlePayAmountChange(v: string) {
+    setPayAmount(v);
+    if (!payDispatch) return;
+    const amount = Number(v);
+    const order = payDispatch.order;
+    const dispatch = payDispatch.dispatch;
+    
+    const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
+    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+    const invoiceTotal = invoiceBase + invoiceGst;
+    const shortageDeduction = Number(payShortage) || 0;
+    const expectedNet = invoiceTotal - shortageDeduction;
+    
+    // If amount is less than expected net, auto-calc TDS as 0.1% of base
+    if (amount < expectedNet) {
+      const autoTds = Math.round(invoiceBase * 0.001);
+      setPayTds(String(autoTds));
+    } else if (amount >= expectedNet) {
+      setPayTds('');
+    }
+  }
+
+  // Recalculate if user changes shortage manually
+  function handlePayShortageChange(v: string) {
+    setPayShortage(v);
+    if (!payDispatch) return;
+    const order = payDispatch.order;
+    const dispatch = payDispatch.dispatch;
+    
+    const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
+    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+    const invoiceTotal = invoiceBase + invoiceGst;
+    const shortageDeduction = Number(v) || 0;
+    const expectedNet = invoiceTotal - shortageDeduction - Number(payTds || 0);
+    
+    setPayAmount(String(expectedNet));
+  }
+
+  const payMutation = useMutation({
+    mutationFn: () => api(`/sale-dispatches/${payDispatch!.dispatch.id}/mark-paid`, {
+      method: 'POST',
+      body: JSON.stringify({
+        date: new Date(payDate).toISOString(),
+        amount: Number(payAmount),
+        tdsAmount: Number(payTds) || 0,
+        shortageAmount: Number(payShortage) || 0,
+      }),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Payment recorded successfully');
+      setPayDispatch(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -447,9 +526,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                           ) : (
                             <div className="space-y-2.5">
                               {dispatches.map((d) => {
-                                const cnAmt = Number(d.creditNoteAmount || 0);
-                                const netDue = (d.weightKg * Number(o.ratePerKg) * (1 + GST_RATE)) - cnAmt;
-                                const tds = d.weightKg * Number(o.ratePerKg) * 0.001;
+                                const netDue = (d.weightKg * Number(o.ratePerKg) * (1 + GST_RATE));
                                 const dueIso = dueDateIso(d.deliveredDate, o.dueDays);
                                 const overdue = isOverdue(dueIso);
                                 const soon = isDueSoon(dueIso);
@@ -472,12 +549,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             <span>{shortDate(d.dispatchDate)}</span><span className="opacity-40">·</span>
                                             <span>{d.vehicleNumber ?? 'no vehicle'}</span><span className="opacity-40">·</span>
                                             <span className="font-mono">{toTonnes(d.weightKg).toFixed(2)} t</span>
-                                            {d.internalWeightKg != null && (
-                                              <>
-                                                <span className="opacity-40">·</span>
-                                                <span className="font-mono text-emerald-600 dark:text-emerald-400">{toTonnes(d.internalWeightKg).toFixed(2)} t internal</span>
-                                              </>
-                                            )}
                                             {d.kataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.kataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Dispatch kata</a>}
                                             {d.buyerKataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.buyerKataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Buyer kata</a>}
                                           </div>
@@ -521,8 +592,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                       {/* figures */}
                                       <div className="flex items-center gap-5">
                                         <Figure label="Net due" value={rupees(netDue)} valueClass="text-forest" />
-                                        {isPappu && <Figure label="TDS 0.1%" value={rupees(tds)} valueClass="text-rose-600 dark:text-rose-400" />}
-                                        {cnAmt > 0 && <Figure label="Credit note" value={`−${rupees(cnAmt)}`} valueClass="text-destructive" />}
                                         <div className="text-right">
                                           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Due</div>
                                           <div className="mt-0.5 flex items-center justify-end gap-1 text-sm font-medium">
@@ -575,6 +644,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                         {d.status === 'DISPATCHED' && (
                                           <Button size="sm" variant="forest" onClick={() => openDeliver(d, o)}>
                                             <PackageCheck className="h-3.5 w-3.5" /> Mark delivered
+                                          </Button>
+                                        )}
+                                        {d.status === 'DELIVERED' && (
+                                          <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openPaymentDialog(d, o)}>
+                                            <IndianRupee className="h-3.5 w-3.5" /> Mark Paid
                                           </Button>
                                         )}
                                         {d.status === 'DELIVERED' && <Badge variant="success">Delivered</Badge>}
@@ -647,9 +721,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
               <div className="flex justify-between"><span className="text-muted-foreground">Base ({invoiceDispatch ? toTonnes(invoiceDispatch.dispatch.weightKg).toFixed(2) : 0} t × {rupees(invoiceDispatch?.order.ratePerKg ?? 0)})</span><span className="font-medium">{rupees(invoiceBase)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{rupees(invoiceGst)}</span></div>
-              {invoiceCn > 0 && <div className="flex justify-between text-rose-600"><span>Shortage CN (separate)</span><span>−{rupees(invoiceCn)}</span></div>}
               <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
-              {invoiceCn > 0 && <div className="flex justify-between text-xs text-muted-foreground"><span>Net receivable after CN</span><span>{rupees(invoiceNet)}</span></div>}
             </div>
             <DialogFooter>
               <Button onClick={() => raiseInvoiceMutation.mutate()} disabled={raiseInvoiceMutation.isPending}>
@@ -690,18 +762,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </label>
             </div>
             {deliverShortageKg > 0 && (
-              <div className="rounded-lg border bg-rose-50/50 dark:bg-rose-950/20 p-3 text-sm space-y-1.5">
-                <div className="font-semibold text-rose-700 mb-2">Shortage Detected</div>
-                <div className="flex justify-between text-rose-600"><span>Weight difference:</span><span className="font-medium">−{deliverShortageKg} kg</span></div>
-                <div className="flex justify-between text-rose-600"><span>Value loss (base):</span><span className="font-medium">−{rupees(deliverShortageKg * deliverRate)}</span></div>
-                <div className="flex justify-between border-t border-rose-200 pt-1.5 font-semibold text-rose-700"><span>Auto credit note (incl. GST)</span><span>{rupees(deliverCreditAmount)}</span></div>
-              </div>
-            )}
-            {deliverDispatch?.dispatch.internalWeightKg && deliverDispatch.order.product === 'PAPPU' && buyerKataKg > deliverDispatch.dispatch.internalWeightKg && (
-              <div className="rounded-lg border bg-emerald-50/50 dark:bg-emerald-950/20 p-3 text-sm space-y-1.5">
-                <div className="font-semibold text-emerald-700 mb-2">Moisture Gain Profit</div>
-                <div className="flex justify-between text-emerald-600"><span>Weight gained:</span><span className="font-medium">+{buyerKataKg - deliverDispatch.dispatch.internalWeightKg} kg</span></div>
-                <div className="flex justify-between border-t border-emerald-200 pt-1.5 font-semibold text-emerald-700"><span>Profit to record</span><span>{rupees((buyerKataKg - deliverDispatch.dispatch.internalWeightKg) * deliverRate)}</span></div>
+              <div className="rounded-lg border bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm space-y-1.5">
+                <div className="font-semibold text-amber-700 mb-2">Shortage Recorded</div>
+                <div className="flex justify-between text-amber-600"><span>Weight difference:</span><span className="font-medium">−{deliverShortageKg} kg</span></div>
+                <div className="text-xs text-amber-600/80 mt-1">Shortages are saved but will not reduce the invoice value automatically. Adjust them at the time of payment receipt.</div>
               </div>
             )}
             {deliverShortageKg === 0 && buyerKataKg > 0 && !deliverOverweight && (
@@ -712,7 +776,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             )}
             <DialogFooter>
               <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverOverweight} variant="forest">
-                <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : deliverShortageKg > 0 ? 'Confirm Delivered & Raise CN' : 'Confirm Delivered'}
+                <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : 'Confirm Delivered'}
               </Button>
             </DialogFooter>
           </div>
@@ -825,6 +889,85 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Dialog */}
+      <Dialog open={!!payDispatch} onOpenChange={(v) => !v && setPayDispatch(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark as Paid — {payDispatch?.order.buyer.name}</DialogTitle>
+          </DialogHeader>
+          
+          {payDispatch && (() => {
+            const d = payDispatch.dispatch;
+            const o = payDispatch.order;
+            const invoiceBase = d.weightKg * Number(o.ratePerKg);
+            const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+            const invoiceTotal = invoiceBase + invoiceGst;
+            const shortageValue = Number(d.creditNoteAmount) || 0;
+            
+            return (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Invoice Total</span>
+                    <span className="font-medium text-foreground">{rupees(invoiceTotal)}</span>
+                  </div>
+                  {Number(payShortage) > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>Shortage Deduction</span>
+                      <span>-{rupees(Number(payShortage))}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-semibold border-t pt-1.5 border-border">
+                    <span>Net Due</span>
+                    <span>{rupees(invoiceTotal - (Number(payShortage) || 0))}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Payment Date</Label>
+                    <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Amount Received</Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
+                      <Input type="number" step="0.01" className="pl-7" value={payAmount} onChange={(e) => handlePayAmountChange(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Shortage Deduction</Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
+                      <Input type="number" step="0.01" className="pl-7" value={payShortage} onChange={(e) => handlePayShortageChange(e.target.value)} placeholder="0" />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Any quality/weight shortage claim by buyer.</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>TDS Deducted (0.1%)</Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
+                      <Input type="number" step="0.01" className="pl-7" value={payTds} onChange={(e) => setPayTds(e.target.value)} placeholder="0" />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Auto-calc if received amount is less than expected net.</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayDispatch(null)}>Cancel</Button>
+            <Button onClick={() => payMutation.mutate()} disabled={payMutation.isPending || !payAmount}>
+              {payMutation.isPending ? 'Saving...' : 'Record Payment'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

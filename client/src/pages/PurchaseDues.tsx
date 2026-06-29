@@ -47,6 +47,8 @@ export default function PurchaseDuesPage() {
     lorryNumber: string | null;
     dueAge: number;
     amount: number;
+    totalAmount: number;
+    status: string;
   }> = [];
 
   let totalBillingAll = 0;
@@ -91,11 +93,14 @@ export default function PurchaseDuesPage() {
       }
     });
 
-    // 4. Push outstanding items to flat list
+    // 4. Push all items to flat list with status
     const today = new Date();
     activePurchases.forEach((p) => {
-      if (p.remainingAmount > 0.01) { // ignore floating point dust
-        const purchaseDate = new Date(p.createdAt);
+      let status = 'Unpaid';
+      if (p.remainingAmount <= 0.01) status = 'Paid';
+      else if (p.remainingAmount < p.totalAmount - 0.01) status = 'Partially Paid';
+
+      const purchaseDate = new Date(p.createdAt);
 
         // Calculate age
         const diffTime = today.getTime() - purchaseDate.getTime();
@@ -112,8 +117,9 @@ export default function PurchaseDuesPage() {
           lorryNumber: p.stockIn?.lorryNumber ?? null,
           dueAge,
           amount: p.remainingAmount,
+          totalAmount: p.totalAmount,
+          status,
         });
-      }
     });
   });
 
@@ -163,10 +169,10 @@ export default function PurchaseDuesPage() {
             </Card>
           </div>
 
-          <div className="rounded-lg border bg-card">
-            <div className="px-5 py-4 border-b font-semibold text-sm">Outstanding Purchases Aging List</div>
+          <div className="rounded-lg border bg-card [&_div[data-slot=table-container]]:overflow-auto [&_div[data-slot=table-container]]:max-h-[70vh]">
+            <div className="px-5 py-4 border-b font-semibold text-sm">Purchase Aging List</div>
             <Table>
-              <TableHeader>
+              <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-muted [&_th]:shadow-[0_1px_0_0] [&_th]:shadow-border">
                 <TableRow>
                   <TableHead>Date (Purchased)</TableHead>
                   <TableHead>Party (Supplier)</TableHead>
@@ -175,12 +181,13 @@ export default function PurchaseDuesPage() {
                   <TableHead className="text-right">Tonnage</TableHead>
                   <TableHead>Vehicle No</TableHead>
                   <TableHead className="text-right">Outstanding Amount</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-center">Due Age (days)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {outstandingPurchases.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No outstanding purchase dues.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No purchase dues found.</TableCell></TableRow>
                 ) : (
                   outstandingPurchases.map((bill) => (
                     <TableRow key={bill.id}>
@@ -194,7 +201,16 @@ export default function PurchaseDuesPage() {
                         {rupees(bill.amount)}
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className="text-rose-600 dark:text-rose-400 font-bold">{bill.dueAge} days</span>
+                        <span className={`font-semibold ${bill.status === 'Paid' ? 'text-emerald-600 dark:text-emerald-400' : bill.status === 'Unpaid' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                          {bill.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {bill.status !== 'Paid' ? (
+                          <span className="text-rose-600 dark:text-rose-400 font-bold">{bill.dueAge} days</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))

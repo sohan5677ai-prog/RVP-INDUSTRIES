@@ -30,14 +30,9 @@ const port = Number(process.env.PORT ?? 4000);
 app.listen(port, "0.0.0.0", () => {
   console.log(`rvp-server listening on http://localhost:${port}`);
 
-  // Bootstrap missing accounts
+  // Bootstrap missing accounts. (40040 Internal Weight Profit was decommissioned.)
   import("./lib/prisma.js").then(async ({ prisma }) => {
     try {
-      await prisma.account.upsert({
-        where: { code: '40040' },
-        update: { name: 'Internal Weight Profit', type: 'REVENUE' },
-        create: { code: '40040', name: 'Internal Weight Profit', type: 'REVENUE' },
-      });
       await prisma.account.upsert({
         where: { code: '50080' },
         update: { name: 'Interest Expense', type: 'EXPENSE' },

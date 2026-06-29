@@ -7,20 +7,15 @@
 //   - amounts: rupees (number)
 
 export const EXEMPT_KG = 80;
-export const DEFAULT_HAMALI_RATE = 160; // ₹ per tonne (full unloading charge)
-// Arrival hamali is a small profit-centre. Of the ₹160/tonne charge:
-//   - funding side: lorry pays ₹80, the seed (inventory) bears ₹80
-//   - usage side:   the crew is paid ₹140, the company keeps ₹20 as margin
-// Only the inventory's ₹80 share is capitalised into the silo value (unchanged
+export const DEFAULT_HAMALI_RATE = 150; // ₹ per tonne (full unloading charge)
+// Arrival hamali is a small profit-centre. Of the ₹150/tonne charge:
+//   - funding side: lorry pays ₹80, the seed (inventory) bears ₹70
+//   - usage side:   the crew is paid ₹140, the company keeps ₹10 as margin
+// Only the inventory's ₹70 share is capitalised into the silo value (unchanged
 // from before); the crew/margin split only affects how the ledger records it.
-export const COMPANY_HAMALI_SHARE = 0.5; // inventory's funding share of the charge
-export const HAMALI_MARGIN_FRACTION = 20 / 160; // company profit per ₹ of hamali (0.125)
+export const COMPANY_HAMALI_SHARE = 70 / 150; // inventory's funding share of the charge
+export const HAMALI_MARGIN_FRACTION = 10 / 150; // company profit per ₹ of hamali
 export const DEFAULT_OUT_TURN_PCT = 60; // black -> white yield
-
-// Bag-cutting: bags are not counted — black seed averages 65 kg/bag. The crew is
-// paid per bag to cut the bag and pour the seed into a bunker. No company margin.
-export const BAG_AVG_KG = 65;
-export const BAG_RATE: Record<'A' | 'B', number> = { A: 3, B: 6 }; // ₹ per bag
 
 // Default freight destinations (fallback before the editable rates load). The
 // actual per-tonne rates live in the FreightRate table, managed in Settings.
@@ -142,13 +137,13 @@ export function hamaliSplit(hamaliCharge: number): HamaliSplit {
   return { total: hamaliCharge, inventory, lorry, crew, margin };
 }
 
-// Pappu loading hamali at sale dispatch. ₹200/tonne total:
-//   funding: company (us) ₹120, lorry ₹80 (collected from the driver, off freight)
-//   usage:   crew ₹190 (our ₹120 + ₹70 of the lorry's ₹80), ₹10 → company P/L
-export const PAPPU_LOADING_HAMALI_RATE = 200; // ₹/tonne total
-export const PAPPU_LOADING_HAMALI_COMPANY_RATE = 120; // ₹/tonne our share
+// Pappu loading hamali at sale dispatch. ₹220/tonne total:
+//   funding: company (us) ₹140, lorry ₹80 (collected from the driver, off freight)
+//   usage:   crew ₹210 (our ₹140 + ₹70 of the lorry's ₹80), ₹10 → company P/L
+export const PAPPU_LOADING_HAMALI_RATE = 220; // ₹/tonne total
+export const PAPPU_LOADING_HAMALI_COMPANY_RATE = 140; // ₹/tonne our share
 export const PAPPU_LOADING_HAMALI_LORRY_RATE = 80; // ₹/tonne collected from the driver
-export const PAPPU_LOADING_HAMALI_MARGIN_RATE = 10; // ₹/tonne company P/L (₹80 − ₹70 crew)
+export const PAPPU_LOADING_HAMALI_MARGIN_RATE = 10; // ₹/tonne company P/L
 
 export interface LoadingHamaliSplit {
   total: number; // full loading charge
@@ -257,12 +252,4 @@ export function loanInterest(value: number, ratePct: number, days: number): numb
   return Math.round(value * (ratePct / 100) * (days / 365) * 100) / 100;
 }
 
-/** Number of bags for a black-seed weight (65 kg/bag average), rounded. */
-export function calcBags(netKg: number): number {
-  return Math.round(netKg / BAG_AVG_KG);
-}
 
-/** Bag-cutting hamali in rupees for a weight at place A (₹3) or B (₹6). */
-export function calcBagCutting(netKg: number, place: 'A' | 'B'): number {
-  return calcBags(netKg) * BAG_RATE[place];
-}

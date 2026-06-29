@@ -114,7 +114,6 @@ export async function importHistoricalSales() {
         hamaliCompanyExpense: 0,
         hamaliMargin: 0,
         weightKg,
-        brokerageAmount: 0,
       });
     });
   }

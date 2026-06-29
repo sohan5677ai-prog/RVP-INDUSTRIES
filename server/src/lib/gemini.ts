@@ -494,6 +494,140 @@ Message: ${JSON.stringify(text)}`;
   return clean;
 }
 
+// ── Bulk table extraction ────────────────────────────────────────────────────
+
+export interface BulkTableRow {
+  date?: string;
+  partyName?: string;
+  tonnes?: number;
+  price?: number;
+  priceType?: 'BASE' | 'DELIVERY';
+  product?: 'PAPPU' | 'HUSK' | 'WASTE' | 'TPS' | 'SHELL';
+  lorryNo?: string;
+  invoiceNo?: string;
+}
+
+const BULK_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    rows: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          date: { type: Type.STRING },
+          partyName: { type: Type.STRING },
+          tonnes: { type: Type.NUMBER },
+          price: { type: Type.NUMBER },
+          priceType: { type: Type.STRING },
+          product: { type: Type.STRING },
+          lorryNo: { type: Type.STRING },
+          invoiceNo: { type: Type.STRING },
+        },
+      },
+    },
+  },
+} as const;
+
+function bulkPrompt(type: 'po' | 'sale'): string {
+  const shared = `You are reading a data table for an Indian tamarind/agro trading business.
+Extract ALL data rows and return as a JSON object with a "rows" array.
+Skip header rows, blank rows, and totals/summary rows.
+Each row must include:
+- date: the date in ISO format yyyy-mm-dd (convert from DD-MM-YYYY or DD/MM/YY etc.)
+- partyName: the supplier or buyer name (string)
+- tonnes: weight in metric tonnes — a plain number (convert if given in kg: divide by 1000)
+- price: rate per kilogram in rupees — a plain number (if given per quintal divide by 100, if per tonne divide by 1000)`;
+
+  if (type === 'po') {
+    return shared + `
+- priceType: "BASE" if price is at supplier's location/ex-works; "DELIVERY" if landed at our factory. Omit if unclear (default DELIVERY).
+- lorryNo: lorry/vehicle registration number if present`;
+  }
+  return shared + `
+- product: one of PAPPU, HUSK, WASTE, TPS, SHELL if stated; otherwise omit (default is PAPPU)
+- invoiceNo: invoice/bill number if present (e.g. "RVP/01/26-27")
+- lorryNo: lorry/vehicle number if present`;
+}
+
+function cleanBulkRows(rawRows: any[]): BulkTableRow[] {
+  const PRODUCTS = ['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL'];
+  return rawRows
+    .filter((r) => r && (r.partyName || r.tonnes || r.price))
+    .map((r): BulkTableRow => {
+      const row: BulkTableRow = {};
+      if (r.date?.toString().trim()) row.date = r.date.toString().trim();
+      if (r.partyName?.toString().trim()) row.partyName = r.partyName.toString().trim();
+      const t = typeof r.tonnes === 'number' ? r.tonnes : parseFloat(r.tonnes);
+      if (!isNaN(t) && t > 0) row.tonnes = t;
+      const p = typeof r.price === 'number' ? r.price : parseFloat(r.price);
+      if (!isNaN(p) && p > 0) row.price = p;
+      const pt = r.priceType?.toString().trim().toUpperCase();
+      if (pt === 'BASE' || pt === 'DELIVERY') row.priceType = pt;
+      const prod = r.product?.toString().trim().toUpperCase();
+      if (prod && PRODUCTS.includes(prod)) row.product = prod as BulkTableRow['product'];
+      if (r.lorryNo?.toString().trim()) row.lorryNo = r.lorryNo.toString().replace(/\s+/g, '').trim();
+      if (r.invoiceNo?.toString().trim()) row.invoiceNo = r.invoiceNo.toString().trim();
+      return row;
+    });
+}
+
+/** Extract multiple order rows from a plain text table (Excel paste, CSV, free text). */
+export async function extractBulkTableFromText(text: string, type: 'po' | 'sale'): Promise<BulkTableRow[]> {
+  const ai = getClient();
+  const prompt = bulkPrompt(type) + `\n\nTable/text:\n${text}`;
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { responseMimeType: 'application/json', responseSchema: BULK_SCHEMA },
+  });
+  const out = response.text;
+  if (!out) throw new HttpError(502, 'Gemini returned an empty response');
+  let parsed: any;
+  try { parsed = JSON.parse(out); } catch { throw new HttpError(502, 'Gemini returned an unreadable response'); }
+  return cleanBulkRows(parsed?.rows ?? []);
+}
+
+/** Extract multiple order rows from an image (photo of register, printed table, screenshot). */
+export async function extractBulkTableFromImage(buffer: Buffer, mimeType: string, type: 'po' | 'sale'): Promise<BulkTableRow[]> {
+  const ai = getClient();
+  const prompt = bulkPrompt(type);
+  let response;
+  let lastErr: Error | unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType, data: buffer.toString('base64') } },
+          ],
+        }],
+        config: { responseMimeType: 'application/json', responseSchema: BULK_SCHEMA },
+      });
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if ((msg.includes('429') || msg.includes('503')) && attempt < 3) {
+        await new Promise((r) => setTimeout(r, attempt * 2000));
+        continue;
+      }
+      throw new HttpError(502, `Gemini could not read the image: ${msg}`);
+    }
+  }
+  if (!response) throw new HttpError(502, `Gemini failed after retries: ${lastErr instanceof Error ? lastErr.message : 'Unknown'}`);
+  const out = response.text;
+  if (!out) throw new HttpError(502, 'Gemini returned an empty response');
+  let parsed: any;
+  try { parsed = JSON.parse(out); } catch { throw new HttpError(502, 'Gemini returned an unreadable response'); }
+  return cleanBulkRows(parsed?.rows ?? []);
+}
+
+// ── Payment / transaction extraction ────────────────────────────────────────
+
 /**
  * Fields read off a bank-transfer / UPI / cheque payment screenshot, used to
  * pre-fill a Payment (money out) or Receipt (money in) before it's recorded to

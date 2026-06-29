@@ -4,9 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale, Table2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
+import { BulkImportDialog } from '@/components/BulkImportDialog';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
@@ -70,6 +71,7 @@ type POForm = z.infer<typeof poSchema>;
 export default function PurchaseOrders() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
   const [filter, setFilter] = useState<POStatus | 'ALL'>('ALL');
   const [q, setQ] = useState('');
@@ -144,7 +146,7 @@ export default function PurchaseOrders() {
               pricePerKg: Number(v.pricePerKg),
               priceType: v.priceType,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
-              lorryCount: v.lorries ? Math.round(Number(v.lorries)) : null,
+              lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
             },
           })
         : api<PurchaseOrder>('/purchase-orders', {
@@ -155,7 +157,7 @@ export default function PurchaseOrders() {
               pricePerKg: Number(v.pricePerKg),
               priceType: v.priceType,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
-              lorryCount: v.lorries ? Math.round(Number(v.lorries)) : null,
+              lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
             },
           }),
     onSuccess: () => {
@@ -213,9 +215,14 @@ export default function PurchaseOrders() {
         title="Purchase Orders"
         description="Approximate orders raised to suppliers, split one PO per lorry."
         actions={
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New PO
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBulkOpen(true)}>
+              <Table2 className="h-4 w-4" /> Bulk Entry
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" /> New PO
+            </Button>
+          </div>
         }
       />
 
@@ -375,7 +382,7 @@ export default function PurchaseOrders() {
                     <FormLabel>Party (supplier) <span className="text-destructive">*</span></FormLabel>
                     <FormControl>
                       <Combobox
-                        options={(parties ?? []).filter((p) => p.type !== 'BUYER').map((p) => ({ value: p.id, label: p.name }))}
+                        options={(parties ?? []).filter((p) => p.type !== 'BUYER' && p.commodities?.includes('BLACK_SEED')).map((p) => ({ value: p.id, label: p.name }))}
                         value={field.value}
                         onChange={field.onChange}
                         placeholder="Select party"
@@ -462,7 +469,8 @@ export default function PurchaseOrders() {
                             const t = e.target.value;
                             field.onChange(t);
                             if (t && !isNaN(Number(t))) {
-                              form.setValue('lorries', String(Math.round((Number(t) / 25) * 100) / 100));
+                              // Ensure at least 1 lorry for small orders so it doesn't fail backend positive() validation
+                              form.setValue('lorries', String(Math.max(1, Math.round(Number(t) / 25))));
                             } else {
                               form.setValue('lorries', '');
                             }
@@ -484,6 +492,13 @@ export default function PurchaseOrders() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      <BulkImportDialog
+        type="po"
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['purchase-orders'] })}
+      />
     </div>
   );
 }

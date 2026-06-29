@@ -40,6 +40,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import type { Commodity } from '@/lib/types';
+
+const COMMODITIES: { value: Commodity; label: string }[] = [
+  { value: 'BLACK_SEED', label: 'Black Seed' },
+  { value: 'PAPPU', label: 'Pappu' },
+  { value: 'HUSK', label: 'Husk' },
+  { value: 'TAMARIND_SHELL', label: 'Tamarind Shell' },
+  { value: 'TAMARIND_WASTE', label: 'Tamarind Waste' },
+  { value: 'TPS_BROKENS', label: 'TPS (Brokens)' },
+];
 
 const partySchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -52,12 +62,13 @@ const partySchema = z.object({
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
+  commodities: z.array(z.string()).default([]),
 });
 type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
   name: '', type: 'SUPPLIER', phone: '', address: '', state: '', gstin: '', destination: '',
-  bankAccountNumber: '', bankIfsc: '', bankName: '',
+  bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
 export default function Parties() {
@@ -65,9 +76,31 @@ export default function Parties() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Party | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [commodityFilter, setCommodityFilter] = useState('ALL');
+  const [stateFilter, setStateFilter] = useState('ALL');
+
   const { data: parties, isLoading } = useQuery({
     queryKey: ['parties'],
     queryFn: () => api<Party[]>('/parties'),
+  });
+
+  const uniqueStates = Array.from(new Set(parties?.map(p => p.state).filter(Boolean))).sort() as string[];
+
+  const filteredParties = parties?.filter(p => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q || (
+      (p.name?.toLowerCase() || '').includes(q) ||
+      (p.gstin?.toLowerCase() || '').includes(q) ||
+      (p.bankAccountNumber?.toLowerCase() || '').includes(q)
+    );
+
+    const matchesType = typeFilter === 'ALL' || p.type === typeFilter || p.type === 'BOTH';
+    const matchesCommodity = commodityFilter === 'ALL' || p.commodities?.includes(commodityFilter as Commodity);
+    const matchesState = stateFilter === 'ALL' || p.state === stateFilter;
+
+    return matchesSearch && matchesType && matchesCommodity && matchesState;
   });
 
   const form = useForm<PartyForm>({
@@ -94,6 +127,7 @@ export default function Parties() {
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
+      commodities: p.commodities ?? [],
     });
     setOpen(true);
   }
@@ -122,14 +156,56 @@ export default function Parties() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Parties</h1>
-          <p className="text-muted-foreground">Suppliers and buyers</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Parties</h1>
+            <p className="text-muted-foreground">Suppliers and buyers</p>
+          </div>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-2" /> New Party
+          </Button>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New Party
-        </Button>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Input 
+            placeholder="Search Name, GSTIN, Bank A/C..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Types</SelectItem>
+              <SelectItem value="BUYER">Buyer</SelectItem>
+              <SelectItem value="SUPPLIER">Supplier</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={commodityFilter} onValueChange={setCommodityFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Commodities" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Commodities</SelectItem>
+              {COMMODITIES.map(c => (
+                <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={stateFilter} onValueChange={setStateFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="All States" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All States</SelectItem>
+              {uniqueStates.map(s => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card">
@@ -154,14 +230,14 @@ export default function Parties() {
                 </TableCell>
               </TableRow>
             )}
-            {parties?.length === 0 && (
+            {filteredParties?.length === 0 && !isLoading && (
               <TableRow>
                 <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  No parties yet.
+                  No parties found.
                 </TableCell>
               </TableRow>
             )}
-            {parties?.map((p) => (
+            {filteredParties?.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
                 <TableCell>
@@ -202,7 +278,7 @@ export default function Parties() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Party' : 'New Party'}</DialogTitle>
           </DialogHeader>
@@ -242,6 +318,40 @@ export default function Parties() {
                         <SelectItem value="BOTH">Both</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="commodities"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Commodities</FormLabel>
+                    <div className="flex flex-wrap gap-2">
+                      {COMMODITIES.map((c) => {
+                        const active = field.value?.includes(c.value);
+                        return (
+                          <button
+                            key={c.value}
+                            type="button"
+                            onClick={() => {
+                              const next = active
+                                ? (field.value ?? []).filter((v: string) => v !== c.value)
+                                : [...(field.value ?? []), c.value];
+                              field.onChange(next);
+                            }}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+                              active
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-transparent text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}

@@ -1,12 +1,33 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, ChevronDown } from 'lucide-react';
+import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, ChevronDown, Target, ShoppingCart, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { kg, rupees, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+
+type BlendStatus = 'ok' | 'already' | 'infeasible' | 'nostock';
+
+/**
+ * How much black seed (kg) to buy at `buyPrice` to pull a stock of `currentKg`
+ * sitting at `currentAvg` ₹/kg down to a `target` ₹/kg weighted average.
+ *
+ * Solves (currentKg·currentAvg + x·buyPrice) / (currentKg + x) = target  for x:
+ *   x = currentKg · (currentAvg − target) / (target − buyPrice)
+ *
+ * Only feasible when buyPrice < target < currentAvg — you can't dilute an
+ * average below the price you buy at, and there's nothing to do once the
+ * target is already at/above the current average.
+ */
+function buyKgToReachTarget(currentKg: number, currentAvg: number, target: number, buyPrice: number): { kg: number; status: BlendStatus } {
+  if (!(currentKg > 0) || !(currentAvg > 0)) return { kg: 0, status: 'nostock' };
+  if (target >= currentAvg) return { kg: 0, status: 'already' };
+  if (buyPrice >= target) return { kg: 0, status: 'infeasible' };
+  return { kg: currentKg * (currentAvg - target) / (target - buyPrice), status: 'ok' };
+}
 
 interface StockInDetail {
   id: string;
@@ -47,6 +68,8 @@ interface PartyStock {
 export default function StockByParty() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedParties, setExpandedParties] = useState<Set<string>>(new Set());
+  const [targetInput, setTargetInput] = useState('');
+  const [buyPriceInput, setBuyPriceInput] = useState('');
 
   const { data: partyStocks, isLoading } = useQuery<PartyStock[]>({
     queryKey: ['party-stocks'],
@@ -77,6 +100,20 @@ export default function StockByParty() {
   const overallPricePools = [...overallPricePoolsMap.entries()]
     .map(([price, weight]) => ({ price, weight, pct: totalRemaining > 0 ? (weight / totalRemaining) * 100 : 0 }))
     .sort((a, b) => b.price - a.price);
+
+  // ─── Blend-to-Target planner ───────────────────────────────────────────────
+  // Smart default for the buy price = the cheapest band we currently hold, since
+  // that's the most realistic price at which fresh seed could pull the avg down.
+  const lowestBandPrice = overallPricePools.length ? overallPricePools[overallPricePools.length - 1].price : 0;
+  const targetAvg = parseFloat(targetInput);
+  const hasTarget = Number.isFinite(targetAvg) && targetAvg > 0;
+  const buyPrice = buyPriceInput.trim() ? parseFloat(buyPriceInput) : lowestBandPrice;
+  const hasBuy = Number.isFinite(buyPrice) && buyPrice > 0;
+  const planActive = hasTarget && hasBuy;
+
+  const wholeResult = planActive ? buyKgToReachTarget(totalRemaining, overallWac, targetAvg, buyPrice) : null;
+  const newTotalKg = wholeResult ? totalRemaining + wholeResult.kg : 0;
+  const newValuation = wholeResult ? totalValuation + wholeResult.kg * buyPrice : 0;
 
   function toggleParty(partyId: string) {
     setExpandedParties((prev) => {
@@ -163,6 +200,103 @@ export default function StockByParty() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ─── Blend-to-Target Planner ─────────────────────────────────────── */}
+      <Card className="border-l-4 border-l-primary shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Target className="h-4 w-4 text-primary" /> Average-Cost Blender
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Your stock sits at <span className="font-semibold text-foreground">{overallWac > 0 ? `${rupees(overallWac)}/kg` : '—'}</span> avg.
+            Enter the average you want and the price you can buy fresh black seed at — see how much to buy to pull the blend down, overall and per supplier.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+            <div className="space-y-1">
+              <Label htmlFor="target-avg" className="text-xs text-muted-foreground">Target average (₹/kg)</Label>
+              <Input
+                id="target-avg"
+                type="number"
+                min="0"
+                step="0.5"
+                value={targetInput}
+                onChange={(e) => setTargetInput(e.target.value)}
+                placeholder="e.g. 30"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="buy-price" className="text-xs text-muted-foreground">Buy price (₹/kg)</Label>
+              <Input
+                id="buy-price"
+                type="number"
+                min="0"
+                step="0.5"
+                value={buyPriceInput}
+                onChange={(e) => setBuyPriceInput(e.target.value)}
+                placeholder={lowestBandPrice > 0 ? `e.g. ${rupees(lowestBandPrice)} (cheapest band)` : 'e.g. 25'}
+              />
+            </div>
+            <div className="flex items-end pb-0.5">
+              {!buyPriceInput.trim() && lowestBandPrice > 0 && hasTarget && (
+                <p className="text-[11px] text-muted-foreground">
+                  Using cheapest band <span className="font-semibold text-foreground">{rupees(lowestBandPrice)}/kg</span> as buy price.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {!planActive && (
+            <p className="text-sm text-muted-foreground">Enter a target average to plan a blend.</p>
+          )}
+
+          {wholeResult && wholeResult.status === 'infeasible' && (
+            <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>Buy price <span className="font-semibold">{rupees(buyPrice)}/kg</span> is not below the target <span className="font-semibold">{rupees(targetAvg)}/kg</span>. You can't pull an average below the price you buy at — lower the buy price or raise the target.</span>
+            </div>
+          )}
+
+          {wholeResult && wholeResult.status === 'already' && (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+              <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>Target <span className="font-semibold">{rupees(targetAvg)}/kg</span> is already at or above your current average <span className="font-semibold">{rupees(overallWac)}/kg</span> — no buying needed.</span>
+            </div>
+          )}
+
+          {wholeResult && wholeResult.status === 'nostock' && (
+            <p className="text-sm text-muted-foreground">No raw stock on hand to blend against.</p>
+          )}
+
+          {wholeResult && wholeResult.status === 'ok' && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
+                  <ShoppingCart className="h-3 w-3" /> Buy
+                </div>
+                <div className="text-xl font-bold text-primary mt-1">{toTonnes(wholeResult.kg).toFixed(2)} MT</div>
+                <div className="text-[10px] text-muted-foreground">at {rupees(buyPrice)}/kg ({kg(wholeResult.kg)})</div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New Avg</div>
+                <div className="text-xl font-bold text-amber-600 mt-1">{rupees(targetAvg)}/kg</div>
+                <div className="text-[10px] text-muted-foreground">down from {rupees(overallWac)}/kg</div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New Total Stock</div>
+                <div className="text-xl font-bold mt-1">{toTonnes(newTotalKg).toFixed(2)} MT</div>
+                <div className="text-[10px] text-muted-foreground">from {toTonnes(totalRemaining).toFixed(2)} MT</div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New Valuation</div>
+                <div className="text-xl font-bold text-emerald-600 mt-1">{rupees(newValuation)}</div>
+                <div className="text-[10px] text-muted-foreground">+{rupees(wholeResult.kg * buyPrice)} fresh capital</div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Price Distribution Analysis Card */}
       {overallPricePools.length > 0 && (
@@ -254,12 +388,15 @@ export default function StockByParty() {
               <TableHead className="text-right font-bold text-primary">Net Stock Remaining</TableHead>
               <TableHead className="text-right">Avg Cost (WAC)</TableHead>
               <TableHead className="text-right">Valuation</TableHead>
+              <TableHead className="text-right">
+                {planActive ? `Buy to reach ${rupees(targetAvg)}` : 'Buy to reach target'}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredPartyStocks.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No supplier stock details found.
                 </TableCell>
               </TableRow>
@@ -299,11 +436,32 @@ export default function StockByParty() {
                       <TableCell className="text-right font-extrabold text-emerald-600">
                         {p.totalValuation > 0 ? rupees(p.totalValuation) : '—'}
                       </TableCell>
+                      <TableCell className="text-right text-sm">
+                        {(() => {
+                          if (!planActive) return <span className="text-muted-foreground">—</span>;
+                          const r = buyKgToReachTarget(p.netStockKg, p.weightedAveragePrice, targetAvg, buyPrice);
+                          if (r.status === 'ok') {
+                            return (
+                              <span className="font-bold text-primary">
+                                {toTonnes(r.kg).toFixed(2)} MT
+                                <span className="block text-[10px] text-muted-foreground font-medium">at {rupees(buyPrice)}/kg</span>
+                              </span>
+                            );
+                          }
+                          if (r.status === 'already') {
+                            return <span className="text-[11px] text-emerald-600 font-medium">already ≤ target</span>;
+                          }
+                          if (r.status === 'infeasible') {
+                            return <span className="text-[11px] text-rose-500 font-medium">price ≥ target</span>;
+                          }
+                          return <span className="text-muted-foreground">—</span>;
+                        })()}
+                      </TableCell>
                     </TableRow>
                     
                     {isExpanded && hasStock && (
                       <TableRow className="bg-muted/10 hover:bg-muted/10">
-                        <TableCell colSpan={6} className="p-4 pl-12">
+                        <TableCell colSpan={7} className="p-4 pl-12">
                           <div className="max-w-2xl rounded-lg border bg-card p-4 shadow-sm space-y-3">
                             <div className="flex items-center justify-between border-b pb-2">
                               <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider">
@@ -340,7 +498,7 @@ export default function StockByParty() {
                                           {toTonnes(pool.totalPurchasedKg).toFixed(2)} MT <span className="text-[10px] text-muted-foreground font-semibold">({kg(pool.totalPurchasedKg)})</span>
                                           {pool.totalMilledKg > 0 && (
                                             <span className="block text-[10px] text-muted-foreground font-medium">
-                                              {toTonnes(pool.netStockKg).toFixed(2)} MT remaining after milling
+                                              {toTonnes(pool.netStockKg).toFixed(2)} MT remaining after pappu sold
                                             </span>
                                           )}
                                         </TableCell>

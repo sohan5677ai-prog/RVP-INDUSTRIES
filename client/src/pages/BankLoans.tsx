@@ -48,6 +48,8 @@ export default function BankLoansPage() {
 
   // --- Add loan --------------------------------------------------------------
   const [loanOpen, setLoanOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [personName, setPersonName] = useState('');
   const [principal, setPrincipal] = useState('');
   const [drawdownDate, setDrawdownDate] = useState(today());
   const [bankName, setBankName] = useState('');
@@ -55,6 +57,8 @@ export default function BankLoansPage() {
   const [location, setLocation] = useState<string>('');
 
   function resetLoanForm() {
+    setName('');
+    setPersonName('');
     setPrincipal('');
     setDrawdownDate(today());
     setBankName('');
@@ -67,6 +71,8 @@ export default function BankLoansPage() {
       api<BankLoan>('/loans', {
         method: 'POST',
         body: {
+          name: name || null,
+          personName: personName || null,
           principal: Number(principal),
           drawdownDate,
           bankName: bankName || null,
@@ -193,7 +199,7 @@ export default function BankLoansPage() {
             <TableRow>
               <TableHead className="w-8" />
               <TableHead>Date</TableHead>
-              <TableHead>Bank / Ref</TableHead>
+              <TableHead>Person / Name / Bank</TableHead>
               <TableHead>Location</TableHead>
               <TableHead className="text-right">Principal</TableHead>
               <TableHead className="text-right">Rate</TableHead>
@@ -221,8 +227,12 @@ export default function BankLoansPage() {
                   </TableCell>
                   <TableCell>{shortDate(loan.drawdownDate)}</TableCell>
                   <TableCell>
-                    <div className="font-medium">{loan.bankName ?? '—'}</div>
-                    {loan.loanRef && <div className="text-xs text-muted-foreground font-mono">{loan.loanRef}</div>}
+                    <div className="font-medium text-foreground">{loan.personName ?? loan.name ?? loan.bankName ?? '—'}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {loan.personName && loan.name ? `${loan.name} ` : ''}
+                      {loan.bankName ? `(${loan.bankName})` : ''}
+                      {loan.loanRef ? <span className="font-mono"> · {loan.loanRef}</span> : ''}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <span className="text-sm">{loan.location ?? '—'}</span>
@@ -315,15 +325,25 @@ export default function BankLoansPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
+                <Label htmlFor="pname">Person Name</Label>
+                <Input id="pname" value={personName} onChange={(e) => setPersonName(e.target.value)} placeholder="e.g. John Doe" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lname">Loan Name</Label>
+                <Input id="lname" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. HDFC Agri" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
                 <Label htmlFor="bank">Bank name</Label>
                 <Input id="bank" value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. SBI" />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="ref">Loan / account ref</Label>
                 <Input id="ref" value={loanRef} onChange={(e) => setLoanRef(e.target.value)} placeholder="optional" />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="location">Storage Location</Label>
                 <Select value={location} onValueChange={setLocation}>

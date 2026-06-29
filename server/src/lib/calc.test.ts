@@ -61,9 +61,9 @@ describe('crossVerify', () => {
 });
 
 describe('calcHamali', () => {
-  it('default rate 160/tonne with rounded tonnage', () => {
-    expect(calcHamali(10400)).toBe(1600); // 10.4 -> 10 tonnes * 160 = 1600
-    expect(calcHamali(10550)).toBe(1760); // 10.55 -> 11 tonnes * 160 = 1760
+  it('default rate 150/tonne with rounded tonnage', () => {
+    expect(calcHamali(10400)).toBe(1500); // 10.4 -> 10 tonnes * 150 = 1500
+    expect(calcHamali(10550)).toBe(1650); // 10.55 -> 11 tonnes * 150 = 1650
   });
   it('custom rate', () => {
     expect(calcHamali(5000, 100)).toBe(500);

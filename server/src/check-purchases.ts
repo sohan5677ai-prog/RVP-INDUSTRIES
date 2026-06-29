@@ -16,7 +16,7 @@ async function main() {
     out += `  PO Price: ${p.stockIn.purchaseOrder.pricePerKg}, Type: ${p.stockIn.purchaseOrder.priceType}\n`;
     out += `  RVP Net Weight: ${p.netWeightKg} kg\n`;
     out += `  Freight: ${p.freightCharge}\n`;
-    out += `  Bag cutting: ${p.bagCuttingCharge}\n`;
+
     out += `  Hamali: ${p.hamaliCharge}\n`;
     if (p.verification) {
       out += `  Verified Price: ${p.verification.pricePerKg}\n`;

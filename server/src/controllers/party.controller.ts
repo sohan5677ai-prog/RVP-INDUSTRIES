@@ -24,7 +24,14 @@ export async function updateParty(req: Request, res: Response) {
   const data = updatePartySchema.parse(req.body);
   const existing = await prisma.party.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new HttpError(404, 'Party not found');
-  const party = await prisma.party.update({ where: { id: req.params.id }, data });
+  const { commodities, ...rest } = data;
+  const party = await prisma.party.update({
+    where: { id: req.params.id },
+    data: {
+      ...rest,
+      ...(commodities !== undefined ? { commodities: { set: commodities } } : {}),
+    },
+  });
   res.json(party);
 }
 

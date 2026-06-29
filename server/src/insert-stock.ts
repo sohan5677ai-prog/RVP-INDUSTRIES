@@ -111,8 +111,7 @@ export async function insertMissingStock() {
             hamaliCharge: new Prisma.Decimal(hamaliCharge),
             kataFee: new Prisma.Decimal(kataFee),
             bunkerPlace: null,
-            bagCount: 0,
-            bagCuttingCharge: 0,
+
             freightCharge: 0
           }
         });

@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createProcessingSchema } from '../schemas/processing.schema.js';
+import { AllocationService } from '../services/allocation.service.js';
 import { calcPappu, DEFAULT_OUT_TURN_PCT } from '../lib/calc.js';
 import { ProcessingService } from '../services/processing.service.js';
 
@@ -69,8 +70,21 @@ export async function createProcessing(req: Request, res: Response) {
 
   const fullItem = await prisma.processing.findUnique({
     where: { id: result.item.id },
-    include: processingInclude,
+    include: {
+      ...processingInclude,
+      purchase: {
+        include: { stockIn: true }
+      }
+    },
   });
+
+  if (fullItem?.purchase?.stockIn?.purchaseOrderId) {
+    // Trigger Rebalancing Engine
+    await AllocationService.rebalanceAfterProcessing(
+      fullItem.purchase.stockIn.purchaseOrderId,
+      fullItem.pappuWeightKg
+    );
+  }
 
   res.status(201).json({
     ...fullItem,

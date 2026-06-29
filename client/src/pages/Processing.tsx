@@ -18,6 +18,7 @@ interface BlackSeedRow {
 
 interface BlackSeedStockResponse {
   rows: BlackSeedRow[];
+  pappuCommittedKg: number;
 }
 
 const PAPPU = 0.6;
@@ -31,7 +32,11 @@ export default function Processing() {
   });
 
   const rows = data?.rows ?? [];
-  const totalSeed = rows.reduce((sum, r) => sum + r.rvpNetWeightKg, 0);
+  const receivedSeed = rows.reduce((sum, r) => sum + r.rvpNetWeightKg, 0);
+  // Black seed pool reduces as pappu sales are committed (booked orders, max of
+  // ordered vs dispatched): each kg consumes 1/0.6 kg of seed. Mirrors Stock by Price.
+  const seedConsumedByPappuKg = (data?.pappuCommittedKg ?? 0) / PAPPU;
+  const totalSeed = Math.max(0, receivedSeed - seedConsumedByPappuKg);
 
   if (isLoading) {
     return (
@@ -56,6 +61,11 @@ export default function Processing() {
         <div className="rounded-lg border bg-card p-4">
           <div className="text-xs uppercase tracking-wider text-muted-foreground">Black Seed Pool</div>
           <div className="text-2xl font-bold text-primary mt-1">{toTonnes(totalSeed).toFixed(2)} MT</div>
+          {seedConsumedByPappuKg > 0 && (
+            <div className="text-[10px] text-muted-foreground mt-1">
+              {toTonnes(receivedSeed).toFixed(2)} MT received − {toTonnes(seedConsumedByPappuKg).toFixed(2)} MT for pappu sold
+            </div>
+          )}
         </div>
         <div className="rounded-lg border bg-card p-4">
           <div className="text-xs uppercase tracking-wider text-muted-foreground">Pappu (60%)</div>

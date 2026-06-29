@@ -39,6 +39,14 @@ export const deliverSaleDispatchSchema = z.object({
   buyerKataKg: z.coerce.number().int().positive().optional(),
 });
 
+export const markPaidSchema = z.object({
+  date: z.coerce.date(),
+  amount: z.coerce.number().nonnegative(),
+  tdsAmount: z.coerce.number().nonnegative().optional().default(0),
+  shortageAmount: z.coerce.number().nonnegative().optional().default(0),
+});
+
 export type CreateSaleOrderInput = z.infer<typeof createSaleOrderSchema>;
 export type DeliverSaleDispatchInput = z.infer<typeof deliverSaleDispatchSchema>;
 export type DispatchSaleOrderInput = z.infer<typeof dispatchSaleOrderSchema>;
+export type MarkPaidInput = z.infer<typeof markPaidSchema>;

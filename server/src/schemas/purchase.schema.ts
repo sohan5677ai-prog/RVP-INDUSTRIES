@@ -36,7 +36,7 @@ export const createPurchaseSchema = z.object({
   rvpSecondWeightKg: z.coerce.number().int().positive(),
   hamaliRate: z.preprocess((val) => (val === null || val === undefined || val === '' ? undefined : Number(val)), z.number().nonnegative().optional()),
   // Bunker the seed is poured into — only meaningful for stock landing directly
-  // at the process. Drives the bag-cutting hamali (A = ₹3/bag, B = ₹6/bag).
+  // at the process.
   bunkerPlace: z.enum(['A', 'B']).optional().nullable(),
   // Inward freight is now captured at Stock In (see createStockInSchema) and
   // sourced from the StockIn record at purchase time, not from this request.

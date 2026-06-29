@@ -77,21 +77,7 @@ function reviewBlocks(d: PurchaseDraftData): KnownBlock[] {
       )
     );
   }
-  if (d.atProcess) {
-    blocks.push(
-      selectSection(
-        `${FLOW}:bunker_select`,
-        d.bunkerPlace
-          ? `:package: Bunker (bag-cutting): *${d.bunkerPlace}* — change?`
-          : ':package: Which bunker is the seed poured into? (bag-cutting)',
-        'Select bunker',
-        [
-          { text: 'A (₹3/bag)', value: 'A' },
-          { text: 'B (₹6/bag)', value: 'B' },
-        ]
-      )
-    );
-  }
+
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
   return blocks;
 }
@@ -109,25 +95,7 @@ function editModal(d: PurchaseDraftData, channel: string, messageTs: string, thr
       },
     },
   ];
-  if (d.atProcess) {
-    blocks.push({
-      type: 'input',
-      block_id: 'bunker',
-      optional: true,
-      label: { type: 'plain_text', text: 'Bunker (bag-cutting)' },
-      element: {
-        type: 'static_select',
-        action_id: 'v',
-        ...(d.bunkerPlace
-          ? { initial_option: { text: { type: 'plain_text', text: d.bunkerPlace }, value: d.bunkerPlace } }
-          : {}),
-        options: [
-          { text: { type: 'plain_text', text: 'A (₹3/bag)' }, value: 'A' },
-          { text: { type: 'plain_text', text: 'B (₹6/bag)' }, value: 'B' },
-        ],
-      },
-    });
-  }
+
   return {
     type: 'modal' as const,
     callback_id: `${FLOW}:edit_submit`,
@@ -150,12 +118,6 @@ function resultBlocks(purchase: any): KnownBlock[] {
       { label: 'Net weight (RVP kata)', value: `${net} kg` },
       { label: 'Hamali', value: rupees(Number(purchase.hamaliCharge)) },
       { label: 'Kata fee', value: rupees(Number(purchase.kataFee)) },
-      {
-        label: 'Bag-cutting',
-        value: purchase.bunkerPlace
-          ? `${rupees(Number(purchase.bagCuttingCharge))} (bunker ${purchase.bunkerPlace}, ${purchase.bagCount} bags)`
-          : '—',
-      },
     ]),
     contextBlock(':arrow_down: Opening weight verification…'),
   ];

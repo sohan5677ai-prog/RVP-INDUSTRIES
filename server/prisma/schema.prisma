@@ -34,6 +34,12 @@ enum SaleStatus {
   DELIVERED
 }
 
+enum AllocationStatus {
+  SOFT
+  HARD
+  BUMPED
+}
+
 // Products sold. Pappu depletes the black-seed pool; Husk/Waste deplete their
 // derived (25%/10%) availability; TPS (brokens) is revenue-only. Shell is a
 // production byproduct transferred to Rampalli and sold from that stock.
@@ -43,6 +49,15 @@ enum SaleProduct {
   WASTE
   TPS
   SHELL
+}
+
+enum Commodity {
+  BLACK_SEED
+  PAPPU
+  HUSK
+  TAMARIND_SHELL
+  TAMARIND_WASTE
+  TPS_BROKENS
 }
 
 model User {
@@ -70,6 +85,7 @@ model Party {
   bankAccountNumber String?
   bankIfsc          String?
   bankName          String?
+  commodities       Commodity[]
   createdAt         DateTime        @default(now())
   purchaseOrders    PurchaseOrder[]
   saleOrders        SaleOrder[]
@@ -96,14 +112,17 @@ model PurchaseOrder {
   // our location (DELIVERY). Some suppliers quote one, some the other.
   priceType     PriceType @default(DELIVERY)
   tonnageKg     Int // approx, in kg
+  actualTonnageKg Int? // actual arrived weight in kg (set at stock-in)
   lorryCount    Int? // approx number of lorries ordered
   // Links all per-lorry POs created together from one order, so they can be
   // grouped back into a single logical order in the UI.
   poGroupId     String?
   status        POStatus @default(PENDING)
+  expectedYieldPct Decimal @default(60) @db.Decimal(5, 2)
   createdBy     String
   createdAt     DateTime @default(now())
   stockIns      StockIn[]
+  allocations   SaleAllocation[]
 }
 
 model StockIn {
@@ -138,8 +157,7 @@ model Purchase {
   // Bag-cutting (pouring black seed into a process bunker). Only set when the
   // stock lands directly at the process; storage stock gets it on transfer.
   bunkerPlace      BunkerPlace?
-  bagCount         Int                @default(0) // round(netWeightKg / 65)
-  bagCuttingCharge Decimal            @default(0) @db.Decimal(12, 2) // bags × rate(place)
+
   // Inward freight to bring BASE-priced stock to our location (capitalised into
   // the seed). DELIVERY-priced POs already include freight in the price → 0.
   freightCharge    Decimal            @default(0) @db.Decimal(12, 2)
@@ -212,6 +230,7 @@ model SaleOrder {
 
   // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
   dispatches     SaleDispatch[]
+  allocations    SaleAllocation[]
 
   // --- Legacy columns (pre multi-dispatch). No longer written; kept so the
   // backfill migration can copy them into the first SaleDispatch row. ---
@@ -257,6 +276,7 @@ model SaleDispatch {
   internalWeightProfitAmount Decimal? @db.Decimal(12, 2)
   creditNoteAmount Decimal?  @db.Decimal(12, 2)
   buyerKataFileUrl String?
+  tdsAmount        Decimal?  @db.Decimal(12, 2)
 
   // Generated tax invoice. Number = prefix/seq/FY; seq resets each financial year.
   invoiceNumber  String?
@@ -285,12 +305,42 @@ model SaleDispatch {
   @@unique([invoiceFy, invoiceSeq])
 }
 
+model SaleAllocation {
+  id              String           @id @default(cuid())
+  saleOrder       SaleOrder        @relation(fields: [saleOrderId], references: [id])
+  saleOrderId     String
+  purchaseOrder   PurchaseOrder    @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId String
+  allocatedWeight Int
+  status          AllocationStatus @default(SOFT)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([saleOrderId])
+  @@index([purchaseOrderId])
+}
+
 enum AccountType {
   ASSET
   LIABILITY
   EQUITY
   REVENUE
   EXPENSE
+}
+
+// Tally-style account-group hierarchy. `nature` fixes the debit/credit sign
+// convention; `statement` decides whether the group lands on the Balance Sheet
+// or the Profit & Loss.
+enum GroupNature {
+  ASSETS
+  LIABILITIES
+  INCOME
+  EXPENSES
+}
+
+enum StatementType {
+  BALANCE_SHEET
+  PROFIT_LOSS
 }
 
 enum DiscountType {
@@ -305,10 +355,24 @@ enum PriceType {
 }
 
 // Which bunker the black seed is poured into at the process. Drives the
-// bag-cutting hamali rate: A = ₹3/bag, B = ₹6/bag.
+// bunker place (A or B).
 enum BunkerPlace {
   A
   B
+}
+
+// Tally primary/sub groups, a self-referential tree (e.g. Current Assets →
+// Stock-in-Hand). The nature + statement are inherited from the primary group.
+model AccountGroup {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  parentId  String?
+  parent    AccountGroup?  @relation("GroupTree", fields: [parentId], references: [id])
+  children  AccountGroup[] @relation("GroupTree")
+  nature    GroupNature
+  statement StatementType
+  sortOrder Int            @default(0)
+  accounts  Account[]
 }
 
 model Account {
@@ -317,6 +381,15 @@ model Account {
   name  String
   type  AccountType
   lines JournalLine[]
+
+  // Tally classification + opening balance for Balance Sheet / P&L reporting.
+  groupId        String?
+  group          AccountGroup? @relation(fields: [groupId], references: [id])
+  // Signed opening balance brought forward: +Dr (assets/expenses) / -Cr (liabilities/income).
+  openingBalance Decimal       @default(0) @db.Decimal(14, 2)
+  // Decommissioned heads kept for historical lines but hidden from the live chart.
+  isDeprecated   Boolean       @default(false)
+  sortOrder      Int           @default(0)
 }
 
 model JournalEntry {
@@ -375,6 +448,8 @@ model CompanyProfile {
   // Standard annual bank-loan interest rate (%) used to capitalise the stock's
   // carrying cost on storage→process transfers. Editable in the Loans section.
   loanInterestRatePct     Decimal @default(0) @db.Decimal(6, 3)
+  // Buffer percentage (e.g. 80) of expected yield allowed for soft allocation.
+  bufferStockPct          Decimal @default(80) @db.Decimal(5, 2)
 
   // TaxPro GSP configuration
   taxproGspId             String?
@@ -418,7 +493,7 @@ model SiloInventory {
 
 // Movement of black seed from a storage location (Rampalli/Murgan/Multi) to the
 // process. Each transfer incurs two hamali legs (storage loading + process
-// unloading), transfer transport, and bag-cutting at the destination bunker —
+// unloading), and transfer transport at the destination bunker —
 // all 100% company-borne and capitalised into the seed's value at the process.
 model StockTransfer {
   id               String       @id @default(cuid())
@@ -430,8 +505,7 @@ model StockTransfer {
   loadingHamali    Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg (₹80/t)
   unloadingHamali  Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined (₹270/t)
   bunkerPlace      BunkerPlace?
-  bagCount         Int          @default(0)
-  bagCuttingCharge Decimal      @default(0) @db.Decimal(12, 2)
+
   hamaliMargin     Decimal      @default(0) @db.Decimal(12, 2) // company profit (₹10/t on the unload leg)
   // Bank-loan carrying interest capitalised into the seed at the process:
   // seedCostMoved × rate% × interestDays/365, where interestDays runs from the
@@ -456,6 +530,8 @@ enum LoanStatus {
 // black seed when it moves storage→process (StockTransfer.interestCharge).
 model BankLoan {
   id              String          @id @default(cuid())
+  name            String? // loan name
+  personName      String? // person on whose name loan is taken
   loanRef         String? // bank loan/account reference
   bankName        String?
   location        String?

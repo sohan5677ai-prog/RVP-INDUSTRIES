@@ -95,6 +95,8 @@ export async function createLoan(req: Request, res: Response) {
     const created = await tx.bankLoan.create({
       data: {
         principal: data.principal,
+        name: data.name ?? null,
+        personName: data.personName ?? null,
         drawdownDate: data.drawdownDate,
         loanRef: data.loanRef ?? null,
         bankName: data.bankName ?? null,

@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 import authRoutes from './auth.routes.js';
+import { parseBulkImport } from '../controllers/bulkImport.controller.js';
 import partyRoutes from './party.routes.js';
 import brokerRoutes from './broker.routes.js';
 import purchaseRoutes from './purchase.routes.js';
@@ -17,6 +20,7 @@ import loanRoutes from './loan.routes.js';
 import chatRoutes from './chat.routes.js';
 import userRoutes from './user.routes.js';
 import taxproRoutes from './taxpro.routes.js';
+import allocationRoutes from './allocation.routes.js';
 
 const router = Router();
 
@@ -25,6 +29,9 @@ router.use('/auth', authRoutes);
 
 // Everything below requires a valid token.
 router.use(requireAuth);
+
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+router.post('/bulk-import/parse', memUpload.single('file'), asyncHandler(parseBulkImport));
 
 router.use('/parties', partyRoutes);
 router.use('/brokers', brokerRoutes);
@@ -42,5 +49,7 @@ router.use('/system', systemRoutes);
 router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);
 router.use('/', taxproRoutes);
+router.use('/', allocationRoutes);
 
 export default router;
+

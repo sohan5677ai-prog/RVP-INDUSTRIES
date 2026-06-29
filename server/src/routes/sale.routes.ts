@@ -5,6 +5,7 @@ import {
   listSaleOrders,
   getSaleOrder,
   createSaleOrder,
+  bulkCreateSaleOrders,
   updateSaleOrder,
   deleteSaleOrder,
   extractSaleDoc,
@@ -12,12 +13,14 @@ import {
   getSaleDispatch,
   raiseSaleInvoice,
   deliverSaleDispatch,
+  markDispatchPaid,
 } from '../controllers/sale.controller.js';
 
 const router = Router();
 
 router.get('/sale-orders', asyncHandler(listSaleOrders));
 router.get('/sale-orders/:id', asyncHandler(getSaleOrder));
+router.post('/sale-orders/bulk', asyncHandler(bulkCreateSaleOrders));
 router.post('/sale-orders', asyncHandler(createSaleOrder));
 router.put('/sale-orders/:id', asyncHandler(updateSaleOrder));
 router.delete('/sale-orders/:id', asyncHandler(deleteSaleOrder));
@@ -45,5 +48,8 @@ router.post(
   upload.fields([{ name: 'kata', maxCount: 1 }]),
   asyncHandler(deliverSaleDispatch)
 );
+
+// Mark a dispatched shipment as paid and record receipt/TDS
+router.post('/sale-dispatches/:id/mark-paid', asyncHandler(markDispatchPaid));
 
 export default router;

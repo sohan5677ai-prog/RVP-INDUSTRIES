@@ -57,20 +57,7 @@ async function transferModal(user: ErpUser, channel: string) {
         optional: true,
         label: { type: 'plain_text', text: 'Lorry number' },
         element: { type: 'plain_text_input', action_id: 'v' },
-      },
-      {
-        type: 'input',
-        block_id: 'bunker',
-        optional: true,
-        label: { type: 'plain_text', text: 'Destination bunker (bag-cutting)' },
-        element: {
-          type: 'static_select',
-          action_id: 'v',
-          options: [
-            { text: { type: 'plain_text', text: 'A (₹3/bag)' }, value: 'A' },
-            { text: { type: 'plain_text', text: 'B (₹6/bag)' }, value: 'B' },
-          ],
-        },
+
       },
       {
         type: 'input',
@@ -106,7 +93,7 @@ export function registerStockTransferFlow(app: App): void {
     if (!user) return;
     const fromLocation = v.source?.v?.selected_option?.value;
     const lorry = v.lorry?.v?.value || undefined;
-    const bunker = v.bunker?.v?.selected_option?.value as 'A' | 'B' | undefined;
+
     const date = v.date?.v?.selected_date ?? new Date().toISOString().slice(0, 10);
 
     // Post the result back to the channel the command was invoked from.
@@ -115,7 +102,7 @@ export function registerStockTransferFlow(app: App): void {
     try {
       const t = await apiPost(
         '/stock-transfers',
-        { fromLocation, weightKg: weight, lorryNumber: lorry, bunkerPlace: bunker, transferDate: date },
+        { fromLocation, weightKg: weight, lorryNumber: lorry, transferDate: date },
         user
       );
       await client.chat.postMessage({
@@ -128,7 +115,7 @@ export function registerStockTransferFlow(app: App): void {
             { label: 'Seed value moved', value: rupees(Number(t.seedCostMoved)) },
             { label: 'Transport', value: rupees(Number(t.transportCharge)) },
             { label: 'Hamali (unload+handling)', value: rupees(Number(t.loadingHamali) + Number(t.unloadingHamali)) },
-            { label: 'Bag-cutting', value: t.bunkerPlace ? `${rupees(Number(t.bagCuttingCharge))} (bunker ${t.bunkerPlace})` : '—' },
+
             { label: 'Loan interest', value: `${rupees(Number(t.interestCharge))} (${t.interestDays}d)` },
             { label: 'Total value at process', value: rupees(Number(t.movedValue)) },
           ]),

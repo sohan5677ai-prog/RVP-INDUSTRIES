@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, Scale, PackageCheck, Coins, Weight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, StockIn, BunkerPlace } from '@/lib/types';
-import { calcHamali, calcKataFee, calcBags, calcBagCutting, BAG_RATE, DEFAULT_HAMALI_RATE, isVehicleExempt } from '@/lib/calc';
+import { calcHamali, calcKataFee, DEFAULT_HAMALI_RATE, isVehicleExempt } from '@/lib/calc';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
@@ -65,11 +65,7 @@ export default function Purchases() {
   const netValid = net > 0 && (Number(rvpSecondWeight) || 0) > 0;
   const hamali = netValid ? calcHamali(net, rate, isCompanyVehicle) : 0;
   const kataFeeVal = netValid ? calcKataFee(net, isCompanyVehicle) : 0;
-  // Bag-cutting only applies when the seed lands directly at the process bunker.
-  const location = editing ? editing.stockIn?.loadingLocation : selected?.loadingLocation;
-  const isAtProcess = location === 'At process';
-  const bags = netValid ? calcBags(net) : 0;
-  const bagCutting = netValid && isAtProcess && bunkerPlace ? calcBagCutting(net, bunkerPlace) : 0;
+  // Bag-cutting has been removed.
   // Inward freight is captured at Stock In (BASE-priced POs only); shown here
   // read-only, sourced from the stock-in record.
   const priceType = editing ? editing.stockIn?.purchaseOrder?.priceType : selected?.purchaseOrder?.priceType;
@@ -81,7 +77,6 @@ export default function Purchases() {
     setStockInId('');
     setRvpSecondWeight('');
     setHamaliRate(String(DEFAULT_HAMALI_RATE));
-    setBunkerPlace('');
   }
 
   function openEdit(p: PurchaseRow) {
@@ -89,7 +84,6 @@ export default function Purchases() {
     setStockInId(p.stockInId);
     setRvpSecondWeight(p.stockIn ? String(p.stockIn.rvpSecondWeightKg) : '');
     setHamaliRate(String(p.hamaliRate));
-    setBunkerPlace((p.bunkerPlace as BunkerPlace) ?? '');
     setOpen(true);
   }
 
@@ -97,10 +91,9 @@ export default function Purchases() {
     mutationFn: () => {
       const url = editing ? `/purchases/${editing.id}` : '/purchases';
       const method = editing ? 'PUT' : 'POST';
-      const place = isAtProcess && bunkerPlace ? bunkerPlace : null;
       const body = editing
-        ? { stockInId: editing.stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate, bunkerPlace: place }
-        : { stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate, bunkerPlace: place };
+        ? { stockInId: editing.stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate }
+        : { stockInId, rvpSecondWeightKg: Number(rvpSecondWeight), hamaliRate: rate };
       return api<PurchaseRow>(url, { method, body });
     },
     onSuccess: () => {
@@ -124,7 +117,8 @@ export default function Purchases() {
   });
 
   const totalNet = items?.reduce((s, p) => s + Number(p.netWeightKg || 0), 0) ?? 0;
-  const totalCharges = items?.reduce((s, p) => s + Number(p.hamaliCharge || 0) + Number(p.kataFee || 0), 0) ?? 0;
+  const totalHamali = items?.reduce((s, p) => s + Number(p.hamaliCharge || 0), 0) ?? 0;
+  const totalKata = items?.reduce((s, p) => s + Number(p.kataFee || 0), 0) ?? 0;
 
   return (
     <div className="space-y-8">
@@ -139,11 +133,12 @@ export default function Purchases() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 stagger">
         <StatCard label="Recorded" value={items?.length ?? 0} icon={PackageCheck} tone="taupe" hint="purchase records" />
         <StatCard label="Awaiting" value={available.length} icon={Scale} tone="amber" hint="stock-ins to record" />
         <StatCard label="Net weight" value={kg(totalNet)} icon={Weight} tone="forest" hint="across purchases" />
-        <StatCard label="Hamali + Kata" value={rupees(totalCharges)} icon={Coins} tone="clay" hint="total charges" />
+        <StatCard label="Hamali" value={rupees(totalHamali)} icon={Coins} tone="clay" hint="total hamali" />
+        <StatCard label="Kata" value={rupees(totalKata)} icon={Coins} tone="clay" hint="total kata fee" />
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">
@@ -220,9 +215,9 @@ export default function Purchases() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md flex flex-col max-h-[90vh]">
           <DialogHeader><DialogTitle>{editing ? 'Edit Purchase' : 'Record Purchase'}</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1">
              {editing ? (
               <div className="space-y-2">
                 <Label>Stock-in</Label>
@@ -235,8 +230,8 @@ export default function Purchases() {
               <div className="space-y-2">
                 <Label>Stock-in (awaiting purchase record)</Label>
                 <Select value={stockInId} onValueChange={setStockInId}>
-                   <SelectTrigger><SelectValue placeholder="Select a stock-in" /></SelectTrigger>
-                  <SelectContent>
+                   <SelectTrigger className="w-full min-w-0 overflow-hidden [&>span]:truncate [&>span]:block [&>span]:flex-1"><SelectValue placeholder="Select a stock-in" /></SelectTrigger>
+                  <SelectContent className="max-w-[90vw] sm:max-w-md">
                     {available.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.purchaseOrder?.poNumber} · {s.purchaseOrder?.party?.name} — Inv {s.invoiceNumber} (Lorry {s.lorryNumber}) · First Weight {kg(s.rvpFirstWeightKg)}
@@ -254,23 +249,6 @@ export default function Purchases() {
               <Label htmlFor="rate">Hamali rate (₹/tonne)</Label>
               <Input id="rate" type="number" step="0.01" value={hamaliRate} onChange={(e) => setHamaliRate(e.target.value)} />
             </div>
-
-            {isAtProcess ? (
-              <div className="space-y-2">
-                <Label>Bunker place (bag-cutting)</Label>
-                <Select value={bunkerPlace} onValueChange={(v: any) => setBunkerPlace(v)}>
-                  <SelectTrigger><SelectValue placeholder="Select place A or B" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="A">Place A — ₹{BAG_RATE.A}/bag</SelectItem>
-                    <SelectItem value="B">Place B — ₹{BAG_RATE.B}/bag</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : location ? (
-              <p className="text-xs text-muted-foreground">
-                Stock is at <span className="font-medium">{location}</span> — bag-cutting is charged later, on the Stock Transfer to the process.
-              </p>
-            ) : null}
 
             {isBase && (
               <p className="text-xs text-muted-foreground">
@@ -311,14 +289,7 @@ export default function Purchases() {
                   )}
                 </span>
               </div>
-              {isAtProcess && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    Bag-cutting {bunkerPlace ? `(${bags} bags @ ₹${BAG_RATE[bunkerPlace]})` : '(select place)'}
-                  </span>
-                  <span className="font-semibold">{bagCutting > 0 ? rupees(bagCutting) : '—'}</span>
-                </div>
-              )}
+
               {isBase && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Inward freight (base price)</span>

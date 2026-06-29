@@ -3,40 +3,228 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { InventoryService } from '../services/inventory.service.js';
 
-export async function listAccounts(req: Request, res: Response) {
-  const accounts = await prisma.account.findMany({
-    orderBy: { code: 'asc' },
-    include: {
-      lines: {
-        include: { journalEntry: true }
-      }
-    }
-  });
+// ---------------------------------------------------------------------------
+// Tally-style grouped reporting. Every ledger's closing balance is SIGNED:
+// +Dr (assets/expenses) / −Cr (liabilities/income/capital) = openingBalance +
+// Σdebit − Σcredit. Groups roll their ledgers' and child groups' closings up
+// into a signed subtotal. The Balance Sheet ties because the seeded opening
+// trial balance nets to zero and every journal entry is itself balanced.
+// ---------------------------------------------------------------------------
 
-  // Calculate actual balances: Debit - Credit for Assets/Expenses, Credit - Debit for Liabilities/Equity/Revenues
-  const formatted = accounts.map((a) => {
-    const totalDebits = a.lines.reduce((sum, l) => sum + Number(l.debit), 0);
-    const totalCredits = a.lines.reduce((sum, l) => sum + Number(l.credit), 0);
-    
-    let balance = 0;
-    if (a.type === 'ASSET' || a.type === 'EXPENSE') {
-      balance = totalDebits - totalCredits;
-    } else {
-      balance = totalCredits - totalDebits;
-    }
+interface LedgerNode {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  openingBalance: number;
+  debits: number;
+  credits: number;
+  closing: number; // signed: +Dr / −Cr
+}
 
+interface GroupNode {
+  id: string;
+  name: string;
+  nature: 'ASSETS' | 'LIABILITIES' | 'INCOME' | 'EXPENSES';
+  statement: 'BALANCE_SHEET' | 'PROFIT_LOSS';
+  sortOrder: number;
+  ledgers: LedgerNode[];
+  children: GroupNode[];
+  subtotal: number; // signed
+}
+
+function r2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// Load every live (non-deprecated) ledger with its signed closing balance.
+async function loadLedgerBalances(): Promise<LedgerNode[]> {
+  const [accounts, sums] = await Promise.all([
+    prisma.account.findMany({ where: { isDeprecated: false } }),
+    prisma.journalLine.groupBy({
+      by: ['accountId'],
+      _sum: { debit: true, credit: true },
+    }),
+  ]);
+  const sumMap = new Map(
+    sums.map((s) => [s.accountId, { d: Number(s._sum.debit ?? 0), c: Number(s._sum.credit ?? 0) }])
+  );
+  return accounts.map((a) => {
+    const s = sumMap.get(a.id) ?? { d: 0, c: 0 };
+    const opening = Number(a.openingBalance);
     return {
       id: a.id,
       code: a.code,
       name: a.name,
       type: a.type,
-      debits: totalDebits,
-      credits: totalCredits,
-      balance,
+      openingBalance: opening,
+      debits: r2(s.d),
+      credits: r2(s.c),
+      closing: r2(opening + s.d - s.c),
     };
   });
+}
 
-  res.json(formatted);
+// Build the full group tree with rolled-up signed subtotals.
+async function buildGroupTree(): Promise<GroupNode[]> {
+  const [groups, ledgers] = await Promise.all([
+    prisma.accountGroup.findMany(),
+    loadLedgerBalances(),
+  ]);
+
+  const ledgersByGroup = new Map<string, LedgerNode[]>();
+  // Map each ledger to its group (groupId lives on the account row).
+  const accountGroupIds = await prisma.account.findMany({
+    where: { isDeprecated: false },
+    select: { id: true, groupId: true },
+  });
+  const gidById = new Map(accountGroupIds.map((a) => [a.id, a.groupId]));
+  for (const l of ledgers) {
+    const gid = gidById.get(l.id);
+    if (!gid) continue;
+    const arr = ledgersByGroup.get(gid) ?? [];
+    arr.push(l);
+    ledgersByGroup.set(gid, arr);
+  }
+
+  const childrenByParent = new Map<string | null, typeof groups>();
+  for (const g of groups) {
+    const key = g.parentId ?? null;
+    const arr = childrenByParent.get(key) ?? [];
+    arr.push(g);
+    childrenByParent.set(key, arr);
+  }
+
+  const byCode = (a: LedgerNode, b: LedgerNode) => a.code.localeCompare(b.code);
+
+  function build(g: (typeof groups)[number]): GroupNode {
+    const childGroups = (childrenByParent.get(g.id) ?? [])
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(build);
+    const leds = (ledgersByGroup.get(g.id) ?? []).sort(byCode);
+    const subtotal = r2(
+      leds.reduce((s, l) => s + l.closing, 0) + childGroups.reduce((s, c) => s + c.subtotal, 0)
+    );
+    return {
+      id: g.id,
+      name: g.name,
+      nature: g.nature as GroupNode['nature'],
+      statement: g.statement as GroupNode['statement'],
+      sortOrder: g.sortOrder,
+      ledgers: leds,
+      children: childGroups,
+      subtotal,
+    };
+  }
+
+  return (childrenByParent.get(null) ?? [])
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map(build);
+}
+
+// Current-period net profit from the P&L statement groups (perpetual basis:
+// COGS already relieves stock, so no opening/closing-stock adjustment needed).
+function currentPeriodNetProfit(roots: GroupNode[]): {
+  totalIncome: number;
+  totalExpenses: number;
+  netProfit: number;
+} {
+  const pl = roots.filter((r) => r.statement === 'PROFIT_LOSS');
+  const totalIncome = r2(
+    pl.filter((r) => r.nature === 'INCOME').reduce((s, r) => s - r.subtotal, 0)
+  ); // income is Cr → −signed = positive
+  const totalExpenses = r2(
+    pl.filter((r) => r.nature === 'EXPENSES').reduce((s, r) => s + r.subtotal, 0)
+  );
+  return { totalIncome, totalExpenses, netProfit: r2(totalIncome - totalExpenses) };
+}
+
+export async function listAccounts(_req: Request, res: Response) {
+  const tree = await buildGroupTree();
+  res.json(tree);
+}
+
+// ── Tally Balance Sheet: two-column (Liabilities | Assets) display amounts.
+//    Liabilities/Capital shown Cr-positive; Assets shown Dr-positive. ──
+type DisplayNode = {
+  name: string;
+  amount: number;
+  code?: string;
+  ledgers?: { code: string; name: string; amount: number }[];
+  children?: DisplayNode[];
+};
+
+function toDisplay(node: GroupNode, crPositive: boolean): DisplayNode {
+  const sign = crPositive ? -1 : 1;
+  return {
+    name: node.name,
+    amount: r2(sign * node.subtotal),
+    ledgers: node.ledgers.map((l) => ({ code: l.code, name: l.name, amount: r2(sign * l.closing) })),
+    children: node.children.map((c) => toDisplay(c, crPositive)),
+  };
+}
+
+export async function getBalanceSheet(_req: Request, res: Response) {
+  const roots = await buildGroupTree();
+  const { totalIncome, totalExpenses, netProfit } = currentPeriodNetProfit(roots);
+
+  const bs = roots.filter((r) => r.statement === 'BALANCE_SHEET');
+  const assets = bs
+    .filter((r) => r.nature === 'ASSETS')
+    .map((r) => toDisplay(r, false));
+
+  const liabilities = bs
+    .filter((r) => r.nature === 'LIABILITIES')
+    .map((r) => {
+      const d = toDisplay(r, true);
+      // Inject the current-period net profit into the Profit & Loss A/c group.
+      if (r.name === 'Profit & Loss A/c') {
+        d.ledgers = [
+          ...(d.ledgers ?? []),
+          { code: '—', name: 'Current Period (Net Profit)', amount: r2(netProfit) },
+        ];
+        d.amount = r2(d.amount + netProfit);
+      }
+      return d;
+    });
+
+  const assetsTotal = r2(assets.reduce((s, g) => s + g.amount, 0));
+  const liabilitiesTotal = r2(liabilities.reduce((s, g) => s + g.amount, 0));
+
+  res.json({
+    asOf: new Date().toISOString(),
+    liabilities,
+    assets,
+    totals: {
+      liabilities: liabilitiesTotal,
+      assets: assetsTotal,
+      difference: r2(liabilitiesTotal - assetsTotal),
+      balanced: Math.abs(liabilitiesTotal - assetsTotal) < 1,
+    },
+    profitAndLoss: { totalIncome, totalExpenses, netProfit },
+  });
+}
+
+// ── Tally Profit & Loss: income vs expenses with net profit. ──
+export async function getProfitLoss(_req: Request, res: Response) {
+  const roots = await buildGroupTree();
+  const { totalIncome, totalExpenses, netProfit } = currentPeriodNetProfit(roots);
+
+  const pl = roots.filter((r) => r.statement === 'PROFIT_LOSS');
+  const income = pl.filter((r) => r.nature === 'INCOME').map((r) => toDisplay(r, true));
+  const expenses = pl.filter((r) => r.nature === 'EXPENSES').map((r) => toDisplay(r, false));
+
+  res.json({
+    period: new Date().toISOString(),
+    income,
+    expenses,
+    totals: {
+      income: totalIncome,
+      expenses: totalExpenses,
+      netProfit,
+      isProfit: netProfit >= 0,
+    },
+  });
 }
 
 export async function listJournalEntries(req: Request, res: Response) {

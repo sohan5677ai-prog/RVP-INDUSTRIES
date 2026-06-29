@@ -613,8 +613,8 @@ export default function StockByPrice() {
       {/* Price-band table */}
       <div className="rounded-lg border bg-card overflow-auto max-h-[70vh]">
         <Table>
-          <TableHeader className="sticky top-0 z-10">
-            <TableRow className="bg-card border-b">
+          <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-card [&_th]:shadow-[0_1px_0_0] [&_th]:shadow-border">
+            <TableRow>
               <TableHead className="w-10"></TableHead>
               <TableHead>Black Seed Price</TableHead>
               <TableHead>Implied Pappu Price</TableHead>

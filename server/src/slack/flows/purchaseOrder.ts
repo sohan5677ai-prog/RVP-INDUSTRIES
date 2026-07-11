@@ -272,7 +272,7 @@ export function registerPurchaseOrderFlow(app: App): void {
       blocks: summaryBlocks(data),
     });
 
-    setDraft(keyFor(command.channel_id, command.user_id), {
+    await setDraft(keyFor(command.channel_id, command.user_id), {
       flow: FLOW,
       user,
       slackUserId: command.user_id,
@@ -287,12 +287,12 @@ export function registerPurchaseOrderFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<PoDraftData>(key);
+    const draft = await getDraft<PoDraftData>(key);
     if (!draft) return;
     const selected = b.actions[0].selected_option;
     draft.data.partyId = selected.value;
     draft.data.partyName = draft.data.suppliers.find((s) => s.id === selected.value)?.name;
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({
       channel: b.channel.id,
       ts: b.message.ts,
@@ -306,7 +306,7 @@ export function registerPurchaseOrderFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<PoDraftData>(key);
+    const draft = await getDraft<PoDraftData>(key);
     if (!draft) return;
     await client.views.open({
       trigger_id: b.trigger_id,
@@ -388,7 +388,7 @@ export function registerPurchaseOrderFlow(app: App): void {
     await ack();
     const meta = JSON.parse(view.private_metadata || '{}');
     const key = keyFor(meta.channel, body.user.id);
-    const draft = getDraft<PoDraftData>(key);
+    const draft = await getDraft<PoDraftData>(key);
     if (!draft) return;
     const v = view.state.values as any;
     const partyId = v.party?.v?.selected_option?.value;
@@ -402,7 +402,7 @@ export function registerPurchaseOrderFlow(app: App): void {
     const p = parseFloat(v.price?.v?.value);
     if (!isNaN(p) && p > 0) draft.data.pricePerKg = p;
     draft.data.priceType = v.priceType?.v?.selected_option?.value === 'BASE' ? 'BASE' : 'DELIVERY';
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({
       channel: meta.channel,
       ts: meta.messageTs,
@@ -416,7 +416,7 @@ export function registerPurchaseOrderFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<PoDraftData>(key);
+    const draft = await getDraft<PoDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/po` again.' });
       return;
@@ -441,7 +441,7 @@ export function registerPurchaseOrderFlow(app: App): void {
         },
         draft.user
       );
-      clearDraft(key);
+      await clearDraft(key);
       const tonnage = d.tonnageTonnes ? `${d.tonnageTonnes} t (${tonnesToKg(d.tonnageTonnes)} kg)` : `${d.lorryCount} lorries`;
       await client.chat.update({
         channel: b.channel.id,
@@ -470,7 +470,7 @@ export function registerPurchaseOrderFlow(app: App): void {
   app.action(`${FLOW}:cancel`, async ({ ack, body, client }) => {
     await ack();
     const b = body as any;
-    clearDraft(keyFor(b.channel.id, b.user.id));
+    await clearDraft(keyFor(b.channel.id, b.user.id));
     await client.chat.update({
       channel: b.channel.id,
       ts: b.message.ts,

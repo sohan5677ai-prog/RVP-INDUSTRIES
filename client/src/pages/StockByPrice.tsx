@@ -43,7 +43,7 @@ interface LotResponse {
 interface PriceBandResponse {
   blackPricePerKg: number;
   lorries: number;
-  arrivedBlackKg: number; // gross arrived (at process)
+  arrivedBlackKg: number; // gross arrived (at RVP)
   allocatedPappuKg: number; // consumable pappu this band supplied to sales (the debit)
   remainingBlackKg: number; // arrived seed left after sales draw-down (≥ 0)
   remainingValue: number;
@@ -411,7 +411,7 @@ export default function StockByPrice() {
           )}
 
           {(hasPrice || hasTonnage) && !plan && (
-            <p className="text-sm text-muted-foreground">No black-seed stock at process to plan against.</p>
+            <p className="text-sm text-muted-foreground">No black-seed stock at RVP to plan against.</p>
           )}
 
           {plan && (

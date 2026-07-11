@@ -198,7 +198,7 @@ async function doCreate(key: string, draft: any, b: any, client: any, respond: a
       },
       draft.user
     );
-    clearDraft(key);
+    await clearDraft(key);
     await client.chat.update({
       channel: b.channel.id,
       ts: b.message.ts,
@@ -305,7 +305,7 @@ export function registerSaleFlow(app: App): void {
     };
 
     const posted = await client.chat.postMessage({ channel: command.channel_id, text: 'Sale Order draft', blocks: summaryBlocks(data) });
-    setDraft(keyFor(command.channel_id, command.user_id), {
+    await setDraft(keyFor(command.channel_id, command.user_id), {
       flow: FLOW,
       user,
       slackUserId: command.user_id,
@@ -319,19 +319,19 @@ export function registerSaleFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<SaleDraftData>(key);
+    const draft = await getDraft<SaleDraftData>(key);
     if (!draft) return;
     const sel = b.actions[0].selected_option;
     draft.data.buyerId = sel.value;
     draft.data.buyerName = draft.data.buyers.find((x) => x.id === sel.value)?.name;
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Sale Order draft', blocks: summaryBlocks(draft.data) });
   });
 
   app.action(`${FLOW}:edit`, async ({ ack, body, client }) => {
     await ack();
     const b = body as any;
-    const draft = getDraft<SaleDraftData>(keyFor(b.channel.id, b.user.id));
+    const draft = await getDraft<SaleDraftData>(keyFor(b.channel.id, b.user.id));
     if (!draft) return;
     await client.views.open({ trigger_id: b.trigger_id, view: editModal(draft.data, b.channel.id, b.message.ts) });
   });
@@ -370,7 +370,7 @@ export function registerSaleFlow(app: App): void {
     const dd = parseInt(v.dueDays?.v?.value, 10);
     if (!isNaN(dd)) data.dueDays = dd;
     const posted = await client.chat.postMessage({ channel, text: 'Sale Order draft', blocks: summaryBlocks(data) });
-    setDraft(keyFor(channel, body.user.id), {
+    await setDraft(keyFor(channel, body.user.id), {
       flow: FLOW,
       user,
       slackUserId: body.user.id,
@@ -384,7 +384,7 @@ export function registerSaleFlow(app: App): void {
     await ack();
     const meta = JSON.parse(view.private_metadata || '{}');
     const key = keyFor(meta.channel, body.user.id);
-    const draft = getDraft<SaleDraftData>(key);
+    const draft = await getDraft<SaleDraftData>(key);
     if (!draft) return;
     const d = draft.data;
     const v = view.state.values as any;
@@ -401,7 +401,7 @@ export function registerSaleFlow(app: App): void {
     if (!isNaN(p) && p > 0) d.pricePerKg = p;
     const dd = parseInt(v.dueDays?.v?.value, 10);
     d.dueDays = isNaN(dd) ? undefined : dd;
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: meta.channel, ts: meta.messageTs, text: 'Sale Order draft', blocks: summaryBlocks(d) });
   });
 
@@ -409,7 +409,7 @@ export function registerSaleFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<SaleDraftData>(key);
+    const draft = await getDraft<SaleDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/sale` again.' });
       return;
@@ -421,7 +421,7 @@ export function registerSaleFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<SaleDraftData>(key);
+    const draft = await getDraft<SaleDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/sale` again.' });
       return;
@@ -431,14 +431,14 @@ export function registerSaleFlow(app: App): void {
       return;
     }
     draft.data.marginOverride = true;
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await doCreate(key, draft, b, client, respond);
   });
 
   app.action(`${FLOW}:cancel`, async ({ ack, body, client }) => {
     await ack();
     const b = body as any;
-    clearDraft(keyFor(b.channel.id, b.user.id));
+    await clearDraft(keyFor(b.channel.id, b.user.id));
     await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Cancelled', blocks: [headerBlock('Sale Order'), contextBlock(':wastebasket: Draft cancelled.')] });
   });
 }

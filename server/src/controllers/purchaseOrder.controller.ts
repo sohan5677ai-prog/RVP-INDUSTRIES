@@ -10,6 +10,7 @@ import {
 export async function listPurchaseOrders(req: Request, res: Response) {
   const { status } = listPurchaseOrdersSchema.parse(req.query);
   const orders = await prisma.purchaseOrder.findMany({
+    take: 100,
     where: status ? { status } : undefined,
     orderBy: { poDate: 'desc' },
     include: { party: true, stockIns: { select: { id: true } } },

@@ -119,11 +119,6 @@ export async function createVerification(req: Request, res: Response) {
   const toleranceExceeded = shortageKg > 0 && (shortageKg / billingWeightKg) > 0.005;
   const debitNoteAmount = toleranceExceeded ? shortageKg * pricePerKg : 0;
   const supplierName = purchase.stockIn.purchaseOrder.party.name;
-
-  if (debitNoteAmount > 0) {
-    logger.info(`[DEBIT NOTE ENGINE] Auto-generating and emailing Debit Note of ₹${debitNoteAmount.toFixed(2)} to supplier "${supplierName}" due to shortage of ${shortageKg} kg (> 0.5% tolerance).`);
-  }
-
   const verification = await prisma.$transaction(async (tx) => {
     // 1. Update purchase with discounts
     await tx.purchase.update({
@@ -259,16 +254,13 @@ export async function deleteVerification(req: Request, res: Response) {
       originalCost
     );
 
-    // 3. Cleanup processing if it exists
-    const processing = await tx.processing.findUnique({
-      where: { purchaseId: verification.purchaseId },
-    });
-    if (processing) {
-      await tx.processing.delete({ where: { id: processing.id } });
-    }
-
     // 4. Delete the weight verification record
     await tx.weightVerification.delete({ where: { id: req.params.id } });
+
+    // 5. Reset ledger back to unverified state
+    await tx.journalEntry.deleteMany({
+      where: { reference: `PURCHASE-${purchase.id}` }
+    });
   });
 
   res.json({ message: 'Verification deleted' });

@@ -258,7 +258,7 @@ export function registerDispatchFlow(app: App): void {
         : ":warning: Couldn't read a weight off that slip - type it via *Edit*."
       : undefined;
     const posted = await client.chat.postMessage({ channel, text: 'Review dispatch', blocks: reviewBlocks(data, note) });
-    setDraft(keyFor(channel, posted.ts as string), {
+    await setDraft(keyFor(channel, posted.ts as string), {
       flow: FLOW,
       user,
       slackUserId: body.user.id,
@@ -274,11 +274,11 @@ export function registerDispatchFlow(app: App): void {
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
     const key = keyFor(b.channel.id, threadTs);
-    const draft = getDraft<DispatchDraftData>(key);
+    const draft = await getDraft<DispatchDraftData>(key);
     if (!draft) return;
     const o = draft.data.openOrders.find((x) => x.id === b.actions[0].selected_option.value);
     if (o) applyOrder(draft.data, o);
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Review dispatch', blocks: reviewBlocks(draft.data) });
   });
 
@@ -286,7 +286,7 @@ export function registerDispatchFlow(app: App): void {
     await ack();
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
-    const draft = getDraft<DispatchDraftData>(keyFor(b.channel.id, threadTs));
+    const draft = await getDraft<DispatchDraftData>(keyFor(b.channel.id, threadTs));
     if (!draft) return;
     await client.views.open({ trigger_id: b.trigger_id, view: editModal(draft.data, b.channel.id, b.message.ts, threadTs) });
   });
@@ -300,11 +300,11 @@ export function registerDispatchFlow(app: App): void {
     }
     await ack();
     const key = keyFor(meta.channel, meta.threadTs);
-    const draft = getDraft<DispatchDraftData>(key);
+    const draft = await getDraft<DispatchDraftData>(key);
     if (!draft) return;
     draft.data.tonnageKg = w;
     draft.data.vehicleNumber = (view.state.values as any).vehicle?.v?.value || draft.data.vehicleNumber;
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: meta.channel, ts: meta.messageTs, text: 'Review dispatch', blocks: reviewBlocks(draft.data) });
   });
 
@@ -314,7 +314,7 @@ export function registerDispatchFlow(app: App): void {
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
     const key = keyFor(b.channel.id, threadTs);
-    const draft = getDraft<DispatchDraftData>(key);
+    const draft = await getDraft<DispatchDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/dispatch` again.' });
       return;
@@ -342,7 +342,7 @@ export function registerDispatchFlow(app: App): void {
       return;
     }
 
-    clearDraft(key);
+    await clearDraft(key);
     // Auto-raise the invoice so the dispatch is immediately tracked/numbered.
     try {
       await raiseInvoiceCard(dispatch.id, draft.user, b.channel.id, b.message.ts, b.user.id, client);
@@ -399,7 +399,7 @@ export function registerDispatchFlow(app: App): void {
     await ack();
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
-    clearDraft(keyFor(b.channel.id, threadTs));
+    await clearDraft(keyFor(b.channel.id, threadTs));
     await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Cancelled', blocks: [headerBlock('Dispatch'), contextBlock(':wastebasket: Cancelled.')] });
   });
 }

@@ -22,6 +22,7 @@ import type { Account, Purchase, PurchaseOrder, SaleOrder, POStatus, SaleStatus 
 
 interface HuskExpenses {
   blackSeedUnloading: number;
+  transferCosts: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -48,6 +49,7 @@ interface HuskPnl {
 // Display order + labels for the itemized husk-pool deductions.
 const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading' },
+  { key: 'transferCosts', label: 'Stock Transfer Costs' },
   { key: 'pappuLoading', label: 'Pappu Loading' },
   { key: 'pappuRoasting', label: 'Pappu Roasting' },
   { key: 'huskLoading', label: 'Husk Loading' },

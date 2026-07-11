@@ -33,6 +33,7 @@ const hamaliSelect = {
 export async function listPurchases(req: Request, res: Response) {
   if (req.query.view === 'hamali') {
     const purchases = await prisma.purchase.findMany({
+      take: 100,
       orderBy: { createdAt: 'desc' },
       select: hamaliSelect,
     });
@@ -40,6 +41,7 @@ export async function listPurchases(req: Request, res: Response) {
     return;
   }
   const purchases = await prisma.purchase.findMany({
+    take: 100,
     orderBy: { createdAt: 'desc' },
     include: purchaseInclude,
   });

@@ -268,7 +268,7 @@ export function registerPurchaseFlow(app: App): void {
       );
     }
     const posted = await client.chat.postMessage({ channel, text: 'Review purchase', blocks });
-    setDraft(keyFor(channel, posted.ts as string), {
+    await setDraft(keyFor(channel, posted.ts as string), {
       flow: FLOW,
       user,
       slackUserId: body.user.id,
@@ -284,10 +284,10 @@ export function registerPurchaseFlow(app: App): void {
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
     const key = keyFor(b.channel.id, threadTs);
-    const draft = getDraft<PurchaseDraftData>(key);
+    const draft = await getDraft<PurchaseDraftData>(key);
     if (!draft) return;
     draft.data.bunkerPlace = b.actions[0].selected_option.value as 'A' | 'B';
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Review purchase', blocks: reviewBlocks(draft.data) });
   });
 
@@ -296,7 +296,7 @@ export function registerPurchaseFlow(app: App): void {
     await ack();
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
-    const draft = getDraft<PurchaseDraftData>(keyFor(b.channel.id, threadTs));
+    const draft = await getDraft<PurchaseDraftData>(keyFor(b.channel.id, threadTs));
     if (!draft) return;
     await client.views.open({ trigger_id: b.trigger_id, view: editModal(draft.data, b.channel.id, b.message.ts, threadTs) });
   });
@@ -305,7 +305,7 @@ export function registerPurchaseFlow(app: App): void {
     await ack();
     const meta = JSON.parse(view.private_metadata || '{}');
     const key = keyFor(meta.channel, meta.threadTs);
-    const draft = getDraft<PurchaseDraftData>(key);
+    const draft = await getDraft<PurchaseDraftData>(key);
     if (!draft) return;
     const v = view.state.values as any;
     const sec = parseInt(v.second?.v?.value, 10);
@@ -314,7 +314,7 @@ export function registerPurchaseFlow(app: App): void {
       const bunker = v.bunker?.v?.selected_option?.value as 'A' | 'B' | undefined;
       if (bunker) draft.data.bunkerPlace = bunker;
     }
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: meta.channel, ts: meta.messageTs, text: 'Review purchase', blocks: reviewBlocks(draft.data) });
   });
 
@@ -324,7 +324,7 @@ export function registerPurchaseFlow(app: App): void {
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
     const key = keyFor(b.channel.id, threadTs);
-    const draft = getDraft<PurchaseDraftData>(key);
+    const draft = await getDraft<PurchaseDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/purchase` again.' });
       return;
@@ -345,7 +345,7 @@ export function registerPurchaseFlow(app: App): void {
         { stockInId: d.stockInId, rvpSecondWeightKg: d.secondWeightKg, ...(d.bunkerPlace ? { bunkerPlace: d.bunkerPlace } : {}) },
         draft.user
       );
-      clearDraft(key);
+      await clearDraft(key);
       await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Purchase recorded', blocks: resultBlocks(purchase) });
       // Seamlessly open the weight-verification preview for this purchase.
       await startVerification(purchase.id, draft.user, b.user.id, b.channel.id, client, respond);
@@ -359,7 +359,7 @@ export function registerPurchaseFlow(app: App): void {
     await ack();
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
-    clearDraft(keyFor(b.channel.id, threadTs));
+    await clearDraft(keyFor(b.channel.id, threadTs));
     await client.chat.update({
       channel: b.channel.id,
       ts: b.message.ts,

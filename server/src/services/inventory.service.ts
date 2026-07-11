@@ -113,7 +113,12 @@ export class InventoryService {
 
     const silos = await tx.siloInventory.findMany({
       where: { itemType: 'BLACK_SEED', weightKg: { gt: 0 }, location: 'RVP' },
-      orderBy: { weightKg: 'desc' },
+    });
+
+    silos.sort((a, b) => {
+      const mapA = Number(a.totalValue) / a.weightKg;
+      const mapB = Number(b.totalValue) / b.weightKg;
+      return mapB - mapA; // Highest MAP first (most expensive)
     });
 
     for (const silo of silos) {
@@ -143,7 +148,7 @@ export class InventoryService {
    * Reverse a pappu sale's black-seed consumption (undo a dispatch made by
    * mistake). Adds the black-seed-equivalent weight (`pappuKg / 0.60`) back to the
    * pool together with the cost that was relieved, restoring the pool's total
-   * weight and value. The seed is returned to the largest existing black-seed silo
+   * weight and value. The seed is returned to the highest MAP existing black-seed silo
    * (or a fresh pool silo if none remain), since the original per-silo split is not
    * recorded; this keeps the pool totals and blended MAP correct.
    */
@@ -154,10 +159,19 @@ export class InventoryService {
   ): Promise<void> {
     const weightKg = Math.round(pappuKg / this.PAPPU_OUTTURN);
 
-    const silo = await tx.siloInventory.findFirst({
-      where: { itemType: 'BLACK_SEED' },
-      orderBy: { weightKg: 'desc' },
+    const silos = await tx.siloInventory.findMany({
+      where: { itemType: 'BLACK_SEED', location: 'RVP' },
     });
+    
+    let silo = null;
+    if (silos.length > 0) {
+      silos.sort((a, b) => {
+        const mapA = a.weightKg > 0 ? Number(a.totalValue) / a.weightKg : 0;
+        const mapB = b.weightKg > 0 ? Number(b.totalValue) / b.weightKg : 0;
+        return mapB - mapA;
+      });
+      silo = silos[0];
+    }
 
     if (silo) {
       await tx.siloInventory.update({
@@ -169,7 +183,7 @@ export class InventoryService {
       });
     } else {
       await tx.siloInventory.create({
-        data: { itemType: 'BLACK_SEED', location: 'Black Seed Pool', weightKg, totalValue: totalCost },
+        data: { itemType: 'BLACK_SEED', location: 'RVP', weightKg, totalValue: totalCost },
       });
     }
   }
@@ -186,7 +200,7 @@ export class InventoryService {
    */
   static async getBlackSeedPappuCostPerKg(): Promise<number> {
     const silos = await prisma.siloInventory.findMany({
-      where: { itemType: 'BLACK_SEED' },
+      where: { itemType: 'BLACK_SEED', location: 'RVP' },
     });
     const totalWeight = silos.reduce((s, x) => s + x.weightKg, 0);
     const totalValue = silos.reduce((s, x) => s + Number(x.totalValue), 0);

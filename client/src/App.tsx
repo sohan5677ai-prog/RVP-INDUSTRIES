@@ -22,11 +22,7 @@ const PurchaseOrders = lazyWithPreload('/purchase-orders', () => import('@/pages
 const StockIn = lazyWithPreload('/stock-in', () => import('@/pages/StockIn'));
 const Purchases = lazyWithPreload('/purchases', () => import('@/pages/Purchases'));
 const Verification = lazyWithPreload('/verification', () => import('@/pages/Verification'));
-const Processing = lazyWithPreload('/processing', () => import('@/pages/Processing'));
-const ProcessingOutput = lazyWithPreload(
-  ['/processing/pappu', '/processing/husk', '/processing/waste'],
-  () => import('@/pages/ProcessingOutput')
-);
+
 const PappuCalculator = lazyWithPreload('/pappu-calculator', () => import('@/pages/PappuCalculator'));
 const StockLocation = lazyWithPreload('/stock/location', () => import('@/pages/StockLocation'));
 const StockTransfer = lazyWithPreload('/stock/transfer', () => import('@/pages/StockTransfer'));
@@ -60,6 +56,7 @@ const BalanceSheet = lazyWithPreload('/accounts/balance-sheet', () => import('@/
 const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/pages/ProfitLoss'));
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
+const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
@@ -109,10 +106,7 @@ export default function App() {
               <Route path="/purchases" element={<Purchases />} />
               <Route path="/verification" element={<Verification />} />
               <Route path="/purchases/:purchaseId/statement" element={<PurchaseStatement />} />
-              <Route path="/processing" element={<Processing />} />
-              <Route path="/processing/pappu" element={<ProcessingOutput product="pappu" />} />
-              <Route path="/processing/husk" element={<ProcessingOutput product="husk" />} />
-              <Route path="/processing/waste" element={<ProcessingOutput product="waste" />} />
+
               <Route path="/pappu-calculator" element={<PappuCalculator />} />
               <Route path="/stock/overview" element={<BlackSeedStock />} />
               <Route path="/stock/location" element={<StockLocation />} />
@@ -152,6 +146,7 @@ export default function App() {
               <Route path="/reports/maintenance" element={<Maintenance />} />
               <Route path="/reports/drawings" element={<Drawings />} />
               <Route path="/reports/interest" element={<Interest />} />
+              <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
             </Route>

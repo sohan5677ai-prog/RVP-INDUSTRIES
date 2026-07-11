@@ -162,6 +162,7 @@ model StockIn {
   selfVehicle       Boolean       @default(false)
   createdAt         DateTime      @default(now())
   purchase          Purchase?
+  @@index([purchaseOrderId])
 }
 
 model Purchase {
@@ -210,6 +211,7 @@ model WeightVerification {
   // Recovering it lowers the seed's landed cost. 0 for third-party lorries.
   selfVehicleKata Decimal @default(0) @db.Decimal(12, 2)
   createdAt       DateTime @default(now())
+  @@index([purchaseId])
 }
 
 model Processing {
@@ -443,6 +445,8 @@ model JournalLine {
   debit          Decimal      @db.Decimal(12, 2)
   credit         Decimal      @db.Decimal(12, 2)
   costCenter     String?
+  @@index([accountId])
+  @@index([journalEntryId])
 }
 
 // Editable per-destination outward freight rates (₹/tonne), managed in Settings.
@@ -701,6 +705,7 @@ model DustPurchase {
   lorryNumber    String?
   invoiceNumber  String?
   createdAt      DateTime @default(now())
+  @@index([partyId])
 }
 
 model Payment {
@@ -721,6 +726,10 @@ model Payment {
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
+  @@index([partyId])
+  @@index([purchaseId])
+  @@index([brokerId])
+  @@index([journalEntryId])
 }
 
 model Receipt {
@@ -740,6 +749,9 @@ model Receipt {
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
+  @@index([partyId])
+  @@index([saleDispatchId])
+  @@index([journalEntryId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -844,4 +856,20 @@ model TallyUnmappedVoucher {
   alterId       Int      @default(0)
   resolved      Boolean  @default(false)
   createdAt     DateTime @default(now())
+}
+
+// Persisted drafts for Slack multi-step flows (PO, Stock In, etc.)
+model SlackDraft {
+  id          String   @id @default(cuid())
+  key         String   @unique // channel:threadTs or channel:slackUserId
+  flow        String
+  step        String?
+  userId      String   // ERP user ID
+  role        String   // ERP user role
+  slackUserId String
+  channel     String
+  threadTs    String?
+  data        String   // JSON string of accumulated fields
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

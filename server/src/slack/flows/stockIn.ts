@@ -294,7 +294,7 @@ export function registerStockInFlow(app: App): void {
     }
     const data = draftFromPo(po, location);
     const posted = await client.chat.postMessage({ channel, text: 'Review stock-in', blocks: reviewBlocks(data) });
-    setDraft(keyFor(channel, posted.ts as string), {
+    await setDraft(keyFor(channel, posted.ts as string), {
       flow: FLOW,
       user,
       slackUserId: body.user.id,
@@ -327,7 +327,7 @@ export function registerStockInFlow(app: App): void {
     const threadTs = meta.threadTs as string;
     const kind = meta.kind as ReadKind;
     const key = keyFor(channel, threadTs);
-    const draft = getDraft<StockInDraftData>(key);
+    const draft = await getDraft<StockInDraftData>(key);
     if (!draft) return;
     const d = draft.data;
     const v = view.state.values as any;
@@ -359,7 +359,7 @@ export function registerStockInFlow(app: App): void {
         if (r.rvpFirstWeightKg) d.rvpFirstWeightKg = r.rvpFirstWeightKg;
         if (!d.lorryNumber && r.lorryNumber) d.lorryNumber = r.lorryNumber;
       }
-      setDraft(key, draft);
+      await setDraft(key, draft);
       await client.chat.update({
         channel,
         ts: threadTs,
@@ -370,7 +370,7 @@ export function registerStockInFlow(app: App): void {
       // A single failed read is non-fatal - keep the PO/other fields and let the
       // user type this one. (Common cause: Gemini quota/billing - far rarer now
       // that we make one call at a time.)
-      setDraft(key, draft);
+      await setDraft(key, draft);
       await client.chat.update({
         channel,
         ts: threadTs,
@@ -385,7 +385,7 @@ export function registerStockInFlow(app: App): void {
     await ack();
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
-    const draft = getDraft<StockInDraftData>(keyFor(b.channel.id, threadTs));
+    const draft = await getDraft<StockInDraftData>(keyFor(b.channel.id, threadTs));
     if (!draft) return;
     await client.views.open({ trigger_id: b.trigger_id, view: editModal(draft.data, b.channel.id, b.message.ts, threadTs) });
   });
@@ -394,7 +394,7 @@ export function registerStockInFlow(app: App): void {
     await ack();
     const meta = JSON.parse(view.private_metadata || '{}');
     const key = keyFor(meta.channel, meta.threadTs);
-    const draft = getDraft<StockInDraftData>(key);
+    const draft = await getDraft<StockInDraftData>(key);
     if (!draft) return;
     const d = draft.data;
     const v = view.state.values as any;
@@ -412,7 +412,7 @@ export function registerStockInFlow(app: App): void {
       const fr = parseFloat(v.freight?.v?.value);
       if (!isNaN(fr) && fr >= 0) d.freightCharge = fr;
     }
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: meta.channel, ts: meta.messageTs, text: 'Review stock-in', blocks: reviewBlocks(d) });
   });
 
@@ -422,7 +422,7 @@ export function registerStockInFlow(app: App): void {
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
     const key = keyFor(b.channel.id, threadTs);
-    const draft = getDraft<StockInDraftData>(key);
+    const draft = await getDraft<StockInDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/stockin` again.' });
       return;
@@ -466,7 +466,7 @@ export function registerStockInFlow(app: App): void {
         /* non-fatal */
       }
 
-      clearDraft(key);
+      await clearDraft(key);
       await client.chat.update({
         channel: b.channel.id,
         ts: b.message.ts,
@@ -505,7 +505,7 @@ export function registerStockInFlow(app: App): void {
     await ack();
     const b = body as any;
     const threadTs = b.message.thread_ts ?? b.message.ts;
-    clearDraft(keyFor(b.channel.id, threadTs));
+    await clearDraft(keyFor(b.channel.id, threadTs));
     await client.chat.update({
       channel: b.channel.id,
       ts: b.message.ts,

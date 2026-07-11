@@ -28,7 +28,8 @@ const PAYMENT_TYPE_GROUPS: { label: string; items: { value: PaymentType; label: 
     label: 'Suppliers & Counterparties',
     items: [
       { value: 'SUPPLIER', label: 'Supplier Payment' },
-      { value: 'TRANSPORTER', label: 'Transporter Freight' },
+      { value: 'TRANSPORTER_INWARD', label: 'Transporter Freight (Inward)' },
+      { value: 'TRANSPORTER_OUTWARD', label: 'Transporter Freight (Outward)' },
       { value: 'BROKER', label: 'Broker Commission' },
     ],
   },
@@ -53,7 +54,7 @@ const PAYMENT_TYPES: { value: PaymentType; label: string }[] = [
 
 // Types that settle a specific counterparty (they have their own picker below).
 // Everything else is a direct-cash expense/drawing that uses the free-text payee.
-const COUNTERPARTY_TYPES: PaymentType[] = ['SUPPLIER', 'TRANSPORTER', 'BROKER'];
+const COUNTERPARTY_TYPES: PaymentType[] = ['SUPPLIER', 'TRANSPORTER_INWARD', 'TRANSPORTER_OUTWARD', 'BROKER'];
 
 // Payments created from a detail page (Gunny Bags / Electricity / Maintenance /
 // Drawings). They're read-only here — edit or delete them on their own page so
@@ -153,7 +154,7 @@ export default function PaymentsPage() {
           type,
           partyId: type === 'SUPPLIER' ? partyId || null : null,
           brokerId: type === 'BROKER' ? brokerId || null : null,
-          lorryNumber: type === 'TRANSPORTER' ? lorryNumber || null : null,
+          lorryNumber: (type === 'TRANSPORTER_INWARD' || type === 'TRANSPORTER_OUTWARD') ? lorryNumber || null : null,
           payee: !COUNTERPARTY_TYPES.includes(type) ? payee || null : null,
           reference: reference || null,
           description: description || null,
@@ -228,7 +229,7 @@ export default function PaymentsPage() {
                 paidToText = p.party?.name ?? '-';
               } else if (p.type === 'BROKER') {
                 paidToText = p.broker?.name ?? '-';
-              } else if (p.type === 'TRANSPORTER') {
+              } else if (p.type === 'TRANSPORTER_INWARD' || p.type === 'TRANSPORTER_OUTWARD') {
                 paidToText = p.lorryNumber ? `Transporter (Lorry ${p.lorryNumber})` : 'Transporter';
               } else {
                 paidToText = p.payee || typeLabel;

@@ -23,6 +23,7 @@ export async function extractReceiptScreenshot(req: Request, res: Response) {
 
 export async function listReceipts(req: Request, res: Response) {
   const receipts = await prisma.receipt.findMany({
+    take: 100,
     orderBy: { date: 'desc' },
     include: {
       party: true,

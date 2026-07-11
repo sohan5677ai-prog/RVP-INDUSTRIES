@@ -230,7 +230,7 @@ export async function startVerification(
   }
   const data = toDraftData(purchase);
   const posted = await client.chat.postMessage({ channel, text: 'Weight verification', blocks: previewBlocks(data) });
-  setDraft(keyFor(channel, slackUserId), {
+  await setDraft(keyFor(channel, slackUserId), {
     flow: FLOW,
     user,
     slackUserId,
@@ -302,13 +302,13 @@ export function registerVerificationFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<VerifyDraftData>(key);
+    const draft = await getDraft<VerifyDraftData>(key);
     if (!draft) return;
     const choice = b.actions[0].selected_option.value as 'NONE' | DiscountType;
     if (choice === 'NONE') {
       draft.data.discountType = undefined;
       draft.data.discountValue = 0;
-      setDraft(key, draft);
+      await setDraft(key, draft);
       await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Weight verification', blocks: previewBlocks(draft.data) });
     } else {
       // Need a value → open a modal (we have a trigger_id here).
@@ -327,11 +327,11 @@ export function registerVerificationFlow(app: App): void {
     }
     await ack();
     const key = keyFor(meta.channel, meta.user);
-    const draft = getDraft<VerifyDraftData>(key);
+    const draft = await getDraft<VerifyDraftData>(key);
     if (!draft) return;
     draft.data.discountType = meta.type;
     draft.data.discountValue = num;
-    setDraft(key, draft);
+    await setDraft(key, draft);
     await client.chat.update({ channel: meta.channel, ts: meta.messageTs, text: 'Weight verification', blocks: previewBlocks(draft.data) });
   });
 
@@ -340,7 +340,7 @@ export function registerVerificationFlow(app: App): void {
     await ack();
     const b = body as any;
     const key = keyFor(b.channel.id, b.user.id);
-    const draft = getDraft<VerifyDraftData>(key);
+    const draft = await getDraft<VerifyDraftData>(key);
     if (!draft) {
       await respond({ response_type: 'ephemeral', replace_original: false, text: 'This draft has expired. Run `/verify` again.' });
       return;
@@ -352,7 +352,7 @@ export function registerVerificationFlow(app: App): void {
         { purchaseId: d.purchaseId, discountType: d.discountType ?? null, discountValue: d.discountValue },
         draft.user
       );
-      clearDraft(key);
+      await clearDraft(key);
       const igst = round2(d.billingWeightKg * d.pricePerKg * 0.05);
       const blocks: KnownBlock[] = [
         headerBlock('✅ Verification approved'),
@@ -381,7 +381,7 @@ export function registerVerificationFlow(app: App): void {
   app.action(`${FLOW}:cancel`, async ({ ack, body, client }) => {
     await ack();
     const b = body as any;
-    clearDraft(keyFor(b.channel.id, b.user.id));
+    await clearDraft(keyFor(b.channel.id, b.user.id));
     await client.chat.update({
       channel: b.channel.id,
       ts: b.message.ts,

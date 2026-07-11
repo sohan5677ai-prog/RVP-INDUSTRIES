@@ -41,6 +41,32 @@ const ewbSchema = z.object({
   transDocDt: z.string().optional(),  // yyyy-mm-dd from the date input
 });
 
+// Get list of generated IRNs and EWBs
+router.get(
+  '/taxpro/list',
+  asyncHandler(async (req, res) => {
+    // Currently, only SaleDispatches have IRNs/EWBs
+    const sales = await prisma.saleDispatch.findMany({
+      where: {
+        OR: [
+          { irn: { not: null } },
+          { ewbNumber: { not: null } },
+        ],
+      },
+      include: {
+        saleOrder: {
+          include: {
+            buyer: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({ sales, purchases: [] });
+  })
+);
+
 // Generate E-Invoice (IRN)
 router.post(
   '/sale-dispatches/:id/einvoice',

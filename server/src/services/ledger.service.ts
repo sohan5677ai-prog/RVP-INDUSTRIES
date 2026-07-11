@@ -237,7 +237,7 @@ export class LedgerService {
       });
     }
 
-    // 2. Hamali accrual (₹160/t profit-centre). Funding: seed bears `inventory`,
+    // 2. Hamali accrual (₹150/t profit-centre). Funding: seed bears `inventory`,
     // lorry funds `lorry`. Usage: crew is paid `crew`, company keeps `margin`.
     if (h.total > 0) {
       lines.push({
@@ -795,11 +795,11 @@ export class LedgerService {
     if (data.type === 'SUPPLIER') {
       debitAccount = '20100'; // Accounts Payable - Suppliers
       partyRef = data.partyName || '';
-    } else if (data.type === 'TRANSPORTER') {
-      // NOTE: Inward freight went to 20230, outward went to 20250 (unless KNM which goes to 20260 for both)
-      // Since payments are per lorry and could cover both inward and outward, debiting a single account
-      // might leave contra balances in 20230/20250. For now, route KNM to 20260, and default others to 20230.
+    } else if (data.type === 'TRANSPORTER_INWARD') {
       debitAccount = isKnm ? '20260' : '20230'; // Freight Payable - Transporters
+      partyRef = data.lorryNumber ? `Lorry ${data.lorryNumber}` : '';
+    } else if (data.type === 'TRANSPORTER_OUTWARD') {
+      debitAccount = isKnm ? '20260' : '20250'; // Lorry Owner Payable - Freight
       partyRef = data.lorryNumber ? `Lorry ${data.lorryNumber}` : '';
     } else if (data.type === 'BROKER') {
       debitAccount = '20240'; // Brokerage Payable

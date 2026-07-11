@@ -117,7 +117,7 @@ export function registerStockTransferFlow(app: App): void {
             { label: 'Hamali (unload+handling)', value: rupees(Number(t.loadingHamali) + Number(t.unloadingHamali)) },
 
             { label: 'Loan interest', value: `${rupees(Number(t.interestCharge))} (${t.interestDays}d)` },
-            { label: 'Total value at process', value: rupees(Number(t.movedValue)) },
+            { label: 'Total value at RVP', value: rupees(Number(t.movedValue)) },
           ]),
           contextBlock(':information_source: Carter slip is not stored on the ERP transfer record.'),
         ],

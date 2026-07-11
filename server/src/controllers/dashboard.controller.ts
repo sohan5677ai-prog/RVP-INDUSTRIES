@@ -4,35 +4,42 @@ import { prisma } from '../lib/prisma.js';
 import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.js';
 import { customLoadingHamali } from '../lib/calc.js';
 
+import { computeUnifiedStockEngine } from '../services/stockEngine.js';
+
 export async function dashboardSummary(_req: Request, res: Response) {
   const PAPPU_OUTTURN = 0.6;
+  
+  const { bands, totalStorageKg, totalAllocatedPappuKg } = await computeUnifiedStockEngine('MOST_EXPENSIVE_FIRST');
+
   const [
     pendingPOs,
     arrivedPOs,
     pendingSales,
-    verifiedSeed,
     pappuDispatchedAgg,
     payableAgg,
   ] = await Promise.all([
     prisma.purchaseOrder.count({ where: { status: 'PENDING' } }),
     prisma.purchaseOrder.count({ where: { status: 'ARRIVED' } }),
     prisma.saleOrder.count({ where: { status: 'PENDING' } }),
-    // All verified black seed received (one pool - milling does not deplete it).
-    prisma.weightVerification.aggregate({ _sum: { finalWeightKg: true } }),
-    // Pappu sold = all dispatched Pappu shipments (RVP kata weight), across every
-    // dispatch (partial or full, delivered or not).
     prisma.saleDispatch.aggregate({
       _sum: { weightKg: true },
       where: { saleOrder: { product: 'PAPPU' } },
     }),
-    // Total verified payable to suppliers (no Payment model yet - open question #6).
     prisma.weightVerification.aggregate({ _sum: { totalAmount: true } }),
   ]);
 
-  const receivedSeedKg = verifiedSeed._sum.finalWeightKg ?? 0;
   const pappuDispatchedKg = pappuDispatchedAgg._sum.weightKg ?? 0;
+  
+  // Total arrived seed = RVP seed + Storage seed.
+  // The bands.arrivedBlackKg includes the total gross arrived at RVP (including transfers).
+  const grossArrivedRvpKg = bands.reduce((s, b) => s + b.arrivedBlackKg, 0);
+  const receivedSeedKg = grossArrivedRvpKg + totalStorageKg;
+
   // Black seed is depleted only when pappu is sold: each kg sold used 1/0.6 kg seed.
-  const blackStockOnHandKg = Math.max(0, receivedSeedKg - pappuDispatchedKg / PAPPU_OUTTURN);
+  // RVP remaining is given by the engine, plus un-transferred storage.
+  const remainingRvpKg = bands.reduce((s, b) => s + (b.remainingBlackKg ?? 0), 0);
+  const blackStockOnHandKg = Math.max(0, remainingRvpKg + totalStorageKg);
+
   // Pappu produced is the derived potential of all received seed (60% out-turn).
   const pappuProducedKg = Math.round(receivedSeedKg * PAPPU_OUTTURN);
   const pappuInventoryKg = Math.max(0, pappuProducedKg - pappuDispatchedKg);
@@ -87,12 +94,11 @@ export interface HuskExpenses {
   termLoanInterest: number;
 }
 
-// Itemized husk-pool overheads in display order. `pappu` marks costs already
-// captured inside the per-order Pappu P/L (seed loading, roasting, net). The
-// dashboard recovery card shows every line; the P&L page's husk pool omits the
+// Map frontend expense labels to their exact backend keys. Also flag the 
 // pappu-flagged ones so Net Profit does not double-count them.
 export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu: boolean }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
+  { key: 'transferCosts',      label: 'Stock Transfer Costs', pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
@@ -130,6 +136,9 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     huskRate,
     wasteRate,
     customRates,
+    transferAgg,
+    shellAgg,
+    huskAgg,
   ] = await Promise.all([
       prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
       prisma.saleDispatch.findMany({ select: { weightKg: true, saleOrder: { select: { product: true } } } }),
@@ -144,6 +153,9 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       getHamaliRateFull('HUSK_LOADING'),
       getHamaliRateFull('WASTE_LOADING'),
       getCustomHamaliRates(),
+      prisma.stockTransfer.aggregate({ _sum: { transportCharge: true, unloadingHamali: true } }),
+      prisma.shellTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
+      prisma.huskTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
     ]);
 
     // ── Revenue: pooled byproduct sales revenue (net credits on 40010) ──────────
@@ -181,7 +193,12 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     const diesel = manual['DIESEL'] ?? 0;
     const misc = manual['MISC'] ?? 0;
 
-    // ── Standalone report tables ────────────────────────────────────────────────
+    // ── Static/Standalone Expenses ──────────
+    const transferCosts = 
+      (Number(transferAgg._sum.transportCharge || 0) + Number(transferAgg._sum.unloadingHamali || 0)) +
+      (Number(shellAgg._sum.transportCharge || 0) + Number(shellAgg._sum.hamaliCharge || 0)) +
+      (Number(huskAgg._sum.transportCharge || 0) + Number(huskAgg._sum.hamaliCharge || 0));
+
     const gunny = Object.fromEntries(
       (gunnyByDir as any[]).map((r) => [r.direction, Number(r._sum.amount ?? 0)]),
     );
@@ -197,6 +214,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
 
     const expenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
+      transferCosts,
       pappuLoading,
       pappuRoasting,
       huskLoading,

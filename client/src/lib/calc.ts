@@ -16,6 +16,8 @@ export const DEFAULT_HAMALI_RATE = 150; // ₹ per tonne (full unloading charge)
 export const COMPANY_HAMALI_SHARE = 70 / 150; // inventory's funding share of the charge
 export const HAMALI_MARGIN_FRACTION = 10 / 150; // company profit per ₹ of hamali
 export const DEFAULT_OUT_TURN_PCT = 60; // black -> white yield
+export const PAPPU_OUT_TURN = 0.6; // out-turn fraction used in stock calculations
+export const PAPPU_CONSUMABLE = 0.8; // Fraction of milled pappu that is consumable/sellable
 
 // Default freight destinations (fallback before the editable rates load). The
 // actual per-tonne rates live in the FreightRate table, managed in Settings.
@@ -128,8 +130,8 @@ export interface HamaliSplit {
 
 /**
  * Split an arrival hamali charge into its funding sides (inventory/lorry) and
- * usage sides (crew/margin). e.g. ₹160 -> inventory 80, lorry 80, crew 140,
- * margin 20. Scales proportionally for non-default rates.
+ * usage sides (crew/margin). e.g. ₹150 -> inventory 70, lorry 80, crew 140,
+ * margin 10. Scales proportionally for non-default rates.
  */
 export function hamaliSplit(hamaliCharge: number, isCompanyVehicle: boolean = false): HamaliSplit {
   const inventory = isCompanyVehicle ? hamaliCharge : round2(hamaliCharge * COMPANY_HAMALI_SHARE);
@@ -309,7 +311,6 @@ export function loanInterest(value: number, ratePct: number, days: number): numb
 // (Conversion, Black Seed Stock, Order Planner, byproduct pool) shows identical
 // Remaining / Available / Committed numbers.
 
-export const PAPPU_OUT_TURN = 0.6; // black seed → milled pappu yield
 
 /** Minimal shape of a /inventory/by-price band consumed by {@link stockSummary}. */
 export interface ByPriceBandLike {

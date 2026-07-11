@@ -53,31 +53,6 @@ export interface WeightVerification {
   createdAt: string;
 }
 
-export interface Processing {
-  id: string;
-  purchaseId?: string | null;
-  blackWeightKg: number;
-  outTurnPct: string;
-  pappuWeightKg: number;
-  huskWeightKg: number;
-  wasteWeightKg: number;
-  lostWeightKg: number;
-  overheadElectricity: string;
-  overheadWages: string;
-  overheadMaintenance: string;
-  loadingLocation: string;
-  yieldAnomaly?: boolean;
-  yieldAnomalyReason?: string | null;
-  processDate: string;
-  purchase?: (Purchase & {
-    stockIn?: (StockIn & {
-      purchaseOrder?: (PurchaseOrder & {
-        party?: Party;
-      }) | null;
-    }) | null;
-  }) | null;
-}
-
 
 export interface Purchase {
   id: string;
@@ -92,7 +67,6 @@ export interface Purchase {
   discountValue?: string;
   createdAt: string;
   verification?: WeightVerification | null;
-  processing?: Processing | null;
 }
 
 export interface StockTransfer {
@@ -476,14 +450,17 @@ export interface SiloInventory {
 
 export type PaymentType =
   | 'SUPPLIER'
-  | 'TRANSPORTER'
+  | 'TRANSPORTER_INWARD'
+  | 'TRANSPORTER_OUTWARD'
   | 'BROKER'
   | 'TRANSPORT'
-  | 'GUNNY_BAGS'
+  | 'OTHER'
+  | 'DIESEL'
   | 'ELECTRICITY'
+  | 'HAMALI'
   | 'MAINTENANCE'
   | 'DRAWINGS'
-  | 'OTHER';
+  | 'GUNNY_BAGS';
 
 export interface Payment {
   id: string;

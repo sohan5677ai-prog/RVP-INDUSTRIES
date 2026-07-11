@@ -639,7 +639,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={colCount} className="p-0">
                         <div className="border-t border-border/60 bg-muted/25 px-5 py-4">
-                          {isPappu && margin && <PappuMarginPanel margin={margin} />}
+
                           <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                             Shipments · {dispatches.length}
                           </div>

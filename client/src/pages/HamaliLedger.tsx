@@ -104,6 +104,11 @@ export default function HamaliLedger() {
     queryFn: () => api<ShellTransfer[]>('/shell-transfers'),
   });
 
+  const { data: huskTransfers, isLoading: loadingHuskTransfers } = useQuery({
+    queryKey: ['husk-transfers'],
+    queryFn: () => api<HuskTransfer[]>('/husk-transfers'),
+  });
+
   const qc = useQueryClient();
   const { data: manualCosts } = useQuery({
     queryKey: ['manual-hamali-costs'],
@@ -198,7 +203,7 @@ export default function HamaliLedger() {
 
   const manualValid = mMeta.perBag ? Number(mBags) > 0 && Number(mRate) > 0 : Number(mAmount) > 0;
 
-  const isLoading = loadingPurchases || loadingSales || loadingStockTransfers || loadingShellTransfers;
+  const isLoading = loadingPurchases || loadingSales || loadingStockTransfers || loadingShellTransfers || loadingHuskTransfers;
 
   // Purchase (inward) hamali - funding split inventory/lorry, usage crew/margin.
   const purchaseEntries: HamaliEntry[] = (purchases ?? []).map((p) => {
@@ -304,6 +309,25 @@ export default function HamaliLedger() {
         label: 'Shell Transfer',
         partyId: null,
         partyName: 'Internal (Process → Rampalli)',
+        lorryNumber: t.lorryNumber ?? null,
+        reference: `${t.fromLocation} → ${t.toLocation}`,
+        netWeightKg: t.weightKg,
+        fullCharge,
+        ourShare: fullCharge,
+        lorryShare: 0,
+        crew: fullCharge,
+        pl: 0,
+      };
+    }),
+    ...(huskTransfers ?? []).map((t) => {
+      const fullCharge = Number(t.hamaliCharge);
+      return {
+        id: `TX-HUSK-${t.id}`,
+        date: t.transferDate || t.createdAt,
+        source: 'TRANSFER' as const,
+        label: 'Husk Transfer',
+        partyId: null,
+        partyName: 'Internal (Factory → Storage)',
         lorryNumber: t.lorryNumber ?? null,
         reference: `${t.fromLocation} → ${t.toLocation}`,
         netWeightKg: t.weightKg,

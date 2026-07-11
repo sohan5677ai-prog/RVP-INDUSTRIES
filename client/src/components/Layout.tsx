@@ -43,6 +43,7 @@ import {
   Loader2,
   PanelLeftClose,
   Menu,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -88,12 +89,8 @@ const sections: NavSection[] = [
     ],
   },
   {
-    heading: 'Processing',
+    heading: 'Tools',
     items: [
-      { to: '/processing', label: 'Conversion', icon: Factory, end: true },
-      { to: '/processing/pappu', label: 'Pappu (60%)', icon: Wheat },
-      { to: '/processing/husk', label: 'Husk (25%)', icon: Layers },
-      { to: '/processing/waste', label: 'Pre Cleaner Husk & Tamarind (10%)', icon: Trash2 },
       { to: '/pappu-calculator', label: 'Pappu Calculator', icon: Calculator },
     ],
   },
@@ -111,6 +108,7 @@ const sections: NavSection[] = [
   {
     heading: 'Reports',
     items: [
+      { to: '/reports/irn-ewb', label: 'IRN/EWB', icon: FileText },
       { to: '/reports/purchase-dues', label: 'Purchase Dues', icon: TrendingDown },
       { to: '/reports/payment-planner', label: 'Payment Planner', icon: Wallet },
       { to: '/reports/sale-dues', label: 'Sale Dues', icon: TrendingUp },

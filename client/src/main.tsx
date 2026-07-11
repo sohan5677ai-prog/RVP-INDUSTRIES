@@ -19,6 +19,7 @@ const queryClient = new QueryClient({
       staleTime: 60_000,
       // A broken/missing endpoint shouldn't hang a page for ~7s of backoff.
       retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });

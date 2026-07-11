@@ -1,52 +1,83 @@
+import { prisma } from '../lib/prisma.js';
 import type { ErpUser } from './erpClient.js';
 
-/**
- * In-memory per-conversation draft store. Each Slack flow (PO, stock-in, …)
- * accumulates its partially-built record here until the user taps Approve.
- *
- * Keyed by channel + thread (or user when there is no thread). This is
- * deliberately simple - drafts are lost if the server restarts mid-flow, which
- * is acceptable for the MVP. A DB-backed store is a clean later hardening.
- */
 export interface Draft<T = Record<string, any>> {
-  flow: string; // e.g. "po", "stockin"
-  step?: string; // current step within a multi-step flow
-  user: ErpUser; // the ERP user this draft is being created as
+  flow: string;
+  step?: string;
+  user: ErpUser;
   slackUserId: string;
   channel: string;
   threadTs?: string;
-  data: T; // flow-specific accumulated fields
+  data: T;
 }
 
-const drafts = new Map<string, Draft>();
-
-/** Stable key for a conversation: channel + thread (falls back to user). */
 export function draftKey(channel: string, threadTs?: string, user?: string): string {
   return `${channel}:${threadTs ?? user ?? 'na'}`;
 }
 
-export function setDraft(key: string, draft: Draft): void {
-  drafts.set(key, draft);
+export async function setDraft(key: string, draft: Draft): Promise<void> {
+  await prisma.slackDraft.upsert({
+    where: { key },
+    update: {
+      flow: draft.flow,
+      step: draft.step,
+      userId: draft.user.userId,
+      role: draft.user.role,
+      slackUserId: draft.slackUserId,
+      channel: draft.channel,
+      threadTs: draft.threadTs,
+      data: JSON.stringify(draft.data),
+    },
+    create: {
+      key,
+      flow: draft.flow,
+      step: draft.step,
+      userId: draft.user.userId,
+      role: draft.user.role,
+      slackUserId: draft.slackUserId,
+      channel: draft.channel,
+      threadTs: draft.threadTs,
+      data: JSON.stringify(draft.data),
+    },
+  });
 }
 
-export function getDraft<T = Record<string, any>>(key: string): Draft<T> | undefined {
-  return drafts.get(key) as Draft<T> | undefined;
+export async function getDraft<T = Record<string, any>>(key: string): Promise<Draft<T> | undefined> {
+  const row = await prisma.slackDraft.findUnique({ where: { key } });
+  if (!row) return undefined;
+  return {
+    flow: row.flow,
+    step: row.step ?? undefined,
+    user: { userId: row.userId, role: row.role as any },
+    slackUserId: row.slackUserId,
+    channel: row.channel,
+    threadTs: row.threadTs ?? undefined,
+    data: JSON.parse(row.data),
+  };
 }
 
-/**
- * Find the first draft matching a predicate. Used as a fallback when a file is
- * uploaded into a channel but NOT as a reply inside the flow's thread - we locate
- * the user's active flow by channel + user instead of by thread key.
- */
-export function findDraft<T = Record<string, any>>(
+export async function findDraft<T = Record<string, any>>(
   predicate: (d: Draft) => boolean
-): Draft<T> | undefined {
-  for (const d of drafts.values()) {
-    if (predicate(d)) return d as Draft<T>;
+): Promise<Draft<T> | undefined> {
+  const all = await prisma.slackDraft.findMany();
+  for (const row of all) {
+    const draft: Draft<any> = {
+      flow: row.flow,
+      step: row.step ?? undefined,
+      user: { userId: row.userId, role: row.role as any },
+      slackUserId: row.slackUserId,
+      channel: row.channel,
+      threadTs: row.threadTs ?? undefined,
+      data: JSON.parse(row.data),
+    };
+    if (predicate(draft)) return draft;
   }
   return undefined;
 }
 
-export function clearDraft(key: string): void {
-  drafts.delete(key);
+export async function clearDraft(key: string): Promise<void> {
+  try {
+    await prisma.slackDraft.delete({ where: { key } });
+  } catch (e) {
+  }
 }

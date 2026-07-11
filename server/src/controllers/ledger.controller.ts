@@ -271,6 +271,7 @@ export async function getProfitLoss(_req: Request, res: Response) {
 
 export async function listJournalEntries(req: Request, res: Response) {
   const entries = await prisma.journalEntry.findMany({
+    take: 100,
     orderBy: { date: 'desc' },
     include: {
       lines: {
@@ -324,24 +325,25 @@ type PaymentRow = Awaited<ReturnType<typeof loadPayments>>[number];
 type ReceiptRow = Awaited<ReturnType<typeof loadReceipts>>[number];
 type DustPurchaseRow = Awaited<ReturnType<typeof loadDustPurchases>>[number];
 
-function loadPurchaseOrders() {
+function loadPurchaseOrders(partyId?: string) {
   return prisma.purchaseOrder.findMany({
+    where: partyId ? { partyId } : undefined,
     include: {
       stockIns: { include: { purchase: { include: { verification: true } } } },
     },
   });
 }
-function loadSales() {
-  return prisma.saleOrder.findMany({ include: { dispatches: true } });
+function loadSales(buyerId?: string) {
+  return prisma.saleOrder.findMany({ where: buyerId ? { buyerId } : undefined, include: { dispatches: true } });
 }
-function loadPayments() {
-  return prisma.payment.findMany({ where: { partyId: { not: null } } });
+function loadPayments(partyId?: string) {
+  return prisma.payment.findMany({ where: { partyId: partyId ? partyId : { not: null } } });
 }
-function loadReceipts() {
-  return prisma.receipt.findMany({ where: { partyId: { not: null } } });
+function loadReceipts(partyId?: string) {
+  return prisma.receipt.findMany({ where: { partyId: partyId ? partyId : { not: null } } });
 }
-function loadDustPurchases() {
-  return prisma.dustPurchase.findMany();
+function loadDustPurchases(partyId?: string) {
+  return prisma.dustPurchase.findMany({ where: partyId ? { partyId } : undefined });
 }
 
 function round2(n: number): number {
@@ -568,16 +570,110 @@ function buildPartyLedger(
 export async function listPartyLedgers(_req: Request, res: Response) {
   const [parties, pos, sales, payments, receipts, dustPurchases] = await Promise.all([
     prisma.party.findMany({ orderBy: { name: 'asc' } }),
-    loadPurchaseOrders(),
-    loadSales(),
-    loadPayments(),
-    loadReceipts(),
-    loadDustPurchases(),
+    prisma.purchaseOrder.findMany({
+      select: { partyId: true, stockIns: { select: { arrivalDate: true, purchase: { select: { verification: { select: { totalAmount: true } } } } } } }
+    }),
+    prisma.saleOrder.findMany({
+      select: { buyerId: true, ratePerKg: true, dispatches: { select: { dispatchDate: true, invoiceDate: true, weightKg: true, gstAmount: true } } }
+    }),
+    prisma.payment.findMany({
+      where: { partyId: { not: null } },
+      select: { partyId: true, amount: true, date: true }
+    }),
+    prisma.receipt.findMany({
+      where: { partyId: { not: null } },
+      select: { partyId: true, amount: true, date: true }
+    }),
+    prisma.dustPurchase.findMany({
+      select: { partyId: true, amount: true, purchaseDate: true }
+    })
   ]);
 
-  const rows = parties.map((party) => {
-    const { summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases);
-    return { ...party, ...summary };
+  const map = new Map<string, any>();
+  for (const p of parties) {
+    map.set(p.id, {
+      ...p,
+      totalDebit: 0, totalCredit: 0,
+      purchaseTotal: 0, saleTotal: 0, paidTotal: 0, receivedTotal: 0,
+      transactionCount: 0, pendingCount: 0, lastTxnDate: null
+    });
+  }
+
+  const applyDate = (pid: string, d: Date | null) => {
+    if (!d) return;
+    const s = map.get(pid);
+    if (!s) return;
+    if (!s.lastTxnDate || d.getTime() > new Date(s.lastTxnDate).getTime()) s.lastTxnDate = d;
+  };
+
+  for (const po of pos) {
+    const s = map.get(po.partyId);
+    if (!s) continue;
+    for (const si of po.stockIns) {
+      applyDate(po.partyId, si.arrivalDate);
+      const amt = si.purchase?.verification?.totalAmount;
+      if (amt != null) {
+        s.purchaseTotal += Number(amt);
+        s.totalCredit += Number(amt);
+        s.transactionCount++;
+      } else {
+        s.pendingCount++;
+        s.transactionCount++;
+      }
+    }
+  }
+  for (const sale of sales) {
+    const s = map.get(sale.buyerId);
+    if (!s) continue;
+    const rate = Number(sale.ratePerKg);
+    for (const d of sale.dispatches) {
+      applyDate(sale.buyerId, d.invoiceDate ?? d.dispatchDate);
+      const amt = round2(d.weightKg * rate) + round2(Number(d.gstAmount));
+      s.saleTotal += amt;
+      s.totalDebit += amt;
+      s.transactionCount++;
+    }
+  }
+  for (const pay of payments) {
+    const s = map.get(pay.partyId!);
+    if (!s) continue;
+    applyDate(pay.partyId!, pay.date);
+    const amt = Number(pay.amount);
+    s.paidTotal += amt;
+    s.totalDebit += amt;
+    s.transactionCount++;
+  }
+  for (const rec of receipts) {
+    const s = map.get(rec.partyId!);
+    if (!s) continue;
+    applyDate(rec.partyId!, rec.date);
+    const amt = Number(rec.amount);
+    s.receivedTotal += amt;
+    s.totalCredit += amt;
+    s.transactionCount++;
+  }
+  for (const dp of dustPurchases) {
+    const s = map.get(dp.partyId);
+    if (!s) continue;
+    applyDate(dp.partyId, dp.purchaseDate);
+    const amt = Number(dp.amount);
+    s.purchaseTotal += amt;
+    s.totalCredit += amt;
+    s.transactionCount++;
+  }
+
+  const rows = Array.from(map.values()).map(s => {
+    s.purchaseTotal = round2(s.purchaseTotal);
+    s.saleTotal = round2(s.saleTotal);
+    s.paidTotal = round2(s.paidTotal);
+    s.receivedTotal = round2(s.receivedTotal);
+    s.totalDebit = round2(s.totalDebit);
+    s.totalCredit = round2(s.totalCredit);
+    const bal = round2(s.totalDebit - s.totalCredit);
+    s.balance = Math.abs(bal);
+    s.balanceType = bal >= 0 ? 'DR' : 'CR';
+    s.totalBusiness = round2(s.purchaseTotal + s.saleTotal);
+    return s;
   });
 
   res.json(rows);
@@ -588,11 +684,11 @@ export async function getPartyLedger(req: Request, res: Response) {
   if (!party) throw new HttpError(404, 'Party not found');
 
   const [pos, sales, payments, receipts, dustPurchases] = await Promise.all([
-    loadPurchaseOrders(),
-    loadSales(),
-    loadPayments(),
-    loadReceipts(),
-    loadDustPurchases(),
+    loadPurchaseOrders(party.id),
+    loadSales(party.id),
+    loadPayments(party.id),
+    loadReceipts(party.id),
+    loadDustPurchases(party.id),
   ]);
 
   const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases);

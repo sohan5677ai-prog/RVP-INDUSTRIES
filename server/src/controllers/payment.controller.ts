@@ -28,6 +28,7 @@ export async function extractPaymentScreenshot(req: Request, res: Response) {
 
 export async function listPayments(req: Request, res: Response) {
   const payments = await prisma.payment.findMany({
+    take: 100,
     orderBy: { date: 'desc' },
     include: {
       party: true,

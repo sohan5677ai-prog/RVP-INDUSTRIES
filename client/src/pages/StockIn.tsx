@@ -372,7 +372,7 @@ export default function StockIn() {
     onSuccess: () => {
       // Editing a purchased stock-in rolls back its purchase chain, so refresh
       // everything downstream too.
-      ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'processing'].forEach(
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
         (k) => qc.invalidateQueries({ queryKey: [k] }),
       );
       toast.success(editing ? 'Stock-in updated' : 'Stock-in recorded');
@@ -385,7 +385,7 @@ export default function StockIn() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/stock-in/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'processing'].forEach(
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
         (k) => qc.invalidateQueries({ queryKey: [k] }),
       );
       toast.success('Stock-in deleted');

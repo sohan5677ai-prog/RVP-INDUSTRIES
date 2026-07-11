@@ -462,7 +462,7 @@ export class TaxproService {
     const payload = {
       ewbNo: Number(dispatch.ewbNumber),
       cancelRsnCode: Number(cancelReason || '1'), // 1-Duplicate, 2-Order Cancelled, 3-Mistake, 4-Other
-      cancelRemarks: cancelRemarks || 'Cancelled from ERP system',
+      cancelRmrk: cancelRemarks || 'Cancelled from ERP system',
     };
 
     if (isMock) {
@@ -471,7 +471,7 @@ export class TaxproService {
 
     try {
       const token = await this.getAuthToken(company, company.gstin || '');
-      const json = await this.request(company.taxproSandbox, '/eiewb/dec/v1.03/ewaybill/cancel', {
+      const json = await this.request(company.taxproSandbox, '/ewaybillapi/dec/v1.03/ewayapi?action=CANEWB', {
         method: 'POST',
         headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
         body: JSON.stringify(payload),

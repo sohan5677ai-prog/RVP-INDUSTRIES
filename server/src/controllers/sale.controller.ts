@@ -57,6 +57,7 @@ function withFulfilment<T extends { tonnageKg: number; dispatches?: { weightKg: 
 export async function listSaleOrders(req: Request, res: Response) {
   const { status, product } = listSaleOrdersSchema.parse(req.query);
   const orders = await prisma.saleOrder.findMany({
+    take: 100,
     where: { ...(status ? { status } : {}), ...(product ? { product } : {}) },
     orderBy: { saleDate: 'desc' },
     include: { buyer: true, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },

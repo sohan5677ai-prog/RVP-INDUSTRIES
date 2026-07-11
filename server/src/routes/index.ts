@@ -7,7 +7,6 @@ import { parseBulkImport } from '../controllers/bulkImport.controller.js';
 import partyRoutes from './party.routes.js';
 import brokerRoutes from './broker.routes.js';
 import purchaseRoutes from './purchase.routes.js';
-import processingRoutes from './processing.routes.js';
 import saleRoutes from './sale.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import systemRoutes from './system.routes.js';
@@ -23,6 +22,7 @@ import taxproRoutes from './taxpro.routes.js';
 import manualHamaliCostRoutes from './manualHamaliCost.routes.js';
 import hamaliVerificationRoutes from './hamaliVerification.routes.js';
 import poolReportRoutes from './poolReport.routes.js';
+import { globalSearch } from '../controllers/search.controller.js';
 const router = Router();
 
 // Public
@@ -37,7 +37,6 @@ router.post('/bulk-import/parse', memUpload.single('file'), asyncHandler(parseBu
 router.use('/parties', partyRoutes);
 router.use('/brokers', brokerRoutes);
 router.use('/', purchaseRoutes);
-router.use('/', processingRoutes);
 router.use('/', saleRoutes);
 router.use('/', dashboardRoutes);
 router.use('/', ledgerRoutes);
@@ -53,5 +52,7 @@ router.use('/system', systemRoutes);
 router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);
 router.use('/', taxproRoutes);
-export default router;
 
+router.get('/search', asyncHandler(globalSearch));
+
+export default router;

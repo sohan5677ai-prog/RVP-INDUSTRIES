@@ -377,7 +377,7 @@ export default function BankLoansPage() {
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="RVP">At process</SelectItem>
+                    <SelectItem value="RVP">RVP</SelectItem>
                     <SelectItem value="PGR COLD">Rampalli</SelectItem>
                     <SelectItem value="Murugan">Murugan</SelectItem>
                     <SelectItem value="KNM Multi">Multi</SelectItem>

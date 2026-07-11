@@ -118,7 +118,6 @@ export default function Verification() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
-      qc.invalidateQueries({ queryKey: ['processing'] });
       toast.success('Approved - balance payable calculated and black seed added to stock');
       setOpen(false);
       setSelectedPurchase(null);
@@ -132,7 +131,6 @@ export default function Verification() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
-      qc.invalidateQueries({ queryKey: ['processing'] });
       toast.success('Verification removed - you can re-verify');
       setOpen(false);
       setSelectedPurchase(null);

@@ -134,7 +134,7 @@ async function main() {
       },
     });
 
-    console.log(`[${created + 1}] ${dateStr} | ${buyerName} | ${lorryNo || '—'} | ${invoiceStr} | ${netTonnes}t @ ₹${pricePerKg}/kg`);
+    console.log(`[${created + 1}] ${dateStr} | ${buyerName} | ${lorryNo || '-'} | ${invoiceStr} | ${netTonnes}t @ ₹${pricePerKg}/kg`);
     created++;
   }
 

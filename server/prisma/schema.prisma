@@ -40,15 +40,21 @@ enum AllocationStatus {
   BUMPED
 }
 
-// Products sold. Pappu depletes the black-seed pool; Husk/Waste deplete their
-// derived (25%/10%) availability; TPS (brokens) is revenue-only. Shell is a
-// production byproduct transferred to Rampalli and sold from that stock.
+// Products sold. Pappu depletes the black-seed pool; Husk depletes its derived
+// (25%) availability; TPS (brokens) is revenue-only. Shell, Waste and the three
+// pre-cleaner byproducts (Pre Cleaner Dust, Nalla Pokkulu, Nalla Chintapandu)
+// all deplete the single shared 10% "Pre Cleaner Husk & Tamarind" pool. Shell is
+// physically transferred to another location before sale, but that transfer is
+// only a movement/cost record — it is NOT held as a separate valued silo.
 enum SaleProduct {
   PAPPU
   HUSK
   WASTE
   TPS
   SHELL
+  PRECLEANER_DUST
+  NALLA_POKKULU
+  NALLA_CHINTAPANDU
 }
 
 enum Commodity {
@@ -58,6 +64,9 @@ enum Commodity {
   TAMARIND_SHELL
   TAMARIND_WASTE
   TPS_BROKENS
+  PRECLEANER_DUST
+  NALLA_POKKULU
+  NALLA_CHINTAPANDU
 }
 
 model User {
@@ -79,6 +88,7 @@ model Party {
   phone             String?
   address           String?
   state             String?
+  pincode           String?
   gstin             String?
   // Default delivery destination for this buyer (maps to a freight rate).
   destination       String?
@@ -91,6 +101,8 @@ model Party {
   saleOrders        SaleOrder[]
   payments          Payment[]
   receipts          Receipt[]
+  dustPurchases     DustPurchase[]
+  tallyLedgerMaps   TallyLedgerMap[]
 }
 
 model Broker {
@@ -111,6 +123,8 @@ model PurchaseOrder {
   // Whether pricePerKg is quoted at the supplier's location (BASE) or landed at
   // our location (DELIVERY). Some suppliers quote one, some the other.
   priceType     PriceType @default(DELIVERY)
+  hasGst        Boolean  @default(false)
+  gstAmount     Decimal  @default(0) @db.Decimal(14, 2)
   tonnageKg     Int // approx, in kg
   actualTonnageKg Int? // actual arrived weight in kg (set at stock-in)
   lorryCount    Int? // approx number of lorries ordered
@@ -138,10 +152,14 @@ model StockIn {
   billingWeightKg   Int // invoice tonnage
   partyKataKg       Int // party weighbridge
   invoiceFileUrl    String // uploaded invoice
-  loadingLocation   String        @default("At process")
+  loadingLocation   String        @default("RVP")
   // Inward freight (₹) captured at arrival, only for BASE-priced POs (DELIVERY
   // already includes it). Carried into Purchase.freightCharge and capitalised.
   freightCharge     Decimal       @default(0) @db.Decimal(12, 2)
+  // Ticked when the party arrived in their OWN vehicle (no third-party lorry).
+  // At verification the lorry's ₹80/t hamali share — normally recovered from the
+  // transporter — is instead deducted from the party's net payable.
+  selfVehicle       Boolean       @default(false)
   createdAt         DateTime      @default(now())
   purchase          Purchase?
 }
@@ -165,6 +183,7 @@ model Purchase {
   discountValue  Decimal             @default(0) @db.Decimal(12, 2)
   createdAt      DateTime            @default(now())
   verification   WeightVerification?
+  payments       Payment[]
   processing     Processing?
 }
 
@@ -180,7 +199,16 @@ model WeightVerification {
   exempt          Boolean
   finalWeightKg   Int
   pricePerKg      Decimal  @db.Decimal(12, 2)
+  // Net balance payable to the supplier (already net of any self-vehicle hamali
+  // and kata recovery below). Seed inventory value = totalAmount + selfVehicleHamali.
   totalAmount     Decimal  @db.Decimal(14, 2)
+  // ₹ deducted from the party's payable because they used their own vehicle
+  // (the lorry's ₹80/t hamali share). 0 for third-party lorries.
+  selfVehicleHamali Decimal @default(0) @db.Decimal(12, 2)
+  // ₹ deducted from the party's payable because they used their own vehicle
+  // (the full weighbridge/kata fee, normally recovered from the transporter).
+  // Recovering it lowers the seed's landed cost. 0 for third-party lorries.
+  selfVehicleKata Decimal @default(0) @db.Decimal(12, 2)
   createdAt       DateTime @default(now())
 }
 
@@ -199,7 +227,7 @@ model Processing {
   overheadElectricity Decimal     @default(0) @db.Decimal(12, 2)
   overheadWages       Decimal     @default(0) @db.Decimal(12, 2)
   overheadMaintenance Decimal     @default(0) @db.Decimal(12, 2)
-  loadingLocation     String      @default("At process")
+  loadingLocation     String      @default("RVP")
   processDate         DateTime
 }
 
@@ -298,8 +326,11 @@ model SaleDispatch {
   ewbValidUpto   DateTime?
   ewbStatus      String?    // 'GENERATED', 'CANCELLED'
   ewbCancelledDate DateTime?
+  ewbDistance    Int?       // approx transport distance (km) entered at EWB generation
 
   createdAt      DateTime   @default(now())
+
+  receipts       Receipt[]
 
   @@index([saleOrderId])
   @@unique([invoiceFy, invoiceSeq])
@@ -422,6 +453,69 @@ model FreightRate {
   updatedAt    DateTime @updatedAt
 }
 
+// Editable per-operation hamali (labour) rates (₹/tonne), managed in Settings.
+// One row per operation key (BLACK_SEED_UNLOAD, PAPPU_LOADING, TRANSFER_FROM_STORAGE,
+// HUSK_LOADING, TPS_LOADING, SHELL_TRANSFER). These drive the live costing — each
+// controller fetches its headline rate and passes it into the calc functions.
+model HamaliRate {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  label          String
+  ratePerTonne   Decimal  @default(0) @db.Decimal(8, 2) // Total ₹/tonne charge
+  lorryPerTonne  Decimal  @default(0) @db.Decimal(8, 2) // collected from the driver (off freight)
+  marginPerTonne Decimal  @default(0) @db.Decimal(8, 2) // company P/L benefit (collect more than we pay the crew)
+  isCustom       Boolean  @default(false) // user-added cost (vs the fixed operations); charged on every Pappu dispatch
+  sortOrder      Int      @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+// Manually-entered hamali costs that can't be derived from purchases or sales.
+// Two kinds:
+//   Per-bag charges (amount = bags × ratePerBag):
+//     - BAG_CUTTING_NORMAL    — bag cutting at Place A (≈₹3/bag)
+//     - BAG_CUTTING_DISTANCE  — bag cutting at Place B (≈₹6/bag)
+//     - PAPPU_NET             — pappu netting/bagging (≈₹6/bag)
+//   Flat amounts (amount entered directly, bags/ratePerBag null):
+//     - DIESEL                — diesel/fuel cost borne for the crew
+//     - MISC                  — any other charge given to the hamali crew
+//     - PAID                  — cash actually disbursed to the crew (settles the payable)
+// Charge entries post Dr Factory Labor 50020 / Cr Hamali payable 20200; PAID
+// posts Dr Hamali payable 20200 / Cr Cash-in-Hand 10410.
+enum ManualHamaliType {
+  BAG_CUTTING_NORMAL
+  BAG_CUTTING_DISTANCE
+  PAPPU_NET
+  DIESEL
+  MISC
+  PAID
+}
+
+model ManualHamaliCost {
+  id         String           @id @default(cuid())
+  date       DateTime
+  type       ManualHamaliType
+  bags       Int?
+  ratePerBag Decimal?         @db.Decimal(8, 2)
+  amount     Decimal          @db.Decimal(12, 2) // per-bag: bags × ratePerBag; flat: entered directly
+  note       String?
+  createdBy  String?
+  createdAt  DateTime         @default(now())
+}
+
+// A periodic reconciliation checkpoint on the Hamali Report: crew dues have been
+// cross-verified with the hamali crew through `asOfDate` (inclusive). Verify-only
+// marker with no GL posting - the actual cash settlement is recorded separately
+// as a PAID ManualHamaliCost. The Hamali view locks rows on/before the latest
+// checkpoint and shows the period since as the current, still-to-verify window.
+model HamaliVerification {
+  id        String   @id @default(cuid())
+  asOfDate  DateTime // verified through this date, inclusive
+  crewTotal Decimal  @db.Decimal(12, 2) // snapshot of crew dues verified in this period
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now())
+}
+
 // Single-row seller profile printed on generated tax invoices. Edited in Settings.
 model CompanyProfile {
   id                String   @id @default("default")
@@ -430,6 +524,7 @@ model CompanyProfile {
   gstin             String?
   stateName         String?
   stateCode         String? // GST state code, e.g. "37"
+  pincode           String?
   contact           String?
   // Bank details printed in the invoice footer.
   bankAccountName   String?
@@ -479,42 +574,43 @@ model ProductTaxInfo {
   hsn         String? // primary HSN/SAC (the GST-taxable code)
   hsnExempt   String? // alternate HSN for the GST-exempt (without-GST) variant, e.g. husk
   description String?
+  gstRate     Decimal     @default(5) @db.Decimal(5, 2) // GST % for this commodity (e.g. 5, 12, 18)
   updatedAt   DateTime    @updatedAt
 }
 
 model SiloInventory {
   id         String   @id @default(cuid())
   itemType   String // "BLACK_SEED" | "WHITE_PAPPU" | "HUSK" | "WASTE"
-  location   String // e.g. "At process", "Rampalli", "Murgan", "Multi", "Finished Silo"
+  location   String // e.g. "RVP", "PGR COLD", "Murugan", "KNM Multi", "Finished Silo"
   weightKg   Int      @default(0)
   totalValue Decimal  @default(0) @db.Decimal(12, 2)
   updatedAt  DateTime @updatedAt
 }
 
-// Movement of black seed from a storage location (Rampalli/Murgan/Multi) to the
+// Movement of black seed from a storage location (Rampalli/Murugan/Multi) to the
 // process. Each transfer incurs two hamali legs (storage loading + process
 // unloading), and transfer transport at the destination bunker —
 // all 100% company-borne and capitalised into the seed's value at the process.
 model StockTransfer {
   id               String       @id @default(cuid())
   fromLocation     String
-  toLocation       String       @default("At process")
+  toLocation       String       @default("RVP")
   weightKg         Int
   lorryNumber      String?
   transportCharge  Decimal      @default(0) @db.Decimal(12, 2)
-  loadingHamali    Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg (₹80/t)
-  unloadingHamali  Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined (₹270/t)
+  loadingHamali    Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg — no longer charged, always 0
+  unloadingHamali  Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined
   bunkerPlace      BunkerPlace?
 
-  hamaliMargin     Decimal      @default(0) @db.Decimal(12, 2) // company profit (₹10/t on the unload leg)
+  hamaliMargin     Decimal      @default(0) @db.Decimal(12, 2) // company profit — no longer applicable, always 0
   // Bank-loan carrying interest capitalised into the seed at the process:
   // seedCostMoved × rate% × interestDays/365, where interestDays runs from the
   // earliest open loan's drawdown date to the transfer date.
   interestCharge   Decimal      @default(0) @db.Decimal(12, 2)
   interestDays     Int          @default(0)
   interestRatePct  Decimal      @default(0) @db.Decimal(6, 3)
-  seedCostMoved    Decimal      @default(0) @db.Decimal(12, 2) // value drawn from source silo (MAP)
-  movedValue       Decimal      @default(0) @db.Decimal(12, 2) // seedCostMoved + all transfer costs
+  seedCostMoved    Decimal      @default(0) @db.Decimal(12, 2) // seed value drawn from source, by price band (landed ex-GST), not MAP
+  movedValue       Decimal      @default(0) @db.Decimal(12, 2) // seedCostMoved + capitalised transfer costs (hamali + transport)
   transferDate     DateTime
   createdAt        DateTime     @default(now())
 }
@@ -561,8 +657,8 @@ model LoanRepayment {
 // capitalised into the shell's value at Rampalli.
 model ShellTransfer {
   id              String   @id @default(cuid())
-  fromLocation    String   @default("At process")
-  toLocation      String   @default("Rampalli")
+  fromLocation    String   @default("RVP")
+  toLocation      String   @default("PGR COLD")
   weightKg        Int
   lorryNumber     String?
   hamaliCharge    Decimal  @default(0) @db.Decimal(12, 2) // ₹333/t packing+loading+unloading
@@ -572,16 +668,54 @@ model ShellTransfer {
   createdAt       DateTime @default(now())
 }
 
+// A transfer of husk (a milling byproduct) from the factory to one of our storage
+// locations (PGR COLD / Murugan / KNM Multi). Like ShellTransfer this is only a
+// physical-movement + cost record; the ₹333/t hamali and fixed ₹500 transport are
+// expensed (see LedgerService.postHuskTransfer). Kept as its own model so husk
+// transfers stay separate from the shell/dust transfer list.
+model HuskTransfer {
+  id              String   @id @default(cuid())
+  fromLocation    String   @default("RVP")
+  toLocation      String // PGR COLD | Murugan | KNM Multi
+  weightKg        Int
+  lorryNumber     String?
+  hamaliCharge    Decimal  @default(0) @db.Decimal(12, 2) // ₹333/t packing+loading+unloading
+  transportCharge Decimal  @default(0) @db.Decimal(12, 2) // fixed ₹500
+  totalCost       Decimal  @default(0) @db.Decimal(12, 2) // hamali + transport
+  transferDate    DateTime
+  createdAt       DateTime @default(now())
+}
+
+// A purchase of pre-cleaner dust bought IN from an outside party (distinct from a
+// ShellTransfer, which only moves our own byproduct to storage). It raises a
+// supplier payable (Cr Accounts Payable) against a direct-expense cost
+// (Dr Pre Cleaner Dust Purchases) - see LedgerService.postDustPurchase.
+model DustPurchase {
+  id             String   @id @default(cuid())
+  party          Party    @relation(fields: [partyId], references: [id])
+  partyId        String
+  purchaseDate   DateTime
+  weightKg       Int
+  pricePerKg     Decimal  @db.Decimal(12, 2) // ₹ per kg
+  amount         Decimal  @db.Decimal(14, 2) // pricePerKg × weightKg (payable to the party)
+  lorryNumber    String?
+  invoiceNumber  String?
+  createdAt      DateTime @default(now())
+}
+
 model Payment {
   id             String        @id @default(cuid())
   date           DateTime
   amount         Decimal       @db.Decimal(12, 2)
-  type           String        // 'SUPPLIER', 'TRANSPORTER', 'BROKER', 'OTHER'
+  type           String        // 'SUPPLIER' | 'TRANSPORTER' | 'BROKER' | 'OTHER' | expense heads (DIESEL, HAMALI, ELECTRICITY, …) | 'DRAWINGS'
   partyId        String?
   party          Party?        @relation(fields: [partyId], references: [id])
+  purchaseId     String?
+  purchase       Purchase?     @relation(fields: [purchaseId], references: [id])
   brokerId       String?
   broker         Broker?       @relation(fields: [brokerId], references: [id])
   lorryNumber    String?
+  payee          String?       // free-text recipient for expense/drawings payments (e.g. "Shabri Reddy")
   reference      String?
   description    String?
   journalEntryId String?       @unique
@@ -593,12 +727,121 @@ model Receipt {
   id             String        @id @default(cuid())
   date           DateTime
   amount         Decimal       @db.Decimal(12, 2)
-  type           String        // 'BUYER', 'OTHER'
+  tdsAmount      Decimal?      @db.Decimal(12, 2) // TDS deducted by buyer (0.1% of sale value)
+  shortageAmount Decimal?      @db.Decimal(12, 2) // Kata / weight-shortage deduction
+  type           String        // 'BUYER' | 'OTHER' | income heads (GUNNY_BAGS_SALE, SCRAP_SALE, HAMALI_INCOME, INTEREST_INCOME)
   partyId        String?
   party          Party?        @relation(fields: [partyId], references: [id])
+  saleDispatchId String?
+  saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
+  payer          String?       // free-text payer for direct-income receipts (e.g. "gunny bag buyer")
   reference      String?
   description    String?
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone byproduct-pool expense/record reports. These are NOT posted to the
+// accounting ledger; they feed only the dashboard Husk (byproduct) P&L pool, each
+// netting against the pooled husk/T-waste/TPS/byproduct revenue.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum GunnyBagDirection {
+  PURCHASE
+  SALE
+}
+
+// Gunny (bardana) bags bought or sold. Net cost fed to the husk pool =
+// Σ PURCHASE.amount − Σ SALE.amount.
+model GunnyBagEntry {
+  id        String            @id @default(cuid())
+  date      DateTime
+  direction GunnyBagDirection
+  quantity  Int // number of bags
+  amount    Decimal           @db.Decimal(12, 2) // total ₹ for this entry
+  note      String?
+  createdAt DateTime          @default(now())
+}
+
+// Monthly electricity bill. `amount` (total bill) is the husk-pool expense; units
+// & month are captured for reference.
+model ElectricityBill {
+  id        String   @id @default(cuid())
+  date      DateTime
+  month     String // billed month, e.g. "2026-07"
+  units     Int      @default(0) // units consumed
+  amount    Decimal  @db.Decimal(12, 2) // total bill ₹ (the expense)
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+// Factory maintenance expense (QED AMC, repairs, etc.). Deducted from the pool.
+model MaintenanceExpense {
+  id          String   @id @default(cuid())
+  date        DateTime
+  description String // "QED AMC", "Factory repair", ...
+  amount      Decimal  @db.Decimal(12, 2)
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
+enum DrawingOwner {
+  SHABRI
+  REDDY
+}
+
+enum InterestType {
+  CC
+  TERM_LOAN
+}
+
+// Bank loan interest (cash-credit / term-loan) charged by the bank. Recorded from
+// the Reports → Interest page and deducted from the husk pool as an operating cost.
+model InterestCharge {
+  id        String       @id @default(cuid())
+  date      DateTime
+  type      InterestType
+  amount    Decimal      @db.Decimal(12, 2)
+  note      String?
+  createdAt DateTime     @default(now())
+}
+
+// Owner drawings (Shabri / Reddy). Deducted from the husk pool per owner request.
+model Drawing {
+  id        String       @id @default(cuid())
+  date      DateTime
+  owner     DrawingOwner
+  amount    Decimal      @db.Decimal(12, 2)
+  note      String?
+  createdAt DateTime     @default(now())
+}
+
+// Resolves a Tally ledger name to an ERP Party. Built from the unmapped queue as
+// the user confirms matches; consulted first by the importer before name-matching.
+model TallyLedgerMap {
+  id         String   @id @default(cuid())
+  ledgerName String   @unique // exact Tally ledger name
+  partyId    String?
+  party      Party?   @relation(fields: [partyId], references: [id])
+  note       String?
+  createdAt  DateTime @default(now())
+}
+
+// Parking lot for Payment/Receipt vouchers whose counterparty ledger couldn't be
+// matched to a Party. Surfaced in the UI for one-click manual mapping; never
+// guessed onto the wrong party.
+model TallyUnmappedVoucher {
+  id            String   @id @default(cuid())
+  tallyGuid     String   @unique
+  voucherType   String // "Payment" | "Receipt"
+  voucherNumber String?
+  date          DateTime
+  amount        Decimal  @db.Decimal(14, 2)
+  ledgerName    String // the unmatched counterparty ledger
+  narration     String?
+  alterId       Int      @default(0)
+  resolved      Boolean  @default(false)
+  createdAt     DateTime @default(now())
 }

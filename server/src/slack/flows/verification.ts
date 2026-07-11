@@ -1,6 +1,6 @@
 import type { App } from '@slack/bolt';
 import type { KnownBlock } from '@slack/types';
-import { crossVerify } from '../../lib/calc.js';
+import { crossVerify, hamaliSplit } from '../../lib/calc.js';
 import { resolveErpUser, NOT_LINKED_MESSAGE } from '../users.js';
 import { apiGet, apiPost, ErpApiError, type ErpUser } from '../erpClient.js';
 import { getDraft, setDraft, clearDraft } from '../state.js';
@@ -17,6 +17,8 @@ interface VerifyDraftData {
   partyKataKg: number;
   rvpKataKg: number;
   pricePerKg: number;
+  selfVehicleHamali: number;
+  selfVehicleKata: number;
   discountType?: DiscountType;
   discountValue: number;
 }
@@ -36,6 +38,10 @@ function toDraftData(purchase: any): VerifyDraftData {
     partyKataKg: so?.partyKataKg ?? 0,
     rvpKataKg: purchase.netWeightKg ?? 0,
     pricePerKg: Number(po?.pricePerKg ?? 0),
+    // Self vehicle: the lorry's ₹80/t hamali share comes off the party's payable.
+    selfVehicleHamali: so?.selfVehicle ? hamaliSplit(Number(purchase.hamaliCharge ?? 0)).lorry : 0,
+    // Self vehicle: the party also bears the full weighbridge/kata fee.
+    selfVehicleKata: so?.selfVehicle ? Number(purchase.kataFee ?? 0) : 0,
     discountValue: 0,
   };
 }
@@ -53,6 +59,8 @@ interface VerifyBreakdown {
   netBase: number;
   billingAmount: number;
   igst: number;
+  selfVehicleHamali: number;
+  selfVehicleKata: number;
   total: number;
   shortageKg: number;
   debitNote: number;
@@ -83,7 +91,7 @@ function computeBreakdown(d: VerifyDraftData): VerifyBreakdown {
   const netBase = Math.max(0, baseCost - kataDiffDeduction - discountAmount);
   const billingAmount = d.billingWeightKg * price;
   const igst = round2(billingAmount * 0.05);
-  const total = round2(netBase + igst);
+  const total = round2(netBase + igst - d.selfVehicleHamali - d.selfVehicleKata);
 
   const shortageKg = d.billingWeightKg - d.rvpKataKg;
   const toleranceExceeded = shortageKg > 0 && shortageKg / d.billingWeightKg > 0.005;
@@ -102,6 +110,8 @@ function computeBreakdown(d: VerifyDraftData): VerifyBreakdown {
     netBase,
     billingAmount,
     igst,
+    selfVehicleHamali: d.selfVehicleHamali,
+    selfVehicleKata: d.selfVehicleKata,
     total,
     shortageKg,
     debitNote,
@@ -127,6 +137,12 @@ function previewBlocks(d: VerifyDraftData): KnownBlock[] {
   }
   payLines.push(`Net base cost (payable):  ${rupees(b.netBase)}`);
   payLines.push(`IGST (5% on invoice billing ${rupees(b.billingAmount)}):  ${rupees(b.igst)}`);
+  if (b.selfVehicleHamali > 0) {
+    payLines.push(`Self-vehicle hamali (₹80/t, party's own lorry):  −${rupees(b.selfVehicleHamali)}`);
+  }
+  if (b.selfVehicleKata > 0) {
+    payLines.push(`Self-vehicle kata (weighbridge fee, party's own lorry):  −${rupees(b.selfVehicleKata)}`);
+  }
   payLines.push(`*Net balance payable:  ${rupees(b.total)}*`);
 
   const blocks: KnownBlock[] = [
@@ -158,7 +174,7 @@ function previewBlocks(d: VerifyDraftData): KnownBlock[] {
   if (b.debitNote > 0) {
     blocks.push(
       contextBlock(
-        `:warning: Shortage of ${b.shortageKg} kg exceeds the 0.5% tolerance — a *debit note of ${rupees(b.debitNote)}* will be raised to the supplier on approve.`
+        `:warning: Shortage of ${b.shortageKg} kg exceeds the 0.5% tolerance - a *debit note of ${rupees(b.debitNote)}* will be raised to the supplier on approve.`
       )
     );
   }
@@ -343,7 +359,7 @@ export function registerVerificationFlow(app: App): void {
         contextBlock(d.label),
         fieldsSection([
           { label: 'Billing / Party / RVP', value: `${d.billingWeightKg} / ${d.partyKataKg} / ${d.rvpKataKg} kg` },
-          { label: 'Reference', value: `${result.referenceKg ?? '—'} kg` },
+          { label: 'Reference', value: `${result.referenceKg ?? '-'} kg` },
           { label: 'Final weight', value: `${result.finalWeightKg} kg` },
           { label: 'Status', value: result.exempt ? 'Exempt' : 'Deduction applied' },
           { label: 'Price', value: `${rupees(Number(result.pricePerKg))}/kg` },
@@ -352,7 +368,7 @@ export function registerVerificationFlow(app: App): void {
         ]),
       ];
       if (result.debitNoteAmount) {
-        blocks.push(contextBlock(`:warning: *Debit note ${rupees(Number(result.debitNoteAmount))}* — ${result.debitNoteReason}`));
+        blocks.push(contextBlock(`:warning: *Debit note ${rupees(Number(result.debitNoteAmount))}* - ${result.debitNoteReason}`));
       }
       blocks.push(contextBlock('Stock value & ledger updated; verified batch auto-milled.'));
       await client.chat.update({ channel: b.channel.id, ts: b.message.ts, text: 'Verification approved', blocks });

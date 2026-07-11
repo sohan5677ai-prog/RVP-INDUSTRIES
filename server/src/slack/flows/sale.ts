@@ -58,8 +58,8 @@ function summaryBlocks(d: SaleDraftData, marginError?: string): KnownBlock[] {
   }
   blocks.push(
     fieldsSection([
-      { label: 'Buyer', value: d.buyerId ? d.buyerName ?? '—' : '_not set_' },
-      { label: 'Broker', value: d.brokerId ? d.brokerName ?? '—' : 'None' },
+      { label: 'Buyer', value: d.buyerId ? d.buyerName ?? '-' : '_not set_' },
+      { label: 'Broker', value: d.brokerId ? d.brokerName ?? '-' : 'None' },
       { label: 'Product', value: d.product },
       { label: 'Sale date', value: d.saleDate ? fmtDate(d.saleDate) : '_not set_' },
       { label: 'Tonnage', value: d.tonnageTonnes ? `${d.tonnageTonnes} t (${tonnesToKg(d.tonnageTonnes)} kg)` : '_not set_' },
@@ -81,7 +81,7 @@ function summaryBlocks(d: SaleDraftData, marginError?: string): KnownBlock[] {
     return blocks;
   }
   const missing = saleMissing(d);
-  if (missing.length > 0) blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — use *Edit*.`));
+  if (missing.length > 0) blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} - use *Edit*.`));
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
   return blocks;
 }
@@ -90,7 +90,7 @@ function summaryBlocks(d: SaleDraftData, marginError?: string): KnownBlock[] {
 function editModal(d: SaleDraftData, channel: string, messageTs?: string) {
   const isCreate = !messageTs;
   const brokerOptions = [
-    { text: { type: 'plain_text', text: '— none —' }, value: 'NONE' },
+    { text: { type: 'plain_text', text: '- none -' }, value: 'NONE' },
     ...d.brokers.map((b) => ({ text: { type: 'plain_text', text: b.name.slice(0, 75) }, value: b.id })),
   ];
   return {
@@ -206,7 +206,7 @@ async function doCreate(key: string, draft: any, b: any, client: any, respond: a
       blocks: [
         headerBlock('✅ Sale Order created'),
         fieldsSection([
-          { label: 'Buyer', value: d.buyerName ?? '—' },
+          { label: 'Buyer', value: d.buyerName ?? '-' },
           { label: 'Product', value: d.product },
           { label: 'Tonnage', value: `${d.tonnageTonnes} t` },
           { label: 'Rate', value: `${rupees(d.pricePerKg!)}/kg` },

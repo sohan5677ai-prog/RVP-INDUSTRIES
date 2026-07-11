@@ -3,10 +3,9 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createShellTransferSchema } from '../schemas/purchase.schema.js';
 import { shellTransferCost } from '../lib/calc.js';
-import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 
-const SHELL_STORAGE = 'Rampalli';
+const SHELL_STORAGE = 'PGR COLD';
 
 export async function listShellTransfers(_req: Request, res: Response) {
   const transfers = await prisma.shellTransfer.findMany({
@@ -16,19 +15,22 @@ export async function listShellTransfers(_req: Request, res: Response) {
 }
 
 /**
- * Record a tamarind-shell transfer from the process to the Rampalli storage.
- * Bears a fixed hamali (₹333/t packing + loading + unloading) and a ₹500
- * transport — both capitalised into the shell's value at Rampalli, where it is
- * later sold.
+ * Record a tamarind-shell transfer from the process to another location. Shell is
+ * NOT held as a valued silo - this is only a physical-movement + cost record. The
+ * fixed hamali (₹333/t packing + loading + unloading) and transport are expensed
+ * (see LedgerService.postShellTransfer). Shell is later sold straight from the
+ * shared 10% "Pre Cleaner Husk & Tamarind" pool, like Waste.
  */
 export async function createShellTransfer(req: Request, res: Response) {
   const data = createShellTransferSchema.parse(req.body);
 
-  const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(data.weightKg);
+  const { getHamaliRate } = await import('./settings.controller.js');
+  const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(
+    data.weightKg,
+    await getHamaliRate('SHELL_TRANSFER')
+  );
 
   const transfer = await prisma.$transaction(async (tx) => {
-    await InventoryService.addShellInventory(tx, SHELL_STORAGE, data.weightKg, totalCost);
-
     const created = await tx.shellTransfer.create({
       data: {
         toLocation: SHELL_STORAGE,
@@ -55,26 +57,16 @@ export async function createShellTransfer(req: Request, res: Response) {
 }
 
 /**
- * Reverse a shell transfer: draw the weight back out of the Rampalli silo. Only
- * possible while that stock is still on hand (not yet sold). The journal entry is
- * left in place for audit.
+ * Reverse a shell transfer. Shell is no longer a valued silo, so this just removes
+ * the movement record and reverses its cost posting. The transfer's expense
+ * journal entry is deleted so the P/L is corrected.
  */
 export async function deleteShellTransfer(req: Request, res: Response) {
   const transfer = await prisma.shellTransfer.findUnique({ where: { id: req.params.id } });
   if (!transfer) throw new HttpError(404, 'Shell transfer not found');
 
-  const silo = await prisma.siloInventory.findFirst({
-    where: { itemType: 'TAMARIND_SHELL', location: transfer.toLocation },
-  });
-  if (!silo || silo.weightKg < transfer.weightKg) {
-    throw new HttpError(
-      400,
-      `Cannot reverse: ${transfer.toLocation} no longer holds ${transfer.weightKg} kg of shell (already sold)`
-    );
-  }
-
   await prisma.$transaction(async (tx) => {
-    await InventoryService.consumeShellInventory(tx, transfer.toLocation, transfer.weightKg);
+    await tx.journalEntry.deleteMany({ where: { reference: `SHELL-TRANSFER-${transfer.id}` } });
     await tx.shellTransfer.delete({ where: { id: transfer.id } });
   });
 

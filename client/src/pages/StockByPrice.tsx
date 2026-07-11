@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Loader2, Search, Tag, Factory, Wheat, Calculator,
   ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2,
-  ChevronRight, ChevronDown, Scale, ShoppingCart,
+  ChevronRight, ChevronDown, Scale,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { FreightRate } from '@/lib/types';
@@ -36,6 +36,8 @@ interface LotResponse {
   orderedKg: number;
   receivedKg: number; // seed left in lot after sales draw-down
   soldKg: number; // seed consumed from this lot by sales
+  // Which sale orders drew this lot's seed (date-aware allocation), for traceability.
+  consumedBy?: { saleDate: string; buyer: string; seedKg: number }[];
 }
 
 interface PriceBandResponse {
@@ -46,6 +48,8 @@ interface PriceBandResponse {
   remainingBlackKg: number; // arrived seed left after sales draw-down (≥ 0)
   remainingValue: number;
   pendingBlackKg: number; // still-coming (open PO) seed left after draw-down
+  pendingConsumableBlackKg: number; // the consumable portion of the still-coming seed
+  pendingBufferBlackKg: number; // the buffer portion of the still-coming seed
   pendingValue: number;
   shortfallBlackKg: number; // seed an arrived PO failed to deliver
   shortfallPappuKg: number; // consumable deficit beyond buffer (the NEGATIVE balance)
@@ -68,6 +72,8 @@ interface PriceBand {
   arrivedGrossKg: number; // gross arrived
   allocatedPappuKg: number; // consumable pappu committed to sale orders (the debit)
   pendingBlackKg: number; // still-coming seed left after draw-down
+  pendingConsumableBlackKg: number; // the consumable portion of the still-coming seed
+  pendingBufferBlackKg: number; // the buffer portion of the still-coming seed
   shortfallBlackKg: number; // seed an arrived PO failed to deliver
   availablePappuKg: number; // CONSUMABLE pappu on arrived seed
   committedPappuKg: number; // available + consumable pappu on pending seed
@@ -88,7 +94,7 @@ const PAPPU_CONSUMABLE = 0.8;
 const SEED_TO_CONSUMABLE = PAPPU_OUTTURN * PAPPU_CONSUMABLE;
 
 /**
- * Stock by Price — a pappu order planner driven by the black-seed cost basis.
+ * Stock by Price - a pappu order planner driven by the black-seed cost basis.
  *
  * Each price band is an account: black seed is a credit (arrived lorries + still-
  * coming PENDING PO tonnage) and committed pappu sales are a debit. Sales draw seed
@@ -124,8 +130,7 @@ export default function StockByPrice() {
     return (data?.bands ?? []).map((b) => {
       // Available = consumable pappu on arrived seed left after sales (no buffer).
       // Committed = available + consumable pappu on still-coming (pending) seed (has 20% buffer).
-      const availablePappuKg = b.remainingBlackKg * PAPPU_OUTTURN;
-      const committedPappuKg = availablePappuKg + (b.pendingBlackKg * SEED_TO_CONSUMABLE);
+      // Available and Committed are calculated at the bottom using the updated buffer logic.
       
       // Buffer is 20% of the GROSS black seed, but ONLY for pending / un-arrived orders.
       const rawBufferBlackKg = (b.lots || []).reduce((sum, l) => {
@@ -174,21 +179,27 @@ export default function StockByPrice() {
         }
       }
 
-      const bufferPappuKg = remainingBufferBlackKg * PAPPU_OUTTURN;
+        const availablePappuKg = b.remainingBlackKg * PAPPU_OUTTURN;
+        // Pending buffer is completely separated; we only count the consumable portion
+        const committedPappuKg = availablePappuKg + b.pendingConsumableBlackKg * PAPPU_OUTTURN;
+        const bufferPappuKg = remainingBufferBlackKg * PAPPU_OUTTURN;
+        const bufferBlackKg = remainingBufferBlackKg + b.pendingBufferBlackKg;
 
-      return {
-        blackPricePerKg: b.blackPricePerKg,
-        impliedPappuPrice: b.blackPricePerKg / PAPPU_OUTTURN,
-        lorries: b.lorries,
-        arrivedRemainingKg: b.remainingBlackKg,
-        arrivedGrossKg: b.arrivedBlackKg,
-        allocatedPappuKg: b.allocatedPappuKg,
-        pendingBlackKg: b.pendingBlackKg,
-        shortfallBlackKg: finalShortfallBlackKg,
-        availablePappuKg,
-        committedPappuKg,
-        bufferBlackKg: remainingBufferBlackKg,
-        bufferPappuKg,
+        return {
+          blackPricePerKg: b.blackPricePerKg,
+          impliedPappuPrice: b.blackPricePerKg / PAPPU_OUTTURN,
+          lorries: b.lorries,
+          arrivedRemainingKg: b.remainingBlackKg,
+          arrivedGrossKg: b.arrivedBlackKg,
+          allocatedPappuKg: b.allocatedPappuKg,
+          pendingBlackKg: b.pendingBlackKg,
+          pendingConsumableBlackKg: b.pendingConsumableBlackKg,
+          pendingBufferBlackKg: b.pendingBufferBlackKg,
+          shortfallBlackKg: finalShortfallBlackKg,
+          availablePappuKg,
+          committedPappuKg,
+          bufferBlackKg,
+          bufferPappuKg,
         shortfallPappuKg: finalShortfallPappuKg,
         value: b.remainingValue,
         pendingValue: b.pendingValue,
@@ -230,12 +241,22 @@ export default function StockByPrice() {
       ? bands.filter((b) => b.blackPricePerKg <= ceilingBlackPrice + 1e-6)
       : bands;
 
-    // COMMITTED pools arrived + pending seed; AVAILABLE pools arrived only.
+    // Two distinct bases - both now use the unified allocation's remaining values:
+    //  • AVAILABLE - arrived seed only (what can be milled and shipped today).
+    //  • COMMITTED - arrived + pending seed (includes still-coming PO seed).
+    // The unified allocation already drew sales expensive-first across both arrived
+    // and pending, so remaining values correctly reflect what's left.
     const useCommitted = plannerBasis === 'COMMITTED';
-    const availableBlackKg = eligible.reduce((s, b) => s + b.arrivedRemainingKg + (useCommitted ? b.pendingBlackKg : 0), 0);
-    const poolPappu = eligible.reduce((s, b) => s + (useCommitted ? b.committedPappuKg : b.availablePappuKg), 0);
-    const poolPending = eligible.reduce((s, b) => s + (b.pendingBlackKg * SEED_TO_CONSUMABLE), 0);
-    const eligibleValue = eligible.reduce((s, b) => s + b.value + (useCommitted ? b.pendingValue : 0), 0);
+    const availableBlackKg = eligible.reduce((s, b) => s + (useCommitted
+      ? b.arrivedRemainingKg + b.pendingBlackKg // Gross weight because b.pendingValue is gross value
+      : b.arrivedRemainingKg), 0);
+    const poolPappu = eligible.reduce((s, b) => s + (useCommitted
+      ? b.committedPappuKg
+      : b.availablePappuKg), 0);
+    const poolPendingPappu = eligible.reduce((s, b) => s + (b.pendingConsumableBlackKg * PAPPU_OUTTURN), 0);
+    const eligibleValue = eligible.reduce((s, b) => s + (useCommitted
+      ? b.value + b.pendingValue
+      : b.value), 0);
     const wacBlack = availableBlackKg > 0 ? eligibleValue / availableBlackKg : 0; // weighted-avg seed cost
     const wacPappuCost = wacBlack / PAPPU_OUTTURN; // weighted-avg cost per sellable kg
     const askedPappuKg = hasTonnage ? tonnage * 1000 : 0;
@@ -250,7 +271,7 @@ export default function StockByPrice() {
     
     return {
       ceilingBlackPrice, eligibleCount: eligible.length, availableBlackKg,
-      poolPappu, poolPending, wacBlack, wacPappuCost, askedPappuKg, blackRequiredKg,
+      poolPappu, poolPendingPappu, wacBlack, wacPappuCost, askedPappuKg, blackRequiredKg,
       seedShortfallKg, diff, fulfillmentPct, marginPerKg,
       isAllStock: !hasPrice
     };
@@ -266,20 +287,23 @@ export default function StockByPrice() {
 
   // At-process totals (net remaining = arrived seed − committed orders).
   const totalBlackKg = bands.reduce((s, b) => s + b.arrivedRemainingKg, 0);
-  const totalPendingBlackKg = bands.reduce((s, b) => s + b.pendingBlackKg, 0);
-  const committedBlackSeedKg = totalBlackKg + (totalPendingBlackKg * PAPPU_CONSUMABLE);
-  const totalReceivedKg = bands.reduce((s, b) => s + b.arrivedGrossKg, 0);
-  const totalAvailablePappuKg = bands.reduce((s, b) => s + b.availablePappuKg, 0);
-  const totalCommittedPappuKg = bands.reduce((s, b) => s + b.committedPappuKg, 0);
-  // Valuation counts bands with positive net stock + pending stock
+      const totalReceivedKg = bands.reduce((s, b) => s + b.arrivedGrossKg, 0);
+      // Committed black seed = seed on hand (arrived, net of sales) + pending consumable PO seed.
+      const totalPendingConsumableBlackKg = bands.reduce((s, b) => s + b.pendingConsumableBlackKg, 0);
+      const committedBlackKg = totalBlackKg + totalPendingConsumableBlackKg;
+      // Valuation counts bands with positive net stock + pending stock
   const totalValue = bands.reduce((s, b) => s + Math.max(0, b.value) + Math.max(0, b.pendingValue), 0);
   const totalPositiveBlackKg = bands.reduce((s, b) => s + Math.max(0, b.arrivedRemainingKg) + Math.max(0, b.pendingBlackKg), 0);
   const overallWacBlack = totalPositiveBlackKg > 0 ? totalValue / totalPositiveBlackKg : 0;
   const overallWacPappu = overallWacBlack / PAPPU_OUTTURN;
-  const totalBufferBlackKg = bands.reduce((s, b) => s + b.bufferBlackKg, 0);
-  const totalBufferPappuKg = bands.reduce((s, b) => s + b.bufferPappuKg, 0);
-  const totalShortfallPappuKg = bands.reduce((s, b) => s + b.shortfallPappuKg, 0);
 
+  // When a pappu price is entered, the Weighted Avg card narrows to only the
+  // eligible bands (seed at ≤ the break-even ceiling) - the same pool the planner
+  // costs against. With no price entered it stays the weighted average of ALL bands.
+  const usingEligibleWac = !!plan && !plan.isAllStock && plan.availableBlackKg > 0;
+  const displayedWacBlack = usingEligibleWac ? plan.wacBlack : overallWacBlack;
+  const displayedWacPappu = usingEligibleWac ? plan.wacPappuCost : overallWacPappu;
+      
   const q = search.trim().toLowerCase();
   const visible = bands.filter((b) => {
     // 2. Text Search
@@ -310,13 +334,6 @@ export default function StockByPrice() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Order Planner</h1>
-        <p className="text-muted-foreground">
-          Enter the pappu price and tonnage a customer asks for. All pappu figures are <span className="font-medium">consumable</span> (sellable)
-          tonnage: (seed - {((1 - PAPPU_CONSUMABLE) * 100).toFixed(0)}% buffer) × {PAPPU_OUTTURN} out-turn = {SEED_TO_CONSUMABLE.toFixed(2)} kg consumable per kg seed.
-          The planner pools every black-seed cost band at or below the break-even ceiling (pappu price × {PAPPU_OUTTURN.toFixed(2)}). Plan against{' '}
-          <span className="font-medium">Available</span> pappu (arrived seed only) or <span className="font-medium">Committed</span> (arrived + pending PO seed),
-          and see the shortage or excess and your margin on the weighted-average cost.
-        </p>
       </div>
 
       {/* ─── Order Planner ─────────────────────────────────────────────────── */}
@@ -362,7 +379,7 @@ export default function StockByPrice() {
                   <SelectItem value="__none__">No freight</SelectItem>
                   {freightRates?.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
-                      {r.destination} — {rupees(r.ratePerTonne)}/t
+                      {r.destination} - {rupees(r.ratePerTonne)}/t
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -426,11 +443,18 @@ export default function StockByPrice() {
                     <Wheat className="h-3 w-3" /> {plannerBasis === 'COMMITTED' ? 'Committed Pappu' : 'Available Pappu'}
                   </div>
                   <div className="text-xl font-bold text-sky-600 mt-1">{toTonnes(plan.poolPappu).toFixed(2)} MT</div>
-                  <div className="text-[10px] text-muted-foreground">from {toTonnes(plan.availableBlackKg).toFixed(2)} MT seed · {plan.eligibleCount} band{plan.eligibleCount === 1 ? '' : 's'} {plan.isAllStock ? '' : `≤ ${rupees(plan.ceilingBlackPrice)}`}</div>
-                  {plannerBasis === 'COMMITTED' && plan.poolPending > 0 && (
-                    <div className="text-[9px] text-sky-600/70 mt-1 font-medium">
-                      includes {toTonnes(plan.poolPending).toFixed(2)} MT from pending POs in these {plan.eligibleCount} bands
-                    </div>
+                  <div
+                    className="text-[10px] text-muted-foreground"
+                    title={plannerBasis === 'COMMITTED'
+                      ? 'Arrived + pending seed left in the eligible bands after existing commitments are drawn off the dearest seed first (price-order). This can differ from the physical Black Seed Remaining, which is arrived-first.'
+                      : 'Physical arrived seed left after commitments (arrived-first) - the same Black Seed Remaining shown below. Available Pappu = this seed × 0.6.'}
+                  >
+                    from {toTonnes(plan.availableBlackKg).toFixed(2)} MT eligible seed {plannerBasis === 'COMMITTED' ? '(dearest sold first)' : '(physical remaining)'} · {plan.eligibleCount} band{plan.eligibleCount === 1 ? '' : 's'} {plan.isAllStock ? '' : `≤ ${rupees(plan.ceilingBlackPrice)}`}
+                  </div>
+                  {plannerBasis === 'COMMITTED' && plan.poolPendingPappu > 0 && (
+                    <span className="text-muted-foreground block text-xs mt-1">
+                      includes {toTonnes(plan.poolPendingPappu).toFixed(2)} MT of pappu from pending POs in these {plan.eligibleCount} bands
+                    </span>
                   )}
                 </div>
 
@@ -438,11 +462,11 @@ export default function StockByPrice() {
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                     <Scale className="h-3 w-3" /> Asked
                   </div>
-                  <div className="text-xl font-bold mt-1">{hasTonnage ? `${tonnage.toFixed(2)} MT` : '—'}</div>
+                  <div className="text-xl font-bold mt-1">{hasTonnage ? `${tonnage.toFixed(2)} MT` : '-'}</div>
                   <div className="text-[10px] text-muted-foreground">{hasTonnage ? `needs ${toTonnes(plan.blackRequiredKg).toFixed(2)} MT seed` : 'enter tonnage'}</div>
                 </div>
 
-                {/* Shortage / Excess — the headline */}
+                {/* Shortage / Excess - the headline */}
                 {hasTonnage ? (
                   shortage > 0 ? (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
@@ -464,7 +488,7 @@ export default function StockByPrice() {
                 ) : (
                   <div className="rounded-lg border p-3">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Shortage / Excess</div>
-                    <div className="text-xl font-bold mt-1 text-muted-foreground">—</div>
+                    <div className="text-xl font-bold mt-1 text-muted-foreground">-</div>
                     <div className="text-[10px] text-muted-foreground">enter tonnage</div>
                   </div>
                 )}
@@ -475,7 +499,7 @@ export default function StockByPrice() {
                     <Factory className="h-3 w-3" /> Seed Needed
                   </div>
                   <div className={`text-xl font-bold mt-1 ${hasTonnage && shortage > 0 ? 'text-rose-600' : 'text-muted-foreground'}`}>
-                    {hasTonnage ? (shortage > 0 ? `${toTonnes(plan.seedShortfallKg).toFixed(2)} MT` : '0.00 MT') : '—'}
+                    {hasTonnage ? (shortage > 0 ? `${toTonnes(plan.seedShortfallKg).toFixed(2)} MT` : '0.00 MT') : '-'}
                   </div>
                   <div className={`text-[10px] ${hasTonnage && shortage > 0 ? 'text-rose-600/80' : 'text-muted-foreground'}`}>
                     {hasTonnage ? (shortage > 0 ? 'extra black seed to source' : 'order fully covered') : 'enter tonnage'}
@@ -488,7 +512,7 @@ export default function StockByPrice() {
                     {plan.marginPerKg >= 0 ? <ArrowUpRight className="h-3 w-3 text-emerald-500" /> : <ArrowDownRight className="h-3 w-3 text-rose-500" />} Margin
                   </div>
                   <div className={`text-xl font-bold mt-1 ${plan.availableBlackKg === 0 ? 'text-muted-foreground' : plan.marginPerKg >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {plan.availableBlackKg === 0 ? '—' : `${plan.marginPerKg >= 0 ? '+' : ''}${rupees(plan.marginPerKg)}/kg`}
+                    {plan.availableBlackKg === 0 ? '-' : `${plan.marginPerKg >= 0 ? '+' : ''}${rupees(plan.marginPerKg)}/kg`}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
                     {plan.availableBlackKg > 0 ? `sell − avg cost ${rupees(plan.wacPappuCost)}/kg` : 'no eligible stock'}
@@ -517,15 +541,18 @@ export default function StockByPrice() {
       </Card>
 
       {/* At-process summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Weighted Avg</CardTitle>
             <Tag className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-primary">{rupees(overallWacBlack)}/kg</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Implies {rupees(overallWacPappu)}/kg pappu cost</p>
+            <div className="text-2xl font-bold text-primary">{rupees(displayedWacBlack)}/kg</div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Implies {rupees(displayedWacPappu)}/kg pappu cost
+              {usingEligibleWac && <span className="block text-primary font-medium">eligible bands ≤ {rupees(plan!.ceilingBlackPrice)}/kg</span>}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -535,42 +562,21 @@ export default function StockByPrice() {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${totalBlackKg < 0 ? 'text-rose-600' : 'text-amber-600'}`}>{toTonnes(totalBlackKg).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">net of commitments · {toTonnes(totalReceivedKg).toFixed(2)} MT arrived</p>
+            <p className="text-[10px] text-muted-foreground mt-1">physical (arrived-first), net of commitments · {toTonnes(totalReceivedKg).toFixed(2)} MT arrived</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Available Pappu</CardTitle>
-            <Wheat className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${totalAvailablePappuKg < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{toTonnes(totalAvailablePappuKg).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Net from arrived seed − allocated orders · +{toTonnes(totalBufferPappuKg).toFixed(2)} MT pappu buffer
-              {totalShortfallPappuKg > 0 && <span className="block text-rose-600 font-medium">⚠ {toTonnes(totalShortfallPappuKg).toFixed(2)} MT shortfall deficit</span>}
-            </p>
-          </CardContent>
-        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Committed Black Seed</CardTitle>
-            <Factory className="h-4 w-4 text-indigo-500" />
+            <Factory className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-indigo-600">{toTonnes(committedBlackSeedKg).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Remaining + pending (w/ 20% buffer deducted)</p>
+            <div className="text-2xl font-bold text-orange-600">{toTonnes(committedBlackKg).toFixed(2)} MT</div>
+            <p className="text-[10px] text-muted-foreground mt-1">{toTonnes(totalBlackKg).toFixed(2)} MT on-hand + {toTonnes(totalPendingConsumableBlackKg).toFixed(2)} MT pending PO</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Committed Pappu</CardTitle>
-            <Wheat className="h-4 w-4 text-sky-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-sky-600">{toTonnes(totalCommittedPappuKg).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Available + pending PO pappu</p>
-          </CardContent>
-        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Committed Orders</CardTitle>
@@ -679,7 +685,7 @@ export default function StockByPrice() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-medium text-rose-600">
-                      {b.allocatedPappuKg > 0 ? `${toTonnes(b.allocatedPappuKg).toFixed(2)} MT` : '—'}
+                      {b.allocatedPappuKg > 0 ? `${toTonnes(b.allocatedPappuKg).toFixed(2)} MT` : '-'}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex flex-col items-end gap-1">
@@ -711,7 +717,7 @@ export default function StockByPrice() {
                             </span>
                             <span className="text-xs text-muted-foreground font-semibold">
                               {b.lorries} lorry(s)
-                              {plannerBasis === 'COMMITTED' && b.pendingBlackKg > 0 && <span className="text-amber-600"> · {toTonnes(b.pendingBlackKg).toFixed(2)} MT pending</span>}
+                              {b.pendingBlackKg > 0 && <span className="text-amber-600"> · {toTonnes(b.pendingBlackKg).toFixed(2)} MT pending</span>}
                               {b.shortfallBlackKg > 0 && <span className="text-rose-600"> · {toTonnes(b.shortfallBlackKg).toFixed(2)} MT short</span>}
                             </span>
                           </div>
@@ -731,30 +737,34 @@ export default function StockByPrice() {
                               </TableHeader>
                               <TableBody>
                                 {b.lots
-                                  .filter((l) => plannerBasis === 'COMMITTED' || l.kind !== 'PENDING')
                                   .map((l) => {
-                                  const isArrived = l.kind === 'ARRIVED';
-                                  const isShortfall = l.kind === 'SHORTFALL';
-                                  const consumable = Math.round(l.receivedKg * (isArrived ? PAPPU_OUTTURN : SEED_TO_CONSUMABLE));
-                                  // The DB stores receivedKg and soldKg as Gross Seed.
-                                  // Buffer is calculated only on the remaining seed (receivedKg).
-                                  const bufferBlack = (isArrived || isShortfall) ? 0 : Math.round(l.receivedKg * (1 - PAPPU_CONSUMABLE));
-                                  const bufferPappu = (isArrived || isShortfall) ? 0 : Math.round(l.receivedKg * PAPPU_OUTTURN * (1 - PAPPU_CONSUMABLE));
-                                  
-                                  // For arrived, no buffer is deducted. For pending, 20% is deducted.
-                                  // For shortfall, we just show the raw gross gap.
-                                  const netRemainingSeed = isShortfall ? l.receivedKg : Math.round(l.receivedKg * (isArrived ? 1 : PAPPU_CONSUMABLE));
-                                  const netSoldSeed = l.soldKg; // We now show Gross Sold for all to avoid confusion
+                                      const isArrived = l.kind === 'ARRIVED';
+                                      const isShortfall = l.kind === 'SHORTFALL';
+                                      
+                                      // For PENDING lots, the buffer is fixed based on the original ordered/gross amount,
+                                      // so that it doesn't disappear when consumable seed is drawn down.
+                                      const originalGross = isArrived ? l.receivedKg : l.receivedKg + l.soldKg;
+                                      const bufferBlack = (isArrived || isShortfall) ? 0 : Math.round(originalGross * (1 - PAPPU_CONSUMABLE));
+                                      
+                                      // Consumable remaining is simply whatever is left minus the buffer
+                                      const remainingConsumableBlack = (isArrived || isShortfall) ? l.receivedKg : Math.max(0, l.receivedKg - bufferBlack);
+                                      const consumable = Math.round(remainingConsumableBlack * PAPPU_OUTTURN);
+                                      const bufferPappu = (isArrived || isShortfall) ? 0 : Math.round(bufferBlack * PAPPU_OUTTURN);
+                                      
+                                      // For arrived, no buffer is deducted. For pending, 20% is deducted.
+                                      // For shortfall, we just show the raw gross gap.
+                                      const netRemainingSeed = isShortfall ? l.receivedKg : Math.round(remainingConsumableBlack);
+                                      const netSoldSeed = l.soldKg; // We now show Gross Sold for all to avoid confusion
                                   // Per-lot shortfall deficit
                                   const gapPappu = l.receivedKg * PAPPU_OUTTURN;
-                                  const lotBuffer = l.orderedKg * PAPPU_OUTTURN * (1 - PAPPU_CONSUMABLE);
-                                  const deficit = Math.round(Math.max(0, gapPappu - lotBuffer));
+                                  // const lotBuffer = l.orderedKg * PAPPU_OUTTURN * (1 - PAPPU_CONSUMABLE);
+                                  // const deficit = Math.round(Math.max(0, gapPappu - lotBuffer));
                                   return (
                                     <TableRow key={l.purchaseId} className="hover:bg-muted/20">
                                       <TableCell className="py-2 text-xs">{shortDate(l.date)}</TableCell>
                                       <TableCell className="py-2 text-xs font-medium text-foreground">{l.partyName}</TableCell>
-                                      <TableCell className="py-2 text-xs font-mono">{l.lorryNumber || '—'}</TableCell>
-                                      <TableCell className="py-2 text-xs font-mono">{l.poNumber || '—'}</TableCell>
+                                      <TableCell className="py-2 text-xs font-mono">{l.lorryNumber || '-'}</TableCell>
+                                      <TableCell className="py-2 text-xs font-mono">{l.poNumber || '-'}</TableCell>
                                       <TableCell className="py-2 text-xs">
                                         {l.kind === 'ARRIVED' && <Badge variant="outline" className="text-[10px] border-emerald-200 text-emerald-700 bg-emerald-50">Arrived</Badge>}
                                         {l.kind === 'PENDING' && <Badge variant="outline" className="text-[10px] border-amber-200 text-amber-700 bg-amber-50">Pending</Badge>}
@@ -772,8 +782,26 @@ export default function StockByPrice() {
                                           <span className="block text-[10px] text-muted-foreground font-normal">+{kg(bufferBlack)} seed buffer</span>
                                         ) : null}
                                       </TableCell>
-                                      <TableCell className="py-2 text-xs text-right text-muted-foreground">
-                                        {l.soldKg > 0 ? kg(netSoldSeed) : '—'}
+                                      <TableCell className="py-2 text-xs text-right text-muted-foreground align-top">
+                                        {l.soldKg > 0 ? kg(netSoldSeed) : '-'}
+                                        {l.kind === 'PENDING' && l.soldKg > 0 && (
+                                          <span className="block text-[10px] text-amber-600 font-normal">
+                                            −{kg(Math.round(l.soldKg * SEED_TO_CONSUMABLE))} pappu consumed
+                                          </span>
+                                        )}
+                                        {(isArrived || l.kind === 'PENDING') && l.consumedBy && l.consumedBy.length > 0 && (
+                                          <span className="mt-1 block space-y-0.5 text-[10px] font-normal">
+                                            {l.consumedBy.slice(0, 6).map((c, i) => (
+                                              <span key={i} className="block text-muted-foreground">
+                                                <span className="text-sky-700">{kg(c.seedKg)}</span> → {c.buyer}
+                                                <span className="text-muted-foreground/70"> · {shortDate(c.saleDate)}</span>
+                                              </span>
+                                            ))}
+                                            {l.consumedBy.length > 6 && (
+                                              <span className="block text-muted-foreground/70">+{l.consumedBy.length - 6} more order(s)</span>
+                                            )}
+                                          </span>
+                                        )}
                                       </TableCell>
                                       <TableCell className="py-2 text-xs text-right font-semibold">
                                         {l.kind === 'SHORTFALL' ? (

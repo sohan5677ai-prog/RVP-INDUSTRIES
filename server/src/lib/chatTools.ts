@@ -118,7 +118,7 @@ export const toolDeclarations: FunctionDeclaration[] = [
   },
   {
     name: 'get_recent_stock_transfers',
-    description: 'Get recent internal stock transfers of black seeds from storage locations (Rampalli, Murgan, Multi) to process',
+    description: 'Get recent internal stock transfers of black seeds from storage locations (Rampalli, Murugan, Multi) to process',
     parameters: {
       type: Type.OBJECT,
       properties: {

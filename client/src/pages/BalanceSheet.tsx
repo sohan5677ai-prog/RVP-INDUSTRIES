@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { cn } from '@/lib/utils';
 
 function Money({ amount, className }: { amount: number; className?: string }) {
-  if (Math.abs(amount) < 0.005) return <span className={cn('text-muted-foreground', className)}>—</span>;
+  if (Math.abs(amount) < 0.005) return <span className={cn('text-muted-foreground', className)}>-</span>;
   const neg = amount < 0;
   return (
     <span className={cn('font-mono tabular-nums', neg && 'text-rose-600 dark:text-rose-400', className)}>
@@ -82,7 +82,7 @@ export default function BalanceSheet() {
       <PageHeader
         icon={Scale}
         title="Balance Sheet"
-        description="Tally-style statement of financial position — opening balances plus live movements."
+        description="Tally-style statement of financial position - opening balances plus live movements."
       />
 
       {isLoading ? (
@@ -97,7 +97,7 @@ export default function BalanceSheet() {
             <p className="text-sm text-muted-foreground">As at {shortDate(data.asOf)}</p>
             {data.totals.balanced ? (
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" /> Balanced — both sides tie to {rupees(data.totals.assets)}
+                <CheckCircle2 className="h-4 w-4" /> Balanced - both sides tie to {rupees(data.totals.assets)}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400">

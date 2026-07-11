@@ -18,7 +18,7 @@ type GroupDef = {
 };
 
 const GROUPS: GroupDef[] = [
-  // ── Balance Sheet — Liabilities side ──
+  // ── Balance Sheet - Liabilities side ──
   { name: 'Capital Account', nature: 'LIABILITIES', statement: 'BALANCE_SHEET', sortOrder: 10 },
   { name: 'Reserves & Surplus', parent: 'Capital Account', nature: 'LIABILITIES', statement: 'BALANCE_SHEET', sortOrder: 11 },
   { name: 'Loans (Liability)', nature: 'LIABILITIES', statement: 'BALANCE_SHEET', sortOrder: 20 },
@@ -31,7 +31,7 @@ const GROUPS: GroupDef[] = [
   { name: 'Sundry Creditors', parent: 'Current Liabilities', nature: 'LIABILITIES', statement: 'BALANCE_SHEET', sortOrder: 33 },
   { name: 'Profit & Loss A/c', nature: 'LIABILITIES', statement: 'BALANCE_SHEET', sortOrder: 40 },
 
-  // ── Balance Sheet — Assets side ──
+  // ── Balance Sheet - Assets side ──
   { name: 'Fixed Assets', nature: 'ASSETS', statement: 'BALANCE_SHEET', sortOrder: 50 },
   { name: 'Investments', nature: 'ASSETS', statement: 'BALANCE_SHEET', sortOrder: 60 },
   { name: 'Current Assets', nature: 'ASSETS', statement: 'BALANCE_SHEET', sortOrder: 70 },
@@ -95,7 +95,7 @@ const LEDGERS: LedgerDef[] = [
   { code: '20255', name: 'Surya Roadlines Payable', type: 'LIABILITY', group: 'Sundry Creditors', sortOrder: 7 },
   { code: '20270', name: 'Kata Fee Payable', type: 'LIABILITY', group: 'Sundry Creditors', sortOrder: 8 },
 
-  // ── Profit & Loss A/c — accumulated retained earnings brought forward
+  // ── Profit & Loss A/c - accumulated retained earnings brought forward
   //    (₹12,74,19,493.20). Current-period live profit is added on top by the report. ──
   { code: '31000', name: 'Profit & Loss A/c (Brought Forward)', type: 'EQUITY', group: 'Profit & Loss A/c', opening: -127419493.20, sortOrder: 1 },
 
@@ -131,10 +131,27 @@ const LEDGERS: LedgerDef[] = [
   { code: '50030', name: 'Factory Overhead Expense', type: 'EXPENSE', group: 'Direct Expenses', sortOrder: 3 },
   { code: '50040', name: 'Yield Variance Expense / Loss', type: 'EXPENSE', group: 'Direct Expenses', sortOrder: 4 },
   { code: '50090', name: 'Transport Expense (Internal)', type: 'EXPENSE', group: 'Direct Expenses', sortOrder: 5 },
+  { code: '50120', name: 'Pre Cleaner Dust Purchases', type: 'EXPENSE', group: 'Direct Expenses', sortOrder: 6 },
   { code: '50050', name: 'Freight Outward (Selling Expense)', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 1 },
   { code: '50070', name: 'Loading Hamali Expense (Selling)', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 2 },
   { code: '50080', name: 'Interest Expense', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 3 },
   { code: '50100', name: 'Sales Shortage & Allowances', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 4 },
+
+  // ── Direct-cash expense heads (populated from the Payments screen) ──
+  { code: '50250', name: 'Hamali Expense (Paid)', type: 'EXPENSE', group: 'Direct Expenses', sortOrder: 20 },
+  { code: '50240', name: 'Packing Material - Gunny Bags', type: 'EXPENSE', group: 'Direct Expenses', sortOrder: 21 },
+  { code: '50210', name: 'Diesel & Fuel', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 20 },
+  { code: '50260', name: 'Transport Fee', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 21 },
+  { code: '50220', name: 'Electricity Charges', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 22 },
+  { code: '50230', name: 'Repairs & Maintenance', type: 'EXPENSE', group: 'Indirect Expenses', sortOrder: 23 },
+
+  // ── Direct-cash income heads (populated from the Receipts screen) ──
+  { code: '40110', name: 'Gunny Bag Sales', type: 'REVENUE', group: 'Indirect Incomes', sortOrder: 20 },
+  { code: '40120', name: 'Scrap & Waste Sales', type: 'REVENUE', group: 'Indirect Incomes', sortOrder: 21 },
+  { code: '40130', name: 'Interest Income', type: 'REVENUE', group: 'Indirect Incomes', sortOrder: 22 },
+
+  // ── Proprietor drawings (contra-capital; debited when owners withdraw cash) ──
+  { code: '30030', name: 'Proprietor Drawings', type: 'EQUITY', group: 'Capital Account', sortOrder: 3 },
 ];
 
 // Decommissioned heads → where their historical journal lines are re-pointed so
@@ -151,7 +168,7 @@ const DEPRECATED_REPOINT: Record<string, string> = {
 };
 
 async function seedChartOfAccounts() {
-  // 1. Groups — primaries first so sub-groups can resolve their parent id.
+  // 1. Groups - primaries first so sub-groups can resolve their parent id.
   const groupId = new Map<string, string>();
   for (const g of GROUPS.filter((x) => !x.parent)) {
     const rec = await prisma.accountGroup.upsert({
@@ -171,7 +188,7 @@ async function seedChartOfAccounts() {
     groupId.set(g.name, rec.id);
   }
 
-  // 2. Ledgers — upsert with group, opening balance, and reactivate (not deprecated).
+  // 2. Ledgers - upsert with group, opening balance, and reactivate (not deprecated).
   for (const l of LEDGERS) {
     const gid = groupId.get(l.group);
     if (!gid) throw new Error(`Seed error: group "${l.group}" not found for ledger ${l.code}`);
@@ -196,7 +213,7 @@ async function seedChartOfAccounts() {
     });
   }
 
-  // 3. Decommission removed heads — re-point any historical lines, then flag.
+  // 3. Decommission removed heads - re-point any historical lines, then flag.
   for (const [fromCode, toCode] of Object.entries(DEPRECATED_REPOINT)) {
     const from = await prisma.account.findUnique({ where: { code: fromCode } });
     if (!from) continue;

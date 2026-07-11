@@ -26,6 +26,7 @@ const data = [
   { date: '2026-06-17', party: 'MSV Vasanth', lorryNo: 'AP39UX9105', invoice: 'RVP/65/26-27', tons: 15.55, price: 7.00 },
   { date: '2026-06-19', party: 'Balaji Challakere', lorryNo: 'TN34W3799', invoice: 'RVP/66/26-27', tons: 25.61, price: 6.95 },
   { date: '2026-06-24', party: 'Balaji Challakere', lorryNo: 'TN52D5808', invoice: 'RVP/67/26-27', tons: 25.50, price: 7.10 },
+  { date: '2026-06-25', party: 'MSV Vasanth', lorryNo: 'AP39UX9105', invoice: 'RVP/70/26-27', tons: 16.02, price: 7.30 },
 ];
 
 async function main() {

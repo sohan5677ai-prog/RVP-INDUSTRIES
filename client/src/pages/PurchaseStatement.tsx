@@ -17,7 +17,7 @@ type PurchaseDetails = Purchase & {
 
 // Formats a number with Indian style commas
 function fmt(val: number | string | null | undefined): string {
-  if (val == null) return '—';
+  if (val == null) return '-';
   const num = typeof val === 'string' ? Number(val) : val;
   return num.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
@@ -58,13 +58,19 @@ export default function PurchaseStatement() {
   const clientKata = verification.referenceKg;
   const ratePerKg = Number(verification.pricePerKg);
 
+  const hasGst = stockIn.purchaseOrder.hasGst ?? false;
   const baseAmount = Math.round(clientKata * ratePerKg);
-  const igstAmount = Math.round(baseAmount * 0.05);
+  const igstAmount = hasGst ? Math.round(baseAmount * 0.05) : 0;
   const totalAmount = baseAmount + igstAmount;
 
   const diffKg = verification.diffKg;
   const deductKg = Math.max(0, diffKg - 80);
   const kataDiffAmount = Math.round(deductKg * ratePerKg);
+
+  // Self-vehicle hamali recovered from the party (₹80/t on their own lorry).
+  const selfVehicleHamali = Math.round(Number(verification.selfVehicleHamali ?? 0));
+  // Self-vehicle kata (weighbridge fee) recovered from the party on their own lorry.
+  const selfVehicleKata = Math.round(Number(verification.selfVehicleKata ?? 0));
 
   const balancePayable = Math.round(Number(verification.totalAmount));
 
@@ -118,7 +124,7 @@ export default function PurchaseStatement() {
               <span className="p-2 font-semibold flex-1 text-right pr-4 bg-neutral-50/50">{fmt(rvpKata)} kg</span>
             </div>
             <div className="flex">
-              <span className="w-32 font-bold border-r border-black p-2 bg-neutral-50">Client Kata</span>
+              <span className="w-32 font-bold border-r border-black p-2 bg-neutral-50">Party Kata</span>
               <span className="p-2 font-semibold flex-1 text-right pr-4 bg-neutral-50/50">{fmt(clientKata)} kg</span>
             </div>
           </div>
@@ -142,11 +148,13 @@ export default function PurchaseStatement() {
             <div className="col-span-2 p-2.5 text-right font-medium">{fmt(baseAmount)}</div>
           </div>
 
-          {/* IGST Row */}
-          <div className="grid grid-cols-12 border-b border-black">
-            <div className="col-span-10 border-r border-black p-2.5 pl-6 text-neutral-700">Add : IGST (5%)</div>
-            <div className="col-span-2 p-2.5 text-right">{fmt(igstAmount)}</div>
-          </div>
+          {/* IGST Row - only for GST-invoice purchases */}
+          {hasGst && (
+            <div className="grid grid-cols-12 border-b border-black">
+              <div className="col-span-10 border-r border-black p-2.5 pl-6 text-neutral-700">Add : IGST (5%)</div>
+              <div className="col-span-2 p-2.5 text-right">{fmt(igstAmount)}</div>
+            </div>
+          )}
 
           {/* Total Row */}
           <div className="grid grid-cols-12 font-semibold border-b border-black bg-neutral-50/50">
@@ -166,12 +174,36 @@ export default function PurchaseStatement() {
               {deductKg > 0 ? fmt(deductKg) : '0'}
             </div>
             <div className="col-span-2 border-r border-black p-2.5 text-right flex items-center justify-end">
-              {deductKg > 0 ? fmt(ratePerKg) : '—'}
+              {deductKg > 0 ? fmt(ratePerKg) : '-'}
             </div>
             <div className="col-span-2 p-2.5 text-right text-red-700 flex items-center justify-end">
-              {deductKg > 0 ? `(${fmt(kataDiffAmount)})` : '—'}
+              {deductKg > 0 ? `(${fmt(kataDiffAmount)})` : '-'}
             </div>
           </div>
+
+          {/* Self-vehicle Hamali Row - only when the party used their own lorry */}
+          {selfVehicleHamali > 0 && (
+            <div className="grid grid-cols-12 border-b border-neutral-300">
+              <div className="col-span-10 border-r border-black p-2.5 pl-4 flex items-center">
+                Less : Self-vehicle hamali (₹80/t on party's own lorry)
+              </div>
+              <div className="col-span-2 p-2.5 text-right text-red-700 flex items-center justify-end">
+                ({fmt(selfVehicleHamali)})
+              </div>
+            </div>
+          )}
+
+          {/* Self-vehicle Kata Row - weighbridge fee on the party's own lorry */}
+          {selfVehicleKata > 0 && (
+            <div className="grid grid-cols-12 border-b border-neutral-300">
+              <div className="col-span-10 border-r border-black p-2.5 pl-4 flex items-center">
+                Less : Self-vehicle kata (weighbridge fee on party's own lorry)
+              </div>
+              <div className="col-span-2 p-2.5 text-right text-red-700 flex items-center justify-end">
+                ({fmt(selfVehicleKata)})
+              </div>
+            </div>
+          )}
 
           {/* Balance Payable Row */}
           <div className="grid grid-cols-12 font-bold bg-neutral-100 text-base">
@@ -180,13 +212,9 @@ export default function PurchaseStatement() {
           </div>
         </div>
 
-        {/* Footer Signature Elements */}
-        <div className="mt-16 grid grid-cols-2 text-xs pt-8 border-t border-dotted border-neutral-400">
-          <div className="space-y-12">
-            <p className="font-semibold text-neutral-500">Prepared By:</p>
-            <p className="border-t border-neutral-300 w-32 pt-1 font-medium text-neutral-700">Operator Sign</p>
-          </div>
-          <div className="space-y-12 text-right justify-self-end">
+        {/* Footer Signature */}
+        <div className="mt-16 flex justify-end text-xs pt-8 border-t border-dotted border-neutral-400">
+          <div className="space-y-12 text-right">
             <p className="font-semibold text-neutral-500">For RVP Industries:</p>
             <p className="border-t border-neutral-300 w-32 pt-1 font-medium text-neutral-700 text-center">Authorized Sign</p>
           </div>

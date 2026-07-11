@@ -40,7 +40,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import type { Commodity } from '@/lib/types';
+import { Combobox } from '@/components/ui/combobox';
+import type { Commodity, FreightRate } from '@/lib/types';
 
 const COMMODITIES: { value: Commodity; label: string }[] = [
   { value: 'BLACK_SEED', label: 'Black Seed' },
@@ -51,23 +52,33 @@ const COMMODITIES: { value: Commodity; label: string }[] = [
   { value: 'TPS_BROKENS', label: 'TPS (Brokens)' },
 ];
 
+const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
+  'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
+  'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana',
+  'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+  'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
+  'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry'
+].map(s => ({ value: s, label: s }));
+
 const partySchema = z.object({
   name: z.string().min(1, 'Name is required'),
   type: z.enum(['SUPPLIER', 'BUYER', 'BOTH']),
   phone: z.string().optional(),
   address: z.string().optional(),
   state: z.string().optional(),
+  pincode: z.string().optional(),
   gstin: z.string().optional(),
   destination: z.string().optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
-  commodities: z.array(z.string()).default([]),
+  commodities: z.array(z.string()),
 });
 type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
-  name: '', type: 'SUPPLIER', phone: '', address: '', state: '', gstin: '', destination: '',
+  name: '', type: 'SUPPLIER', phone: '', address: '', state: '', pincode: '', gstin: '', destination: '',
   bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
@@ -85,6 +96,18 @@ export default function Parties() {
     queryKey: ['parties'],
     queryFn: () => api<Party[]>('/parties'),
   });
+
+  // Delivery destinations come from the Settings → Freight Rates rows, so adding a
+  // destination there makes it selectable here (and vice-versa - single source of truth).
+  const { data: freightRates } = useQuery({
+    queryKey: ['freight-rates'],
+    queryFn: () => api<FreightRate[]>('/settings/freight-rates'),
+  });
+  const destinationOptions = (freightRates ?? []).map((r) => ({
+    value: r.destination,
+    label: r.destination,
+    hint: `₹${Number(r.ratePerTonne).toLocaleString('en-IN')}/t`,
+  }));
 
   const uniqueStates = Array.from(new Set(parties?.map(p => p.state).filter(Boolean))).sort() as string[];
 
@@ -122,6 +145,7 @@ export default function Parties() {
       phone: p.phone ?? '',
       address: p.address ?? '',
       state: p.state ?? '',
+      pincode: p.pincode ?? '',
       gstin: p.gstin ?? '',
       destination: p.destination ?? '',
       bankAccountNumber: p.bankAccountNumber ?? '',
@@ -243,17 +267,17 @@ export default function Parties() {
                 <TableCell>
                   <Badge variant="secondary">{p.type}</Badge>
                 </TableCell>
-                <TableCell>{p.phone ?? '—'}</TableCell>
-                <TableCell>{p.address ?? '—'}</TableCell>
-                <TableCell>{p.state ?? '—'}</TableCell>
-                <TableCell className="font-mono text-xs">{p.gstin ?? '—'}</TableCell>
+                <TableCell>{p.phone ?? '-'}</TableCell>
+                <TableCell>{p.address ?? '-'}</TableCell>
+                <TableCell>{p.state ?? '-'}</TableCell>
+                <TableCell className="font-mono text-xs">{p.gstin ?? '-'}</TableCell>
                 <TableCell>
                   {p.bankName || p.bankAccountNumber || p.bankIfsc ? (
                     <div className="text-xs">
-                      <div className="font-medium">{p.bankName ?? '—'}</div>
-                      <div className="text-muted-foreground font-mono">{p.bankAccountNumber ?? '—'} · {p.bankIfsc ?? '—'}</div>
+                      <div className="font-medium">{p.bankName ?? '-'}</div>
+                      <div className="text-muted-foreground font-mono">{p.bankAccountNumber ?? '-'} · {p.bankIfsc ?? '-'}</div>
                     </div>
-                  ) : '—'}
+                  ) : '-'}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
@@ -387,17 +411,34 @@ export default function Parties() {
                   control={form.control}
                   name="state"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>State</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Andhra Pradesh" {...field} />
-                      </FormControl>
+                    <FormItem className="flex flex-col justify-end">
+                      <FormLabel className="mb-1">State</FormLabel>
+                      <Combobox
+                        options={INDIAN_STATES}
+                        value={field.value ?? ''}
+                        onChange={field.onChange}
+                        placeholder="Select state..."
+                        searchPlaceholder="Search states..."
+                      />
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="pincode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Pincode</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 517247" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="gstin"
@@ -415,15 +456,27 @@ export default function Parties() {
                   <FormField
                     control={form.control}
                     name="destination"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Delivery destination</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. Surat (for buyers)" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+                    render={({ field }) => {
+                      // Keep an already-saved destination selectable even if it's no
+                      // longer in the freight-rate list.
+                      const opts = field.value && !destinationOptions.some((o) => o.value === field.value)
+                        ? [{ value: field.value, label: field.value }, ...destinationOptions]
+                        : destinationOptions;
+                      return (
+                        <FormItem className="flex flex-col justify-end">
+                          <FormLabel className="mb-1">Delivery destination</FormLabel>
+                          <Combobox
+                            options={opts}
+                            value={field.value ?? ''}
+                            onChange={field.onChange}
+                            placeholder="Select destination…"
+                            searchPlaceholder="Search destinations…"
+                            emptyText="No destinations - add them in Settings → Freight Rates."
+                          />
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
                   />
                 )}
               </div>

@@ -1,15 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Search, Warehouse, IndianRupee, TrendingUp, Calculator, Factory, Scale, Wheat, ArrowDownRight, ArrowUpRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Loader2, Search, Warehouse, IndianRupee, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { StockTransfer, FreightRate } from '@/lib/types';
+import type { StockTransfer } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface BlackSeedRow {
   purchaseId: string;
@@ -18,6 +17,7 @@ interface BlackSeedRow {
   value: number;
   valueExclGstAndHamali: number;
   location: string;
+  isTransferredIn?: boolean; // backend-synthesized transfer-in row; recomputed here, so excluded
 }
 
 interface BlackSeedStockResponse {
@@ -29,10 +29,10 @@ interface BlackSeedStockResponse {
 }
 
 // Pooled model: pappu is 60% of black seed, so each kg of pappu sold consumes
-// (1 / 0.60) kg of black seed from the pool — drawn oldest-date-first (FIFO).
+// (1 / 0.60) kg of black seed from the pool - drawn oldest-date-first (FIFO).
 const PAPPU_OUTTURN = 0.6;
 
-const STORAGE_LOCATIONS = ['Rampalli', 'Murgan', 'Multi'];
+const STORAGE_LOCATIONS = ['PGR COLD', 'Murugan', 'KNM Multi'];
 
 interface DateRow {
   date: string; // YYYY-MM-DD
@@ -92,9 +92,6 @@ export default function StockByDate() {
   const [search, setSearch] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [pappuPriceInput, setPappuPriceInput] = useState('');
-  const [tonnageInput, setTonnageInput] = useState('');
-  const [freightId, setFreightId] = useState('__none__');
 
   const { data, isLoading: loadingSeed } = useQuery({
     queryKey: ['black-seed-stock'],
@@ -106,12 +103,6 @@ export default function StockByDate() {
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
   });
 
-  const { data: freightRates } = useQuery({
-    queryKey: ['freight-rates'],
-    queryFn: () => api<FreightRate[]>('/settings/freight-rates'),
-  });
-  const selectedFreight = freightRates?.find((r) => r.id === freightId);
-  const freightPerKg = selectedFreight ? Number(selectedFreight.ratePerTonne) / 1000 : 0;
 
   // Build date-wise lots with full transfer visibility.
   //
@@ -124,17 +115,20 @@ export default function StockByDate() {
   //
   // This makes transferred stock appear as its own date row.
   const dateRows = useMemo<DateRow[]>(() => {
-    const rows = data?.rows ?? [];
+    // Exclude the backend's synthetic transfer-in rows (location 'RVP',
+    // isTransferredIn): we recompute every transfer ourselves below, so keeping
+    // them would double-count the transferred weight.
+    const rows = (data?.rows ?? []).filter((r) => !r.isTransferredIn);
     const allTransfers = transfers ?? [];
     // Seed is drawn down by COMMITTED pappu sales (booked orders, max of ordered vs
     // dispatched): each kg consumes 1/0.6 kg of seed (60% out-turn). Mirrors Stock by Price.
     const seedConsumedByPappuKg = (data?.pappuCommittedKg ?? 0) / PAPPU_OUTTURN;
 
     // Step 1: Group purchases by location, build per-location date lots.
-    const processRows = rows.filter((r) => !STORAGE_LOCATIONS.includes(r.location || 'At process'));
+    const processRows = rows.filter((r) => !STORAGE_LOCATIONS.includes(r.location || 'RVP'));
     const storageLots: Record<string, DateRow[]> = {};
     for (const loc of STORAGE_LOCATIONS) {
-      const locRows = rows.filter((r) => (r.location || 'At process') === loc);
+      const locRows = rows.filter((r) => (r.location || 'RVP') === loc);
       storageLots[loc] = buildDateLots(locRows);
     }
     const processLots = buildDateLots(processRows);
@@ -154,7 +148,10 @@ export default function StockByDate() {
       // Create a transfer-in lot at the transfer date with capitalised value.
       const d = t.transferDate.slice(0, 10);
       const existing = transferInLots.find((l) => l.date === d);
-      const val = Number(t.seedCostMoved) + Number(t.interestCharge);
+      // Capitalised value arriving at the process = seed drawn from storage PLUS
+      // the hamali + transport that travel with it (exactly server-persisted
+      // movedValue). Bank-loan interest is expensed, NOT capitalised into the seed.
+      const val = Number(t.movedValue);
       if (existing) {
         existing.recvWeightKg += t.weightKg;
         existing.recvValue += val;
@@ -175,25 +172,11 @@ export default function StockByDate() {
       }
     }
 
-    // Step 3: Merge all lots — remaining storage lots + process lots + transfer-in lots.
+    // Step 3: Merge lots - only include process lots (RVP) + transfer-in lots.
     const allLots: DateRow[] = [
       ...processLots,
       ...transferInLots,
     ];
-    // Include storage lots that still have remaining stock (not fully transferred).
-    for (const loc of STORAGE_LOCATIONS) {
-      for (const lot of storageLots[loc]) {
-        if (lot.remWeightKg > 0) {
-          // Adjust recvWeightKg/recvValue to match what's still at storage.
-          allLots.push({
-            ...lot,
-            recvWeightKg: lot.remWeightKg,
-            recvValue: lot.remValue,
-            avgPrice: lot.avgPrice,
-          });
-        }
-      }
-    }
 
     // Sort all lots by date (oldest first) for FIFO.
     allLots.sort((a, b) => a.date.localeCompare(b.date));
@@ -208,64 +191,6 @@ export default function StockByDate() {
   const totalRemWeightKg = dateRows.reduce((s, r) => s + r.remWeightKg, 0);
   const totalRemValue = dateRows.reduce((s, r) => s + r.remValue, 0);
   const overallAvg = totalRemWeightKg > 0 ? totalRemValue / totalRemWeightKg : 0;
-
-  // ─── Order planner maths (FIFO) ──────────────────────────────────────────
-  const basePappuPrice = parseFloat(pappuPriceInput);
-  const tonnage = parseFloat(tonnageInput);
-  const hasPrice = Number.isFinite(basePappuPrice) && basePappuPrice > 0;
-  const hasTonnage = Number.isFinite(tonnage) && tonnage > 0;
-  const pappuPrice = Math.max(0, (hasPrice ? basePappuPrice : 0) - freightPerKg);
-
-  const plan = useMemo(() => {
-    if (!hasTonnage) return null; // FIFO strictly requires tonnage to know how deep into the stock queue to go
-    if (dateRows.length === 0) return null;
-
-    const askedPappuKg = tonnage * 1000;
-    const blackRequiredKg = askedPappuKg / PAPPU_OUTTURN;
-
-    let accumulatedKg = 0;
-    let accumulatedValue = 0;
-    let consumedLotsCount = 0;
-    let earliestDate = '';
-    let latestDate = '';
-
-    // Consume from oldest to newest (dateRows is already sorted oldest-first)
-    for (const row of dateRows) {
-      if (row.remWeightKg <= 0) continue;
-      
-      const needed = blackRequiredKg - accumulatedKg;
-      if (needed <= 1e-6) break;
-
-      const take = Math.min(needed, row.remWeightKg);
-      const takeValue = (take / row.remWeightKg) * row.remValue;
-
-      accumulatedKg += take;
-      accumulatedValue += takeValue;
-      consumedLotsCount += 1;
-      
-      if (!earliestDate) earliestDate = row.date;
-      latestDate = row.date;
-    }
-
-    const availableBlackKg = totalRemWeightKg;
-    const producible = availableBlackKg * PAPPU_OUTTURN;
-    
-    const wacBlack = accumulatedKg > 0 ? accumulatedValue / accumulatedKg : 0;
-    const wacPappuCost = wacBlack / PAPPU_OUTTURN;
-    
-    const diff = producible - askedPappuKg;
-    const seedShortfallKg = Math.max(0, blackRequiredKg - availableBlackKg);
-    const fulfillmentPct = askedPappuKg > 0 ? Math.min(100, ((accumulatedKg * PAPPU_OUTTURN) / askedPappuKg) * 100) : 100;
-    const marginPerKg = hasPrice ? (pappuPrice - wacPappuCost) : 0;
-
-    return {
-      consumedLotsCount, earliestDate, latestDate,
-      accumulatedKg,
-      availableBlackKg,
-      producible, wacBlack, wacPappuCost, askedPappuKg, blackRequiredKg,
-      seedShortfallKg, diff, fulfillmentPct, marginPerKg,
-    };
-  }, [dateRows, totalRemWeightKg, pappuPrice, tonnage, hasPrice, hasTonnage]);
 
   const isLoading = loadingSeed || loadingTransfers;
 
@@ -291,170 +216,10 @@ export default function StockByDate() {
         <h1 className="text-2xl font-bold">Stock by Date (FIFO)</h1>
         <p className="text-muted-foreground">
           Date-wise black-seed lots on a first-in-first-out basis. As pappu is sold, the equivalent black seed is
-          drawn from the oldest dates first — so the running weighted-average price reflects the pooled stock still on hand.
+          drawn from the oldest dates first - so the running weighted-average price reflects the pooled stock still on hand.
           Transferred stock appears at its transfer date with capitalised costs. Valuation excludes GST.
         </p>
       </div>
-
-      {/* ─── Order Planner (FIFO) ──────────────────────────────────────────────── */}
-      <Card className="border-l-4 border-l-primary shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Calculator className="h-4 w-4 text-primary" /> Order Planner (FIFO)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
-            <div className="space-y-1">
-              <Label htmlFor="tonnage" className="text-xs text-muted-foreground">Tonnage asked (MT)</Label>
-              <Input
-                id="tonnage"
-                type="number"
-                min="0"
-                step="0.5"
-                value={tonnageInput}
-                onChange={(e) => setTonnageInput(e.target.value)}
-                placeholder="e.g. 30 (Required)"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="pappu-price" className="text-xs text-muted-foreground">Pappu price asked (₹/kg)</Label>
-              <Input
-                id="pappu-price"
-                type="number"
-                min="0"
-                step="0.5"
-                value={pappuPriceInput}
-                onChange={(e) => setPappuPriceInput(e.target.value)}
-                placeholder="e.g. 42 (Optional for margin)"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="freight" className="text-xs text-muted-foreground">Freight</Label>
-              <Select value={freightId} onValueChange={setFreightId}>
-                <SelectTrigger id="freight">
-                  <SelectValue placeholder="No freight" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No freight</SelectItem>
-                  {freightRates?.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.destination} — {rupees(r.ratePerTonne)}/t
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {hasPrice && freightPerKg > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Pappu ₹{basePappuPrice.toFixed(2)} − freight {rupees(freightPerKg)}/kg ({rupees(selectedFreight!.ratePerTonne)}/t to {selectedFreight!.destination}) ={' '}
-              <span className="font-semibold text-foreground">{rupees(pappuPrice)}/kg net</span>
-            </p>
-          )}
-
-          {!hasTonnage && (
-            <p className="text-sm text-muted-foreground">Enter the tonnage asked to see which lots will be consumed.</p>
-          )}
-
-          {plan && (
-            <div className="space-y-4">
-              {/* Mapping line */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                <span>{tonnage.toFixed(2)} MT Order</span>
-                <ArrowDownRight className="h-4 w-4" />
-                <span>draws from the oldest available stock:</span>
-                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 font-bold">
-                  {plan.consumedLotsCount} date lot{plan.consumedLotsCount === 1 ? '' : 's'}
-                </Badge>
-                <span>
-                  · {plan.earliestDate && plan.latestDate ? `from ${shortDate(plan.earliestDate)} to ${shortDate(plan.latestDate)}` : ''}
-                  {plan.accumulatedKg > 0 && <> · avg cost {rupees(plan.wacPappuCost)}/kg pappu</>}
-                </span>
-              </div>
-
-              {/* Result tiles */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                <div className="rounded-lg border p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                    <Wheat className="h-3 w-3" /> Producible Pappu
-                  </div>
-                  <div className="text-xl font-bold text-sky-600 mt-1">{toTonnes(plan.producible).toFixed(2)} MT</div>
-                  <div className="text-[10px] text-muted-foreground">from {toTonnes(plan.availableBlackKg).toFixed(2)} MT total remaining seed</div>
-                </div>
-
-                <div className="rounded-lg border p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                    <Scale className="h-3 w-3" /> Asked
-                  </div>
-                  <div className="text-xl font-bold mt-1">{tonnage.toFixed(2)} MT</div>
-                  <div className="text-[10px] text-muted-foreground">needs {toTonnes(plan.blackRequiredKg).toFixed(2)} MT seed</div>
-                </div>
-
-                {/* Shortage / Excess */}
-                {plan.diff < 0 ? (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-600 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" /> Shortage
-                    </div>
-                    <div className="text-xl font-bold text-rose-600 mt-1">{toTonnes(Math.abs(plan.diff)).toFixed(2)} MT</div>
-                    <div className="text-[10px] text-rose-600/80">short of the {tonnage.toFixed(2)} MT order</div>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Excess
-                    </div>
-                    <div className="text-xl font-bold text-emerald-600 mt-1">{toTonnes(plan.diff).toFixed(2)} MT</div>
-                    <div className="text-[10px] text-emerald-600/80">spare pappu after the order</div>
-                  </div>
-                )}
-
-                {/* Black seed needed */}
-                <div className={`rounded-lg border p-3 ${plan.seedShortfallKg > 0 ? 'border-rose-200 bg-rose-50' : ''}`}>
-                  <div className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1 ${plan.seedShortfallKg > 0 ? 'text-rose-600' : 'text-muted-foreground'}`}>
-                    <Factory className="h-3 w-3" /> Seed Needed
-                  </div>
-                  <div className={`text-xl font-bold mt-1 ${plan.seedShortfallKg > 0 ? 'text-rose-600' : 'text-muted-foreground'}`}>
-                    {plan.seedShortfallKg > 0 ? `${toTonnes(plan.seedShortfallKg).toFixed(2)} MT` : '0.00 MT'}
-                  </div>
-                  <div className={`text-[10px] ${plan.seedShortfallKg > 0 ? 'text-rose-600/80' : 'text-muted-foreground'}`}>
-                    {plan.seedShortfallKg > 0 ? 'extra black seed to source' : 'order fully covered'}
-                  </div>
-                </div>
-
-                {/* Margin */}
-                <div className="rounded-lg border p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                    {plan.marginPerKg >= 0 ? <ArrowUpRight className="h-3 w-3 text-emerald-500" /> : <ArrowDownRight className="h-3 w-3 text-rose-500" />} Margin
-                  </div>
-                  <div className={`text-xl font-bold mt-1 ${!hasPrice ? 'text-muted-foreground' : plan.marginPerKg >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {!hasPrice ? '—' : `${rupees(plan.marginPerKg)}/kg`}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {hasPrice ? `sell − avg cost ${rupees(plan.wacPappuCost)}/kg` : 'enter price'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Fulfillment */}
-              <div className="space-y-2 max-w-xl">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Fulfilment from stock</span>
-                  <span className="font-semibold">{plan.fulfillmentPct.toFixed(0)}%</span>
-                </div>
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${plan.seedShortfallKg > 0 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                    style={{ width: `${plan.fulfillmentPct}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Headline: overall remaining stock + weighted average */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -557,7 +322,7 @@ export default function StockByDate() {
                     {depleted && <Badge variant="outline" className="ml-2 text-[10px]">Sold through</Badge>}
                     {partial && <Badge variant="outline" className="ml-2 text-[10px] text-amber-600">Partial</Badge>}
                   </TableCell>
-                  <TableCell className="text-right font-medium">{r.lorries > 0 ? r.lorries : '—'}</TableCell>
+                  <TableCell className="text-right font-medium">{r.lorries > 0 ? r.lorries : '-'}</TableCell>
                   <TableCell className="text-right font-semibold">
                     {toTonnes(r.remWeightKg).toFixed(2)} MT
                     {r.remWeightKg !== r.recvWeightKg && (

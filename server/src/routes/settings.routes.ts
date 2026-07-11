@@ -11,6 +11,8 @@ import {
   updateProductTax,
   listProductionCostComponents,
   updateProductionCostComponents,
+  getHamaliRates,
+  updateHamaliRates,
 } from '../controllers/settings.controller.js';
 
 const router = Router();
@@ -28,5 +30,8 @@ router.put('/settings/product-tax', asyncHandler(updateProductTax));
 
 router.get('/settings/production-cost', asyncHandler(listProductionCostComponents));
 router.put('/settings/production-cost', asyncHandler(updateProductionCostComponents));
+
+router.get('/settings/hamali-rates', asyncHandler(getHamaliRates));
+router.put('/settings/hamali-rates', asyncHandler(updateHamaliRates));
 
 export default router;

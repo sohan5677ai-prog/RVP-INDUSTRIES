@@ -11,18 +11,31 @@ import {
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { AllocationService } from '../services/allocation.service.js';
-import { calcSaleFreight, calcHamali, calcKataFee, pappuLoadingHamali } from '../lib/calc.js';
-import { getFreightRateForDestination, getCompanyProfileRow } from './settings.controller.js';
+
+import { calcSaleFreight, calcHamali, calcKataFee, pappuLoadingHamali, customLoadingHamali, productLoadingHamali, isVehicleExempt } from '../lib/calc.js';
+import {
+  getFreightRateForDestination,
+  getCompanyProfileRow,
+  getHamaliRate,
+  getHamaliRateFull,
+  getCustomHamaliRates,
+} from './settings.controller.js';
 import { fileUrl } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 
-const GST_RATE = 0.05; // 5% IGST on the sale amount
+const GST_RATE = 0.05; // fallback IGST fraction (5%) when a commodity has no configured rate
 
-/** GST (5% IGST) on weight × rate, rounded to paise. */
-function calcGst(weightKg: number, ratePerKg: number): number {
-  return Math.round(weightKg * ratePerKg * GST_RATE * 100) / 100;
+/** GST on weight × rate at the given fraction (default 5%), rounded to paise. */
+function calcGst(weightKg: number, ratePerKg: number, fraction: number = GST_RATE): number {
+  return Math.round(weightKg * ratePerKg * fraction * 100) / 100;
+}
+
+/** GST fraction (e.g. 0.05) configured for a commodity in Settings; defaults to 5%. */
+async function gstFractionForProduct(product: string): Promise<number> {
+  const info = await prisma.productTaxInfo.findUnique({ where: { product: product as any } });
+  const pct = info?.gstRate != null ? Number(info.gstRate) : 5;
+  return pct / 100;
 }
 
 /** Destination + outward freight, derived from the buyer's party + Settings rate. */
@@ -100,21 +113,10 @@ export async function createSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-  // Gap 5: Block PAPPU sale order creation if there are no POs to back it
-  if (data.product === 'PAPPU') {
-    const capacity = await AllocationService.checkAllocationCapacity(
-      data.tonnageKg,
-      Number(data.ratePerKg)
-    );
-    if (!capacity.canAllocate) {
-      throw new HttpError(
-        409,
-        capacity.reason ?? 'Insufficient PO capacity to create this sale order.'
-      );
-    }
-  }
+
 
   const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+  const gstFraction = await gstFractionForProduct(data.product);
 
   const order = await prisma.saleOrder.create({
     data: {
@@ -125,7 +127,7 @@ export async function createSaleOrder(req: Request, res: Response) {
       tonnageKg: data.tonnageKg,
       ratePerKg: data.ratePerKg,
       dueDays: data.dueDays ?? null,
-      gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg)),
+      gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
       brokerageRatePerKg: data.brokerageRatePerKg,
       destination,
       freightCharge,
@@ -134,22 +136,7 @@ export async function createSaleOrder(req: Request, res: Response) {
     include: { buyer: true, broker: true },
   });
 
-  let allocationSummary = null;
-  if (data.product === 'PAPPU') {
-    // Trigger Soft Allocation
-    const totalAllocated = await AllocationService.allocateSaleOrder(order.id, data.tonnageKg);
-    const unallocatedKg = data.tonnageKg - totalAllocated;
-
-    allocationSummary = {
-      totalAllocatedKg: Math.round(totalAllocated),
-      unallocatedKg: Math.round(unallocatedKg),
-      warning: unallocatedKg > 0
-        ? `⚠️ Only ${Math.round(totalAllocated / 1000)}T of ${Math.round(data.tonnageKg / 1000)}T could be allocated against existing POs. ${Math.round(unallocatedKg / 1000)}T is UNALLOCATED.`
-        : null,
-    };
-  }
-
-  res.status(201).json({ ...order, allocationSummary });
+  res.status(201).json(order);
 }
 
 export async function bulkCreateSaleOrders(req: Request, res: Response) {
@@ -188,6 +175,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
       await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
       const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+      const gstFraction = await gstFractionForProduct(data.product);
 
       const order = await prisma.saleOrder.create({
         data: {
@@ -197,7 +185,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           tonnageKg: data.tonnageKg,
           ratePerKg: data.ratePerKg,
           dueDays: data.dueDays ?? null,
-          gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg)),
+          gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
           brokerageRatePerKg: 0,
           destination,
           freightCharge,
@@ -205,9 +193,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
         },
       });
 
-      if (data.product === 'PAPPU') {
-        await AllocationService.allocateSaleOrder(order.id, data.tonnageKg);
-      }
+
 
       results.push({ index: i, success: true, id: order.id });
     } catch (err: any) {
@@ -220,31 +206,21 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
 
 export async function updateSaleOrder(req: Request, res: Response) {
   const data = createSaleOrderSchema.parse(req.body);
-  const order = await prisma.saleOrder.findUnique({ where: { id: req.params.id } });
+  const order = await prisma.saleOrder.findUnique({ 
+    where: { id: req.params.id },
+    include: { dispatches: true }
+  });
   if (!order) throw new HttpError(404, 'Sale order not found');
-  if (order.status !== 'PENDING') {
-    throw new HttpError(400, 'Cannot edit a sale order that is already dispatched');
-  }
 
   const buyer = await prisma.party.findUnique({ where: { id: data.buyerId } });
   if (!buyer) throw new HttpError(400, 'Buyer not found');
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
   const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+  const gstFraction = await gstFractionForProduct(data.product);
 
-  if (data.product === 'PAPPU') {
-    const capacity = await AllocationService.checkAllocationCapacity(
-      data.tonnageKg,
-      Number(data.ratePerKg),
-      order.id
-    );
-    if (!capacity.canAllocate) {
-      throw new HttpError(
-        409,
-        capacity.reason ?? 'Insufficient PO capacity to update this sale order.'
-      );
-    }
-  }
+  const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
+  const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
   const updated = await prisma.saleOrder.update({
     where: { id: req.params.id },
@@ -256,54 +232,32 @@ export async function updateSaleOrder(req: Request, res: Response) {
       tonnageKg: data.tonnageKg,
       ratePerKg: data.ratePerKg,
       dueDays: data.dueDays ?? null,
-      gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg)),
+      gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
       brokerageRatePerKg: data.brokerageRatePerKg,
       destination,
       freightCharge,
       marginOverride: data.marginOverride || false,
+      status,
     },
     include: { buyer: true, broker: true },
   });
 
-  let allocationSummary = null;
-  if (data.product === 'PAPPU') {
-    // Delete existing allocations since we are re-allocating
-    await prisma.saleAllocation.deleteMany({
-      where: { saleOrderId: updated.id }
-    });
-    
-    // Trigger Soft Allocation
-    const totalAllocated = await AllocationService.allocateSaleOrder(updated.id, data.tonnageKg);
-    const unallocatedKg = data.tonnageKg - totalAllocated;
-
-    allocationSummary = {
-      totalAllocatedKg: Math.round(totalAllocated),
-      unallocatedKg: Math.round(unallocatedKg),
-      warning: unallocatedKg > 0
-        ? `⚠️ Only ${Math.round(totalAllocated / 1000)}T of ${Math.round(data.tonnageKg / 1000)}T could be allocated against existing POs. ${Math.round(unallocatedKg / 1000)}T is UNALLOCATED.`
-        : null,
-    };
-  }
-
-  res.json({ ...updated, allocationSummary });
+  res.json(updated);
 }
 
 export async function deleteSaleOrder(req: Request, res: Response) {
   const order = await prisma.saleOrder.findUnique({ where: { id: req.params.id } });
   if (!order) throw new HttpError(404, 'Sale order not found');
   if (order.status !== 'PENDING') {
-    throw new HttpError(400, 'Cannot delete a sale order that is already dispatched');
+    throw new HttpError(400, 'Cannot delete a sale order that has dispatches. Please undo all dispatches first.');
   }
-  await prisma.$transaction([
-    prisma.saleAllocation.deleteMany({ where: { saleOrderId: req.params.id } }),
-    prisma.saleOrder.delete({ where: { id: req.params.id } })
-  ]);
+  await prisma.saleOrder.delete({ where: { id: req.params.id } });
   res.json({ message: 'Sale order deleted' });
 }
 
 /**
  * Read a sale's invoice or kata slip and return the fields it can extract, so the
- * dispatch dialog can pre-fill. Does not persist — the file is held in memory.
+ * dispatch dialog can pre-fill. Does not persist - the file is held in memory.
  */
 export async function extractSaleDoc(req: Request, res: Response) {
   if (!req.file) throw new HttpError(400, 'Document file is required');
@@ -324,7 +278,7 @@ export async function extractSaleDoc(req: Request, res: Response) {
 /**
  * Dispatch a (partial) quantity of a sale order: store the uploaded kata slip,
  * record the confirmed vehicle no / kata tonnage as one SaleDispatch, then bill
- * (revenue + GST + freight) and — for Pappu — deplete the pool with COGS. The tax
+ * (revenue + GST + freight) and - for Pappu - deplete the pool with COGS. The tax
  * invoice is raised per dispatch separately afterwards. The order's ordered weight
  * is never overwritten; its status moves PENDING/PARTIAL -> PARTIAL/DISPATCHED as
  * the remaining balance shrinks to zero.
@@ -352,7 +306,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     else internalWeightKg = weightKg;
   }
   const baseAmount = weightKg * Number(order.ratePerKg);
-  const gstAmount = calcGst(weightKg, Number(order.ratePerKg));
+  const gstAmount = calcGst(weightKg, Number(order.ratePerKg), await gstFractionForProduct(order.product));
   const { freightCharge } = await deriveDestinationFreight(order.buyer, weightKg);
 
   // Lorry freight split (paid by us): destination unloading hamali + kata are
@@ -360,30 +314,80 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // delivery (released to Surya Roadlines at REACHED), and the remainder is the
   // lorry owner's. Only when there is freight to split.
   const company = await getCompanyProfileRow();
+  const isCompanyVehicle = isVehicleExempt(data.vehicleNumber, company.companyVehicles);
   const retentionConfig = Number(company.freightRetentionPerTrip ?? 3000);
   const hasFreight = freightCharge > 0;
-  const freightKata = hasFreight ? calcKataFee(weightKg) : 0;
-  const freightRetention = hasFreight ? retentionConfig : 0;
+  const freightKata = calcKataFee(weightKg, isCompanyVehicle);
+  const freightRetention = (hasFreight && !isCompanyVehicle) ? retentionConfig : 0;
 
-  // Loading hamali split. Pappu uses the ₹220/t loading rate: the lorry funds
-  // ₹80/t (deducted off its freight), we bear ₹140/t, the crew is paid ₹210/t
-  // and ₹10/t is company P/L. Other products keep the flat ₹160/t (fully off the
-  // lorry's freight, no company share or margin).
+  // Loading hamali split (all rates editable in Settings → Hamali Rates):
+  //   - Pappu: ₹220/t - lorry funds ₹80/t (off its freight), we bear the rest,
+  //     crew paid ₹210/t, ₹10/t company P/L.
+  //   - Husk / Waste: 100% company-borne byproduct loading (buyer usually lifts
+  //     ex-works), applied at every dispatch regardless of whether we carry freight.
+  //   - TPS: ₹160/t off the lorry's freight (no company share or margin).
+  //   - Shell: flat default rate off the lorry's freight.
   let freightUnloadingHamali = 0; // hamali amount deducted off the lorry's freight
   let hamaliCrewPayable = 0; // total hamali paid to the crew
   let hamaliCompanyExpense = 0; // our company-borne loading-hamali cost
   let hamaliMargin = 0; // company hamali profit → P/L
-  if (hasFreight) {
-    if (order.product === 'PAPPU') {
-      const lh = pappuLoadingHamali(weightKg);
+  // Waste and the three pre-cleaner byproducts (Pre Cleaner Dust, Nalla Pokkulu,
+  // Nalla Chintapandu) all share the Tamarind Waste loading rate.
+  const isPoolByproduct =
+    order.product === 'WASTE' ||
+    order.product === 'PRECLEANER_DUST' ||
+    order.product === 'NALLA_POKKULU' ||
+    order.product === 'NALLA_CHINTAPANDU';
+  if (order.product === 'HUSK' || isPoolByproduct) {
+    const rateKey = order.product === 'HUSK' ? 'HUSK_LOADING' : 'WASTE_LOADING';
+    const pl = await getHamaliRateFull(rateKey);
+    const lh = customLoadingHamali(weightKg, pl.total, pl.lorry, pl.margin, isCompanyVehicle);
+    
+    if (hasFreight) {
       freightUnloadingHamali = lh.lorry;
       hamaliCrewPayable = lh.crew;
       hamaliCompanyExpense = lh.company;
       hamaliMargin = lh.margin;
     } else {
+      hamaliCompanyExpense = lh.company;
+      hamaliCrewPayable = lh.company;
+    }
+  } else if (order.product === 'PAPPU') {
+    const pl = await getHamaliRateFull('PAPPU_LOADING');
+    const lh = pappuLoadingHamali(weightKg, isCompanyVehicle, pl.total, pl.lorry, pl.margin);
+    
+    freightUnloadingHamali = lh.lorry;
+    hamaliCrewPayable = lh.crew;
+    hamaliCompanyExpense = lh.company;
+    hamaliMargin = lh.margin;
+
+    // Any user-added custom costs (e.g. Roasting) are charged on top of the standard Pappu loading
+    for (const c of await getCustomHamaliRates()) {
+      const ch = customLoadingHamali(weightKg, c.total, c.lorry, c.margin, isCompanyVehicle);
+      freightUnloadingHamali += ch.lorry;
+      hamaliCrewPayable += ch.crew;
+      hamaliCompanyExpense += ch.company;
+      hamaliMargin += ch.margin;
+    }
+  } else if (order.product === 'TPS' || order.product === 'SHELL') {
+    // Both TPS & Shell defaults are identical: ₹160/t deducted off the lorry's freight
+    // and paid fully to the crew (no company share or margin), so both use TPS_LOADING.
+    const pl = await getHamaliRateFull('TPS_LOADING');
+    const lh = customLoadingHamali(weightKg, pl.total, pl.lorry, pl.margin, isCompanyVehicle);
+    
+    if (hasFreight) {
+      freightUnloadingHamali = lh.lorry;
+      hamaliCrewPayable = lh.crew;
+      hamaliCompanyExpense = lh.company;
+      hamaliMargin = lh.margin;
+    } else {
+      // Typically these aren't sold without freight, but just in case:
+      hamaliCompanyExpense = lh.company;
+      hamaliCrewPayable = lh.company;
+    }
+  } else if (hasFreight) {
       freightUnloadingHamali = calcHamali(weightKg);
       hamaliCrewPayable = freightUnloadingHamali;
-    }
   }
 
   // Production cost (₹/kg components) is added to pappu COGS.
@@ -396,16 +400,14 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   const dispatch = await prisma.$transaction(async (tx) => {
     let cogsAmount = 0;
-    let cogsInventoryAccount: string | undefined;
-    let cogsCostCenter: string | undefined;
+    const cogsInventoryAccount: string | undefined = undefined;
+    const cogsCostCenter: string | undefined = undefined;
     if (order.product === 'PAPPU') {
       cogsAmount = await InventoryService.consumeBlackSeedForSale(tx, weightKg);
-    } else if (order.product === 'SHELL') {
-      // Shell is sold from the Rampalli storage it was transferred to.
-      cogsAmount = await InventoryService.consumeShellInventory(tx, 'Rampalli', weightKg);
-      cogsInventoryAccount = '10060'; // Tamarind Shell Inventory
-      cogsCostCenter = 'Rampalli';
     }
+    // Shell, Waste and the pre-cleaner byproducts carry no COGS silo relief - they
+    // are revenue-only sales that draw down the shared 10% pool (tracked as a
+    // derived figure, not a valued inventory).
 
     const created = await tx.saleDispatch.create({
       data: {
@@ -438,6 +440,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       hamaliCompanyExpense,
       hamaliMargin,
       weightKg,
+      isCompanyVehicle,
     });
 
     await tx.saleOrder.update({
@@ -452,10 +455,75 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 }
 
 /**
+ * Undo a dispatch made by mistake. Only allowed while the shipment is still a
+ * plain DISPATCHED record - once it is delivered, invoiced, or has an E-Invoice /
+ * E-Way Bill against it, the undo is blocked (those must be reversed first). The
+ * reversal: restores the inventory consumed at dispatch (black-seed pool for
+ * pappu, shell store for shell), deletes the sale's ledger posting, removes the
+ * SaleDispatch, and recomputes the order status from the remaining shipments.
+ */
+export async function undoSaleDispatch(req: Request, res: Response) {
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: req.params.id },
+    include: { saleOrder: true },
+  });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+  if (dispatch.status === 'DELIVERED') {
+    throw new HttpError(400, 'Cannot undo a delivered shipment - reverse the delivery first.');
+  }
+  if (dispatch.invoiceNumber) {
+    throw new HttpError(400, 'Cannot undo a dispatch once its tax invoice is raised.');
+  }
+  if (dispatch.irn && dispatch.irnStatus !== 'CANCELLED') {
+    throw new HttpError(400, 'Cancel the E-Invoice (IRN) before undoing this dispatch.');
+  }
+  if (dispatch.ewbNumber && dispatch.ewbStatus !== 'CANCELLED') {
+    throw new HttpError(400, 'Cancel the E-Way Bill before undoing this dispatch.');
+  }
+
+  const order = dispatch.saleOrder;
+
+  await prisma.$transaction(async (tx) => {
+    // 1. Restore the inventory relieved at dispatch, valued at the exact cost the
+    //    sale's COGS posting recorded (read off the black-seed inventory credit
+    //    line). Only Pappu draws down a valued pool; Shell/Waste/byproducts are
+    //    revenue-only (they only touched the derived 10% pool), so nothing to restore.
+    if (order.product === 'PAPPU') {
+      const saleEntry = await tx.journalEntry.findFirst({
+        where: { reference: `SALE-${dispatch.id}` },
+        include: { lines: { include: { account: true } } },
+      });
+      const invCreditAmount = saleEntry
+        ? saleEntry.lines
+            .filter((l) => l.account.code === '10010')
+            .reduce((s, l) => s + Number(l.credit), 0)
+        : 0;
+      await InventoryService.restoreBlackSeedForSale(tx, dispatch.weightKg, invCreditAmount);
+    }
+
+    // 2. Delete the sale's ledger posting (journal lines cascade with the entry).
+    await tx.journalEntry.deleteMany({ where: { reference: `SALE-${dispatch.id}` } });
+
+    // 3. Remove the dispatch itself.
+    await tx.saleDispatch.delete({ where: { id: dispatch.id } });
+
+    // 4. Recompute the order's status from whatever shipments remain.
+    const remaining = await tx.saleDispatch.findMany({ where: { saleOrderId: order.id } });
+    const dispatchedKg = remaining.reduce((s, d) => s + d.weightKg, 0);
+    const status = dispatchedKg === 0
+      ? 'PENDING'
+      : dispatchedKg >= order.tonnageKg ? 'DISPATCHED' : 'PARTIAL';
+    await tx.saleOrder.update({ where: { id: order.id }, data: { status } });
+  });
+
+  res.json({ message: 'Dispatch undone' });
+}
+
+/**
  * Raise the tax invoice for an already-dispatched shipment. Auto-assigns the next
  * invoice number (prefix/seq/FY, sequence resets each financial year) and stamps
  * the invoice date. The sale was already billed at dispatch, so no new ledger
- * entry is posted. Idempotent — re-raising keeps the existing number.
+ * entry is posted. Idempotent - re-raising keeps the existing number.
  */
 export async function raiseSaleInvoice(req: Request, res: Response) {
   const dispatch = await prisma.saleDispatch.findUnique({
@@ -522,7 +590,7 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
       throw new HttpError(400, "Buyer's Kata weight cannot be greater than dispatched weight. Contact admin.");
     }
     shortageKg = dispatch.weightKg - data.buyerKataKg;
-    creditNoteAmount = shortageKg > 0 ? shortageKg * rate + calcGst(shortageKg, rate) : 0;
+    creditNoteAmount = shortageKg > 0 ? shortageKg * rate + calcGst(shortageKg, rate, await gstFractionForProduct(order.product)) : 0;
     
     if (dispatch.internalWeightKg && order.product === 'PAPPU') {
       profitWeightKg = data.buyerKataKg - dispatch.internalWeightKg;

@@ -82,7 +82,7 @@ function uploadModal(channel: string) {
     submit: { type: 'plain_text' as const, text: 'Read kata' },
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
-      contextBlock(":mag: Attach the *RVP weighbridge / carter slip* — I'll read the dispatched weight and lorry number. Anything I can't read, you can type on the next card."),
+      contextBlock(":mag: Attach the *RVP weighbridge / carter slip* - I'll read the dispatched weight and lorry number. Anything I can't read, you can type on the next card."),
       {
         type: 'input',
         block_id: 'kata',
@@ -113,19 +113,19 @@ function reviewBlocks(d: DispatchDraftData, note?: string): KnownBlock[] {
   }
   blocks.push(
     fieldsSection([
-      { label: 'Buyer / order', value: d.saleOrderId ? (d.label ?? '—') : '_pick above_' },
-      { label: 'Product', value: d.product ?? '—' },
-      { label: 'Rate', value: d.ratePerKg ? `${rupees(d.ratePerKg)}/kg` : '—' },
+      { label: 'Buyer / order', value: d.saleOrderId ? (d.label ?? '-') : '_pick above_' },
+      { label: 'Product', value: d.product ?? '-' },
+      { label: 'Rate', value: d.ratePerKg ? `${rupees(d.ratePerKg)}/kg` : '-' },
       { label: 'Vehicle', value: d.vehicleNumber ?? '_not set_' },
       { label: 'Dispatched weight', value: d.tonnageKg ? `${d.tonnageKg} kg` : '_not set_' },
-      { label: 'Amount', value: base ? rupees(base) : '—' },
-      { label: 'GST (5%)', value: base ? rupees(gst) : '—' },
+      { label: 'Amount', value: base ? rupees(base) : '-' },
+      { label: 'GST (5%)', value: base ? rupees(gst) : '-' },
     ])
   );
   const missing: string[] = [];
   if (!d.saleOrderId) missing.push('sale order');
   if (!d.tonnageKg) missing.push('dispatched weight');
-  if (missing.length) blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — pick above or use *Edit*.`));
+  if (missing.length) blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} - pick above or use *Edit*.`));
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
   return blocks;
 }
@@ -173,8 +173,8 @@ async function raiseInvoiceCard(
     blocks: [
       headerBlock('🧾 Dispatched & invoiced'),
       fieldsSection([
-        { label: 'Invoice number', value: invoice.invoiceNumber ?? '—' },
-        { label: 'Buyer', value: invoice.saleOrder?.buyer?.name ?? '—' },
+        { label: 'Invoice number', value: invoice.invoiceNumber ?? '-' },
+        { label: 'Buyer', value: invoice.saleOrder?.buyer?.name ?? '-' },
         { label: 'Weight', value: `${invoice.weightKg} kg` },
         { label: 'GST (5%)', value: rupees(Number(invoice.gstAmount)) },
         { label: 'Status', value: invoice.status },
@@ -237,7 +237,7 @@ export function registerDispatchFlow(app: App): void {
     if (file) {
       try {
         const f: DownloadedFile = await downloadSlackFile(file);
-        data.kataFile = f; // keep the buffer even if OCR fails — approve re-uploads it
+        data.kataFile = f; // keep the buffer even if OCR fails - approve re-uploads it
         const r = await extractInvoiceData(f.buffer, f.mimetype, 'partyKata');
         if (r.partyKataKg) data.tonnageKg = r.partyKataKg;
         if (r.lorryNumber) data.vehicleNumber = r.lorryNumber;
@@ -248,14 +248,14 @@ export function registerDispatchFlow(app: App): void {
     const vehicleTyped = (view.state.values as any).vehicle?.v?.value?.trim();
     if (vehicleTyped) data.vehicleNumber = vehicleTyped;
 
-    // Auto-fetch the sale order when there's only one open — otherwise the
+    // Auto-fetch the sale order when there's only one open - otherwise the
     // review card shows a dropdown to pick it (a kata slip carries no buyer/rate).
     if (openOrders.length === 1) applyOrder(data, openOrders[0]);
 
     const note = !data.tonnageKg
       ? readError
-        ? `:warning: Couldn't read the slip (${readError}) — type the weight via *Edit*.`
-        : ":warning: Couldn't read a weight off that slip — type it via *Edit*."
+        ? `:warning: Couldn't read the slip (${readError}) - type the weight via *Edit*.`
+        : ":warning: Couldn't read a weight off that slip - type it via *Edit*."
       : undefined;
     const posted = await client.chat.postMessage({ channel, text: 'Review dispatch', blocks: reviewBlocks(data, note) });
     setDraft(keyFor(channel, posted.ts as string), {
@@ -325,7 +325,7 @@ export function registerDispatchFlow(app: App): void {
       return;
     }
     if (!d.tonnageKg) {
-      await respond({ response_type: 'ephemeral', replace_original: false, text: ':x: Dispatched weight missing — use *Edit*.' });
+      await respond({ response_type: 'ephemeral', replace_original: false, text: ':x: Dispatched weight missing - use *Edit*.' });
       return;
     }
     let dispatch: any;
@@ -347,7 +347,7 @@ export function registerDispatchFlow(app: App): void {
     try {
       await raiseInvoiceCard(dispatch.id, draft.user, b.channel.id, b.message.ts, b.user.id, client);
     } catch (err) {
-      // Dispatch succeeded but invoicing failed — show the dispatched card with a
+      // Dispatch succeeded but invoicing failed - show the dispatched card with a
       // manual Raise Invoice button so it can be retried.
       const msg = err instanceof ErpApiError ? err.message : (err as Error).message;
       await client.chat.update({
@@ -358,7 +358,7 @@ export function registerDispatchFlow(app: App): void {
           headerBlock('✅ Dispatched'),
           contextBlock(d.label ?? ''),
           fieldsSection([
-            { label: 'Vehicle', value: d.vehicleNumber ?? '—' },
+            { label: 'Vehicle', value: d.vehicleNumber ?? '-' },
             { label: 'Weight', value: `${dispatch.weightKg} kg` },
             { label: 'GST (5%)', value: rupees(Number(dispatch.gstAmount)) },
             { label: 'Status', value: dispatch.status },

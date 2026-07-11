@@ -3,7 +3,7 @@ import { HttpError } from './httpError.js';
 
 /**
  * Fields that can come back from reading a stock-in document. Every field is
- * optional — Gemini fills in whatever it can confidently read. Which fields are
+ * optional - Gemini fills in whatever it can confidently read. Which fields are
  * requested depends on the document `kind` being read.
  */
 export interface ExtractedInvoice {
@@ -29,11 +29,11 @@ Extract these fields and return them as JSON:
 - lorryNumber: the lorry / vehicle registration number (e.g. "AP02AB1234"). Remove spaces.
 - arrivalDate: the invoice date in ISO format yyyy-mm-dd.
 - billingWeightKg: the billed net weight/quantity, CONVERTED TO KILOGRAMS. Invoices often
-  state weight in tonnes ("MT") or quintals — convert: 1 tonne = 1000 kg, 1 quintal = 100 kg.
+  state weight in tonnes ("MT") or quintals - convert: 1 tonne = 1000 kg, 1 quintal = 100 kg.
   Return a whole number of kilograms.
-- partyName: the SUPPLIER / SELLER / consignor name printed on the invoice — the business
+- partyName: the SUPPLIER / SELLER / consignor name printed on the invoice - the business
   that issued the bill (usually at the top, near "From" / "Seller" / GSTIN). NOT the buyer
-  ("RVP" / "M/s RVP" is the buyer — do not return that).
+  ("RVP" / "M/s RVP" is the buyer - do not return that).
 - pricePerKg: the unit RATE per KILOGRAM. If the rate is quoted per tonne or per quintal,
   convert it to a per-kg rate (1 tonne = 1000 kg, 1 quintal = 100 kg). A plain number.
 Only include a field you can read with reasonable confidence. Do not guess.`,
@@ -51,7 +51,7 @@ the label next to a number. Work out the weights from arithmetic instead:
 - The NET weight you must return = GROSS − TARE, where TARE is the empty-lorry weight. NET must be
   POSITIVE and smaller than the gross.
 - If THREE weight numbers are present and one of them equals (largest − one of the others), then
-  that value IS the net — return it. (Example: weights 42870, 11350, 31520 → gross 42870, and
+  that value IS the net - return it. (Example: weights 42870, 11350, 31520 → gross 42870, and
   42870 − 11350 = 31520, so the net is 31520.)
 - If only TWO weight numbers are present, NET = larger − smaller.
 - Never return a negative, zero, or the largest (gross) value as the net.
@@ -70,7 +70,7 @@ If the slip shows multiple weights, pick the larger (loaded) one as the first we
 Only include a field you can read with reasonable confidence. Do not guess.`,
 
   rvpSecondWeight: `You are reading OUR OWN weighbridge slip ("RVP Kata") for a lorry of tamarind seed
-AFTER it has been UNLOADED — this is the SECOND / TARE weighing of the now-empty lorry.
+AFTER it has been UNLOADED - this is the SECOND / TARE weighing of the now-empty lorry.
 Extract these fields and return them as JSON:
 - rvpSecondWeightKg: the SECOND / TARE / EMPTY-lorry weight in KILOGRAMS.
   Convert tonnes/quintals to kg (1 tonne = 1000 kg, 1 quintal = 100 kg). Whole number.
@@ -87,7 +87,7 @@ Only include a field you can read with reasonable confidence. Do not guess.`,
 function invoiceMatchPrompt(candidates: string[]): string {
   return `
 Below is a list of KNOWN SUPPLIERS in our system. Decide which one (if any) issued this
-invoice — the SELLER, not the buyer. Match by meaning, allowing for abbreviations, initials,
+invoice - the SELLER, not the buyer. Match by meaning, allowing for abbreviations, initials,
 extra words like "M/s", dots and punctuation, and minor spelling differences. For example a
 list entry "DCS" could appear on the invoice as "D.C.S." or "Devi Cotton Syndicate", and
 "K.N.M. Traders" could be listed as "KNM Traders".
@@ -263,7 +263,7 @@ export async function extractInvoiceData(
 
 /**
  * Fields parsed from a free-text purchase-order instruction sent over Slack
- * (e.g. "22 Jun, DCS Traders, 50 tonnes, 25.5/kg"). Every field is optional —
+ * (e.g. "22 Jun, DCS Traders, 50 tonnes, 25.5/kg"). Every field is optional -
  * the bot confirms/edits before anything is created.
  */
 export interface ExtractedPurchaseOrder {
@@ -373,7 +373,7 @@ Message: ${JSON.stringify(text)}`;
 
 /**
  * Fields parsed from a free-text sale-order instruction sent over Slack
- * (e.g. "Krishna Exports, broker Ramesh, 20 tonnes pappu, 95/kg"). Optional —
+ * (e.g. "Krishna Exports, broker Ramesh, 20 tonnes pappu, 95/kg"). Optional -
  * the bot confirms/edits before anything is created.
  */
 export interface ExtractedSaleOrder {
@@ -428,7 +428,7 @@ Today's date is ${today}. Extract these fields and return them as JSON:
 Only include a field you can read with reasonable confidence. Do not guess.
 ${
   buyers.length > 0
-    ? `\nKNOWN BUYERS — pick the one this order is for, matching by meaning (abbreviations,
+    ? `\nKNOWN BUYERS - pick the one this order is for, matching by meaning (abbreviations,
 initials, "M/s", punctuation, minor spelling). matchedBuyerName: copy the matching entry
 EXACTLY as written below, or omit if none clearly matches. Never invent a name.
 Known buyers: ${JSON.stringify(buyers)}`
@@ -436,7 +436,7 @@ Known buyers: ${JSON.stringify(buyers)}`
 }
 ${
   brokers.length > 0
-    ? `\nKNOWN BROKERS — if a broker is mentioned, pick the matching one. matchedBrokerName: copy
+    ? `\nKNOWN BROKERS - if a broker is mentioned, pick the matching one. matchedBrokerName: copy
 the matching entry EXACTLY as written below, or omit. Never invent a name.
 Known brokers: ${JSON.stringify(brokers)}`
     : ''
@@ -536,8 +536,8 @@ Skip header rows, blank rows, and totals/summary rows.
 Each row must include:
 - date: the date in ISO format yyyy-mm-dd (convert from DD-MM-YYYY or DD/MM/YY etc.)
 - partyName: the supplier or buyer name (string)
-- tonnes: weight in metric tonnes — a plain number (convert if given in kg: divide by 1000)
-- price: rate per kilogram in rupees — a plain number (if given per quintal divide by 100, if per tonne divide by 1000)`;
+- tonnes: weight in metric tonnes - a plain number (convert if given in kg: divide by 1000)
+- price: rate per kilogram in rupees - a plain number (if given per quintal divide by 100, if per tonne divide by 1000)`;
 
   if (type === 'po') {
     return shared + `
@@ -631,7 +631,7 @@ export async function extractBulkTableFromImage(buffer: Buffer, mimeType: string
 /**
  * Fields read off a bank-transfer / UPI / cheque payment screenshot, used to
  * pre-fill a Payment (money out) or Receipt (money in) before it's recorded to
- * the party account. Every field is optional — the user confirms before saving.
+ * the party account. Every field is optional - the user confirms before saving.
  */
 export interface ExtractedTransaction {
   amount?: number; // the transaction amount in rupees
@@ -672,9 +672,9 @@ export async function extractTransactionData(
 
   const counterpartyDesc =
     perspective === 'payment'
-      ? `the BENEFICIARY / payee / "To" account — the party WE PAID money to. Ignore our own
+      ? `the BENEFICIARY / payee / "To" account - the party WE PAID money to. Ignore our own
   account/sender details (the debited account is ours, not the counterparty).`
-      : `the SENDER / remitter / "From" account — the party WE RECEIVED money from. Ignore our
+      : `the SENDER / remitter / "From" account - the party WE RECEIVED money from. Ignore our
   own account/beneficiary details (the credited account is ours, not the counterparty).`;
 
   const prompt = `You are reading a screenshot (or photo) of a single bank / UPI / NEFT / RTGS / IMPS
@@ -682,7 +682,7 @@ transfer confirmation or a cheque, for an Indian tamarind/agro trading business.
 fields and return them as JSON:
 - amount: the transaction amount in RUPEES as a plain number (strip "₹", "Rs.", commas).
 - date: the transaction date in ISO format yyyy-mm-dd. If a time is shown, ignore it.
-- reference: the transaction reference — the UTR / UPI transaction id / RRN / cheque number /
+- reference: the transaction reference - the UTR / UPI transaction id / RRN / cheque number /
   bank reference number. Prefer the UTR/UPI id if several are present. A string.
 - counterpartyName: ${counterpartyDesc} Return the name exactly as printed.
 - description: any short narration / remark / note shown on the transfer, if present.

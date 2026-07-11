@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Search, Package, ClipboardList } from 'lucide-react';
 import { api } from '@/lib/api';
+import { stockSummary } from '@/lib/calc';
 import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { Input } from '@/components/ui/input';
 import {
@@ -19,6 +20,7 @@ interface BlackSeedRow {
   poNumber: string | null;
   lorryNumber: string;
   rvpNetWeightKg: number;
+  location: string;
   pricePerKg: number;
   value: number;
 }
@@ -28,7 +30,9 @@ interface BlackSeedStockResponse {
   pappuSoldKg: number;
   huskSoldKg: number;
   wasteSoldKg: number;
-  poTonnageKg: number;
+  // Total sold from the shared 10% pool: shell + waste + pre-cleaner byproducts.
+  wastePoolSoldKg: number;
+  pendingPoTonnageKg: number;
 }
 
 const PAPPU_OUTTURN = 0.6;
@@ -42,8 +46,19 @@ const PRODUCT_META: Record<OutputProduct, {
 }> = {
   pappu: { title: 'Pappu (60%)', noun: 'Pappu', pct: 0.6, outputLabel: 'Pappu Output', accent: 'text-indigo-600' },
   husk: { title: 'Husk (25%)', noun: 'Husk', pct: 0.25, outputLabel: 'Husk Output', accent: 'text-amber-600' },
-  waste: { title: 'Tamarind Waste (10%)', noun: 'Waste', pct: 0.1, outputLabel: 'Waste Output', accent: 'text-stone-600' },
+  waste: { title: 'Pre Cleaner Husk & Tamarind (10%)', noun: 'Waste', pct: 0.1, outputLabel: 'Waste Output', accent: 'text-stone-600' },
 };
+
+interface PriceBandResponse {
+  arrivedBlackKg: number;
+  remainingBlackKg: number;
+  pendingBlackKg: number;
+  pendingConsumableBlackKg: number;
+}
+
+interface StockByPriceResponse {
+  bands: PriceBandResponse[];
+}
 
 export default function ProcessingOutput({ product }: { product: OutputProduct }) {
   const meta = PRODUCT_META[product];
@@ -51,10 +66,17 @@ export default function ProcessingOutput({ product }: { product: OutputProduct }
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
 
-  const { data, isLoading } = useQuery({
+  const { data: stockData, isLoading: loadingStock } = useQuery({
     queryKey: ['black-seed-stock'],
     queryFn: () => api<BlackSeedStockResponse>('/inventory/black-seed'),
   });
+
+  const { data: plannerData, isLoading: loadingPlanner } = useQuery({
+    queryKey: ['stock-by-price'],
+    queryFn: () => api<StockByPriceResponse>('/inventory/by-price'),
+  });
+
+  const isLoading = loadingStock || loadingPlanner;
 
   // Configurable per-kg production cost (sum of components from Settings).
   const { data: prodCostComponents } = useQuery({
@@ -63,17 +85,34 @@ export default function ProcessingOutput({ product }: { product: OutputProduct }
   });
   const productionCostPerKg = (prodCostComponents ?? []).reduce((s, c) => s + Number(c.ratePerKg), 0);
 
-  const rows = data?.rows ?? [];
-  const poTonnageKg = data?.poTonnageKg ?? 0;
-  // Each product is depleted by its OWN sales (Pappu/Husk/Waste sale orders).
-  const soldKg = product === 'pappu' ? (data?.pappuSoldKg ?? 0)
-    : product === 'husk' ? (data?.huskSoldKg ?? 0)
-    : (data?.wasteSoldKg ?? 0);
+  const allRows = stockData?.rows ?? [];
+  const rows = allRows.filter((r) => (r.location || 'RVP') === 'RVP');
+  const bands = plannerData?.bands ?? [];
 
-  // Totals (whole pool — not affected by the table filters below).
-  const receivedKg = rows.reduce((sum, r) => sum + r.rvpNetWeightKg, 0);
-  const availableKg = Math.max(0, meta.pct * receivedKg - soldKg);
-  const committedKg = Math.max(0, meta.pct * poTonnageKg - soldKg);
+  let availableKg = 0;
+  let committedKg = 0;
+
+  if (product === 'pappu') {
+    // Pappu strictly mirrors the Order Planner via the shared helper:
+    //   Available = remaining seed (after sales draw-down) × out-turn.
+    //   Committed = Available + CONSUMABLE pending seed × out-turn (buffer excluded).
+    const summary = stockSummary(bands);
+    availableKg = summary.availablePappuKg;
+    committedKg = summary.committedPappuKg;
+  } else {
+    // Husk and Waste use the planner's total gross arrived and pending seed, minus their own sales.
+    const totalArrivedBlackKg = bands.reduce((sum, b) => sum + b.arrivedBlackKg, 0);
+    const totalPendingBlackKg = bands.reduce((sum, b) => sum + b.pendingBlackKg, 0);
+    // Waste draws down the shared 10% pool across all byproducts (shell + waste +
+    // pre-cleaner dust + nalla pokkulu + nalla chintapandu); husk uses its own sales.
+    const soldKg = product === 'husk' ? (stockData?.huskSoldKg ?? 0) : (stockData?.wastePoolSoldKg ?? 0);
+    
+    availableKg = Math.max(0, meta.pct * totalArrivedBlackKg - soldKg);
+    committedKg = availableKg + (meta.pct * totalPendingBlackKg);
+  }
+
+  // Gross black seed received (arrived across all price bands), shown in the KPI subtitle.
+  const receivedKg = bands.reduce((sum, b) => sum + b.arrivedBlackKg, 0);
 
 
   const filteredRows = rows.filter((r) => {
@@ -98,7 +137,7 @@ export default function ProcessingOutput({ product }: { product: OutputProduct }
       <div>
         <h1 className="text-2xl font-bold">{meta.title}</h1>
         <p className="text-muted-foreground">
-          {Math.round(meta.pct * 100)}% of every black-seed arrival, depleted as pappu is sold.
+          {Math.round(meta.pct * 100)}% of every black-seed arrival, depleted as {product === 'waste' ? 'byproducts (shell, waste, pre-cleaner) are' : `${meta.noun.toLowerCase()} is`} sold.
         </p>
       </div>
 
@@ -124,7 +163,7 @@ export default function ProcessingOutput({ product }: { product: OutputProduct }
           <CardContent>
             <div className="text-2xl font-bold text-violet-600">{toTonnes(committedKg).toFixed(2)} MT</div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              {Math.round(meta.pct * 100)}% of {toTonnes(poTonnageKg).toFixed(2)} MT ordered − sales
+              Available + pending PO {meta.noun.toLowerCase()}
             </p>
           </CardContent>
         </Card>

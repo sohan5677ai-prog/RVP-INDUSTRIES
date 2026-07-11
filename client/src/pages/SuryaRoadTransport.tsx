@@ -46,7 +46,7 @@ export default function SuryaRoadTransport() {
     .map(({ o, d }) => ({
       id: d.id,
       date: d.dispatchDate,
-      buyer: o.buyer?.name ?? '—',
+      buyer: o.buyer?.name ?? '-',
       lorryNumber: d.vehicleNumber ?? null,
       invoice: d.invoiceNumber ?? null,
       destination: o.destination ?? null,
@@ -150,9 +150,9 @@ export default function SuryaRoadTransport() {
                     <TableRow key={r.id}>
                       <TableCell>{shortDate(r.date)}</TableCell>
                       <TableCell className="font-semibold">{r.buyer}</TableCell>
-                      <TableCell className="font-mono text-sm">{r.lorryNumber ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.invoice ?? '—'}</TableCell>
-                      <TableCell>{r.destination ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                      <TableCell>{r.destination ?? '-'}</TableCell>
                       <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
                       <TableCell>
                         <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">

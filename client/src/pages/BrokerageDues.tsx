@@ -48,7 +48,7 @@ export default function BrokerageDuesPage() {
         id: d.id,
         saleDate: d.dispatchDate,
         invoiceNumber: d.invoiceNumber,
-        buyerName: o.buyer?.name ?? '—',
+        buyerName: o.buyer?.name ?? '-',
         vehicleNumber: d.vehicleNumber,
         totalBrokerage: 2000,
         remainingBrokerage: 2000,
@@ -161,9 +161,9 @@ export default function BrokerageDuesPage() {
                     <TableRow key={o.id}>
                       <TableCell className="font-semibold">{o.brokerName}</TableCell>
                       <TableCell>{shortDate(o.saleDate)}</TableCell>
-                      <TableCell className="font-mono text-xs">{o.invoiceNumber ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{o.invoiceNumber ?? '-'}</TableCell>
                       <TableCell>{o.buyerName}</TableCell>
-                      <TableCell className="font-mono text-xs">{o.vehicleNumber ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{o.vehicleNumber ?? '-'}</TableCell>
                       <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">
                         {rupees(o.brokerageAmount)}
                       </TableCell>

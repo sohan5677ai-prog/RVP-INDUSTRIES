@@ -11,6 +11,8 @@
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
     "import-data": "tsx prisma/importTestData.ts",
+    "import-pgr-cold": "tsx prisma/importPgrColdStock.ts",
+    "import-murugan-loans": "tsx prisma/importMuruganLoans.ts",
     "import-sales": "tsx prisma/importPappuSales.ts",
     "import-husk-sales": "tsx addHuskSales.ts",
     "delete-sales": "tsx deleteSales.ts",

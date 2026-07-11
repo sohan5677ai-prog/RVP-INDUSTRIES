@@ -61,17 +61,18 @@ export default function InvoiceView() {
   });
 
   const tax = taxRows?.find((t) => t.product === order?.product);
+  const gstFraction = (tax?.gstRate != null ? Number(tax.gstRate) : GST_RATE * 100) / 100;
   const amounts = useMemo(() => {
     if (!dispatch || !order) return { base: 0, gst: 0, total: 0 };
     const base = dispatch.weightKg * Number(order.ratePerKg);
-    const gst = Math.round(base * GST_RATE * 100) / 100;
+    const gst = Math.round(base * gstFraction * 100) / 100;
     return { base, gst, total: base + gst };
-  }, [dispatch, order]);
+  }, [dispatch, order, gstFraction]);
 
   if (!dispatch || !order || !company) return <div className="p-8 text-muted-foreground">Loading invoice…</div>;
 
   const paperW = PAPER_W[layout.paperSize] ?? 210;
-  const gstPct = Math.round(GST_RATE * 100);
+  const gstPct = Math.round(gstFraction * 100);
   const buyerGstin = order.buyer?.gstin ?? null;
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
   const description = tax?.description || PRODUCT_FALLBACK[order.product] || order.product;

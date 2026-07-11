@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { crossVerify, calcHamali, calcKataFee, calcPappu, calcTotal, daysBetween, loanInterest } from './calc';
+import {
+  crossVerify,
+  calcHamali,
+  calcKataFee,
+  calcPappu,
+  calcTotal,
+  daysBetween,
+  loanInterest,
+  pappuLoadingHamali,
+  productLoadingHamali,
+  transferHamali,
+  shellTransferCost,
+} from './calc';
 
 describe('crossVerify', () => {
   // Section 10 validation table (one-sided rules).
@@ -67,6 +79,46 @@ describe('calcHamali', () => {
   });
   it('custom rate', () => {
     expect(calcHamali(5000, 100)).toBe(500);
+  });
+});
+
+describe('configurable hamali rates', () => {
+  it('pappuLoadingHamali: default ₹220/t splits, lorry & margin fixed', () => {
+    const lh = pappuLoadingHamali(25000); // 25 tonnes
+    expect(lh.total).toBe(25 * 220);   // 5500
+    expect(lh.lorry).toBe(25 * 80);    // 2000 (fixed)
+    expect(lh.margin).toBe(25 * 10);   // 250 (fixed)
+    expect(lh.company).toBe(lh.total - lh.lorry); // 3500
+    expect(lh.crew).toBe(lh.total - lh.margin);   // 5250
+  });
+
+  it('pappuLoadingHamali: custom rate raises company share, keeps lorry/margin', () => {
+    const lh = pappuLoadingHamali(25000, false, 260);
+    expect(lh.total).toBe(25 * 260);   // 6500
+    expect(lh.lorry).toBe(25 * 80);    // 2000 (unchanged)
+    expect(lh.company).toBe(6500 - 2000); // 4500
+  });
+
+  it('productLoadingHamali: flat rate × rounded tonnes', () => {
+    expect(productLoadingHamali(16020, 333)).toBe(16 * 333); // husk: 5328
+    expect(productLoadingHamali(16020, 333, true)).toBe(0);  // company vehicle exempt
+  });
+
+  it('transferHamali: handling only, storage-unload leg no longer charged', () => {
+    const t = transferHamali(25000); // default 270/t
+    expect(t.charge).toBe(25 * 270);       // 6750
+    expect(t.unloadCharge).toBe(0);
+    expect(t.handlingCharge).toBe(25 * 270); // 6750
+    expect(t.margin).toBe(0);
+    expect(t.crew).toBe(25 * 270);         // 6750
+  });
+
+  it('shellTransferCost: configurable hamali, fixed ₹500 transport', () => {
+    const s = shellTransferCost(20000); // default 333/t
+    expect(s.hamaliCharge).toBe(20 * 333); // 6660
+    expect(s.transportCharge).toBe(500);
+    expect(s.totalCost).toBe(6660 + 500);
+    expect(shellTransferCost(20000, 400).hamaliCharge).toBe(20 * 400); // 8000
   });
 });
 

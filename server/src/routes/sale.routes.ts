@@ -14,6 +14,7 @@ import {
   raiseSaleInvoice,
   deliverSaleDispatch,
   markDispatchPaid,
+  undoSaleDispatch,
 } from '../controllers/sale.controller.js';
 
 const router = Router();
@@ -26,7 +27,7 @@ router.put('/sale-orders/:id', asyncHandler(updateSaleOrder));
 router.delete('/sale-orders/:id', asyncHandler(deleteSaleOrder));
 
 // Dispatch: read a doc for pre-fill (in-memory), then dispatch a (partial) lorry
-// against the order with the kata slip — creates a SaleDispatch shipment.
+// against the order with the kata slip - creates a SaleDispatch shipment.
 router.post('/sale-orders/extract', memoryUpload.single('document'), asyncHandler(extractSaleDoc));
 router.post(
   '/sale-orders/:id/dispatch',
@@ -34,7 +35,7 @@ router.post(
   asyncHandler(dispatchSaleOrder)
 );
 
-// A single dispatch (shipment) — used by the invoice view.
+// A single dispatch (shipment) - used by the invoice view.
 router.get('/sale-dispatches/:id', asyncHandler(getSaleDispatch));
 
 // Raise the tax invoice for a dispatched shipment (auto-assigns number). The
@@ -51,5 +52,9 @@ router.post(
 
 // Mark a dispatched shipment as paid and record receipt/TDS
 router.post('/sale-dispatches/:id/mark-paid', asyncHandler(markDispatchPaid));
+
+// Undo a dispatch made by mistake (only while still a plain DISPATCHED record):
+// restores inventory, deletes the sale posting + the shipment.
+router.post('/sale-dispatches/:id/undo', asyncHandler(undoSaleDispatch));
 
 export default router;

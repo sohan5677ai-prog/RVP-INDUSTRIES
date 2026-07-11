@@ -8,7 +8,7 @@ import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban, ClipboardList, Cl
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
-import { kg, rupees, shortDate } from '@/lib/format';
+import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -63,6 +63,7 @@ const poSchema = z.object({
   partyId: z.string().min(1, 'Party is required'),
   pricePerKg: z.string().min(1, 'Price is required').refine((v) => Number(v) > 0, 'Price must be positive'),
   priceType: z.enum(['BASE', 'DELIVERY']),
+  excludeGst: z.boolean(),
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Tonnage must be positive'),
   lorries: z.string().optional(),
 });
@@ -113,12 +114,12 @@ export default function PurchaseOrders() {
 
   const form = useForm<POForm>({
     resolver: zodResolver(poSchema),
-    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', tonnes: '', lorries: '' },
+    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', excludeGst: false, tonnes: '', lorries: '' },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', tonnes: '', lorries: '' });
+    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', excludeGst: false, tonnes: '', lorries: '' });
     setOpen(true);
   }
 
@@ -129,6 +130,7 @@ export default function PurchaseOrders() {
       partyId: po.partyId,
       pricePerKg: String(po.pricePerKg),
       priceType: po.priceType ?? 'DELIVERY',
+      excludeGst: po.hasGst === false,
       tonnes: String(po.tonnageKg / 1000),
       lorries: po.lorryCount ? String(po.lorryCount) : '',
     });
@@ -145,6 +147,7 @@ export default function PurchaseOrders() {
               partyId: v.partyId,
               pricePerKg: Number(v.pricePerKg),
               priceType: v.priceType,
+              hasGst: !v.excludeGst,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
             },
@@ -156,6 +159,7 @@ export default function PurchaseOrders() {
               partyId: v.partyId,
               pricePerKg: Number(v.pricePerKg),
               priceType: v.priceType,
+              hasGst: !v.excludeGst,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
             },
@@ -226,11 +230,10 @@ export default function PurchaseOrders() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
-        <StatCard label="Orders" value={groups.length} icon={ClipboardList} tone="taupe" hint={`${lorriesTotal} lorries`} />
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 stagger">
         <StatCard label="Pending" value={pendingCount} icon={Clock} tone="amber" hint="awaiting arrival" />
         <StatCard label="Arrived" value={lorriesArrived} icon={Truck} tone="forest" hint={`of ${lorriesTotal} lorries`} />
-        <StatCard label="Total tonnage" value={kg(totalTonnageAll)} icon={Scale} tone="clay" hint="ordered" />
+        <StatCard label="Total tonnage" value={`${toTonnes(totalTonnageAll).toFixed(2)} MT`} icon={Scale} tone="clay" hint="ordered" />
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">
@@ -261,7 +264,7 @@ export default function PurchaseOrders() {
             {shown.map(({ groupId, pos }) => {
               const ordered = [...pos].sort((a, b) => (a.poNumber || '').localeCompare(b.poNumber || ''));
               const isOpen = expanded.has(groupId);
-              const party = ordered[0].party?.name ?? '—';
+              const party = ordered[0].party?.name ?? '-';
               const totalTonnage = ordered.reduce((sum, p) => sum + p.tonnageKg, 0);
               const arrived = ordered.reduce((sum, p) => sum + (p.stockIns?.length ?? 0), 0);
               const statuses = [...new Set(ordered.map((p) => p.status))];
@@ -272,7 +275,7 @@ export default function PurchaseOrders() {
 
               return (
                 <Fragment key={groupId}>
-                  {/* Order summary row — click to expand its per-lorry POs */}
+                  {/* Order summary row - click to expand its per-lorry POs */}
                   <TableRow className="cursor-pointer bg-muted/30 hover:bg-muted/50 font-medium" onClick={() => toggleGroup(groupId)}>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -424,6 +427,29 @@ export default function PurchaseOrders() {
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="excludeGst"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                    <FormControl>
+                      <input 
+                        type="checkbox" 
+                        checked={field.value} 
+                        onChange={field.onChange} 
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary mt-0.5"
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel>Exclude GST</FormLabel>
+                      <p className="text-[0.8rem] text-muted-foreground">
+                        Select this if the supplier does NOT provide a GST invoice. (GST is included by default)
+                      </p>
+                    </div>
+                  </FormItem>
+                )}
+              />
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField

@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, Scale, PackageCheck, Coins, Weight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Purchase, StockIn, BunkerPlace } from '@/lib/types';
+import type { Purchase, StockIn } from '@/lib/types';
 import { calcHamali, calcKataFee, DEFAULT_HAMALI_RATE, isVehicleExempt } from '@/lib/calc';
-import { kg, rupees, shortDate } from '@/lib/format';
+import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Segmented } from '@/components/ui/segmented';
+import { Combobox } from '@/components/ui/combobox';
 import type { CompanyProfile } from '@/lib/types';
 
 type PurchaseRow = Purchase & {
@@ -32,6 +34,8 @@ export default function Purchases() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseRow | null>(null);
+  const [priceFilter, setPriceFilter] = useState<'ALL' | 'BASE' | 'DELIVERY'>('ALL');
+  const [partyFilter, setPartyFilter] = useState('ALL');
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['purchases'],
@@ -53,7 +57,6 @@ export default function Purchases() {
   const [stockInId, setStockInId] = useState('');
   const [rvpSecondWeight, setRvpSecondWeight] = useState('');
   const [hamaliRate, setHamaliRate] = useState(String(DEFAULT_HAMALI_RATE));
-  const [bunkerPlace, setBunkerPlace] = useState<BunkerPlace | ''>('');
 
   const selected = available.find((s) => s.id === stockInId);
   const rvpFirst = editing ? (editing.stockIn?.rvpFirstWeightKg ?? 0) : (selected?.rvpFirstWeightKg ?? 0);
@@ -120,11 +123,27 @@ export default function Purchases() {
   const totalHamali = items?.reduce((s, p) => s + Number(p.hamaliCharge || 0), 0) ?? 0;
   const totalKata = items?.reduce((s, p) => s + Number(p.kataFee || 0), 0) ?? 0;
 
+  // Party options for the filter combo, derived from the purchase records.
+  const partyOptions = useMemo(() => {
+    const names = [...new Set((items ?? [])
+      .map((p) => p.stockIn?.purchaseOrder?.party?.name)
+      .filter((n): n is string => !!n))].sort();
+    return [{ value: 'ALL', label: 'All parties' }, ...names.map((n) => ({ value: n, label: n }))];
+  }, [items]);
+
+  // Rows shown after the price-type tabs and party combo. Stat cards use the full set.
+  const filtered = (items ?? []).filter((p) => {
+    if (partyFilter !== 'ALL' && (p.stockIn?.purchaseOrder?.party?.name ?? '') !== partyFilter) return false;
+    if (priceFilter !== 'ALL' && (p.stockIn?.purchaseOrder?.priceType ?? '') !== priceFilter) return false;
+    return true;
+  });
+  const filtersActive = priceFilter !== 'ALL' || partyFilter !== 'ALL';
+
   return (
     <div className="space-y-8">
       <PageHeader
         icon={Scale}
-        title="Purchase"
+        title="Stock in Detail"
         description="Record purchases from stock-ins and set the hamali rate. Weight verification is done on the Verification page."
         actions={
           <Button onClick={() => { resetForm(); setOpen(true); }} disabled={!available.length}>
@@ -134,19 +153,42 @@ export default function Purchases() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 stagger">
-        <StatCard label="Recorded" value={items?.length ?? 0} icon={PackageCheck} tone="taupe" hint="purchase records" />
-        <StatCard label="Awaiting" value={available.length} icon={Scale} tone="amber" hint="stock-ins to record" />
-        <StatCard label="Net weight" value={kg(totalNet)} icon={Weight} tone="forest" hint="across purchases" />
+        <StatCard label="Unloaded" value={items?.length ?? 0} icon={PackageCheck} tone="taupe" hint="purchase records" />
+        <StatCard label="Waiting" value={available.length} icon={Scale} tone="amber" hint="stock-ins to record" />
+        <StatCard label="Net weight" value={`${toTonnes(totalNet).toFixed(2)} MT`} icon={Weight} tone="forest" hint="across purchases" />
         <StatCard label="Hamali" value={rupees(totalHamali)} icon={Coins} tone="clay" hint="total hamali" />
         <StatCard label="Kata" value={rupees(totalKata)} icon={Coins} tone="clay" hint="total kata fee" />
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
-          <h2 className="text-sm font-semibold text-foreground">Purchase records</h2>
-          {available.length > 0 && (
-            <Badge variant="warning">{available.length} awaiting</Badge>
-          )}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-foreground">Purchase records</h2>
+            {available.length > 0 && (
+              <Badge variant="warning">{available.length} awaiting</Badge>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Segmented
+              options={[
+                { label: 'All', value: 'ALL' },
+                { label: 'Base', value: 'BASE' },
+                { label: 'Delivery', value: 'DELIVERY' },
+              ]}
+              value={priceFilter}
+              onValueChange={setPriceFilter}
+              size="sm"
+            />
+            <Combobox
+              options={partyOptions}
+              value={partyFilter}
+              onChange={setPartyFilter}
+              placeholder="All parties"
+              searchPlaceholder="Search party…"
+              ariaLabel="Filter by party"
+              className="w-52"
+            />
+          </div>
         </div>
         <div className="overflow-x-auto">
           <Table>
@@ -166,21 +208,21 @@ export default function Purchases() {
               {isLoading && (
                 <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
               )}
-              {items?.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">No purchases yet.</TableCell></TableRow>
+              {!isLoading && filtered.length === 0 && (
+                <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">{filtersActive ? 'No purchases match the filters.' : 'No purchases yet.'}</TableCell></TableRow>
               )}
-              {items?.map((p) => (
+              {filtered.map((p) => (
                 <TableRow key={p.id} className="group">
                   <TableCell className="text-muted-foreground">{shortDate(p.createdAt)}</TableCell>
                   <TableCell className="font-medium text-foreground">
-                    {p.stockIn?.purchaseOrder?.party?.name ?? '—'}
+                    {p.stockIn?.purchaseOrder?.party?.name ?? '-'}
                     {p.stockIn?.purchaseOrder?.poNumber && (
                       <span className="ml-2 text-xs text-muted-foreground font-mono">({p.stockIn.purchaseOrder.poNumber})</span>
                     )}
                   </TableCell>
-                  <TableCell><span className="font-mono text-xs font-semibold">{p.stockIn?.invoiceNumber ?? '—'}</span></TableCell>
+                  <TableCell><span className="font-mono text-xs font-semibold">{p.stockIn?.invoiceNumber ?? '-'}</span></TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {p.stockIn?.purchaseOrder?.pricePerKg ? rupees(p.stockIn.purchaseOrder.pricePerKg) : '—'}
+                    {p.stockIn?.purchaseOrder?.pricePerKg ? rupees(p.stockIn.purchaseOrder.pricePerKg) : '-'}
                     {p.stockIn?.purchaseOrder?.priceType && (
                       <span className="block text-[10px] text-muted-foreground">{p.stockIn.purchaseOrder.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>
                     )}
@@ -223,7 +265,7 @@ export default function Purchases() {
                 <Label>Stock-in</Label>
                 <Input
                   disabled
-                  value={`${editing.stockIn?.purchaseOrder?.poNumber} · ${editing.stockIn?.purchaseOrder?.party?.name} — Inv ${editing.stockIn?.invoiceNumber}`}
+                  value={`${editing.stockIn?.purchaseOrder?.poNumber} · ${editing.stockIn?.purchaseOrder?.party?.name} - Inv ${editing.stockIn?.invoiceNumber}`}
                 />
               </div>
             ) : (
@@ -234,7 +276,7 @@ export default function Purchases() {
                   <SelectContent className="max-w-[90vw] sm:max-w-md">
                     {available.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
-                        {s.purchaseOrder?.poNumber} · {s.purchaseOrder?.party?.name} — Inv {s.invoiceNumber} (Lorry {s.lorryNumber}) · First Weight {kg(s.rvpFirstWeightKg)}
+                        {s.purchaseOrder?.poNumber} · {s.purchaseOrder?.party?.name} - Inv {s.invoiceNumber} (Lorry {s.lorryNumber}) · First Weight {kg(s.rvpFirstWeightKg)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -252,22 +294,22 @@ export default function Purchases() {
 
             {isBase && (
               <p className="text-xs text-muted-foreground">
-                Inward freight {freightVal > 0 ? <span className="font-medium">{rupees(freightVal)}</span> : 'is'} captured at Stock In (base-priced PO){freightVal > 0 ? '' : ' — none entered'}; it's capitalised into the seed and tracked in the Purchase Freight ledger.
+                Inward freight {freightVal > 0 ? <span className="font-medium">{rupees(freightVal)}</span> : 'is'} captured at Stock In (base-priced PO){freightVal > 0 ? '' : ' - none entered'}; it's capitalised into the seed and tracked in the Purchase Freight ledger.
               </p>
             )}
 
              <div className="rounded-lg border bg-muted/40 p-4 space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">RVP First Weight (gross)</span>
-                <span className="font-medium">{rvpFirst > 0 ? kg(rvpFirst) : '—'}</span>
+                <span className="font-medium">{rvpFirst > 0 ? kg(rvpFirst) : '-'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">RVP Second Weight (tare)</span>
-                <span className="font-medium">{Number(rvpSecondWeight) > 0 ? kg(Number(rvpSecondWeight)) : '—'}</span>
+                <span className="font-medium">{Number(rvpSecondWeight) > 0 ? kg(Number(rvpSecondWeight)) : '-'}</span>
               </div>
               <div className="flex justify-between border-t pt-2">
                 <span className="text-muted-foreground font-semibold">RVP Net Weight</span>
-                <span className={`font-bold ${netValid ? 'text-primary' : 'text-destructive'}`}>{netValid ? kg(net) : '—'}</span>
+                <span className={`font-bold ${netValid ? 'text-primary' : 'text-destructive'}`}>{netValid ? kg(net) : '-'}</span>
               </div>
               <div className="flex justify-between border-t pt-2">
                 <span className="text-muted-foreground">Hamali = rounded(net/1000) × rate</span>
@@ -275,7 +317,7 @@ export default function Purchases() {
                   {isCompanyVehicle ? (
                     <span className="text-emerald-600 dark:text-emerald-400 text-xs">Exempted<br />{rupees(0)}</span>
                   ) : (
-                    netValid ? rupees(hamali) : '—'
+                    netValid ? rupees(hamali) : '-'
                   )}
                 </span>
               </div>
@@ -285,7 +327,7 @@ export default function Purchases() {
                   {isCompanyVehicle ? (
                     <span className="text-emerald-600 dark:text-emerald-400 text-xs">Exempted<br />{rupees(0)}</span>
                   ) : (
-                    netValid ? rupees(kataFeeVal) : '—'
+                    netValid ? rupees(kataFeeVal) : '-'
                   )}
                 </span>
               </div>
@@ -293,7 +335,7 @@ export default function Purchases() {
               {isBase && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Inward freight (base price)</span>
-                  <span className="font-semibold">{freightVal > 0 ? rupees(freightVal) : '—'}</span>
+                  <span className="font-semibold">{freightVal > 0 ? rupees(freightVal) : '-'}</span>
                 </div>
               )}
               <p className="text-xs text-muted-foreground pt-1 border-t mt-1">

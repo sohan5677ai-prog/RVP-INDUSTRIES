@@ -71,7 +71,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     const splitX = LEFT + W * 0.56;
     const headerTop = y;
 
-    // Right meta column — three rows.
+    // Right meta column - three rows.
     const metaRowH = 30;
     const metaMidX = splitX + (RIGHT - splitX) / 2;
     // Row 1: Invoice No | Dated
@@ -90,7 +90,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     label('Dispatched through', splitX, r3, RIGHT - splitX);
     bold('Road', splitX, r3 + 11, RIGHT - splitX, 9);
 
-    // Left column — seller then buyer.
+    // Left column - seller then buyer.
     let ly = headerTop + 4;
     doc.font('Helvetica-Bold').fontSize(10).text(data.company.name, LEFT + 4, ly, { width: splitX - LEFT - 8 });
     ly = doc.y + 1;

@@ -10,7 +10,18 @@ import '@fontsource-variable/fraunces';
 import '@fontsource-variable/geist-mono';
 import './index.css';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Mutations invalidate the keys they touch, so served-from-cache data
+      // stays fresh; this just stops every page revisit from re-fetching and
+      // flashing a spinner. Revisits within the window render instantly.
+      staleTime: 60_000,
+      // A broken/missing endpoint shouldn't hang a page for ~7s of backoff.
+      retry: 1,
+    },
+  },
+});
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

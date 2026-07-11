@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { PartyLedgerRow, PartyLedgerDetail, PartyLedgerTxn, LedgerKind } from '@/lib/types';
@@ -48,10 +49,11 @@ function CopyBtn({ value }: { value: string }) {
 /* ============================================================== root switch */
 
 export default function PartyLedger() {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selected = searchParams.get('party');
   return selected
-    ? <PartyDetail partyId={selected} onBack={() => setSelected(null)} />
-    : <PartyIndex onSelect={setSelected} />;
+    ? <PartyDetail partyId={selected} onBack={() => setSearchParams({})} />
+    : <PartyIndex onSelect={(id) => setSearchParams({ party: id })} />;
 }
 
 /* ================================================================ index view */
@@ -92,7 +94,7 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Party Ledger</h1>
-        <p className="text-muted-foreground">A complete A-to-Z account for every supplier and buyer — balances, statements & bank details.</p>
+        <p className="text-muted-foreground">A complete A-to-Z account for every supplier and buyer - balances, statements & bank details.</p>
       </div>
 
       {/* KPI strip */}
@@ -148,9 +150,9 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] font-medium">{TYPE_LABEL[p.type] ?? p.type}</Badge>
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{p.phone ?? '—'}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{[p.address, p.state].filter(Boolean).join(', ') || '—'}</TableCell>
-                  <TableCell className="text-center text-sm text-muted-foreground">{p.lastTxnDate ? shortDate(p.lastTxnDate) : '—'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{p.phone ?? '-'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{[p.address, p.state].filter(Boolean).join(', ') || '-'}</TableCell>
+                  <TableCell className="text-center text-sm text-muted-foreground">{p.lastTxnDate ? shortDate(p.lastTxnDate) : '-'}</TableCell>
                   <TableCell className="text-right font-medium">{rupees(p.totalBusiness)}</TableCell>
                   <TableCell className="text-right">
                     {p.balance > 0 ? (
@@ -216,6 +218,12 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   const { party, summary } = data;
   const filteredDebit = filtered.reduce((s, t) => s + t.debit, 0);
   const filteredCredit = filtered.reduce((s, t) => s + t.credit, 0);
+  // Opening = running balance just before the first row; closing = last row's running balance.
+  const opening = filtered.length ? filtered[0].runningBalance - filtered[0].debit + filtered[0].credit : 0;
+  const closing = filtered.length ? filtered[filtered.length - 1].runningBalance : 0;
+  const periodText = filtered.length
+    ? `${shortDate(filtered[0].date)} – ${shortDate(filtered[filtered.length - 1].date)}`
+    : '';
 
   function exportCsv() {
     const head = ['Date', 'Type', 'Particulars', 'Invoice No', 'Vehicle No', 'UTR / Ref', 'Transferred Date', 'Weight (kg)', 'Rate', 'Debit', 'Credit', 'Balance'];
@@ -321,41 +329,77 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
       </div>
 
       {/* statement */}
-      <div className="rounded-xl border bg-card overflow-x-auto">
-        <div className="px-5 py-3.5 border-b flex items-center justify-between bg-muted/30">
-          <span className="font-semibold text-sm">Account Statement</span>
-          <span className="text-xs text-muted-foreground">{filtered.length} entries</span>
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        {/* statement header band */}
+        <div className="px-5 py-4 border-b bg-gradient-to-r from-primary/[0.07] via-card to-card flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <ReceiptText className="h-4 w-4 text-primary" />
+              <span className="font-semibold tracking-tight">Account Statement</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {periodText ? `${party.name} · ${periodText}` : party.name}
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Closing Balance</div>
+            <div className={`text-lg font-bold tabular-nums ${closing === 0 ? '' : balanceColor(closing >= 0 ? 'DR' : 'CR')}`}>
+              {closing === 0 ? 'Settled' : <>{rupees(Math.abs(closing))} <span className="text-xs font-semibold">{closing >= 0 ? 'DR' : 'CR'}</span></>}
+            </div>
+          </div>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-24">Date</TableHead>
-              <TableHead>Particulars</TableHead>
-              <TableHead>Invoice No</TableHead>
-              <TableHead>Vehicle No</TableHead>
-              <TableHead>UTR / Ref · Transferred</TableHead>
-              <TableHead className="text-right">Debit</TableHead>
-              <TableHead className="text-right">Credit</TableHead>
-              <TableHead className="text-right">Balance</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">No transactions for the selected filters.</TableCell></TableRow>
-            ) : (
-              filtered.map((t) => <TxnRow key={t.id} t={t} />)
-            )}
-          </TableBody>
-        </Table>
+
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-28">Date</TableHead>
+                <TableHead className="min-w-[260px]">Particulars</TableHead>
+                <TableHead>Reference</TableHead>
+                <TableHead className="text-right border-l border-border/60 bg-muted/60">Debit</TableHead>
+                <TableHead className="text-right bg-muted/60">Credit</TableHead>
+                <TableHead className="text-right border-l border-border/60 bg-muted/60">Balance</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">No transactions for the selected filters.</TableCell></TableRow>
+              ) : (
+                <>
+                  {/* opening balance */}
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{shortDate(filtered[0].date)}</TableCell>
+                    <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>Opening Balance</TableCell>
+                    <TableCell className="border-l border-border/60 bg-muted/20" />
+                    <TableCell className="bg-muted/20" />
+                    <TableCell className="text-right border-l border-border/60 bg-muted/20"><BalanceCell value={opening} muted /></TableCell>
+                  </TableRow>
+
+                  {filtered.map((t, i) => <TxnRow key={t.id} t={t} zebra={i % 2 === 1} />)}
+
+                  {/* closing balance */}
+                  <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">{shortDate(filtered[filtered.length - 1].date)}</TableCell>
+                    <TableCell className="text-sm font-semibold" colSpan={2}>Closing Balance</TableCell>
+                    <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums">{filteredDebit > 0 ? rupees(filteredDebit) : ''}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{filteredCredit > 0 ? rupees(filteredCredit) : ''}</TableCell>
+                    <TableCell className="text-right border-l border-border/60"><BalanceCell value={closing} /></TableCell>
+                  </TableRow>
+                </>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
         {filtered.length > 0 && (
-          <div className="border-t bg-muted/30 px-5 py-3 flex flex-wrap items-center justify-end gap-x-8 gap-y-1 text-sm">
-            <span className="text-muted-foreground">Total Debit <span className="font-semibold text-foreground ml-1">{rupees(filteredDebit)}</span></span>
-            <span className="text-muted-foreground">Total Credit <span className="font-semibold text-foreground ml-1">{rupees(filteredCredit)}</span></span>
-            <span className="text-muted-foreground">Closing Balance
-              <span className={`font-bold ml-1 ${balanceColor(summary.balanceType)}`}>
-                {summary.balance > 0 ? `${rupees(summary.balance)} ${summary.balanceType}` : 'Settled'}
-              </span>
-            </span>
+          <div className="grid grid-cols-3 divide-x divide-border border-t bg-muted/20">
+            <SummaryStat label="Total Debit" value={rupees(filteredDebit)} />
+            <SummaryStat label="Total Credit" value={rupees(filteredCredit)} />
+            <SummaryStat
+              label="Net Balance"
+              value={closing === 0 ? 'Settled' : `${rupees(Math.abs(closing))} ${closing >= 0 ? 'DR' : 'CR'}`}
+              tone={closing === 0 ? undefined : closing >= 0 ? 'emerald' : 'rose'}
+            />
           </div>
         )}
       </div>
@@ -363,47 +407,85 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   );
 }
 
-function TxnRow({ t }: { t: PartyLedgerTxn }) {
+function TxnRow({ t, zebra }: { t: PartyLedgerTxn; zebra?: boolean }) {
   const meta = KIND_META[t.kind];
+  const refs = [
+    t.invoiceNumber && { label: 'Inv', value: t.invoiceNumber },
+    t.vehicleNumber && { label: 'Veh', value: t.vehicleNumber },
+    t.utr && { label: 'UTR', value: t.utr },
+  ].filter(Boolean) as { label: string; value: string }[];
+
   return (
-    <TableRow>
-      <TableCell className="text-sm whitespace-nowrap">{shortDate(t.date)}</TableCell>
-      <TableCell>
+    <TableRow className={zebra ? 'bg-muted/[0.18]' : undefined}>
+      <TableCell className="align-top text-sm whitespace-nowrap text-muted-foreground">{shortDate(t.date)}</TableCell>
+      <TableCell className="align-top">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className={`text-[10px] font-medium ${meta.cls}`}>{meta.label}</Badge>
+          <Badge variant="outline" className={`text-[10px] font-semibold ${meta.cls}`}>{meta.label}</Badge>
           {t.status === 'PENDING' && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 dark:text-amber-400">Awaiting</Badge>}
         </div>
-        <div className="text-xs text-muted-foreground mt-1">
-          {t.particulars}
-          {t.weightKg != null && <span> · {t.weightKg.toLocaleString('en-IN')} kg{t.ratePerKg ? ` @ ₹${t.ratePerKg}` : ''}</span>}
-        </div>
-      </TableCell>
-      <TableCell className="font-mono text-xs">{t.invoiceNumber ?? '—'}</TableCell>
-      <TableCell className="font-mono text-xs">{t.vehicleNumber ?? '—'}</TableCell>
-      <TableCell className="text-xs">
-        {t.utr ? (
-          <div>
-            <div className="font-mono">{t.utr}</div>
-            {t.transferredDate && <div className="text-muted-foreground">{shortDate(t.transferredDate)}</div>}
+        <div className="text-[13px] text-foreground/90 mt-1.5 leading-snug whitespace-normal">{t.particulars}</div>
+        {t.weightKg != null && (
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            {t.weightKg.toLocaleString('en-IN')} kg{t.ratePerKg ? ` @ ₹${t.ratePerKg}/kg` : ''}
           </div>
-        ) : '—'}
-      </TableCell>
-      <TableCell className="text-right font-medium tabular-nums">{t.debit > 0 ? rupees(t.debit) : '—'}</TableCell>
-      <TableCell className="text-right font-medium tabular-nums">{t.credit > 0 ? rupees(t.credit) : '—'}</TableCell>
-      <TableCell className="text-right tabular-nums">
-        {t.runningBalance === 0 ? (
-          <span className="text-muted-foreground">0</span>
-        ) : (
-          <span className={`font-semibold ${balanceColor(t.runningBalance >= 0 ? 'DR' : 'CR')}`}>
-            {rupees(Math.abs(t.runningBalance))} <span className="text-[10px]">{t.runningBalance >= 0 ? 'DR' : 'CR'}</span>
-          </span>
         )}
+      </TableCell>
+      <TableCell className="align-top">
+        {refs.length ? (
+          <div className="space-y-0.5">
+            {refs.map((r) => (
+              <div key={r.label} className="flex items-baseline gap-1.5 text-[11px]">
+                <span className="text-muted-foreground w-7 shrink-0">{r.label}</span>
+                <span className="font-mono text-foreground/80 break-all">{r.value}</span>
+              </div>
+            ))}
+            {t.transferredDate && (
+              <div className="flex items-baseline gap-1.5 text-[11px]">
+                <span className="text-muted-foreground w-7 shrink-0">Dt</span>
+                <span className="text-muted-foreground">{shortDate(t.transferredDate)}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="text-muted-foreground text-xs">-</span>
+        )}
+      </TableCell>
+      <TableCell className="align-top text-right tabular-nums border-l border-border/60">
+        {t.debit > 0 ? <span className="font-semibold text-foreground">{rupees(t.debit)}</span> : <span className="text-muted-foreground/50">-</span>}
+      </TableCell>
+      <TableCell className="align-top text-right tabular-nums">
+        {t.credit > 0 ? <span className="font-semibold text-foreground">{rupees(t.credit)}</span> : <span className="text-muted-foreground/50">-</span>}
+      </TableCell>
+      <TableCell className="align-top text-right border-l border-border/60">
+        <BalanceCell value={t.runningBalance} />
       </TableCell>
     </TableRow>
   );
 }
 
 /* -------------------------------------------------------------- small bits */
+
+function BalanceCell({ value, muted }: { value: number; muted?: boolean }) {
+  if (value === 0) return <span className="text-muted-foreground tabular-nums">0.00</span>;
+  const dr = value >= 0;
+  return (
+    <span className={`inline-flex items-baseline gap-1.5 tabular-nums ${muted ? 'text-muted-foreground' : `font-semibold ${balanceColor(dr ? 'DR' : 'CR')}`}`}>
+      {rupees(Math.abs(value))}
+      <span className={`text-[9px] font-bold px-1 py-0.5 rounded leading-none ${dr ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+        {dr ? 'DR' : 'CR'}
+      </span>
+    </span>
+  );
+}
+
+function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: 'emerald' | 'rose' }) {
+  return (
+    <div className="px-5 py-3.5 text-center">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`text-base font-bold tabular-nums mt-0.5 ${tone ? TONE_RING[tone] : ''}`}>{value}</div>
+    </div>
+  );
+}
 
 function Info({ label, value, mono, copy }: { label: string; value: string; mono?: boolean; copy?: boolean }) {
   return (

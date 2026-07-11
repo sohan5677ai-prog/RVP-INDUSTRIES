@@ -18,7 +18,7 @@ type ComboboxProps = {
   ariaLabel?: string;
 };
 
-/** Searchable single-select — a glass trigger over a filterable, frosted list. */
+/** Searchable single-select - a glass trigger over a filterable, frosted list. */
 export const Combobox = forwardRef<HTMLButtonElement, ComboboxProps>(function Combobox({
   options, value, onChange, placeholder = 'Select…', searchPlaceholder = 'Search…',
   emptyText = 'No matches.', className, contentClassName, disabled, ariaLabel,

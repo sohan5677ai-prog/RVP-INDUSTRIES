@@ -35,7 +35,7 @@ interface BulkRow {
 }
 
 interface Props {
-  type: 'po' | 'sale';
+  type: 'po' | 'sale' | 'cold-storage';
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSuccess: () => void;
@@ -90,7 +90,7 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
   }
 
   function filterParties(list: Party[]) {
-    if (type === 'po') return list.filter((p) => p.type === 'SUPPLIER' || p.type === 'BOTH');
+    if (type === 'po' || type === 'cold-storage') return list.filter((p) => p.type === 'SUPPLIER' || p.type === 'BOTH');
     return list.filter((p) => p.type === 'BUYER' || p.type === 'BOTH');
   }
 
@@ -99,7 +99,8 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
     setParseError('');
     try {
       const fd = new FormData();
-      fd.append('type', type);
+      // cold-storage shares the same field schema as PO (date/party/lorry/tonnes/price)
+      fd.append('type', type === 'cold-storage' ? 'po' : type);
       if (mode === 'text') {
         if (!text.trim()) { setParseError('Paste some text first'); setParsing(false); return; }
         fd.append('text', text);
@@ -153,6 +154,55 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
     const filtered = filterParties(parties);
     const updated = [...rows];
 
+    if (type === 'cold-storage') {
+      // Validate party matching first
+      for (let i = 0; i < updated.length; i++) {
+        const row = updated[i];
+        const partyId = row.partyId ||
+          filtered.find((p) => p.name.toLowerCase() === row.partyName.toLowerCase())?.id;
+        updated[i] = { ...row, partyId: partyId ?? row.partyId };
+      }
+      setRows([...updated]);
+
+      const unmatched = updated.filter((r) => !r.partyId);
+      if (unmatched.length > 0) {
+        const first = unmatched[0];
+        updated[rows.indexOf(first)] = { ...first, status: 'error', errorMsg: 'Party not matched - select one' };
+        setRows([...updated]);
+        return;
+      }
+
+      try {
+        const batchRows = updated.map((r) => ({
+          date: r.date,
+          partyId: r.partyId,
+          lorryNo: r.lorryNo,
+          tonnes: parseFloat(r.tonnes),
+          pricePerKg: parseFloat(r.price),
+        }));
+
+        const result = await api<{ results: Array<{ success: boolean; poNumber?: string; error?: string }> }>(
+          '/stock-in/cold-storage-batch',
+          { method: 'POST', body: JSON.stringify({ rows: batchRows }) }
+        );
+
+        for (let i = 0; i < updated.length; i++) {
+          const r = result.results[i];
+          updated[i] = r?.success
+            ? { ...updated[i], status: 'success' }
+            : { ...updated[i], status: 'error', errorMsg: r?.error ?? 'Failed' };
+        }
+      } catch (err: any) {
+        for (let i = 0; i < updated.length; i++) {
+          updated[i] = { ...updated[i], status: 'error', errorMsg: err?.message ?? 'Batch failed' };
+        }
+      }
+      setRows([...updated]);
+      const successes = updated.filter((r) => r.status === 'success').length;
+      if (successes > 0) onSuccess();
+      return;
+    }
+
     for (let i = 0; i < updated.length; i++) {
       const row = updated[i];
       // Update status to show in-progress visually
@@ -162,7 +212,7 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
       try {
         const partyId = row.partyId ||
           filtered.find((p) => p.name.toLowerCase() === row.partyName.toLowerCase())?.id;
-        if (!partyId) throw new Error('Party not matched — select one in the preview table');
+        if (!partyId) throw new Error('Party not matched - select one in the preview table');
 
         if (type === 'po') {
           await api('/purchase-orders', {
@@ -208,14 +258,14 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
   const filteredParties = filterParties(parties);
 
   // Column header text
-  const partyLabel = type === 'po' ? 'Supplier' : 'Buyer';
+  const partyLabel = type === 'sale' ? 'Buyer' : 'Supplier';
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-5xl flex flex-col max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>
-            {type === 'po' ? 'Bulk Purchase Orders' : 'Bulk Sale Orders'}
+            {type === 'po' ? 'Bulk Purchase Orders' : type === 'cold-storage' ? 'KNM Cold Storage Import' : 'Bulk Sale Orders'}
           </DialogTitle>
         </DialogHeader>
 
@@ -250,8 +300,10 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
                   <p className="text-xs text-slate-500">
                     Copy rows from Excel and paste below. Columns:{' '}
                     {type === 'po'
-                      ? 'Date | Supplier | Lorry No | Tonnes | Price (₹/kg) | Price Type (BASE/DELIVERY)'
-                      : 'Date | Buyer | Invoice | Lorry No | Tonnes | Price (₹/kg) | Product'}
+                      ? 'Date | Supplier | Lorries | Tonnes | Price (₹/kg) | Price Type (BASE/DELIVERY)'
+                      : type === 'cold-storage'
+                      ? 'Stocking Date | Party | Lorry No | Chamber | Invoice | No of tons | Price | Amount'
+                      : 'Date | Buyer | Invoice | Lorries | Tonnes | Price (₹/kg) | Product'}
                   </p>
                   <textarea
                     className="w-full h-56 rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
@@ -326,6 +378,7 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
                     <tr>
                       <th className="px-2 py-2 text-left font-medium w-32">Date</th>
                       <th className="px-2 py-2 text-left font-medium min-w-[160px]">{partyLabel}</th>
+                      {type === 'cold-storage' && <th className="px-2 py-2 text-left font-medium w-32">Lorry No</th>}
                       <th className="px-2 py-2 text-right font-medium w-24">Tonnes</th>
                       <th className="px-2 py-2 text-right font-medium w-24">₹/kg</th>
                       {type === 'po' && <th className="px-2 py-2 text-left font-medium w-28">Price Type</th>}
@@ -356,12 +409,22 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
                               value={row.partyId}
                               onChange={(e) => updateRow(row.id, { partyId: e.target.value })}
                             >
-                              <option value="">{row.partyName || '— select —'}</option>
+                              <option value="">{row.partyName || '- select -'}</option>
                               {filteredParties.map((p) => (
                                 <option key={p.id} value={p.id}>{p.name}</option>
                               ))}
                             </select>
                           </td>
+                          {type === 'cold-storage' && (
+                            <td className="px-2 py-1">
+                              <input
+                                className="w-full rounded border border-transparent hover:border-slate-200 focus:border-blue-400 focus:outline-none px-1 py-0.5 text-sm font-mono"
+                                value={row.lorryNo}
+                                placeholder="AP39UX9105"
+                                onChange={(e) => updateRow(row.id, { lorryNo: e.target.value })}
+                              />
+                            </td>
+                          )}
                           <td className="px-2 py-1">
                             <input
                               type="number"

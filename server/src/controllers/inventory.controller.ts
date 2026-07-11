@@ -1,14 +1,18 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
-import { companyHamaliShare } from '../lib/calc.js';
+import type { SaleProduct } from '@prisma/client';
+import { companyHamaliShare, calcSaleFreight } from '../lib/calc.js';
+import { getFreightRateForDestination } from './settings.controller.js';
 
 /**
- * Detailed black seed stock: one row per recorded purchase (lorry). Milling does
- * NOT remove seed from this list — raw black seed is only depleted when the
- * finished pappu is sold (the frontend nets out the seed-equivalent of pappu
- * sold). Value = seed cost + the company's half of the hamali.
+ * Detailed black seed stock rows: one per recorded purchase (lorry), PLUS synthetic
+ * transferred-in rows at RVP for seed moved from storage. Milling does NOT remove
+ * seed from this list - raw black seed is only depleted when the finished pappu is
+ * sold. Shared by getBlackSeedStock and the per-order pappu margin so both read the
+ * same arrived-at-process seed timeline. Value = seed cost + the company's half of
+ * the hamali.
  */
-export async function getBlackSeedStock(_req: Request, res: Response) {
+export async function computeBlackSeedRows() {
   const purchases = await prisma.purchase.findMany({
     orderBy: { createdAt: 'desc' },
     include: {
@@ -24,25 +28,19 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
     // RVP net (kata) weight of black seed received.
     const rvpNetWeightKg = p.netWeightKg;
 
-    const igst = p.verification
-      ? Math.round(Number(p.verification.billingWeightKg) * Number(p.verification.pricePerKg) * 0.05 * 100) / 100
-      : 0;
-
-    // Use physical weight for seed cost calculation to avoid shortage inflating the unit price.
+    // Stock is valued EXCLUDING GST - the input IGST paid on a purchase is claimable
+    // tax credit, not a cost of the stock. Use physical weight × price so a shortage
+    // can't inflate the unit price.
     const seedCostWithoutGst = rvpNetWeightKg * price;
-    const proportionalGst = p.verification && Number(p.verification.billingWeightKg) > 0
-      ? igst * (rvpNetWeightKg / Number(p.verification.billingWeightKg))
-      : 0;
-    const seedCost = seedCostWithoutGst + proportionalGst;
 
-    const value = Math.round((seedCost + ourHamali + freight) * 100) / 100;
+    const value = Math.round((seedCostWithoutGst + ourHamali + freight) * 100) / 100;
 
     const priceType = p.stockIn.purchaseOrder.priceType || 'BASE';
     const isBasePrice = priceType === 'BASE';
     const addedFreight = isBasePrice ? freight : 0;
 
     const valueExclGstAndHamali = Math.round((seedCostWithoutGst + addedFreight) * 100) / 100;
-    const valueExclHamali = Math.round((seedCost + addedFreight) * 100) / 100;
+    const valueExclHamali = Math.round((seedCostWithoutGst + addedFreight) * 100) / 100;
 
     return {
       purchaseId: p.id,
@@ -61,31 +59,118 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
       valueExclGstAndHamali,
       valueExclHamali,
       verified: !!p.verification,
+      isTransferredIn: false as boolean,
+      fromLocation: null as string | null,
     };
   });
+
+  // Storage-location seed that has since moved to RVP via a StockTransfer (Stock
+  // Transfer page) is physically at the process now, so it should show up here too
+  // - as a synthetic row (location 'RVP') for the transferred portion, dated on the
+  // TRANSFER date (not the original arrival date), since that's when it actually
+  // reached the process. Depletes storage by BAND PRICE (most-expensive seed first,
+  // oldest lot within a band), matching the Stock by Location / Order Planner
+  // allocation engine - a transfer draws down the priciest seed first, NOT FIFO by
+  // arrival date. Transfers are applied oldest-transfer-first. The original row is
+  // left untouched; any untransferred remainder is still sitting in storage and stays
+  // excluded, same as before.
+  const storageRowsByLocation = new Map<string, typeof rows>();
+  for (const row of rows) {
+    if (row.location === 'RVP' || row.location === 'At process') continue;
+    const list = storageRowsByLocation.get(row.location) ?? [];
+    list.push(row);
+    storageRowsByLocation.set(row.location, list);
+  }
+  for (const list of storageRowsByLocation.values()) {
+    // Highest price first; oldest lot first within the same price band.
+    list.sort((a, z) => (z.pricePerKg - a.pricePerKg) || (a.date.getTime() - z.date.getTime()));
+  }
+  // Remaining (undepleted) kg per storage row, drawn down across transfers in date order.
+  const remainingByPurchaseId = new Map<string, number>();
+  for (const list of storageRowsByLocation.values()) {
+    for (const row of list) remainingByPurchaseId.set(row.purchaseId, row.rvpNetWeightKg);
+  }
+
+  const transfersToRvp = await prisma.stockTransfer.findMany({
+    where: { toLocation: 'RVP' },
+    orderBy: { transferDate: 'asc' },
+  });
+  for (const t of transfersToRvp) {
+    let remainingTransferKg = t.weightKg;
+    if (remainingTransferKg <= 0) continue;
+
+    const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge)) / t.weightKg : 0;
+
+    const sourceRows = storageRowsByLocation.get(t.fromLocation) ?? [];
+
+    for (const row of sourceRows) {
+      if (remainingTransferKg <= 0) break;
+      const availableKg = remainingByPurchaseId.get(row.purchaseId) ?? 0;
+      if (availableKg <= 0) continue;
+      const takenKg = Math.min(remainingTransferKg, availableKg);
+      if (takenKg <= 0) continue;
+      remainingTransferKg -= takenKg;
+      remainingByPurchaseId.set(row.purchaseId, availableKg - takenKg);
+      const frac = takenKg / row.rvpNetWeightKg;
+
+      rows.push({
+        ...row,
+        purchaseId: `${row.purchaseId}-transfer-${t.id}`,
+        date: t.transferDate,
+        rvpNetWeightKg: takenKg,
+        location: 'RVP',
+        pricePerKg: Math.round((row.pricePerKg + addedCostPerKg) * 100) / 100,
+        hamaliCharge: Math.round(row.hamaliCharge * frac * 100) / 100,
+        companyHamali: Math.round(row.companyHamali * frac * 100) / 100,
+        value: Math.round((row.value * frac + (takenKg * addedCostPerKg)) * 100) / 100,
+        valueExclGstAndHamali: Math.round((row.valueExclGstAndHamali * frac + (takenKg * addedCostPerKg)) * 100) / 100,
+        valueExclHamali: Math.round((row.valueExclHamali * frac + (takenKg * addedCostPerKg)) * 100) / 100,
+        isTransferredIn: true,
+        fromLocation: t.fromLocation,
+      });
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Detailed black seed stock endpoint: the rows above plus pappu/husk/waste sold &
+ * committed aggregates the Stock pages need.
+ */
+export async function getBlackSeedStock(_req: Request, res: Response) {
+  const rows = await computeBlackSeedRows();
 
   // Product sold = all dispatched shipments (RVP kata weight). Pappu nets down the
   // raw pool; husk/waste net down their own derived availability.
   const dispatches = await prisma.saleDispatch.findMany({
     select: { weightKg: true, saleOrder: { select: { product: true } } },
   });
-  const soldKg = (product: string) =>
-    dispatches.filter((d) => d.saleOrder.product === product).reduce((s, d) => s + d.weightKg, 0);
+  const soldKg = (...products: SaleProduct[]) =>
+    dispatches
+      .filter((d) => products.includes(d.saleOrder.product))
+      .reduce((s, d) => s + d.weightKg, 0);
   const pappuSoldKg = soldKg('PAPPU');
   const huskSoldKg = soldKg('HUSK');
   const wasteSoldKg = soldKg('WASTE');
+  // Shell, Waste and the three pre-cleaner byproducts all draw down the single
+  // shared 10% "Pre Cleaner Husk & Tamarind" pool.
+  const wastePoolSoldKg = soldKg('WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU');
 
-  // Committed pappu drives raw-seed depletion (same basis as Stock by Price): a pappu
-  // sale draws seed down the moment the ORDER is placed, not just when it dispatches.
-  // Per order, the footprint is max(ordered tonnage, already dispatched).
-  const pappuOrders = await prisma.saleOrder.findMany({
-    where: { product: 'PAPPU' },
-    include: { dispatches: { select: { weightKg: true } } },
-  });
-  const pappuCommittedKg = pappuOrders.reduce((sum, so) => {
-    const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
-    return sum + Math.max(so.tonnageKg, dispatched);
-  }, 0);
+  // Committed amounts drive depletion. A sale draws down the moment the ORDER is placed.
+  const getCommittedKg = async (product: SaleProduct) => {
+    const orders = await prisma.saleOrder.findMany({
+      where: { product },
+      include: { dispatches: { select: { weightKg: true } } },
+    });
+    return orders.reduce((sum, so) => {
+      const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+      return sum + Math.max(so.tonnageKg, dispatched);
+    }, 0);
+  };
+  const pappuCommittedKg = await getCommittedKg('PAPPU');
+  const huskCommittedKg = await getCommittedKg('HUSK');
+  const wasteCommittedKg = await getCommittedKg('WASTE');
 
   // Total black seed consumed in milling (pappu sold + black seed consumed on it).
   // This is the authoritative raw-stock depletion figure: once seed enters the mill
@@ -95,25 +180,28 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
 
   // Total tonnage committed across all live (non-cancelled) purchase orders,
   // used to project the pappu we are committed to producing (60% out-turn).
-  const poTonnageAgg = await prisma.purchaseOrder.aggregate({
-    _sum: { tonnageKg: true },
+  const pos = await prisma.purchaseOrder.findMany({
     where: { status: { not: 'CANCELLED' } },
+    include: { stockIns: { select: { rvpKataKg: true } } },
   });
-  const poTonnageKg = poTonnageAgg._sum.tonnageKg ?? 0;
+  const pendingPoTonnageKg = pos.reduce((sum, po) => {
+    const arrived = po.stockIns.reduce((s, si) => s + si.rvpKataKg, 0);
+    return sum + Math.max(0, po.tonnageKg - arrived);
+  }, 0);
 
-  res.json({ rows, pappuSoldKg, pappuCommittedKg, huskSoldKg, wasteSoldKg, totalMilledKg, poTonnageKg });
+  res.json({ rows, pappuSoldKg, pappuCommittedKg, huskSoldKg, huskCommittedKg, wasteSoldKg, wasteCommittedKg, wastePoolSoldKg, totalMilledKg, pendingPoTonnageKg });
 }
 
 /**
  * Stock grouped by black-seed purchase price (₹/kg), for the Pappu Order Planner.
  *
  * Each price band is a PAPPU "minus-balance account":
- *   - CREDIT — black seed arriving in the band (verified lorries) and, separately,
+ *   - CREDIT - black seed arriving in the band (verified lorries) and, separately,
  *              the un-arrived ordered tonnage of still-OPEN (PENDING) POs that is
  *              still coming.
- *   - DEBIT  — pappu committed to customers, driven by REAL sales: what has shipped
+ *   - DEBIT  - pappu committed to customers, driven by REAL sales: what has shipped
  *              (SaleDispatch) plus what is still open on un-shipped sale orders.
- *              SaleAllocation records are NOT used here — imported/historical sales
+ *              SaleAllocation records are NOT used here - imported/historical sales
  *              have none, so relying on them under-depletes the bank.
  *
  * The debit is in CONSUMABLE pappu (what a customer actually receives). Only
@@ -125,13 +213,12 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
  *
  * Negative balances come from arrival SHORTFALLS: when a PO has already arrived
  * (status ARRIVED/COMPLETED) but its received weight fell short of the order, the
- * gap is a shortfall — the buffer absorbs it first, and anything beyond the buffer
+ * gap is a shortfall - the buffer absorbs it first, and anything beyond the buffer
  * eats into consumable pappu and is reported as a negative balance.
  *
  * A single out-turn (PAPPU_OUT_TURN) bridges seed↔pappu everywhere on this page;
  * PAPPU_CONSUMABLE then bridges milled pappu↔sellable pappu.
  */
-const PRICE_STORAGE_LOCATIONS = ['Rampalli', 'Murgan', 'Multi'];
 const PAPPU_OUT_TURN = 0.6;
 // Fraction of milled pappu that is consumable/sellable; the remaining 20% is a
 // buffer reserve (waste + safety stock) that is produced but never sold.
@@ -152,10 +239,10 @@ export async function getStockByPrice(_req: Request, res: Response) {
   });
 
   // A lot is one row in a band's expansion panel. `kind` tells the three apart:
-  //   ARRIVED  — seed physically received (CREDIT)
-  //   PENDING  — un-arrived tonnage of a still-OPEN (PENDING) PO (future CREDIT,
+  //   ARRIVED  - seed physically received (CREDIT)
+  //   PENDING  - un-arrived tonnage of a still-OPEN (PENDING) PO (future CREDIT,
   //              depletable by sales after arrived seed runs out)
-  //   SHORTFALL — gap on a PO that has already arrived (ARRIVED/COMPLETED) but
+  //   SHORTFALL - gap on a PO that has already arrived (ARRIVED/COMPLETED) but
   //              received less than ordered. Not a credit; drives negative balance.
   type LotKind = 'ARRIVED' | 'PENDING' | 'SHORTFALL';
   interface Lot {
@@ -168,17 +255,20 @@ export async function getStockByPrice(_req: Request, res: Response) {
     orderedKg: number;   // PO order size (for SHORTFALL context); = receivedKg otherwise
     receivedKg: number;  // seed in this lot; reduced by sales draw-down for display
     soldKg: number;      // seed consumed from this lot by sales
+    // Traceability: which sale orders drew this (ARRIVED) lot's seed, and how much.
+    // Populated by the date-aware chronological allocation below.
+    consumedBy?: { saleDate: string; buyer: string; seedKg: number }[];
   }
   interface Band {
     blackPricePerKg: number;
     lorries: number;
-    // ARRIVED pool — physically at process (CREDIT)
+    // ARRIVED pool - physically at process (CREDIT)
     arrivedBlackKg: number;   // gross arrived
     arrivedValue: number;     // value of gross arrived
-    // PENDING pool — ordered on still-open POs, not yet arrived (future CREDIT)
+    // PENDING pool - ordered on still-open POs, not yet arrived (future CREDIT)
     pendingBlackKg: number;
     pendingValue: number;
-    // SHORTFALL — seed an already-arrived PO failed to deliver (CREDIT that never came)
+    // SHORTFALL - seed an already-arrived PO failed to deliver (CREDIT that never came)
     shortfallBlackKg: number;
     // Consumable-pappu deficit from those shortfalls, AFTER the buffer absorbs its
     // share (the negative balance). >= 0 magnitude; reported negative on the client.
@@ -197,11 +287,36 @@ export async function getStockByPrice(_req: Request, res: Response) {
     return b;
   };
 
+  // Seed delivered straight to a storage silo (Rampalli/Murugan/Multi) hasn't
+  // reached the process yet, so it isn't a price-band credit on its own - it only
+  // becomes one once a StockTransfer physically moves it to RVP (handled in step 2
+  // below, FIFO by arrival date). Collected here per storage location as we scan
+  // stock-ins, so step 2 has something to draw against.
+  const storageLotsByLocation = new Map<string, Array<{
+    price: number; netKg: number; value: number; date: Date;
+    purchaseId: string; partyName: string; lorryNumber: string; poNumber: string | null;
+  }>>();
+
   // 1. Build bands: arrived lorries (CREDIT) + un-arrived ordered tonnage, split into
   //    PENDING (open PO, still coming) vs SHORTFALL (arrived PO that came up short).
   for (const po of purchaseOrders) {
     let totalPoNetKg = 0;
     const orderedKg = po.tonnageKg; // original order, never overwritten
+
+    // Track whether any stock-in on this PO went to RVP / At process vs cold storage.
+    // Checked for ALL stock-ins (even those without a purchase entry yet) so that
+    // storage-only POs (Murugan, PGR COLD, KNM Multi) don't create phantom
+    // SHORTFALL / PENDING lots in the Order Planner — their gap belongs to the
+    // cold-storage tracking pages, not the process-level planner.
+    let hasRvpStockIn = false;
+    let hasStorageStockIn = false;
+    for (const si of po.stockIns) {
+      if (si.loadingLocation === 'At process' || si.loadingLocation === 'RVP') {
+        hasRvpStockIn = true;
+      } else {
+        hasStorageStockIn = true;
+      }
+    }
 
     for (const si of po.stockIns) {
       if (!si.purchase) continue;
@@ -212,14 +327,19 @@ export async function getStockByPrice(_req: Request, res: Response) {
       const price = si.purchase.verification
         ? Number(si.purchase.verification.pricePerKg)
         : Number(po.pricePerKg);
-      const ourHamali = companyHamaliShare(Number(si.purchase.hamaliCharge));
-      // Stock-by-Price values arrived seed at the ACTUAL amount paid the supplier
-      // (verification.totalAmount = reconciled weight × price + GST). This is
-      // intentionally distinct from Black Seed Stock's physical-weight valuation.
-      const seedCost = si.purchase.verification
-        ? Number(si.purchase.verification.totalAmount)
-        : netKg * price;
-      const value = Math.round((seedCost + ourHamali + Number(si.purchase.freightCharge)) * 100) / 100;
+      // As requested, seed value strictly equals base price (excluding inward hamali/freight)
+      const value = Math.round((netKg * price) * 100) / 100;
+
+      if (si.loadingLocation !== 'At process' && si.loadingLocation !== 'RVP') {
+        const lots = storageLotsByLocation.get(si.loadingLocation) ?? [];
+        lots.push({
+          price, netKg, value, date: si.arrivalDate,
+          purchaseId: si.purchase.id, partyName: po.party.name,
+          lorryNumber: si.lorryNumber, poNumber: po.poNumber,
+        });
+        storageLotsByLocation.set(si.loadingLocation, lots);
+        continue;
+      }
 
       const b = getBand(price);
       b.lorries += 1;
@@ -237,6 +357,11 @@ export async function getStockByPrice(_req: Request, res: Response) {
         soldKg: 0,
       });
     }
+
+    // Storage-only POs (e.g. Murugan/MRG, PGR COLD, KNM Multi): their gap belongs
+    // to the cold-storage pages, not the Order Planner. Skip the gap entirely so no
+    // SHORTFALL or PENDING lot is created in the price bands.
+    if (hasStorageStockIn && !hasRvpStockIn) continue;
 
     const gapKg = Math.max(0, orderedKg - totalPoNetKg);
     if (gapKg > 0) {
@@ -291,6 +416,57 @@ export async function getStockByPrice(_req: Request, res: Response) {
     }
   }
 
+  // 2. Storage seed that has since been moved to the process via a StockTransfer
+  //    (Stock Transfer page) becomes an ARRIVED credit too. The transfer's costs
+  //    (hamali + transport) are added to the seed's original purchase price, placing
+  //    it in a higher price band (e.g. 28.00 + 0.32 = 28.32). The lot date becomes
+  //    the transfer date, marking when it physically arrived at the process.
+  const transfers = await prisma.stockTransfer.findMany({
+    where: { toLocation: 'RVP' },
+    orderBy: { transferDate: 'asc' },
+  });
+  for (const t of transfers) {
+    let remainingTransferKg = t.weightKg;
+    if (remainingTransferKg <= 0) continue;
+
+    const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge)) / t.weightKg : 0;
+
+    // Match backend transfer logic: highest price first, then oldest lot.
+    const lots = (storageLotsByLocation.get(t.fromLocation) ?? [])
+      .sort((a, z) => (z.price - a.price) || (a.date.getTime() - z.date.getTime()));
+
+    for (const lot of lots) {
+      if (remainingTransferKg <= 0) break;
+      const takenKg = Math.min(remainingTransferKg, lot.netKg);
+      if (takenKg <= 0) continue;
+      
+      const frac = takenKg / lot.netKg;
+      const valueTaken = lot.value * frac;
+      
+      lot.netKg -= takenKg;
+      lot.value -= valueTaken;
+      remainingTransferKg -= takenKg;
+
+      const newPrice = Math.round((lot.price + addedCostPerKg) * 100) / 100;
+      
+      const b = getBand(newPrice);
+      b.lorries += 1;
+      b.arrivedBlackKg += takenKg;
+      b.arrivedValue += valueTaken + (takenKg * addedCostPerKg);
+      b.lots.push({
+        purchaseId: `${lot.purchaseId}-transfer-${t.id}`,
+        date: t.transferDate,
+        partyName: lot.partyName,
+        lorryNumber: lot.lorryNumber,
+        poNumber: lot.poNumber,
+        kind: 'ARRIVED',
+        orderedKg: takenKg,
+        receivedKg: takenKg,
+        soldKg: 0,
+      });
+    }
+  }
+
   const bands = [...bandMap.values()].sort((a, b) => b.blackPricePerKg - a.blackPricePerKg);
 
   // ── DEBIT: actual pappu committed to customers ───────────────────────────────
@@ -299,89 +475,167 @@ export async function getStockByPrice(_req: Request, res: Response) {
   // is CONSUMABLE pappu (what the customer receives).
   const pappuOrders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
-    include: { dispatches: { select: { weightKg: true } } },
+    include: { dispatches: { select: { weightKg: true } }, buyer: { select: { name: true } } },
   });
   const committedPappuKg = pappuOrders.reduce((sum, so) => {
     const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
     return sum + Math.max(so.tonnageKg, dispatched); // sold + still-open footprint
   }, 0);
 
-  // Two-pass debit — arrived seed is ALWAYS exhausted before pending seed is touched.
-  // Pass 1: draw from arrived bands most-expensive-first (yield = 0.6).
-  // Pass 2: only if arrived is fully exhausted, draw from pending most-expensive-first
-  //         (yield = 0.48, because the 20% buffer reserve cannot be sold).
-  // This ensures Black Seed Remaining (arrived net of sales) matches every other page.
   const arrivedYield = PAPPU_OUT_TURN;
   const pendingYield = PAPPU_OUT_TURN * PAPPU_CONSUMABLE;
 
   const assignedArrivedSeed = new Map<string, number>(); // band key → arrived seed debited
   const assignedPendingSeed = new Map<string, number>(); // band key → pending seed debited
 
-  let remainingDebit = committedPappuKg;
-
-  // Pass 1: arrived seed only.
+  // ── UNIFIED DATE-AWARE chronological allocation ──────────────────────────────
+  // Both ARRIVED and PENDING lots enter the same pool, each at their own date
+  // (arrival date for arrived seed, PO date for pending PO seed). A sale order can
+  // only draw from lots that entered the pool on/before the sale's date. Within the
+  // pool at any moment, lots are drawn MOST-EXPENSIVE FIRST (oldest lot to break
+  // ties within a band). This ensures:
+  //   1. Expensive PO bands (e.g. ₹27.80) are consumed before cheap arrived bands
+  //      (e.g. ₹26.50) - the "Expensive First" rule.
+  //   2. Date-awareness is preserved - a July transfer can't be eaten by an April
+  //      sale; backdated orders only see stock available at their time.
+  //   3. Committed pappu drops by EXACTLY the sale tonnage - arrived/pending draws
+  //      are tracked separately so the client formula (Available + Pending = Committed)
+  //      holds precisely.
+  //
+  // Yield differs by lot type: ARRIVED seed yields 0.6 pappu/kg (full out-turn);
+  // PENDING seed yields 0.48 pappu/kg (0.6 × 0.8, with 20% buffer deduction).
+  // The draw function works in PAPPU kg and converts to seed per-lot.
+  type PoolRef = {
+    bandKey: string; price: number; date: Date;
+    remainingConsumableKg: number; lot: Lot; lotKind: 'ARRIVED' | 'PENDING';
+  };
+  const poolRefs: PoolRef[] = [];
   for (const b of bands) {
-    if (remainingDebit <= EPS) break;
-    const arrivedConsumableAvail = b.arrivedBlackKg * arrivedYield;
-    const take = Math.min(remainingDebit, arrivedConsumableAvail);
-    if (take > 0) {
-      assignedArrivedSeed.set(b.blackPricePerKg.toFixed(2), take / arrivedYield);
-      remainingDebit -= take;
+    for (const lot of b.lots) {
+      if (lot.kind === 'ARRIVED') {
+        lot.consumedBy = [];
+        poolRefs.push({ bandKey: b.blackPricePerKg.toFixed(2), price: b.blackPricePerKg, date: lot.date, remainingConsumableKg: lot.receivedKg, lot, lotKind: 'ARRIVED' });
+      } else if (lot.kind === 'PENDING') {
+        lot.consumedBy = [];
+        // Pending lots only offer their consumable portion (80%) for sales
+        poolRefs.push({ bandKey: b.blackPricePerKg.toFixed(2), price: b.blackPricePerKg, date: lot.date, remainingConsumableKg: lot.receivedKg * PAPPU_CONSUMABLE, lot, lotKind: 'PENDING' });
+      }
     }
   }
 
-  // Pass 2: pending seed (only if arrived was insufficient).
-  for (const b of bands) {
-    if (remainingDebit <= EPS) break;
-    const pendingConsumableAvail = b.pendingBlackKg * pendingYield;
-    const take = Math.min(remainingDebit, pendingConsumableAvail);
-    if (take > 0) {
-      assignedPendingSeed.set(b.blackPricePerKg.toFixed(2), take / pendingYield);
-      remainingDebit -= take;
+  type Demand = { saleDate: Date; buyer: string; pappuNeed: number };
+  type AllocEvent =
+    | { t: number; kind: 'arrive'; ref: PoolRef }
+    | { t: number; kind: 'sale'; demand: Demand };
+  const allocEvents: AllocEvent[] = [];
+  for (const r of poolRefs) allocEvents.push({ t: r.date.getTime(), kind: 'arrive', ref: r });
+  for (const so of pappuOrders) {
+    const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+    const committed = Math.max(so.tonnageKg, dispatched);
+    if (committed > 0) allocEvents.push({
+      t: so.saleDate.getTime(),
+      kind: 'sale',
+      demand: { saleDate: so.saleDate, buyer: so.buyer?.name ?? 'Unknown', pappuNeed: committed },
+    });
+  }
+  // Same day: process arrivals before sales, so same-day seed can back a same-day sale.
+  allocEvents.sort((a, z) => a.t - z.t || (a.kind === 'arrive' ? -1 : 1));
+
+  const activePool: PoolRef[] = [];
+  // Draw `demand.pappuNeed` (in pappu kg) from the seed available so far - dearest
+  // first, oldest lot to break ties. Converts pappu→seed per-lot using the lot's
+  // yield. Since we are now ONLY drawing from consumable seed, both arrived and
+  // pending lots yield 0.6. Returns the pappu left unfilled.
+  const drawFromPool = (demand: Demand): number => {
+    let needPappu = demand.pappuNeed;
+    if (needPappu <= EPS) return 0;
+    activePool.sort((a, z) => (z.price - a.price) || (a.date.getTime() - z.date.getTime()));
+    const saleDate = demand.saleDate.toISOString().slice(0, 10);
+    for (const r of activePool) {
+      if (needPappu <= EPS) break;
+      if (r.remainingConsumableKg <= EPS) continue;
+      const yld = arrivedYield; // Both arrived and pending now yield 0.6 from their consumable portion
+      const availPappu = r.remainingConsumableKg * yld;
+      const takePappu = Math.min(needPappu, availPappu);
+      const takeSeed = takePappu / yld;
+      r.remainingConsumableKg -= takeSeed;
+      if (r.lotKind === 'ARRIVED') {
+        assignedArrivedSeed.set(r.bandKey, (assignedArrivedSeed.get(r.bandKey) ?? 0) + takeSeed);
+      } else {
+        assignedPendingSeed.set(r.bandKey, (assignedPendingSeed.get(r.bandKey) ?? 0) + takeSeed);
+      }
+      r.lot.consumedBy!.push({ saleDate, buyer: demand.buyer, seedKg: Math.round(takeSeed) });
+      needPappu -= takePappu;
+    }
+    return needPappu;
+  };
+
+  // Unfilled demand is queued (a backorder) and served, oldest-first, by the next
+  // lot to enter the pool - never by a lot that enters long after the sale.
+  const backlog: Demand[] = [];
+  for (const ev of allocEvents) {
+    if (ev.kind === 'arrive') {
+      activePool.push(ev.ref);
+      while (backlog.length > 0) {
+        const left = drawFromPool(backlog[0]);
+        if (left > EPS) { backlog[0].pappuNeed = left; break; } // pool exhausted again
+        backlog.shift();
+      }
+    } else {
+      const left = drawFromPool(ev.demand);
+      if (left > EPS) backlog.push({ ...ev.demand, pappuNeed: left });
     }
   }
 
   // Whatever could not be drawn from arrived + pending seed is the over-commitment
-  // deficit (in consumable pappu).
-  const totalDeficitPappuKg = remainingDebit;
+  // deficit (in pappu kg).
+  const totalDeficitPappuKg = backlog.reduce((s, d) => s + d.pappuNeed, 0);
   const totalAllocatedPappuKg = committedPappuKg;
+
+  // Persist each lot's remaining seed / consumed seed from the unified allocation.
+  for (const r of poolRefs) {
+    if (r.lotKind === 'ARRIVED') {
+      r.lot.soldKg = Math.round(r.lot.receivedKg - r.remainingConsumableKg);
+      r.lot.receivedKg = Math.round(r.remainingConsumableKg);
+    } else {
+      // For pending lots, soldKg tracks the consumable seed sold.
+      r.lot.soldKg = Math.round(r.lot.receivedKg * PAPPU_CONSUMABLE - r.remainingConsumableKg);
+      // The remaining gross seed is the original gross minus the sold consumable seed.
+      r.lot.receivedKg = Math.round(r.lot.receivedKg - r.lot.soldKg);
+    }
+  }
 
   const result = bands.map((b) => {
     const key = b.blackPricePerKg.toFixed(2);
     const arrivedDebitKg = assignedArrivedSeed.get(key) ?? 0;
     const pendingDebitKg = assignedPendingSeed.get(key) ?? 0;
-    const debitSeedKg = arrivedDebitKg + pendingDebitKg;
 
     const remainingBlackKg = b.arrivedBlackKg - arrivedDebitKg;   // arrived seed left (≥ 0)
-    const remainingPendingKg = b.pendingBlackKg - pendingDebitKg; // pending seed left (≥ 0)
+    
+    // For pending, separate the consumable and buffer portions so the client doesn't 
+    // accidentally treat the untouched buffer as sellable.
+    const initialPendingConsumable = b.pendingBlackKg * PAPPU_CONSUMABLE;
+    const initialPendingBuffer = b.pendingBlackKg * (1 - PAPPU_CONSUMABLE);
+    const remainingPendingConsumable = Math.max(0, initialPendingConsumable - pendingDebitKg);
+    const remainingPendingBuffer = initialPendingBuffer; // buffer is untouched by sales
+    const remainingPendingKg = remainingPendingConsumable + remainingPendingBuffer;
 
     // Value tracks only the seed still on the books for this band.
     const remFrac = b.arrivedBlackKg > 0 ? remainingBlackKg / b.arrivedBlackKg : 0;
     const pendFrac = b.pendingBlackKg > 0 ? remainingPendingKg / b.pendingBlackKg : 0;
-
-    // Reflect the sales draw-down on each lot (date FIFO): arrived lots first, then
-    // pending. Shortfall lots are never consumed.
-    b.lots.sort((a, z) => a.date.getTime() - z.date.getTime());
-    let takeArrived = arrivedDebitKg;
-    let takePending = pendingDebitKg;
-    for (const lot of b.lots) {
-      if (lot.kind === 'ARRIVED' && takeArrived > EPS) {
-        const take = Math.min(takeArrived, lot.receivedKg);
-        lot.receivedKg -= take;
-        lot.soldKg += take;
-        takeArrived -= take;
-      }
-    }
 
     return {
       blackPricePerKg: b.blackPricePerKg,
       lorries: b.lorries,
       arrivedBlackKg: Math.round(b.arrivedBlackKg),
       // Consumable pappu this band supplied to sales (arrived + pending drawn down).
-      allocatedPappuKg: Math.round(arrivedDebitKg * arrivedYield + pendingDebitKg * pendingYield),
+      // Both now yielded at 0.6 because we only drew from the consumable portion.
+      allocatedPappuKg: Math.round(arrivedDebitKg * arrivedYield + pendingDebitKg * arrivedYield),
       remainingBlackKg: Math.round(remainingBlackKg),
       remainingValue: Math.round(b.arrivedValue * remFrac * 100) / 100,
       pendingBlackKg: Math.round(remainingPendingKg),
+      pendingConsumableBlackKg: Math.round(remainingPendingConsumable),
+      pendingBufferBlackKg: Math.round(remainingPendingBuffer),
       pendingValue: Math.round(b.pendingValue * pendFrac * 100) / 100,
       shortfallBlackKg: Math.round(b.shortfallBlackKg),
       shortfallPappuKg: Math.round(b.shortfallPappuKg),
@@ -429,7 +683,7 @@ export function parseState(address: string | null): string {
  * Get remaining raw black seed stock aggregated by supplier party.
  *
  * Raw seed is depleted only as pappu is actually SOLD (dispatched), NOT when it is
- * milled — milling happens automatically on arrival, so a milled-based balance would
+ * milled - milling happens automatically on arrival, so a milled-based balance would
  * collapse to ~0. This mirrors Stock by Price's remaining-black-seed model: the
  * seed-equivalent of pappu sold (pappuSold ÷ 0.6 out-turn) is drawn down across every
  * supplier's price pools MOST-EXPENSIVE-BAND FIRST.
@@ -466,7 +720,7 @@ export async function getStockByParty(req: Request, res: Response) {
     stockIns: any[];
   };
 
-  // Build gross pools per party (no depletion yet) — pool seed by purchase price.
+  // Build gross pools per party (no depletion yet) - pool seed by purchase price.
   const partyData = parties.map((party) => {
     // Keyed on a rounded-to-paise string so a verified 25.00 and a PO 25 collapse
     // into one group (raw JS numbers from Decimal can otherwise split a clean price).
@@ -521,31 +775,6 @@ export async function getStockByParty(req: Request, res: Response) {
 
     return { party, pricePoolMap };
   });
-
-  // Seed consumed by COMMITTED pappu sales (same basis as Stock by Price): a pappu
-  // sale draws seed the moment the order is placed (max of ordered vs dispatched),
-  // drawn down most-expensive-band first across every supplier's pools.
-  const pappuOrders = await prisma.saleOrder.findMany({
-    where: { product: 'PAPPU' },
-    include: { dispatches: { select: { weightKg: true } } },
-  });
-  const pappuCommittedKg = pappuOrders.reduce((sum, so) => {
-    const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
-    return sum + Math.max(so.tonnageKg, dispatched);
-  }, 0);
-  let seedToDeplete = pappuCommittedKg / PAPPU_OUT_TURN;
-
-  const allPools = partyData.flatMap((pd) => [...pd.pricePoolMap.values()]);
-  allPools.sort((a, b) => b.pricePerKg - a.pricePerKg);
-  for (const pool of allPools) {
-    if (seedToDeplete <= 0) break;
-    const take = Math.min(seedToDeplete, pool.netStockKg);
-    if (take <= 0) continue;
-    pool.netStockKg -= take;
-    pool.value = pool.netStockKg * pool.pricePerKg;
-    pool.totalMilledKg += take;
-    seedToDeplete -= take;
-  }
 
   const stockByParty = partyData.map(({ party, pricePoolMap }) => {
     const pricePools = [...pricePoolMap.values()]
@@ -660,5 +889,179 @@ export async function getStockByState(req: Request, res: Response) {
 export async function getSilos(req: Request, res: Response) {
   const silos = await prisma.siloInventory.findMany();
   res.json(silos);
+}
+
+export async function getCalculatorDefaults(req: Request, res: Response) {
+  // Latest black seed price
+  const latestPo = await prisma.purchaseOrder.findFirst({
+    orderBy: { poDate: 'desc' },
+  });
+  const blackSeedPrice = latestPo ? Number(latestPo.pricePerKg) : 20;
+
+  // Latest husk sale price
+  const latestHuskSale = await prisma.saleOrder.findFirst({
+    where: { product: 'HUSK' },
+    orderBy: { saleDate: 'desc' },
+  });
+  const huskPrice = latestHuskSale ? Number(latestHuskSale.ratePerKg) : 1.5;
+
+  // Latest waste sale price
+  const latestWasteSale = await prisma.saleOrder.findFirst({
+    where: { product: 'WASTE' },
+    orderBy: { saleDate: 'desc' },
+  });
+  const wastePrice = latestWasteSale ? Number(latestWasteSale.ratePerKg) : 1.0;
+
+  res.json({
+    blackSeedPrice,
+    millingCost: 1, // Default processing cost
+    huskPrice,
+    wastePrice,
+  });
+}
+
+/**
+ * Per-order profit/loss margin for every PAPPU sale order, incl. backdated ones.
+ *
+ * Uses the SAME date-aware chronological allocation as the Order Planner: each
+ * order draws the seed available at its sale date, dearest-first, so every order
+ * is costed on the ACTUAL black seed that backed it (not a blended pool average).
+ * The sale price is a DELIVERED price (freight-inclusive), so freight is netted
+ * out of realisation. Margin = revenue − freight − brokerage − seed cost −
+ * production cost. GST is a pass-through and excluded.
+ */
+export async function computePappuOrderMargins() {
+  const EPS = 1e-6;
+
+  // Arrived-at-process seed timeline (real RVP lorries + transferred-in, repriced).
+  const rows = await computeBlackSeedRows();
+  type Ref = { price: number; date: Date; remainingKg: number };
+  const refs: Ref[] = rows
+    .filter((r) => r.location === 'RVP' && r.rvpNetWeightKg > 0)
+    .map((r) => ({ price: r.pricePerKg, date: r.date, remainingKg: r.rvpNetWeightKg }));
+
+  const orders = await prisma.saleOrder.findMany({
+    where: { product: 'PAPPU' },
+    include: { buyer: true, dispatches: { select: { weightKg: true } } },
+    orderBy: { saleDate: 'asc' },
+  });
+
+  const prodRows = await prisma.productionCostComponent.findMany();
+  const prodCostPerKg = prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0);
+
+  // Outward freight is netted out of the (freight-inclusive) sale price. Use the
+  // CURRENT Settings rate for each order's destination - so backdated orders whose
+  // stored freightCharge predates the rate setup are still costed correctly.
+  const destOf = (so: { destination: string | null; buyer: { destination: string | null } }) =>
+    so.destination ?? so.buyer?.destination ?? null;
+  const freightRateByDest = new Map<string, number>();
+  for (const so of orders) {
+    const key = destOf(so) ?? '';
+    if (!freightRateByDest.has(key)) freightRateByDest.set(key, await getFreightRateForDestination(destOf(so)));
+  }
+
+  // Per order → the price bands (and seed kg) that backed it.
+  const orderSeed = new Map<string, Map<string, { price: number; seedKg: number }>>();
+  const recordDraw = (orderId: string, price: number, seedKg: number) => {
+    let m = orderSeed.get(orderId);
+    if (!m) { m = new Map(); orderSeed.set(orderId, m); }
+    const key = price.toFixed(2);
+    const e = m.get(key) ?? { price, seedKg: 0 };
+    e.seedKg += seedKg;
+    m.set(key, e);
+  };
+
+  type AllocEvent =
+    | { t: number; kind: 'arrive'; ref: Ref }
+    | { t: number; kind: 'sale'; orderId: string; seedNeed: number };
+  const events: AllocEvent[] = [];
+  for (const r of refs) events.push({ t: r.date.getTime(), kind: 'arrive', ref: r });
+  const committedOf = new Map<string, number>();
+  for (const so of orders) {
+    const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+    const committed = Math.max(so.tonnageKg, dispatched);
+    committedOf.set(so.id, committed);
+    if (committed > 0) events.push({ t: so.saleDate.getTime(), kind: 'sale', orderId: so.id, seedNeed: committed / PAPPU_OUT_TURN });
+  }
+  events.sort((a, z) => a.t - z.t || (a.kind === 'arrive' ? -1 : 1));
+
+  const pool: Ref[] = [];
+  const draw = (orderId: string, needSeed: number): number => {
+    if (needSeed <= EPS) return 0;
+    pool.sort((a, z) => (z.price - a.price) || (a.date.getTime() - z.date.getTime()));
+    for (const r of pool) {
+      if (needSeed <= EPS) break;
+      if (r.remainingKg <= EPS) continue;
+      const take = Math.min(needSeed, r.remainingKg);
+      r.remainingKg -= take;
+      recordDraw(orderId, r.price, take);
+      needSeed -= take;
+    }
+    return needSeed;
+  };
+  const backlog: { orderId: string; seedNeed: number }[] = [];
+  for (const ev of events) {
+    if (ev.kind === 'arrive') {
+      pool.push(ev.ref);
+      while (backlog.length > 0) {
+        const left = draw(backlog[0].orderId, backlog[0].seedNeed);
+        if (left > EPS) { backlog[0].seedNeed = left; break; }
+        backlog.shift();
+      }
+    } else {
+      const left = draw(ev.orderId, ev.seedNeed);
+      if (left > EPS) backlog.push({ orderId: ev.orderId, seedNeed: left });
+    }
+  }
+
+  const result = orders.map((so) => {
+    const qty = so.tonnageKg; // ordered pappu kg (freight/GST are computed on this)
+    const rate = Number(so.ratePerKg);
+    const freight = calcSaleFreight(qty, freightRateByDest.get(destOf(so) ?? '') ?? 0);
+    const brokerage = Math.round(qty * Number(so.brokerageRatePerKg) * 100) / 100;
+
+    const bandsMap = orderSeed.get(so.id) ?? new Map<string, { price: number; seedKg: number }>();
+    const seedBands = [...bandsMap.values()]
+      .sort((a, b) => b.price - a.price)
+      .map((b) => ({ price: b.price, seedKg: Math.round(b.seedKg), cost: Math.round(b.price * b.seedKg * 100) / 100 }));
+    const seedKg = seedBands.reduce((s, b) => s + b.seedKg, 0);
+    const seedCost = Math.round(seedBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
+
+    const prodCost = Math.round(qty * prodCostPerKg * 100) / 100;
+    const revenue = Math.round(qty * rate * 100) / 100;
+    const netRealization = Math.round((revenue - freight - brokerage) * 100) / 100;
+    const margin = Math.round((netRealization - seedCost - prodCost) * 100) / 100;
+
+    return {
+      orderId: so.id,
+      buyer: so.buyer?.name ?? '-',
+      destination: destOf(so),
+      saleDate: so.saleDate,
+      committedPappuKg: committedOf.get(so.id) ?? qty,
+      orderedKg: qty,
+      ratePerKg: rate,
+      revenue,
+      freight,
+      freightPerKg: qty > 0 ? Math.round((freight / qty) * 100) / 100 : 0,
+      brokerage,
+      seedKg,
+      seedCost,
+      seedWacPerKg: seedKg > 0 ? Math.round((seedCost / seedKg) * 100) / 100 : 0,
+      seedCostPerPappuKg: qty > 0 ? Math.round((seedCost / qty) * 100) / 100 : 0,
+      prodCostPerKg: Math.round(prodCostPerKg * 100) / 100,
+      prodCost,
+      netRealization,
+      margin,
+      marginPerKg: qty > 0 ? Math.round((margin / qty) * 100) / 100 : 0,
+      marginPct: revenue > 0 ? Math.round((margin / revenue) * 10000) / 100 : 0,
+      seedBands,
+    };
+  });
+
+  return result;
+}
+
+export async function getPappuOrderMargins(_req: Request, res: Response) {
+  res.json(await computePappuOrderMargins());
 }
 

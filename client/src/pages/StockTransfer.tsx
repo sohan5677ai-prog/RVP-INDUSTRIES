@@ -3,11 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, ArrowRight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { StockTransfer, SiloInventory, BunkerPlace, LoansResponse } from '@/lib/types';
+import type { StockTransfer, SiloInventory } from '@/lib/types';
 import {
   transferHamali,
-  TRANSFER_STORAGE_UNLOAD_RATE, TRANSFER_STORAGE_UNLOAD_MARGIN, TRANSFER_HANDLING_RATE, TRANSFER_TRANSPORT,
-  loanInterest, daysBetween,
+  TRANSFER_HANDLING_RATE, TRANSFER_TRANSPORT,
 } from '@/lib/calc';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -23,7 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 
-const STORAGES = ['Rampalli', 'Murgan', 'Multi'] as const;
+const STORAGES = ['PGR COLD', 'Murugan', 'KNM Multi'] as const;
 
 export default function StockTransferPage() {
   const qc = useQueryClient();
@@ -37,12 +36,6 @@ export default function StockTransferPage() {
   const { data: silos } = useQuery({
     queryKey: ['silos'],
     queryFn: () => api<SiloInventory[]>('/inventory/silos'),
-  });
-
-  // Loan summary drives the bank-interest preview (rate + earliest open loan).
-  const { data: loanData } = useQuery({
-    queryKey: ['loans'],
-    queryFn: () => api<LoansResponse>('/loans'),
   });
 
   const storageSilo = (loc: string) =>
@@ -62,19 +55,9 @@ export default function StockTransferPage() {
 
   const transportCharge = weightValid ? TRANSFER_TRANSPORT : 0;
 
-  // Bank-loan carrying interest preview. Seed value moved is estimated from the
-  // source silo's MAP; days run from the earliest open loan's drawdown date.
-  const loanRate = loanData?.summary.rate ?? 0;
-  const earliestOpenLoanDate = loanData?.summary.earliestOpenLoanDate ?? null;
-  const interestDays = earliestOpenLoanDate
-    ? daysBetween(new Date(earliestOpenLoanDate), new Date(transferDate))
-    : 0;
-  const srcSilo = fromLocation ? storageSilo(fromLocation) : undefined;
-  const srcMap = srcSilo && srcSilo.weightKg > 0 ? Number(srcSilo.totalValue) / srcSilo.weightKg : 0;
-  const estSeedValue = weightValid ? srcMap * weightKg : 0;
-  const interestCharge = weightValid && interestDays > 0 ? loanInterest(estSeedValue, loanRate, interestDays) : 0;
-
-  const totalAdded = hamali.charge + transportCharge + interestCharge;
+  // Hamali + transport travel with the seed and are capitalised into its value at
+  // RVP. The seed's own value is drawn from the specific price band(s)
+  // top-to-bottom on save (server-side), not a MAP estimate.
 
   function resetForm() {
     setFromLocation('');
@@ -120,9 +103,8 @@ export default function StockTransferPage() {
         <div>
           <h1 className="text-2xl font-bold">Stock Transfer</h1>
           <p className="text-muted-foreground">
-            Move black seed from a storage (Rampalli/Murgan/Multi) to the process. Adds a fixed hamali
-            (₹{TRANSFER_STORAGE_UNLOAD_RATE}/t storage unload + ₹{TRANSFER_HANDLING_RATE}/t load &amp; unload),
-            and ₹{TRANSFER_TRANSPORT} transport to the seed's value.
+            Move black seed from a storage (Rampalli/Murugan/Multi) to the process. Adds a fixed hamali
+            (₹{TRANSFER_HANDLING_RATE}/t load &amp; unload), and ₹{TRANSFER_TRANSPORT} transport to the seed's value.
           </p>
         </div>
         <Button onClick={() => { resetForm(); setOpen(true); }}>
@@ -150,18 +132,17 @@ export default function StockTransferPage() {
               <TableHead className="text-right">Weight</TableHead>
               <TableHead className="text-right">Hamali</TableHead>
               <TableHead className="text-right">Transport</TableHead>
-
-              <TableHead className="text-right">Interest</TableHead>
               <TableHead className="text-right">Moved value</TableHead>
+              <TableHead className="text-right">Price/kg</TableHead>
               <TableHead className="w-16 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
             {transfers?.length === 0 && (
-              <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">No transfers yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">No transfers yet.</TableCell></TableRow>
             )}
             {transfers?.map((t) => (
               <TableRow key={t.id}>
@@ -171,17 +152,12 @@ export default function StockTransferPage() {
                     {t.fromLocation} <ArrowRight className="h-3 w-3" /> {t.toLocation}
                   </span>
                 </TableCell>
-                <TableCell className="font-mono text-xs">{t.lorryNumber ?? '—'}</TableCell>
+                <TableCell className="font-mono text-xs">{t.lorryNumber ?? '-'}</TableCell>
                 <TableCell className="text-right">{kg(t.weightKg)}</TableCell>
                 <TableCell className="text-right">{rupees(Number(t.loadingHamali) + Number(t.unloadingHamali))}</TableCell>
                 <TableCell className="text-right">{rupees(t.transportCharge)}</TableCell>
-
-                <TableCell className="text-right">
-                  {Number(t.interestCharge) > 0 ? (
-                    <>{rupees(t.interestCharge)}<span className="block text-[10px] text-muted-foreground">{t.interestDays} days @ {Number(t.interestRatePct)}%</span></>
-                  ) : '—'}
-                </TableCell>
                 <TableCell className="text-right font-semibold">{rupees(t.movedValue)}</TableCell>
+                <TableCell className="text-right font-semibold text-emerald-600">{t.weightKg > 0 ? rupees(Number(t.movedValue) / t.weightKg) : '-'}</TableCell>
                 <TableCell className="text-right">
                   <Button
                     variant="ghost"
@@ -211,7 +187,7 @@ export default function StockTransferPage() {
                 <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                 <SelectContent>
                   {STORAGES.map((loc) => (
-                    <SelectItem key={loc} value={loc}>{loc} — {kg(storageStock(loc))} available</SelectItem>
+                    <SelectItem key={loc} value={loc}>{loc} - {kg(storageStock(loc))} available</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -237,10 +213,6 @@ export default function StockTransferPage() {
 
             <div className="rounded-lg border bg-muted/40 p-4 space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Storage unload hamali (₹{TRANSFER_STORAGE_UNLOAD_RATE}/t)</span>
-                <span className="font-medium">{rupees(hamali.unloadCharge)}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-muted-foreground">Load &amp; unload hamali (₹{TRANSFER_HANDLING_RATE}/t)</span>
                 <span className="font-medium">{rupees(hamali.handlingCharge)}</span>
               </div>
@@ -248,19 +220,8 @@ export default function StockTransferPage() {
                 <span className="text-muted-foreground">Transfer transport (fixed)</span>
                 <span className="font-medium">{rupees(transportCharge)}</span>
               </div>
-
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Bank-loan interest {interestDays > 0 ? `(${interestDays} days @ ${loanRate}%)` : '(no open loan)'}
-                </span>
-                <span className="font-medium">{interestCharge > 0 ? rupees(interestCharge) : '—'}</span>
-              </div>
-              <div className="flex justify-between border-t pt-2">
-                <span className="text-muted-foreground font-semibold">Cost added to seed</span>
-                <span className="font-bold text-primary">{weightValid ? rupees(totalAdded) : '—'}</span>
-              </div>
               <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-                Of the ₹{TRANSFER_STORAGE_UNLOAD_RATE}/t storage-unload hamali, ₹{TRANSFER_STORAGE_UNLOAD_RATE - TRANSFER_STORAGE_UNLOAD_MARGIN}/t is paid to the crew and ₹{TRANSFER_STORAGE_UNLOAD_MARGIN}/t is company hamali profit. The ₹{TRANSFER_HANDLING_RATE}/t load &amp; unload is fully crew. All costs are capitalised into the seed at the process.
+                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew) and ₹{TRANSFER_TRANSPORT} transport are capitalised into that seed value.
               </p>
             </div>
 

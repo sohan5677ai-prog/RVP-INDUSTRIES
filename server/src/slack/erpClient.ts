@@ -75,7 +75,7 @@ export async function apiPost(path: string, body: unknown, user: ErpUser): Promi
 }
 
 /**
- * POST multipart/form-data — used for endpoints behind multer (e.g. stock-in,
+ * POST multipart/form-data - used for endpoints behind multer (e.g. stock-in,
  * sale dispatch). String fields and uploaded files are appended to a FormData;
  * the runtime sets the multipart boundary automatically.
  */

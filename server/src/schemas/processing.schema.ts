@@ -8,7 +8,7 @@ export const createProcessingSchema = z.object({
   overheadElectricity: z.coerce.number().nonnegative().optional().default(0),
   overheadWages: z.coerce.number().nonnegative().optional().default(0),
   overheadMaintenance: z.coerce.number().nonnegative().optional().default(0),
-  loadingLocation: z.enum(['At process', 'Rampalli', 'Murgan', 'Multi']).optional().default('At process'),
+  loadingLocation: z.enum(['RVP', 'PGR COLD', 'Murugan', 'KNM Multi']).optional().default('RVP'),
 });
 
 export type CreateProcessingInput = z.infer<typeof createProcessingSchema>;

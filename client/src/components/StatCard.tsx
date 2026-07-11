@@ -21,7 +21,7 @@ type StatCardProps = {
   className?: string;
 };
 
-/** Glass KPI tile — content is clamped so figures never spill outside the tile. */
+/** Glass KPI tile - content is clamped so figures never spill outside the tile. */
 export function StatCard({ label, value, icon: Icon, tone = 'amber', hint, className }: StatCardProps) {
   const t = tones[tone];
   const valueStr = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;

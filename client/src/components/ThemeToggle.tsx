@@ -3,7 +3,7 @@ import { useTheme } from 'next-themes';
 import { Moon, Sun } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/** Sun/moon theme switch — guards against hydration flash before mount. */
+/** Sun/moon theme switch - guards against hydration flash before mount. */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);

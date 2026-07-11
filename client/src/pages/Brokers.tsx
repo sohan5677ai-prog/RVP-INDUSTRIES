@@ -131,7 +131,7 @@ export default function Brokers() {
             {brokers?.map((b) => (
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.name}</TableCell>
-                <TableCell>{b.phone ?? '—'}</TableCell>
+                <TableCell>{b.phone ?? '-'}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(b)}>

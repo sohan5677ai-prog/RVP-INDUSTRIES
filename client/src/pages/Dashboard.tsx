@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardList, Truck, Boxes, Wheat, Wallet, ShoppingCart, TrendingUp,
-  ShieldAlert, LineChart as LineChartIcon, PieChart as PieChartIcon, Layers,
-  Scale, BarChart3, Gauge, AlertTriangle,
+  LineChart as LineChartIcon, PieChart as PieChartIcon, Layers,
+  Scale, BarChart3, Gauge, AlertTriangle, Users
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -20,6 +20,47 @@ import { StatCard } from '@/components/StatCard';
 import { ChartCard } from '@/components/ChartCard';
 import type { Account, Purchase, PurchaseOrder, SaleOrder, POStatus, SaleStatus } from '@/lib/types';
 
+interface HuskExpenses {
+  blackSeedUnloading: number;
+  pappuLoading: number;
+  pappuRoasting: number;
+  huskLoading: number;
+  tWasteLoading: number;
+  bagCutting: number;
+  pappuNet: number;
+  diesel: number;
+  misc: number;
+  gunnyBags: number;
+  electricity: number;
+  maintenance: number;
+  drawingsShabri: number;
+  drawingsReddy: number;
+}
+interface HuskPnl {
+  revenue: number;
+  expenses: HuskExpenses;
+  totalExpenses: number;
+  netRecovery: number;
+}
+
+// Display order + labels for the itemized husk-pool deductions.
+const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
+  { key: 'blackSeedUnloading', label: 'Black Seed Unloading' },
+  { key: 'pappuLoading', label: 'Pappu Loading' },
+  { key: 'pappuRoasting', label: 'Pappu Roasting' },
+  { key: 'huskLoading', label: 'Husk Loading' },
+  { key: 'tWasteLoading', label: 'T-Waste Loading' },
+  { key: 'bagCutting', label: 'Bag Cutting' },
+  { key: 'pappuNet', label: 'Pappu Net (Rasi)' },
+  { key: 'diesel', label: 'Diesel' },
+  { key: 'misc', label: 'Miscellaneous' },
+  { key: 'gunnyBags', label: 'Gunny Bags (net)' },
+  { key: 'electricity', label: 'Electricity' },
+  { key: 'maintenance', label: 'Maintenance' },
+  { key: 'drawingsShabri', label: 'Drawings - Shabri' },
+  { key: 'drawingsReddy', label: 'Drawings - Reddy' },
+];
+
 interface Summary {
   pendingPOs: number;
   arrivedPOs: number;
@@ -34,13 +75,14 @@ interface Summary {
 type PurchaseRow = Purchase & {
   netWeightKg: number;
   stockIn?: {
+    arrivalDate?: string;
     billingWeightKg?: number;
     partyKataKg?: number;
     purchaseOrder?: { poNumber?: string; party?: { name: string } };
   };
 };
 
-// Theme-aware colours — CSS vars adapt automatically to dark mode.
+// Theme-aware colours - CSS vars adapt automatically to dark mode.
 const C = {
   amber: 'var(--primary)',
   forest: 'var(--forest)',
@@ -83,7 +125,7 @@ export default function Dashboard() {
   const { data: purchases } = useQuery({ queryKey: ['purchases'], queryFn: () => api<PurchaseRow[]>('/purchases') });
   const { data: poAll } = useQuery({ queryKey: ['purchase-orders', 'ALL'], queryFn: () => api<PurchaseOrder[]>('/purchase-orders') });
   const { data: saleAll } = useQuery({ queryKey: ['sale-orders', 'ALL'], queryFn: () => api<SaleOrder[]>('/sale-orders') });
-  const { data: huskPnl } = useQuery({ queryKey: ['husk-pnl'], queryFn: () => api<{ revenue: number; expenses: { factoryLabor: number, factoryOverhead: number, loadingHamali: number, interest: number, transportInternal: number, total: number }, netRecovery: number }>('/reports/husk-pnl') });
+  const { data: huskPnl } = useQuery({ queryKey: ['husk-pnl'], queryFn: () => api<HuskPnl>('/reports/husk-pnl') });
 
   const resetMutation = useMutation({
     mutationFn: () => api<{ message: string }>('/system/clear-transactions', { method: 'POST' }),
@@ -100,7 +142,7 @@ export default function Dashboard() {
     });
     const idx = Object.fromEntries(months.map((m, i) => [m.key, i]));
     for (const p of purchases ?? []) {
-      const d = new Date(p.createdAt);
+      const d = new Date(p.stockIn?.arrivalDate || p.createdAt);
       const i = idx[`${d.getFullYear()}-${d.getMonth()}`];
       if (i != null) {
         months[i].spend += Number(p.verification?.totalAmount || 0);
@@ -158,14 +200,21 @@ export default function Dashboard() {
   const topSuppliers = [...supplierStats].sort((a, b) => b.rvp - a.rvp).slice(0, 6)
     .map((s) => ({ name: s.name.length > 16 ? s.name.slice(0, 15) + '…' : s.name, value: Math.round(s.rvp) }));
 
-  const supplierTrustList = supplierStats.map((s) => {
-    const shortagePct = s.billing > 0 ? (s.shortage / s.billing) * 100 : 0;
-    let trustRank = 'High trust';
-    let badgeVariant: 'success' | 'warning' | 'destructive' = 'success';
-    if (shortagePct > 0.5) { trustRank = 'Short shipping'; badgeVariant = 'destructive'; }
-    else if (shortagePct > 0.2) { trustRank = 'Medium trust'; badgeVariant = 'warning'; }
-    return { ...s, shortagePct, trustRank, badgeVariant };
-  }).sort((a, b) => b.shortagePct - a.shortagePct);
+  const topBuyersList = useMemo(() => {
+    const map: Record<string, { name: string; count: number; ordered: number; dispatched: number }> = {};
+    for (const o of saleAll ?? []) {
+      const name = o.buyer?.name;
+      if (!name) continue;
+      map[name] ??= { name, count: 0, ordered: 0, dispatched: 0 };
+      map[name].count += 1;
+      map[name].ordered += o.tonnageKg;
+      map[name].dispatched += o.dispatchedKg ?? 0;
+    }
+    return Object.values(map)
+      .map(b => ({ ...b, remaining: Math.max(0, b.ordered - b.dispatched), fulfilPct: b.ordered > 0 ? (b.dispatched / b.ordered) * 100 : 0 }))
+      .sort((a, b) => b.dispatched - a.dispatched)
+      .slice(0, 10);
+  }, [saleAll]);
 
   // ── Weight reconciliation totals ──────────────────────────────────
   const recon = useMemo(() => {
@@ -303,7 +352,7 @@ export default function Dashboard() {
               <div className="grid md:grid-cols-3 gap-8 p-3">
                 <div className="space-y-6">
                   <div>
-                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Husk Sales (Revenue)</div>
+                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Pooled Byproduct Sales (Husk + T-Waste + TPS)</div>
                     <div className="text-3xl font-bold tracking-tight text-forest">{rupees(huskPnl?.revenue ?? 0)}</div>
                   </div>
                   <div>
@@ -315,13 +364,19 @@ export default function Dashboard() {
                 </div>
                 
                 <div className="md:col-span-2">
-                  <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-4">Pooled Operational Expenses</div>
-                  <div className="space-y-3.5">
-                    <ExpenseBar label="Factory Labor (Hamali)" value={huskPnl?.expenses?.factoryLabor ?? 0} max={huskPnl?.revenue ?? 1} />
-                    <ExpenseBar label="Factory Overhead (Borri, Elec, Maint)" value={huskPnl?.expenses?.factoryOverhead ?? 0} max={huskPnl?.revenue ?? 1} />
-                    <ExpenseBar label="Selling & Loading (Pappu/Husk)" value={huskPnl?.expenses?.loadingHamali ?? 0} max={huskPnl?.revenue ?? 1} />
-                    <ExpenseBar label="Internal Transfers" value={huskPnl?.expenses?.transportInternal ?? 0} max={huskPnl?.revenue ?? 1} />
-                    <ExpenseBar label="Bank Interest" value={huskPnl?.expenses?.interest ?? 0} max={huskPnl?.revenue ?? 1} />
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Pooled Operational Expenses</span>
+                    <span className="font-mono text-xs text-muted-foreground">{rupees(huskPnl?.totalExpenses ?? 0)} total</span>
+                  </div>
+                  <div className="space-y-3">
+                    {HUSK_EXPENSE_ROWS.map((row) => (
+                      <ExpenseBar
+                        key={row.key}
+                        label={row.label}
+                        value={huskPnl?.expenses?.[row.key] ?? 0}
+                        max={huskPnl?.totalExpenses ?? 1}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>
@@ -359,31 +414,33 @@ export default function Dashboard() {
             </ChartCard>
           </div>
 
-          {/* Supplier Trust Index */}
-          <ChartCard title="Supplier trust index" subtitle="Short-shipping risk by supplier" icon={ShieldAlert} iconClass="bg-warning/12 text-warning">
+          {/* Top Buyers by Volume */}
+          <ChartCard title="Top buyers by volume" subtitle="Top 10 buyers by dispatched weight" icon={Users} iconClass="bg-blue-50 text-blue-600 dark:bg-blue-950/20">
             <div className="px-3 pb-1 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    <th className="text-left py-2 font-semibold">Supplier</th>
-                    <th className="text-right py-2 font-semibold">Trips</th>
-                    <th className="text-right py-2 font-semibold">Invoiced</th>
-                    <th className="text-right py-2 font-semibold">Shortage</th>
-                    <th className="text-right py-2 font-semibold">Short %</th>
-                    <th className="text-right py-2 font-semibold">Rank</th>
+                    <th className="text-left py-2 font-semibold">Buyer</th>
+                    <th className="text-right py-2 font-semibold">Orders</th>
+                    <th className="text-right py-2 font-semibold">Ordered</th>
+                    <th className="text-right py-2 font-semibold">Dispatched</th>
+                    <th className="text-right py-2 font-semibold">Remaining</th>
+                    <th className="text-right py-2 font-semibold">Fulfilment</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {supplierTrustList.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center text-muted-foreground py-6">No verified supplier records.</td></tr>
-                  ) : supplierTrustList.map((s) => (
-                    <tr key={s.name} className="border-b border-border/60 last:border-0 hover:bg-accent/40 transition-colors">
-                      <td className="py-2.5 font-medium text-foreground">{s.name}</td>
-                      <td className="py-2.5 text-right font-mono tabular-nums">{s.count}</td>
-                      <td className="py-2.5 text-right font-mono tabular-nums">{kg(s.billing)}</td>
-                      <td className="py-2.5 text-right font-mono tabular-nums text-destructive">-{kg(s.shortage)}</td>
-                      <td className="py-2.5 text-right font-mono tabular-nums">{s.shortagePct.toFixed(2)}%</td>
-                      <td className="py-2.5 text-right"><Badge variant={s.badgeVariant}>{s.trustRank}</Badge></td>
+                  {topBuyersList.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center text-muted-foreground py-6">No verified sale records.</td></tr>
+                  ) : topBuyersList.map((b) => (
+                    <tr key={b.name} className="border-b border-border/60 last:border-0 hover:bg-accent/40 transition-colors">
+                      <td className="py-2.5 font-medium text-foreground">{b.name}</td>
+                      <td className="py-2.5 text-right font-mono tabular-nums">{b.count}</td>
+                      <td className="py-2.5 text-right font-mono tabular-nums">{kg(b.ordered)}</td>
+                      <td className="py-2.5 text-right font-mono tabular-nums text-forest">{kg(b.dispatched)}</td>
+                      <td className="py-2.5 text-right font-mono tabular-nums text-muted-foreground">{kg(b.remaining)}</td>
+                      <td className="py-2.5 text-right">
+                        <Badge variant={b.fulfilPct >= 100 ? 'success' : 'secondary'}>{b.fulfilPct.toFixed(0)}%</Badge>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

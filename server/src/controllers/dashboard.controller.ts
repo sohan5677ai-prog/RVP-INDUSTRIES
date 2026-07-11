@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
+import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.js';
+import { customLoadingHamali } from '../lib/calc.js';
 
 export async function dashboardSummary(_req: Request, res: Response) {
   const PAPPU_OUTTURN = 0.6;
@@ -14,7 +16,7 @@ export async function dashboardSummary(_req: Request, res: Response) {
     prisma.purchaseOrder.count({ where: { status: 'PENDING' } }),
     prisma.purchaseOrder.count({ where: { status: 'ARRIVED' } }),
     prisma.saleOrder.count({ where: { status: 'PENDING' } }),
-    // All verified black seed received (one pool — milling does not deplete it).
+    // All verified black seed received (one pool - milling does not deplete it).
     prisma.weightVerification.aggregate({ _sum: { finalWeightKg: true } }),
     // Pappu sold = all dispatched Pappu shipments (RVP kata weight), across every
     // dispatch (partial or full, delivered or not).
@@ -22,7 +24,7 @@ export async function dashboardSummary(_req: Request, res: Response) {
       _sum: { weightKg: true },
       where: { saleOrder: { product: 'PAPPU' } },
     }),
-    // Total verified payable to suppliers (no Payment model yet — open question #6).
+    // Total verified payable to suppliers (no Payment model yet - open question #6).
     prisma.weightVerification.aggregate({ _sum: { totalAmount: true } }),
   ]);
 
@@ -47,65 +49,180 @@ export async function dashboardSummary(_req: Request, res: Response) {
   });
 }
 
-export async function huskPnl(req: Request, res: Response) {
-  try {
-    const accounts = await prisma.account.findMany({
-      where: { code: { in: ['40010', '50020', '50030', '50070', '50080', '50090'] } }
-    });
-    
-    const accountMap = new Map(accounts.map(a => [a.code, a.id]));
-    const idToCodeMap = new Map(accounts.map(a => [a.id, a.code]));
+// Non-pappu byproduct revenue pooled into the "Husk" recovery view. Excludes
+// Pappu (its own P&L) and Shell.
+const POOL_REVENUE_COST_CENTERS = [
+  'HUSK', 'WASTE', 'TPS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
+];
+// Products loaded at the ₹/tonne WASTE_LOADING rate (10% pool byproducts).
+const WASTE_LOADING_PRODUCTS = new Set([
+  'WASTE', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
+]);
 
-    const revAccountId = accountMap.get('40010');
-    let huskRevenue = 0;
+/**
+ * Husk (byproduct) recovery pool for the dashboard. Pools all non-pappu byproduct
+ * SALE revenue and deducts every operating cost, itemized. This is a MANAGEMENT
+ * view - loading-hamali lines are recomputed from current ₹/tonne rates × dispatched
+ * tonnage (so "Pappu Roasting" separates from "Pappu Loading", which the ledger
+ * merges), and the four standalone reports (gunny/electricity/maintenance/drawings)
+ * are read from their own tables. Nothing here is posted to the accounting ledger.
+ */
+export interface HuskExpenses {
+  blackSeedUnloading: number;
+  pappuLoading: number;
+  pappuRoasting: number;
+  huskLoading: number;
+  tWasteLoading: number;
+  bagCutting: number;
+  pappuNet: number;
+  diesel: number;
+  misc: number;
+  gunnyBags: number;
+  electricity: number;
+  maintenance: number;
+  drawingsShabri: number;
+  drawingsReddy: number;
+  ccInterest: number;
+  termLoanInterest: number;
+}
 
-    if (revAccountId) {
-      const huskRevenueLines = await prisma.journalLine.aggregate({
+// Itemized husk-pool overheads in display order. `pappu` marks costs already
+// captured inside the per-order Pappu P/L (seed loading, roasting, net). The
+// dashboard recovery card shows every line; the P&L page's husk pool omits the
+// pappu-flagged ones so Net Profit does not double-count them.
+export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu: boolean }[] = [
+  { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
+  { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
+  { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
+  { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
+  { key: 'tWasteLoading',      label: 'T-Waste Loading',      pappu: false },
+  { key: 'bagCutting',         label: 'Bag Cutting',          pappu: false },
+  { key: 'pappuNet',           label: 'Pappu Net (Rasi)',     pappu: true  },
+  { key: 'diesel',             label: 'Diesel',               pappu: false },
+  { key: 'misc',               label: 'Miscellaneous',        pappu: false },
+  { key: 'gunnyBags',          label: 'Gunny Bags (net)',     pappu: false },
+  { key: 'electricity',        label: 'Electricity',          pappu: false },
+  { key: 'maintenance',        label: 'Maintenance',          pappu: false },
+  { key: 'drawingsShabri',     label: 'Drawings - Shabri',    pappu: false },
+  { key: 'drawingsReddy',      label: 'Drawings - Reddy',     pappu: false },
+  { key: 'ccInterest',         label: 'CC Interest',          pappu: false },
+  { key: 'termLoanInterest',   label: 'Term Loan Interest',   pappu: false },
+];
+
+// Shared husk-pool computation: pooled byproduct revenue + every operating cost,
+// itemized. Loading-hamali lines are recomputed from current ₹/tonne rates ×
+// dispatched tonnage; the four standalone reports (gunny/electricity/maintenance/
+// drawings) are read from their own tables. Used by the dashboard recovery card
+// and by the P&L page's husk pool.
+export async function computeHuskPool(): Promise<{ revenue: number; expenses: HuskExpenses }> {
+  const [
+    revAccount,
+    dispatches,
+    blackSeedHamali,
+    manualByType,
+    gunnyByDir,
+    electricityAgg,
+    maintenanceAgg,
+    drawingsByOwner,
+    interestByType,
+    pappuRate,
+    huskRate,
+    wasteRate,
+    customRates,
+  ] = await Promise.all([
+      prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
+      prisma.saleDispatch.findMany({ select: { weightKg: true, saleOrder: { select: { product: true } } } }),
+      prisma.purchase.aggregate({ _sum: { hamaliCharge: true } }),
+      (prisma.manualHamaliCost.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
+      (prisma.gunnyBagEntry.groupBy as any)({ by: ['direction'], _sum: { amount: true } }),
+      prisma.electricityBill.aggregate({ _sum: { amount: true } }),
+      prisma.maintenanceExpense.aggregate({ _sum: { amount: true } }),
+      (prisma.drawing.groupBy as any)({ by: ['owner'], _sum: { amount: true } }),
+      (prisma.interestCharge.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
+      getHamaliRateFull('PAPPU_LOADING'),
+      getHamaliRateFull('HUSK_LOADING'),
+      getHamaliRateFull('WASTE_LOADING'),
+      getCustomHamaliRates(),
+    ]);
+
+    // ── Revenue: pooled byproduct sales revenue (net credits on 40010) ──────────
+    let revenue = 0;
+    if (revAccount) {
+      const revLines = await prisma.journalLine.aggregate({
         _sum: { credit: true, debit: true },
-        where: { accountId: revAccountId, costCenter: 'HUSK' },
+        where: { accountId: revAccount.id, costCenter: { in: POOL_REVENUE_COST_CENTERS } },
       });
-      huskRevenue = Number(huskRevenueLines._sum.credit ?? 0) - Number(huskRevenueLines._sum.debit ?? 0);
+      revenue = Number(revLines._sum.credit ?? 0) - Number(revLines._sum.debit ?? 0);
     }
 
-    const expenseCodes = ['50020', '50030', '50070', '50080', '50090'];
-    const expenseAccountIds = expenseCodes.map(c => accountMap.get(c)).filter(Boolean) as string[];
-
-    let expenseLines: any[] = [];
-    if (expenseAccountIds.length > 0) {
-      expenseLines = await prisma.journalLine.groupBy({
-        by: ['accountId'],
-        _sum: { debit: true, credit: true },
-        where: { accountId: { in: expenseAccountIds } },
-      });
+    // ── Dispatched tonnage per product (drives recomputed loading hamali) ───────
+    let pappuKg = 0, huskKg = 0, wasteKg = 0;
+    for (const d of dispatches) {
+      const product = d.saleOrder.product;
+      if (product === 'PAPPU') pappuKg += d.weightKg;
+      else if (product === 'HUSK') huskKg += d.weightKg;
+      else if (WASTE_LOADING_PRODUCTS.has(product)) wasteKg += d.weightKg;
     }
+
+    const pappuLoading = customLoadingHamali(pappuKg, pappuRate.total, pappuRate.lorry, pappuRate.margin).company;
+    const pappuRoasting = customRates.reduce(
+      (s, c) => s + customLoadingHamali(pappuKg, c.total, c.lorry, c.margin).company, 0,
+    );
+    const huskLoading = customLoadingHamali(huskKg, huskRate.total, huskRate.lorry, huskRate.margin).company;
+    const tWasteLoading = customLoadingHamali(wasteKg, wasteRate.total, wasteRate.lorry, wasteRate.margin).company;
+
+    // ── Manual hamali costs grouped by type ─────────────────────────────────────
+    const manual = Object.fromEntries(
+      (manualByType as any[]).map((r) => [r.type, Number(r._sum.amount ?? 0)]),
+    );
+    const bagCutting = (manual['BAG_CUTTING_NORMAL'] ?? 0) + (manual['BAG_CUTTING_DISTANCE'] ?? 0);
+    const pappuNet = manual['PAPPU_NET'] ?? 0;
+    const diesel = manual['DIESEL'] ?? 0;
+    const misc = manual['MISC'] ?? 0;
+
+    // ── Standalone report tables ────────────────────────────────────────────────
+    const gunny = Object.fromEntries(
+      (gunnyByDir as any[]).map((r) => [r.direction, Number(r._sum.amount ?? 0)]),
+    );
+    const gunnyBags = (gunny['PURCHASE'] ?? 0) - (gunny['SALE'] ?? 0);
+    const electricity = Number(electricityAgg._sum.amount ?? 0);
+    const maintenance = Number(maintenanceAgg._sum.amount ?? 0);
+    const drawings = Object.fromEntries(
+      (drawingsByOwner as any[]).map((r) => [r.owner, Number(r._sum.amount ?? 0)]),
+    );
+    const interest = Object.fromEntries(
+      (interestByType as any[]).map((r) => [r.type, Number(r._sum.amount ?? 0)]),
+    );
 
     const expenses = {
-      factoryLabor: 0,
-      factoryOverhead: 0,
-      loadingHamali: 0,
-      interest: 0,
-      transportInternal: 0,
-      total: 0,
+      blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
+      pappuLoading,
+      pappuRoasting,
+      huskLoading,
+      tWasteLoading,
+      bagCutting,
+      pappuNet,
+      diesel,
+      misc,
+      gunnyBags,
+      electricity,
+      maintenance,
+      drawingsShabri: drawings['SHABRI'] ?? 0,
+      drawingsReddy: drawings['REDDY'] ?? 0,
+      ccInterest: interest['CC'] ?? 0,
+      termLoanInterest: interest['TERM_LOAN'] ?? 0,
     };
 
-    for (const row of expenseLines) {
-      const code = idToCodeMap.get(row.accountId);
-      const netExpense = Number(row._sum.debit ?? 0) - Number(row._sum.credit ?? 0);
-      expenses.total += netExpense;
-      if (code === '50020') expenses.factoryLabor += netExpense;
-      else if (code === '50030') expenses.factoryOverhead += netExpense;
-      else if (code === '50070') expenses.loadingHamali += netExpense;
-      else if (code === '50080') expenses.interest += netExpense;
-      else if (code === '50090') expenses.transportInternal += netExpense;
-    }
+  return { revenue, expenses };
+}
 
-    const netRecovery = huskRevenue - expenses.total;
-
-    res.json({
-      revenue: huskRevenue,
-      expenses,
-      netRecovery,
-    });
+// Dashboard husk-recovery card: full itemized pool (includes pappu-flagged costs).
+export async function huskPnl(_req: Request, res: Response) {
+  try {
+    const { revenue, expenses } = await computeHuskPool();
+    const totalExpenses = Object.values(expenses).reduce((s, v) => s + v, 0);
+    const netRecovery = revenue - totalExpenses;
+    res.json({ revenue, expenses, totalExpenses, netRecovery });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to calculate Husk PnL' });

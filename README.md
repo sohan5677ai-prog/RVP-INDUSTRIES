@@ -1,4 +1,4 @@
-# RVP Industries — Tamarind Seed Processing Software
+# RVP Industries - Tamarind Seed Processing Software
 
 Monorepo: `client/` (React + Vite + TS) and `server/` (Express + TS + Prisma). Postgres runs in Docker.
 

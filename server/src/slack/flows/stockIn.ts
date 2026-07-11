@@ -15,7 +15,7 @@ import { fmtDate, rupees } from '../parse.js';
 import { startPurchaseForStockIn } from './purchase.js';
 
 const FLOW = 'stockin';
-const LOCATIONS = ['At process', 'Rampalli', 'Murgan', 'Multi'];
+const LOCATIONS = ['RVP', 'PGR COLD', 'Murugan', 'KNM Multi'];
 
 // The flow now PICKS THE PO FIRST (reliable manual choice from the pending list)
 // and then reads each slip on demand, ONE document = ONE Gemini call. This avoids
@@ -78,7 +78,7 @@ function poPickModal(pos: any[], channel: string) {
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
       contextBlock(
-        ":package: Pick the purchase order this lorry is against. On the next card you can read each slip with AI — *one at a time* — or just type the values."
+        ":package: Pick the purchase order this lorry is against. On the next card you can read each slip with AI - *one at a time* - or just type the values."
       ),
       {
         type: 'input',
@@ -106,7 +106,7 @@ function poPickModal(pos: any[], channel: string) {
         element: {
           type: 'static_select',
           action_id: 'v',
-          initial_option: { text: { type: 'plain_text', text: 'At process' }, value: 'At process' },
+          initial_option: { text: { type: 'plain_text', text: 'RVP' }, value: 'RVP' },
           options: LOCATIONS.map((l) => ({ text: { type: 'plain_text', text: l }, value: l })),
         },
       },
@@ -124,7 +124,7 @@ function readDocModal(kind: ReadKind, channel: string, threadTs: string) {
     submit: { type: 'plain_text' as const, text: 'Read' },
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
-      contextBlock(`:mag: Attach the *${DOC_LABEL[kind]}* — I'll read it and fill the matching fields.`),
+      contextBlock(`:mag: Attach the *${DOC_LABEL[kind]}* - I'll read it and fill the matching fields.`),
       {
         type: 'input',
         block_id: 'file',
@@ -176,7 +176,7 @@ function reviewBlocks(d: StockInDraftData, note?: string): KnownBlock[] {
   if (note) blocks.push(contextBlock(note));
   const missing = reviewMissing(d);
   if (missing.length > 0) {
-    blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — read the slip above or tap *Edit* to type it.`));
+    blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} - read the slip above or tap *Edit* to type it.`));
   }
   blocks.push(readButtons());
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
@@ -284,7 +284,7 @@ export function registerStockInFlow(app: App): void {
     if (!user) return;
     const v = view.state.values as any;
     const poId = v.po?.v?.selected_option?.value;
-    const location = v.location?.v?.selected_option?.value ?? 'At process';
+    const location = v.location?.v?.selected_option?.value ?? 'RVP';
     let po: any;
     try {
       po = await apiGet(`/purchase-orders/${poId}`, user);
@@ -367,8 +367,8 @@ export function registerStockInFlow(app: App): void {
         blocks: reviewBlocks(d, `:white_check_mark: Read the ${DOC_LABEL[kind]}. Check the values below.`),
       });
     } catch (err) {
-      // A single failed read is non-fatal — keep the PO/other fields and let the
-      // user type this one. (Common cause: Gemini quota/billing — far rarer now
+      // A single failed read is non-fatal - keep the PO/other fields and let the
+      // user type this one. (Common cause: Gemini quota/billing - far rarer now
       // that we make one call at a time.)
       setDraft(key, draft);
       await client.chat.update({
@@ -435,7 +435,7 @@ export function registerStockInFlow(app: App): void {
     }
 
     try {
-      // The invoice file is optional (the ERP stores a blank URL when absent —
+      // The invoice file is optional (the ERP stores a blank URL when absent -
       // e.g. the invoice values were typed rather than read from a photo).
       const files = d.invoiceFile
         ? [{ field: 'invoice', buffer: d.invoiceFile.buffer, filename: d.invoiceFile.filename, mimetype: d.invoiceFile.mimetype }]
@@ -475,9 +475,9 @@ export function registerStockInFlow(app: App): void {
           headerBlock('✅ Stock-in recorded'),
           contextBlock(`PO *${d.poNumber}* · ${d.partyName}`),
           fieldsSection([
-            { label: 'Arrival date', value: d.arrivalDate ? fmtDate(d.arrivalDate) : '—' },
-            { label: 'Lorry', value: d.lorryNumber ?? '—' },
-            { label: 'Invoice #', value: d.invoiceNumber ?? '—' },
+            { label: 'Arrival date', value: d.arrivalDate ? fmtDate(d.arrivalDate) : '-' },
+            { label: 'Lorry', value: d.lorryNumber ?? '-' },
+            { label: 'Invoice #', value: d.invoiceNumber ?? '-' },
             { label: 'Billing weight', value: `${d.billingWeightKg} kg` },
             { label: 'Party kata', value: `${d.partyKataKg} kg` },
             { label: 'RVP first weight', value: `${d.rvpFirstWeightKg} kg` },
@@ -493,7 +493,7 @@ export function registerStockInFlow(app: App): void {
         const fullStockIn = await apiGet(`/stock-in/${created.id}`, draft.user);
         await startPurchaseForStockIn(fullStockIn, draft.user, b.user.id, b.channel.id, client);
       } catch {
-        /* non-fatal — the user can still run /purchase manually */
+        /* non-fatal - the user can still run /purchase manually */
       }
     } catch (err) {
       const msg = err instanceof ErpApiError ? err.message : (err as Error).message;

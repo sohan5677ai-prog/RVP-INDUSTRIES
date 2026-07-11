@@ -92,7 +92,7 @@ export default function JournalEntries() {
                               {line.costCenter}
                             </span>
                           ) : (
-                            <span className="text-muted-foreground/30">—</span>
+                            <span className="text-muted-foreground/30">-</span>
                           )}
                         </td>
                         <td className="p-3 text-right font-mono text-xs text-emerald-600 dark:text-emerald-500">

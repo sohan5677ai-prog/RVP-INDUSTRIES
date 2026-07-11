@@ -2,7 +2,7 @@
   "name": "rvp-app",
   "version": "0.1.0",
   "private": true,
-  "description": "RVP Industries — Tamarind Seed Processing Software",
+  "description": "RVP Industries - Tamarind Seed Processing Software",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm --prefix server run dev",

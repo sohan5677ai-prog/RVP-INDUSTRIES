@@ -8,7 +8,7 @@ import { registerSaleFlow } from './flows/sale.js';
 import { registerDispatchFlow } from './flows/dispatch.js';
 
 /**
- * Start the Slack bot in Socket Mode (outbound WebSocket — no public URL needed).
+ * Start the Slack bot in Socket Mode (outbound WebSocket - no public URL needed).
  * Gated by SLACK_ENABLED in index.ts. Safe to call without a fully-configured
  * workspace: it validates the required tokens and no-ops with a warning if any
  * are missing, so a misconfigured Slack setup never blocks the API server.
@@ -19,7 +19,7 @@ export async function startSlackBot(): Promise<void> {
 
   if (!token || !appToken) {
     console.warn(
-      '[slack] SLACK_BOT_TOKEN / SLACK_APP_TOKEN not set — Slack bot disabled. ' +
+      '[slack] SLACK_BOT_TOKEN / SLACK_APP_TOKEN not set - Slack bot disabled. ' +
         'Set them (and SLACK_ENABLED=true) to enable it.'
     );
     return;

@@ -39,10 +39,10 @@ function LedgerRow({ ledger, depth }: { ledger: LedgerNode; depth: number }) {
         <span className="text-sm text-foreground">{ledger.name}</span>
       </TableCell>
       <TableCell className="text-right font-mono text-xs text-muted-foreground tabular-nums">
-        {ledger.openingBalance ? rupees(Math.abs(ledger.openingBalance)) : '—'}
+        {ledger.openingBalance ? rupees(Math.abs(ledger.openingBalance)) : '-'}
       </TableCell>
       <TableCell className={cn('text-right font-mono text-sm tabular-nums', d.isDr ? 'text-foreground' : 'text-foreground')}>
-        {Math.abs(ledger.closing) < 0.005 ? '—' : (
+        {Math.abs(ledger.closing) < 0.005 ? '-' : (
           <>
             {d.value} <span className="text-[10px] text-muted-foreground font-semibold">{d.side}</span>
           </>
@@ -78,7 +78,7 @@ function GroupRows({ group, depth, open, toggle }: {
         </TableCell>
         <TableCell />
         <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
-          {Math.abs(group.subtotal) < 0.005 ? '—' : (
+          {Math.abs(group.subtotal) < 0.005 ? '-' : (
             <>
               {d.value} <span className="text-[10px] text-muted-foreground font-semibold">{d.side}</span>
             </>

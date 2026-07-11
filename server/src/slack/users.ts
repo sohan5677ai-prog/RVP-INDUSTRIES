@@ -3,7 +3,7 @@ import type { ErpUser } from './erpClient.js';
 
 /**
  * Resolve a Slack member ID to the ERP user it is linked to (User.slackUserId).
- * Returns null when no ERP user is mapped — callers must refuse the action and
+ * Returns null when no ERP user is mapped - callers must refuse the action and
  * tell the user to ask an admin to link their account.
  */
 export async function resolveErpUser(slackUserId: string): Promise<ErpUser | null> {

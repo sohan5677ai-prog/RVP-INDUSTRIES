@@ -49,6 +49,153 @@ export async function getFreightRateForDestination(destination: string | null | 
   return rate ? Number(rate.ratePerTonne) : 0;
 }
 
+// --- Hamali rates (₹/tonne per operation, drive the live costing) ---------------
+
+export const HAMALI_RATE_KEYS = [
+  'BLACK_SEED_UNLOAD',
+  'PAPPU_LOADING',
+  'TRANSFER_FROM_STORAGE',
+  'HUSK_LOADING',
+  'TPS_LOADING',
+  'SHELL_TRANSFER',
+  'WASTE_LOADING',
+] as const;
+type HamaliRateKey = (typeof HAMALI_RATE_KEYS)[number];
+
+// Seed defaults mirror the current constants in lib/calc.ts so behaviour is
+// unchanged until a rate is edited. TRANSFER is the ₹270 load+unload handling
+// total (the storage-unload leg is no longer charged).
+//   ratePerTonne = full charge; lorry = collected off the driver's freight;
+//   margin = company P/L benefit (we collect more from the lorry than we pay the crew).
+//   Company-borne share is derived = ratePerTonne − lorry. Crew payable = ratePerTonne − margin.
+type HamaliDefault = { label: string; ratePerTonne: number; lorryPerTonne: number; marginPerTonne: number; sortOrder: number };
+const HAMALI_RATE_DEFAULTS: Record<HamaliRateKey, HamaliDefault> = {
+  BLACK_SEED_UNLOAD: { label: 'Black Seed Unloading', ratePerTonne: 150, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 0 },
+  PAPPU_LOADING: { label: 'Pappu Loading', ratePerTonne: 220, lorryPerTonne: 80, marginPerTonne: 10, sortOrder: 1 },
+  TRANSFER_FROM_STORAGE: { label: 'Transfer From Storages', ratePerTonne: 270, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 2 },
+  HUSK_LOADING: { label: 'Husk Loading', ratePerTonne: 333, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 3 },
+  TPS_LOADING: { label: 'TPS (Brokens) Loading', ratePerTonne: 160, lorryPerTonne: 160, marginPerTonne: 0, sortOrder: 4 },
+  SHELL_TRANSFER: { label: 'Tamarind Shell Transfer', ratePerTonne: 333, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 5 },
+  WASTE_LOADING: { label: 'Tamarind Waste Loading', ratePerTonne: 150, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 6 },
+};
+
+/** Return all hamali rate rows (fixed + custom), lazily creating missing fixed ones from defaults. */
+export async function getHamaliRateRows() {
+  const existing = await prisma.hamaliRate.findMany();
+  const have = new Set(existing.map((r) => r.key));
+  const missing = HAMALI_RATE_KEYS.filter((k) => !have.has(k));
+  if (missing.length) {
+    await prisma.hamaliRate.createMany({
+      data: missing.map((k) => ({
+        key: k,
+        label: HAMALI_RATE_DEFAULTS[k].label,
+        ratePerTonne: HAMALI_RATE_DEFAULTS[k].ratePerTonne,
+        lorryPerTonne: HAMALI_RATE_DEFAULTS[k].lorryPerTonne,
+        marginPerTonne: HAMALI_RATE_DEFAULTS[k].marginPerTonne,
+        sortOrder: HAMALI_RATE_DEFAULTS[k].sortOrder,
+      })),
+    });
+  }
+  const rows = await prisma.hamaliRate.findMany();
+  // Order by saved sortOrder, then the canonical key order as a tiebreak.
+  return rows.sort(
+    (a, b) =>
+      a.sortOrder - b.sortOrder ||
+      HAMALI_RATE_KEYS.indexOf(a.key as HamaliRateKey) - HAMALI_RATE_KEYS.indexOf(b.key as HamaliRateKey)
+  );
+}
+
+export async function getHamaliRates(_req: Request, res: Response) {
+  res.json(await getHamaliRateRows());
+}
+
+const hamaliRatesSchema = z.object({
+  rates: z
+    .array(
+      z.object({
+        key: z
+          .string()
+          .min(1)
+          .max(64)
+          .regex(/^[A-Z0-9_]+$/, 'Key must be uppercase letters, digits or underscores'),
+        label: z.string().min(1).max(120),
+        ratePerTonne: z.coerce.number().nonnegative(),
+        lorryPerTonne: z.coerce.number().nonnegative().default(0),
+        marginPerTonne: z.coerce.number().nonnegative().default(0),
+        isCustom: z.boolean().default(false),
+      })
+    )
+    .min(1),
+});
+
+/**
+ * Replace the hamali rate set. Fixed operations keep their key; custom rows (the
+ * user-added costs) are upserted, and any custom row no longer present is removed.
+ * Row order is persisted via sortOrder. Lorry & margin are now editable per row.
+ */
+export async function updateHamaliRates(req: Request, res: Response) {
+  const { rates } = hamaliRatesSchema.parse(req.body);
+  await prisma.$transaction(async (tx) => {
+    for (let i = 0; i < rates.length; i++) {
+      const r = rates[i];
+      // A fixed key can never be flipped into a custom row (and vice-versa).
+      const isFixed = (HAMALI_RATE_KEYS as readonly string[]).includes(r.key);
+      const data = {
+        label: r.label,
+        ratePerTonne: r.ratePerTonne,
+        lorryPerTonne: r.lorryPerTonne,
+        marginPerTonne: r.marginPerTonne,
+        isCustom: isFixed ? false : true,
+        sortOrder: i,
+      };
+      await tx.hamaliRate.upsert({
+        where: { key: r.key },
+        update: data,
+        create: { key: r.key, ...data },
+      });
+    }
+    // Drop custom rows the user deleted in the UI (fixed rows are never deleted).
+    const keptKeys = rates.map((r) => r.key);
+    await tx.hamaliRate.deleteMany({ where: { isCustom: true, key: { notIn: keptKeys } } });
+  });
+  res.json(await getHamaliRateRows());
+}
+
+/** Look up a single hamali rate's total (₹/tonne), falling back to the seeded default. */
+export async function getHamaliRate(key: HamaliRateKey): Promise<number> {
+  const row = await prisma.hamaliRate.findUnique({ where: { key } });
+  if (row) return Number(row.ratePerTonne);
+  return HAMALI_RATE_DEFAULTS[key].ratePerTonne;
+}
+
+export interface HamaliSplitRates {
+  total: number;
+  lorry: number;
+  margin: number;
+}
+
+/** Full split (total / lorry / margin) for one rate, falling back to seeded defaults. */
+export async function getHamaliRateFull(key: HamaliRateKey): Promise<HamaliSplitRates> {
+  const row = await prisma.hamaliRate.findUnique({ where: { key } });
+  if (row) {
+    return { total: Number(row.ratePerTonne), lorry: Number(row.lorryPerTonne), margin: Number(row.marginPerTonne) };
+  }
+  const d = HAMALI_RATE_DEFAULTS[key];
+  return { total: d.ratePerTonne, lorry: d.lorryPerTonne, margin: d.marginPerTonne };
+}
+
+/** Every user-added custom cost - these are charged on each Pappu sale dispatch. */
+export async function getCustomHamaliRates(): Promise<(HamaliSplitRates & { key: string; label: string })[]> {
+  const rows = await prisma.hamaliRate.findMany({ where: { isCustom: true } });
+  return rows.map((r) => ({
+    key: r.key,
+    label: r.label,
+    total: Number(r.ratePerTonne),
+    lorry: Number(r.lorryPerTonne),
+    margin: Number(r.marginPerTonne),
+  }));
+}
+
 // --- Company profile (single row, lazily created) -------------------------------
 
 const COMPANY_ID = 'default';
@@ -70,6 +217,7 @@ const companyProfileSchema = z.object({
   gstin: z.string().optional().nullable(),
   stateName: z.string().optional().nullable(),
   stateCode: z.string().optional().nullable(),
+  pincode: z.string().optional().nullable(),
   contact: z.string().optional().nullable(),
   bankAccountName: z.string().optional().nullable(),
   bankName: z.string().optional().nullable(),
@@ -110,7 +258,7 @@ export async function updateInvoiceLayout(req: Request, res: Response) {
 
 // --- Per-product tax info (HSN + invoice description) ---------------------------
 
-const PRODUCTS = ['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL'] as const;
+const PRODUCTS = ['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'] as const;
 type ProductCode = (typeof PRODUCTS)[number];
 
 const PRODUCT_TAX_DEFAULTS: Record<ProductCode, { hsn: string; description: string }> = {
@@ -119,6 +267,9 @@ const PRODUCT_TAX_DEFAULTS: Record<ProductCode, { hsn: string; description: stri
   WASTE: { hsn: '2308', description: 'Tamarind Waste' },
   TPS: { hsn: '1207', description: 'Tamarind Seed Brokens' },
   SHELL: { hsn: '1404', description: 'Tamarind Shell' },
+  PRECLEANER_DUST: { hsn: '2308', description: 'Pre Cleaner Dust' },
+  NALLA_POKKULU: { hsn: '2308', description: 'Nalla Pokkulu' },
+  NALLA_CHINTAPANDU: { hsn: '2308', description: 'Nalla Chintapandu' },
 };
 
 /** Return all product tax rows, creating any missing ones with sensible defaults. */
@@ -146,6 +297,7 @@ const productTaxSchema = z.object({
         hsn: z.string().optional().nullable(),
         hsnExempt: z.string().optional().nullable(),
         description: z.string().optional().nullable(),
+        gstRate: z.coerce.number().min(0).max(100).optional().nullable(),
       })
     )
     .min(1),
@@ -157,8 +309,8 @@ export async function updateProductTax(req: Request, res: Response) {
     rows.map((r) =>
       prisma.productTaxInfo.upsert({
         where: { product: r.product },
-        update: { hsn: r.hsn ?? null, hsnExempt: r.hsnExempt ?? null, description: r.description ?? null },
-        create: { product: r.product, hsn: r.hsn ?? null, hsnExempt: r.hsnExempt ?? null, description: r.description ?? null },
+        update: { hsn: r.hsn ?? null, hsnExempt: r.hsnExempt ?? null, description: r.description ?? null, gstRate: r.gstRate ?? 5 },
+        create: { product: r.product, hsn: r.hsn ?? null, hsnExempt: r.hsnExempt ?? null, description: r.description ?? null, gstRate: r.gstRate ?? 5 },
       })
     )
   );

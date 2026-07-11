@@ -20,7 +20,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import type { Party, PurchaseOrder, SaleOrder } from '@/lib/types';
-import { Chatbot } from '@/components/Chatbot';
 
 interface BlackSeedRow {
   purchaseId: string;
@@ -63,7 +62,7 @@ export default function Home() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}</h1>
-        <p className="text-muted-foreground">RVP Industries — Tamarind Processing ERP</p>
+        <p className="text-muted-foreground">RVP Industries - Tamarind Processing ERP</p>
       </div>
 
       {/* Search bars */}
@@ -85,7 +84,7 @@ export default function Home() {
                 <span className="font-medium truncate">{p.name}</span>
                 <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 shrink-0">{p.type}</Badge>
               </div>
-              <span className="text-xs text-muted-foreground shrink-0">{p.phone ?? '—'}</span>
+              <span className="text-xs text-muted-foreground shrink-0">{p.phone ?? '-'}</span>
             </>
           )}
         />
@@ -189,8 +188,6 @@ export default function Home() {
           ))}
         </div>
       </div>
-
-      <Chatbot />
     </div>
   );
 }

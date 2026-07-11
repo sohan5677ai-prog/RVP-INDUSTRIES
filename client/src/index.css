@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ──────────────────────────────────────────────────────────────
-   RVP ERP — "Tamarind & Bone"
+   RVP ERP - "Tamarind & Bone"
    Agricultural heritage × premium editorial.
    Espresso · warm bone · tamarind amber · forest green.
 ────────────────────────────────────────────────────────────── */
@@ -41,14 +41,14 @@
   --input: #ddd0b6;
   --ring: #ad4f0a;
 
-  /* Espresso sidebar */
-  --sidebar: #1b1510;
-  --sidebar-foreground: #c8bba6;
-  --sidebar-border: #2c231a;
-  --sidebar-accent: #db8c3f;
-  --sidebar-hover: #241c14;
+  /* Obsidian-espresso sidebar - warm near-black with a brass-gold accent */
+  --sidebar: #19140d;
+  --sidebar-foreground: #ece3d2;
+  --sidebar-border: #3a2d1d;
+  --sidebar-accent: #f0b34a;
+  --sidebar-hover: #241b11;
 
-  /* Warm, espresso-tinted elevation (not gray — the premium tell) */
+  /* Warm, espresso-tinted elevation (not gray - the premium tell) */
   --shadow-color: 30 22 14;
   --shadow-xs: 0 1px 2px rgb(var(--shadow-color) / 0.05);
   --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.05), 0 1px 1px rgb(var(--shadow-color) / 0.04);
@@ -92,11 +92,11 @@
   --input: #3a2f1e;
   --ring: #e0922e;
 
-  --sidebar: #0f0c08;
-  --sidebar-foreground: #b6aa90;
-  --sidebar-border: #221b12;
-  --sidebar-accent: #e0922e;
-  --sidebar-hover: #1a140d;
+  --sidebar: #110d08;
+  --sidebar-foreground: #e8ddc8;
+  --sidebar-border: #34281a;
+  --sidebar-accent: #f0b34a;
+  --sidebar-hover: #1b140c;
 
   --shadow-color: 0 0 0;
   --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
@@ -237,7 +237,7 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Premium canvas — warm bone with paper grain + soft amber bloom
+   Premium canvas - warm bone with paper grain + soft amber bloom
 ────────────────────────────────────────────────────────────── */
 .premium-bg {
   position: relative;
@@ -260,7 +260,7 @@
 .dark .premium-bg::before { opacity: 0.35; }
 
 /* ──────────────────────────────────────────────────────────────
-   Motion — refined, spring-leaning
+   Motion - refined, spring-leaning
 ────────────────────────────────────────────────────────────── */
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise-in {
@@ -309,7 +309,7 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Calendar (react-day-picker) — Tamarind & Bone theme
+   Calendar (react-day-picker) - Tamarind & Bone theme
 ────────────────────────────────────────────────────────────── */
 .rdp-premium {
   --rdp-accent-color: var(--primary);

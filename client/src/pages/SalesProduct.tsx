@@ -1,8 +1,8 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -20,8 +20,30 @@ import { cn } from '@/lib/utils';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const GST_RATE = 0.05;
+
+/** Per-order pappu profit/loss, from the date-aware seed allocation (server). */
+interface PappuMargin {
+  orderId: string;
+  ratePerKg: number;
+  revenue: number;
+  freight: number;
+  freightPerKg: number;
+  brokerage: number;
+  seedKg: number;
+  seedCost: number;
+  seedWacPerKg: number;
+  seedCostPerPappuKg: number;
+  prodCostPerKg: number;
+  prodCost: number;
+  netRealization: number;
+  margin: number;
+  marginPerKg: number;
+  marginPct: number;
+  seedBands: { price: number; seedKg: number; cost: number }[];
+}
 
 const PRODUCT_META: Record<SaleProduct, { title: string; noun: string }> = {
   PAPPU: { title: 'Pappu Sales', noun: 'Pappu' },
@@ -29,6 +51,9 @@ const PRODUCT_META: Record<SaleProduct, { title: string; noun: string }> = {
   WASTE: { title: 'Tamarind Waste Sales', noun: 'Tamarind Waste' },
   TPS: { title: 'TPS (Brokens) Sales', noun: 'TPS (Brokens)' },
   SHELL: { title: 'Tamarind Shell Sales', noun: 'Tamarind Shell' },
+  PRECLEANER_DUST: { title: 'Pre Cleaner Dust Sales', noun: 'Pre Cleaner Dust' },
+  NALLA_POKKULU: { title: 'Nalla Pokkulu Sales', noun: 'Nalla Pokkulu' },
+  NALLA_CHINTAPANDU: { title: 'Nalla Chintapandu Sales', noun: 'Nalla Chintapandu' },
 };
 
 const statusVariant: Record<SaleStatus, 'soft' | 'warning' | 'success' | 'outline'> = {
@@ -62,7 +87,7 @@ function isOverdue(iso: string | null): boolean {
   return new Date(iso).getTime() < Date.now();
 }
 
-/** Dispatched (sum of shipments) — falls back to summing if the server field is absent. */
+/** Dispatched (sum of shipments) - falls back to summing if the server field is absent. */
 function dispatchedKgOf(o: SaleOrder): number {
   if (o.dispatchedKg != null) return o.dispatchedKg;
   return (o.dispatches ?? []).reduce((s, d) => s + d.weightKg, 0);
@@ -77,7 +102,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const hasBroker = !['WASTE', 'TPS', 'SHELL'].includes(product);
+  const hasBroker = !['WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'].includes(product);
   const isPappu = product === 'PAPPU';
   // Order row: ⌄ Date · Shipments · Party · [Broker] · Destination · Ordered ·
   // Dispatched · Remaining · Price · Status · Actions. Per-shipment detail lives
@@ -104,6 +129,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const { data: parties, isLoading: loadingParties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
   const { data: brokers, isLoading: loadingBrokers } = useQuery({ queryKey: ['brokers'], queryFn: () => api<Broker[]>('/brokers') });
 
+  // Per-order profit/loss margin (Pappu only), keyed by order id.
+  const { data: margins } = useQuery({
+    queryKey: ['pappu-margins'],
+    queryFn: () => api<PappuMargin[]>('/inventory/pappu-margins'),
+    enabled: isPappu,
+  });
+  const marginById = useMemo(() => new Map((margins ?? []).map((m) => [m.orderId, m])), [margins]);
+
   const visible = (orders ?? []).filter((o) => {
     if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
     if (brokerFilter !== 'ALL') {
@@ -124,7 +157,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [kataFile, setKataFile] = useState<File | null>(null);
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [dispatchTonnes, setDispatchTonnes] = useState('');
-  const [internalWeightTonnes, setInternalWeightTonnes] = useState('');
   const [extractingKata, setExtractingKata] = useState(false);
 
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
@@ -136,7 +168,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setKataFile(null);
     setVehicleNumber('');
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
-    setInternalWeightTonnes('');
   }
 
   async function extractKata(file: File) {
@@ -150,7 +181,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       );
       if (data.vehicleNumber) setVehicleNumber(data.vehicleNumber);
       if (data.tonnageKg) setDispatchTonnes(String(data.tonnageKg / 1000));
-      toast.success('Read kata slip — fields pre-filled');
+      toast.success('Read kata slip - fields pre-filled');
     } catch (e) {
       toast.error(getErrorMessage(e));
     } finally {
@@ -164,15 +195,39 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (kataFile) fd.append('kata', kataFile);
       fd.append('vehicleNumber', vehicleNumber);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
-      if (internalWeightTonnes) fd.append('internalWeightKg', String(Math.round((Number(internalWeightTonnes) || 0) * 1000)));
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
+      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Dispatched — raise the invoice when ready');
+      toast.success('Dispatched - raise the invoice when ready');
       setDispatchOrder(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  // ── Undo dispatch (mistaken dispatch) ───────────────────────────────────────
+  const [undoTarget, setUndoTarget] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+
+  /** A shipment can be undone only while it's still a plain DISPATCHED record. */
+  function canUndo(d: SaleDispatch): boolean {
+    return d.status === 'DISPATCHED'
+      && !d.invoiceNumber
+      && (!d.irn || d.irnStatus === 'CANCELLED')
+      && (!d.ewbNumber || d.ewbStatus === 'CANCELLED');
+  }
+
+  const undoMutation = useMutation({
+    mutationFn: () => api(`/sale-dispatches/${undoTarget!.dispatch.id}/undo`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
+      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Dispatch undone - stock and ledger reversed');
+      setUndoTarget(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -193,7 +248,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const invoiceBase = invoiceDispatch ? invoiceDispatch.dispatch.weightKg * Number(invoiceDispatch.order.ratePerKg) : 0;
   const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
-  const invoiceNet = invoiceBase + invoiceGst;
 
   // ── Mark Delivered dialog (captures buyer kata + shortage) ───────────────────
   const [deliverDispatch, setDeliverDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
@@ -206,11 +260,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setBuyerKataTonnes(String(dispatch.weightKg / 1000));
   }
 
-  const deliverRate = deliverDispatch ? Number(deliverDispatch.order.ratePerKg) : 0;
   const buyerKataKg = Math.round((Number(buyerKataTonnes) || 0) * 1000);
   const deliverShortageKg = deliverDispatch ? Math.max(0, deliverDispatch.dispatch.weightKg - buyerKataKg) : 0;
   const deliverOverweight = deliverDispatch ? buyerKataKg > deliverDispatch.dispatch.weightKg : false;
-  const deliverCreditAmount = deliverShortageKg * deliverRate * (1 + GST_RATE);
 
   const deliverMutation = useMutation({
     mutationFn: () => {
@@ -312,10 +364,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [ewbDispatch, setEwbDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
   const [transporterId, setTransporterId] = useState('');
   const [transporterName, setTransporterName] = useState('');
-  const [transDistance, setTransDistance] = useState('100');
+  const [transDistance, setTransDistance] = useState('0');
   const [transMode, setTransMode] = useState('1');
   const [ewbVehicleNo, setEwbVehicleNo] = useState('');
   const [vehicleType, setVehicleType] = useState('R');
+  const [transDocNo, setTransDocNo] = useState('');
+  const [transDocDt, setTransDocDt] = useState('');
 
   const [cancelTarget, setCancelTarget] = useState<{ id: string; type: 'einvoice' | 'ewaybill' } | null>(null);
   const [cancelReason, setCancelReason] = useState('2'); // default "2" - Data Entry Mistake
@@ -353,6 +407,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         transMode,
         vehicleNumber: ewbVehicleNo,
         vehicleType,
+        transDocNo,
+        transDocDt,
       },
     }),
     onSuccess: (res) => {
@@ -380,11 +436,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setEwbDispatch({ dispatch, order });
     setTransporterId('');
     setTransporterName('');
-    setTransDistance('100');
+    setTransDistance('0');
     setTransMode('1');
     setEwbVehicleNo(dispatch.vehicleNumber || '');
     setVehicleType('R');
+    setTransDocNo('');
+    setTransDocDt('');
   }
+
+  // Transporter GSTIN is optional, but if entered it must be a valid 15-char GSTIN
+  // (NIC rejects the whole request otherwise, error 5002 "Transin").
+  const transporterIdNorm = transporterId.trim().toUpperCase();
+  const transporterIdInvalid = transporterIdNorm.length > 0 && !/^[0-9]{2}[A-Z0-9]{13}$/.test(transporterIdNorm);
 
   function openCancel(id: string, type: 'einvoice' | 'ewaybill') {
     setCancelTarget({ id, type });
@@ -395,15 +458,67 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // ── Full workflow view ────────────────────────────────────────────────
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || !!fromDate || !!toDate;
 
+  // ── Metrics (for Husk) ──────────────────────────────────────────────────
+  const totalSoldKg = visible.reduce((sum, o) => sum + o.tonnageKg, 0);
+  const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
+  const wacPrice = totalSoldKg > 0 ? totalRevenue / totalSoldKg : 0;
+  const dispatchedRevenue = visible.reduce((sum, o) => sum + (dispatchedKgOf(o) * Number(o.ratePerKg)), 0);
+  const pendingRevenue = totalRevenue - dispatchedRevenue;
+  const realizationPct = totalRevenue > 0 ? (dispatchedRevenue / totalRevenue) * 100 : 0;
+
   return (
     <div className="space-y-6">
       {!hideHeader && (
         <PageHeader
           icon={ShoppingCart}
           title={meta.title}
-          description={`Manage the full ${meta.noun.toLowerCase()} lifecycle — dispatch lorries against each order, invoice every shipment, and mark delivered.`}
+          description={`Manage the full ${meta.noun.toLowerCase()} lifecycle - dispatch lorries against each order, invoice every shipment, and mark delivered.`}
         />
       )}
+
+      {/* Metrics Dashboard */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total {meta.noun} Sold</CardTitle>
+            <PackageCheck className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-600">{toTonnes(totalSoldKg).toFixed(2)} MT</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Total ordered tonnage</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Wt Avg Price</CardTitle>
+            <IndianRupee className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-primary">{rupees(wacPrice)}/kg</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Weighted average rate</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Revenue Pipeline</CardTitle>
+            <IndianRupee className="h-4 w-4 text-sky-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-sky-600">{rupees(totalRevenue)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Total gross revenue</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pending Value</CardTitle>
+            <Truck className="h-4 w-4 text-rose-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-rose-600">{rupees(pendingRevenue)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">{realizationPct.toFixed(0)}% revenue realized</p>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Filters */}
       <div className="glass rounded-2xl p-3 flex flex-wrap items-center gap-2.5">
@@ -472,9 +587,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               const remainingKg = remainingKgOf(o);
               const dispatches = o.dispatches ?? [];
               const isOpen = expanded.has(o.id);
+              const margin = isPappu ? marginById.get(o.id) : undefined;
               return (
                 <Fragment key={o.id}>
-                  {/* Order row — click to expand its shipments */}
+                  {/* Order row - click to expand its shipments */}
                   <TableRow
                     className={cn('cursor-pointer transition-colors', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
                     onClick={() => toggleRow(o.id)}
@@ -490,9 +606,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                         ? <Badge variant="soft">{dispatches.length} shipment{dispatches.length > 1 ? 's' : ''}</Badge>
                         : <span className="text-xs text-muted-foreground">none yet</span>}
                     </TableCell>
-                    <TableCell className="font-medium text-foreground">{o.buyer?.name ?? '—'}</TableCell>
-                    {hasBroker && <TableCell className="text-muted-foreground">{o.broker?.name ?? '—'}</TableCell>}
-                    <TableCell className="text-muted-foreground">{o.destination ?? '—'}</TableCell>
+                    <TableCell className="font-medium text-foreground">{o.buyer?.name ?? '-'}</TableCell>
+                    {hasBroker && <TableCell className="text-muted-foreground">{o.broker?.name ?? '-'}</TableCell>}
+                    <TableCell className="text-muted-foreground">{o.destination ?? '-'}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums font-medium">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{toTonnes(dispatchedKg).toFixed(2)} t</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
@@ -500,7 +616,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                         ? <span className="text-amber-600 dark:text-amber-400">{toTonnes(remainingKg).toFixed(2)} t</span>
                         : <span className="text-emerald-600 dark:text-emerald-400">0.00 t</span>}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{rupees(o.ratePerKg)}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {rupees(o.ratePerKg)}
+                      {margin && (
+                        <span className={cn('block text-[10px] font-medium', margin.margin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+                          {margin.margin >= 0 ? '▲' : '▼'} {rupees(Math.abs(margin.marginPerKg))}/kg
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell><Badge variant={statusVariant[o.status]}>{titleCase(o.status)}</Badge></TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
@@ -516,6 +639,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={colCount} className="p-0">
                         <div className="border-t border-border/60 bg-muted/25 px-5 py-4">
+                          {isPappu && margin && <PappuMarginPanel margin={margin} />}
                           <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                             Shipments · {dispatches.length}
                           </div>
@@ -600,7 +724,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 {overdue && <CalendarClock className="mr-0.5 inline h-3.5 w-3.5" />}
                                                 {shortDate(dueIso)}{o.dueDays != null ? ` · ${o.dueDays}d` : ''}
                                               </span>
-                                            ) : <span className="text-muted-foreground">—</span>}
+                                            ) : <span className="text-muted-foreground">-</span>}
                                           </div>
                                         </div>
                                       </div>
@@ -631,9 +755,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                               </Button>
                                             )}
                                             {d.ewbNumber && d.ewbStatus !== 'CANCELLED' && (
-                                              <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'ewaybill')}>
-                                                Cancel EWB
-                                              </Button>
+                                              <>
+                                                <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate(`/sale-dispatches/${d.id}/ewaybill`)}>
+                                                  <Printer className="h-3.5 w-3.5 mr-1" /> EWB
+                                                </Button>
+                                                <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'ewaybill')}>
+                                                  Cancel EWB
+                                                </Button>
+                                              </>
                                             )}
                                           </>
                                         ) : (
@@ -652,6 +781,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                           </Button>
                                         )}
                                         {d.status === 'DELIVERED' && <Badge variant="success">Delivered</Badge>}
+                                        {canUndo(d) && (
+                                          <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => setUndoTarget({ dispatch: d, order: o })}>
+                                            <Undo2 className="h-3.5 w-3.5" /> Undo
+                                          </Button>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
@@ -673,13 +807,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Dispatch dialog */}
       <Dialog open={!!dispatchOrder} onOpenChange={(v) => !v && setDispatchOrder(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Dispatch — {dispatchOrder?.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Dispatch - {dispatchOrder?.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/40 p-3 text-sm flex justify-between">
               <span className="text-muted-foreground">Remaining on this order</span>
               <span className="font-semibold">{dispatchOrder ? toTonnes(dispatchRemaining).toFixed(2) : 0} t</span>
             </div>
-            <p className="text-sm text-muted-foreground">Drop the kata slip. We'll read the vehicle no and weight — edit if needed, then dispatch this lorry against the order.</p>
+            <p className="text-sm text-muted-foreground">Drop the kata slip. We'll read the vehicle no and weight - edit if needed, then dispatch this lorry against the order.</p>
             <div className="space-y-1.5">
               <Label className="text-xs">Kata slip {extractingKata && <Loader2 className="inline h-3 w-3 animate-spin" />}</Label>
               <label className="flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:bg-accent">
@@ -696,13 +830,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <p className="text-[11px] text-destructive">Exceeds the {toTonnes(dispatchRemaining).toFixed(2)} t remaining on this order.</p>
               )}
             </div>
-            {dispatchOrder?.product === 'PAPPU' && (
-              <div className="space-y-1.5 border-t border-border pt-3 mt-3">
-                <Label className="text-xs">Internal Weight (tonnes)</Label>
-                <Input type="number" step="0.001" value={internalWeightTonnes} onChange={(e) => setInternalWeightTonnes(e.target.value)} placeholder="Auto-calculated if left blank" />
-                <p className="text-[11px] text-muted-foreground">Actual weight without moisture gain. Leave blank to auto-calculate (e.g. 25t = 150kg short).</p>
-              </div>
-            )}
             <DialogFooter>
               <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchOverflow || dispatchMutation.isPending}>
                 {dispatchMutation.isPending ? 'Dispatching…' : 'Confirm Dispatch'}
@@ -712,10 +839,33 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         </DialogContent>
       </Dialog>
 
+      {/* Undo dispatch confirmation */}
+      <Dialog open={!!undoTarget} onOpenChange={(v) => !v && setUndoTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Undo dispatch - {undoTarget?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This reverses a dispatch made by mistake. The {undoTarget ? toTonnes(undoTarget.dispatch.weightKg).toFixed(2) : 0} t shipment will be removed,
+              its sale posting reversed, and the stock it consumed returned. The order goes back to its earlier state so you can dispatch again correctly.
+            </p>
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
+              <div className="flex justify-between"><span className="text-muted-foreground">Vehicle</span><span className="font-medium">{undoTarget?.dispatch.vehicleNumber ?? '-'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Dispatched</span><span className="font-medium">{undoTarget ? shortDate(undoTarget.dispatch.dispatchDate) : ''} · {undoTarget ? toTonnes(undoTarget.dispatch.weightKg).toFixed(2) : 0} t</span></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setUndoTarget(null)}>Keep dispatch</Button>
+              <Button variant="destructive" onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
+                <Undo2 className="h-4 w-4" /> {undoMutation.isPending ? 'Undoing…' : 'Undo dispatch'}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Raise Invoice dialog */}
       <Dialog open={!!invoiceDispatch} onOpenChange={(v) => !v && setInvoiceDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Raise Invoice — {invoiceDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Raise Invoice - {invoiceDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">A tax invoice will be generated for this shipment with the next auto number.</p>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
@@ -735,7 +885,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Mark Delivered dialog (buyer kata + shortage) */}
       <Dialog open={!!deliverDispatch} onOpenChange={(v) => !v && setDeliverDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Mark as Delivered — {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Mark as Delivered - {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Confirm the buyer received this shipment. Enter the buyer's kata weight to auto-calculate any shortage &amp; credit note. The delivered date is set to today and the payment due date is calculated from it.
@@ -787,7 +937,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       <Dialog open={!!ewbDispatch} onOpenChange={(v) => !v && setEwbDispatch(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generate E-Way Bill — {ewbDispatch?.order.buyer?.name}</DialogTitle>
+            <DialogTitle>Generate E-Way Bill - {ewbDispatch?.order.buyer?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/40 p-3 text-sm flex flex-col gap-1">
@@ -797,19 +947,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
-                <Label className="text-xs">Transporter GSTIN/ID (optional)</Label>
-                <Input value={transporterId} onChange={(e) => setTransporterId(e.target.value)} placeholder="e.g. 27AAAAA1111A1Z1" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Transporter Name (optional)</Label>
-                <Input value={transporterName} onChange={(e) => setTransporterName(e.target.value)} placeholder="Surya Roadlines" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Distance (in Km) *</Label>
-                <Input type="number" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder="e.g. 250" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Transport Mode</Label>
+                <Label className="text-xs">Transport Mode *</Label>
                 <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={transMode} onChange={(e) => setTransMode(e.target.value)}>
                   <option value="1">Road</option>
                   <option value="2">Rail</option>
@@ -818,20 +956,66 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Vehicle Number (if different)</Label>
-                <Input value={ewbVehicleNo} onChange={(e) => setEwbVehicleNo(e.target.value)} placeholder="e.g. AP03XX1234" />
+                <Label className="text-xs">Distance (km) *</Label>
+                <Input type="number" min="0" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder="e.g. 250" />
+                <p className="text-[11px] text-muted-foreground">Enter 0 to let the portal auto-calculate from PIN codes.</p>
+              </div>
+
+              {transMode === '1' ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Vehicle Number *</Label>
+                    <Input value={ewbVehicleNo} onChange={(e) => setEwbVehicleNo(e.target.value)} placeholder="e.g. AP03XX1234" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Vehicle Type *</Label>
+                    <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={vehicleType} onChange={(e) => setVehicleType(e.target.value)}>
+                      <option value="R">Regular</option>
+                      <option value="O">Over Dimensional Cargo</option>
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Transport Document No *</Label>
+                    <Input value={transDocNo} onChange={(e) => setTransDocNo(e.target.value)} placeholder="LR / RR / Airway bill no" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Transport Document Date *</Label>
+                    <Input type="date" value={transDocDt} onChange={(e) => setTransDocDt(e.target.value)} />
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Transporter GSTIN/ID (optional)</Label>
+                <Input
+                  value={transporterId}
+                  onChange={(e) => setTransporterId(e.target.value.toUpperCase())}
+                  placeholder="e.g. 27AAAAA1111A1Z1"
+                  className={transporterIdInvalid ? 'border-destructive' : undefined}
+                />
+                {transporterIdInvalid && (
+                  <p className="text-[11px] text-destructive">Must be a valid 15-character GSTIN, or leave blank.</p>
+                )}
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Vehicle Type</Label>
-                <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={vehicleType} onChange={(e) => setVehicleType(e.target.value)}>
-                  <option value="R">Regular</option>
-                  <option value="O">Over Dimensional Cargo</option>
-                </select>
+                <Label className="text-xs">Transporter Name (optional)</Label>
+                <Input value={transporterName} onChange={(e) => setTransporterName(e.target.value)} placeholder="Surya Roadlines" />
               </div>
             </div>
 
             <DialogFooter>
-              <Button onClick={() => generateEwbMutation.mutate()} disabled={generateEwbMutation.isPending || !transDistance}>
+              <Button
+                onClick={() => generateEwbMutation.mutate()}
+                disabled={
+                  generateEwbMutation.isPending ||
+                  transDistance === '' ||
+                  transporterIdInvalid ||
+                  (transMode === '1' ? !ewbVehicleNo.trim() : (!transDocNo.trim() || !transDocDt))
+                }
+              >
                 {generateEwbMutation.isPending ? 'Generating...' : 'Generate E-Way Bill'}
               </Button>
             </DialogFooter>
@@ -896,7 +1080,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       <Dialog open={!!payDispatch} onOpenChange={(v) => !v && setPayDispatch(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Mark as Paid — {payDispatch?.order.buyer.name}</DialogTitle>
+            <DialogTitle>Mark as Paid - {payDispatch?.order.buyer?.name}</DialogTitle>
           </DialogHeader>
           
           {payDispatch && (() => {
@@ -905,8 +1089,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             const invoiceBase = d.weightKg * Number(o.ratePerKg);
             const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
             const invoiceTotal = invoiceBase + invoiceGst;
-            const shortageValue = Number(d.creditNoteAmount) || 0;
-            
+
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
@@ -970,6 +1153,120 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** Label + mono value (+ optional sub-line) used in the profitability breakdown. */
+/**
+ * Rich per-order Pappu P/L panel shown inside the expanded row: a P/L headline,
+ * a "where the revenue goes" composition bar, accent-bordered cost tiles, and the
+ * date-aware black-seed allocation chips.
+ */
+function PappuMarginPanel({ margin }: { margin: PappuMargin }) {
+  const isProfit = margin.margin >= 0;
+  const pnlText = isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
+
+  // Bar denominator = whichever is larger, so both profit and loss orders fill it.
+  const costs = margin.freight + margin.brokerage + margin.seedCost + margin.prodCost;
+  const denom = Math.max(margin.revenue, costs, 1);
+  const width = (v: number) => `${(v / denom) * 100}%`;
+
+  const segments = [
+    { key: 'seed', label: 'Black seed', value: margin.seedCost, color: 'bg-amber-500' },
+    { key: 'prod', label: 'Production', value: margin.prodCost, color: 'bg-orange-400' },
+    { key: 'freight', label: 'Freight', value: margin.freight, color: 'bg-slate-400' },
+    { key: 'brokerage', label: 'Brokerage', value: margin.brokerage, color: 'bg-violet-400' },
+    ...(isProfit ? [{ key: 'margin', label: 'Margin', value: margin.margin, color: 'bg-emerald-500' }] : []),
+  ].filter((s) => s.value > 0);
+
+  return (
+    <div className="mb-4 overflow-hidden rounded-2xl border border-border/70 bg-card/70 shadow-sm">
+      {/* Headline */}
+      <div className={cn('flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3', isProfit ? 'bg-emerald-500/[0.06]' : 'bg-rose-500/[0.06]')}>
+        <div className="flex items-center gap-3">
+          <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl', isProfit ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/15 text-rose-600 dark:text-rose-400')}>
+            {isProfit ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{isProfit ? 'Profit' : 'Loss'} · this order</div>
+            <div className={cn('font-mono text-xl font-extrabold leading-tight tabular-nums', pnlText)}>{isProfit ? '+' : ''}{rupees(margin.margin)}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="rounded-lg border border-border/60 bg-background/70 px-3 py-1.5 text-center">
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Margin</div>
+            <div className={cn('font-mono text-sm font-bold tabular-nums', pnlText)}>{margin.marginPct}%</div>
+          </div>
+          <div className="rounded-lg border border-border/60 bg-background/70 px-3 py-1.5 text-center">
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Per kg</div>
+            <div className={cn('font-mono text-sm font-bold tabular-nums', pnlText)}>{rupees(margin.marginPerKg)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Composition bar */}
+      <div className="px-4 pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Where the revenue goes</span>
+          <span className="font-mono text-[11px] font-semibold tabular-nums text-foreground/70">{rupees(margin.revenue)} revenue</span>
+        </div>
+        <div className="flex h-3.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted">
+          {segments.map((s) => (
+            <div key={s.key} className={cn('h-full', s.color)} style={{ width: width(s.value) }} title={`${s.label}: ${rupees(s.value)}`} />
+          ))}
+        </div>
+        <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
+          {segments.map((s) => (
+            <div key={s.key} className="flex items-center gap-1.5">
+              <span className={cn('h-2 w-2 rounded-full', s.color)} />
+              <span className="text-[10px] font-medium text-muted-foreground">{s.label}</span>
+              <span className="font-mono text-[10px] font-semibold tabular-nums text-foreground/80">{rupees(s.value)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Cost tiles */}
+      <div className="grid grid-cols-2 gap-2.5 px-4 py-4 sm:grid-cols-3 lg:grid-cols-4">
+        <PnlTile accent="bg-sky-500" label="Sale price" value={`${rupees(margin.ratePerKg)}/kg`} sub={`${rupees(margin.revenue)} · incl. freight`} />
+        <PnlTile accent="bg-slate-400" label="− Freight" value={`${rupees(margin.freightPerKg)}/kg`} sub={`${rupees(margin.freight)} netted out`} />
+        {margin.brokerage > 0 && <PnlTile accent="bg-violet-400" label="− Brokerage" value={rupees(margin.brokerage)} />}
+        <PnlTile accent="bg-indigo-500" label="= Net realisation" value={rupees(margin.netRealization)} emphasis />
+        <PnlTile accent="bg-amber-500" label="− Black seed cost" value={`${rupees(margin.seedCostPerPappuKg)}/kg`} sub={`${rupees(margin.seedCost)} · WAC ${rupees(margin.seedWacPerKg)}/kg`} />
+        {margin.prodCost > 0 && <PnlTile accent="bg-orange-400" label="− Production" value={`${rupees(margin.prodCostPerKg)}/kg`} sub={rupees(margin.prodCost)} />}
+        <PnlTile accent={isProfit ? 'bg-emerald-500' : 'bg-rose-500'} label={isProfit ? 'Net margin' : 'Net loss'} value={rupees(margin.margin)} sub={`${margin.marginPct}% · ${rupees(margin.marginPerKg)}/kg`} emphasis valueClass={pnlText} />
+      </div>
+
+      {/* Date-aware seed allocation */}
+      {margin.seedBands.length > 0 && (
+        <div className="border-t border-border/60 bg-muted/30 px-4 py-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Black seed allocated · date-aware (dearest available at sale date)</span>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {margin.seedBands.map((b, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200/70 bg-amber-50 px-2.5 py-1 font-mono text-[10px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                <span className="font-semibold">{toTonnes(b.seedKg).toFixed(2)}t</span>
+                <span className="opacity-60">@</span>
+                {rupees(b.price)}/kg
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Accent-bordered figure tile used in the Pappu P/L panel. */
+function PnlTile({ accent, label, value, sub, emphasis, valueClass }: { accent: string; label: string; value: string; sub?: string; emphasis?: boolean; valueClass?: string }) {
+  return (
+    <div className={cn('relative overflow-hidden rounded-xl border p-3', emphasis ? 'border-border bg-background shadow-sm' : 'border-border/60 bg-background/60')}>
+      <span className={cn('absolute inset-y-0 left-0 w-1', accent)} />
+      <div className="pl-1.5">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className={cn('mt-1 font-mono text-sm font-bold tabular-nums', valueClass)}>{value}</div>
+        {sub && <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">{sub}</div>}
+      </div>
     </div>
   );
 }

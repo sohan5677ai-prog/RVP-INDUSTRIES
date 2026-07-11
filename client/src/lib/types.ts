@@ -16,6 +16,7 @@ export interface Party {
   phone: string | null;
   address: string | null;
   state: string | null;
+  pincode?: string | null;
   gstin: string | null;
   destination: string | null;
   bankAccountNumber: string | null;
@@ -25,7 +26,7 @@ export interface Party {
   createdAt: string;
 }
 
-export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS';
+export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS' | 'PRECLEANER_DUST' | 'NALLA_POKKULU' | 'NALLA_CHINTAPANDU';
 
 export interface Broker {
   id: string;
@@ -47,6 +48,8 @@ export interface WeightVerification {
   finalWeightKg: number;
   pricePerKg: string;
   totalAmount: string;
+  selfVehicleHamali?: string;
+  selfVehicleKata?: string;
   createdAt: string;
 }
 
@@ -170,6 +173,32 @@ export interface ShellTransfer {
   createdAt: string;
 }
 
+export interface HuskTransfer {
+  id: string;
+  fromLocation: string;
+  toLocation: string;
+  weightKg: number;
+  lorryNumber: string | null;
+  hamaliCharge: string;
+  transportCharge: string;
+  totalCost: string;
+  transferDate: string;
+  createdAt: string;
+}
+
+export interface DustPurchase {
+  id: string;
+  partyId: string;
+  party: { id: string; name: string } | null;
+  purchaseDate: string;
+  weightKg: number;
+  pricePerKg: string;
+  amount: string;
+  lorryNumber: string | null;
+  invoiceNumber: string | null;
+  createdAt: string;
+}
+
 export interface StockIn {
   id: string;
   purchaseOrderId: string;
@@ -182,8 +211,9 @@ export interface StockIn {
   billingWeightKg: number;
   partyKataKg: number;
   invoiceFileUrl: string;
-  loadingLocation: 'At process' | 'Rampalli' | 'Murgan' | 'Multi';
+  loadingLocation: 'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi';
   freightCharge: string;
+  selfVehicle: boolean;
   createdAt: string;
   purchase?: Purchase | null;
   purchaseOrder?: (PurchaseOrder & { party?: Party }) | null;
@@ -197,6 +227,8 @@ export interface PurchaseOrder {
   party?: Party;
   pricePerKg: string;
   priceType?: 'BASE' | 'DELIVERY';
+  hasGst?: boolean;
+  gstAmount?: string;
   tonnageKg: number;
   lorryCount?: number | null;
   poGroupId?: string | null;
@@ -210,7 +242,7 @@ export interface PurchaseOrder {
 // Order-level: PENDING → PARTIAL (some dispatched) → DISPATCHED (fully).
 // Dispatch-level: DISPATCHED → DELIVERED.
 export type SaleStatus = 'PENDING' | 'PARTIAL' | 'DISPATCHED' | 'DELIVERED';
-export type SaleProduct = 'PAPPU' | 'HUSK' | 'WASTE' | 'TPS' | 'SHELL';
+export type SaleProduct = 'PAPPU' | 'HUSK' | 'WASTE' | 'TPS' | 'SHELL' | 'PRECLEANER_DUST' | 'NALLA_POKKULU' | 'NALLA_CHINTAPANDU';
 
 // A single physical dispatch (one lorry) shipped against a SaleOrder.
 export interface SaleDispatch {
@@ -227,8 +259,11 @@ export interface SaleDispatch {
   receivedDate?: string | null;
   deliveredDate?: string | null;
   buyerKataKg?: number | null;
+  internalWeightKg?: number | null;
+  internalWeightProfitAmount?: string | number | null;
   shortageKg?: number | null;
   creditNoteAmount?: string | number | null;
+  tdsAmount?: string | number | null;
   buyerKataFileUrl?: string | null;
   invoiceNumber: string | null;
   invoiceSeq?: number | null;
@@ -250,6 +285,7 @@ export interface SaleDispatch {
   ewbValidUpto?: string | null;
   ewbStatus?: string | null;
   ewbCancelledDate?: string | null;
+  ewbDistance?: number | null;
 }
 
 export interface SaleOrder {
@@ -283,6 +319,7 @@ export interface CompanyProfile {
   gstin: string | null;
   stateName: string | null;
   stateCode: string | null;
+  pincode?: string | null;
   contact: string | null;
   bankAccountName: string | null;
   bankName: string | null;
@@ -314,6 +351,7 @@ export interface ProductTaxInfo {
   hsn: string | null;
   hsnExempt: string | null;
   description: string | null;
+  gstRate: number | string | null; // GST % (Prisma Decimal serializes as string)
 }
 
 export type AccountType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
@@ -396,15 +434,34 @@ export interface BalanceSheet {
 }
 export interface ProfitLoss {
   period: string;
-  income: ReportGroup[];
-  expenses: ReportGroup[];
-  totals: { income: number; expenses: number; netProfit: number; isProfit: boolean };
+  pappu: { profitLoss: number; orders: number };
+  huskPool: {
+    byproductIncome: number;
+    byproducts: { product: string; amount: number }[];
+    overheadExpenses: number;
+    overheadLedgers: { code: string; name: string; amount: number }[];
+    net: number;
+    isDeficit: boolean;
+  };
+  totals: { netProfit: number; isProfit: boolean };
 }
 
 export interface FreightRate {
   id: string;
   destination: string;
   ratePerTonne: string;
+  updatedAt: string;
+}
+
+export interface HamaliRate {
+  id: string;
+  key: string;
+  label: string;
+  ratePerTonne: string; // Total ₹/tonne
+  lorryPerTonne: string; // collected from the driver (off freight)
+  marginPerTonne: string; // company P/L benefit
+  isCustom: boolean;
+  sortOrder: number;
   updatedAt: string;
 }
 
@@ -417,29 +474,99 @@ export interface SiloInventory {
   updatedAt: string;
 }
 
+export type PaymentType =
+  | 'SUPPLIER'
+  | 'TRANSPORTER'
+  | 'BROKER'
+  | 'TRANSPORT'
+  | 'GUNNY_BAGS'
+  | 'ELECTRICITY'
+  | 'MAINTENANCE'
+  | 'DRAWINGS'
+  | 'OTHER';
+
 export interface Payment {
   id: string;
   date: string;
   amount: string;
-  type: 'SUPPLIER' | 'TRANSPORTER' | 'BROKER' | 'OTHER';
+  type: PaymentType;
   partyId: string | null;
+  purchaseId?: string | null;
   party?: Party | null;
   brokerId: string | null;
   broker?: Broker | null;
-  lorryNumber: string | null;
-  reference: string | null;
-  description: string | null;
-  journalEntryId: string | null;
+  lorryNumber?: string | null;
+  payee?: string | null;
+  reference?: string | null;
+  description?: string | null;
+}
+
+export interface OutstandingBalance {
+  partyId: string;
+  partyName: string;
+  balance: number; // positive = they owe us, negative = we owe them
+}
+
+export interface BankAccount {
+  id: string;
+  bankName: string;
+  accountNumber: string;
+  ifscCode: string;
+  branch?: string;
+  holderName: string;
+  balance: number;
+}
+
+export type ManualHamaliType =
+  | 'BAG_CUTTING_NORMAL'
+  | 'BAG_CUTTING_DISTANCE'
+  | 'PAPPU_NET'
+  | 'DIESEL'
+  | 'MISC'
+  | 'PAID';
+
+export interface ManualHamaliCost {
+  id: string;
+  date: string;
+  type: ManualHamaliType;
+  bags: number | null;
+  ratePerBag: string | null;
+  amount: string;
+  note: string | null;
+  createdBy: string | null;
   createdAt: string;
 }
+
+// A reconciliation checkpoint on the Hamali Report: crew dues verified with the
+// crew through `asOfDate`. Verify-only - no money movement.
+export interface HamaliVerification {
+  id: string;
+  asOfDate: string;
+  crewTotal: string;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export type ReceiptType =
+  | 'BUYER'
+  | 'GUNNY_BAGS_SALE'
+  | 'SCRAP_SALE'
+  | 'HAMALI_INCOME'
+  | 'INTEREST_INCOME'
+  | 'OTHER';
 
 export interface Receipt {
   id: string;
   date: string;
   amount: string;
-  type: 'BUYER' | 'OTHER';
+  tdsAmount: string | null;
+  shortageAmount: string | null;
+  type: ReceiptType;
   partyId: string | null;
+  saleDispatchId?: string | null;
   party?: Party | null;
+  payer: string | null;
   reference: string | null;
   description: string | null;
   journalEntryId: string | null;
@@ -450,6 +577,7 @@ export interface Receipt {
 
 export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE';
 export type BalanceType = 'DR' | 'CR';
+export type BunkerPlace = 'A' | 'B';
 
 export interface PartyLedgerSummary {
   totalDebit: number;

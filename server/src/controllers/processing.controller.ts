@@ -2,7 +2,6 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createProcessingSchema } from '../schemas/processing.schema.js';
-import { AllocationService } from '../services/allocation.service.js';
 import { calcPappu, DEFAULT_OUT_TURN_PCT } from '../lib/calc.js';
 import { ProcessingService } from '../services/processing.service.js';
 
@@ -44,7 +43,7 @@ export async function createProcessing(req: Request, res: Response) {
 
   // Determine raw seed location: a purchase-linked run mills from its arrival
   // silo; a standalone run mills from the chosen pool.
-  let finalLocation: string = data.loadingLocation || 'At process';
+  let finalLocation: string = data.loadingLocation || 'RVP';
   if (data.purchaseId) {
     const purchase = await prisma.purchase.findUnique({
       where: { id: data.purchaseId },
@@ -78,13 +77,6 @@ export async function createProcessing(req: Request, res: Response) {
     },
   });
 
-  if (fullItem?.purchase?.stockIn?.purchaseOrderId) {
-    // Trigger Rebalancing Engine
-    await AllocationService.rebalanceAfterProcessing(
-      fullItem.purchase.stockIn.purchaseOrderId,
-      fullItem.pappuWeightKg
-    );
-  }
 
   res.status(201).json({
     ...fullItem,

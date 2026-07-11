@@ -35,15 +35,20 @@ const StockByDate = lazyWithPreload('/stock/date', () => import('@/pages/StockBy
 const StockByParty = lazyWithPreload('/stock/party', () => import('@/pages/StockByParty'));
 const StockByPrice = lazyWithPreload('/stock/price', () => import('@/pages/StockByPrice'));
 const BankLoans = lazyWithPreload('/loans', () => import('@/pages/BankLoans'));
-const Banking = lazyWithPreload('/banking/limits', () => import('@/pages/Banking'));
 const StockByState = lazyWithPreload('/stock/state', () => import('@/pages/StockByState'));
 const SaleOrders = lazyWithPreload('/sale-orders', () => import('@/pages/SaleOrders'));
 const InvoiceView = lazyWithPreload('/sale-dispatches/:id/invoice', () => import('@/pages/InvoiceView'));
+const EWayBillView = lazyWithPreload('/sale-dispatches/:id/ewaybill', () => import('@/pages/EWayBillView'));
 const SalesProduct = lazyWithPreload(
-  ['/sales/pappu', '/sales/husk', '/sales/waste', '/sales/tps'],
+  ['/sales/pappu', '/sales/tps'],
   () => import('@/pages/SalesProduct')
 );
-const TamarindShell = lazyWithPreload('/sales/shell', () => import('@/pages/TamarindShell'));
+const Husk = lazyWithPreload('/sales/husk', () => import('@/pages/Husk'));
+const ByproductSales = lazyWithPreload(
+  ['/sales/byproducts', '/sales/shell', '/sales/waste'],
+  () => import('@/pages/ByproductSales')
+);
+const PappuProfitLoss = lazyWithPreload('/sales/profit-loss', () => import('@/pages/PappuProfitLoss'));
 const PurchaseStatement = lazyWithPreload('/purchases/:purchaseId/statement', () => import('@/pages/PurchaseStatement'));
 const PartyLedger = lazyWithPreload('/accounts/party-ledger', () => import('@/pages/PartyLedger'));
 const HamaliLedger = lazyWithPreload('/accounts/hamali-ledger', () => import('@/pages/HamaliLedger'));
@@ -59,10 +64,15 @@ const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
 const PurchaseDues = lazyWithPreload('/reports/purchase-dues', () => import('@/pages/PurchaseDues'));
+const PaymentPlanner = lazyWithPreload('/reports/payment-planner', () => import('@/pages/PaymentPlanner'));
 const InternalWeightLedger = lazyWithPreload('/reports/internal-weight-ledger', () => import('@/pages/InternalWeightLedger'));
 const BrokerageDues = lazyWithPreload('/reports/brokerage-dues', () => import('@/pages/BrokerageDues'));
 const FreightDues = lazyWithPreload('/reports/freight-dues', () => import('@/pages/FreightDues'));
-const AllocationHealth = lazyWithPreload('/reports/allocation-health', () => import('@/pages/AllocationHealth'));
+const GunnyBags = lazyWithPreload('/reports/gunny-bags', () => import('@/pages/GunnyBags'));
+const Electricity = lazyWithPreload('/reports/electricity', () => import('@/pages/Electricity'));
+const Maintenance = lazyWithPreload('/reports/maintenance', () => import('@/pages/Maintenance'));
+const Drawings = lazyWithPreload('/reports/drawings', () => import('@/pages/Drawings'));
+const Interest = lazyWithPreload('/reports/interest', () => import('@/pages/Interest'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
 
 function Fallback() {
@@ -88,6 +98,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
+            <Route path="/sale-dispatches/:id/ewaybill" element={<EWayBillView />} />
             <Route element={<Layout />}>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<Dashboard />} />
@@ -110,14 +121,15 @@ export default function App() {
               <Route path="/stock/party" element={<StockByParty />} />
               <Route path="/stock/price" element={<StockByPrice />} />
               <Route path="/stock/state" element={<StockByState />} />
-              <Route path="/banking/limits" element={<Banking />} />
               <Route path="/loans" element={<BankLoans />} />
               <Route path="/sale-orders" element={<SaleOrders />} />
               <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
-              <Route path="/sales/husk" element={<SalesProduct product="HUSK" />} />
-              <Route path="/sales/waste" element={<SalesProduct product="WASTE" />} />
+              <Route path="/sales/husk" element={<Husk />} />
               <Route path="/sales/tps" element={<SalesProduct product="TPS" />} />
-              <Route path="/sales/shell" element={<TamarindShell />} />
+              <Route path="/sales/byproducts" element={<ByproductSales />} />
+              <Route path="/sales/shell" element={<ByproductSales />} />
+              <Route path="/sales/waste" element={<ByproductSales />} />
+              <Route path="/sales/profit-loss" element={<PappuProfitLoss />} />
               <Route path="/accounts/party-ledger" element={<PartyLedger />} />
               <Route path="/accounts/hamali-ledger" element={<HamaliLedger />} />
               <Route path="/accounts/kata-fee-ledger" element={<KataFeeLedger />} />
@@ -132,9 +144,14 @@ export default function App() {
               <Route path="/reports/sale-dues" element={<SaleDues />} />
               <Route path="/reports/internal-weight-ledger" element={<InternalWeightLedger />} />
               <Route path="/reports/purchase-dues" element={<PurchaseDues />} />
+              <Route path="/reports/payment-planner" element={<PaymentPlanner />} />
               <Route path="/reports/brokerage-dues" element={<BrokerageDues />} />
               <Route path="/reports/freight-dues" element={<FreightDues />} />
-              <Route path="/reports/allocation-health" element={<AllocationHealth />} />
+              <Route path="/reports/gunny-bags" element={<GunnyBags />} />
+              <Route path="/reports/electricity" element={<Electricity />} />
+              <Route path="/reports/maintenance" element={<Maintenance />} />
+              <Route path="/reports/drawings" element={<Drawings />} />
+              <Route path="/reports/interest" element={<Interest />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
             </Route>

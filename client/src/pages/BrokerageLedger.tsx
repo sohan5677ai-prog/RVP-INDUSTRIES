@@ -76,7 +76,7 @@ export default function BrokerageLedger() {
         brokerName: b.name,
         date: o.saleDate,
         invoiceNumber: o.invoiceNumber,
-        buyerName: o.buyer?.name ?? '—',
+        buyerName: o.buyer?.name ?? '-',
         vehicleNumber: o.vehicleNumber,
         due,
         paid,
@@ -180,10 +180,10 @@ export default function BrokerageLedger() {
                   filtered.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>{shortDate(r.date)}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.invoiceNumber ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.invoiceNumber ?? '-'}</TableCell>
                       <TableCell className="font-semibold">{r.brokerName}</TableCell>
                       <TableCell>{r.buyerName}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.vehicleNumber ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.vehicleNumber ?? '-'}</TableCell>
                       <TableCell className="text-right font-medium">{rupees(r.due)}</TableCell>
                       <TableCell className="text-right text-emerald-600 dark:text-emerald-400">{rupees(r.paid)}</TableCell>
                       <TableCell className={`text-right font-bold ${r.balance > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{rupees(r.balance)}</TableCell>

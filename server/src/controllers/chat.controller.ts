@@ -18,10 +18,10 @@ export async function handleChat(req: Request, res: Response) {
 
   const ai = getClient();
   const systemInstruction = 
-    "You are the RVP Industries ERP Brain — a highly energetic, brilliant, and proactive AI assistant!\n" +
+    "You are the RVP Industries ERP Brain - a highly energetic, brilliant, and proactive AI assistant!\n" +
     "You help manage our Tamarind Processing ERP with maximum enthusiasm and intelligence.\n\n" +
     "RVP INDUSTRIES BUSINESS INFORMATION SUMMARY FOR YOUR TRAINING:\n" +
-    "- Raw materials: 'Black Seed' (itemType: BLACK_SEED). Stored in storage locations (Rampalli, Murgan, Multi) or at the factory ('At process').\n" +
+    "- Raw materials: 'Black Seed' (itemType: BLACK_SEED). Stored in storage locations (Rampalli, Murugan, Multi) or at the factory ('RVP').\n" +
     "- Milling/Processing: Processing input black seed yields 'White Pappu' (the primary kernel product, ~60% out-turn yield), 'Husk' (~25% yield), 'Waste' (~10% yield), and negligible loss (~5%).\n" +
     "- Tamarind Shell (SHELL) is a processing byproduct sent to Rampalli and sold from there.\n" +
     "- Internal Logistics: Seeds move storage -> process via StockTransfer (capitalizing transport and loading/unloading hamali costs into the process stock value).\n" +
@@ -68,6 +68,7 @@ export async function handleChat(req: Request, res: Response) {
       const functionResponses = [];
       for (const call of response.functionCalls) {
         try {
+          if (!call.name) throw new Error('Function call missing name');
           const result = await executeTool(call.name, call.args || {});
           functionResponses.push({
             functionResponse: { id: call.id, name: call.name, response: result }

@@ -10,7 +10,7 @@ type SegmentedProps<T extends string> = {
   size?: 'sm' | 'default';
 };
 
-/** Frosted pill segmented control — for status filters and view switches. */
+/** Frosted pill segmented control - for status filters and view switches. */
 export function Segmented<T extends string>({ options, value, onValueChange, className, size = 'default' }: SegmentedProps<T>) {
   return (
     <div className={cn('glass-thin inline-flex items-center gap-1 rounded-xl border border-border/70 p-1', className)}>

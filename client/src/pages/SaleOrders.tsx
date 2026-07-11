@@ -35,6 +35,9 @@ const PRODUCTS: { value: SaleProduct; label: string }[] = [
   { value: 'WASTE', label: 'Tamarind Waste' },
   { value: 'TPS', label: 'TPS (Brokens)' },
   { value: 'SHELL', label: 'Tamarind Shell' },
+  { value: 'PRECLEANER_DUST', label: 'Pre Cleaner Dust' },
+  { value: 'NALLA_POKKULU', label: 'Nalla Pokkulu' },
+  { value: 'NALLA_CHINTAPANDU', label: 'Nalla Chintapandu' },
 ];
 
 const PRODUCT_TO_COMMODITY: Record<SaleProduct, Commodity> = {
@@ -43,6 +46,9 @@ const PRODUCT_TO_COMMODITY: Record<SaleProduct, Commodity> = {
   WASTE: 'TAMARIND_WASTE',
   TPS: 'TPS_BROKENS',
   SHELL: 'TAMARIND_SHELL',
+  PRECLEANER_DUST: 'PRECLEANER_DUST',
+  NALLA_POKKULU: 'NALLA_POKKULU',
+  NALLA_CHINTAPANDU: 'NALLA_CHINTAPANDU',
 };
 
 const statusVariant: Record<SaleStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
@@ -58,7 +64,7 @@ const NO_BROKER = '__none__';
 
 const saleSchema = z.object({
   saleDate: z.string().min(1, 'Date is required'),
-  product: z.enum(['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL']),
+  product: z.enum(['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU']),
   buyerId: z.string().min(1, 'Party is required'),
   brokerId: z.string().optional(),
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Must be positive'),
@@ -290,9 +296,9 @@ export default function SaleOrders() {
               <TableRow key={o.id}>
                 <TableCell>{shortDate(o.saleDate)}</TableCell>
                 <TableCell><Badge variant="outline" className="font-medium">{PRODUCTS.find((p) => p.value === o.product)?.label ?? o.product}</Badge></TableCell>
-                <TableCell className="font-medium">{o.buyer?.name ?? '—'}</TableCell>
-                <TableCell>{o.broker?.name ?? '—'}</TableCell>
-                <TableCell>{o.destination ?? '—'}</TableCell>
+                <TableCell className="font-medium">{o.buyer?.name ?? '-'}</TableCell>
+                <TableCell>{o.broker?.name ?? '-'}</TableCell>
+                <TableCell>{o.destination ?? '-'}</TableCell>
                 <TableCell className="text-right font-semibold">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
                 <TableCell className="text-right">{toTonnes(o.dispatchedKg ?? 0).toFixed(2)} t</TableCell>
                 <TableCell className="text-right font-semibold">
@@ -308,17 +314,18 @@ export default function SaleOrders() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
-                    {o.status === 'PENDING' && (
-                      <>
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(o)}><Pencil className="h-4 w-4" /></Button>
-                        <Button variant="ghost" size="icon" onClick={() => { if (confirm('Delete this sale order?')) deleteMutation.mutate(o.id); }}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </>
-                    )}
-                    {o.status !== 'PENDING' && (
-                      <span className="text-xs text-muted-foreground italic pr-1">—</span>
-                    )}
+                    <Button variant="ghost" size="icon" onClick={() => openEdit(o)} title="Edit Order">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => { if (confirm('Delete this sale order?')) deleteMutation.mutate(o.id); }}
+                      title={o.status !== 'PENDING' ? 'Cannot delete an order with dispatches' : 'Delete Order'}
+                      disabled={o.status !== 'PENDING'}
+                    >
+                      <Trash2 className={`h-4 w-4 ${o.status === 'PENDING' ? 'text-destructive' : 'text-muted-foreground'}`} />
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -329,7 +336,7 @@ export default function SaleOrders() {
 
       {/* Create / Edit order dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editing ? 'Edit Sale Order' : 'New Sale Order'}</DialogTitle></DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))} className="space-y-4">
@@ -402,9 +409,9 @@ export default function SaleOrders() {
               )} />
 
               <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
-                <div className="flex justify-between"><span className="text-muted-foreground">Base ({toTonnes(weightKg).toFixed(2)} t × {rupees(rate)})</span><span className="font-medium">{base > 0 ? rupees(base) : '—'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{gst > 0 ? rupees(gst) : '—'}</span></div>
-                <div className="flex justify-between border-t pt-1.5"><span className="text-muted-foreground font-semibold">Value (incl. GST)</span><span className="font-bold text-emerald-600">{value > 0 ? rupees(value) : '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Base ({toTonnes(weightKg).toFixed(2)} t × {rupees(rate)})</span><span className="font-medium">{base > 0 ? rupees(base) : '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{gst > 0 ? rupees(gst) : '-'}</span></div>
+                <div className="flex justify-between border-t pt-1.5"><span className="text-muted-foreground font-semibold">Value (incl. GST)</span><span className="font-bold text-emerald-600">{value > 0 ? rupees(value) : '-'}</span></div>
               </div>
 
               {watchedProduct === 'PAPPU' && (

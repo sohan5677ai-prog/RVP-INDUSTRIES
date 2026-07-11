@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clock, IndianRupee } from 'lucide-react';
+import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clock } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, WeightVerification } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
@@ -13,7 +13,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { crossVerify } from '@/lib/calc';
+import { Segmented } from '@/components/ui/segmented';
+import { Combobox } from '@/components/ui/combobox';
+import { crossVerify, hamaliSplit } from '@/lib/calc';
 import {
   Dialog,
   DialogContent,
@@ -29,7 +31,8 @@ type PurchaseRow = Purchase & {
     invoiceNumber?: string;
     billingWeightKg?: number;
     partyKataKg?: number;
-    purchaseOrder?: { poNumber?: string; pricePerKg?: string; party?: { name: string } };
+    selfVehicle?: boolean;
+    purchaseOrder?: { poNumber?: string; pricePerKg?: string; hasGst?: boolean; party?: { name: string } };
   };
 };
 
@@ -52,12 +55,23 @@ function getCalculationDetails(p: PurchaseRow) {
   const baseCost = displayBaseWeightKg * pricePerKg;
   
   // GST is charged on the invoice billing amount (billing weight x price), not
-  // on our recalculated payable.
+  // on our recalculated payable - and ONLY when the PO/URP was flagged as a GST
+  // invoice (hasGst). No tick = no GST.
+  const hasGst = p.stockIn.purchaseOrder.hasGst ?? false;
   const billingAmount = billingWeightKg * pricePerKg;
-  const igst = billingAmount * 0.05;
-  
+  const igst = hasGst ? billingAmount * 0.05 : 0;
+
   const kataDiffDeduction = hasPenalty ? (reference - finalWeight) * pricePerKg : 0;
-  const totalAmount = baseCost - kataDiffDeduction + igst;
+
+  // Self-vehicle: recover the lorry's ₹80/t hamali share from the party by
+  // deducting it from their net payable (the seed cost is unaffected).
+  const selfVehicle = p.stockIn.selfVehicle ?? false;
+  const selfVehicleHamali = selfVehicle ? hamaliSplit(Number(p.hamaliCharge ?? 0)).lorry : 0;
+
+  // Self-vehicle: also recover the full weighbridge/kata fee from the party.
+  const selfVehicleKata = selfVehicle ? Number(p.kataFee ?? 0) : 0;
+
+  const totalAmount = baseCost - kataDiffDeduction + igst - selfVehicleHamali - selfVehicleKata;
 
   return {
     billingWeightKg,
@@ -69,10 +83,14 @@ function getCalculationDetails(p: PurchaseRow) {
     finalWeightKg: finalWeight,
     displayBaseWeightKg,
     pricePerKg,
+    hasGst,
     baseCost,
     billingAmount,
     igst,
     kataDiffDeduction,
+    selfVehicle,
+    selfVehicleHamali,
+    selfVehicleKata,
     totalAmount,
   };
 }
@@ -82,6 +100,8 @@ export default function Verification() {
   const [selectedPurchase, setSelectedPurchase] = useState<PurchaseRow | null>(null);
   const [open, setOpen] = useState(false);
   const [forceExempt, setForceExempt] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED'>('ALL');
+  const [partyFilter, setPartyFilter] = useState('ALL');
 
   // States for discount
   const [discountType, setDiscountType] = useState<'WEIGHT' | 'PRICE' | 'AMOUNT' | ''>('');
@@ -99,7 +119,7 @@ export default function Verification() {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
       qc.invalidateQueries({ queryKey: ['processing'] });
-      toast.success('Approved — balance payable calculated and black seed added to stock');
+      toast.success('Approved - balance payable calculated and black seed added to stock');
       setOpen(false);
       setSelectedPurchase(null);
     },
@@ -113,7 +133,7 @@ export default function Verification() {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
       qc.invalidateQueries({ queryKey: ['processing'] });
-      toast.success('Verification removed — you can re-verify');
+      toast.success('Verification removed - you can re-verify');
       setOpen(false);
       setSelectedPurchase(null);
     },
@@ -162,35 +182,77 @@ export default function Verification() {
 
   const liveBasePayable = livePayableWeight * livePayablePrice;
   const liveNetBase = discountType === 'AMOUNT' ? Math.max(0, liveBasePayable - discountValNum) : liveBasePayable;
-  // GST is on the invoice billing amount, independent of weight/quality discounts.
+  // GST is on the invoice billing amount, independent of weight/quality discounts,
+  // and only applies when the PO/URP was flagged as a GST invoice.
+  const liveHasGst = calc?.hasGst ?? false;
   const liveBillingAmount = (calc?.billingWeightKg ?? 0) * (calc?.pricePerKg ?? 0);
-  const liveIgst = Math.round(liveBillingAmount * 0.05 * 100) / 100;
-  const liveTotalAmount = liveNetBase + liveIgst;
+  const liveIgst = liveHasGst ? Math.round(liveBillingAmount * 0.05 * 100) / 100 : 0;
+  const liveSelfVehicleHamali = calc?.selfVehicleHamali ?? 0;
+  const liveSelfVehicleKata = calc?.selfVehicleKata ?? 0;
+  const liveTotalAmount = liveNetBase + liveIgst - liveSelfVehicleHamali - liveSelfVehicleKata;
 
   const allPurchases = purchases ?? [];
   const verifiedCount = allPurchases.filter((p) => p.verification).length;
   const pendingCount = allPurchases.length - verifiedCount;
-  const totalPayable = allPurchases.reduce((s, p) => s + (p.verification ? Number(p.verification.totalAmount) : 0), 0);
+
+  // Party options for the filter combo, derived from the purchases list.
+  const partyOptions = useMemo(() => {
+    const names = [...new Set(allPurchases
+      .map((p) => p.stockIn?.purchaseOrder?.party?.name)
+      .filter((n): n is string => !!n))].sort();
+    return [{ value: 'ALL', label: 'All parties' }, ...names.map((n) => ({ value: n, label: n }))];
+  }, [allPurchases]);
+
+  // Rows shown after the status tabs and party combo. Stat cards use the full set.
+  const filtered = allPurchases.filter((p) => {
+    if (partyFilter !== 'ALL' && (p.stockIn?.purchaseOrder?.party?.name ?? '') !== partyFilter) return false;
+    if (statusFilter === 'PENDING' && p.verification) return false;
+    if (statusFilter === 'APPROVED' && !p.verification) return false;
+    return true;
+  });
+  const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL';
 
   return (
     <div className="space-y-8">
       <PageHeader
         icon={BadgeCheck}
-        title="Weight Verification"
+        title="Verification"
         description="Cross-verify billing vs party-kata vs RVP-kata and compute the supplier's balance payable."
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
-        <StatCard label="To verify" value={pendingCount} icon={Clock} tone="amber" hint="awaiting approval" />
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 stagger">
+        <StatCard label="Pending Approval" value={pendingCount} icon={Clock} tone="amber" hint="awaiting approval" />
         <StatCard label="Approved" value={verifiedCount} icon={BadgeCheck} tone="forest" hint="verified purchases" />
         <StatCard label="Total" value={allPurchases.length} icon={Scale} tone="taupe" hint="purchases" />
-        <StatCard label="Net payable" value={rupees(totalPayable)} icon={IndianRupee} tone="gold" hint="approved balances" />
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
-          <h2 className="text-sm font-semibold text-foreground">Purchases to verify</h2>
-          {pendingCount > 0 && <Badge variant="warning">{pendingCount} pending</Badge>}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-foreground">Purchases to verify</h2>
+            {pendingCount > 0 && <Badge variant="warning">{pendingCount} pending</Badge>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Segmented
+              options={[
+                { label: 'All', value: 'ALL' },
+                { label: 'Pending', value: 'PENDING' },
+                { label: 'Approved', value: 'APPROVED' },
+              ]}
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              size="sm"
+            />
+            <Combobox
+              options={partyOptions}
+              value={partyFilter}
+              onChange={setPartyFilter}
+              placeholder="All parties"
+              searchPlaceholder="Search party…"
+              ariaLabel="Filter by party"
+              className="w-52"
+            />
+          </div>
         </div>
         <div className="overflow-x-auto">
         <Table>
@@ -210,23 +272,23 @@ export default function Verification() {
             {isLoading && (
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {purchases?.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No purchases to verify yet.</TableCell></TableRow>
+            {!isLoading && filtered.length === 0 && (
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">{filtersActive ? 'No purchases match the filters.' : 'No purchases to verify yet.'}</TableCell></TableRow>
             )}
-            {purchases?.map((p) => {
+            {filtered.map((p) => {
               const v = p.verification;
               return (
                 <TableRow key={p.id}>
                   <TableCell>{shortDate(p.createdAt)}</TableCell>
                   <TableCell className="font-medium">
-                    {p.stockIn?.purchaseOrder?.party?.name ?? '—'}
+                    {p.stockIn?.purchaseOrder?.party?.name ?? '-'}
                     {p.stockIn?.purchaseOrder?.poNumber && (
                       <span className="ml-2 text-xs text-muted-foreground font-mono">({p.stockIn.purchaseOrder.poNumber})</span>
                     )}
                   </TableCell>
-                  <TableCell className="font-semibold">{p.stockIn?.invoiceNumber ?? '—'}</TableCell>
+                  <TableCell className="font-semibold">{p.stockIn?.invoiceNumber ?? '-'}</TableCell>
                   <TableCell className="text-right">{kg(p.netWeightKg)}</TableCell>
-                  <TableCell className="text-right">{p.stockIn?.purchaseOrder?.pricePerKg ? `${rupees(p.stockIn.purchaseOrder.pricePerKg)}/kg` : '—'}</TableCell>
+                  <TableCell className="text-right">{p.stockIn?.purchaseOrder?.pricePerKg ? `${rupees(p.stockIn.purchaseOrder.pricePerKg)}/kg` : '-'}</TableCell>
                   <TableCell>
                     {v ? (
                       <Badge variant={v.exempt ? 'success' : 'warning'}>
@@ -237,7 +299,7 @@ export default function Verification() {
                     )}
                   </TableCell>
                   <TableCell className="text-right font-semibold text-primary">
-                    {v ? rupees(v.totalAmount) : '—'}
+                    {v ? rupees(v.totalAmount) : '-'}
                   </TableCell>
                   <TableCell className="text-center">
                     <Button
@@ -259,7 +321,7 @@ export default function Verification() {
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5" />
-        Hamali (unloading) is borne by the transporter and is not deducted from the supplier's balance.
+        Hamali (unloading) is borne by the transporter and is not deducted from the supplier's balance - except for a self vehicle, where the ₹80/tonne lorry share and the full weighbridge (kata) fee are deducted from the party's payable.
       </p>
 
       {/* Verification Preview Dialog */}
@@ -437,10 +499,24 @@ export default function Verification() {
                     <span className="text-muted-foreground font-normal">Net Base Cost (payable)</span>
                     <span>{rupees(liveNetBase)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">IGST (5% on invoice billing {rupees(liveBillingAmount)})</span>
-                    <span>{rupees(liveIgst)}</span>
-                  </div>
+                  {liveHasGst && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">IGST (5% on invoice billing {rupees(liveBillingAmount)})</span>
+                      <span>{rupees(liveIgst)}</span>
+                    </div>
+                  )}
+                  {liveSelfVehicleHamali > 0 && (
+                    <div className="flex justify-between text-destructive font-medium">
+                      <span>Self-vehicle hamali (₹80/t on party's own lorry)</span>
+                      <span>-{rupees(liveSelfVehicleHamali)}</span>
+                    </div>
+                  )}
+                  {liveSelfVehicleKata > 0 && (
+                    <div className="flex justify-between text-destructive font-medium">
+                      <span>Self-vehicle kata (weighbridge fee on party's own lorry)</span>
+                      <span>-{rupees(liveSelfVehicleKata)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between border-t pt-2 mt-2 text-sm">
                     <span className="font-bold">Net Balance Payable</span>
                     <span className="font-bold text-primary text-base">{rupees(liveTotalAmount)}</span>

@@ -45,8 +45,8 @@ interface KataEntry {
 function getWeightBracket(weightKg: number): string {
   const tonnes = weightKg / 1000;
   if (tonnes <= 15) return '≤ 15 tonnes (₹50)';
-  if (tonnes <= 25) return '15-25 tonnes (₹150)';
-  return '> 25 tonnes (₹200)';
+  if (tonnes <= 30) return '15-30 tonnes (₹150)';
+  return '> 30 tonnes (₹200)';
 }
 
 export default function KataFeeLedger() {
@@ -73,30 +73,30 @@ export default function KataFeeLedger() {
   const suppliers = parties?.filter((p) => p.type !== 'BUYER') ?? [];
 
   // Purchase (inward) kata fees from the weighbridge on arrival.
-  const purchaseEntries: KataEntry[] = (purchases ?? []).map((p) => ({
-    id: `PUR-${p.id}`,
-    date: p.stockIn?.arrivalDate ?? p.createdAt,
-    source: 'PURCHASE',
-    partyId: p.stockIn?.purchaseOrder?.partyId ?? null,
-    partyName: p.stockIn?.purchaseOrder?.party?.name ?? '—',
-    lorryNumber: p.stockIn?.lorryNumber ?? null,
-    reference: `Inv ${p.stockIn?.invoiceNumber ?? '—'}`,
-    netWeightKg: p.netWeightKg,
-    kataFee: Number(p.kataFee),
-  }));
+  const purchaseEntries: KataEntry[] = (purchases ?? [])
+    .map((p) => ({
+      id: `PUR-${p.id}`,
+      date: p.stockIn?.arrivalDate ?? p.createdAt,
+      source: 'PURCHASE',
+      partyId: p.stockIn?.purchaseOrder?.partyId ?? null,
+      partyName: p.stockIn?.purchaseOrder?.party?.name ?? '-',
+      lorryNumber: p.stockIn?.lorryNumber ?? null,
+      reference: `Inv ${p.stockIn?.invoiceNumber ?? '-'}`,
+      netWeightKg: p.netWeightKg,
+      kataFee: Number(p.kataFee),
+    }));
 
   // Sale (outward) kata fees deducted from the lorry's delivery freight.
   const saleEntries: KataEntry[] = (saleOrders ?? [])
     .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
-    .filter(({ d }) => Number(d.freightCharge) > 0)
     .map(({ o, d }) => ({
       id: `SALE-${d.id}`,
       date: d.dispatchDate,
       source: 'SALE',
       partyId: o.buyerId,
-      partyName: o.buyer?.name ?? '—',
+      partyName: o.buyer?.name ?? '-',
       lorryNumber: d.vehicleNumber ?? null,
-      reference: d.invoiceNumber ?? '—',
+      reference: d.invoiceNumber ?? '-',
       netWeightKg: d.weightKg,
       kataFee: calcKataFee(d.weightKg),
     }));
@@ -202,11 +202,11 @@ export default function KataFeeLedger() {
                     <span className="font-semibold">{brackets.bracket1}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">15-25t (₹150):</span>
+                    <span className="text-muted-foreground">15-30t (₹150):</span>
                     <span className="font-semibold">{brackets.bracket2}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">&gt;25t (₹200):</span>
+                    <span className="text-muted-foreground">&gt;30t (₹200):</span>
                     <span className="font-semibold">{brackets.bracket3}</span>
                   </div>
                 </div>
@@ -247,7 +247,7 @@ export default function KataFeeLedger() {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-semibold">{e.partyName}</TableCell>
-                      <TableCell>{e.lorryNumber ?? '—'}</TableCell>
+                      <TableCell>{e.lorryNumber ?? '-'}</TableCell>
                       <TableCell className="font-mono text-xs">{e.reference}</TableCell>
                       <TableCell className="text-right font-medium">{kg(e.netWeightKg)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{getWeightBracket(e.netWeightKg)}</TableCell>

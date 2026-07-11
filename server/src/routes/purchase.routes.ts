@@ -11,9 +11,11 @@ import {
   voidPurchaseOrder,
 } from '../controllers/purchaseOrder.controller.js';
 import {
-  createStockIn,
-  getStockIn,
   listStockIns,
+  getStockIn,
+  createStockIn,
+  createUrpStockIn,
+  createColdStorageBatch,
   updateStockIn,
   deleteStockIn,
   extractStockInInvoice,
@@ -45,9 +47,11 @@ router.post('/purchase-orders/:id/void', asyncHandler(voidPurchaseOrder));
 
 // Stock-in (multipart invoice upload)
 router.post('/stock-in/extract', memoryUpload.single('invoice'), asyncHandler(extractStockInInvoice));
+router.post('/stock-in/cold-storage-batch', asyncHandler(createColdStorageBatch));
 router.get('/stock-in', asyncHandler(listStockIns));
 router.get('/stock-in/:id', asyncHandler(getStockIn));
 router.post('/stock-in', upload.single('invoice'), asyncHandler(createStockIn));
+router.post('/stock-in/urp', upload.single('invoice'), asyncHandler(createUrpStockIn));
 router.put('/stock-in/:id', upload.single('invoice'), asyncHandler(updateStockIn));
 router.delete('/stock-in/:id', asyncHandler(deleteStockIn));
 

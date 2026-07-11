@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const saleStatusEnum = z.enum(['PENDING', 'PARTIAL', 'DISPATCHED', 'DELIVERED']);
-export const saleProductEnum = z.enum(['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL']);
+export const saleProductEnum = z.enum(['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU']);
 
 export const createSaleOrderSchema = z.object({
   saleDate: z.coerce.date(),
@@ -16,7 +16,7 @@ export const createSaleOrderSchema = z.object({
   dueDays: z.coerce.number().int().nonnegative().optional().nullable(),
   marginOverride: z.boolean().optional().default(false),
   brokerageRatePerKg: z.coerce.number().nonnegative().optional().default(0),
-  // Destination + freight are derived from the buyer's party — not taken from the client.
+  // Destination + freight are derived from the buyer's party - not taken from the client.
 });
 
 // Multipart on dispatch: confirmed values read off the kata slip. The tax invoice
@@ -33,7 +33,7 @@ export const listSaleOrdersSchema = z.object({
 });
 
 // Mark a dispatched shipment as delivered. The only valid transition is
-// DISPATCHED -> DELIVERED, so status is not taken from the client — we just record
+// DISPATCHED -> DELIVERED, so status is not taken from the client - we just record
 // the buyer's kata weight (optional) to compute any shortage credit note.
 export const deliverSaleDispatchSchema = z.object({
   buyerKataKg: z.coerce.number().int().positive().optional(),

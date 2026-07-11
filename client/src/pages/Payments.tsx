@@ -16,15 +16,54 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import type { PaymentType } from '@/lib/types';
 
-const PAYMENT_TYPES = [
-  { value: 'SUPPLIER', label: 'Supplier Payment' },
-  { value: 'TRANSPORTER', label: 'Transporter Freight' },
-  { value: 'BROKER', label: 'Broker Commission' },
-  { value: 'OTHER', label: 'Other Expense' },
-] as const;
+// Types you can record directly from this page. Gunny Bags, Electricity,
+// Maintenance and Drawings are entered on their own detail pages (which auto-post
+// a linked Payment here), so they are intentionally absent from this form.
+const PAYMENT_TYPE_GROUPS: { label: string; items: { value: PaymentType; label: string }[] }[] = [
+  {
+    label: 'Suppliers & Counterparties',
+    items: [
+      { value: 'SUPPLIER', label: 'Supplier Payment' },
+      { value: 'TRANSPORTER', label: 'Transporter Freight' },
+      { value: 'BROKER', label: 'Broker Commission' },
+    ],
+  },
+  {
+    label: 'Expenses',
+    items: [
+      { value: 'TRANSPORT', label: 'Transport Fee' },
+      { value: 'OTHER', label: 'Other Expense' },
+    ],
+  },
+];
+
+// Full label map for rendering ANY payment in the table, including the ones
+// auto-created from detail pages (which aren't offered in the form above).
+const PAYMENT_TYPES: { value: PaymentType; label: string }[] = [
+  ...PAYMENT_TYPE_GROUPS.flatMap((g) => g.items),
+  { value: 'GUNNY_BAGS', label: 'Gunny Bags' },
+  { value: 'ELECTRICITY', label: 'Electricity' },
+  { value: 'MAINTENANCE', label: 'Repairs & Maintenance' },
+  { value: 'DRAWINGS', label: 'Drawings' },
+];
+
+// Types that settle a specific counterparty (they have their own picker below).
+// Everything else is a direct-cash expense/drawing that uses the free-text payee.
+const COUNTERPARTY_TYPES: PaymentType[] = ['SUPPLIER', 'TRANSPORTER', 'BROKER'];
+
+// Payments created from a detail page (Gunny Bags / Electricity / Maintenance /
+// Drawings). They're read-only here — edit or delete them on their own page so
+// both sides stay in sync.
+const MANAGED_ELSEWHERE: Partial<Record<PaymentType, string>> = {
+  GUNNY_BAGS: 'Gunny Bags page',
+  ELECTRICITY: 'Electricity page',
+  MAINTENANCE: 'Maintenance page',
+  DRAWINGS: 'Drawings page',
+};
 
 export default function PaymentsPage() {
   const qc = useQueryClient();
@@ -54,6 +93,7 @@ export default function PaymentsPage() {
   const [partyId, setPartyId] = useState('');
   const [brokerId, setBrokerId] = useState('');
   const [lorryNumber, setLorryNumber] = useState('');
+  const [payee, setPayee] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
 
@@ -64,6 +104,7 @@ export default function PaymentsPage() {
     setPartyId('');
     setBrokerId('');
     setLorryNumber('');
+    setPayee('');
     setReference('');
     setDescription('');
   }
@@ -90,6 +131,10 @@ export default function PaymentsPage() {
         if (broker) {
           setType('BROKER'); setBrokerId(broker.id); setPartyId('');
           filled.push(broker.name);
+        } else {
+          // Unknown recipient → keep it as a free-text payee on an expense payment.
+          setPayee(matchName);
+          filled.push(matchName);
         }
       }
     }
@@ -109,6 +154,7 @@ export default function PaymentsPage() {
           partyId: type === 'SUPPLIER' ? partyId || null : null,
           brokerId: type === 'BROKER' ? brokerId || null : null,
           lorryNumber: type === 'TRANSPORTER' ? lorryNumber || null : null,
+          payee: !COUNTERPARTY_TYPES.includes(type) ? payee || null : null,
           reference: reference || null,
           description: description || null,
         },
@@ -175,39 +221,46 @@ export default function PaymentsPage() {
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
             )}
             {payments?.map((p) => {
-              let paidToText = '—';
+              const typeLabel = PAYMENT_TYPES.find((t) => t.value === p.type)?.label ?? p.type;
+              const managedIn = MANAGED_ELSEWHERE[p.type];
+              let paidToText = '-';
               if (p.type === 'SUPPLIER') {
-                paidToText = p.party?.name ?? '—';
+                paidToText = p.party?.name ?? '-';
               } else if (p.type === 'BROKER') {
-                paidToText = p.broker?.name ?? '—';
+                paidToText = p.broker?.name ?? '-';
               } else if (p.type === 'TRANSPORTER') {
                 paidToText = p.lorryNumber ? `Transporter (Lorry ${p.lorryNumber})` : 'Transporter';
               } else {
-                paidToText = 'Other Expense';
+                paidToText = p.payee || typeLabel;
               }
 
               return (
                 <TableRow key={p.id}>
                   <TableCell>{shortDate(p.date)}</TableCell>
                   <TableCell className="font-semibold text-xs text-muted-foreground">
-                    {PAYMENT_TYPES.find((t) => t.value === p.type)?.label}
+                    {typeLabel}
+                    {managedIn && <span className="ml-1.5 font-normal italic text-[10px]">· via {managedIn}</span>}
                   </TableCell>
                   <TableCell className="font-medium">{paidToText}</TableCell>
-                  <TableCell className="font-mono text-xs">{p.reference ?? '—'}</TableCell>
-                  <TableCell className="max-w-xs truncate text-muted-foreground">{p.description ?? '—'}</TableCell>
+                  <TableCell className="font-mono text-xs">{p.reference ?? '-'}</TableCell>
+                  <TableCell className="max-w-xs truncate text-muted-foreground">{p.description ?? '-'}</TableCell>
                   <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">{rupees(p.amount)}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        if (confirm(`Reverse this payment of ${rupees(p.amount)}? This will remove its associated general ledger journal entry.`)) {
-                          deleteMutation.mutate(p.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {managedIn ? (
+                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>—</span>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          if (confirm(`Reverse this payment of ${rupees(p.amount)}? This will remove its associated general ledger journal entry.`)) {
+                            deleteMutation.mutate(p.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -241,11 +294,16 @@ export default function PaymentsPage() {
 
             <div className="space-y-2">
               <Label>Payment Type</Label>
-              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setBrokerId(''); setLorryNumber(''); }}>
+              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setBrokerId(''); setLorryNumber(''); setPayee(''); }}>
                 <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
-                  {PAYMENT_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  {PAYMENT_TYPE_GROUPS.map((g) => (
+                    <SelectGroup key={g.label}>
+                      <SelectLabel>{g.label}</SelectLabel>
+                      {g.items.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      ))}
+                    </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
@@ -284,6 +342,14 @@ export default function PaymentsPage() {
                 <Label htmlFor="lorry">Lorry / Vehicle Number</Label>
                 <Input id="lorry" value={lorryNumber} onChange={(e) => setLorryNumber(e.target.value)} placeholder="e.g. AP02AB1234" />
                 <p className="text-[10px] text-muted-foreground">Required to match freight charges to the corresponding vehicle.</p>
+              </div>
+            )}
+
+            {!COUNTERPARTY_TYPES.includes(type) && (
+              <div className="space-y-2">
+                <Label htmlFor="payee">Paid To / Payee</Label>
+                <Input id="payee" value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="e.g. Shabri Reddy, APSPDCL, labour contractor" />
+                <p className="text-[10px] text-muted-foreground">Optional — the person or party who received this payment.</p>
               </div>
             )}
 

@@ -60,8 +60,10 @@ export async function createPayment(req: Request, res: Response) {
         amount: data.amount,
         type: data.type,
         partyId: data.partyId ?? null,
+        purchaseId: data.purchaseId ?? null,
         brokerId: data.brokerId ?? null,
         lorryNumber: data.lorryNumber ?? null,
+        payee: data.payee ?? null,
         reference: data.reference ?? null,
         description: data.description ?? null,
       },
@@ -74,6 +76,7 @@ export async function createPayment(req: Request, res: Response) {
       partyName,
       brokerName,
       lorryNumber: data.lorryNumber ?? undefined,
+      payee: data.payee ?? undefined,
       reference: data.reference ?? undefined,
       description: data.description ?? undefined,
     });

@@ -156,7 +156,7 @@ function calcKataFee(netKg: number): number {
 
 async function main() {
   const admin = await prisma.user.findFirst({ where: { username: 'admin' } });
-  if (!admin) throw new Error('Admin user not found — run seed first');
+  if (!admin) throw new Error('Admin user not found - run seed first');
 
   // Upsert all unique parties (case-insensitive dedup)
   const partyMap = new Map<string, string>(); // normalised name → id

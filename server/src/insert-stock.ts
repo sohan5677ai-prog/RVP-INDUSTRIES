@@ -93,7 +93,7 @@ export async function insertMissingStock() {
             billingWeightKg: entry.weightKg,
             partyKataKg: entry.weightKg,
             invoiceFileUrl: "",
-            loadingLocation: "At process",
+            loadingLocation: "RVP",
             freightCharge: 0
           }
         });
@@ -141,7 +141,7 @@ export async function insertMissingStock() {
         const totalInventoryCost = totalAmount + ourHamali;
         await InventoryService.updateBlackSeedInventory(
           tx,
-          "At process",
+          "RVP",
           entry.weightKg,
           totalInventoryCost
         );

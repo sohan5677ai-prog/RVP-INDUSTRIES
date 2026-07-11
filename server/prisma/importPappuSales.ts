@@ -3,9 +3,10 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// ── PAPPU sales from "TEST DATA.xlsx" (rows 2-45) ─────────────────────────────
+// ── PAPPU sales from "TEST DATA.xlsx" (RVP/01 … RVP/76) ───────────────────────
 // Tuple: [dateStr, buyer, lorryNumber, invoice, pappuTons, pappuPricePerKg]
-// Each row is a PAPPU sale. 
+// Each row is a PAPPU sale, in chronological (invoice) order. Husk invoices
+// (RVP/02, 06, 11 …) are interleaved in the real book and live in addHuskSales.ts.
 const SALES: [string, string, string, string, number, number][] = [
   ['06-04-2026', 'Chhaya Industries', 'TN28BF7423', 'RVP/01/26-27', 25, 50.00],
   ['08-04-2026', 'Adinath', 'TN28BF7498', 'RVP/03/26-27', 25, 50.50],
@@ -53,6 +54,11 @@ const SALES: [string, string, string, string, number, number][] = [
   ['13-06-2026', 'Colourtex', 'AP39UF5999', 'RVP/62/26-27', 30, 49.50],
   ['26-06-2026', 'Soham Agro', 'TN28BF7498', 'RVP/68/26-27', 25, 49.00],
   ['26-06-2026', 'Soham Agro', 'TN28BF7423', 'RVP/69/26-27', 25, 49.00],
+  ['27-06-2026', 'Soham Agro', 'TN52AC2251', 'RVP/71/26-27', 35, 49.00],
+  ['29-06-2026', 'Soham Agro', 'TN52AH1074', 'RVP/73/26-27', 35, 49.00],
+  ['30-06-2026', 'Colourtex', 'GJ06AX4056', 'RVP/74/26-27', 30, 49.50],
+  ['30-06-2026', 'Colourtex', 'AP39WR0129', 'RVP/75/26-27', 35, 49.50],
+  ['01-07-2026', 'Colourtex', 'TN28BM9403', 'RVP/76/26-27', 30, 49.50],
 ];
 
 function parseDateStr(dateStr: string): Date {
@@ -61,10 +67,11 @@ function parseDateStr(dateStr: string): Date {
 }
 
 async function main() {
-  // 1) Clear existing sales so the import is idempotent (purchases untouched).
-  console.log('Clearing existing sales…');
-  await prisma.saleDispatch.deleteMany();
-  await prisma.saleOrder.deleteMany();
+  // 1) Clear existing PAPPU sales so the import is idempotent. Scope to PAPPU so
+  //    HUSK sales (addHuskSales.ts) and purchases are left untouched.
+  console.log('Clearing existing PAPPU sales…');
+  await prisma.saleDispatch.deleteMany({ where: { saleOrder: { product: 'PAPPU' } } });
+  await prisma.saleOrder.deleteMany({ where: { product: 'PAPPU' } });
 
   // 2) Resolve buyer parties (case-insensitive dedup), creating any missing.
   const partyCache = new Map<string, string>();

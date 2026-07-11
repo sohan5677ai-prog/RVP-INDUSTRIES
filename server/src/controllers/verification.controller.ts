@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createVerificationSchema } from '../schemas/purchase.schema.js';
-import { crossVerify, companyHamaliShare } from '../lib/calc.js';
+import { crossVerify, companyHamaliShare, hamaliSplit } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 
@@ -36,7 +36,7 @@ export async function getVerification(req: Request, res: Response) {
  * standalone step (separate from recording the purchase). It computes the
  * payable balance to the supplier.
  *
- * NOTE: hamali (unloading) is NOT deducted from the supplier's balance — it is
+ * NOTE: hamali (unloading) is NOT deducted from the supplier's balance - it is
  * borne by the transporter/lorry, not the party.
  */
 export async function createVerification(req: Request, res: Response) {
@@ -84,10 +84,25 @@ export async function createVerification(req: Request, res: Response) {
   const netBaseCost = data.discountType === 'AMOUNT' ? Math.max(0, basePayable - discountAmount) : basePayable;
 
   // GST is charged on the invoice billing amount (billing weight x price), NOT
-  // on our recalculated payable. Payable = net base cost + IGST (5%).
+  // on our recalculated payable. Gross payable = net base cost + IGST (5%).
   const billingAmount = billingWeightKg * pricePerKg;
-  const igst = Math.round(billingAmount * 0.05 * 100) / 100;
-  const totalAmount = netBaseCost + igst;
+  const igst = purchase.stockIn.purchaseOrder.hasGst ? Math.round(billingAmount * 0.05 * 100) / 100 : 0;
+  const grossPayable = netBaseCost + igst;
+
+  // Self-vehicle: the party used their own lorry, so the lorry's ₹80/t hamali
+  // share (normally recovered from the transporter) is deducted from their
+  // payable. The seed's capitalised cost is unaffected - only the party balance
+  // and the ledger's supplier credit change.
+  const selfVehicleHamali = purchase.stockIn.selfVehicle
+    ? hamaliSplit(Number(purchase.hamaliCharge)).lorry
+    : 0;
+  // Self-vehicle: the party also bears the full weighbridge/kata fee (normally
+  // recovered from the transporter). It comes off their payable AND lowers the
+  // seed's landed cost (see totalInventoryCost below).
+  const selfVehicleKata = purchase.stockIn.selfVehicle
+    ? Number(purchase.kataFee)
+    : 0;
+  const totalAmount = Math.max(0, grossPayable - selfVehicleHamali - selfVehicleKata);
 
   // Shortage check for Auto Debit Note (shortage > 0.5%)
   const shortageKg = billingWeightKg - rvpKataKg;
@@ -122,6 +137,8 @@ export async function createVerification(req: Request, res: Response) {
         finalWeightKg: finalWeight,
         pricePerKg,
         totalAmount,
+        selfVehicleHamali,
+        selfVehicleKata,
       },
     });
 
@@ -133,7 +150,11 @@ export async function createVerification(req: Request, res: Response) {
     // Inward freight is fixed at purchase recording and carries through.
     const freight = Number(purchase.freightCharge);
     const originalCost = purchase.netWeightKg * originalPrice + ourHamali + freight;
-    const totalInventoryCost = totalAmount + ourHamali + freight;
+    // Seed value is capitalised EXCLUDING GST (netBaseCost, not grossPayable) - the
+    // input IGST is claimable tax credit, not stock cost. The self-vehicle hamali is
+    // recovered from the party and does not lower the seed's cost; the self-vehicle
+    // kata DOES lower the seed's landed cost (the party reimburses it).
+    const totalInventoryCost = netBaseCost - selfVehicleKata + ourHamali + freight;
 
     // Subtract original purchase stock from inventory
     await InventoryService.updateBlackSeedInventory(
@@ -192,7 +213,15 @@ export async function deleteVerification(req: Request, res: Response) {
     const location = purchase.stockIn.loadingLocation;
     const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
     const freight = Number(purchase.freightCharge);
-    const verifiedCost = Number(verification.totalAmount) + ourHamali + freight;
+    // Reconstruct the seed value we capitalised at verification (GST-EXCLUSIVE).
+    // totalAmount is net of the self-vehicle hamali and kata but still INCLUDES GST:
+    // add the hamali back (it stayed in the seed), leave the kata out (it lowered the
+    // landed cost), and subtract the IGST (it was parked in Input Tax Credit, not stock).
+    const igst = purchase.stockIn.purchaseOrder.hasGst
+      ? Math.round(Number(verification.billingWeightKg) * Number(verification.pricePerKg) * 0.05 * 100) / 100
+      : 0;
+    const selfHam = Number(verification.selfVehicleHamali);
+    const verifiedCost = Number(verification.totalAmount) + selfHam + ourHamali + freight - igst;
 
     // 1. Subtract the verified weight and cost from SiloInventory
     await InventoryService.updateBlackSeedInventory(

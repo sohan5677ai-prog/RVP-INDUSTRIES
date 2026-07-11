@@ -13,7 +13,7 @@ type DatePickerProps = {
   disabled?: boolean;
 };
 
-/** Premium date field — glass trigger + frosted calendar popover. */
+/** Premium date field - glass trigger + frosted calendar popover. */
 export function DatePicker({ value, onChange, placeholder = 'Pick a date', className, disabled }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   return (

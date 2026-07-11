@@ -8,7 +8,7 @@ type SearchInputProps = Omit<React.ComponentProps<'input'>, 'onChange' | 'value'
   containerClassName?: string;
 };
 
-/** Premium search field — leading icon, clear button, frosted glass. */
+/** Premium search field - leading icon, clear button, frosted glass. */
 export function SearchInput({
   value, onValueChange, placeholder = 'Search…', className, containerClassName, ...props
 }: SearchInputProps) {

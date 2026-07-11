@@ -2,10 +2,28 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { HttpError } from '../lib/httpError.js';
-import { TaxproService } from '../services/taxpro.service.ts';
+import { TaxproService } from '../services/taxpro.service.js';
 import { z } from 'zod';
 
 const router = Router();
+
+/**
+ * Runs a TaxPro service call and, on failure, re-throws as an HttpError so the
+ * real GSP/NIC message reaches the client instead of a generic 500. Business
+ * validation faults (bad payload, NIC rejection) are surfaced verbatim; a
+ * pre-existing HttpError (e.g. 400 from earlier checks) is passed through.
+ */
+async function runTaxpro<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    // 502: the failure originated at the upstream GSP/NIC gateway (or in
+    // building the payload we send it), not from our own request handling.
+    throw new HttpError(502, message);
+  }
+}
 
 const cancelSchema = z.object({
   cancelReason: z.string().min(1),
@@ -15,10 +33,12 @@ const cancelSchema = z.object({
 const ewbSchema = z.object({
   transporterId: z.string().optional(),
   transporterName: z.string().optional(),
-  transDistance: z.coerce.number().positive(),
+  transDistance: z.coerce.number().nonnegative().default(0),
   transMode: z.string().default('1'), // '1' - Road
   vehicleNumber: z.string().optional(),
   vehicleType: z.string().default('R'),
+  transDocNo: z.string().optional(),  // LR/RR/Airway bill no (rail/air/ship)
+  transDocDt: z.string().optional(),  // yyyy-mm-dd from the date input
 });
 
 // Generate E-Invoice (IRN)
@@ -34,7 +54,7 @@ router.post(
     if (!dispatch.invoiceNumber) throw new HttpError(400, 'Tax Invoice must be raised before E-Invoice');
     if (dispatch.irn) throw new HttpError(400, 'E-Invoice IRN already generated for this dispatch');
 
-    const result = await TaxproService.generateIRN(id);
+    const result = await runTaxpro(() => TaxproService.generateIRN(id));
 
     const updated = await prisma.saleDispatch.update({
       where: { id },
@@ -66,7 +86,7 @@ router.post(
     if (!dispatch.irn) throw new HttpError(400, 'No E-Invoice found to cancel');
     if (dispatch.irnStatus === 'CANCELLED') throw new HttpError(400, 'E-Invoice is already cancelled');
 
-    const result = await TaxproService.cancelIRN(id, cancelReason, cancelRemarks);
+    const result = await runTaxpro(() => TaxproService.cancelIRN(id, cancelReason, cancelRemarks));
 
     const updated = await prisma.saleDispatch.update({
       where: { id },
@@ -95,14 +115,16 @@ router.post(
     if (!dispatch.irn) throw new HttpError(400, 'E-Invoice IRN must be generated before E-Way Bill');
     if (dispatch.ewbNumber) throw new HttpError(400, 'E-Way Bill already generated for this dispatch');
 
-    const result = await TaxproService.generateEWayBill(id, {
+    const result = await runTaxpro(() => TaxproService.generateEWayBill(id, {
       transporterId: data.transporterId,
       transporterName: data.transporterName,
       transDistance: data.transDistance,
       transMode: data.transMode,
       vehicleNumber: data.vehicleNumber || dispatch.vehicleNumber || '',
       vehicleType: data.vehicleType,
-    });
+      transDocNo: data.transDocNo,
+      transDocDt: data.transDocDt,
+    }));
 
     const updated = await prisma.saleDispatch.update({
       where: { id },
@@ -111,6 +133,7 @@ router.post(
         ewbDate: result.ewbDate,
         ewbValidUpto: result.ewbValidUpto,
         ewbStatus: 'GENERATED',
+        ewbDistance: data.transDistance > 0 ? Math.round(data.transDistance) : null,
       },
       include: { saleOrder: { include: { buyer: true } } },
     });
@@ -133,7 +156,7 @@ router.post(
     if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found to cancel');
     if (dispatch.ewbStatus === 'CANCELLED') throw new HttpError(400, 'E-Way Bill is already cancelled');
 
-    const result = await TaxproService.cancelEWayBill(id, cancelReason, cancelRemarks);
+    const result = await runTaxpro(() => TaxproService.cancelEWayBill(id, cancelReason, cancelRemarks));
 
     const updated = await prisma.saleDispatch.update({
       where: { id },

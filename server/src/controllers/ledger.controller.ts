@@ -2,6 +2,8 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { InventoryService } from '../services/inventory.service.js';
+import { computePappuOrderMargins } from './inventory.controller.js';
+import { computeHuskPool, HUSK_EXPENSE_META } from './dashboard.controller.js';
 
 // ---------------------------------------------------------------------------
 // Tally-style grouped reporting. Every ledger's closing balance is SIGNED:
@@ -181,7 +183,7 @@ export async function getBalanceSheet(_req: Request, res: Response) {
       if (r.name === 'Profit & Loss A/c') {
         d.ledgers = [
           ...(d.ledgers ?? []),
-          { code: '—', name: 'Current Period (Net Profit)', amount: r2(netProfit) },
+          { code: '-', name: 'Current Period (Net Profit)', amount: r2(netProfit) },
         ];
         d.amount = r2(d.amount + netProfit);
       }
@@ -205,22 +207,62 @@ export async function getBalanceSheet(_req: Request, res: Response) {
   });
 }
 
-// ── Tally Profit & Loss: income vs expenses with net profit. ──
+// ── Profit & Loss (management view) ──
+//   Pappu P/L (from the per-order margins report) is the core-product result.
+//   The "husk pool" collects ALL byproduct income (husk/shell/waste/etc.) and
+//   absorbs every operating overhead. A pool surplus is added to the Pappu P/L;
+//   a pool deficit is deducted from it. The remainder is the net P/L.
 export async function getProfitLoss(_req: Request, res: Response) {
-  const roots = await buildGroupTree();
-  const { totalIncome, totalExpenses, netProfit } = currentPeriodNetProfit(roots);
+  const [huskPool, byproductOrders, pappuMargins] = await Promise.all([
+    computeHuskPool(),
+    prisma.saleOrder.findMany({
+      where: { product: { not: 'PAPPU' } },
+      include: { dispatches: { select: { weightKg: true } } },
+    }),
+    computePappuOrderMargins(),
+  ]);
 
-  const pl = roots.filter((r) => r.statement === 'PROFIT_LOSS');
-  const income = pl.filter((r) => r.nature === 'INCOME').map((r) => toDisplay(r, true));
-  const expenses = pl.filter((r) => r.nature === 'EXPENSES').map((r) => toDisplay(r, false));
+  // Pappu P/L = Σ per-order margin (seed + production + freight + brokerage netted).
+  const pappuProfitLoss = r2(pappuMargins.reduce((s, m) => s + m.margin, 0));
+
+  // Byproduct income = actually dispatched non-Pappu sales (GST is pass-through, excluded).
+  const incomeByProduct = new Map<string, number>();
+  for (const so of byproductOrders) {
+    const rate = Number(so.ratePerKg);
+    const dispatchedKg = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+    if (dispatchedKg <= 0) continue;
+    incomeByProduct.set(so.product, r2((incomeByProduct.get(so.product) ?? 0) + dispatchedKg * rate));
+  }
+  const byproducts = [...incomeByProduct.entries()]
+    .map(([product, amount]) => ({ product, amount: r2(amount) }))
+    .sort((a, b) => b.amount - a.amount);
+  const byproductIncome = r2(byproducts.reduce((s, b) => s + b.amount, 0));
+
+  // Overhead = itemized husk-pool operating costs (same breakdown as the dashboard
+  // recovery card), EXCLUDING the pappu-flagged lines (loading/roasting/net) that are
+  // already captured inside the per-order Pappu P/L, so nothing is double-counted.
+  const overheadLedgers = HUSK_EXPENSE_META
+    .filter((m) => !m.pappu)
+    .map((m) => ({ code: m.key, name: m.label, amount: r2(huskPool.expenses[m.key]) }))
+    .filter((l) => Math.abs(l.amount) >= 0.005)
+    .sort((a, b) => b.amount - a.amount);
+  const overheadExpenses = r2(overheadLedgers.reduce((s, l) => s + l.amount, 0));
+
+  const huskPoolNet = r2(byproductIncome - overheadExpenses); // surplus + / deficit −
+  const netProfit = r2(pappuProfitLoss + huskPoolNet);
 
   res.json({
     period: new Date().toISOString(),
-    income,
-    expenses,
+    pappu: { profitLoss: pappuProfitLoss, orders: pappuMargins.length },
+    huskPool: {
+      byproductIncome,
+      byproducts,
+      overheadExpenses,
+      overheadLedgers,
+      net: huskPoolNet,
+      isDeficit: huskPoolNet < 0,
+    },
     totals: {
-      income: totalIncome,
-      expenses: totalExpenses,
       netProfit,
       isProfit: netProfit >= 0,
     },
@@ -247,7 +289,7 @@ export async function listSilos(req: Request, res: Response) {
 }
 
 // ---------------------------------------------------------------------------
-// Party ledger — a single A-to-Z account statement per party combining
+// Party ledger - a single A-to-Z account statement per party combining
 // purchases (we owe a supplier → CR), sales (a buyer owes us → DR), payments
 // made (DR) and receipts collected (CR), Tally-style. A positive running
 // balance is a debit (receivable from a buyer); a negative one is a credit
@@ -280,6 +322,7 @@ type PoWithChain = Awaited<ReturnType<typeof loadPurchaseOrders>>[number];
 type SaleRow = Awaited<ReturnType<typeof loadSales>>[number];
 type PaymentRow = Awaited<ReturnType<typeof loadPayments>>[number];
 type ReceiptRow = Awaited<ReturnType<typeof loadReceipts>>[number];
+type DustPurchaseRow = Awaited<ReturnType<typeof loadDustPurchases>>[number];
 
 function loadPurchaseOrders() {
   return prisma.purchaseOrder.findMany({
@@ -297,6 +340,9 @@ function loadPayments() {
 function loadReceipts() {
   return prisma.receipt.findMany({ where: { partyId: { not: null } } });
 }
+function loadDustPurchases() {
+  return prisma.dustPurchase.findMany();
+}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -307,11 +353,12 @@ function buildPartyLedger(
   pos: PoWithChain[],
   sales: SaleRow[],
   payments: PaymentRow[],
-  receipts: ReceiptRow[]
+  receipts: ReceiptRow[],
+  dustPurchases: DustPurchaseRow[]
 ) {
   const txns: LedgerTxn[] = [];
 
-  // 1. Purchases — supplier supplies stock → we owe them (CREDIT).
+  // 1. Purchases - supplier supplies stock → we owe them (CREDIT).
   for (const po of pos.filter((p) => p.partyId === partyId)) {
     for (const si of po.stockIns) {
       const purchase = si.purchase;
@@ -335,7 +382,7 @@ function buildPartyLedger(
           status: 'POSTED',
         });
       } else {
-        // Stock arrived but not yet weight-verified — listed for visibility, no
+        // Stock arrived but not yet weight-verified - listed for visibility, no
         // ledger impact until the payable amount is confirmed.
         txns.push({
           id: `PUR-${si.id}`,
@@ -358,7 +405,28 @@ function buildPartyLedger(
     }
   }
 
-  // 2. Sales — buyer takes goods → they owe us (DEBIT). Each dispatch (lorry) is a
+  // 1b. Pre-cleaner dust bought IN from the party → we owe them (CREDIT).
+  for (const dp of dustPurchases.filter((x) => x.partyId === partyId)) {
+    txns.push({
+      id: `DUST-${dp.id}`,
+      date: dp.purchaseDate.toISOString(),
+      kind: 'PURCHASE',
+      particulars: 'Pre-cleaner dust purchase',
+      invoiceNumber: dp.invoiceNumber,
+      vehicleNumber: dp.lorryNumber,
+      reference: null,
+      utr: null,
+      transferredDate: null,
+      weightKg: dp.weightKg,
+      ratePerKg: Number(dp.pricePerKg),
+      product: 'PRE CLEANER DUST',
+      debit: 0,
+      credit: round2(Number(dp.amount)),
+      status: 'POSTED',
+    });
+  }
+
+  // 2. Sales - buyer takes goods → they owe us (DEBIT). Each dispatch (lorry) is a
   //    billed shipment; an order is only a receivable once dispatched. Credit note
   //    (delivery shortage) reduces it.
   for (const s of sales.filter((x) => x.buyerId === partyId)) {
@@ -372,7 +440,7 @@ function buildPartyLedger(
         id: `SALE-${d.id}`,
         date: (d.invoiceDate ?? d.dispatchDate).toISOString(),
         kind: 'SALE',
-        particulars: `Sale — ${s.product}`,
+        particulars: `Sale - ${s.product}`,
         invoiceNumber: invoiceLabel,
         vehicleNumber: d.vehicleNumber,
         reference: s.destination,
@@ -392,7 +460,7 @@ function buildPartyLedger(
           id: `CN-${d.id}`,
           date: (d.receivedDate ?? d.deliveredDate ?? d.dispatchDate).toISOString(),
           kind: 'CREDIT_NOTE',
-          particulars: `Credit note — shortage ${d.shortageKg ?? 0} kg`,
+          particulars: `Credit note - shortage ${d.shortageKg ?? 0} kg`,
           invoiceNumber: invoiceLabel,
           vehicleNumber: d.vehicleNumber,
           reference: s.destination,
@@ -498,16 +566,17 @@ function buildPartyLedger(
 }
 
 export async function listPartyLedgers(_req: Request, res: Response) {
-  const [parties, pos, sales, payments, receipts] = await Promise.all([
+  const [parties, pos, sales, payments, receipts, dustPurchases] = await Promise.all([
     prisma.party.findMany({ orderBy: { name: 'asc' } }),
     loadPurchaseOrders(),
     loadSales(),
     loadPayments(),
     loadReceipts(),
+    loadDustPurchases(),
   ]);
 
   const rows = parties.map((party) => {
-    const { summary } = buildPartyLedger(party.id, pos, sales, payments, receipts);
+    const { summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases);
     return { ...party, ...summary };
   });
 
@@ -518,13 +587,14 @@ export async function getPartyLedger(req: Request, res: Response) {
   const party = await prisma.party.findUnique({ where: { id: req.params.id } });
   if (!party) throw new HttpError(404, 'Party not found');
 
-  const [pos, sales, payments, receipts] = await Promise.all([
+  const [pos, sales, payments, receipts, dustPurchases] = await Promise.all([
     loadPurchaseOrders(),
     loadSales(),
     loadPayments(),
     loadReceipts(),
+    loadDustPurchases(),
   ]);
 
-  const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts);
+  const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases);
   res.json({ party, summary, transactions: txns });
 }

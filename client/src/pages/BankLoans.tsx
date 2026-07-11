@@ -19,6 +19,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Rates are entered and shown MONTHLY on this page (e.g. 0.8% / month), but the
+// interest engine and the DB store an ANNUAL rate (value × rate/100 × days/365,
+// shared with stock-cost capitalisation). Convert at the UI boundary only.
+const MONTHS_PER_YEAR = 12;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const toMonthly = (annualPct: number) => round2(annualPct / MONTHS_PER_YEAR);
+const toAnnual = (monthlyPct: number) => round2(monthlyPct * MONTHS_PER_YEAR);
+
 export default function BankLoansPage() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -33,7 +41,7 @@ export default function BankLoansPage() {
 
   // --- Editable global interest rate -----------------------------------------
   const [rateInput, setRateInput] = useState<string>('');
-  const rateValue = rateInput !== '' ? rateInput : (summary ? String(summary.rate) : '');
+  const rateValue = rateInput !== '' ? rateInput : (summary ? String(toMonthly(summary.rate)) : '');
   const rateMutation = useMutation({
     mutationFn: (loanInterestRatePct: number) =>
       api('/loans/settings', { method: 'PUT', body: { loanInterestRatePct } }),
@@ -55,6 +63,7 @@ export default function BankLoansPage() {
   const [bankName, setBankName] = useState('');
   const [loanRef, setLoanRef] = useState('');
   const [location, setLocation] = useState<string>('');
+  const [interestRatePct, setInterestRatePct] = useState('');
 
   function resetLoanForm() {
     setName('');
@@ -64,6 +73,7 @@ export default function BankLoansPage() {
     setBankName('');
     setLoanRef('');
     setLocation('');
+    setInterestRatePct('');
   }
 
   const loanMutation = useMutation({
@@ -78,6 +88,7 @@ export default function BankLoansPage() {
           bankName: bankName || null,
           loanRef: loanRef || null,
           location: location || null,
+          interestRatePct: interestRatePct !== '' ? toAnnual(Number(interestRatePct)) : undefined,
         },
       }),
     onSuccess: () => {
@@ -130,10 +141,14 @@ export default function BankLoansPage() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // Preview accrued interest in the Add Loan dialog.
+  // Preview accrued interest in the Add Loan dialog. The rate field is MONTHLY;
+  // fall back to the global default (stored annual) shown as monthly. The engine
+  // needs the annual rate, so convert back up for the calculation.
+  const effectiveMonthlyRate =
+    interestRatePct !== '' ? Number(interestRatePct) : summary ? toMonthly(summary.rate) : 0;
   const previewInterest =
     principal && summary
-      ? loanInterest(Number(principal), summary.rate, daysBetween(new Date(drawdownDate), new Date()))
+      ? loanInterest(Number(principal), toAnnual(effectiveMonthlyRate), daysBetween(new Date(drawdownDate), new Date()))
       : 0;
 
   return (
@@ -168,7 +183,7 @@ export default function BankLoansPage() {
           <div className="text-xs text-muted-foreground">into transferred stock</div>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">Annual Interest Rate</div>
+          <div className="text-sm text-muted-foreground">Monthly Interest Rate</div>
           <div className="flex items-center gap-1 pt-1">
             <Input
               type="number"
@@ -177,13 +192,13 @@ export default function BankLoansPage() {
               onChange={(e) => setRateInput(e.target.value)}
               className="h-8 w-20"
             />
-            <span className="text-sm font-medium">%</span>
+            <span className="text-sm font-medium">% / mo</span>
             <Button
               size="icon"
               variant="ghost"
               className="h-8 w-8"
               disabled={rateInput === '' || rateMutation.isPending}
-              onClick={() => rateMutation.mutate(Number(rateInput))}
+              onClick={() => rateMutation.mutate(toAnnual(Number(rateInput)))}
               title="Save rate"
             >
               <Check className="h-4 w-4" />
@@ -227,7 +242,7 @@ export default function BankLoansPage() {
                   </TableCell>
                   <TableCell>{shortDate(loan.drawdownDate)}</TableCell>
                   <TableCell>
-                    <div className="font-medium text-foreground">{loan.personName ?? loan.name ?? loan.bankName ?? '—'}</div>
+                    <div className="font-medium text-foreground">{loan.personName ?? loan.name ?? loan.bankName ?? '-'}</div>
                     <div className="text-xs text-muted-foreground">
                       {loan.personName && loan.name ? `${loan.name} ` : ''}
                       {loan.bankName ? `(${loan.bankName})` : ''}
@@ -235,10 +250,10 @@ export default function BankLoansPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm">{loan.location ?? '—'}</span>
+                    <span className="text-sm">{loan.location ?? '-'}</span>
                   </TableCell>
                   <TableCell className="text-right">{rupees(loan.principal)}</TableCell>
-                  <TableCell className="text-right">{Number(loan.interestRatePct)}%</TableCell>
+                  <TableCell className="text-right">{toMonthly(Number(loan.interestRatePct))}% /mo</TableCell>
                   <TableCell className="text-right">{rupees(loan.repaidAmount)}</TableCell>
                   <TableCell className="text-right font-semibold">{rupees(loan.outstanding)}</TableCell>
                   <TableCell className="text-right">{rupees(loan.accruedInterestToDate)}</TableCell>
@@ -338,6 +353,17 @@ export default function BankLoansPage() {
                 <Label htmlFor="bank">Bank name</Label>
                 <Input id="bank" value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. SBI" />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="rate">Interest rate (% / month)</Label>
+                <Input
+                  id="rate"
+                  type="number"
+                  step="0.001"
+                  value={interestRatePct}
+                  onChange={(e) => setInterestRatePct(e.target.value)}
+                  placeholder={summary ? String(toMonthly(summary.rate)) : '0.8'}
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -351,10 +377,10 @@ export default function BankLoansPage() {
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="At process">At process</SelectItem>
-                    <SelectItem value="Rampalli">Rampalli</SelectItem>
-                    <SelectItem value="Murgan">Murgan</SelectItem>
-                    <SelectItem value="Multi">Multi</SelectItem>
+                    <SelectItem value="RVP">At process</SelectItem>
+                    <SelectItem value="PGR COLD">Rampalli</SelectItem>
+                    <SelectItem value="Murugan">Murugan</SelectItem>
+                    <SelectItem value="KNM Multi">Multi</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -362,11 +388,11 @@ export default function BankLoansPage() {
             <div className="rounded-lg border bg-muted/40 p-4 space-y-1 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Interest rate</span>
-                <span className="font-medium">{summary ? `${summary.rate}%` : '—'} / yr</span>
+                <span className="font-medium">{effectiveMonthlyRate}% / month</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Accrued interest if held to today</span>
-                <span className="font-medium">{principal ? rupees(previewInterest) : '—'}</span>
+                <span className="font-medium">{principal ? rupees(previewInterest) : '-'}</span>
               </div>
             </div>
             <DialogFooter>

@@ -20,8 +20,9 @@ import loanRoutes from './loan.routes.js';
 import chatRoutes from './chat.routes.js';
 import userRoutes from './user.routes.js';
 import taxproRoutes from './taxpro.routes.js';
-import allocationRoutes from './allocation.routes.js';
-
+import manualHamaliCostRoutes from './manualHamaliCost.routes.js';
+import hamaliVerificationRoutes from './hamaliVerification.routes.js';
+import poolReportRoutes from './poolReport.routes.js';
 const router = Router();
 
 // Public
@@ -45,11 +46,12 @@ router.use('/', settingsRoutes);
 router.use('/', paymentRoutes);
 router.use('/', receiptRoutes);
 router.use('/', loanRoutes);
+router.use('/', manualHamaliCostRoutes);
+router.use('/', hamaliVerificationRoutes);
+router.use('/', poolReportRoutes);
 router.use('/system', systemRoutes);
 router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);
 router.use('/', taxproRoutes);
-router.use('/', allocationRoutes);
-
 export default router;
 

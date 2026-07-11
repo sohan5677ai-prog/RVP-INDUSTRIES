@@ -5,13 +5,13 @@ import { headerBlock, contextBlock, fieldsSection } from '../blocks.js';
 import { rupees } from '../parse.js';
 
 const FLOW = 'transfer';
-const SOURCES = ['Rampalli', 'Murgan', 'Multi'];
+const SOURCES = ['PGR COLD', 'Murugan', 'KNM Multi'];
 
 /**
  * Modal for a storage→process black-seed transfer. Hamali, transport and loan
  * interest are computed server-side, so we only collect source, weight, lorry,
  * destination bunker and date. (The ERP transfer record has no file field, so a
- * carter slip can't be attached here — it isn't tracked by the web app either.)
+ * carter slip can't be attached here - it isn't tracked by the web app either.)
  */
 async function transferModal(user: ErpUser, channel: string) {
   // Show current availability per source location to help the user.
@@ -22,7 +22,7 @@ async function transferModal(user: ErpUser, channel: string) {
       if (s.itemType === 'BLACK_SEED') avail[s.location] = s.weightKg;
     }
   } catch {
-    /* non-fatal — show the modal without availability */
+    /* non-fatal - show the modal without availability */
   }
   const availLine = SOURCES.map((l) => `${l}: *${(avail[l] ?? 0).toLocaleString('en-IN')} kg*`).join('  ·  ');
 
@@ -34,7 +34,7 @@ async function transferModal(user: ErpUser, channel: string) {
     submit: { type: 'plain_text' as const, text: 'Transfer' },
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
-      contextBlock(`Black seed available — ${availLine}`),
+      contextBlock(`Black seed available - ${availLine}`),
       {
         type: 'input',
         block_id: 'source',

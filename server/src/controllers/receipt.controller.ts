@@ -45,8 +45,12 @@ export async function createReceipt(req: Request, res: Response) {
       data: {
         date: data.date,
         amount: data.amount,
+        tdsAmount: data.tdsAmount ?? null,
+        shortageAmount: data.shortageAmount ?? null,
         type: data.type,
         partyId: data.partyId ?? null,
+        saleDispatchId: data.saleDispatchId ?? null,
+        payer: data.payer ?? null,
         reference: data.reference ?? null,
         description: data.description ?? null,
       },
@@ -57,6 +61,7 @@ export async function createReceipt(req: Request, res: Response) {
       amount: data.amount,
       type: data.type,
       partyName,
+      payer: data.payer ?? undefined,
       reference: data.reference ?? undefined,
       description: data.description ?? undefined,
     });

@@ -1,6 +1,6 @@
 /** Format kg as a readable string. */
 export function kg(value: number | null | undefined): string {
-  if (value == null) return '—';
+  if (value == null) return '-';
   return `${value.toLocaleString('en-IN')} kg`;
 }
 
@@ -11,7 +11,7 @@ export function toTonnes(kgValue: number): number {
 
 /** Format rupees (accepts number or Decimal-string). */
 export function rupees(value: number | string | null | undefined): string {
-  if (value == null) return '—';
+  if (value == null) return '-';
   const n = typeof value === 'string' ? Number(value) : value;
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -22,7 +22,7 @@ export function rupees(value: number | string | null | undefined): string {
 
 /** Format rupees using Indian abbreviations (Lakhs, Crores) for large numbers. */
 export function rupeesShort(value: number | string | null | undefined): string {
-  if (value == null) return '—';
+  if (value == null) return '-';
   const n = typeof value === 'string' ? Number(value) : value;
   
   if (n >= 10000000) {

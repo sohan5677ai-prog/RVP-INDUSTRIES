@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
-import type { Receipt as ReceiptType, Party } from '@/lib/types';
+import type { Receipt, Party, ReceiptType } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,13 +16,51 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 
-const RECEIPT_TYPES = [
-  { value: 'BUYER', label: 'Buyer Collection' },
-  { value: 'OTHER', label: 'Other Receipt / Revenue' },
-] as const;
+// Types you can record directly from this page. Gunny Bag Sales are entered on
+// the Gunny Bags page (which auto-posts a linked Receipt here), so it is
+// intentionally absent from this form.
+const RECEIPT_TYPE_GROUPS: { label: string; items: { value: ReceiptType; label: string }[] }[] = [
+  {
+    label: 'Buyers',
+    items: [
+      { value: 'BUYER', label: 'Buyer Collection' },
+    ],
+  },
+  {
+    label: 'Income',
+    items: [
+      { value: 'SCRAP_SALE', label: 'Scrap / Waste Sales' },
+      { value: 'HAMALI_INCOME', label: 'Hamali Income' },
+      { value: 'INTEREST_INCOME', label: 'Interest Income' },
+    ],
+  },
+  {
+    label: 'Other',
+    items: [
+      { value: 'OTHER', label: 'Other Receipt / Revenue' },
+    ],
+  },
+];
+
+// Full label map for rendering ANY receipt in the table, including ones
+// auto-created from a detail page (not offered in the form above).
+const RECEIPT_TYPES: { value: ReceiptType; label: string }[] = [
+  ...RECEIPT_TYPE_GROUPS.flatMap((g) => g.items),
+  { value: 'GUNNY_BAGS_SALE', label: 'Gunny Bag Sales' },
+];
+
+// Types that settle a specific buyer (they have their own picker below).
+// Everything else is a direct-cash income that uses the free-text payer.
+const COLLECTION_TYPES: ReceiptType[] = ['BUYER'];
+
+// Receipts created from a detail page (currently only Gunny Bag sales).
+// Read-only here — delete them on their own page so both sides stay in sync.
+const MANAGED_ELSEWHERE: Partial<Record<ReceiptType, string>> = {
+  GUNNY_BAGS_SALE: 'Gunny Bags page',
+};
 
 export default function ReceiptsPage() {
   const qc = useQueryClient();
@@ -30,7 +68,7 @@ export default function ReceiptsPage() {
 
   const { data: receipts, isLoading } = useQuery({
     queryKey: ['receipts'],
-    queryFn: () => api<ReceiptType[]>('/receipts'),
+    queryFn: () => api<Receipt[]>('/receipts'),
   });
 
   const { data: parties } = useQuery({
@@ -43,8 +81,9 @@ export default function ReceiptsPage() {
   // Form State
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState('');
-  const [type, setType] = useState<ReceiptType['type']>('BUYER');
+  const [type, setType] = useState<ReceiptType>('BUYER');
   const [partyId, setPartyId] = useState('');
+  const [payer, setPayer] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
 
@@ -53,6 +92,7 @@ export default function ReceiptsPage() {
     setAmount('');
     setType('BUYER');
     setPartyId('');
+    setPayer('');
     setReference('');
     setDescription('');
   }
@@ -74,6 +114,10 @@ export default function ReceiptsPage() {
       if (buyer) {
         setType('BUYER'); setPartyId(buyer.id);
         filled.push(buyer.name);
+      } else {
+        // Unknown payer → keep it as free text on a direct-income receipt.
+        setPayer(matchName);
+        filled.push(matchName);
       }
     }
 
@@ -83,13 +127,14 @@ export default function ReceiptsPage() {
 
   const mutation = useMutation({
     mutationFn: () =>
-      api<ReceiptType>('/receipts', {
+      api<Receipt>('/receipts', {
         method: 'POST',
         body: {
           date,
           amount: Number(amount) || 0,
           type,
           partyId: type === 'BUYER' ? partyId || null : null,
+          payer: !COLLECTION_TYPES.includes(type) ? payer || null : null,
           reference: reference || null,
           description: description || null,
         },
@@ -155,35 +200,42 @@ export default function ReceiptsPage() {
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No receipts recorded yet.</TableCell></TableRow>
             )}
             {receipts?.map((r) => {
-              let receivedFromText = '—';
+              const typeLabel = RECEIPT_TYPES.find((t) => t.value === r.type)?.label ?? r.type;
+              const managedIn = MANAGED_ELSEWHERE[r.type];
+              let receivedFromText = '-';
               if (r.type === 'BUYER') {
-                receivedFromText = r.party?.name ?? '—';
+                receivedFromText = r.party?.name ?? '-';
               } else {
-                receivedFromText = 'Other Income / Revenue';
+                receivedFromText = r.payer || typeLabel;
               }
 
               return (
                 <TableRow key={r.id}>
                   <TableCell>{shortDate(r.date)}</TableCell>
                   <TableCell className="font-semibold text-xs text-muted-foreground">
-                    {RECEIPT_TYPES.find((t) => t.value === r.type)?.label}
+                    {typeLabel}
+                    {managedIn && <span className="ml-1.5 font-normal italic text-[10px]">· via {managedIn}</span>}
                   </TableCell>
                   <TableCell className="font-medium">{receivedFromText}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.reference ?? '—'}</TableCell>
-                  <TableCell className="max-w-xs truncate text-muted-foreground">{r.description ?? '—'}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.reference ?? '-'}</TableCell>
+                  <TableCell className="max-w-xs truncate text-muted-foreground">{r.description ?? '-'}</TableCell>
                   <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">{rupees(r.amount)}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        if (confirm(`Reverse this receipt of ${rupees(r.amount)}? This will remove its associated general ledger journal entry.`)) {
-                          deleteMutation.mutate(r.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {managedIn ? (
+                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>—</span>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          if (confirm(`Reverse this receipt of ${rupees(r.amount)}? This will remove its associated general ledger journal entry.`)) {
+                            deleteMutation.mutate(r.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -217,11 +269,16 @@ export default function ReceiptsPage() {
 
             <div className="space-y-2">
               <Label>Receipt Type</Label>
-              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); }}>
+              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); }}>
                 <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
-                  {RECEIPT_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  {RECEIPT_TYPE_GROUPS.map((g) => (
+                    <SelectGroup key={g.label}>
+                      <SelectLabel>{g.label}</SelectLabel>
+                      {g.items.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      ))}
+                    </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
@@ -238,6 +295,14 @@ export default function ReceiptsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {!COLLECTION_TYPES.includes(type) && (
+              <div className="space-y-2">
+                <Label htmlFor="payer">Received From / Payer</Label>
+                <Input id="payer" value={payer} onChange={(e) => setPayer(e.target.value)} placeholder="e.g. gunny bag buyer, scrap dealer" />
+                <p className="text-[10px] text-muted-foreground">Optional — the person or party this money came from.</p>
               </div>
             )}
 

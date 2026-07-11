@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Truck, ClipboardList, PackageCheck, Weight, Clock } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Truck, PackageCheck, Clock } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
@@ -20,9 +20,23 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Segmented } from '@/components/ui/segmented';
+import { Combobox } from '@/components/ui/combobox';
+import { UrpStockInDialog } from '@/components/UrpStockInDialog';
 
 type StockInRow = StockInType;
 type DocKind = 'invoice' | 'partyKata' | 'rvpWeight';
+
+/**
+ * Display labels for loading locations. The stored values stay the same (so
+ * existing records keep working); only the text shown to the user changes.
+ */
+const LOCATION_LABELS: Record<string, string> = {
+  'RVP': 'RVP',
+  Rampalli: 'PGR Cold',
+  Multi: 'KNM Multi',
+};
+const locationLabel = (v: string) => LOCATION_LABELS[v] ?? v;
 
 interface Extracted {
   invoiceNumber?: string;
@@ -131,8 +145,11 @@ function DropZone({
 export default function StockIn() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [urpOpen, setUrpOpen] = useState(false);
   const [editing, setEditing] = useState<StockInRow | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AWAITING' | 'PURCHASED'>('ALL');
+  const [partyFilter, setPartyFilter] = useState('ALL');
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['stock-in'],
@@ -148,18 +165,32 @@ export default function StockIn() {
     });
   }
 
-  // Group lorry arrivals under their logical order (the per-lorry POs share a
-  // poGroupId) so each order shows as a single summary row that expands to
-  // reveal its individual lorry invoices/weights.
-  const groups = useMemo(() => {
+  // Party options for the filter combo, derived from the arrivals themselves.
+  const partyOptions = useMemo(() => {
+    const names = [...new Set((items ?? [])
+      .map((s) => s.purchaseOrder?.party?.name)
+      .filter((n): n is string => !!n))].sort();
+    return [{ value: 'ALL', label: 'All parties' }, ...names.map((n) => ({ value: n, label: n }))];
+  }, [items]);
+
+  // Arrivals shown in the table, filtered by the status tabs and party combo, then
+  // grouped under their logical order (per-lorry POs share a poGroupId) so each
+  // order is one summary row that expands to its lorry invoices/weights. Stat
+  // cards stay on the full data set; only the table is filtered.
+  const visibleGroups = useMemo(() => {
     const map = new Map<string, { groupId: string; po: StockInRow['purchaseOrder']; rows: StockInRow[] }>();
     for (const s of items ?? []) {
+      if (partyFilter !== 'ALL' && (s.purchaseOrder?.party?.name ?? '') !== partyFilter) continue;
+      if (statusFilter === 'PURCHASED' && !s.purchase) continue;
+      if (statusFilter === 'AWAITING' && s.purchase) continue;
       const key = s.purchaseOrder?.poGroupId ?? s.purchaseOrderId;
       if (!map.has(key)) map.set(key, { groupId: key, po: s.purchaseOrder, rows: [] });
       map.get(key)!.rows.push(s);
     }
     return [...map.values()];
-  }, [items]);
+  }, [items, partyFilter, statusFilter]);
+
+  const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL';
 
   // Pending POs are the ones awaiting a stock-in.
   const { data: pendingPOs } = useQuery({
@@ -174,8 +205,9 @@ export default function StockIn() {
   const [rvpFirstWeightKg, setRvpFirstWeightKg] = useState('');
   const [billingWeightKg, setBillingWeightKg] = useState('');
   const [partyKataKg, setPartyKataKg] = useState('');
-  const [loadingLocation, setLoadingLocation] = useState<'At process' | 'Rampalli' | 'Murgan' | 'Multi'>('At process');
+  const [loadingLocation, setLoadingLocation] = useState<'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi'>('RVP');
   const [freight, setFreight] = useState('0');
+  const [selfVehicle, setSelfVehicle] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [extractingKind, setExtractingKind] = useState<DocKind | null>(null);
   // Vehicle (lorry) number read from each document, used to confirm the three
@@ -212,7 +244,7 @@ export default function StockIn() {
     if (byName.length === 1) return { status: 'matched', po: byName[0] };
 
     // Several POs for this party. If they all carry the same price (e.g. per-lorry
-    // POs of one order), any will do — take the first. Otherwise use the invoice
+    // POs of one order), any will do - take the first. Otherwise use the invoice
     // price to pick the closest.
     const prices = new Set(byName.map((po) => Number(po.pricePerKg)));
     if (prices.size === 1) return { status: 'matched', po: byName[0] };
@@ -253,7 +285,7 @@ export default function StockIn() {
       if (data.partyKataKg) { setPartyKataKg(String(data.partyKataKg)); filled.push('party kata'); }
       if (data.rvpFirstWeightKg) { setRvpFirstWeightKg(String(data.rvpFirstWeightKg)); filled.push('RVP first weight'); }
 
-      // From the invoice, best-effort auto-match a pending PO by supplier — but
+      // From the invoice, best-effort auto-match a pending PO by supplier - but
       // only as a convenience when the user hasn't already picked one. The PO
       // dropdown is the source of truth, so we never override a manual choice
       // and never warn on a miss (the user just picks it themselves).
@@ -288,8 +320,9 @@ export default function StockIn() {
     setRvpFirstWeightKg('');
     setBillingWeightKg('');
     setPartyKataKg('');
-    setLoadingLocation('At process');
+    setLoadingLocation('RVP');
     setFreight('0');
+    setSelfVehicle(false);
     setInvoiceFile(null);
     setDocLorries({});
   }
@@ -309,8 +342,9 @@ export default function StockIn() {
     setRvpFirstWeightKg(String(s.rvpFirstWeightKg));
     setBillingWeightKg(String(s.billingWeightKg));
     setPartyKataKg(String(s.partyKataKg));
-    setLoadingLocation(s.loadingLocation ?? 'At process');
+    setLoadingLocation(s.loadingLocation ?? 'RVP');
     setFreight(String(s.freightCharge ?? 0));
+    setSelfVehicle(s.selfVehicle ?? false);
     setInvoiceFile(null);
     setOpen(true);
   }
@@ -328,6 +362,7 @@ export default function StockIn() {
       fd.append('partyKataKg', partyKataKg);
       fd.append('loadingLocation', loadingLocation);
       fd.append('freightCharge', isBase ? (freight || '0') : '0');
+      fd.append('selfVehicle', selfVehicle ? 'true' : 'false');
       if (invoiceFile) fd.append('invoice', invoiceFile);
 
       const url = editing ? `/stock-in/${editing.id}` : '/stock-in';
@@ -335,8 +370,11 @@ export default function StockIn() {
       return api(url, { method, body: fd, multipart: true });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['stock-in'] });
-      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      // Editing a purchased stock-in rolls back its purchase chain, so refresh
+      // everything downstream too.
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'processing'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success(editing ? 'Stock-in updated' : 'Stock-in recorded');
       setOpen(false);
       resetForm();
@@ -347,8 +385,9 @@ export default function StockIn() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/stock-in/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['stock-in'] });
-      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'processing'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Stock-in deleted');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -373,7 +412,6 @@ export default function StockIn() {
 
   const allRows = items ?? [];
   const purchasedRows = allRows.filter((r) => r.purchase).length;
-  const totalRvpAll = allRows.reduce((s, r) => s + r.rvpFirstWeightKg, 0);
 
   return (
     <div className="space-y-8">
@@ -382,17 +420,23 @@ export default function StockIn() {
         title="Stock In"
         description="RVP Kata weights and lorry invoice details captured on arrival, grouped per order."
         actions={
-          <Button onClick={openCreate} disabled={!pendingPOs?.length && !editing}>
-            <Plus className="h-4 w-4" /> Record Stock In
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setUrpOpen(true)} variant="secondary" className="gap-2">
+              <Plus className="h-4 w-4" />
+              Direct Inward (URP)
+            </Button>
+            <Button onClick={openCreate} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Record Inward Lorry
+            </Button>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
-        <StatCard label="Lorries in" value={allRows.length} icon={Truck} tone="taupe" hint="arrivals recorded" />
-        <StatCard label="Orders" value={groups.length} icon={ClipboardList} tone="amber" hint="grouped" />
-        <StatCard label="Purchased" value={purchasedRows} icon={PackageCheck} tone="forest" hint={`of ${allRows.length} lorries`} />
-        <StatCard label="Pending POs" value={pendingPOs?.length ?? 0} icon={Clock} tone="rose" hint="awaiting arrival" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+        <StatCard label="Kata Entry" value={allRows.length} icon={Truck} tone="taupe" hint="arrivals unloaded" />
+        <StatCard label="Inward" value={purchasedRows} icon={PackageCheck} tone="forest" hint={`of ${allRows.length} lorries`} />
+        <StatCard label="Pending POs" value={pendingPOs?.length ?? 0} icon={Clock} tone="rose" hint="waiting arrival" />
       </div>
 
       {pendingPOs?.length === 0 && !editing && (
@@ -400,8 +444,29 @@ export default function StockIn() {
       )}
 
       <div className="glass rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
           <h2 className="text-sm font-semibold text-foreground">Arrivals</h2>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Segmented
+              options={[
+                { label: 'All', value: 'ALL' },
+                { label: 'Awaiting', value: 'AWAITING' },
+                { label: 'Purchased', value: 'PURCHASED' },
+              ]}
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              size="sm"
+            />
+            <Combobox
+              options={partyOptions}
+              value={partyFilter}
+              onChange={setPartyFilter}
+              placeholder="All parties"
+              searchPlaceholder="Search party…"
+              ariaLabel="Filter by party"
+              className="w-52"
+            />
+          </div>
         </div>
         <Table>
           <TableHeader>
@@ -423,10 +488,10 @@ export default function StockIn() {
             {isLoading && (
               <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {!isLoading && groups.length === 0 && (
-              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">No stock-ins yet.</TableCell></TableRow>
+            {!isLoading && visibleGroups.length === 0 && (
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">{filtersActive ? 'No arrivals match the filters.' : 'No stock-ins yet.'}</TableCell></TableRow>
             )}
-            {groups.map(({ groupId, po, rows }) => {
+            {visibleGroups.map(({ groupId, po, rows }) => {
               const isOpen = expanded.has(groupId);
               const totalRvp = rows.reduce((sum, r) => sum + r.rvpFirstWeightKg, 0);
               const totalBilling = rows.reduce((sum, r) => sum + r.billingWeightKg, 0);
@@ -436,11 +501,11 @@ export default function StockIn() {
               const latestArrival = rows.reduce((d, r) => (r.arrivalDate > d ? r.arrivalDate : d), rows[0].arrivalDate);
               // PO-number range across the lorries in this order (e.g. DCS-001 – DCS-003)
               const poNums = rows.map((r) => r.purchaseOrder?.poNumber).filter(Boolean).sort() as string[];
-              const poLabel = poNums.length === 0 ? '—' : poNums.length === 1 ? poNums[0] : `${poNums[0]} – ${poNums[poNums.length - 1]}`;
+              const poLabel = poNums.length === 0 ? '-' : poNums.length === 1 ? poNums[0] : `${poNums[0]} – ${poNums[poNums.length - 1]}`;
 
               return (
                 <Fragment key={groupId}>
-                  {/* Order summary row — click to expand the lorries underneath */}
+                  {/* Order summary row - click to expand the lorries underneath */}
                   <TableRow
                     className="cursor-pointer bg-muted/30 hover:bg-muted/50 font-medium"
                     onClick={() => toggleGroup(groupId)}
@@ -460,7 +525,7 @@ export default function StockIn() {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="font-semibold">{po?.party?.name ?? '—'}</TableCell>
+                    <TableCell className="font-semibold">{po?.party?.name ?? '-'}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{rows.length} {rows.length === 1 ? 'lorry' : 'lorries'}</Badge>
                     </TableCell>
@@ -470,7 +535,7 @@ export default function StockIn() {
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {locations.map((l) => (
-                          <Badge key={l} variant="outline" className="text-[10px]">{l}</Badge>
+                          <Badge key={l} variant="outline" className="text-[10px]">{locationLabel(l)}</Badge>
                         ))}
                       </div>
                     </TableCell>
@@ -478,7 +543,7 @@ export default function StockIn() {
                     <TableCell className="text-right">{kg(totalBilling)}</TableCell>
                     <TableCell className="text-right">{kg(totalParty)}</TableCell>
                     <TableCell className="text-right">
-                      {po?.pricePerKg ? rupees(po.pricePerKg) : '—'}
+                      {po?.pricePerKg ? rupees(po.pricePerKg) : '-'}
                       {po?.priceType && <span className="block text-[10px] font-normal text-muted-foreground">{po.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>}
                     </TableCell>
                     <TableCell />
@@ -489,41 +554,52 @@ export default function StockIn() {
                   {isOpen && rows.map((s) => (
                     <TableRow key={s.id} className="bg-background">
                       <TableCell className="pl-10 text-muted-foreground">{shortDate(s.arrivalDate)}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{s.purchaseOrder?.poNumber ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{s.purchaseOrder?.poNumber ?? '-'}</TableCell>
                       <TableCell className="font-semibold">{s.invoiceNumber}</TableCell>
                       <TableCell>{s.lorryNumber}</TableCell>
-                      <TableCell><Badge variant="outline">{s.loadingLocation}</Badge></TableCell>
+                      <TableCell><Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge></TableCell>
                       <TableCell className="text-right font-semibold">{kg(s.rvpFirstWeightKg)}</TableCell>
                       <TableCell className="text-right">{kg(s.billingWeightKg)}</TableCell>
                       <TableCell className="text-right">{kg(s.partyKataKg)}</TableCell>
-                      <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '—'}</TableCell>
+                      <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '-'}</TableCell>
                       <TableCell>
                         {s.invoiceFileUrl ? (
                           <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
                             <FileText className="h-3 w-3" /> View
                           </a>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-muted-foreground">-</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {!s.purchase && (
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEdit(s); }}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('Delete this stock-in record?')) deleteMutation.mutate(s.id);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        )}
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={s.purchase ? 'Edit - this will roll back the recorded purchase' : 'Edit stock-in'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (s.purchase && !confirm('This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Editing will roll back the purchase (reverting inventory & ledger) and you\'ll need to re-record it. Continue?')) return;
+                              openEdit(s);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={s.purchase ? 'Delete - this will also roll back the recorded purchase' : 'Delete stock-in'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const msg = s.purchase
+                                ? 'This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Deleting will also roll back the purchase (reverting inventory & ledger). Delete anyway?'
+                                : 'Delete this stock-in record?';
+                              if (confirm(msg)) deleteMutation.mutate(s.id);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -540,16 +616,30 @@ export default function StockIn() {
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-2">
               <Label>Purchase order</Label>
-              <Select value={poId} onValueChange={setPoId}>
-                <SelectTrigger><SelectValue placeholder="Select a pending PO" /></SelectTrigger>
-                <SelectContent>
-                  {pendingPOs?.map((po) => (
-                    <SelectItem key={po.id} value={po.id}>
-                      {po.poNumber} · {po.party?.name} — {shortDate(po.poDate)} — {rupees(po.pricePerKg)}/kg
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {editing ? (
+                <>
+                  <Input
+                    disabled
+                    value={`${editing.purchaseOrder?.poNumber ?? '-'} · ${editing.purchaseOrder?.party?.name ?? ''}${editing.purchaseOrder?.pricePerKg ? ` - ${rupees(editing.purchaseOrder.pricePerKg)}/kg` : ''}`}
+                  />
+                  {editing.purchase && (
+                    <p className="text-[11px] text-amber-600">
+                      Saving will roll back the recorded purchase{editing.purchase.verification ? ' & verification' : ''}; re-record it on the Purchases page afterward.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <Select value={poId} onValueChange={setPoId}>
+                  <SelectTrigger><SelectValue placeholder="Select a pending PO" /></SelectTrigger>
+                  <SelectContent>
+                    {pendingPOs?.map((po) => (
+                      <SelectItem key={po.id} value={po.id}>
+                        {po.poNumber} · {po.party?.name} - {shortDate(po.poDate)} - {rupees(po.pricePerKg)}/kg
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             {/* AI document drop zones */}
@@ -590,7 +680,7 @@ export default function StockIn() {
                   {(['partyKata', 'invoice', 'rvpWeight'] as DocKind[]).map((k) => (
                     <div key={k} className="flex flex-col">
                       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{docLabel[k]}</span>
-                      <span className={`font-mono font-medium ${docLorries[k] && !platesCompatible(docLorries[k]!, referencePlate) ? 'text-red-600' : ''}`}>{docLorries[k] ?? '—'}</span>
+                      <span className={`font-mono font-medium ${docLorries[k] && !platesCompatible(docLorries[k]!, referencePlate) ? 'text-red-600' : ''}`}>{docLorries[k] ?? '-'}</span>
                     </div>
                   ))}
                 </div>
@@ -616,10 +706,10 @@ export default function StockIn() {
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="At process">At process</SelectItem>
-                    <SelectItem value="Rampalli">Rampalli</SelectItem>
-                    <SelectItem value="Murgan">Murgan</SelectItem>
-                    <SelectItem value="Multi">Multi</SelectItem>
+                    <SelectItem value="RVP">RVP</SelectItem>
+                    <SelectItem value="PGR COLD">PGR Cold</SelectItem>
+                    <SelectItem value="Murugan">Murugan</SelectItem>
+                    <SelectItem value="KNM Multi">KNM Multi</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -647,9 +737,24 @@ export default function StockIn() {
               </div>
             </div>
 
+            <label className="flex items-start gap-2.5 rounded-lg border bg-muted/30 px-4 py-3 cursor-pointer hover:border-primary/50 transition-colors">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-primary"
+                checked={selfVehicle}
+                onChange={(e) => setSelfVehicle(e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-medium text-foreground">Self vehicle (party's own lorry)</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  Deducts the ₹80/tonne lorry hamali from the party's net payable at verification.
+                </span>
+              </span>
+            </label>
+
             {isBase && (
               <div className="space-y-2">
-                <Label htmlFor="freight">Inward freight (₹) — base-priced PO</Label>
+                <Label htmlFor="freight">Inward freight (₹) - base-priced PO</Label>
                 <Input id="freight" type="number" step="0.01" value={freight} onChange={(e) => setFreight(e.target.value)} placeholder="freight to bring stock to our location" />
                 <p className="text-[11px] text-muted-foreground">Captured here at arrival; carried into the purchase and posted to the purchase-freight ledger. DELIVERY-priced POs already include freight.</p>
               </div>
@@ -657,7 +762,7 @@ export default function StockIn() {
 
             <div className="rounded-lg border bg-muted/40 px-4 py-2 text-sm flex justify-between">
               <span className="text-muted-foreground">RVP First Weight (gross)</span>
-              <span className={`font-semibold ${Number(rvpFirstWeightKg) > 0 ? '' : 'text-destructive'}`}>{Number(rvpFirstWeightKg) > 0 ? kg(Number(rvpFirstWeightKg)) : '—'}</span>
+              <span className={`font-semibold ${Number(rvpFirstWeightKg) > 0 ? '' : 'text-destructive'}`}>{Number(rvpFirstWeightKg) > 0 ? kg(Number(rvpFirstWeightKg)) : '-'}</span>
             </div>
 
             <DialogFooter>
@@ -668,6 +773,8 @@ export default function StockIn() {
           </form>
         </DialogContent>
       </Dialog>
+      
+      <UrpStockInDialog open={urpOpen} onOpenChange={setUrpOpen} />
     </div>
   );
 }

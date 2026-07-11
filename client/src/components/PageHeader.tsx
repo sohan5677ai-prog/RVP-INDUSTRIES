@@ -9,7 +9,7 @@ type PageHeaderProps = {
   className?: string;
 };
 
-/** Consistent premium page header — icon chip + title/description + actions. */
+/** Consistent premium page header - icon chip + title/description + actions. */
 export function PageHeader({ title, description, icon: Icon, actions, className }: PageHeaderProps) {
   return (
     <div className={cn('flex flex-wrap items-start justify-between gap-4', className)}>

@@ -6,7 +6,6 @@ import {
   createPurchaseOrderSchema,
   listPurchaseOrdersSchema,
 } from '../schemas/purchase.schema.js';
-import { AllocationService } from '../services/allocation.service.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
   const { status } = listPurchaseOrdersSchema.parse(req.query);
@@ -94,6 +93,8 @@ export async function createPurchaseOrder(req: Request, res: Response) {
           pricePerKg: data.pricePerKg,
           priceType: data.priceType,
           tonnageKg: poTonnage,
+          hasGst: data.hasGst,
+          gstAmount: data.hasGst ? (poTonnage * data.pricePerKg * 0.05) : 0,
           lorryCount: 1, // each PO represents exactly 1 lorry
           poGroupId,
           createdBy: req.user!.userId,
@@ -167,6 +168,8 @@ export async function bulkCreatePurchaseOrders(req: Request, res: Response) {
               partyId: parsed.partyId,
               pricePerKg: parsed.pricePerKg,
               priceType: parsed.priceType,
+              hasGst: parsed.hasGst,
+              gstAmount: parsed.hasGst ? (poTonnage * Number(parsed.pricePerKg) * 0.05) : 0,
               tonnageKg: poTonnage,
               lorryCount: 1,
               poGroupId,
@@ -210,14 +213,13 @@ export async function updatePurchaseOrder(req: Request, res: Response) {
       partyId: data.partyId,
       pricePerKg: data.pricePerKg,
       priceType: data.priceType,
+      hasGst: data.hasGst,
+      gstAmount: data.hasGst ? (data.tonnageKg * data.pricePerKg * 0.05) : 0,
       tonnageKg: data.tonnageKg,
       lorryCount: data.lorryCount,
     },
     include: { party: true },
   });
-
-  const { AllocationService } = await import('../services/allocation.service.js');
-  await AllocationService.checkAndRebalancePO(updated.id);
 
   res.json(updated);
 }
@@ -238,7 +240,7 @@ export async function deletePurchaseOrder(req: Request, res: Response) {
 }
 
 /**
- * Void a purchase order — set status to CANCELLED without deleting. Allows
+ * Void a purchase order - set status to CANCELLED without deleting. Allows
  * tracking cancelled orders in the history. Works on any PENDING PO.
  */
 export async function voidPurchaseOrder(req: Request, res: Response) {
@@ -258,9 +260,6 @@ export async function voidPurchaseOrder(req: Request, res: Response) {
     data: { status: 'CANCELLED' },
     include: { party: true },
   });
-
-  // Re-allocate all sale orders that were counting on this PO
-  await AllocationService.handlePoCancellation(req.params.id);
 
   res.json(updated);
 }

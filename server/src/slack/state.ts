@@ -5,7 +5,7 @@ import type { ErpUser } from './erpClient.js';
  * accumulates its partially-built record here until the user taps Approve.
  *
  * Keyed by channel + thread (or user when there is no thread). This is
- * deliberately simple — drafts are lost if the server restarts mid-flow, which
+ * deliberately simple - drafts are lost if the server restarts mid-flow, which
  * is acceptable for the MVP. A DB-backed store is a clean later hardening.
  */
 export interface Draft<T = Record<string, any>> {
@@ -35,7 +35,7 @@ export function getDraft<T = Record<string, any>>(key: string): Draft<T> | undef
 
 /**
  * Find the first draft matching a predicate. Used as a fallback when a file is
- * uploaded into a channel but NOT as a reply inside the flow's thread — we locate
+ * uploaded into a channel but NOT as a reply inside the flow's thread - we locate
  * the user's active flow by channel + user instead of by thread key.
  */
 export function findDraft<T = Record<string, any>>(

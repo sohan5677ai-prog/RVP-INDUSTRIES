@@ -111,7 +111,7 @@ export class InventoryService {
     let totalCost = 0;
 
     const silos = await tx.siloInventory.findMany({
-      where: { itemType: 'BLACK_SEED', weightKg: { gt: 0 } },
+      where: { itemType: 'BLACK_SEED', weightKg: { gt: 0 }, location: 'RVP' },
       orderBy: { weightKg: 'desc' },
     });
 
@@ -136,6 +136,41 @@ export class InventoryService {
     }
 
     return Math.round(totalCost * 100) / 100;
+  }
+
+  /**
+   * Reverse a pappu sale's black-seed consumption (undo a dispatch made by
+   * mistake). Adds the black-seed-equivalent weight (`pappuKg / 0.60`) back to the
+   * pool together with the cost that was relieved, restoring the pool's total
+   * weight and value. The seed is returned to the largest existing black-seed silo
+   * (or a fresh pool silo if none remain), since the original per-silo split is not
+   * recorded; this keeps the pool totals and blended MAP correct.
+   */
+  static async restoreBlackSeedForSale(
+    tx: Prisma.TransactionClient,
+    pappuKg: number,
+    totalCost: number
+  ): Promise<void> {
+    const weightKg = Math.round(pappuKg / this.PAPPU_OUTTURN);
+
+    const silo = await tx.siloInventory.findFirst({
+      where: { itemType: 'BLACK_SEED' },
+      orderBy: { weightKg: 'desc' },
+    });
+
+    if (silo) {
+      await tx.siloInventory.update({
+        where: { id: silo.id },
+        data: {
+          weightKg: silo.weightKg + weightKg,
+          totalValue: new Prisma.Decimal(silo.totalValue).plus(totalCost),
+        },
+      });
+    } else {
+      await tx.siloInventory.create({
+        data: { itemType: 'BLACK_SEED', location: 'Black Seed Pool', weightKg, totalValue: totalCost },
+      });
+    }
   }
 
   /** Sum of the user-defined per-kg production cost components. */

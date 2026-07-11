@@ -46,7 +46,7 @@ function uploadModal(stockInId: string, channel: string) {
     submit: { type: 'plain_text' as const, text: 'Read kata' },
     close: { type: 'plain_text' as const, text: 'Cancel' },
     blocks: [
-      contextBlock(':mag: Attach our RVP *second-weight (tare)* kata slip — the empty lorry after unloading. Or leave it empty and type the weight on the next card.'),
+      contextBlock(':mag: Attach our RVP *second-weight (tare)* kata slip - the empty lorry after unloading. Or leave it empty and type the weight on the next card.'),
       {
         type: 'input',
         block_id: 'second',
@@ -126,7 +126,7 @@ function resultBlocks(purchase: any): KnownBlock[] {
 /**
  * Post the "Record purchase" card with an Upload button for an arrived stock-in.
  * Server-initiated (auto-chain from a recorded stock-in) so there's no trigger_id
- * yet — the button click opens the upload modal.
+ * yet - the button click opens the upload modal.
  */
 export async function startPurchaseForStockIn(
   stockIn: any,
@@ -239,7 +239,7 @@ export function registerPurchaseFlow(app: App): void {
       label: `${stockIn.purchaseOrder?.poNumber ?? ''} · ${stockIn.purchaseOrder?.party?.name ?? ''} · lorry ${stockIn.lorryNumber ?? ''}`,
       firstWeightKg: stockIn.rvpFirstWeightKg,
       location: stockIn.loadingLocation,
-      atProcess: stockIn.loadingLocation === 'At process',
+      atProcess: stockIn.loadingLocation === 'RVP',
       step: 'review',
     };
 
@@ -262,8 +262,8 @@ export function registerPurchaseFlow(app: App): void {
         0,
         contextBlock(
           readError
-            ? `:warning: Couldn't read the slip (${readError}) — type the weight via *Edit*.`
-            : ":warning: Couldn't read a tare weight off that slip — type it via *Edit*."
+            ? `:warning: Couldn't read the slip (${readError}) - type the weight via *Edit*.`
+            : ":warning: Couldn't read a tare weight off that slip - type it via *Edit*."
         )
       );
     }

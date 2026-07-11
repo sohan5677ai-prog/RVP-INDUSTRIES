@@ -55,7 +55,7 @@ function summaryBlocks(d: PoDraftData): KnownBlock[] {
 
   blocks.push(
     fieldsSection([
-      { label: 'Party', value: d.partyId ? d.partyName ?? '—' : '_not set_' },
+      { label: 'Party', value: d.partyId ? d.partyName ?? '-' : '_not set_' },
       { label: 'PO date', value: d.poDate ? fmtDate(d.poDate) : '_not set_' },
       {
         label: 'Tonnage',
@@ -69,7 +69,7 @@ function summaryBlocks(d: PoDraftData): KnownBlock[] {
 
   const missing = poMissing(d);
   if (missing.length > 0) {
-    blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} — use *Edit* to fill in.`));
+    blocks.push(contextBlock(`:pencil2: Missing: ${missing.join(', ')} - use *Edit* to fill in.`));
   }
   blocks.push(approveEditCancel(FLOW, { includeEdit: true }));
   return blocks;
@@ -365,8 +365,8 @@ export function registerPurchaseOrderFlow(app: App): void {
           headerBlock('✅ Purchase Order created'),
           fieldsSection([
             { label: 'PO number', value: created.poNumber ?? created.id },
-            { label: 'Party', value: partyName ?? '—' },
-            { label: 'PO date', value: poDate ? fmtDate(poDate) : '—' },
+            { label: 'Party', value: partyName ?? '-' },
+            { label: 'PO date', value: poDate ? fmtDate(poDate) : '-' },
             { label: 'Tonnage', value: isValidT ? `${t} t` : `${lc} lorries` },
             { label: 'Price', value: `${rupees(pricePerKg)}/kg (${priceType})` },
           ]),
@@ -451,8 +451,8 @@ export function registerPurchaseOrderFlow(app: App): void {
           headerBlock('✅ Purchase Order created'),
           fieldsSection([
             { label: 'PO number', value: created.poNumber ?? created.id },
-            { label: 'Party', value: d.partyName ?? '—' },
-            { label: 'PO date', value: d.poDate ? fmtDate(d.poDate) : '—' },
+            { label: 'Party', value: d.partyName ?? '-' },
+            { label: 'PO date', value: d.poDate ? fmtDate(d.poDate) : '-' },
             { label: 'Tonnage', value: tonnage },
             { label: 'Lorries', value: d.lorryCount ? String(d.lorryCount) : '1' },
             { label: 'Price', value: `${rupees(d.pricePerKg!)}/kg (${d.priceType})` },

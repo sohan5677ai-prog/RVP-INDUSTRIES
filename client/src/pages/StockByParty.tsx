@@ -18,7 +18,7 @@ type BlendStatus = 'ok' | 'already' | 'infeasible' | 'nostock';
  * Solves (currentKg·currentAvg + x·buyPrice) / (currentKg + x) = target  for x:
  *   x = currentKg · (currentAvg − target) / (target − buyPrice)
  *
- * Only feasible when buyPrice < target < currentAvg — you can't dilute an
+ * Only feasible when buyPrice < target < currentAvg - you can't dilute an
  * average below the price you buy at, and there's nothing to do once the
  * target is already at/above the current average.
  */
@@ -159,7 +159,7 @@ export default function StockByParty() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-extrabold text-primary">{toTonnes(totalRemaining).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">({kg(totalRemaining)} net remaining)</p>
+            <p className="text-[10px] text-muted-foreground mt-1">({kg(totalRemaining)} total received)</p>
           </CardContent>
         </Card>
 
@@ -180,7 +180,7 @@ export default function StockByParty() {
             <ArrowDownRight className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-extrabold text-amber-600">{overallWac > 0 ? `${rupees(overallWac)}/kg` : '—'}</div>
+            <div className="text-2xl font-extrabold text-amber-600">{overallWac > 0 ? `${rupees(overallWac)}/kg` : '-'}</div>
             <p className="text-[10px] text-muted-foreground mt-1">Our average raw stock cost basis</p>
           </CardContent>
         </Card>
@@ -192,7 +192,7 @@ export default function StockByParty() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-extrabold text-indigo-600">
-              {topSupplier ? `${supplierConcentrationPct.toFixed(1)}%` : '—'}
+              {topSupplier ? `${supplierConcentrationPct.toFixed(1)}%` : '-'}
             </div>
             <p className="text-[10px] text-muted-foreground mt-1 truncate">
               {topSupplier ? `Held by top supplier: ${topSupplier.partyName}` : 'No active suppliers'}
@@ -208,8 +208,8 @@ export default function StockByParty() {
             <Target className="h-4 w-4 text-primary" /> Average-Cost Blender
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Your stock sits at <span className="font-semibold text-foreground">{overallWac > 0 ? `${rupees(overallWac)}/kg` : '—'}</span> avg.
-            Enter the average you want and the price you can buy fresh black seed at — see how much to buy to pull the blend down, overall and per supplier.
+            Your stock sits at <span className="font-semibold text-foreground">{overallWac > 0 ? `${rupees(overallWac)}/kg` : '-'}</span> avg.
+            Enter the average you want and the price you can buy fresh black seed at - see how much to buy to pull the blend down, overall and per supplier.
           </p>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -254,14 +254,14 @@ export default function StockByParty() {
           {wholeResult && wholeResult.status === 'infeasible' && (
             <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-              <span>Buy price <span className="font-semibold">{rupees(buyPrice)}/kg</span> is not below the target <span className="font-semibold">{rupees(targetAvg)}/kg</span>. You can't pull an average below the price you buy at — lower the buy price or raise the target.</span>
+              <span>Buy price <span className="font-semibold">{rupees(buyPrice)}/kg</span> is not below the target <span className="font-semibold">{rupees(targetAvg)}/kg</span>. You can't pull an average below the price you buy at - lower the buy price or raise the target.</span>
             </div>
           )}
 
           {wholeResult && wholeResult.status === 'already' && (
             <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
               <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-              <span>Target <span className="font-semibold">{rupees(targetAvg)}/kg</span> is already at or above your current average <span className="font-semibold">{rupees(overallWac)}/kg</span> — no buying needed.</span>
+              <span>Target <span className="font-semibold">{rupees(targetAvg)}/kg</span> is already at or above your current average <span className="font-semibold">{rupees(overallWac)}/kg</span> - no buying needed.</span>
             </div>
           )}
 
@@ -365,7 +365,7 @@ export default function StockByParty() {
           <div>
             <h3 className="font-semibold text-sm">Supplier Inventory Ledger</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Summary of total raw stock on hand, cost basis, and valuation per party. Expand a supplier to view price pooling details.
+              Summary of total historical stock received, average cost basis, and total valuation per party. Expand a supplier to view price pooling details.
             </p>
           </div>
           <div className="relative w-64">
@@ -385,7 +385,7 @@ export default function StockByParty() {
               <TableHead className="w-10"></TableHead>
               <TableHead>Supplier Party</TableHead>
               <TableHead>Location / Address</TableHead>
-              <TableHead className="text-right font-bold text-primary">Net Stock Remaining</TableHead>
+              <TableHead className="text-right font-bold text-primary">Total Received Stock</TableHead>
               <TableHead className="text-right">Avg Cost (WAC)</TableHead>
               <TableHead className="text-right">Valuation</TableHead>
               <TableHead className="text-right">
@@ -431,14 +431,14 @@ export default function StockByParty() {
                         <span className="block text-[10px] text-primary/70 font-semibold">({kg(p.netStockKg)})</span>
                       </TableCell>
                       <TableCell className="text-right font-semibold text-amber-600">
-                        {p.weightedAveragePrice > 0 ? `${rupees(p.weightedAveragePrice)}/kg` : '—'}
+                        {p.weightedAveragePrice > 0 ? `${rupees(p.weightedAveragePrice)}/kg` : '-'}
                       </TableCell>
                       <TableCell className="text-right font-extrabold text-emerald-600">
-                        {p.totalValuation > 0 ? rupees(p.totalValuation) : '—'}
+                        {p.totalValuation > 0 ? rupees(p.totalValuation) : '-'}
                       </TableCell>
                       <TableCell className="text-right text-sm">
                         {(() => {
-                          if (!planActive) return <span className="text-muted-foreground">—</span>;
+                          if (!planActive) return <span className="text-muted-foreground">-</span>;
                           const r = buyKgToReachTarget(p.netStockKg, p.weightedAveragePrice, targetAvg, buyPrice);
                           if (r.status === 'ok') {
                             return (
@@ -454,7 +454,7 @@ export default function StockByParty() {
                           if (r.status === 'infeasible') {
                             return <span className="text-[11px] text-rose-500 font-medium">price ≥ target</span>;
                           }
-                          return <span className="text-muted-foreground">—</span>;
+                          return <span className="text-muted-foreground">-</span>;
                         })()}
                       </TableCell>
                     </TableRow>

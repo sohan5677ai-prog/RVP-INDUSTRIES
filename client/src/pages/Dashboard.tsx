@@ -35,6 +35,8 @@ interface HuskExpenses {
   maintenance: number;
   drawingsShabri: number;
   drawingsReddy: number;
+  ccInterest: number;
+  termLoanInterest: number;
 }
 interface HuskPnl {
   revenue: number;
@@ -59,6 +61,8 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'maintenance', label: 'Maintenance' },
   { key: 'drawingsShabri', label: 'Drawings - Shabri' },
   { key: 'drawingsReddy', label: 'Drawings - Reddy' },
+  { key: 'ccInterest', label: 'CC Interest' },
+  { key: 'termLoanInterest', label: 'Term Loan Interest' },
 ];
 
 interface Summary {

@@ -180,8 +180,8 @@ export async function bulkCreatePurchaseOrders(req: Request, res: Response) {
       });
 
       results.push({ index: i, success: true, poNumber: firstPoNumber });
-    } catch (err: any) {
-      results.push({ index: i, success: false, error: err?.message ?? 'Unknown error' });
+    } catch (err: unknown) {
+      results.push({ index: i, success: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
   }
 

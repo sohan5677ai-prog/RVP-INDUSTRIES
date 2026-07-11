@@ -1,0 +1,1 @@
+import { PrismaClient } from '@prisma/client'; const prisma = new PrismaClient(); async function main() { const silos = await prisma.stockIn.findMany({ select: { loadingLocation: true }, distinct: ['loadingLocation'] }); console.log(silos); } main().catch(console.error).finally(() => prisma.$disconnect());

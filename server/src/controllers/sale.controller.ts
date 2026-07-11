@@ -196,8 +196,8 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
 
 
       results.push({ index: i, success: true, id: order.id });
-    } catch (err: any) {
-      results.push({ index: i, success: false, error: err?.message ?? 'Unknown error' });
+    } catch (err: unknown) {
+      results.push({ index: i, success: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
   }
 

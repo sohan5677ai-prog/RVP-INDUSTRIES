@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
@@ -21,7 +22,7 @@ export async function extractPaymentScreenshot(req: Request, res: Response) {
     ...new Set([...parties.map((p) => p.name), ...brokers.map((b) => b.name)].filter(Boolean)),
   ];
   const data = await extractTransactionData(req.file.buffer, req.file.mimetype, 'payment', candidates);
-  console.log('[extract:payment]', JSON.stringify(data));
+  logger.info('[extract:payment]', JSON.stringify(data));
   res.json(data);
 }
 

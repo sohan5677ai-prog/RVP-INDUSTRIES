@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
@@ -49,6 +50,15 @@ export async function createVerification(req: Request, res: Response) {
   if (!purchase) throw new HttpError(400, 'Purchase not found');
   if (purchase.verification) throw new HttpError(409, 'This purchase is already verified');
 
+  // KNM company vehicles have no external transporter to recover the lorry's
+  // hamali share from, so the seed bears the whole charge. The recording path
+  // (purchase.controller) already capitalises the full charge with this flag; we
+  // pass it here too so the subtract/add below faithfully mirror that cost.
+  const { getCompanyProfileRow } = await import('./settings.controller.js');
+  const { isVehicleExempt } = await import('../lib/calc.js');
+  const companyProfile = await getCompanyProfileRow();
+  const isCompanyVehicle = isVehicleExempt(purchase.stockIn.lorryNumber, companyProfile.companyVehicles);
+
   const billingWeightKg = purchase.stockIn.billingWeightKg;
   const partyKataKg = purchase.stockIn.partyKataKg;
   const rvpKataKg = purchase.netWeightKg;
@@ -94,7 +104,7 @@ export async function createVerification(req: Request, res: Response) {
   // payable. The seed's capitalised cost is unaffected - only the party balance
   // and the ledger's supplier credit change.
   const selfVehicleHamali = purchase.stockIn.selfVehicle
-    ? hamaliSplit(Number(purchase.hamaliCharge)).lorry
+    ? hamaliSplit(Number(purchase.hamaliCharge), isCompanyVehicle).lorry
     : 0;
   // Self-vehicle: the party also bears the full weighbridge/kata fee (normally
   // recovered from the transporter). It comes off their payable AND lowers the
@@ -111,7 +121,7 @@ export async function createVerification(req: Request, res: Response) {
   const supplierName = purchase.stockIn.purchaseOrder.party.name;
 
   if (debitNoteAmount > 0) {
-    console.log(`[DEBIT NOTE ENGINE] Auto-generating and emailing Debit Note of ₹${debitNoteAmount.toFixed(2)} to supplier "${supplierName}" due to shortage of ${shortageKg} kg (> 0.5% tolerance).`);
+    logger.info(`[DEBIT NOTE ENGINE] Auto-generating and emailing Debit Note of ₹${debitNoteAmount.toFixed(2)} to supplier "${supplierName}" due to shortage of ${shortageKg} kg (> 0.5% tolerance).`);
   }
 
   const verification = await prisma.$transaction(async (tx) => {
@@ -146,7 +156,7 @@ export async function createVerification(req: Request, res: Response) {
     // Adjust silo: subtract old purchase weight & cost, add new verified weight
     // & cost. Inventory value carries only the company's half of the hamali.
     const originalPrice = Number(purchase.stockIn.purchaseOrder.pricePerKg);
-    const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
+    const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge), isCompanyVehicle);
     // Inward freight is fixed at purchase recording and carries through.
     const freight = Number(purchase.freightCharge);
     const originalCost = purchase.netWeightKg * originalPrice + ourHamali + freight;
@@ -208,10 +218,17 @@ export async function deleteVerification(req: Request, res: Response) {
   });
   if (!verification) throw new HttpError(404, 'Verification not found');
 
+  const { getCompanyProfileRow } = await import('./settings.controller.js');
+  const { isVehicleExempt } = await import('../lib/calc.js');
+  const companyProfile = await getCompanyProfileRow();
+  const isCompanyVehicle = isVehicleExempt(verification.purchase.stockIn.lorryNumber, companyProfile.companyVehicles);
+
   await prisma.$transaction(async (tx) => {
     const purchase = verification.purchase;
     const location = purchase.stockIn.loadingLocation;
-    const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge));
+    // Mirror the flagged share used at recording/verification so this reversal is
+    // exact for KNM company vehicles (full charge borne by the seed).
+    const ourHamali = companyHamaliShare(Number(purchase.hamaliCharge), isCompanyVehicle);
     const freight = Number(purchase.freightCharge);
     // Reconstruct the seed value we capitalised at verification (GST-EXCLUSIVE).
     // totalAmount is net of the self-vehicle hamali and kata but still INCLUDES GST:

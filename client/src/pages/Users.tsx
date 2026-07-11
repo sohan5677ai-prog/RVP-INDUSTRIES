@@ -18,18 +18,18 @@ export default function Users() {
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api<any[]>('/users'),
+    queryFn: () => api<{ id: string; name: string; username: string; role: string; email?: string }[]>('/users'),
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => api('/users', { method: 'POST', body: data }),
+    mutationFn: (data: { name: string; username: string; role: string; password?: string }) => api('/users', { method: 'POST', body: data }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
       toast.success('User created successfully');
       setOpen(false);
       setFormData({ name: '', username: '', password: '', role: 'USER' });
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMutation = useMutation({
@@ -38,7 +38,7 @@ export default function Users() {
       qc.invalidateQueries({ queryKey: ['users'] });
       toast.success('User deleted');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const handleSubmit = (e: React.FormEvent) => {

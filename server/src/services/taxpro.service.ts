@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 
@@ -308,7 +309,7 @@ export class TaxproService {
         message: company.taxproSandbox ? 'IRN generated (SANDBOX)' : 'IRN generated successfully',
       };
     } catch (err: any) {
-      console.error('TaxPro IRN Generation Error:', err);
+      logger.error('TaxPro IRN Generation Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -347,7 +348,7 @@ export class TaxproService {
         message: 'IRN cancelled successfully',
       };
     } catch (err: any) {
-      console.error('TaxPro IRN Cancellation Error:', err);
+      logger.error('TaxPro IRN Cancellation Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -439,7 +440,7 @@ export class TaxproService {
         message: 'E-Way Bill generated successfully',
       };
     } catch (err: any) {
-      console.error('TaxPro EWB Generation Error:', err);
+      logger.error('TaxPro EWB Generation Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -482,7 +483,7 @@ export class TaxproService {
         message: 'E-Way Bill cancelled successfully',
       };
     } catch (err: any) {
-      console.error('TaxPro EWB Cancellation Error:', err);
+      logger.error('TaxPro EWB Cancellation Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }

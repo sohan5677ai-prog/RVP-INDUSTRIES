@@ -433,7 +433,7 @@ export default function Verification() {
                       <label className="text-[10px] font-semibold text-muted-foreground uppercase">Discount Mode</label>
                       <select
                         value={discountType}
-                        onChange={(e: any) => {
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                           setDiscountType(e.target.value);
                           setDiscountValue('');
                         }}

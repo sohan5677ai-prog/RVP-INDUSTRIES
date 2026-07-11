@@ -1,0 +1,1 @@
+import { PrismaClient } from '@prisma/client'; const prisma = new PrismaClient(); async function main() { const silos = await prisma.siloInventory.findMany(); console.log(JSON.stringify(silos, null, 2)); } main().catch(console.error).finally(() => prisma.$disconnect());

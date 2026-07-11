@@ -1,3 +1,4 @@
+import { logger } from './lib/logger.js';
 import "dotenv/config";
 import path from "node:path";
 import express from "express";
@@ -28,7 +29,7 @@ app.use(errorHandler);
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, "0.0.0.0", () => {
-  console.log(`rvp-server listening on http://localhost:${port}`);
+  logger.info(`rvp-server listening on http://localhost:${port}`);
 
   // Bootstrap missing accounts. (40040 Internal Weight Profit was decommissioned.)
   import("./lib/prisma.js").then(async ({ prisma }) => {
@@ -44,7 +45,7 @@ app.listen(port, "0.0.0.0", () => {
         create: { code: '50090', name: 'Transport Expense (Internal)', type: 'EXPENSE' },
       });
     } catch(e) {
-      console.error(e);
+      logger.error(e);
     }
   });
 
@@ -53,7 +54,7 @@ app.listen(port, "0.0.0.0", () => {
   if (process.env.SLACK_ENABLED === "true") {
     import("./slack/app.js")
       .then(({ startSlackBot }) => startSlackBot())
-      .catch((err) => console.error("[slack] failed to start:", err));
+      .catch((err) => logger.error("[slack] failed to start:", err));
   }
 });
 

@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { toolDeclarations, executeTool } from '../lib/chatTools.js';
@@ -6,7 +7,7 @@ import { HttpError } from '../lib/httpError.js';
 let client: GoogleGenAI | null = null;
 function getClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
-  console.log('Gemini API key in chat controller:', apiKey ? `Loaded (starts with ${apiKey.slice(0, 6)}..., length ${apiKey.length})` : 'Not loaded');
+  logger.info('Gemini API key in chat controller:', apiKey ? `Loaded (starts with ${apiKey.slice(0, 6)}..., length ${apiKey.length})` : 'Not loaded');
   if (!apiKey) throw new HttpError(503, 'GEMINI_API_KEY is missing');
   if (!client) client = new GoogleGenAI({ apiKey });
   return client;
@@ -40,7 +41,7 @@ export async function handleChat(req: Request, res: Response) {
     parts: [{ text: m.content }]
   }));
 
-  try {
+  
     let response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents,
@@ -73,9 +74,10 @@ export async function handleChat(req: Request, res: Response) {
           functionResponses.push({
             functionResponse: { id: call.id, name: call.name, response: result }
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           functionResponses.push({
-             functionResponse: { id: call.id, name: call.name, response: { error: err.message } }
+             functionResponse: { id: call.id, name: call.name, response: { error: errMsg } }
           });
         }
       }
@@ -96,8 +98,4 @@ export async function handleChat(req: Request, res: Response) {
     }
 
     res.json({ text: response.text });
-  } catch (err: any) {
-    console.error('Chat error:', err);
-    res.status(500).json({ error: err.message || 'Error processing chat' });
-  }
 }

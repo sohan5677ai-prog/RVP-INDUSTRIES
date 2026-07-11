@@ -5,141 +5,11 @@ import { companyHamaliShare, calcSaleFreight } from '../lib/calc.js';
 import { getFreightRateForDestination } from './settings.controller.js';
 
 /**
- * Detailed black seed stock rows: one per recorded purchase (lorry), PLUS synthetic
- * transferred-in rows at RVP for seed moved from storage. Milling does NOT remove
- * seed from this list - raw black seed is only depleted when the finished pappu is
- * sold. Shared by getBlackSeedStock and the per-order pappu margin so both read the
- * same arrived-at-process seed timeline. Value = seed cost + the company's half of
- * the hamali.
- */
-export async function computeBlackSeedRows() {
-  const purchases = await prisma.purchase.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: {
-      verification: true,
-      stockIn: { include: { purchaseOrder: { include: { party: true } } } },
-    },
-  });
-
-  const rows = purchases.map((p) => {
-    const price = p.verification ? Number(p.verification.pricePerKg) : Number(p.stockIn.purchaseOrder.pricePerKg);
-    const ourHamali = companyHamaliShare(Number(p.hamaliCharge));
-    const freight = Number(p.freightCharge);
-    // RVP net (kata) weight of black seed received.
-    const rvpNetWeightKg = p.netWeightKg;
-
-    // Stock is valued EXCLUDING GST - the input IGST paid on a purchase is claimable
-    // tax credit, not a cost of the stock. Use physical weight × price so a shortage
-    // can't inflate the unit price.
-    const seedCostWithoutGst = rvpNetWeightKg * price;
-
-    const value = Math.round((seedCostWithoutGst + ourHamali + freight) * 100) / 100;
-
-    const priceType = p.stockIn.purchaseOrder.priceType || 'BASE';
-    const isBasePrice = priceType === 'BASE';
-    const addedFreight = isBasePrice ? freight : 0;
-
-    const valueExclGstAndHamali = Math.round((seedCostWithoutGst + addedFreight) * 100) / 100;
-    const valueExclHamali = Math.round((seedCostWithoutGst + addedFreight) * 100) / 100;
-
-    return {
-      purchaseId: p.id,
-      date: p.stockIn.arrivalDate,
-      invoiceNumber: p.stockIn.invoiceNumber,
-      partyName: p.stockIn.purchaseOrder.party.name,
-      poNumber: p.stockIn.purchaseOrder.poNumber,
-      lorryNumber: p.stockIn.lorryNumber,
-      rvpNetWeightKg,
-      location: p.stockIn.loadingLocation,
-      pricePerKg: price,
-      hamaliCharge: Number(p.hamaliCharge),
-      companyHamali: ourHamali,
-      bunkerPlace: p.bunkerPlace,
-      value,
-      valueExclGstAndHamali,
-      valueExclHamali,
-      verified: !!p.verification,
-      isTransferredIn: false as boolean,
-      fromLocation: null as string | null,
-    };
-  });
-
-  // Storage-location seed that has since moved to RVP via a StockTransfer (Stock
-  // Transfer page) is physically at the process now, so it should show up here too
-  // - as a synthetic row (location 'RVP') for the transferred portion, dated on the
-  // TRANSFER date (not the original arrival date), since that's when it actually
-  // reached the process. Depletes storage by BAND PRICE (most-expensive seed first,
-  // oldest lot within a band), matching the Stock by Location / Order Planner
-  // allocation engine - a transfer draws down the priciest seed first, NOT FIFO by
-  // arrival date. Transfers are applied oldest-transfer-first. The original row is
-  // left untouched; any untransferred remainder is still sitting in storage and stays
-  // excluded, same as before.
-  const storageRowsByLocation = new Map<string, typeof rows>();
-  for (const row of rows) {
-    if (row.location === 'RVP' || row.location === 'At process') continue;
-    const list = storageRowsByLocation.get(row.location) ?? [];
-    list.push(row);
-    storageRowsByLocation.set(row.location, list);
-  }
-  for (const list of storageRowsByLocation.values()) {
-    // Highest price first; oldest lot first within the same price band.
-    list.sort((a, z) => (z.pricePerKg - a.pricePerKg) || (a.date.getTime() - z.date.getTime()));
-  }
-  // Remaining (undepleted) kg per storage row, drawn down across transfers in date order.
-  const remainingByPurchaseId = new Map<string, number>();
-  for (const list of storageRowsByLocation.values()) {
-    for (const row of list) remainingByPurchaseId.set(row.purchaseId, row.rvpNetWeightKg);
-  }
-
-  const transfersToRvp = await prisma.stockTransfer.findMany({
-    where: { toLocation: 'RVP' },
-    orderBy: { transferDate: 'asc' },
-  });
-  for (const t of transfersToRvp) {
-    let remainingTransferKg = t.weightKg;
-    if (remainingTransferKg <= 0) continue;
-
-    const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge)) / t.weightKg : 0;
-
-    const sourceRows = storageRowsByLocation.get(t.fromLocation) ?? [];
-
-    for (const row of sourceRows) {
-      if (remainingTransferKg <= 0) break;
-      const availableKg = remainingByPurchaseId.get(row.purchaseId) ?? 0;
-      if (availableKg <= 0) continue;
-      const takenKg = Math.min(remainingTransferKg, availableKg);
-      if (takenKg <= 0) continue;
-      remainingTransferKg -= takenKg;
-      remainingByPurchaseId.set(row.purchaseId, availableKg - takenKg);
-      const frac = takenKg / row.rvpNetWeightKg;
-
-      rows.push({
-        ...row,
-        purchaseId: `${row.purchaseId}-transfer-${t.id}`,
-        date: t.transferDate,
-        rvpNetWeightKg: takenKg,
-        location: 'RVP',
-        pricePerKg: Math.round((row.pricePerKg + addedCostPerKg) * 100) / 100,
-        hamaliCharge: Math.round(row.hamaliCharge * frac * 100) / 100,
-        companyHamali: Math.round(row.companyHamali * frac * 100) / 100,
-        value: Math.round((row.value * frac + (takenKg * addedCostPerKg)) * 100) / 100,
-        valueExclGstAndHamali: Math.round((row.valueExclGstAndHamali * frac + (takenKg * addedCostPerKg)) * 100) / 100,
-        valueExclHamali: Math.round((row.valueExclHamali * frac + (takenKg * addedCostPerKg)) * 100) / 100,
-        isTransferredIn: true,
-        fromLocation: t.fromLocation,
-      });
-    }
-  }
-
-  return rows;
-}
-
-/**
  * Detailed black seed stock endpoint: the rows above plus pappu/husk/waste sold &
  * committed aggregates the Stock pages need.
  */
 export async function getBlackSeedStock(_req: Request, res: Response) {
-  const rows = await computeBlackSeedRows();
+  const rows = await InventoryService.computeBlackSeedRows();
 
   // Product sold = all dispatched shipments (RVP kata weight). Pappu nets down the
   // raw pool; husk/waste net down their own derived availability.
@@ -934,7 +804,7 @@ export async function computePappuOrderMargins() {
   const EPS = 1e-6;
 
   // Arrived-at-process seed timeline (real RVP lorries + transferred-in, repriced).
-  const rows = await computeBlackSeedRows();
+  const rows = await InventoryService.computeBlackSeedRows();
   type Ref = { price: number; date: Date; remainingKg: number };
   const refs: Ref[] = rows
     .filter((r) => r.location === 'RVP' && r.rvpNetWeightKg > 0)

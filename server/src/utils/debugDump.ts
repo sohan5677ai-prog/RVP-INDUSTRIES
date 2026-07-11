@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -20,8 +21,8 @@ export async function dumpDebugInfo() {
     };
     
     fs.writeFileSync(path.resolve(process.cwd(), 'debug_dump.json'), JSON.stringify(info, null, 2));
-    console.log('Debug info written to debug_dump.json');
+    logger.info('Debug info written to debug_dump.json');
   } catch (err) {
-    console.error('Debug dump failed', err);
+    logger.error('Debug dump failed', err);
   }
 }

@@ -139,15 +139,15 @@ export default function InvoiceView() {
           className="inv-page shadow-lg"
           style={{ width: `${paperW}mm`, padding: `${layout.marginMm}mm`, fontSize: `${layout.fontPx}px` }}
         >
-          <div className="center" style={{ fontWeight: 'bold', fontSize: '1.5em', marginBottom: 4 }}>Tax Invoice</div>
+          <div className="center font-bold text-2xl mb-1">Tax Invoice</div>
 
           {dispatch.irn && (
-            <div style={{ display: 'flex', gap: 12, border: '1px solid #000', padding: '4px 8px', marginBottom: 6, fontSize: '0.85em', alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <div><span style={{ fontWeight: 'bold' }}>IRN:</span> <span style={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '1.05em' }}>{dispatch.irn}</span></div>
-                <div style={{ display: 'flex', gap: 30, marginTop: 4 }}>
-                  <div><span style={{ fontWeight: 'bold' }}>Ack No:</span> {dispatch.irnAckNo}</div>
-                  <div><span style={{ fontWeight: 'bold' }}>Ack Date:</span> {dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : ''}</div>
+            <div className="flex gap-3 border border-black px-2 py-1 mb-1.5 text-[0.85em] items-center">
+              <div className="flex-1">
+                <div><span className="font-bold">IRN:</span> <span className="font-mono break-all text-[1.05em]">{dispatch.irn}</span></div>
+                <div className="flex gap-8 mt-1">
+                  <div><span className="font-bold">Ack No:</span> {dispatch.irnAckNo}</div>
+                  <div><span className="font-bold">Ack Date:</span> {dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : ''}</div>
                 </div>
               </div>
               {dispatch.irnSignedQr && (

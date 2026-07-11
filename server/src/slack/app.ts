@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import { App } from '@slack/bolt';
 import { registerPurchaseOrderFlow } from './flows/purchaseOrder.js';
 import { registerStockInFlow } from './flows/stockIn.js';
@@ -33,7 +34,7 @@ export async function startSlackBot(): Promise<void> {
   });
 
   app.error(async (error: Error) => {
-    console.error('[slack] error:', error);
+    logger.error('[slack] error:', error);
   });
 
   // Global trace: logs EVERY incoming payload (commands, events, interactions),
@@ -45,7 +46,7 @@ export async function startSlackBot(): Promise<void> {
     const kind = body.type ?? 'unknown';
     const detail = evt.type ? `event=${evt.type}${evt.subtype ? `/${evt.subtype}` : ''}` : (body.command ?? body.actions?.[0]?.action_id ?? '');
     const files = Array.isArray(evt.files) ? ` files=${evt.files.length}` : '';
-    console.log(`[slack] ← ${kind} ${detail}${files}`);
+    logger.info(`[slack] ← ${kind} ${detail}${files}`);
     await args.next();
   });
 
@@ -58,5 +59,5 @@ export async function startSlackBot(): Promise<void> {
   registerDispatchFlow(app);
 
   await app.start();
-  console.log('Slack bot connected (Socket Mode)');
+  logger.info('Slack bot connected (Socket Mode)');
 }

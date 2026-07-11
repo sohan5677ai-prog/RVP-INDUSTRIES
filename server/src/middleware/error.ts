@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { HttpError } from '../lib/httpError.js';
@@ -16,6 +17,6 @@ export function errorHandler(
   if (err instanceof HttpError) {
     return res.status(err.status).json({ error: err.message });
   }
-  console.error(err);
+  logger.error(err);
   return res.status(500).json({ error: 'Internal server error' });
 }

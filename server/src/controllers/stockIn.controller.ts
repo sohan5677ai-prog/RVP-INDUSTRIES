@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
@@ -115,7 +116,7 @@ export async function extractStockInInvoice(req: Request, res: Response) {
   }
 
   const data = await extractInvoiceData(req.file.buffer, req.file.mimetype, kind, candidates);
-  console.log(`[extract:${kind}]`, JSON.stringify(data));
+  logger.info(`[extract:${kind}]`, JSON.stringify(data));
   res.json(data);
 }
 
@@ -483,8 +484,8 @@ export async function createColdStorageBatch(req: Request, res: Response) {
       });
 
       results.push(result);
-    } catch (e: any) {
-      results.push({ success: false, error: e?.message ?? 'Failed' });
+    } catch (e: unknown) {
+      results.push({ success: false, error: e instanceof Error ? e.message : 'Failed' });
     }
   }
 

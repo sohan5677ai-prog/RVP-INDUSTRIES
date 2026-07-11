@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.js';
@@ -218,13 +219,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
 
 // Dashboard husk-recovery card: full itemized pool (includes pappu-flagged costs).
 export async function huskPnl(_req: Request, res: Response) {
-  try {
-    const { revenue, expenses } = await computeHuskPool();
-    const totalExpenses = Object.values(expenses).reduce((s, v) => s + v, 0);
-    const netRecovery = revenue - totalExpenses;
-    res.json({ revenue, expenses, totalExpenses, netRecovery });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to calculate Husk PnL' });
-  }
+  const { revenue, expenses } = await computeHuskPool();
+  const totalExpenses = Object.values(expenses).reduce((s, v) => s + v, 0);
+  const netRecovery = revenue - totalExpenses;
+  res.json({ revenue, expenses, totalExpenses, netRecovery });
 }

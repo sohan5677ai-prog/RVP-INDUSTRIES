@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
@@ -16,7 +17,7 @@ export async function extractReceiptScreenshot(req: Request, res: Response) {
   const buyers = await prisma.party.findMany({ where: { type: 'BUYER' }, select: { name: true } });
   const candidates = [...new Set(buyers.map((b) => b.name).filter(Boolean))];
   const data = await extractTransactionData(req.file.buffer, req.file.mimetype, 'receipt', candidates);
-  console.log('[extract:receipt]', JSON.stringify(data));
+  logger.info('[extract:receipt]', JSON.stringify(data));
   res.json(data);
 }
 

@@ -6,7 +6,7 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:client"],
       "port": 5173,
-      "autoPort": false
+      "autoPort": true
     }
   ]
 }

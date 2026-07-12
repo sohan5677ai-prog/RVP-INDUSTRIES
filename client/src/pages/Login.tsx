@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
 import { ApiError } from '@/lib/api';
@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Lock, Mail, Loader2, ArrowRight } from 'lucide-react';
 
+const INTRO_SEEN_KEY = 'rvp-intro-seen';
+
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -14,6 +16,44 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Intro plays once per browser session; the video's final frame is pitch
+  // black, matching the zinc-950 page behind it for a seamless reveal.
+  // Skipped entirely for users who prefer reduced motion.
+  const [introDone, setIntroDone] = useState(
+    () =>
+      sessionStorage.getItem(INTRO_SEEN_KEY) === '1' ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+  const [introFading, setIntroFading] = useState(false);
+  // The pod waits on its first frame until the user clicks or presses Enter.
+  const [introStarted, setIntroStarted] = useState(false);
+  const introVideoRef = useRef<HTMLVideoElement>(null);
+
+  function finishIntro() {
+    if (introDone || introFading) return;
+    sessionStorage.setItem(INTRO_SEEN_KEY, '1');
+    setIntroFading(true);
+    setTimeout(() => setIntroDone(true), 900);
+  }
+
+  function startIntro() {
+    if (introStarted) return;
+    setIntroStarted(true);
+    const vid = introVideoRef.current;
+    if (!vid) return finishIntro();
+    vid.muted = true;
+    vid.play().catch(() => finishIntro());
+  }
+
+  useEffect(() => {
+    if (introDone) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Enter' || e.key === ' ') startIntro();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [introDone, introStarted]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,12 +71,71 @@ export default function Login() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950">
+      {/* Cinematic intro — tamarind pod burst, ends on a black frame */}
+      {!introDone && (
+        <div
+          onClick={startIntro}
+          role="button"
+          aria-label="Play intro animation, then continue to sign in"
+          className={`fixed inset-0 z-50 cursor-pointer bg-black transition-opacity duration-700 ${introFading ? 'opacity-0' : 'opacity-100'}`}
+        >
+          <video
+            ref={introVideoRef}
+            src="/intro-tamarind.mp4"
+            poster="/intro-tamarind-poster.jpg"
+            muted
+            playsInline
+            preload="auto"
+            onEnded={finishIntro}
+            onError={finishIntro}
+            className="h-full w-full object-cover"
+          />
+          {/* Brand header — fades out once the burst begins */}
+          <div
+            className={`absolute inset-x-0 top-10 sm:top-14 flex flex-col items-center text-center transition-opacity duration-500 ${
+              introStarted ? 'opacity-0' : 'opacity-100'
+            }`}
+          >
+            <div className="h-14 w-14 mb-4 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-700 flex items-center justify-center shadow-2xl shadow-black/60 ring-1 ring-white/10">
+              <span className="font-display font-bold text-2xl text-amber-50">R</span>
+            </div>
+            <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
+              RVP Industries
+            </h1>
+            <p className="mt-2 text-xs sm:text-sm tracking-[0.25em] text-white/60">
+              ENTERPRISE RESOURCE PLANNING
+            </p>
+          </div>
+          {!introStarted && (
+            <div className="absolute inset-x-0 bottom-16 flex justify-center">
+              <p className="animate-pulse text-xs tracking-[0.3em] text-white/60">
+                CLICK OR PRESS ENTER
+              </p>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              finishIntro();
+            }}
+            className="absolute bottom-6 right-6 rounded-full border border-white/20 bg-black/40 px-4 py-1.5 text-xs tracking-widest text-white/70 backdrop-blur-sm transition-colors hover:bg-black/60 hover:text-white"
+          >
+            SKIP
+          </button>
+        </div>
+      )}
+
       {/* Premium Background Gradients */}
       <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-violet-600/30 blur-[120px]" />
       <div className="absolute -bottom-[20%] -right-[10%] w-[50%] h-[50%] rounded-full bg-amber-600/20 blur-[120px]" />
       <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] rounded-full bg-emerald-600/20 blur-[100px]" />
 
-      <div className="relative z-10 w-full max-w-md p-6 sm:p-10">
+      <div
+        className={`relative z-10 w-full max-w-md p-6 sm:p-10 ${
+          introFading ? 'animate-in fade-in zoom-in-95 duration-1000' : ''
+        }`}
+      >
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center mb-8">
           <div className="h-16 w-16 mb-6 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-700 flex items-center justify-center shadow-2xl shadow-amber-900/50 ring-1 ring-white/10">

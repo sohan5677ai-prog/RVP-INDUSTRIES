@@ -207,8 +207,20 @@ export async function getCompanyProfileRow() {
   return prisma.companyProfile.create({ data: { id: COMPANY_ID } });
 }
 
+// Secret credential fields that must never be sent back to the client. They are
+// write-only from the UI's perspective: the form shows them blank and only
+// overwrites the stored value when the admin types a new one.
+const SECRET_FIELDS = ['taxproGspSecret', 'taxproGstPass'] as const;
+
+/** Strip write-only secrets from a company-profile row before returning it. */
+function redactCompanyProfile<T extends Record<string, unknown>>(row: T): T {
+  const clone: Record<string, unknown> = { ...row };
+  for (const f of SECRET_FIELDS) clone[f] = null;
+  return clone as T;
+}
+
 export async function getCompanyProfile(_req: Request, res: Response) {
-  res.json(await getCompanyProfileRow());
+  res.json(redactCompanyProfile(await getCompanyProfileRow()));
 }
 
 const companyProfileSchema = z.object({
@@ -235,12 +247,20 @@ const companyProfileSchema = z.object({
 
 export async function updateCompanyProfile(req: Request, res: Response) {
   const data = companyProfileSchema.parse(req.body);
+
+  // Secrets are redacted on read, so the form submits them blank unless the
+  // admin typed a new value. Drop blank/undefined secret fields so a normal save
+  // never wipes the stored credential — only a non-empty value overwrites it.
+  for (const f of SECRET_FIELDS) {
+    if (data[f] == null || data[f] === '') delete (data as Record<string, unknown>)[f];
+  }
+
   const saved = await prisma.companyProfile.upsert({
     where: { id: COMPANY_ID },
     update: data,
     create: { id: COMPANY_ID, ...data },
   });
-  res.json(saved);
+  res.json(redactCompanyProfile(saved));
 }
 
 // Invoice print layout (paper/margins/font/column widths) stored as a JSON string.

@@ -1,16 +1,24 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import multer from 'multer';
 
 const uploadsDir = path.resolve(process.cwd(), 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 
+// Only allow a small set of document/image extensions we actually accept, so a
+// user can't upload an .html/.svg that would be served inline, or an executable.
+const ALLOWED_EXT = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif']);
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-z0-9]/gi, '_').slice(0, 40);
-    cb(null, `${Date.now()}-${base}${ext}`);
+    const rawExt = path.extname(file.originalname).toLowerCase();
+    const ext = ALLOWED_EXT.has(rawExt) ? rawExt : '';
+    // Invoice files hold customer PII and are served as capability URLs, so the
+    // filename must be unguessable — a 16-byte random token, not a timestamp.
+    const token = crypto.randomBytes(16).toString('hex');
+    cb(null, `${token}${ext}`);
   },
 });
 

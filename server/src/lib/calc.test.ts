@@ -125,8 +125,9 @@ describe('configurable hamali rates', () => {
 describe('calcKataFee', () => {
   it('tiered weighbridge fee', () => {
     expect(calcKataFee(15000)).toBe(50); // <= 15t
-    expect(calcKataFee(20000)).toBe(150); // 15-25t
-    expect(calcKataFee(26000)).toBe(200); // > 25t
+    expect(calcKataFee(20000)).toBe(150); // 15-30t
+    expect(calcKataFee(30000)).toBe(150); // 15-30t (upper edge)
+    expect(calcKataFee(31000)).toBe(200); // > 30t
   });
 });
 

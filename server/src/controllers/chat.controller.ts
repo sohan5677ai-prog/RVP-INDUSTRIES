@@ -1,4 +1,3 @@
-import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { toolDeclarations, executeTool } from '../lib/chatTools.js';
@@ -7,7 +6,6 @@ import { HttpError } from '../lib/httpError.js';
 let client: GoogleGenAI | null = null;
 function getClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
-  logger.info('Gemini API key in chat controller:', apiKey ? `Loaded (starts with ${apiKey.slice(0, 6)}..., length ${apiKey.length})` : 'Not loaded');
   if (!apiKey) throw new HttpError(503, 'GEMINI_API_KEY is missing');
   if (!client) client = new GoogleGenAI({ apiKey });
   return client;

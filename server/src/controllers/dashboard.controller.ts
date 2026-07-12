@@ -77,6 +77,7 @@ const WASTE_LOADING_PRODUCTS = new Set([
  */
 export interface HuskExpenses {
   blackSeedUnloading: number;
+  transferCosts: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;

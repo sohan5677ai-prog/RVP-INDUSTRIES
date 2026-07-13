@@ -496,11 +496,6 @@ export default function StockByParty() {
                                         </TableCell>
                                         <TableCell className="py-2 text-xs text-right font-extrabold text-primary">
                                           {toTonnes(pool.totalPurchasedKg).toFixed(2)} MT <span className="text-[10px] text-muted-foreground font-semibold">({kg(pool.totalPurchasedKg)})</span>
-                                          {pool.totalMilledKg > 0 && (
-                                            <span className="block text-[10px] text-muted-foreground font-medium">
-                                              {toTonnes(pool.netStockKg).toFixed(2)} MT remaining after pappu sold
-                                            </span>
-                                          )}
                                         </TableCell>
                                         <TableCell className="py-2 text-xs text-right font-bold text-emerald-600">
                                           {rupees(pool.purchasedValue)}

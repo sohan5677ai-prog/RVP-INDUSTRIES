@@ -117,13 +117,18 @@ export async function getStockByParty(req: Request, res: Response) {
       });
     }
     const p = partyMap.get(lot.partyId)!;
+    // Stock-by-Party shows the FULL stock received/purchased per party - it must
+    // NOT be depleted by downstream pappu milling/sales. The stock engine reduces
+    // `receivedKg` in place by whatever was consumed (`soldKg`), so the original
+    // gross received amount is `receivedKg + soldKg`.
+    const grossKg = lot.receivedKg + lot.soldKg;
     p.totalPurchasedKg += lot.orderedKg;
     p.totalMilledKg += lot.soldKg;
-    p.netStockKg += lot.receivedKg;
-    
-    const value = lot.receivedKg * lot.pricePerKg;
+    p.netStockKg += grossKg;
+
+    const value = grossKg * lot.pricePerKg;
     p.totalValuation += value;
-    
+
     let pool = p.pricePools.find((pl: any) => pl.pricePerKg === lot.pricePerKg);
     if (!pool) {
       pool = {
@@ -139,7 +144,7 @@ export async function getStockByParty(req: Request, res: Response) {
     }
     pool.totalPurchasedKg += lot.orderedKg;
     pool.totalMilledKg += lot.soldKg;
-    pool.netStockKg += lot.receivedKg;
+    pool.netStockKg += grossKg;
     pool.purchasedValue += lot.orderedKg * lot.pricePerKg;
     pool.value += value;
     pool.stockIns.push({

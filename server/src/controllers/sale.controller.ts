@@ -20,7 +20,7 @@ import {
   getHamaliRateFull,
   getCustomHamaliRates,
 } from './settings.controller.js';
-import { fileUrl } from '../lib/upload.js';
+import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 
@@ -414,6 +414,10 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // Fully dispatched once this lorry takes the remaining balance to (or below) zero.
   const fullyDispatched = alreadyDispatchedKg + weightKg >= order.tonnageKg;
 
+  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // transaction open.
+  const kataFileUrl = kataFile ? await uploadFileToStorage(kataFile) : null;
+
   const dispatch = await prisma.$transaction(async (tx) => {
     let cogsAmount = 0;
     const cogsInventoryAccount: string | undefined = undefined;
@@ -434,7 +438,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         freightCharge,
         status: 'DISPATCHED',
         vehicleNumber: data.vehicleNumber ?? null,
-        kataFileUrl: kataFile ? fileUrl(kataFile.filename) : null,
+        kataFileUrl,
         transportProvider,
         customRetention: transportProvider === 'OTHER' ? (data.customRetention ?? null) : null,
       },
@@ -621,6 +625,10 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     }
   }
 
+  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // transaction open.
+  const buyerKataFileUrl = kataFile ? await uploadFileToStorage(kataFile) : null;
+
   const updated = await prisma.$transaction(async (tx) => {
     // We intentionally do not post a Credit Note to the ledger here anymore.
     // The shortage is recorded on the dispatch, but A/R is maintained at the full billed amount.
@@ -642,7 +650,7 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
           creditNoteAmount,
           internalWeightProfitAmount,
         }),
-        ...(kataFile && { buyerKataFileUrl: fileUrl(kataFile.filename) }),
+        ...(kataFile && { buyerKataFileUrl }),
       },
       include: { saleOrder: { include: { buyer: true, broker: true } } },
     });

@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createStockInSchema, createUrpStockInSchema } from '../schemas/purchase.schema.js';
-import { fileUrl } from '../lib/upload.js';
+import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { computeFY, formatPoNumber, reservePoSerials } from '../lib/poNumber.js';
 
@@ -206,6 +206,10 @@ export async function createStockIn(req: Request, res: Response) {
   const rvpSecondWeightKg = data.rvpSecondWeightKg ?? 0;
   const rvpKataKg = rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0;
 
+  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // transaction open.
+  const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : "";
+
   const stockIn = await prisma.$transaction(async (tx) => {
     const created = await tx.stockIn.create({
       data: {
@@ -218,7 +222,7 @@ export async function createStockIn(req: Request, res: Response) {
         rvpKataKg,
         billingWeightKg: data.billingWeightKg,
         partyKataKg: data.partyKataKg,
-        invoiceFileUrl: req.file ? fileUrl(req.file.filename) : "",
+        invoiceFileUrl,
         loadingLocation: data.loadingLocation,
         // Only BASE-priced POs carry inward freight; DELIVERY already includes it.
         freightCharge: po.priceType === 'BASE' ? data.freightCharge : 0,
@@ -269,6 +273,10 @@ export async function createUrpStockIn(req: Request, res: Response) {
   // With no net it stays at stock-in.
   const willRecordPurchase = rvpKataKg > 0;
 
+  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // transaction open.
+  const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : "";
+
   const stockIn = await prisma.$transaction(async (tx) => {
     // 1. Create a 1-lorry PO behind the scenes. URP spot purchases share one
     // continuing "URP" series across all parties (URP/01/26-27, URP/02/26-27, ...).
@@ -317,7 +325,7 @@ export async function createUrpStockIn(req: Request, res: Response) {
         directNet: directNetKg > 0,
         billingWeightKg: data.billingWeightKg,
         partyKataKg: data.partyKataKg,
-        invoiceFileUrl: req.file ? fileUrl(req.file.filename) : "",
+        invoiceFileUrl,
         loadingLocation: data.loadingLocation,
         freightCharge,
         freightTonnageKg,
@@ -359,7 +367,7 @@ export async function updateStockIn(req: Request, res: Response) {
     throw new HttpError(400, 'Arrival date cannot be before the purchase order date');
   }
 
-  const invoiceFileUrl = req.file ? fileUrl(req.file.filename) : stockIn.invoiceFileUrl;
+  const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : stockIn.invoiceFileUrl;
 
   // A direct-net (URP) arrival typed the net straight in: rvpFirstWeightKg holds
   // the net and there is no tare, so keep the net as-is instead of computing

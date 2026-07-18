@@ -1,6 +1,5 @@
 import { logger } from './lib/logger.js';
 import "dotenv/config";
-import path from "node:path";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -19,23 +18,22 @@ const app = express();
 // which the rate limiter keys on).
 app.set("trust proxy", 1);
 
-app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? "http://localhost:5173" }));
-app.use(express.json());
+// Comma-separated list so the deployed client (a Vercel domain, plus any
+// custom domain later) can be added without a code change.
+const allowedOrigins = (process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
-// Serve uploaded invoice files. These are opened as plain browser links (which
-// can't carry the Bearer token), so access is gated by unguessable filenames
-// (see lib/upload.ts) rather than middleware — a capability-URL scheme. Set
-// noindex/nosniff so the PII files aren't crawled or content-sniffed.
-app.use(
-  "/uploads",
-  (_req, res, next) => {
-    res.setHeader("X-Robots-Tag", "noindex, nofollow");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    next();
+app.use(helmet());
+app.use(cors({
+  origin: (origin, cb) => {
+    // No Origin header (server-to-server calls, health checks) - allow.
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error(`Origin ${origin} not allowed by CORS`));
   },
-  express.static(path.resolve(process.cwd(), "uploads")),
-);
+}));
+app.use(express.json());
 
 app.get("/api/health", (_req, res) => {
   res.json({

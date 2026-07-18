@@ -9,7 +9,30 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import { cn } from '@/lib/utils';
+
+type CoaRow = { kind: 'GROUP' | 'LEDGER'; depth: number; code: string; name: string; opening: number; closing: number };
+
+function flattenCoa(nodes: GroupNode[], depth = 0, acc: CoaRow[] = []): CoaRow[] {
+  for (const g of nodes) {
+    acc.push({ kind: 'GROUP', depth, code: '', name: g.name, opening: 0, closing: g.subtotal });
+    flattenCoa(g.children, depth + 1, acc);
+    for (const l of g.ledgers) {
+      acc.push({ kind: 'LEDGER', depth: depth + 1, code: l.code, name: l.name, opening: l.openingBalance ?? 0, closing: l.closing });
+    }
+  }
+  return acc;
+}
+
+const COA_COLUMNS: ExportColumn<CoaRow>[] = [
+  { header: 'Code', value: (r) => r.code },
+  { header: 'Group / Ledger', value: (r) => `${'  '.repeat(r.depth)}${r.name}` },
+  { header: 'Opening', value: (r) => (r.opening ? rupees(Math.abs(r.opening)) : ''), excel: (r) => (r.opening ? Math.abs(r.opening) : null), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Closing', value: (r) => (Math.abs(r.closing) < 0.005 ? '' : rupees(Math.abs(r.closing))), excel: (r) => (Math.abs(r.closing) < 0.005 ? null : Math.abs(r.closing)), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Dr/Cr', value: (r) => (Math.abs(r.closing) < 0.005 ? '' : r.closing >= 0 ? 'Dr' : 'Cr'), align: 'center' },
+];
 
 // Signed amount → { value, Dr/Cr }. +Dr / −Cr.
 function drcr(signed: number) {
@@ -142,6 +165,7 @@ export default function Ledgers() {
             <RefreshCcw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
+          <ExportButtons filename="Chart_Of_Accounts" title="Chart of Accounts" columns={COA_COLUMNS} rows={flattenCoa(tree)} />
         </div>
       </div>
 

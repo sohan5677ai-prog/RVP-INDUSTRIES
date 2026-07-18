@@ -6,11 +6,14 @@ import {
   createPurchaseOrderSchema,
   listPurchaseOrdersSchema,
 } from '../schemas/purchase.schema.js';
+import { computeFY, derivePartyPrefix, formatPoNumber, normalizeSeriesKey, reservePoSerials } from '../lib/poNumber.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
-  const { status } = listPurchaseOrdersSchema.parse(req.query);
+  const { status, skip, take, all } = listPurchaseOrdersSchema.parse(req.query);
+  const isAll = all === 'true';
   const orders = await prisma.purchaseOrder.findMany({
-    take: 100,
+    skip: isAll ? undefined : skip,
+    take: isAll ? undefined : take,
     where: status ? { status } : undefined,
     orderBy: { poDate: 'desc' },
     include: { party: true, stockIns: { select: { id: true } } },
@@ -39,17 +42,9 @@ export async function getPurchaseOrder(req: Request, res: Response) {
   res.json(po);
 }
 
-function getPartyPrefix(partyName: string): string {
-  const words = partyName.trim().split(/\s+/);
-  if (words.length > 1) {
-    const initials = words
-      .map((w) => w[0])
-      .join('')
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '');
-    if (initials.length >= 2) return initials;
-  }
-  return partyName.slice(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
+function partySeriesKey(party: { nickname?: string | null; name: string }): string {
+  if (party.nickname && party.nickname.trim()) return normalizeSeriesKey(party.nickname);
+  return derivePartyPrefix(party.name);
 }
 
 export async function createPurchaseOrder(req: Request, res: Response) {
@@ -65,34 +60,26 @@ export async function createPurchaseOrder(req: Request, res: Response) {
   const createdPOs: any[] = [];
 
   await prisma.$transaction(async (tx) => {
-    const prefix = getPartyPrefix(party.name);
-    const lastPo = await tx.purchaseOrder.findFirst({
-      where: { poNumber: { startsWith: `${prefix}-` } },
-      orderBy: { poNumber: 'desc' }, // Order by poNumber descending to find the highest number
-    });
-
-    let nextNum = 1;
-    if (lastPo && lastPo.poNumber) {
-      const parts = lastPo.poNumber.split('-');
-      const numPart = parts[parts.length - 1];
-      const num = parseInt(numPart, 10);
-      if (!isNaN(num)) {
-        nextNum = num + 1;
-      }
-    }
+    const seriesKey = partySeriesKey(party);
+    const fy = computeFY(data.poDate);
+    const startSerial = await reservePoSerials(tx, seriesKey, fy, numLorries);
 
     for (let i = 0; i < numLorries; i++) {
-      const currentPoNumber = `${prefix}-${(nextNum + i).toString().padStart(3, '0')}`;
+      const serial = startSerial + i;
       const isLast = i === numLorries - 1;
       const poTonnage = isLast ? (data.tonnageKg - (unitTonnageKg * (numLorries - 1))) : unitTonnageKg;
 
       const newPo = await tx.purchaseOrder.create({
         data: {
-          poNumber: currentPoNumber,
+          poNumber: formatPoNumber(seriesKey, serial, fy),
+          poSeriesKey: seriesKey,
+          poSerial: serial,
+          poFy: fy,
           poDate: data.poDate,
           partyId: data.partyId,
           pricePerKg: data.pricePerKg,
           priceType: data.priceType,
+          plannedLocation: data.plannedLocation,
           tonnageKg: poTonnage,
           hasGst: data.hasGst,
           gstAmount: data.hasGst ? (poTonnage * data.pricePerKg * 0.05) : 0,
@@ -146,29 +133,26 @@ export async function bulkCreatePurchaseOrders(req: Request, res: Response) {
       let firstPoNumber = '';
 
       await prisma.$transaction(async (tx) => {
-        const prefix = getPartyPrefix(party.name);
-        const lastPo = await tx.purchaseOrder.findFirst({
-          where: { poNumber: { startsWith: `${prefix}-` } },
-          orderBy: { poNumber: 'desc' },
-        });
-        let nextNum = 1;
-        if (lastPo?.poNumber) {
-          const parts = lastPo.poNumber.split('-');
-          const num = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(num)) nextNum = num + 1;
-        }
+        const seriesKey = partySeriesKey(party);
+        const fy = computeFY(parsed.poDate);
+        const startSerial = await reservePoSerials(tx, seriesKey, fy, numLorries);
         for (let j = 0; j < numLorries; j++) {
-          const poNumber = `${prefix}-${(nextNum + j).toString().padStart(3, '0')}`;
+          const serial = startSerial + j;
+          const poNumber = formatPoNumber(seriesKey, serial, fy);
           const isLast = j === numLorries - 1;
           const poTonnage = isLast ? (parsed.tonnageKg - unitTonnageKg * (numLorries - 1)) : unitTonnageKg;
           if (j === 0) firstPoNumber = poNumber;
           await tx.purchaseOrder.create({
             data: {
               poNumber,
+              poSeriesKey: seriesKey,
+              poSerial: serial,
+              poFy: fy,
               poDate: parsed.poDate,
               partyId: parsed.partyId,
               pricePerKg: parsed.pricePerKg,
               priceType: parsed.priceType,
+              plannedLocation: parsed.plannedLocation,
               hasGst: parsed.hasGst,
               gstAmount: parsed.hasGst ? (poTonnage * Number(parsed.pricePerKg) * 0.05) : 0,
               tonnageKg: poTonnage,
@@ -214,6 +198,7 @@ export async function updatePurchaseOrder(req: Request, res: Response) {
       partyId: data.partyId,
       pricePerKg: data.pricePerKg,
       priceType: data.priceType,
+      plannedLocation: data.plannedLocation,
       hasGst: data.hasGst,
       gstAmount: data.hasGst ? (data.tonnageKg * data.pricePerKg * 0.05) : 0,
       tonnageKg: data.tonnageKg,

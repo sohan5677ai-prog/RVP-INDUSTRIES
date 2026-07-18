@@ -9,7 +9,6 @@ import {
   Truck,
   Scale,
   BadgeCheck,
-  Factory,
   ShoppingCart,
   LogOut,
   BookOpen,
@@ -17,11 +16,6 @@ import {
   Receipt,
   Warehouse,
   Calculator,
-  Landmark,
-  FileSpreadsheet,
-  Wallet,
-  TrendingUp,
-  TrendingDown,
   MapPin,
   ArrowLeftRight,
   CalendarDays,
@@ -29,7 +23,6 @@ import {
   Wheat,
   Layers,
   Recycle,
-  Trash2,
   ChevronRight,
   SlidersHorizontal,
   Banknote,
@@ -44,11 +37,18 @@ import {
   PanelLeftClose,
   Menu,
   FileText,
+  TrendingUp,
+  FileMinus2,
+  TrendingDown,
+  Wallet,
+  Landmark,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { preloadRoute } from '@/lib/preload';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import DispatchReminders from '@/components/DispatchReminders';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean };
 type NavSection = { heading?: string; items: NavItem[] };
@@ -103,6 +103,7 @@ const sections: NavSection[] = [
       { to: '/sales/husk', label: 'Husk', icon: Layers },
       { to: '/sales/tps', label: 'TPS (Brokens)', icon: Wheat },
       { to: '/sales/byproducts', label: 'Tamarind Byproducts', icon: Recycle },
+      { to: '/sales/notes', label: 'Credit/Debit Notes', icon: FileMinus2 },
     ],
   },
   {
@@ -174,7 +175,6 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
 
-  // Sections are collapsed by default; the one holding the active route starts open.
   const activeHeading = sections.find(
     (s) => s.heading && s.items.some((it) => it.to !== '/' && location.pathname.startsWith(it.to))
   )?.heading;
@@ -182,11 +182,9 @@ export default function Layout() {
     () => (activeHeading ? { [activeHeading]: true } : {})
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // Accordion: opening a section collapses the others.
   const toggle = (heading: string) =>
     setOpenSections((prev) => (prev[heading] ? {} : { [heading]: true }));
 
-  // Derive a breadcrumb (section › page) for the topbar.
   let current: { label: string; heading?: string } | undefined;
   for (const s of sections) {
     for (const it of s.items) {
@@ -204,20 +202,18 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* ── Sidebar ─────────────────────────────────────────── */}
+      <DispatchReminders />
       <aside className={cn('w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border relative', sidebarOpen ? 'flex' : 'hidden')}>
-        {/* Layered depth: warm top glow, gentle bottom shade, and a hairline of light down the inner edge */}
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(125%_40%_at_0%_0%,rgba(232,169,63,0.11),transparent_62%)]" />
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.025] via-transparent to-black/25" />
         <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-white/10 via-white/[0.04] to-transparent" />
-        {/* Brand */}
         <div className="relative z-10 flex items-center gap-3 px-5 h-16 border-b border-sidebar-border shrink-0">
           <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-amber-950/50 ring-1 ring-amber-300/20 shrink-0">
             <span className="font-display font-semibold text-[15px] text-amber-50 leading-none">R</span>
           </div>
           <div className="min-w-0 leading-tight">
             <div className="font-display font-semibold text-[15px] text-amber-50/95 truncate tracking-tight">RVP Industries</div>
-            <div className="text-[10.5px] uppercase tracking-[0.16em] text-sidebar-foreground/55">Tamarind Processing</div>
+            <div className="text-[10.5px] uppercase tracking-[0.16em] text-sidebar-foreground/55">Tamarind Seed Processing</div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -330,7 +326,7 @@ export default function Layout() {
       {/* ── Main ────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar */}
-        <header className="h-16 shrink-0 sticky top-0 z-30 flex items-center justify-between gap-4 px-8 bg-[color-mix(in_srgb,var(--card)_82%,transparent)] backdrop-blur-xl border-b border-border/80 shadow-[0_1px_0_color-mix(in_srgb,var(--card)_90%,transparent)]">
+        <header className="h-16 shrink-0 sticky top-0 z-30 flex items-center justify-between gap-4 px-8 bg-card border-b border-border/80 shadow-[0_1px_0_color-mix(in_srgb,var(--card)_90%,transparent)]">
           <div className="flex items-baseline gap-2.5 min-w-0">
             {!sidebarOpen && (
               <button

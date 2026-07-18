@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { HttpError } from '../lib/httpError.js';
 import { TaxproService } from '../services/taxpro.service.js';
+import { sendInvoiceEmail, sendEwbEmail } from '../services/saleDocumentEmail.service.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -194,6 +195,26 @@ router.post(
     });
 
     res.json({ updated, message: result.message });
+  })
+);
+
+// Email the tax invoice (with IRN/QR if generated) to the buyer.
+router.post(
+  '/sale-dispatches/:id/einvoice/email',
+  asyncHandler(async (req, res) => {
+    const result = await sendInvoiceEmail(req.params.id);
+    if (!result.ok) throw new HttpError(502, result.error || 'Failed to send email');
+    res.json(result);
+  })
+);
+
+// Email the e-way bill details to the buyer.
+router.post(
+  '/sale-dispatches/:id/ewaybill/email',
+  asyncHandler(async (req, res) => {
+    const result = await sendEwbEmail(req.params.id);
+    if (!result.ok) throw new HttpError(502, result.error || 'Failed to send email');
+    res.json(result);
   })
 );
 

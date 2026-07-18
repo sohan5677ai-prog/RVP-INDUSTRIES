@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
-import { companyHamaliShare } from '../lib/calc.js';
+import { companyHamaliShare, landedPricePerKg } from '../lib/calc.js';
 
 export class InventoryService {
   /**
@@ -371,25 +371,31 @@ export class InventoryService {
     });
 
     const rows = purchases.map((p) => {
-      const price = p.verification ? Number(p.verification.pricePerKg) : Number(p.stockIn.purchaseOrder.pricePerKg);
+      // Base (party-payable) rate, then the landed DELIVERY cost = base + netKg/freight.
+      // All black-seed COST/valuation on this page (and Stock by Location, pappu
+      // margins) is priced at the landed rate so freight is reflected; the supplier
+      // payable elsewhere still uses the base rate. DELIVERY POs carry freight = 0.
+      const basePrice = p.verification ? Number(p.verification.pricePerKg) : Number(p.stockIn.purchaseOrder.pricePerKg);
+      const priceType = p.stockIn.purchaseOrder.priceType || 'BASE';
+      const freight = priceType === 'BASE' ? Number(p.freightCharge) : 0;
       const ourHamali = companyHamaliShare(Number(p.hamaliCharge));
-      const freight = Number(p.freightCharge);
       // RVP net (kata) weight of black seed received.
       const rvpNetWeightKg = p.netWeightKg;
+      // Freight is spread over the whole-vehicle tonnage for a SHARED lorry, else this
+      // arrival's own net weight (a full lorry makes the two equal).
+      const freightBasisKg = p.freightTonnageKg || rvpNetWeightKg;
+      const price = landedPricePerKg(basePrice, freightBasisKg, freight);
 
       // Stock is valued EXCLUDING GST - the input IGST paid on a purchase is claimable
-      // tax credit, not a cost of the stock. Use physical weight × price so a shortage
-      // can't inflate the unit price.
+      // tax credit, not a cost of the stock. Use physical weight × landed price so a
+      // shortage can't inflate the unit price; freight is already inside `price`, so it
+      // is NOT added again on top of the seed cost.
       const seedCostWithoutGst = rvpNetWeightKg * price;
 
-      const value = Math.round((seedCostWithoutGst + ourHamali + freight) * 100) / 100;
+      const value = Math.round((seedCostWithoutGst + ourHamali) * 100) / 100;
 
-      const priceType = p.stockIn.purchaseOrder.priceType || 'BASE';
-      const isBasePrice = priceType === 'BASE';
-      const addedFreight = isBasePrice ? freight : 0;
-
-      const valueExclGstAndHamali = Math.round((seedCostWithoutGst + addedFreight) * 100) / 100;
-      const valueExclHamali = Math.round((seedCostWithoutGst + addedFreight) * 100) / 100;
+      const valueExclGstAndHamali = Math.round(seedCostWithoutGst * 100) / 100;
+      const valueExclHamali = Math.round(seedCostWithoutGst * 100) / 100;
 
       return {
         purchaseId: p.id,

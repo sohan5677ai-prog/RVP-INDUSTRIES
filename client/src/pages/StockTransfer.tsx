@@ -21,8 +21,21 @@ import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 const STORAGES = ['PGR COLD', 'Murugan', 'KNM Multi'] as const;
+
+const STOCK_TRANSFER_COLUMNS: ExportColumn<StockTransfer>[] = [
+  { header: 'Date', value: (t) => shortDate(t.transferDate) },
+  { header: 'Route', value: (t) => `${t.fromLocation} → ${t.toLocation}` },
+  { header: 'Lorry', value: (t) => t.lorryNumber ?? '' },
+  { header: 'Weight (kg)', value: (t) => t.weightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Hamali', value: (t) => rupees(Number(t.loadingHamali) + Number(t.unloadingHamali)), excel: (t) => Number(t.loadingHamali) + Number(t.unloadingHamali), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Transport', value: (t) => rupees(t.transportCharge), excel: (t) => Number(t.transportCharge), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Moved Value', value: (t) => rupees(t.movedValue), excel: (t) => Number(t.movedValue), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Price/kg', value: (t) => (t.weightKg > 0 ? rupees(Number(t.movedValue) / t.weightKg) : ''), excel: (t) => (t.weightKg > 0 ? Number(t.movedValue) / t.weightKg : null), numFmt: '#,##0.00', align: 'right' },
+];
 
 export default function StockTransferPage() {
   const qc = useQueryClient();
@@ -107,9 +120,12 @@ export default function StockTransferPage() {
             (₹{TRANSFER_HANDLING_RATE}/t load &amp; unload), and ₹{TRANSFER_TRANSPORT} transport to the seed's value.
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4" /> Record Transfer
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename="Stock_Transfers" title="Stock Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={STOCK_TRANSFER_COLUMNS} rows={transfers ?? []} />
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4" /> Record Transfer
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">

@@ -1,6 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import type { Broker, SaleOrder, Payment } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Input } from '@/components/ui/input';
@@ -14,6 +18,10 @@ import { Handshake, Loader2, TrendingDown } from 'lucide-react';
 // allocated FIFO (oldest order first) to derive each order's paid & balance.
 const FLAT_BROKERAGE = 2000;
 
+// "RVP" is the company's own-orders marker (not a real commission agent), so no
+// brokerage is due on orders booked under it.
+const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
+
 interface LedgerRow {
   id: string;
   brokerId: string;
@@ -26,6 +34,17 @@ interface LedgerRow {
   paid: number;
   balance: number;
 }
+
+const BROKERAGE_LEDGER_COLUMNS: ExportColumn<LedgerRow>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Invoice Number', value: (r) => r.invoiceNumber ?? '' },
+  { header: 'Broker', value: (r) => r.brokerName },
+  { header: 'Party (Buyer)', value: (r) => r.buyerName },
+  { header: 'Vehicle No', value: (r) => r.vehicleNumber ?? '' },
+  { header: 'Brokerage Due', value: (r) => rupees(r.due), excel: (r) => r.due, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Paid', value: (r) => rupees(r.paid), excel: (r) => r.paid, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Balance', value: (r) => rupees(r.balance), excel: (r) => r.balance, numFmt: '#,##0.00', align: 'right' },
+];
 
 export default function BrokerageLedger() {
   const [brokerFilter, setBrokerFilter] = useState<string>('ALL');
@@ -41,14 +60,19 @@ export default function BrokerageLedger() {
     queryFn: () => api<SaleOrder[]>('/sale-orders'),
   });
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    queryKey: ['payments'],
-    queryFn: () => api<Payment[]>('/payments'),
+    // Full history — the ledger reflects every payment, not just latest 100.
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
   });
 
   const isLoading = loadingBrokers || loadingSales || loadingPayments;
 
-  const rows: LedgerRow[] = [];
-  brokers?.forEach((b) => {
+  // Heavy per-broker FIFO build depends only on the fetched data; memoize so the
+  // broker Select and date inputs don't recompute it on every change.
+  const rows = useMemo<LedgerRow[]>(() => {
+    const acc: LedgerRow[] = [];
+    brokers?.forEach((b) => {
+    if (isOwnBroker(b.name)) return; // own (RVP) orders carry no brokerage
     // One ₹2000 brokerage line per dispatched shipment under this broker.
     const activeOrders = (saleOrders ?? [])
       .filter((o) => o.brokerId === b.id)
@@ -70,7 +94,7 @@ export default function BrokerageLedger() {
       const due = FLAT_BROKERAGE;
       const paid = Math.min(unallocated, due);
       unallocated -= paid;
-      rows.push({
+      acc.push({
         id: o.id,
         brokerId: b.id,
         brokerName: b.name,
@@ -83,7 +107,9 @@ export default function BrokerageLedger() {
         balance: due - paid,
       });
     });
-  });
+    });
+    return acc;
+  }, [brokers, saleOrders, payments]);
 
   const filtered = rows
     .filter((r) => {
@@ -95,15 +121,26 @@ export default function BrokerageLedger() {
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
+
   const totalDue = filtered.reduce((s, r) => s + r.due, 0);
   const totalPaid = filtered.reduce((s, r) => s + r.paid, 0);
   const totalBalance = filtered.reduce((s, r) => s + r.balance, 0);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Brokerage Report</h1>
-        <p className="text-muted-foreground">Brokerage due, paid &amp; balance per sale order (₹2,000 flat per order, payments allocated FIFO).</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Brokerage Report</h1>
+          <p className="text-muted-foreground">Brokerage due, paid &amp; balance per sale order (₹2,000 flat per order, payments allocated FIFO).</p>
+        </div>
+        <ExportButtons
+          filename="Brokerage_Report"
+          title="Brokerage Statement"
+          subtitle={`${filtered.length} entry(s)`}
+          columns={BROKERAGE_LEDGER_COLUMNS}
+          rows={filtered}
+        />
       </div>
 
       {/* Filters Bar */}
@@ -177,7 +214,7 @@ export default function BrokerageLedger() {
                 {filtered.length === 0 ? (
                   <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No brokerage entries match selected filters.</TableCell></TableRow>
                 ) : (
-                  filtered.map((r) => (
+                  visible.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>{shortDate(r.date)}</TableCell>
                       <TableCell className="font-mono text-xs">{r.invoiceNumber ?? '-'}</TableCell>
@@ -192,6 +229,7 @@ export default function BrokerageLedger() {
                 )}
               </TableBody>
             </Table>
+            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
         </>
       )}

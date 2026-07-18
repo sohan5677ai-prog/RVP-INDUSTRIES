@@ -23,6 +23,16 @@ export const PAPPU_CONSUMABLE = 0.8; // Fraction of milled pappu that is consuma
 // actual per-tonne rates live in the FreightRate table, managed in Settings.
 export const SALE_DESTINATIONS = ['Surat', 'Barshi', 'Nagar'] as const;
 
+/**
+ * Round a rupee AMOUNT to whole rupees, half-up (₹100.50 → ₹101). Reserved for
+ * party-ledger / payment / receipt settlement, where the ERP settles to whole
+ * rupees. Costing, valuation and analytics (Order Planner, WAC, margins, P&L)
+ * deliberately keep paise, so this is NOT applied to the calc helpers below.
+ */
+export function roundRupee(n: number): number {
+  return Math.round(n || 0);
+}
+
 /** Outward freight in rupees: ratePerTonne × tonnes. */
 export function calcSaleFreight(weightKg: number, ratePerTonne: number): number {
   return Math.round((weightKg / 1000) * (ratePerTonne || 0) * 100) / 100;
@@ -103,12 +113,33 @@ export function calcTotal(finalKg: number, pricePerKg: number): number {
   return finalKg * pricePerKg;
 }
 
+/**
+ * DELIVERY (landed) cost price of black seed, ₹/kg. The company PAYS the supplier
+ * the base price, but the true cost it INCURS also carries the inward freight, so
+ * every black-seed COST/valuation view (Order Planner, Stock by Party, Stock by
+ * Location, Black Seed Stock, pappu margins) prices seed at this landed rate.
+ * Party-facing figures (party ledger, verification, purchase dues) must keep using
+ * the raw base price - that is what is actually payable.
+ *
+ * Formula: landed = base + (freight / freightBasisKg). `freightBasisKg` is the tonnage
+ * the freight is spread across - the whole-vehicle tonnage for a SHARED lorry, or this
+ * arrival's own net weight for a single-party lorry (a full lorry makes the two equal).
+ * So a party's per-kg freight = totalFreight / totalTonnage, and their freight in ₹ is
+ * that rate × their net weight. DELIVERY-priced POs bake freight into the quoted rate,
+ * so pass freight = 0 and landed == base. Freight of 0 leaves the base price untouched.
+ */
+export function landedPricePerKg(basePrice: number, freightBasisKg: number, freight: number): number {
+  if (!(freight > 0) || !(freightBasisKg > 0)) return basePrice;
+  return Math.round((basePrice + freight / freightBasisKg) * 100) / 100;
+}
+
 /** Weighbridge fee (kata fee) based on net weight tonnage. */
 export function calcKataFee(netKg: number, isCompanyVehicle: boolean = false): number {
   if (isCompanyVehicle) return 0;
   const tonnes = netKg / 1000;
-  if (tonnes <= 15) return 50;
-  if (tonnes <= 30) return 150;
+  if (tonnes <= 5) return 50;
+  if (tonnes <= 15) return 100;
+  if (tonnes <= 25) return 150;
   return 200;
 }
 

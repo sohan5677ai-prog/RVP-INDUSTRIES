@@ -93,6 +93,7 @@ export interface HuskExpenses {
   drawingsReddy: number;
   ccInterest: number;
   termLoanInterest: number;
+  termLoanPrincipal: number;
 }
 
 // Map frontend expense labels to their exact backend keys. Also flag the 
@@ -115,6 +116,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'drawingsReddy',      label: 'Drawings - Reddy',     pappu: false },
   { key: 'ccInterest',         label: 'CC Interest',          pappu: false },
   { key: 'termLoanInterest',   label: 'Term Loan Interest',   pappu: false },
+  { key: 'termLoanPrincipal',  label: 'Term Loan Principal',  pappu: false },
 ];
 
 // Shared husk-pool computation: pooled byproduct revenue + every operating cost,
@@ -140,9 +142,15 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     transferAgg,
     shellAgg,
     huskAgg,
+    termLoanPrincipalAgg,
   ] = await Promise.all([
       prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
-      prisma.saleDispatch.findMany({ select: { weightKg: true, saleOrder: { select: { product: true } } } }),
+      prisma.$queryRaw<{product: string, weightKg: bigint}[]>`
+        SELECT so."product", SUM(sd."weightKg") as "weightKg"
+        FROM "SaleOrder" so
+        JOIN "SaleDispatch" sd ON sd."saleOrderId" = so.id
+        GROUP BY so."product"
+      `,
       prisma.purchase.aggregate({ _sum: { hamaliCharge: true } }),
       (prisma.manualHamaliCost.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
       (prisma.gunnyBagEntry.groupBy as any)({ by: ['direction'], _sum: { amount: true } }),
@@ -157,6 +165,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       prisma.stockTransfer.aggregate({ _sum: { transportCharge: true, unloadingHamali: true } }),
       prisma.shellTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
       prisma.huskTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
+      prisma.termLoanPrincipal.aggregate({ _sum: { amount: true } }),
     ]);
 
     // ── Revenue: pooled byproduct sales revenue (net credits on 40010) ──────────
@@ -172,10 +181,11 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     // ── Dispatched tonnage per product (drives recomputed loading hamali) ───────
     let pappuKg = 0, huskKg = 0, wasteKg = 0;
     for (const d of dispatches) {
-      const product = d.saleOrder.product;
-      if (product === 'PAPPU') pappuKg += d.weightKg;
-      else if (product === 'HUSK') huskKg += d.weightKg;
-      else if (WASTE_LOADING_PRODUCTS.has(product)) wasteKg += d.weightKg;
+      const product = d.product;
+      const weight = Number(d.weightKg || 0);
+      if (product === 'PAPPU') pappuKg += weight;
+      else if (product === 'HUSK') huskKg += weight;
+      else if (WASTE_LOADING_PRODUCTS.has(product)) wasteKg += weight;
     }
 
     const pappuLoading = customLoadingHamali(pappuKg, pappuRate.total, pappuRate.lorry, pappuRate.margin).company;
@@ -231,6 +241,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       drawingsReddy: drawings['REDDY'] ?? 0,
       ccInterest: interest['CC'] ?? 0,
       termLoanInterest: interest['TERM_LOAN'] ?? 0,
+      termLoanPrincipal: Number(termLoanPrincipalAgg._sum.amount ?? 0),
     };
 
   return { revenue, expenses };

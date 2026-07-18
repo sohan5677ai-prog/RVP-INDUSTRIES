@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 interface ElectricityBill {
   id: string;
@@ -20,6 +22,14 @@ interface ElectricityBill {
   amount: string;
   note: string | null;
 }
+
+const ELECTRICITY_COLUMNS: ExportColumn<ElectricityBill>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Month', value: (r) => r.month },
+  { header: 'Units', value: (r) => r.units, numFmt: '#,##0', align: 'right' },
+  { header: 'Bill Amount', value: (r) => rupees(r.amount), excel: (r) => Number(r.amount), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Note', value: (r) => r.note ?? '' },
+];
 
 const today = () => new Date().toISOString().slice(0, 10);
 const thisMonth = () => new Date().toISOString().slice(0, 7);
@@ -81,7 +91,12 @@ export default function Electricity() {
         icon={Zap}
         title="Electricity"
         description="Monthly electricity bills. The total bill amount is deducted from the husk recovery pool."
-        actions={<Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>}
+        actions={
+          <>
+            <ExportButtons filename="Electricity_Bills" title="Electricity Bills" subtitle={`${rows.length} bill(s)`} columns={ELECTRICITY_COLUMNS} rows={rows} />
+            <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

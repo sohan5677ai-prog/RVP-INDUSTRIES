@@ -17,6 +17,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 type LocationType = 'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi';
 
@@ -394,6 +396,14 @@ export default function StockLocation() {
 
   const isLoading = loadingSeed || loadingTransfers || loadingLoans || loadingPlanner;
 
+  const exportColumns: ExportColumn<typeof visibleBands[number]>[] = [
+    { header: 'Black Seed Price', value: (b) => rupees(b.price), excel: (b) => b.price, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Lorries', value: (b) => b.lorries || '', align: 'right' },
+    { header: 'Received MT', value: (b) => toTonnes(b.receivedKg).toFixed(2), excel: (b) => toTonnes(b.receivedKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Remaining MT', value: (b) => toTonnes(b.remainingKg).toFixed(2), excel: (b) => toTonnes(b.remainingKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Remaining Valuation', value: (b) => rupees(b.remainingValue), excel: (b) => b.remainingValue, numFmt: '#,##0.00', align: 'right' },
+  ];
+
   function toggle(key: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -412,14 +422,23 @@ export default function StockLocation() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Stock by Location</h1>
-        <p className="text-muted-foreground">
-          Location-wise black-seed stock grouped into price bands, same as the Order Planner. Transfers out of
-          storage and pappu sold at the process deplete stock <span className="font-medium">top to bottom</span> -
-          highest-priced seed first, oldest lot first within a band - so the weighted-average price reflects the
-          pooled stock still on hand at each location. Valuation excludes GST.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Stock by Location</h1>
+          <p className="text-muted-foreground">
+            Location-wise black-seed stock grouped into price bands, same as the Order Planner. Transfers out of
+            storage and pappu sold at the process deplete stock <span className="font-medium">top to bottom</span> -
+            highest-priced seed first, oldest lot first within a band - so the weighted-average price reflects the
+            pooled stock still on hand at each location. Valuation excludes GST.
+          </p>
+        </div>
+        <ExportButtons
+          filename={`Stock_By_Location_${String(selectedLoc).replace(/\s+/g, '_')}`}
+          title={`Stock by Location — ${selectedLoc}`}
+          subtitle={`${visibleBands.length} band(s)`}
+          columns={exportColumns}
+          rows={visibleBands}
+        />
       </div>
 
       {/* KPI tiles */}
@@ -531,30 +550,28 @@ export default function StockLocation() {
         )}
       </div>
 
-      {/* Per-location breakdown tiles (when "All" is selected) */}
-      {selectedLoc === 'All' && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {locations.map((loc) => {
-            const m = getMetrics(loc);
-            return (
-              <button
-                key={loc}
-                type="button"
-                onClick={() => setSelectedLoc(loc)}
-                className="rounded-lg border bg-card p-3 text-left hover:border-primary/50 transition-colors"
-              >
-                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{loc}</div>
-                <div className="text-lg font-bold text-primary mt-1">{toTonnes(m.totalRemWeightKg).toFixed(2)} MT</div>
-                <div className="text-xs text-emerald-600 font-medium">{rupees(m.totalRemValue)} stock</div>
-                <div className="text-xs text-violet-600 font-medium">{rupees(m.totalOutstandingLoan)} loan</div>
-                <div className="text-xs text-muted-foreground">
-                  {rupees(m.overallAvg)}/kg avg
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Per-location breakdown tiles - always visible, regardless of the selected location below */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {locations.map((loc) => {
+          const m = getMetrics(loc);
+          return (
+            <button
+              key={loc}
+              type="button"
+              onClick={() => setSelectedLoc(loc)}
+              className={`rounded-lg border bg-card p-3 text-left hover:border-primary/50 transition-colors ${selectedLoc === loc ? 'border-primary/50 ring-1 ring-primary/30' : ''}`}
+            >
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{loc}</div>
+              <div className="text-lg font-bold text-primary mt-1">{toTonnes(m.totalRemWeightKg).toFixed(2)} MT</div>
+              <div className="text-xs text-emerald-600 font-medium">{rupees(m.totalRemValue)} stock</div>
+              <div className="text-xs text-violet-600 font-medium">{rupees(m.totalOutstandingLoan)} loan</div>
+              <div className="text-xs text-muted-foreground">
+                {rupees(m.overallAvg)}/kg avg
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Price-band ledger */}
       <div className="rounded-lg border bg-card">

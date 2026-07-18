@@ -19,8 +19,30 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 const DUST_STORAGE = 'PGR COLD';
+
+const DUST_PURCHASE_COLUMNS: ExportColumn<DustPurchase>[] = [
+  { header: 'Date', value: (p) => shortDate(p.purchaseDate) },
+  { header: 'Party', value: (p) => p.party?.name ?? '' },
+  { header: 'Invoice', value: (p) => p.invoiceNumber ?? '' },
+  { header: 'Lorry', value: (p) => p.lorryNumber ?? '' },
+  { header: 'Weight (kg)', value: (p) => p.weightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Price/kg', value: (p) => rupees(p.pricePerKg), excel: (p) => Number(p.pricePerKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Amount', value: (p) => rupees(p.amount), excel: (p) => Number(p.amount), numFmt: '#,##0.00', align: 'right' },
+];
+
+const DUST_TRANSFER_COLUMNS: ExportColumn<ShellTransfer>[] = [
+  { header: 'Date', value: (t) => shortDate(t.transferDate) },
+  { header: 'Route', value: (t) => `${t.fromLocation} → ${t.toLocation}` },
+  { header: 'Lorry', value: (t) => t.lorryNumber ?? '' },
+  { header: 'Weight (kg)', value: (t) => t.weightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Hamali', value: (t) => rupees(t.hamaliCharge), excel: (t) => Number(t.hamaliCharge), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Transport', value: (t) => rupees(t.transportCharge), excel: (t) => Number(t.transportCharge), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Total Cost', value: (t) => rupees(t.totalCost), excel: (t) => Number(t.totalCost), numFmt: '#,##0.00', align: 'right' },
+];
 
 /**
  * Pre Cleaner Dust detail. Purchases record dust bought IN from an outside party
@@ -67,7 +89,7 @@ function PurchasesPanel() {
   });
 
   const supplierOptions = (parties ?? [])
-    .filter((p) => p.type !== 'BUYER')
+    .filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM')
     .map((p) => ({ value: p.id, label: p.name }));
 
   const boughtKg = (purchases ?? []).reduce((s, p) => s + p.weightKg, 0);
@@ -140,9 +162,12 @@ function PurchasesPanel() {
         <p className="text-sm text-muted-foreground">
           Pre-cleaner dust bought from an outside party · each purchase raises a supplier payable.
         </p>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4" /> Record Purchase
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename="PreCleaner_Dust_Purchases" title="Pre Cleaner Dust Purchases" subtitle={`${purchases?.length ?? 0} purchase(s)`} columns={DUST_PURCHASE_COLUMNS} rows={purchases ?? []} />
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4" /> Record Purchase
+          </Button>
+        </div>
       </div>
       <div className="glass rounded-2xl overflow-hidden">
         <Table>
@@ -326,9 +351,12 @@ function TransfersPanel() {
         <p className="text-sm text-muted-foreground">
           Factory → {DUST_STORAGE} transfers · hamali ₹{SHELL_HAMALI_RATE}/t + ₹{SHELL_TRANSPORT} transport.
         </p>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4" /> Record Transfer
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename="PreCleaner_Dust_Transfers" title="Pre Cleaner Dust Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={DUST_TRANSFER_COLUMNS} rows={transfers ?? []} />
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4" /> Record Transfer
+          </Button>
+        </div>
       </div>
       <div className="glass rounded-2xl overflow-hidden">
         <Table>

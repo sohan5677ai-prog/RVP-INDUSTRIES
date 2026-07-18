@@ -11,6 +11,9 @@ import {
   productLoadingHamali,
   transferHamali,
   shellTransferCost,
+  roundRupee,
+  calcSaleFreight,
+  landedPricePerKg,
 } from './calc';
 
 describe('crossVerify', () => {
@@ -174,5 +177,22 @@ describe('loanInterest', () => {
   });
   it('zero rate -> zero interest', () => {
     expect(loanInterest(1500000, 0, 60)).toBe(0);
+  });
+});
+
+describe('roundRupee - reserved for party-ledger / payment / receipt settlement', () => {
+  it('rounds half-up to whole rupees', () => {
+    expect(roundRupee(100.49)).toBe(100);
+    expect(roundRupee(100.5)).toBe(101);
+    expect(roundRupee(100.99)).toBe(101);
+  });
+  it('handles null/undefined/NaN as 0', () => {
+    expect(roundRupee(undefined as unknown as number)).toBe(0);
+    expect(roundRupee(NaN)).toBe(0);
+  });
+  it('costing helpers still keep paise (NOT rounded to whole rupees)', () => {
+    // 10.4t × ₹123.45/t = 1283.88 - paise preserved for costing/valuation
+    expect(calcSaleFreight(10400, 123.45)).toBeCloseTo(1283.88, 2);
+    expect(landedPricePerKg(50, 10000, 12345)).toBe(51.23);
   });
 });

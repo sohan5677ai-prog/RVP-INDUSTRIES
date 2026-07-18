@@ -3,7 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import type { Receipt, Party, ReceiptType } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -62,13 +66,32 @@ const MANAGED_ELSEWHERE: Partial<Record<ReceiptType, string>> = {
   GUNNY_BAGS_SALE: 'Gunny Bags page',
 };
 
+function receiptTypeLabel(r: Receipt): string {
+  return RECEIPT_TYPES.find((t) => t.value === r.type)?.label ?? r.type;
+}
+
+function receiptReceivedFrom(r: Receipt): string {
+  if (r.type === 'BUYER') return r.party?.name ?? '-';
+  return r.payer || receiptTypeLabel(r);
+}
+
+const RECEIPT_EXPORT_COLUMNS: ExportColumn<Receipt>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Type', value: (r) => receiptTypeLabel(r) },
+  { header: 'Received From', value: (r) => receiptReceivedFrom(r) },
+  { header: 'Ref / Cheque', value: (r) => r.reference ?? '' },
+  { header: 'Description', value: (r) => r.description ?? '' },
+  { header: 'Amount', value: (r) => rupees(r.amount), excel: (r) => Number(r.amount), numFmt: '#,##0.00', align: 'right' },
+];
+
 export default function ReceiptsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
   const { data: receipts, isLoading } = useQuery({
-    queryKey: ['receipts'],
-    queryFn: () => api<Receipt[]>('/receipts'),
+    // Show the full receipt history, not just the latest 100 (server default).
+    queryKey: ['receipts', { all: true }],
+    queryFn: () => api<Receipt[]>('/receipts?all=true'),
   });
 
   const { data: parties } = useQuery({
@@ -77,6 +100,10 @@ export default function ReceiptsPage() {
   });
 
   const buyers = parties?.filter((p) => p.type === 'BUYER') ?? [];
+
+  // Render the log progressively so a long receipt history doesn't mount
+  // thousands of rows on open; more append as you scroll.
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleReceipts = [] } = usePagedRows(receipts ?? [], 50);
 
   // Form State
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -174,9 +201,18 @@ export default function ReceiptsPage() {
             Record cash or bank receipts from buyers (accounts receivable collection) or other income. Automatically generates general ledger journal entries.
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4" /> Record Receipt
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons
+            filename="Receipts"
+            title="Receipts Register"
+            subtitle={`${receipts?.length ?? 0} receipt(s)`}
+            columns={RECEIPT_EXPORT_COLUMNS}
+            rows={receipts ?? []}
+          />
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4" /> Record Receipt
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card overflow-x-auto">
@@ -199,7 +235,7 @@ export default function ReceiptsPage() {
             {receipts?.length === 0 && (
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No receipts recorded yet.</TableCell></TableRow>
             )}
-            {receipts?.map((r) => {
+            {visibleReceipts.map((r) => {
               const typeLabel = RECEIPT_TYPES.find((t) => t.value === r.type)?.label ?? r.type;
               const managedIn = MANAGED_ELSEWHERE[r.type];
               let receivedFromText = '-';
@@ -242,6 +278,7 @@ export default function ReceiptsPage() {
             })}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

@@ -32,6 +32,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+
+const BROKER_COLUMNS: ExportColumn<Broker>[] = [
+  { header: 'Name', value: (b) => b.name },
+  { header: 'Phone', value: (b) => b.phone ?? '' },
+];
 
 const brokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -99,9 +106,18 @@ export default function Brokers() {
           <h1 className="text-2xl font-bold">Brokers</h1>
           <p className="text-muted-foreground">Sale-order middlemen</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New Broker
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons
+            filename="Brokers"
+            title="Brokers"
+            subtitle={`${brokers?.length ?? 0} broker(s)`}
+            columns={BROKER_COLUMNS}
+            rows={brokers ?? []}
+          />
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New Broker
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card">

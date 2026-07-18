@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -31,12 +31,24 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
   
   const [rvpFirstWeightKg, setRvpFirstWeightKg] = useState('');
   const [rvpSecondWeightKg, setRvpSecondWeightKg] = useState('');
+  // Direct net-weight mode: for spot purchases with no separate tare weighment,
+  // the operator ticks this and enters the RVP net directly. It still auto-records
+  // the purchase and routes the arrival to Verification.
+  const [useNetWeight, setUseNetWeight] = useState(false);
+  const [rvpNetWeightKg, setRvpNetWeightKg] = useState('');
   const [billingWeightKg, setBillingWeightKg] = useState('');
   const [partyKataKg, setPartyKataKg] = useState('');
+  // When the RVP net, billing weight and party kata are all identical (common for
+  // spot buys), the operator enters the net once and it fills all three.
+  const [sameWeight, setSameWeight] = useState(false);
   
   const [hasGst, setHasGst] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [freight, setFreight] = useState('0');
+  // Shared lorry: the inward freight covers several parties' stock, so it is spread
+  // over the whole vehicle's tonnage (not just this party's net weight).
+  const [sharedVehicle, setSharedVehicle] = useState(false);
+  const [freightTonnageKg, setFreightTonnageKg] = useState('');
   const [selfVehicle, setSelfVehicle] = useState(false);
   const [loadingLocation, setLoadingLocation] = useState<'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi'>('RVP');
 
@@ -46,7 +58,7 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
     queryFn: () => api<Party[]>('/parties'),
   });
 
-  const suppliers = parties?.filter((p) => p.type === 'SUPPLIER' || p.type === 'BOTH') ?? [];
+  const suppliers = useMemo(() => parties?.filter((p) => p.type === 'SUPPLIER' || p.type === 'BOTH') ?? [], [parties]);
 
   const mutation = useMutation({
     // Route through the api() helper so the auth token is attached (the raw
@@ -71,17 +83,30 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
     setPricePerKg('');
     setRvpFirstWeightKg('');
     setRvpSecondWeightKg('');
+    setUseNetWeight(false);
+    setRvpNetWeightKg('');
     setBillingWeightKg('');
     setPartyKataKg('');
+    setSameWeight(false);
     setHasGst(false);
     setInvoiceNumber('');
     setFreight('0');
+    setSharedVehicle(false);
+    setFreightTonnageKg('');
     setSelfVehicle(false);
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!partyId) return toast.error('Please select a supplier');
+    if (useNetWeight && (Number(rvpNetWeightKg) || 0) <= 0) {
+      return toast.error('Enter the RVP net weight');
+    }
+
+    // "All three same" (direct-net only): the RVP net doubles as billing + party kata.
+    const allSame = useNetWeight && sameWeight;
+    const effectiveBilling = allSame ? rvpNetWeightKg : billingWeightKg;
+    const effectivePartyKata = allSame ? rvpNetWeightKg : partyKataKg;
 
     const fd = new FormData();
     fd.append('partyId', partyId);
@@ -95,14 +120,27 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
         fd.append('invoiceNumber', invoiceNumber);
       }
     }
-    fd.append('rvpFirstWeightKg', rvpFirstWeightKg);
-    fd.append('rvpSecondWeightKg', rvpSecondWeightKg || '0');
-    fd.append('billingWeightKg', billingWeightKg);
-    fd.append('partyKataKg', partyKataKg);
+    if (useNetWeight) {
+      // Direct net entry: store the net as the first weight (no tare) and flag the
+      // explicit net so the server records it as-is and skips first − second.
+      fd.append('rvpNetWeightKg', rvpNetWeightKg);
+      fd.append('rvpFirstWeightKg', rvpNetWeightKg);
+      fd.append('rvpSecondWeightKg', '0');
+    } else {
+      fd.append('rvpFirstWeightKg', rvpFirstWeightKg);
+      fd.append('rvpSecondWeightKg', rvpSecondWeightKg || '0');
+    }
+    fd.append('billingWeightKg', effectiveBilling);
+    fd.append('partyKataKg', effectivePartyKata);
     fd.append('loadingLocation', loadingLocation);
     fd.append('selfVehicle', selfVehicle ? 'true' : 'false');
     if (priceType === 'BASE') {
       fd.append('freightCharge', freight);
+      // Shared lorry: spread the freight over the whole vehicle's tonnage. Left blank
+      // (or unshared) → server falls back to this party's net weight as the basis.
+      if (sharedVehicle && Number(freightTonnageKg) > 0) {
+        fd.append('freightTonnageKg', freightTonnageKg);
+      }
     }
 
     mutation.mutate(fd);
@@ -156,27 +194,69 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 pt-2">
-            <div className="space-y-2">
-              <Label htmlFor="rvpFirst">RVP First Weight (Gross Kg)</Label>
-              <Input id="rvpFirst" type="number" value={rvpFirstWeightKg} onChange={(e) => setRvpFirstWeightKg(e.target.value)} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rvpSecond">RVP Second Weight (Tare Kg)</Label>
-              <Input id="rvpSecond" type="number" value={rvpSecondWeightKg} onChange={(e) => setRvpSecondWeightKg(e.target.value)} placeholder="0 (Optional if direct unload)" />
-            </div>
+          <div className="flex items-center space-x-2 pt-2">
+            <input
+              type="checkbox"
+              id="useNetWeight"
+              checked={useNetWeight}
+              onChange={(e) => setUseNetWeight(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <Label htmlFor="useNetWeight" className="cursor-pointer">
+              Enter RVP Net Weight directly <span className="text-xs font-normal text-muted-foreground">(spot purchase — no 2nd weighment)</span>
+            </Label>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="billing">Billing Weight (Kg)</Label>
-              <Input id="billing" type="number" value={billingWeightKg} onChange={(e) => setBillingWeightKg(e.target.value)} required />
+          {useNetWeight ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="rvpNet">RVP Net Weight (Kg)</Label>
+                  <Input id="rvpNet" type="number" value={rvpNetWeightKg} onChange={(e) => setRvpNetWeightKg(e.target.value)} required placeholder="e.g. 24500" />
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="sameWeight"
+                  checked={sameWeight}
+                  onChange={(e) => setSameWeight(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <Label htmlFor="sameWeight" className="cursor-pointer">
+                  Billing &amp; Party Kata same as RVP Net <span className="text-xs font-normal text-muted-foreground">(fills all three with the net)</span>
+                </Label>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="partyKata">Party Kata (Kg)</Label>
-              <Input id="partyKata" type="number" value={partyKataKg} onChange={(e) => setPartyKataKg(e.target.value)} required />
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="rvpFirst">RVP First Weight (Gross Kg)</Label>
+                <Input id="rvpFirst" type="number" value={rvpFirstWeightKg} onChange={(e) => setRvpFirstWeightKg(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rvpSecond">RVP Second Weight (Tare Kg)</Label>
+                <Input id="rvpSecond" type="number" value={rvpSecondWeightKg} onChange={(e) => setRvpSecondWeightKg(e.target.value)} placeholder="0 (Optional if direct unload)" />
+              </div>
             </div>
-          </div>
+          )}
+
+          {useNetWeight && sameWeight ? (
+            <p className="text-xs text-muted-foreground">
+              Billing weight and party kata will both be set to the RVP net ({rvpNetWeightKg || '—'} kg).
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="billing">Billing Weight (Kg)</Label>
+                <Input id="billing" type="number" value={billingWeightKg} onChange={(e) => setBillingWeightKg(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="partyKata">Party Kata (Kg)</Label>
+                <Input id="partyKata" type="number" value={partyKataKg} onChange={(e) => setPartyKataKg(e.target.value)} required />
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center space-x-2 pt-2 pb-2">
             <input 
@@ -210,9 +290,56 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
           )}
 
           {priceType === 'BASE' && (
-            <div className="space-y-2">
-              <Label htmlFor="freight">Inward Freight (₹) - Base-priced PO</Label>
-              <Input id="freight" type="number" step="0.01" value={freight} onChange={(e) => setFreight(e.target.value)} placeholder="0" />
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="space-y-2">
+                <Label htmlFor="freight">Inward Freight (₹) - Base-priced PO</Label>
+                <Input id="freight" type="number" step="0.01" value={freight} onChange={(e) => setFreight(e.target.value)} placeholder="0" />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="sharedVehicle"
+                  checked={sharedVehicle}
+                  onChange={(e) => setSharedVehicle(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <Label htmlFor="sharedVehicle" className="cursor-pointer">
+                  Shared vehicle? <span className="text-xs font-normal text-muted-foreground">(freight covers other parties too — spread over total lorry tonnage)</span>
+                </Label>
+              </div>
+
+              {sharedVehicle && (
+                <div className="space-y-2">
+                  <Label htmlFor="freightTonnage">Total Vehicle Tonnage (Kg)</Label>
+                  <Input
+                    id="freightTonnage"
+                    type="number"
+                    value={freightTonnageKg}
+                    onChange={(e) => setFreightTonnageKg(e.target.value)}
+                    placeholder="e.g. 30000 (whole lorry load)"
+                  />
+                </div>
+              )}
+
+              {(() => {
+                const base = Number(pricePerKg) || 0;
+                const frt = Number(freight) || 0;
+                const net = useNetWeight
+                  ? Number(rvpNetWeightKg) || 0
+                  : (Number(rvpFirstWeightKg) || 0) - (Number(rvpSecondWeightKg) || 0);
+                const basis = sharedVehicle && Number(freightTonnageKg) > 0 ? Number(freightTonnageKg) : net;
+                if (base <= 0 || frt <= 0 || basis <= 0) return null;
+                const perKg = frt / basis;
+                const delivery = base + perKg;
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    Delivery price = ₹{base.toFixed(2)} + (₹{frt.toLocaleString('en-IN')} ÷ {basis.toLocaleString('en-IN')} kg)
+                    {' = '}<span className="font-semibold text-foreground">₹{delivery.toFixed(2)}/kg</span>
+                    {' '}(+₹{perKg.toFixed(2)} freight/kg)
+                  </p>
+                );
+              })()}
             </div>
           )}
 

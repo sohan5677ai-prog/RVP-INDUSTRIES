@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -14,6 +14,10 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck } from 'lucide-react';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -59,6 +63,7 @@ function titleCase(s: string) {
 
 function FreightTable({
   freightLabel,
+  exportName,
   rows,
   paymentStatusFor,
   dueFor,
@@ -67,6 +72,7 @@ function FreightTable({
   paymentsByLorry,
 }: {
   freightLabel: string;
+  exportName: string;
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
@@ -75,6 +81,7 @@ function FreightTable({
   paymentsByLorry: Map<string, { date: string, amount: number, reference: string | null }[]>;
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(rows, 50);
 
   const t = {
     freight: rows.reduce((s, r) => s + r.freight, 0),
@@ -84,8 +91,32 @@ function FreightTable({
     net: rows.reduce((s, r) => s + r.net, 0),
   };
 
+  const exportColumns: ExportColumn<FreightRow>[] = [
+    { header: 'Date', value: (r) => shortDate(r.date) },
+    { header: 'Lorry No', value: (r) => r.lorry ?? '' },
+    { header: 'Invoice No', value: (r) => r.invoice ?? '' },
+    ...(hideDeductions ? [
+      { header: 'Sourced', value: (r: FreightRow) => r.sourced },
+      { header: 'Destination', value: (r: FreightRow) => r.destination ?? '' },
+      { header: 'Party', value: (r: FreightRow) => r.party ?? '' },
+    ] : []),
+    { header: freightLabel, value: (r) => rupees(r.freight), excel: (r) => r.freight, numFmt: '#,##0.00', align: 'right' },
+    ...(hideDeductions ? [] : [
+      { header: 'Hamali', value: (r: FreightRow) => (r.hamali ? rupees(r.hamali) : ''), excel: (r: FreightRow) => r.hamali || null, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Kata', value: (r: FreightRow) => (r.kata ? rupees(r.kata) : ''), excel: (r: FreightRow) => r.kata || null, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Transport', value: (r: FreightRow) => (r.transport ? rupees(r.transport) : ''), excel: (r: FreightRow) => r.transport || null, numFmt: '#,##0.00', align: 'right' as const },
+    ]),
+    { header: 'Net Freight', value: (r) => rupees(r.net), excel: (r) => r.net, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Delivery Status', value: (r) => titleCase(r.deliveryStatus) },
+    { header: 'Payment Status', value: (r) => paymentStatusFor(r) },
+    { header: 'Due', value: (r) => rupees(dueFor(r)), excel: (r) => dueFor(r), numFmt: '#,##0.00', align: 'right' },
+  ];
+
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="flex justify-end px-3 py-2 border-b">
+        <ExportButtons filename={exportName} title={`${freightLabel} Dues`} subtitle={`${rows.length} record(s)`} columns={exportColumns} rows={rows} />
+      </div>
       <Table>
         <TableHeader>
           <TableRow>
@@ -109,7 +140,7 @@ function FreightTable({
           {rows.length === 0 && (
             <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No records.</TableCell></TableRow>
           )}
-          {rows.map((r) => {
+          {(pageRows ?? []).map((r) => {
             const pay = paymentStatusFor(r);
             const due = dueFor(r);
             const isExpanded = expandedRow === r.lorry;
@@ -207,6 +238,7 @@ function FreightTable({
           </tfoot>
         )}
       </Table>
+      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
   );
 }
@@ -223,15 +255,16 @@ export default function FreightDuesPage() {
 
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases'],
-    queryFn: () => api<PurchaseRow[]>('/purchases'),
+    queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
   });
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
     queryKey: ['sale-orders'],
     queryFn: () => api<SaleOrder[]>('/sale-orders'),
   });
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    queryKey: ['payments'],
-    queryFn: () => api<Payment[]>('/payments'),
+    // Full history — dues are matched against every payment, not just latest 100.
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
   });
   const { data: company } = useQuery({
     queryKey: ['company'],
@@ -239,6 +272,12 @@ export default function FreightDuesPage() {
   });
 
   const isLoading = loadingPurchases || loadingSales || loadingPayments;
+
+  // The full freight allocation (outward/inward/KNM split + per-lorry FIFO
+  // payment matching) is heavy and depends only on the fetched data. Memoize it
+  // so the payment dialog's keystrokes don't recompute the whole thing per
+  // render. retention/knmList live inside so the memo stays referentially stable.
+  const { outwardRows, inwardRows, knmRows, rowStatus, rowDue, paymentsByLorry } = useMemo(() => {
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
   const knmList = (company?.companyVehicles || '').split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
 
@@ -250,10 +289,11 @@ export default function FreightDuesPage() {
     .filter(({ d }) => Number(d.freightCharge) > 0)
     .map(({ o, d }) => {
       const freight = Number(d.freightCharge);
-      const isKnm = d.vehicleNumber ? knmList.includes(d.vehicleNumber.trim().toLowerCase()) : false;
+      const provider = (d as any).transportProvider ?? (d.vehicleNumber && knmList.includes(d.vehicleNumber.trim().toLowerCase()) ? 'KNM' : 'SURYA');
+      const isKnm = provider === 'KNM';
       const hamali = isKnm ? 0 : (o.product === 'PAPPU' ? pappuLoadingHamali(d.weightKg).lorry : calcHamali(d.weightKg));
       const kata = isKnm ? 0 : calcKataFee(d.weightKg);
-      const transport = isKnm ? 0 : retention;
+      const transport = provider === 'SURYA' ? retention : (provider === 'OTHER' ? Number((d as any).customRetention ?? 0) : 0);
       return {
         id: d.id,
         date: d.dispatchDate,
@@ -308,7 +348,7 @@ export default function FreightDuesPage() {
   const paidByLorry = new Map<string, number>();
   const paymentsByLorry = new Map<string, { date: string, amount: number, reference: string | null }[]>();
   payments?.forEach((p) => {
-    if (p.type === 'TRANSPORTER' && p.lorryNumber) {
+    if (p.type === 'TRANSPORT' && p.lorryNumber) {
       const k = p.lorryNumber.trim().toUpperCase();
       paidByLorry.set(k, (paidByLorry.get(k) ?? 0) + Number(p.amount));
       
@@ -350,6 +390,8 @@ export default function FreightDuesPage() {
       }
     }
   }
+  return { outwardRows, inwardRows, knmRows, rowStatus, rowDue, paymentsByLorry };
+  }, [saleOrders, purchases, payments, company]);
 
   function paymentStatusFor(r: FreightRow): PaymentStatus {
     return r.lorry ? (rowStatus.get(r.id) ?? 'Pending') : 'Pending';
@@ -424,7 +466,7 @@ export default function FreightDuesPage() {
               </CardHeader>
               <CardContent><div className="text-xl font-bold">{rupees(outwardNet)}</div></CardContent>
             </Card>
-            <FreightTable freightLabel="Outward Freight" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
+            <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
           </TabsContent>
 
           <TabsContent value="inward" className="space-y-4">
@@ -434,7 +476,7 @@ export default function FreightDuesPage() {
               </CardHeader>
               <CardContent><div className="text-xl font-bold">{rupees(inwardNet)}</div></CardContent>
             </Card>
-            <FreightTable freightLabel="Inward Freight" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
+            <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
           </TabsContent>
 
           <TabsContent value="knm" className="space-y-4">
@@ -444,7 +486,7 @@ export default function FreightDuesPage() {
               </CardHeader>
               <CardContent><div className="text-xl font-bold">{rupees(knmNet)}</div></CardContent>
             </Card>
-            <FreightTable freightLabel="KNM Freight" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+            <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
           </TabsContent>
         </Tabs>
       )}

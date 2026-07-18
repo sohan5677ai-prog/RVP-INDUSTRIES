@@ -22,6 +22,8 @@ import taxproRoutes from './taxpro.routes.js';
 import manualHamaliCostRoutes from './manualHamaliCost.routes.js';
 import hamaliVerificationRoutes from './hamaliVerification.routes.js';
 import poolReportRoutes from './poolReport.routes.js';
+import notesRoutes from './notes.routes.js';
+import emailLogRoutes from './emailLog.routes.js';
 import { globalSearch } from '../controllers/search.controller.js';
 const router = Router();
 
@@ -48,6 +50,8 @@ router.use('/', loanRoutes);
 router.use('/', manualHamaliCostRoutes);
 router.use('/', hamaliVerificationRoutes);
 router.use('/', poolReportRoutes);
+router.use('/', notesRoutes);
+router.use('/', emailLogRoutes);
 router.use('/system', systemRoutes);
 router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);

@@ -2,7 +2,7 @@ import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { createPaymentSchema } from '../schemas/payment.schema.js';
+import { createPaymentSchema, listPaymentsSchema } from '../schemas/payment.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 
@@ -15,7 +15,7 @@ import { extractTransactionData } from '../lib/gemini.js';
 export async function extractPaymentScreenshot(req: Request, res: Response) {
   if (!req.file) throw new HttpError(400, 'Screenshot file is required');
   const [parties, brokers] = await Promise.all([
-    prisma.party.findMany({ where: { type: { not: 'BUYER' } }, select: { name: true } }),
+    prisma.party.findMany({ where: { type: { notIn: ['BUYER', 'HAMALI_TEAM'] } }, select: { name: true } }),
     prisma.broker.findMany({ select: { name: true } }),
   ]);
   const candidates = [
@@ -27,8 +27,14 @@ export async function extractPaymentScreenshot(req: Request, res: Response) {
 }
 
 export async function listPayments(req: Request, res: Response) {
+  const { skip, take, all } = listPaymentsSchema.parse(req.query);
+  const isAll = all === 'true';
   const payments = await prisma.payment.findMany({
-    take: 100,
+    skip: isAll ? undefined : skip,
+    take: isAll ? undefined : take,
+    // No take limit: the Purchase Dues page matches payments to bills via FIFO
+    // across a supplier's full payment history. Capping at 100 makes fully-paid
+    // purchases reappear as unpaid once their payment falls off the recent list.
     orderBy: { date: 'desc' },
     include: {
       party: true,
@@ -40,6 +46,28 @@ export async function listPayments(req: Request, res: Response) {
 
 export async function createPayment(req: Request, res: Response) {
   const data = createPaymentSchema.parse(req.body);
+
+  // Double-submit guard: reject an identical payment (same counterparty, amount
+  // and value date) created within the last 10 seconds. A fast double-click on
+  // "Record Payment" fires two requests before the button disables; this stops
+  // the second from becoming a phantom duplicate. Keyed on the full identity
+  // (party/broker/lorry) so genuinely distinct payments that merely share an
+  // amount — e.g. two lorries with the same freight — are never blocked.
+  const recentDuplicate = await prisma.payment.findFirst({
+    where: {
+      type: data.type,
+      amount: data.amount,
+      date: data.date,
+      partyId: data.partyId ?? null,
+      brokerId: data.brokerId ?? null,
+      lorryNumber: data.lorryNumber ?? null,
+      purchaseId: data.purchaseId ?? null,
+      createdAt: { gte: new Date(Date.now() - 10_000) },
+    },
+  });
+  if (recentDuplicate) {
+    throw new HttpError(409, 'An identical payment was just recorded a moment ago. Refresh to confirm before recording it again.');
+  }
 
   const payment = await prisma.$transaction(async (tx) => {
     let partyName = undefined;
@@ -68,6 +96,7 @@ export async function createPayment(req: Request, res: Response) {
         payee: data.payee ?? null,
         reference: data.reference ?? null,
         description: data.description ?? null,
+        hamaliVerificationId: data.hamaliVerificationId ?? null,
       },
     });
 

@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Purchase, SaleOrder, HamaliRate, StockTransfer, ShellTransfer, ManualHamaliCost, ManualHamaliType, HamaliVerification, CompanyProfile } from '@/lib/types';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+import type { Purchase, SaleOrder, HamaliRate, StockTransfer, ShellTransfer, HuskTransfer, ManualHamaliCost, ManualHamaliType, HamaliVerification, CompanyProfile, Payment, Party } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { hamaliSplit, pappuLoadingHamali, calcHamali, customLoadingHamali, isVehicleExempt } from '@/lib/calc';
 import { Input } from '@/components/ui/input';
@@ -14,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Segmented } from '@/components/ui/segmented';
-import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, CheckCircle2 } from 'lucide-react';
+import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, CheckCircle2, ReceiptText, Users, Phone, Landmark } from 'lucide-react';
 
 // Manual hamali charge categories the crew is paid for but that can't be derived
 // from purchases/sales. Per-bag types compute amount = bags × rate; flat types
@@ -23,6 +27,9 @@ const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; d
   { value: 'BAG_CUTTING_NORMAL', label: 'Bag Cutting (Place A)', perBag: true, defaultRate: 3 },
   { value: 'BAG_CUTTING_DISTANCE', label: 'Bag Cutting (Place B)', perBag: true, defaultRate: 6 },
   { value: 'PAPPU_NET', label: 'Pappu Net', perBag: true, defaultRate: 6 },
+  { value: 'HUSK_PACKING', label: 'Husk Packing', perBag: true },
+  { value: 'TPS_BROKENS_PACKING', label: 'TPS Brokens Packing', perBag: true },
+  { value: 'TAMARIND_BYPRODUCTS_PACKING', label: 'Tamarind Byproducts Packing', perBag: true },
   { value: 'DIESEL', label: 'Diesel Cost', perBag: false },
   { value: 'MISC', label: 'Miscellaneous', perBag: false },
   { value: 'PAID', label: 'Paid to Hamali', perBag: false },
@@ -67,8 +74,21 @@ interface HamaliEntry {
   pl: number;
 }
 
+// A squared-off period surfaced in the Payables tab: its window, snapshot amount
+// due, how much has been settled, and the derived settlement status.
+interface PayableRow {
+  v: HamaliVerification;
+  from: string; // yyyy-mm-dd (inclusive)
+  to: string;   // yyyy-mm-dd (inclusive)
+  days: number;
+  payable: number;
+  paid: number;
+  outstanding: number;
+  status: 'PAID' | 'PARTIAL' | 'UNPAID';
+}
+
 export default function HamaliLedger() {
-  const [view, setView] = useState<'company' | 'hamali'>('company');
+  const [view, setView] = useState<'company' | 'hamali' | 'payables' | 'ledger'>('company');
   const [partyType, setPartyType] = useState<'ALL' | 'BUYER' | 'SUPPLIER'>('ALL');
   const [search, setSearch] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
@@ -120,9 +140,31 @@ export default function HamaliLedger() {
     queryFn: () => api<HamaliVerification[]>('/hamali-verifications'),
   });
 
+  // Crew-settlement payments (type HAMALI) — drive the Payables status and the
+  // debit side of the crew ledger. Fetch the full history (?all=true) so older
+  // settlements aren't dropped by the server's default 100-row cap.
+  const { data: payments } = useQuery({
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
+  });
+
+  // The single "Bikash and Team" hamali party crew payments are booked against
+  // (find-or-created server-side on first read).
+  const { data: teamParty } = useQuery({
+    queryKey: ['hamali-team-party'],
+    queryFn: () => api<Party>('/hamali-verifications/team-party'),
+  });
+
   // Square-off (reconciliation checkpoint) state
   const [squareDate, setSquareDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [squareNote, setSquareNote] = useState('');
+
+  // Payables tab: pay-out dialog + crew-ledger dialog state
+  const [payOpen, setPayOpen] = useState(false);
+  const [payVerif, setPayVerif] = useState<PayableRow | null>(null);
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payAmount, setPayAmount] = useState('');
+  const [payRef, setPayRef] = useState('');
 
   // Record-charge dialog state
   const [recordOpen, setRecordOpen] = useState(false);
@@ -182,7 +224,7 @@ export default function HamaliLedger() {
   });
 
   const createVerification = useMutation({
-    mutationFn: (body: { asOfDate: string; crewTotal: number; note: string | null }) =>
+    mutationFn: (body: { asOfDate: string; periodStart: string | null; crewTotal: number; note: string | null }) =>
       api<HamaliVerification>('/hamali-verifications', { method: 'POST', body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hamali-verifications'] });
@@ -201,10 +243,44 @@ export default function HamaliLedger() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  // Record a crew-settlement payment against a squared-off period. Books
+  // Dr Hamali payable (20200) / Cr Bank, and shows up on the Payments page.
+  const payCrew = useMutation({
+    mutationFn: () =>
+      api<Payment>('/payments', {
+        method: 'POST',
+        body: {
+          date: payDate,
+          amount: Number(payAmount),
+          type: 'HAMALI',
+          partyId: teamParty?.id ?? null,
+          hamaliVerificationId: payVerif?.v.id ?? null,
+          reference: payRef || null,
+          description: payVerif
+            ? `Hamali crew settlement ${shortDate(payVerif.from)} – ${shortDate(payVerif.to)}`
+            : 'Hamali crew settlement',
+        },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['hamali-verifications'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      toast.success('Crew payment recorded');
+      setPayOpen(false);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const manualValid = mMeta.perBag ? Number(mBags) > 0 && Number(mRate) > 0 : Number(mAmount) > 0;
 
   const isLoading = loadingPurchases || loadingSales || loadingStockTransfers || loadingShellTransfers || loadingHuskTransfers;
 
+  // The three hamali entry arrays below are derived purely from fetched data and
+  // are the heavy part of this page (saleEntries does a double flatMap + per-row
+  // rate lookups). Memoize them so typing in the search box or the manual-hamali
+  // record dialog doesn't rebuild every entry on each keystroke.
+  const { purchaseEntries, saleEntries, transferEntries } = useMemo(() => {
   // Purchase (inward) hamali - funding split inventory/lorry, usage crew/margin.
   const purchaseEntries: HamaliEntry[] = (purchases ?? []).map((p) => {
     // Company (KNM) transport vehicles have no external lorry to recover from, so
@@ -340,6 +416,9 @@ export default function HamaliLedger() {
     }),
   ];
 
+  return { purchaseEntries, saleEntries, transferEntries };
+  }, [purchases, saleOrders, hamaliRates, companyProfile, stockTransfers, shellTransfers, huskTransfers]);
+
   const q = search.trim().toLowerCase();
   const filtered = [...purchaseEntries, ...saleEntries, ...transferEntries]
     .filter((e) => {
@@ -353,6 +432,8 @@ export default function HamaliLedger() {
       return true;
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
 
   // Metrics
   const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0);
@@ -389,8 +470,130 @@ export default function HamaliLedger() {
   const pendingCrewTotal = Math.round((pendingCrewFromEntries + pendingCrewFromManual) * 100) / 100;
   const squareValid = (verifiedThroughDay == null || squareDate > verifiedThroughDay) && pendingCrewTotal > 0;
 
-  // Crew payable across the currently filtered rows (Hamali view metric).
-  const totalCrew = filtered.reduce((acc, e) => acc + e.crew, 0);
+  // Crew payable across the currently filtered rows (Hamali view metric). This
+  // now also folds in the Recorded Charges (bag cutting, pappu net, diesel, misc)
+  // net of amounts already paid to the crew — so the tile reflects the FULL crew
+  // dues, not just the derived purchase/sale/transfer shares. Manual charges carry
+  // no party, so they're only added when no party filter/search is narrowing the
+  // view (otherwise the derived-only figure stays consistent with the filter).
+  const inDateWindow = (dateIso: string) => {
+    const d = dayOf(dateIso);
+    if (startDate && d < startDate) return false;
+    if (endDate && d > endDate) return false;
+    return true;
+  };
+  const includeManualInTile = partyType === 'ALL' && q === '';
+  const manualNetInWindow = includeManualInTile
+    ? manualSorted
+        .filter((c) => inDateWindow(c.date))
+        .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0)
+    : 0;
+  const totalCrew = filtered.reduce((acc, e) => acc + e.crew, 0) + manualNetInWindow;
+
+  // ── Payables tab: one row per squared-off period ──────────────────────────
+  // Crew-settlement payments (HAMALI) grouped by the period they settle.
+  const hamaliPayments = (payments ?? []).filter((p) => p.type === 'HAMALI');
+  const paidByVerification = new Map<string, number>();
+  for (const p of hamaliPayments) {
+    if (!p.hamaliVerificationId) continue;
+    paidByVerification.set(p.hamaliVerificationId, (paidByVerification.get(p.hamaliVerificationId) ?? 0) + Number(p.amount));
+  }
+  const addDay = (day: string) => {
+    const d = new Date(day + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+  const daysInclusive = (from: string, to: string) =>
+    Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1);
+  // Earliest dated crew due (for the first period's "from", when nothing precedes it).
+  const allDatedCrew = [...allHamaliEntries.map((e) => dayOf(e.date)), ...manualSorted.map((c) => dayOf(c.date))];
+  const earliestCrewDay = allDatedCrew.length ? allDatedCrew.reduce((m, d) => (d < m ? d : m)) : null;
+  const verifAsc = [...(verifications ?? [])].sort((a, b) => new Date(a.asOfDate).getTime() - new Date(b.asOfDate).getTime());
+  const payableRows: PayableRow[] = verifAsc
+    .map((v, i) => {
+      const to = dayOf(v.asOfDate);
+      const from = v.periodStart
+        ? dayOf(v.periodStart)
+        : i > 0
+          ? addDay(dayOf(verifAsc[i - 1].asOfDate))
+          : earliestCrewDay ?? to;
+      const payable = Number(v.crewTotal);
+      const paid = paidByVerification.get(v.id) ?? 0;
+      const status: PayableRow['status'] = paid >= payable - 0.5 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID';
+      return { v, from, to, days: daysInclusive(from, to), payable, paid, outstanding: Math.max(0, payable - paid), status };
+    })
+    .reverse(); // most-recent period first
+  const payablesTotal = payableRows.reduce((s, r) => s + r.payable, 0);
+  const payablesPaid = payableRows.reduce((s, r) => s + r.paid, 0);
+  const payablesOutstanding = payableRows.reduce((s, r) => s + r.outstanding, 0);
+
+  // The period start for a NEW square-off = day after the last checkpoint, else
+  // the earliest crew due (so the first period spans from the very beginning).
+  const nextPeriodStart = verifiedThroughDay ? addDay(verifiedThroughDay) : earliestCrewDay;
+
+  // ── Crew ledger (Ledger tab) — a party-ledger-style account statement for the
+  // hamali crew. Credits are the SQUARED-OFF periods (one line per checkpoint, with
+  // its date range) — NOT the individual loading/unloading rows. Debits are the
+  // settlement payments. Running balance is what we still owe the crew (CR).
+  interface LedgerLine { id: string; date: string; particulars: string; period: string | null; debit: number; credit: number; }
+  const ledgerLines: (LedgerLine & { balance: number })[] = (() => {
+    const lines: LedgerLine[] = [];
+    // One credit per squared-off period, dated at the period-end (asOfDate).
+    for (const r of payableRows) {
+      lines.push({
+        id: `V-${r.v.id}`,
+        date: r.to,
+        particulars: 'Crew dues squared off',
+        period: `${shortDate(r.from)} – ${shortDate(r.to)}`,
+        debit: 0,
+        credit: r.payable,
+      });
+    }
+    // One debit per crew-settlement payment.
+    for (const p of hamaliPayments) {
+      lines.push({
+        id: `PY-${p.id}`,
+        date: dayOf(p.date),
+        particulars: `Payment to crew${p.reference ? ` · ${p.reference}` : ''}`,
+        period: null,
+        debit: Number(p.amount),
+        credit: 0,
+      });
+    }
+    lines.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.id.localeCompare(b.id));
+    let running = 0;
+    return lines.map((l) => { running += l.credit - l.debit; return { ...l, balance: Math.round(running * 100) / 100 }; });
+  })();
+  const ledgerCredit = ledgerLines.reduce((s, l) => s + l.credit, 0);
+  const ledgerDebit = ledgerLines.reduce((s, l) => s + l.debit, 0);
+  const ledgerBalance = Math.round((ledgerCredit - ledgerDebit) * 100) / 100;
+  const ledgerOpening = ledgerLines.length ? ledgerLines[0].balance - ledgerLines[0].credit + ledgerLines[0].debit : 0;
+
+  function openPay(row: PayableRow) {
+    setPayVerif(row);
+    setPayDate(new Date().toISOString().slice(0, 10));
+    setPayAmount(String(Math.max(0, Math.round(row.outstanding))));
+    setPayRef('');
+    setPayOpen(true);
+  }
+
+  const hamaliExportColumns: ExportColumn<HamaliEntry>[] = [
+    { header: 'Date', value: (e) => shortDate(e.date) },
+    { header: 'Source', value: (e) => e.label || (e.source === 'SALE' ? 'Sale Loading' : e.source === 'TRANSFER' ? 'Transfer' : 'Purchase') },
+    { header: 'Party', value: (e) => e.partyName },
+    { header: 'Lorry No', value: (e) => e.lorryNumber ?? '' },
+    { header: 'Reference', value: (e) => e.reference },
+    { header: 'Net Weight (kg)', value: (e) => e.netWeightKg, numFmt: '#,##0', align: 'right' },
+    { header: 'Full Charge', value: (e) => rupees(e.fullCharge), excel: (e) => e.fullCharge, numFmt: '#,##0.00', align: 'right' },
+    ...(view === 'company' ? [
+      { header: 'Our Share', value: (e: HamaliEntry) => rupees(e.ourShare), excel: (e: HamaliEntry) => e.ourShare, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Lorry Share', value: (e: HamaliEntry) => rupees(e.lorryShare), excel: (e: HamaliEntry) => e.lorryShare, numFmt: '#,##0.00', align: 'right' as const },
+    ] : []),
+    { header: 'Crew Paid', value: (e) => rupees(e.crew), excel: (e) => e.crew, numFmt: '#,##0.00', align: 'right' },
+    ...(view === 'company'
+      ? [{ header: 'Company P/L', value: (e: HamaliEntry) => rupees(e.pl), excel: (e: HamaliEntry) => e.pl, numFmt: '#,##0.00', align: 'right' as const }]
+      : [{ header: 'Status', value: (e: HamaliEntry) => (isVerified(e.date) ? 'Verified' : 'Current') }]),
+  ];
 
   // Crew dues accrued since the last checkpoint (through today) — the standing
   // "not yet verified" figure, independent of the square-off date picker.
@@ -417,7 +620,11 @@ export default function HamaliLedger() {
           <p className="text-muted-foreground">
             {view === 'company'
               ? 'Unloading & loading labor charges from purchases and outward sale freight'
-              : 'Crew-facing view — what the hamali crew is owed, cross-verified and squared off periodically'}
+              : view === 'payables'
+                ? 'Squared-off crew dues — pay each verified period and track what is settled'
+                : view === 'ledger'
+                  ? 'Account statement for the hamali crew — squared-off dues vs settlements'
+                  : 'Crew-facing view — what the hamali crew is owed, cross-verified and squared off periodically'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -427,15 +634,20 @@ export default function HamaliLedger() {
             options={[
               { label: 'Company', value: 'company' },
               { label: 'Hamali', value: 'hamali' },
+              { label: 'Payables', value: 'payables' },
+              { label: 'Ledger', value: 'ledger' },
             ]}
           />
-          <Button onClick={() => { resetRecord(); setRecordOpen(true); }}>
-            <Plus className="h-4 w-4" /> Record
-          </Button>
+          {(view === 'company' || view === 'hamali') && (
+            <Button onClick={() => { resetRecord(); setRecordOpen(true); }}>
+              <Plus className="h-4 w-4" /> Record
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Filters Bar */}
+      {/* Filters Bar (only for the transaction-level Company / Hamali views) */}
+      {(view === 'company' || view === 'hamali') && (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-muted/40 p-4 rounded-lg border">
         <div className="space-y-1.5">
           <Label className="text-xs font-semibold">Filter by Party Type</Label>
@@ -463,6 +675,7 @@ export default function HamaliLedger() {
           <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-card" />
         </div>
       </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center h-48">
@@ -470,8 +683,44 @@ export default function HamaliLedger() {
         </div>
       ) : (
         <div className="grid gap-6">
-          {/* Summary Cards */}
+          {/* Summary Cards (the Ledger view has its own profile header instead) */}
+          {view !== 'ledger' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {view === 'payables' ? (
+              <>
+                <Card className="bg-card border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Squared-off</CardTitle>
+                    <Coins className="h-4 w-4 text-primary" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-primary">{rupees(payablesTotal)}</div>
+                    <p className="text-[10px] text-muted-foreground mt-1">Crew dues across {payableRows.length} verified period(s)</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Paid to Crew</CardTitle>
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(payablesPaid)}</div>
+                    <p className="text-[10px] text-muted-foreground mt-1">Settled via crew payments</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Outstanding</CardTitle>
+                    <ShieldCheck className="h-4 w-4 text-amber-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className={`text-2xl font-bold ${payablesOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{rupees(payablesOutstanding)}</div>
+                    <p className="text-[10px] text-muted-foreground mt-1">Squared-off but not yet fully paid</p>
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+            <>
             {view === 'company' ? (
               <Card className="bg-card border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -491,7 +740,9 @@ export default function HamaliLedger() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-primary">{rupees(totalCrew)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Crew share across the filtered rows</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Crew share across the shown rows{includeManualInTile ? ', incl. recorded charges' : ''}
+                  </p>
                 </CardContent>
               </Card>
             )}
@@ -530,7 +781,10 @@ export default function HamaliLedger() {
                 <p className="text-[10px] text-muted-foreground mt-1">Equal to {kg(totalTons * 1000)} net weight</p>
               </CardContent>
             </Card>
+            </>
+            )}
           </div>
+          )}
 
           {/* Square-off / reconciliation checkpoint (Hamali view only) */}
           {view === 'hamali' && (
@@ -560,7 +814,7 @@ export default function HamaliLedger() {
                   <div className="h-9 flex items-center font-bold text-primary">{rupees(pendingCrewTotal)}</div>
                 </div>
                 <Button
-                  onClick={() => createVerification.mutate({ asOfDate: squareDate, crewTotal: pendingCrewTotal, note: squareNote || null })}
+                  onClick={() => createVerification.mutate({ asOfDate: squareDate, periodStart: nextPeriodStart, crewTotal: pendingCrewTotal, note: squareNote || null })}
                   disabled={!squareValid || createVerification.isPending}
                 >
                   <CheckCircle2 className="h-4 w-4" /> {createVerification.isPending ? 'Squaring off…' : 'Square off'}
@@ -593,9 +847,219 @@ export default function HamaliLedger() {
             </div>
           )}
 
+          {/* Payables tab: squared-off periods to settle + crew ledger */}
+          {view === 'payables' && (
+            <div className="rounded-lg border bg-card overflow-x-auto">
+              <div className="px-5 py-4 border-b">
+                <span className="font-semibold text-sm">Crew Payables — Squared-off Periods</span>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {teamParty ? <>Settled against <b>{teamParty.name}</b></> : 'Loading crew party…'}
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Period (From – To)</TableHead>
+                    <TableHead>Squared-off</TableHead>
+                    <TableHead className="text-right">Days</TableHead>
+                    <TableHead className="text-right">Total Payable</TableHead>
+                    <TableHead className="text-right">Paid</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payableRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                        No squared-off periods yet. Square off a window in the <b>Hamali</b> tab to create one.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    payableRows.map((r) => (
+                      <TableRow key={r.v.id}>
+                        <TableCell className="font-medium">{shortDate(r.from)} – {shortDate(r.to)}</TableCell>
+                        <TableCell className="text-muted-foreground">{shortDate(r.v.createdAt)}</TableCell>
+                        <TableCell className="text-right">{r.days}</TableCell>
+                        <TableCell className="text-right font-bold text-primary">{rupees(r.payable)}</TableCell>
+                        <TableCell className="text-right text-emerald-600 dark:text-emerald-400">{rupees(r.paid)}</TableCell>
+                        <TableCell>
+                          {r.status === 'PAID' ? (
+                            <Badge className="text-[10px] gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"><CheckCircle2 className="h-3 w-3" /> Paid</Badge>
+                          ) : r.status === 'PARTIAL' ? (
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 dark:text-amber-400">Partial</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-600 dark:text-rose-400">Unpaid</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={r.status === 'PAID' || !teamParty}
+                              onClick={() => openPay(r)}
+                            >
+                              <Coins className="h-3.5 w-3.5" /> Pay
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Undo this checkpoint (reopens the period)"
+                              onClick={() => { if (confirm('Remove this checkpoint and reopen the period? Any recorded payments stay on the Payments page but unlink from this period.')) deleteVerification.mutate(r.v.id); }}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* Ledger tab — party-ledger-style account statement for the crew */}
+          {view === 'ledger' && (
+            <div className="space-y-6">
+              {/* Profile header (name / contact / bank) — mirrors the Party Ledger */}
+              <div className="rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card overflow-hidden">
+                <div className="p-6 flex flex-col lg:flex-row lg:items-start gap-6">
+                  <div className="flex items-start gap-4 flex-1">
+                    <div className="h-14 w-14 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <Users className="h-7 w-7" />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-2xl font-bold tracking-tight">{teamParty?.name ?? 'Hamali Team'}</h2>
+                        <Badge variant="outline" className="font-medium">Hamali Team</Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-muted-foreground">
+                        {teamParty?.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {teamParty.phone}</span>}
+                        {!teamParty?.phone && <span className="italic">Add phone & bank details in Parties</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="lg:w-80 shrink-0 rounded-lg border bg-background/60 p-4 space-y-2.5">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <Landmark className="h-3.5 w-3.5" /> Bank Details
+                    </div>
+                    {teamParty?.bankAccountNumber || teamParty?.bankName || teamParty?.bankIfsc ? (
+                      <div className="space-y-1.5 text-sm">
+                        {teamParty?.bankName && <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">Bank</span><span>{teamParty.bankName}</span></div>}
+                        {teamParty?.bankAccountNumber && <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">A/C No</span><span className="font-mono">{teamParty.bankAccountNumber}</span></div>}
+                        {teamParty?.bankIfsc && <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">IFSC</span><span className="font-mono">{teamParty.bankIfsc}</span></div>}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">No bank details on file.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Account statement */}
+              <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b bg-gradient-to-r from-primary/[0.07] via-card to-card flex items-end justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <ReceiptText className="h-4 w-4 text-primary" />
+                    <span className="font-semibold tracking-tight">Account Statement</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Balance Owed</div>
+                    <div className={`text-lg font-bold tabular-nums ${ledgerBalance === 0 ? '' : ledgerBalance > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      {ledgerBalance === 0 ? 'Settled' : <>{rupees(Math.abs(ledgerBalance))} <span className="text-xs font-semibold">{ledgerBalance >= 0 ? 'CR' : 'DR'}</span></>}
+                    </div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-28">Date</TableHead>
+                        <TableHead className="min-w-[240px]">Particulars</TableHead>
+                        <TableHead className="text-right border-l border-border/60 bg-muted/60">Debit</TableHead>
+                        <TableHead className="text-right bg-muted/60">Credit</TableHead>
+                        <TableHead className="text-right border-l border-border/60 bg-muted/60">Balance</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ledgerLines.length === 0 ? (
+                        <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">No squared-off periods yet. Square off a window in the Hamali tab.</TableCell></TableRow>
+                      ) : (
+                        <>
+                          <TableRow className="bg-muted/30 hover:bg-muted/30">
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{shortDate(ledgerLines[0].date)}</TableCell>
+                            <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>Opening Balance</TableCell>
+                            <TableCell className="bg-muted/20" />
+                            <TableCell className="text-right border-l border-border/60 bg-muted/20 tabular-nums text-muted-foreground">
+                              {ledgerOpening === 0 ? '0.00' : `${rupees(Math.abs(ledgerOpening))} ${ledgerOpening >= 0 ? 'CR' : 'DR'}`}
+                            </TableCell>
+                          </TableRow>
+                          {ledgerLines.map((l, i) => (
+                            <TableRow key={l.id} className={i % 2 === 1 ? 'bg-muted/[0.18]' : undefined}>
+                              <TableCell className="align-top text-sm whitespace-nowrap text-muted-foreground">{shortDate(l.date)}</TableCell>
+                              <TableCell className="align-top">
+                                <div className="text-[13px] text-foreground/90 leading-snug">{l.particulars}</div>
+                                {l.period && <div className="text-[11px] text-muted-foreground mt-0.5">Period: {l.period}</div>}
+                              </TableCell>
+                              <TableCell className="align-top text-right tabular-nums border-l border-border/60">{l.debit > 0 ? <span className="font-semibold">{rupees(l.debit)}</span> : <span className="text-muted-foreground/50">-</span>}</TableCell>
+                              <TableCell className="align-top text-right tabular-nums">{l.credit > 0 ? <span className="font-semibold">{rupees(l.credit)}</span> : <span className="text-muted-foreground/50">-</span>}</TableCell>
+                              <TableCell className="align-top text-right tabular-nums border-l border-border/60 font-medium">
+                                {rupees(Math.abs(l.balance))} <span className="text-[9px] font-bold">{l.balance >= 0 ? 'CR' : 'DR'}</span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">{shortDate(ledgerLines[ledgerLines.length - 1].date)}</TableCell>
+                            <TableCell className="text-sm font-semibold" colSpan={2}>Closing Balance</TableCell>
+                            <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums">{ledgerDebit > 0 ? rupees(ledgerDebit) : ''}</TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">{ledgerCredit > 0 ? rupees(ledgerCredit) : ''}</TableCell>
+                            <TableCell className="text-right border-l border-border/60 font-bold tabular-nums">
+                              {rupees(Math.abs(ledgerBalance))} <span className="text-[9px] font-bold">{ledgerBalance >= 0 ? 'CR' : 'DR'}</span>
+                            </TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {ledgerLines.length > 0 && (
+                  <div className="grid grid-cols-3 divide-x divide-border border-t bg-muted/20 text-center">
+                    <div className="px-5 py-3.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total Debit (Paid)</div>
+                      <div className="text-base font-bold tabular-nums mt-0.5">{rupees(ledgerDebit)}</div>
+                    </div>
+                    <div className="px-5 py-3.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total Credit (Dues)</div>
+                      <div className="text-base font-bold tabular-nums mt-0.5">{rupees(ledgerCredit)}</div>
+                    </div>
+                    <div className="px-5 py-3.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Balance Owed</div>
+                      <div className={`text-base font-bold tabular-nums mt-0.5 ${ledgerBalance > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        {ledgerBalance === 0 ? 'Settled' : `${rupees(Math.abs(ledgerBalance))} ${ledgerBalance >= 0 ? 'CR' : 'DR'}`}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Ledger Table */}
+          {(view === 'company' || view === 'hamali') && (
+          <>
           <div className="rounded-lg border bg-card overflow-x-auto">
-            <div className="px-5 py-4 border-b font-semibold text-sm">Hamali Disbursements</div>
+            <div className="px-5 py-4 border-b font-semibold text-sm flex items-center justify-between gap-3">
+              <span>Hamali Disbursements</span>
+              <ExportButtons
+                filename={`Hamali_Report_${view === 'company' ? 'Company' : 'Crew'}`}
+                title={`Hamali Report (${view === 'company' ? 'Company' : 'Crew'})`}
+                subtitle={`${filtered.length} entry(s)`}
+                columns={hamaliExportColumns}
+                rows={filtered}
+              />
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -621,7 +1085,7 @@ export default function HamaliLedger() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((e) => (
+                  visible.map((e) => (
                     <TableRow key={e.id} className={view === 'hamali' && isVerified(e.date) ? 'bg-muted/20' : undefined}>
                       <TableCell>{shortDate(e.date)}</TableCell>
                       <TableCell>
@@ -631,7 +1095,7 @@ export default function HamaliLedger() {
                       </TableCell>
                       <TableCell className="font-semibold">{e.partyName}</TableCell>
                       <TableCell>{e.lorryNumber ?? '-'}</TableCell>
-                      <TableCell className="font-mono text-xs">{e.reference}</TableCell>
+                      <TableCell className="text-xs">{e.reference}</TableCell>
                       <TableCell className="text-right font-medium">{kg(e.netWeightKg)}</TableCell>
                       <TableCell className="text-right font-bold text-primary">{rupees(e.fullCharge)}</TableCell>
                       {view === 'company' && <TableCell className="text-right font-semibold text-amber-600">{rupees(e.ourShare)}</TableCell>}
@@ -652,6 +1116,7 @@ export default function HamaliLedger() {
                 )}
               </TableBody>
             </Table>
+            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
 
           {/* Manually-recorded charges (bag cutting, pappu net, diesel, misc, paid) */}
@@ -713,6 +1178,8 @@ export default function HamaliLedger() {
               </TableBody>
             </Table>
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -774,6 +1241,64 @@ export default function HamaliLedger() {
               </Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pay crew for a squared-off period */}
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pay Hamali Crew</DialogTitle>
+          </DialogHeader>
+          {payVerif && (
+            <div className="space-y-4">
+              <div className="rounded-md bg-muted/50 px-3 py-2 text-sm space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Period</span>
+                  <span className="font-medium">{shortDate(payVerif.from)} – {shortDate(payVerif.to)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Payable</span>
+                  <span className="font-medium">{rupees(payVerif.payable)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Already paid</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{rupees(payVerif.paid)}</span>
+                </div>
+                <div className="flex items-center justify-between border-t pt-1">
+                  <span className="text-muted-foreground">Outstanding</span>
+                  <span className="font-bold text-primary">{rupees(payVerif.outstanding)}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="pay-date">Payment Date</Label>
+                  <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pay-amount">Amount (₹)</Label>
+                  <Input id="pay-amount" type="number" step="1" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pay-ref">Reference (UTR / Cheque / Cash)</Label>
+                <Input id="pay-ref" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="Optional" />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Records a payment to <b>{teamParty?.name ?? 'the hamali crew'}</b> and posts Dr crew payable / Cr bank. It appears on the Payments page.
+              </p>
+
+              <DialogFooter>
+                <Button
+                  onClick={() => payCrew.mutate()}
+                  disabled={!teamParty || !(Number(payAmount) > 0) || payCrew.isPending}
+                >
+                  {payCrew.isPending ? 'Recording…' : `Pay ${rupees(Number(payAmount) || 0)}`}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

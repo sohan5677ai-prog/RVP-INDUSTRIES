@@ -18,6 +18,7 @@ enum PartyType {
   SUPPLIER
   BUYER
   BOTH
+  HAMALI_TEAM
 }
 
 enum POStatus {
@@ -84,8 +85,11 @@ model User {
 model Party {
   id                String          @id @default(cuid())
   name              String
+  // Short handle used as the PO-number series key, e.g. "DCS" -> DCS/01/26-27.
+  nickname          String?
   type              PartyType       @default(SUPPLIER)
   phone             String?
+  email             String?
   address           String?
   state             String?
   pincode           String?
@@ -103,6 +107,9 @@ model Party {
   receipts          Receipt[]
   dustPurchases     DustPurchase[]
   tallyLedgerMaps   TallyLedgerMap[]
+  creditNotes       CreditNote[]
+  debitNotes        DebitNote[]
+  emailLogs         EmailLog[]
 }
 
 model Broker {
@@ -123,6 +130,13 @@ model PurchaseOrder {
   // Whether pricePerKg is quoted at the supplier's location (BASE) or landed at
   // our location (DELIVERY). Some suppliers quote one, some the other.
   priceType     PriceType @default(DELIVERY)
+  // Coarse intended destination for this PO's stock, set when the order is placed.
+  // STOCK-bound POs are held OUT of the Order Planner's pending pool (not sellable)
+  // until their lorry is actually stocked in - the real landing spot is chosen at
+  // stock-in (loadingLocation). A STOCK-planned lorry stocked into RVP at arrival
+  // still flows into the planner, because the arrived band keys off the real
+  // stock-in location, not this flag. Defaults to RVP so existing POs are unaffected.
+  plannedLocation PlannedLocation @default(RVP)
   hasGst        Boolean  @default(false)
   gstAmount     Decimal  @default(0) @db.Decimal(14, 2)
   tonnageKg     Int // approx, in kg
@@ -137,6 +151,129 @@ model PurchaseOrder {
   createdAt     DateTime @default(now())
   stockIns      StockIn[]
   allocations   SaleAllocation[]
+  // PO-number components: poNumber = "{poSeriesKey}/{poSerial}/{poFy}" per lorry.
+  // A poGroupId batch's collapsed display range is derived from min/max poSerial
+  // across its members. Null on legacy/KNM_BATCH rows that predate this scheme.
+  poSeriesKey   String?
+  poSerial      Int?
+  poFy          String?
+}
+
+// Running per-series-per-financial-year counter backing PO numbering
+// (e.g. seriesKey "DCS", fy "26-27" -> lastSerial 6). Incremented atomically
+// when a batch of lorries is created so numbers never collide or reuse.
+model PoSerialCounter {
+  id         String @id @default(cuid())
+  seriesKey  String
+  fy         String
+  lastSerial Int    @default(0)
+
+  @@unique([seriesKey, fy])
+}
+
+// Per-FY sequential counter for credit/debit note numbering, keyed by note
+// type ('CN' | 'DN'). Mirrors PoSerialCounter's atomic-increment shape.
+model NoteSerialCounter {
+  id         String @id @default(cuid())
+  seriesKey  String
+  fy         String
+  lastSerial Int    @default(0)
+
+  @@unique([seriesKey, fy])
+}
+
+enum NoteStatus {
+  ISSUED
+  CANCELLED
+}
+
+model CreditNote {
+  id             String        @id @default(cuid())
+  noteNumber     String        @unique // e.g. RVP/CN/01/26-27
+  noteSeq        Int
+  noteFy         String
+  noteDate       DateTime      @default(now())
+  party          Party         @relation(fields: [partyId], references: [id])
+  partyId        String
+  // Optional — a note might be raised without tying to one specific shipment.
+  saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
+  saleDispatchId String?
+  reason         String
+  // GST-aware breakdown, since this adjusts an invoice already reported with GST.
+  taxableValue   Decimal       @db.Decimal(14, 2)
+  gstRate        Decimal       @db.Decimal(5, 2)
+  gstAmount      Decimal       @db.Decimal(14, 2)
+  totalAmount    Decimal       @db.Decimal(14, 2)
+  status         NoteStatus    @default(ISSUED)
+  createdAt      DateTime      @default(now())
+
+  emailLogs      EmailLog[]
+
+  @@index([partyId])
+  @@index([saleDispatchId])
+  @@unique([noteFy, noteSeq])
+}
+
+model DebitNote {
+  id             String        @id @default(cuid())
+  noteNumber     String        @unique // e.g. RVP/DN/01/26-27
+  noteSeq        Int
+  noteFy         String
+  noteDate       DateTime      @default(now())
+  party          Party         @relation(fields: [partyId], references: [id])
+  partyId        String
+  saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
+  saleDispatchId String?
+  reason         String
+  taxableValue   Decimal       @db.Decimal(14, 2)
+  gstRate        Decimal       @db.Decimal(5, 2)
+  gstAmount      Decimal       @db.Decimal(14, 2)
+  totalAmount    Decimal       @db.Decimal(14, 2)
+  status         NoteStatus    @default(ISSUED)
+  createdAt      DateTime      @default(now())
+
+  emailLogs      EmailLog[]
+
+  @@index([partyId])
+  @@index([saleDispatchId])
+  @@unique([noteFy, noteSeq])
+}
+
+enum EmailDocumentType {
+  INVOICE
+  EWB
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+enum EmailStatus {
+  SENT
+  FAILED
+}
+
+// Audit trail of every document email sent to a party. Only one of
+// saleDispatchId/creditNoteId/debitNoteId is set per row, matching documentType.
+model EmailLog {
+  id              String            @id @default(cuid())
+  party           Party             @relation(fields: [partyId], references: [id])
+  partyId         String
+  documentType    EmailDocumentType
+  saleDispatch    SaleDispatch?     @relation(fields: [saleDispatchId], references: [id])
+  saleDispatchId  String?
+  creditNote      CreditNote?       @relation(fields: [creditNoteId], references: [id])
+  creditNoteId    String?
+  debitNote       DebitNote?        @relation(fields: [debitNoteId], references: [id])
+  debitNoteId     String?
+  referenceLabel  String // denormalized e.g. "RVP/01/26-27" for display without joins
+  recipientEmail  String
+  subject         String
+  resendMessageId String?
+  status          EmailStatus
+  errorMessage    String?
+  sentAt          DateTime          @default(now())
+
+  @@index([partyId])
+  @@index([saleDispatchId])
 }
 
 model StockIn {
@@ -149,6 +286,10 @@ model StockIn {
   rvpFirstWeightKg  Int      @default(0) // RVP weighbridge: loaded/gross weight
   rvpSecondWeightKg Int      @default(0) // RVP weighbridge: empty/tare weight
   rvpKataKg         Int // Net weight from our weighbridge (RVP Kata) = first - second
+  // Direct net entry (spot/URP): the operator typed the RVP net straight in with no
+  // separate tare weighment, so rvpFirstWeightKg holds the net and rvpKataKg = it.
+  // Persisted so edits keep the net as-is instead of recomputing first − second (→ 0).
+  directNet         Boolean  @default(false)
   billingWeightKg   Int // invoice tonnage
   partyKataKg       Int // party weighbridge
   invoiceFileUrl    String // uploaded invoice
@@ -156,6 +297,11 @@ model StockIn {
   // Inward freight (₹) captured at arrival, only for BASE-priced POs (DELIVERY
   // already includes it). Carried into Purchase.freightCharge and capitalised.
   freightCharge     Decimal       @default(0) @db.Decimal(12, 2)
+  // Whole-vehicle tonnage (kg) the inward freight is spread over. Set when the lorry
+  // is SHARED between parties: freight/kg = freightCharge / freightTonnageKg, and this
+  // party's landed price = base + that rate. Null → single-party lorry, so the basis
+  // falls back to this arrival's net weight (freight/kg = freightCharge / netWeightKg).
+  freightTonnageKg  Int?
   // Ticked when the party arrived in their OWN vehicle (no third-party lorry).
   // At verification the lorry's ₹80/t hamali share — normally recovered from the
   // transporter — is instead deducted from the party's net payable.
@@ -180,8 +326,15 @@ model Purchase {
   // Inward freight to bring BASE-priced stock to our location (capitalised into
   // the seed). DELIVERY-priced POs already include freight in the price → 0.
   freightCharge    Decimal            @default(0) @db.Decimal(12, 2)
+  // Whole-vehicle tonnage (kg) the freight is spread over, for SHARED lorries.
+  // Null → single-party lorry, basis falls back to netWeightKg. See StockIn.freightTonnageKg.
+  freightTonnageKg Int?
   discountType   DiscountType?
   discountValue  Decimal             @default(0) @db.Decimal(12, 2)
+  // Operator-settable purchase date (the effective date of the purchase, shown on
+  // the Stock-in Detail and Verification pages). Defaults to when the record was
+  // created; existing rows fall back to createdAt in the app.
+  purchaseDate   DateTime            @default(now())
   createdAt      DateTime            @default(now())
   verification   WeightVerification?
   payments       Payment[]
@@ -243,7 +396,10 @@ model SaleOrder {
   brokerId       String?
   tonnageKg      Int // total weight ORDERED, per RVP kata (kg) — never overwritten
   ratePerKg      Decimal     @db.Decimal(12, 2)
-  gstAmount      Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate
+  gstAmount      Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate (0 when gstExempt)
+  // When true, this order (and its dispatches) is billed WITHOUT GST — set per
+  // order in the dialog for parties billed on a non-GST basis.
+  gstExempt      Boolean     @default(false)
   brokerageRatePerKg Decimal   @default(0) @db.Decimal(12, 2)
   // Delivery destination (Surat/Barshi/Nagar) and the outward freight we bear,
   // since pappu etc. is sold at a delivery price. Freight is our selling expense.
@@ -257,6 +413,9 @@ model SaleOrder {
   // Payment terms: number of credit days. The clock starts from each dispatch's
   // deliveredDate, so dueDate = dispatch.deliveredDate + dueDays.
   dueDays        Int?
+  // Optional dispatch reminder for advance orders: the date the goods are due to
+  // be dispatched. The ERP surfaces a login reminder from 3 days before this date.
+  reminderDate   DateTime?
 
   // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
   dispatches     SaleDispatch[]
@@ -297,6 +456,8 @@ model SaleDispatch {
   status         SaleStatus @default(DISPATCHED)
   vehicleNumber  String?
   kataFileUrl    String?
+  transportProvider String?  // 'SURYA' | 'KNM' | 'OTHER'
+  customRetention   Decimal? @db.Decimal(12, 2) // user-entered retention for 'OTHER'
 
   // Delivery matching (buyer's kata slip captured at delivery).
   receivedDate     DateTime?
@@ -333,6 +494,9 @@ model SaleDispatch {
   createdAt      DateTime   @default(now())
 
   receipts       Receipt[]
+  creditNotes    CreditNote[]
+  debitNotes     DebitNote[]
+  emailLogs      EmailLog[]
 
   @@index([saleOrderId])
   @@unique([invoiceFy, invoiceSeq])
@@ -385,6 +549,15 @@ enum DiscountType {
 enum PriceType {
   BASE
   DELIVERY
+}
+
+// Coarse intended destination chosen at PO time. RVP = expected to land directly
+// at the process (sellable-as-pending in the Order Planner). STOCK = expected to
+// go to a cold storage first, so it is withheld from the planner until it actually
+// arrives at RVP (either stocked directly to RVP, or transferred in later).
+enum PlannedLocation {
+  RVP
+  STOCK
 }
 
 // Which bunker the black seed is poured into at the process. Drives the
@@ -489,6 +662,9 @@ enum ManualHamaliType {
   BAG_CUTTING_NORMAL
   BAG_CUTTING_DISTANCE
   PAPPU_NET
+  HUSK_PACKING
+  TPS_BROKENS_PACKING
+  TAMARIND_BYPRODUCTS_PACKING
   DIESEL
   MISC
   PAID
@@ -512,12 +688,18 @@ model ManualHamaliCost {
 // as a PAID ManualHamaliCost. The Hamali view locks rows on/before the latest
 // checkpoint and shows the period since as the current, still-to-verify window.
 model HamaliVerification {
-  id        String   @id @default(cuid())
-  asOfDate  DateTime // verified through this date, inclusive
-  crewTotal Decimal  @db.Decimal(12, 2) // snapshot of crew dues verified in this period
-  note      String?
-  createdBy String?
-  createdAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  asOfDate    DateTime // verified through this date, inclusive
+  // Start of the squared-off window (snapshot). Null means "from the very start"
+  // (the first-ever checkpoint). Stored alongside crewTotal so the Payables tab
+  // shows a stable period even after earlier checkpoints are undone.
+  periodStart DateTime?
+  crewTotal   Decimal   @db.Decimal(12, 2) // snapshot of crew dues verified in this period
+  note        String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  // Crew-settlement payments recorded against this squared-off period.
+  payments    Payment[]
 }
 
 // Single-row seller profile printed on generated tax invoices. Edited in Settings.
@@ -723,12 +905,17 @@ model Payment {
   payee          String?       // free-text recipient for expense/drawings payments (e.g. "Shabri Reddy")
   reference      String?
   description    String?
+  // Links a HAMALI crew-settlement payment to the squared-off period it settles,
+  // so the Payables tab can derive Paid / Partial / Unpaid status.
+  hamaliVerificationId String?
+  hamaliVerification   HamaliVerification? @relation(fields: [hamaliVerificationId], references: [id])
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
   @@index([partyId])
   @@index([purchaseId])
   @@index([brokerId])
+  @@index([hamaliVerificationId])
   @@index([journalEntryId])
 }
 
@@ -818,6 +1005,17 @@ model InterestCharge {
   amount    Decimal      @db.Decimal(12, 2)
   note      String?
   createdAt DateTime     @default(now())
+}
+
+// Term-loan principal repayments, tracked as a simple informational list under the
+// Interest report's Term Loan tab. Deliberately NOT posted to the ledger — the GL
+// loan principal lives in BankLoan/LoanRepayment; this is a lightweight running log.
+model TermLoanPrincipal {
+  id        String   @id @default(cuid())
+  date      DateTime
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String?
+  createdAt DateTime @default(now())
 }
 
 // Owner drawings (Shabri / Reddy). Deducted from the husk pool per owner request.

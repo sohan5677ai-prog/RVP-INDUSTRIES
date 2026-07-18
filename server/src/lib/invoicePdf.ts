@@ -28,6 +28,13 @@ export interface InvoicePdfData {
   vehicleNumber?: string | null;
   line: { description: string; hsn: string; quantityKg: number; ratePerKg: number };
   gstRate: number; // e.g. 0.05
+  ewbNumber?: string | null;
+  irn?: {
+    irn: string;
+    ackNo: string;
+    ackDate: Date;
+    qrPngBuffer?: Buffer;
+  } | null;
 }
 
 const PAGE = { margin: 36, width: 595.28 };
@@ -67,6 +74,26 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     doc.font('Helvetica-Bold').fontSize(15).text('Tax Invoice', LEFT, PAGE.margin, { width: W, align: 'center' });
     let y = PAGE.margin + 26;
 
+    // IRN block (e-invoice) ---------------------------------------------------
+    if (data.irn) {
+      const boxTop = y;
+      const qrSize = 40;
+      const hasQr = !!data.irn.qrPngBuffer;
+      const textW = hasQr ? W - qrSize - 20 : W - 8;
+      doc.font('Helvetica-Bold').fontSize(8).text('IRN: ', LEFT + 4, boxTop + 4, { width: textW, continued: true });
+      doc.font('Helvetica').fontSize(7.5).text(data.irn.irn, { width: textW });
+      doc.font('Helvetica-Bold').fontSize(8).text('Ack No: ', LEFT + 4, doc.y + 2, { continued: true });
+      doc.font('Helvetica').fontSize(8).text(`${data.irn.ackNo}`, { continued: true });
+      doc.font('Helvetica-Bold').fontSize(8).text('    Ack Date: ', { continued: true });
+      doc.font('Helvetica').fontSize(8).text(fmtDate(data.irn.ackDate));
+      if (hasQr && data.irn.qrPngBuffer) {
+        doc.image(data.irn.qrPngBuffer, RIGHT - qrSize - 4, boxTop + 4, { width: qrSize, height: qrSize });
+      }
+      const boxBottom = Math.max(doc.y + 6, boxTop + (hasQr ? qrSize + 10 : 30));
+      doc.rect(LEFT, boxTop, W, boxBottom - boxTop).stroke();
+      y = boxBottom + 6;
+    }
+
     // Header box: seller/buyer (left) + invoice meta (right) -----------------
     const splitX = LEFT + W * 0.56;
     const headerTop = y;
@@ -85,10 +112,12 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     label('Motor Vehicle No.', metaMidX, r2, RIGHT - metaMidX);
     bold(data.destination ?? '', splitX, r2 + 11, metaMidX - splitX, 9);
     bold(data.vehicleNumber ?? '', metaMidX, r2 + 11, RIGHT - metaMidX, 9);
-    // Row 3: Dispatched through
+    // Row 3: Dispatched through | e-Way Bill No.
     const r3 = headerTop + metaRowH * 2;
-    label('Dispatched through', splitX, r3, RIGHT - splitX);
-    bold('Road', splitX, r3 + 11, RIGHT - splitX, 9);
+    label('Dispatched through', splitX, r3, metaMidX - splitX);
+    label('e-Way Bill No.', metaMidX, r3, RIGHT - metaMidX);
+    bold('Road', splitX, r3 + 11, metaMidX - splitX, 9);
+    bold(data.ewbNumber ?? '', metaMidX, r3 + 11, RIGHT - metaMidX, 9);
 
     // Left column - seller then buyer.
     let ly = headerTop + 4;
@@ -123,7 +152,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     vline(splitX, headerTop, headerBottom);
     hline(headerTop + metaRowH, splitX, RIGHT);
     hline(r3, splitX, RIGHT);
-    vline(metaMidX, headerTop, r3); // split only top two meta rows
+    vline(metaMidX, headerTop, headerBottom); // split all meta rows
     // Separator between seller and buyer on the left.
     hline(buyerLabelY - 3, LEFT, splitX);
 
@@ -275,9 +304,9 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     ];
     let by = doc.y + 2;
     for (const [k, v] of bankRows) {
-      doc.font('Helvetica').fontSize(8).text(`${k} :`, bankX + 4, by, { width: bankW * 0.45 });
-      doc.font('Helvetica-Bold').fontSize(8).text(v || '', bankX + bankW * 0.45, by, { width: bankW * 0.55 - 6 });
-      by = doc.y + 1;
+      doc.font('Helvetica').fontSize(8).text(`${k} :`, bankX + 4, by, { width: bankW * 0.45, lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(8).text(v || '-', bankX + bankW * 0.45, by, { width: bankW * 0.55 - 6, lineBreak: false });
+      by += 11; // fixed row height — doc.y after an empty-string .text() doesn't reliably advance
     }
     doc.font('Helvetica-Bold').fontSize(8).text(`for ${data.company.name}`, bankX + 4, by + 8, { width: bankW - 8, align: 'right' });
     doc.font('Helvetica').fontSize(8).text('Authorised Signatory', bankX + 4, by + 40, { width: bankW - 8, align: 'right' });

@@ -28,7 +28,7 @@ export function StatCard({ label, value, icon: Icon, tone = 'amber', hint, class
   return (
     <div
       className={cn(
-        'group glass relative flex min-w-0 flex-col overflow-hidden rounded-2xl p-4 sm:p-5 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[var(--shadow-lg)] [container-type:inline-size]',
+        'group glass relative flex min-w-0 flex-col overflow-hidden rounded-2xl p-4 sm:p-5 transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-1 hover:shadow-[var(--shadow-lg)] [container-type:inline-size]',
         className
       )}
     >

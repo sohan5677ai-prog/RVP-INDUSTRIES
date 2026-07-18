@@ -8,6 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Segmented } from '@/components/ui/segmented';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 type BlendStatus = 'ok' | 'already' | 'infeasible' | 'nostock';
 
@@ -65,15 +68,28 @@ interface PartyStock {
   pricePools: PricePool[];
 }
 
+const PARTY_STOCK_COLUMNS: ExportColumn<PartyStock>[] = [
+  { header: 'Supplier Party', value: (p) => p.partyName },
+  { header: 'Location / Address', value: (p) => p.address },
+  { header: 'Phone', value: (p) => p.phone ?? '' },
+  { header: 'State', value: (p) => p.state ?? '' },
+  { header: 'Total Received Stock (MT)', value: (p) => toTonnes(p.netStockKg).toFixed(2), excel: (p) => toTonnes(p.netStockKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Avg Cost (WAC)', value: (p) => (p.weightedAveragePrice > 0 ? rupees(p.weightedAveragePrice) : ''), excel: (p) => p.weightedAveragePrice || null, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Valuation', value: (p) => (p.totalValuation > 0 ? rupees(p.totalValuation) : ''), excel: (p) => p.totalValuation || null, numFmt: '#,##0.00', align: 'right' },
+];
+
+type LocationFilter = 'ALL' | 'RVP';
+
 export default function StockByParty() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedParties, setExpandedParties] = useState<Set<string>>(new Set());
   const [targetInput, setTargetInput] = useState('');
   const [buyPriceInput, setBuyPriceInput] = useState('');
+  const [locationFilter, setLocationFilter] = useState<LocationFilter>('ALL');
 
   const { data: partyStocks, isLoading } = useQuery<PartyStock[]>({
-    queryKey: ['party-stocks'],
-    queryFn: () => api<PartyStock[]>('/inventory/by-party'),
+    queryKey: ['party-stocks', locationFilter],
+    queryFn: () => api<PartyStock[]>(`/inventory/by-party?location=${locationFilter}`),
   });
 
   const totalRemaining = partyStocks?.reduce((sum, p) => sum + p.netStockKg, 0) ?? 0;
@@ -143,11 +159,20 @@ export default function StockByParty() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Stock by Party</h1>
-        <p className="text-muted-foreground">
-          Track raw black seed stock balances credited to individual suppliers with price pooling
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Stock by Party</h1>
+          <p className="text-muted-foreground">
+            Track raw black seed stock balances credited to individual suppliers with price pooling
+          </p>
+        </div>
+        <ExportButtons
+          filename="Stock_By_Party"
+          title="Stock by Party"
+          subtitle={`${filteredPartyStocks.length} supplier(s)`}
+          columns={PARTY_STOCK_COLUMNS}
+          rows={filteredPartyStocks}
+        />
       </div>
 
       {/* Advanced Business Intelligence Overview */}
@@ -368,14 +393,24 @@ export default function StockByParty() {
               Summary of total historical stock received, average cost basis, and total valuation per party. Expand a supplier to view price pooling details.
             </p>
           </div>
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search supplier or location…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-card"
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Segmented
+              options={[
+                { label: 'RVP', value: 'RVP' },
+                { label: 'All Locations', value: 'ALL' },
+              ]}
+              value={locationFilter}
+              onValueChange={setLocationFilter}
             />
+            <div className="relative w-64">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search supplier or location…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-card"
+              />
+            </div>
           </div>
         </div>
 

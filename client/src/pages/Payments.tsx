@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import type { Payment, Party, Broker } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -31,6 +35,7 @@ const PAYMENT_TYPE_GROUPS: { label: string; items: { value: PaymentType; label: 
       { value: 'TRANSPORTER_INWARD', label: 'Transporter Freight (Inward)' },
       { value: 'TRANSPORTER_OUTWARD', label: 'Transporter Freight (Outward)' },
       { value: 'BROKER', label: 'Broker Commission' },
+      { value: 'HAMALI', label: 'Hamali Payment' },
     ],
   },
   {
@@ -54,7 +59,7 @@ const PAYMENT_TYPES: { value: PaymentType; label: string }[] = [
 
 // Types that settle a specific counterparty (they have their own picker below).
 // Everything else is a direct-cash expense/drawing that uses the free-text payee.
-const COUNTERPARTY_TYPES: PaymentType[] = ['SUPPLIER', 'TRANSPORTER_INWARD', 'TRANSPORTER_OUTWARD', 'BROKER'];
+const COUNTERPARTY_TYPES: PaymentType[] = ['SUPPLIER', 'TRANSPORTER_INWARD', 'TRANSPORTER_OUTWARD', 'BROKER', 'HAMALI'];
 
 // Payments created from a detail page (Gunny Bags / Electricity / Maintenance /
 // Drawings). They're read-only here — edit or delete them on their own page so
@@ -66,13 +71,36 @@ const MANAGED_ELSEWHERE: Partial<Record<PaymentType, string>> = {
   DRAWINGS: 'Drawings page',
 };
 
+function paymentTypeLabel(p: Payment): string {
+  return PAYMENT_TYPES.find((t) => t.value === p.type)?.label ?? p.type;
+}
+
+function paymentPaidTo(p: Payment): string {
+  if (p.type === 'SUPPLIER' || p.type === 'HAMALI') return p.party?.name ?? '-';
+  if (p.type === 'BROKER') return p.broker?.name ?? '-';
+  if (p.type === 'TRANSPORTER_INWARD' || p.type === 'TRANSPORTER_OUTWARD') {
+    return p.lorryNumber ? `Transporter (Lorry ${p.lorryNumber})` : 'Transporter';
+  }
+  return p.payee || paymentTypeLabel(p);
+}
+
+const PAYMENT_EXPORT_COLUMNS: ExportColumn<Payment>[] = [
+  { header: 'Date', value: (p) => shortDate(p.date) },
+  { header: 'Type', value: (p) => paymentTypeLabel(p) },
+  { header: 'Paid To', value: (p) => paymentPaidTo(p) },
+  { header: 'Ref / Cheque', value: (p) => p.reference ?? '' },
+  { header: 'Description', value: (p) => p.description ?? '' },
+  { header: 'Amount', value: (p) => rupees(p.amount), excel: (p) => Number(p.amount), numFmt: '#,##0.00', align: 'right' },
+];
+
 export default function PaymentsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
   const { data: payments, isLoading } = useQuery({
-    queryKey: ['payments'],
-    queryFn: () => api<Payment[]>('/payments'),
+    // Show the full payment history, not just the latest 100 (the server default).
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
   });
 
   const { data: parties } = useQuery({
@@ -85,7 +113,12 @@ export default function PaymentsPage() {
     queryFn: () => api<Broker[]>('/brokers'),
   });
 
-  const suppliers = parties?.filter((p) => p.type !== 'BUYER') ?? [];
+  const suppliers = useMemo(() => parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [], [parties]);
+  const hamaliTeams = useMemo(() => parties?.filter((p) => p.type === 'HAMALI_TEAM') ?? [], [parties]);
+
+  // Render the log progressively so opening the page with a long payment history
+  // doesn't mount thousands of rows at once; more append as you scroll.
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visiblePayments = [] } = usePagedRows(payments ?? [], 50);
 
   // Form State
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -152,7 +185,7 @@ export default function PaymentsPage() {
           date,
           amount: Number(amount) || 0,
           type,
-          partyId: type === 'SUPPLIER' ? partyId || null : null,
+          partyId: (type === 'SUPPLIER' || type === 'HAMALI') ? partyId || null : null,
           brokerId: type === 'BROKER' ? brokerId || null : null,
           lorryNumber: (type === 'TRANSPORTER_INWARD' || type === 'TRANSPORTER_OUTWARD') ? lorryNumber || null : null,
           payee: !COUNTERPARTY_TYPES.includes(type) ? payee || null : null,
@@ -185,6 +218,7 @@ export default function PaymentsPage() {
   const isValid =
     Number(amount) > 0 &&
     (type !== 'SUPPLIER' || partyId) &&
+    (type !== 'HAMALI' || partyId) &&
     (type !== 'BROKER' || brokerId);
 
   return (
@@ -196,9 +230,18 @@ export default function PaymentsPage() {
             Record cash or bank payments to suppliers, transporters, brokers, or other expenses. Automatically generates general ledger postings.
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4" /> Record Payment
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons
+            filename="Payments"
+            title="Payments Register"
+            subtitle={`${payments?.length ?? 0} payment(s)`}
+            columns={PAYMENT_EXPORT_COLUMNS}
+            rows={payments ?? []}
+          />
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4" /> Record Payment
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card overflow-x-auto">
@@ -221,11 +264,11 @@ export default function PaymentsPage() {
             {payments?.length === 0 && (
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
             )}
-            {payments?.map((p) => {
+            {visiblePayments.map((p) => {
               const typeLabel = PAYMENT_TYPES.find((t) => t.value === p.type)?.label ?? p.type;
               const managedIn = MANAGED_ELSEWHERE[p.type];
               let paidToText = '-';
-              if (p.type === 'SUPPLIER') {
+              if (p.type === 'SUPPLIER' || p.type === 'HAMALI') {
                 paidToText = p.party?.name ?? '-';
               } else if (p.type === 'BROKER') {
                 paidToText = p.broker?.name ?? '-';
@@ -268,6 +311,7 @@ export default function PaymentsPage() {
             })}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -310,13 +354,13 @@ export default function PaymentsPage() {
               </Select>
             </div>
 
-            {type === 'SUPPLIER' && (
+            {(type === 'SUPPLIER' || type === 'HAMALI') && (
               <div className="space-y-2">
-                <Label>Supplier</Label>
+                <Label>{type === 'HAMALI' ? 'Hamali Team' : 'Supplier'}</Label>
                 <Select value={partyId} onValueChange={setPartyId}>
-                  <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder={type === 'HAMALI' ? 'Select hamali team' : 'Select supplier'} /></SelectTrigger>
                   <SelectContent>
-                    {suppliers.map((s) => (
+                    {(type === 'HAMALI' ? hamaliTeams : suppliers).map((s) => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -338,7 +382,7 @@ export default function PaymentsPage() {
               </div>
             )}
 
-            {type === 'TRANSPORTER' && (
+            {type === 'TRANSPORT' && (
               <div className="space-y-2">
                 <Label htmlFor="lorry">Lorry / Vehicle Number</Label>
                 <Input id="lorry" value={lorryNumber} onChange={(e) => setLorryNumber(e.target.value)} placeholder="e.g. AP02AB1234" />

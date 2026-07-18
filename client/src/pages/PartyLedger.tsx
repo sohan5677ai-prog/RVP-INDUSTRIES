@@ -10,8 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import {
-  Search, Loader2, ArrowLeft, Printer, Download, Phone, MapPin, Landmark,
+  Search, Loader2, ArrowLeft, Printer, Phone, MapPin, Landmark,
   Hash, Wallet, TrendingUp, TrendingDown, Scale, Building2,
   ArrowDownRight, ArrowUpRight, ReceiptText, Copy, Check, Users, IndianRupee,
 } from 'lucide-react';
@@ -27,6 +29,20 @@ const KIND_META: Record<LedgerKind, { label: string; cls: string }> = {
 };
 
 const TYPE_LABEL: Record<string, string> = { SUPPLIER: 'Supplier', BUYER: 'Buyer', BOTH: 'Supplier & Buyer' };
+
+const LEDGER_COLUMNS: ExportColumn<PartyLedgerTxn>[] = [
+  { header: 'Date', value: (t) => shortDate(t.date) },
+  { header: 'Type', value: (t) => KIND_META[t.kind].label },
+  { header: 'Particulars', value: (t) => t.particulars },
+  { header: 'Invoice No', value: (t) => t.invoiceNumber ?? '' },
+  { header: 'Vehicle No', value: (t) => t.vehicleNumber ?? '' },
+  { header: 'UTR / Ref', value: (t) => t.utr ?? t.reference ?? '' },
+  { header: 'Weight (kg)', value: (t) => t.weightKg ?? '', excel: (t) => t.weightKg ?? null, numFmt: '#,##0', align: 'right' },
+  { header: 'Rate', value: (t) => (t.ratePerKg != null ? rupees(t.ratePerKg) : ''), excel: (t) => t.ratePerKg ?? null, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Debit', value: (t) => (t.debit ? rupees(t.debit) : ''), excel: (t) => t.debit || null, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Credit', value: (t) => (t.credit ? rupees(t.credit) : ''), excel: (t) => t.credit || null, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Balance', value: (t) => `${rupees(Math.abs(t.runningBalance))} ${t.runningBalance >= 0 ? 'DR' : 'CR'}`, align: 'right' },
+];
 
 function balanceColor(type: 'DR' | 'CR') {
   return type === 'DR' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
@@ -225,20 +241,6 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
     ? `${shortDate(filtered[0].date)} – ${shortDate(filtered[filtered.length - 1].date)}`
     : '';
 
-  function exportCsv() {
-    const head = ['Date', 'Type', 'Particulars', 'Invoice No', 'Vehicle No', 'UTR / Ref', 'Transferred Date', 'Weight (kg)', 'Rate', 'Debit', 'Credit', 'Balance'];
-    const lines = filtered.map((t) => [
-      shortDate(t.date), KIND_META[t.kind].label, t.particulars, t.invoiceNumber ?? '', t.vehicleNumber ?? '',
-      t.utr ?? '', t.transferredDate ? shortDate(t.transferredDate) : '', t.weightKg ?? '', t.ratePerKg ?? '',
-      t.debit || '', t.credit || '', `${Math.abs(t.runningBalance)} ${t.runningBalance >= 0 ? 'DR' : 'CR'}`,
-    ]);
-    const csv = [head, ...lines].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `${party.name.replace(/\s+/g, '_')}_ledger.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
   return (
     <div className="space-y-6">
       {/* toolbar */}
@@ -247,7 +249,14 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           <ArrowLeft className="h-4 w-4" /> All Parties
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1.5"><Download className="h-4 w-4" /> CSV</Button>
+          <ExportButtons
+            filename={`${party.name.replace(/\s+/g, '_')}_Ledger`}
+            title={`Party Ledger — ${party.name}`}
+            subtitle={periodText}
+            columns={LEDGER_COLUMNS}
+            rows={filtered}
+            showPrint={false}
+          />
           <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-1.5"><Printer className="h-4 w-4" /> Print</Button>
         </div>
       </div>

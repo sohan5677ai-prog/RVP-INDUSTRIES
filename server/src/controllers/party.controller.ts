@@ -16,6 +16,10 @@ export async function getParty(req: Request, res: Response) {
 
 export async function createParty(req: Request, res: Response) {
   const data = createPartySchema.parse(req.body);
+  const duplicate = await prisma.party.findFirst({
+    where: { name: { equals: data.name.trim(), mode: 'insensitive' } },
+  });
+  if (duplicate) throw new HttpError(409, `A party named "${duplicate.name}" already exists`);
   const party = await prisma.party.create({ data });
   res.status(201).json(party);
 }
@@ -24,6 +28,12 @@ export async function updateParty(req: Request, res: Response) {
   const data = updatePartySchema.parse(req.body);
   const existing = await prisma.party.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new HttpError(404, 'Party not found');
+  if (data.name !== undefined) {
+    const duplicate = await prisma.party.findFirst({
+      where: { name: { equals: data.name.trim(), mode: 'insensitive' }, id: { not: existing.id } },
+    });
+    if (duplicate) throw new HttpError(409, `A party named "${duplicate.name}" already exists`);
+  }
   const { commodities, ...rest } = data;
   const party = await prisma.party.update({
     where: { id: req.params.id },

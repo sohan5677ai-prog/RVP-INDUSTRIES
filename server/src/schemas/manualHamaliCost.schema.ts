@@ -4,12 +4,22 @@ export const MANUAL_HAMALI_TYPES = [
   'BAG_CUTTING_NORMAL',
   'BAG_CUTTING_DISTANCE',
   'PAPPU_NET',
+  'HUSK_PACKING',
+  'TPS_BROKENS_PACKING',
+  'TAMARIND_BYPRODUCTS_PACKING',
   'DIESEL',
   'MISC',
   'PAID',
 ] as const;
 
-export const PER_BAG_TYPES = ['BAG_CUTTING_NORMAL', 'BAG_CUTTING_DISTANCE', 'PAPPU_NET'] as const;
+export const PER_BAG_TYPES = [
+  'BAG_CUTTING_NORMAL',
+  'BAG_CUTTING_DISTANCE',
+  'PAPPU_NET',
+  'HUSK_PACKING',
+  'TPS_BROKENS_PACKING',
+  'TAMARIND_BYPRODUCTS_PACKING',
+] as const;
 
 export const createManualHamaliCostSchema = z
   .object({

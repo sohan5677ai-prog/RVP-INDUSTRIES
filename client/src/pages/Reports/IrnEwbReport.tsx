@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { FileText, Truck, Printer, Search } from 'lucide-react';
-import { api } from '@/lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { FileText, Truck, Printer, Search, Mail } from 'lucide-react';
+import { api, getErrorMessage } from '@/lib/api';
 import { shortDate } from '@/lib/format';
 import { PageHeader } from '@/components/PageHeader';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -9,19 +10,38 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import type { SaleDispatch } from '@/lib/types';
+import type { SaleDispatch, EmailLog } from '@/lib/types';
 
 interface TaxproReportData {
   sales: SaleDispatch[];
   purchases: any[];
 }
 
+const DOC_TYPE_LABEL: Record<EmailLog['documentType'], string> = {
+  INVOICE: 'Tax Invoice',
+  EWB: 'E-Way Bill',
+  CREDIT_NOTE: 'Credit Note',
+  DEBIT_NOTE: 'Debit Note',
+};
+
 export default function IrnEwbReport() {
+  const qc = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
 
   const { data, isLoading } = useQuery<TaxproReportData>({
     queryKey: ['taxpro-report'],
     queryFn: () => api<TaxproReportData>('/taxpro/list'),
+  });
+
+  const { data: emailLogs, isLoading: loadingLogs } = useQuery({
+    queryKey: ['email-logs'],
+    queryFn: () => api<EmailLog[]>('/email-logs'),
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: (id: string) => api(`/email-logs/${id}/resend`, { method: 'POST' }),
+    onSuccess: () => { toast.success('Email resent'); qc.invalidateQueries({ queryKey: ['email-logs'] }); },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
   const sales = data?.sales || [];
@@ -38,6 +58,18 @@ export default function IrnEwbReport() {
 
   const irnSales = filteredSales.filter(s => s.irn);
   const ewbSales = filteredSales.filter(s => s.ewbNumber);
+
+  const sendInvoiceEmailMutation = useMutation({
+    mutationFn: (id: string) => api(`/sale-dispatches/${id}/einvoice/email`, { method: 'POST' }),
+    onSuccess: () => { toast.success('Invoice emailed to buyer'); qc.invalidateQueries({ queryKey: ['email-logs'] }); },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const sendEwbEmailMutation = useMutation({
+    mutationFn: (id: string) => api(`/sale-dispatches/${id}/ewaybill/email`, { method: 'POST' }),
+    onSuccess: () => { toast.success('E-Way Bill emailed to buyer'); qc.invalidateQueries({ queryKey: ['email-logs'] }); },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
 
   const handlePrint = (dispatch: SaleDispatch, type: 'IRN' | 'EWB') => {
     // A robust ERP would generate a PDF or open a printable window.
@@ -129,6 +161,9 @@ export default function IrnEwbReport() {
           <TabsTrigger value="ewaybill" className="gap-2">
             <Truck className="h-4 w-4" /> E-Way Bills (EWB)
           </TabsTrigger>
+          <TabsTrigger value="emaillog" className="gap-2">
+            <Mail className="h-4 w-4" /> Email Log
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="einvoice" className="space-y-4">
@@ -172,9 +207,18 @@ export default function IrnEwbReport() {
                               {s.irnStatus}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-right space-x-1.5">
                             <Button size="sm" variant="outline" onClick={() => handlePrint(s, 'IRN')}>
                               <Printer className="h-3.5 w-3.5 mr-1.5" /> Print
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title={s.saleOrder?.buyer?.email ? undefined : 'Add an email in Parties first'}
+                              disabled={!s.saleOrder?.buyer?.email || sendInvoiceEmailMutation.isPending}
+                              onClick={() => sendInvoiceEmailMutation.mutate(s.id)}
+                            >
+                              <Mail className="h-3.5 w-3.5 mr-1.5" /> Send
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -234,9 +278,18 @@ export default function IrnEwbReport() {
                               {s.ewbStatus}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-right space-x-1.5">
                             <Button size="sm" variant="outline" onClick={() => handlePrint(s, 'EWB')}>
                               <Printer className="h-3.5 w-3.5 mr-1.5" /> Print
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title={s.saleOrder?.buyer?.email ? undefined : 'Add an email in Parties first'}
+                              disabled={!s.saleOrder?.buyer?.email || sendEwbEmailMutation.isPending}
+                              onClick={() => sendEwbEmailMutation.mutate(s.id)}
+                            >
+                              <Mail className="h-3.5 w-3.5 mr-1.5" /> Send
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -253,6 +306,54 @@ export default function IrnEwbReport() {
               </div>
             </TabsContent>
           </Tabs>
+        </TabsContent>
+
+        <TabsContent value="emaillog" className="space-y-4">
+          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead>Party</TableHead>
+                  <TableHead>Document</TableHead>
+                  <TableHead>Sent At</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loadingLogs ? (
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>
+                ) : !emailLogs || emailLogs.length === 0 ? (
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No emails sent yet</TableCell></TableRow>
+                ) : (
+                  emailLogs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="font-medium">{log.party?.name ?? '-'}</TableCell>
+                      <TableCell>
+                        <div className="text-sm">{DOC_TYPE_LABEL[log.documentType]}</div>
+                        <div className="text-xs font-mono text-muted-foreground">{log.referenceLabel}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{shortDate(log.sentAt)}</div>
+                        <div className="text-xs text-muted-foreground">{log.recipientEmail}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={log.status === 'FAILED' ? 'destructive' : 'success'}>{log.status}</Badge>
+                        {log.status === 'FAILED' && log.errorMessage && (
+                          <div className="mt-1 max-w-[220px] truncate text-[10px] text-destructive" title={log.errorMessage}>{log.errorMessage}</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="outline" disabled={resendMutation.isPending} onClick={() => resendMutation.mutate(log.id)}>
+                          <Mail className="h-3.5 w-3.5 mr-1.5" /> Resend
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

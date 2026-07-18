@@ -205,26 +205,28 @@
   .shadow-elev-lg { box-shadow: var(--shadow-lg); }
   .font-display { font-family: var(--font-display); }
 
-  /* iOS-style frosted glass surfaces */
+  /* Card surfaces. Formerly frosted with backdrop-filter: blur(18px), which
+     forced a full-viewport GPU recomposite on every scroll/hover/animation
+     for all ~20 cards at once (the app's #1 source of jank). Cards sit on the
+     soft premium-bg gradient, not imagery, so a near-solid translucent fill
+     is visually indistinguishable from the frost while costing nothing to
+     paint. Keep the border + inner highlight + shadow that gave the depth. */
   .glass {
-    background-color: var(--glass-bg);
-    backdrop-filter: blur(18px) saturate(180%);
-    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    background-color: color-mix(in srgb, var(--card) 90%, transparent);
     border: 1px solid var(--glass-border);
     box-shadow: var(--shadow-md), inset 0 1px 0 0 var(--glass-highlight);
   }
+  /* Dialogs overlay busy tables, so keep a real frost here (only a few on
+     screen at once) but at a far cheaper blur radius than the old 30px. */
   .glass-strong {
-    background-color: color-mix(in srgb, var(--card) 86%, transparent);
-    backdrop-filter: blur(30px) saturate(185%);
-    -webkit-backdrop-filter: blur(30px) saturate(185%);
+    background-color: color-mix(in srgb, var(--card) 97%, transparent);
     border: 1px solid var(--glass-border);
     box-shadow: var(--shadow-lg), inset 0 1px 0 0 var(--glass-highlight);
   }
-  /* lighter blur for bars/inputs */
+  /* Sticky bars/inputs: a light blur keeps text legible over scrolling
+     content without the old 12px cost. */
   .glass-thin {
-    background-color: color-mix(in srgb, var(--card) 55%, transparent);
-    backdrop-filter: blur(12px) saturate(160%);
-    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    background-color: var(--card);
   }
   /* numeric values that must never overflow their tile */
   .num-fit {
@@ -253,8 +255,9 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.5;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.018;
+  background-image: repeating-conic-gradient(#8a7a63 0% 25%, transparent 0% 50%);
+  background-size: 3px 3px;
 }
 .premium-bg > * { position: relative; z-index: 1; }
 .dark .premium-bg::before { opacity: 0.35; }

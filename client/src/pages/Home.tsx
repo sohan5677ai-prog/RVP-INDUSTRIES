@@ -54,7 +54,7 @@ export default function Home() {
   const { user } = useAuth();
 
   const { data: parties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
-  const { data: pos } = useQuery({ queryKey: ['purchase-orders'], queryFn: () => api<PurchaseOrder[]>('/purchase-orders') });
+  const { data: pos } = useQuery({ queryKey: ['purchase-orders'], queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true') });
   const { data: sales } = useQuery({ queryKey: ['sale-orders'], queryFn: () => api<SaleOrder[]>('/sale-orders') });
   const { data: stock } = useQuery({ queryKey: ['black-seed-stock'], queryFn: () => api<BlackSeedStockResponse>('/inventory/black-seed') });
 

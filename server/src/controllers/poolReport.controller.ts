@@ -9,6 +9,7 @@ import {
   createMaintenanceExpenseSchema,
   createDrawingSchema,
   createInterestChargeSchema,
+  createTermLoanPrincipalSchema,
 } from '../schemas/poolReport.schema.js';
 
 /**
@@ -227,4 +228,38 @@ export async function deleteInterestCharge(req: Request, res: Response) {
     await tx.interestCharge.delete({ where: { id: row.id } });
   });
   res.json({ message: 'Interest charge deleted' });
+}
+
+// ── Term-loan principal (informational list, no GL posting) ──────────────────
+export async function listTermLoanPrincipals(_req: Request, res: Response) {
+  res.json(await prisma.termLoanPrincipal.findMany({ orderBy: { date: 'desc' } }));
+}
+
+export async function createTermLoanPrincipal(req: Request, res: Response) {
+  const data = createTermLoanPrincipalSchema.parse(req.body);
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.termLoanPrincipal.create({
+      data: { date: data.date, amount: data.amount, note: data.note ?? null },
+    });
+    await LedgerService.recordLinkedPayment(tx, {
+      date: data.date,
+      amount: Number(data.amount),
+      type: 'TERM_LOAN_PRINCIPAL',
+      payee: 'Term Loan Principal',
+      description: data.note ?? undefined,
+      refKey: `PRINCIPAL-${row.id}`,
+    });
+    return row;
+  });
+  res.status(201).json(created);
+}
+
+export async function deleteTermLoanPrincipal(req: Request, res: Response) {
+  const row = await prisma.termLoanPrincipal.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Term loan principal entry not found');
+  await prisma.$transaction(async (tx) => {
+    await reverseLinkedEntry(tx, `PRINCIPAL-${row.id}`);
+    await tx.termLoanPrincipal.delete({ where: { id: row.id } });
+  });
+  res.json({ message: 'Term loan principal entry deleted' });
 }

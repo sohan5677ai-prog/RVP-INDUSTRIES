@@ -30,7 +30,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
         <AuthProvider>
           <App />
-          <Toaster richColors />
+          <Toaster richColors position="top-center" />
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>

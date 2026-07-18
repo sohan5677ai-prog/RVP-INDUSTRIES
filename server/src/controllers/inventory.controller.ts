@@ -99,9 +99,14 @@ export async function getStockByPrice(_req: Request, res: Response) {
 
 export async function getStockByParty(req: Request, res: Response) {
   const { allLots } = await computeUnifiedStockEngine('FIFO');
-  
+
+  // 'RVP' shows only seed physically at the mill; anything else (default/'ALL')
+  // combines RVP with stock still sitting at outside storage locations.
+  const locationFilter = typeof req.query.location === 'string' ? req.query.location.toUpperCase() : 'ALL';
+  const scopedLots = locationFilter === 'RVP' ? allLots.filter((lot) => lot.location === 'RVP') : allLots;
+
   const partyMap = new Map<string, any>();
-  for (const lot of allLots) {
+  for (const lot of scopedLots) {
     if (!partyMap.has(lot.partyId)) {
       partyMap.set(lot.partyId, {
         partyId: lot.partyId,
@@ -182,6 +187,7 @@ export async function getStockByState(req: Request, res: Response) {
         totalPurchasedKg: 0,
         totalMilledKg: 0,
         netStockKg: 0,
+        totalValue: 0,
         supplierCount: 0,
       });
       partyCountByState.set(state, new Set<string>());
@@ -192,6 +198,7 @@ export async function getStockByState(req: Request, res: Response) {
     s.totalPurchasedKg += lot.orderedKg;
     s.totalMilledKg += lot.soldKg;
     s.netStockKg += lot.receivedKg;
+    s.totalValue += (lot.receivedKg * lot.pricePerKg);
   }
 
   for (const [state, s] of stateMap.entries()) {

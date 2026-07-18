@@ -7,6 +7,9 @@ export const createPurchaseOrderSchema = z.object({
   partyId: z.string().min(1),
   pricePerKg: z.coerce.number().positive(),
   priceType: z.enum(['BASE', 'DELIVERY']).optional().default('DELIVERY'),
+  // Intended destination: STOCK holds the PO's pending tonnage out of the Order
+  // Planner until it's actually stocked in; RVP (default) shows it as today.
+  plannedLocation: z.enum(['RVP', 'STOCK']).optional().default('RVP'),
   hasGst: z.boolean().optional().default(false),
   tonnageKg: z.coerce.number().int().positive(), // already in kg (FE converts tonnes -> kg)
   lorryCount: z.preprocess((val) => (val === null || val === undefined || val === '' ? null : Number(val)), z.number().int().positive().nullable().optional()),
@@ -14,6 +17,9 @@ export const createPurchaseOrderSchema = z.object({
 
 export const listPurchaseOrdersSchema = z.object({
   status: poStatusEnum.optional(),
+  skip: z.coerce.number().int().nonnegative().optional(),
+  take: z.coerce.number().int().positive().optional().default(100),
+  all: z.enum(['true', 'false']).optional()
 });
 
 // Multipart: all values arrive as strings, so coerce.
@@ -30,6 +36,12 @@ export const createStockInSchema = z.object({
   // Inward freight (₹) to bring BASE-priced stock to our location, captured at
   // arrival. Ignored downstream for DELIVERY-priced POs (freight already in price).
   freightCharge: z.coerce.number().nonnegative().optional().default(0),
+  // Whole-vehicle tonnage (kg) the freight is spread over, for a SHARED lorry.
+  // Empty/0 → single-party lorry, basis falls back to net weight.
+  freightTonnageKg: z.preprocess(
+    (val) => (val === null || val === undefined || val === '' ? undefined : Number(val)),
+    z.number().int().positive().optional(),
+  ),
   // Party arrived in their own vehicle → the lorry's ₹80/t hamali share is
   // deducted from their payable at verification. Multipart sends "true"/"false".
   selfVehicle: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional().default(false),
@@ -44,21 +56,39 @@ export const createUrpStockInSchema = z.object({
   invoiceNumber: z.string().optional(),
   rvpFirstWeightKg: z.coerce.number().int().positive(),
   rvpSecondWeightKg: z.coerce.number().int().nonnegative().optional().default(0),
+  // Direct net-weight entry: for spot purchases with no separate tare weighment,
+  // the operator ticks "enter net directly" and supplies the RVP net here. When
+  // > 0 it is used as the net as-is (overriding first − second).
+  rvpNetWeightKg: z.coerce.number().int().nonnegative().optional().default(0),
   billingWeightKg: z.coerce.number().int().positive(),
   partyKataKg: z.coerce.number().int().positive(),
   loadingLocation: z.enum(['RVP', 'PGR COLD', 'Murugan', 'KNM Multi']).optional().default('RVP'),
   freightCharge: z.coerce.number().nonnegative().optional().default(0),
+  // Shared lorry: the freight covers several parties' stock. When ticked the operator
+  // enters the whole vehicle's tonnage (kg); the per-kg freight = freightCharge /
+  // freightTonnageKg. Empty/0 → single-party lorry, basis falls back to net weight.
+  freightTonnageKg: z.preprocess(
+    (val) => (val === null || val === undefined || val === '' ? undefined : Number(val)),
+    z.number().int().positive().optional(),
+  ),
   hasGst: z.preprocess((val) => val === 'true', z.boolean().optional().default(false)),
   selfVehicle: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional().default(false),
 });
 
 export const createPurchaseSchema = z.object({
   stockInId: z.string().min(1),
-  rvpSecondWeightKg: z.coerce.number().int().positive(),
+  // Normally the tare weighment (must be > 0). For a direct-net (URP) stock-in the
+  // net was typed straight in, so 0 is allowed and the controller uses rvpFirst as
+  // the net; the >0 requirement is enforced there for non-direct-net stock-ins.
+  rvpSecondWeightKg: z.coerce.number().int().nonnegative(),
   hamaliRate: z.preprocess((val) => (val === null || val === undefined || val === '' ? undefined : Number(val)), z.number().nonnegative().optional()),
   // Bunker the seed is poured into - only meaningful for stock landing directly
   // at the process.
   bunkerPlace: z.enum(['A', 'B']).optional().nullable(),
+  // Effective purchase date, set by the operator on the Record Purchase dialog.
+  // Optional: when omitted the DB default (now) applies on create and the existing
+  // value is kept on update.
+  purchaseDate: z.coerce.date().optional(),
   // Inward freight is now captured at Stock In (see createStockInSchema) and
   // sourced from the StockIn record at purchase time, not from this request.
 });

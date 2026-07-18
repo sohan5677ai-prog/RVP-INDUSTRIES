@@ -14,6 +14,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 interface BlackSeedRow {
   purchaseId: string;
@@ -257,9 +261,31 @@ export default function StockByPrice() {
     const eligibleValue = eligible.reduce((s, b) => s + (useCommitted
       ? b.value + b.pendingValue
       : b.value), 0);
-    const wacBlack = availableBlackKg > 0 ? eligibleValue / availableBlackKg : 0; // weighted-avg seed cost
-    const wacPappuCost = wacBlack / PAPPU_OUTTURN; // weighted-avg cost per sellable kg
+    const wacBlack = availableBlackKg > 0 ? eligibleValue / availableBlackKg : 0; // pool weighted-avg seed cost (valuation only)
+    const wacPappuCost = wacBlack / PAPPU_OUTTURN; // pool weighted-avg cost per sellable kg (valuation only)
     const askedPappuKg = hasTonnage ? tonnage * 1000 : 0;
+
+    // Margin is costed DEAREST-FIRST, exactly like a real sale and the per-order P/L
+    // page (computePappuOrderMargins): a sale eats the most-expensive eligible seed
+    // first, so the margin reflects the TRUE realisation - NOT the optimistic blended
+    // pool average, which mixes in cheaper seed the depletion wouldn't leave for this
+    // order. With no tonnage entered we draw the whole eligible pool (= the blend).
+    const seedNeededKg = hasTonnage ? askedPappuKg / PAPPU_OUTTURN : Infinity;
+    let seedLeftToDraw = seedNeededKg;
+    let drawnBlackKg = 0;
+    let drawnBlackCost = 0;
+    for (const b of [...eligible].sort((a, z) => z.blackPricePerKg - a.blackPricePerKg)) {
+      if (seedLeftToDraw <= 1e-6) break;
+      const bandSeedKg = Math.max(0, useCommitted ? b.arrivedRemainingKg + b.pendingBlackKg : b.arrivedRemainingKg);
+      if (bandSeedKg <= 0) continue;
+      const take = Math.min(seedLeftToDraw, bandSeedKg);
+      drawnBlackKg += take;
+      drawnBlackCost += take * b.blackPricePerKg;
+      seedLeftToDraw -= take;
+    }
+    const realizedWacBlack = drawnBlackKg > 0 ? drawnBlackCost / drawnBlackKg : wacBlack;
+    const realizedPappuCost = realizedWacBlack / PAPPU_OUTTURN; // dearest-first cost per sellable kg
+
     // How much black seed is needed for the asked tonnage if bought fresh?
     const blackRequiredKg = askedPappuKg / SEED_TO_CONSUMABLE;
     const diff = poolPappu - askedPappuKg; // + excess, − shortage
@@ -267,12 +293,12 @@ export default function StockByPrice() {
     // Shortage is covered by NEW seed, which yields 0.48 (because it's pending).
     const seedShortfallKg = diff < 0 ? (-diff) / SEED_TO_CONSUMABLE : 0;
     const fulfillmentPct = askedPappuKg > 0 ? Math.min(100, (poolPappu / askedPappuKg) * 100) : 100;
-    const marginPerKg = hasPrice ? pappuPrice - wacPappuCost : 0; // pappu sell − weighted-avg pappu cost
-    
+    const marginPerKg = hasPrice ? pappuPrice - realizedPappuCost : 0; // pappu sell − dearest-first pappu cost
+
     return {
       ceilingBlackPrice, eligibleCount: eligible.length, availableBlackKg,
-      poolPappu, poolPendingPappu, wacBlack, wacPappuCost, askedPappuKg, blackRequiredKg,
-      seedShortfallKg, diff, fulfillmentPct, marginPerKg,
+      poolPappu, poolPendingPappu, wacBlack, wacPappuCost, realizedWacBlack, realizedPappuCost,
+      askedPappuKg, blackRequiredKg, seedShortfallKg, diff, fulfillmentPct, marginPerKg,
       isAllStock: !hasPrice
     };
   }, [bands, pappuPrice, tonnage, hasPrice, hasTonnage, plannerBasis]);
@@ -318,6 +344,7 @@ export default function StockByPrice() {
         (r.poNumber ?? '').toLowerCase().includes(q)
     );
   });
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pagedBands = [] } = usePagedRows(visible, 50);
 
   if (isLoading) {
     return (
@@ -330,10 +357,28 @@ export default function StockByPrice() {
   const shortage = plan && plan.diff < 0 ? -plan.diff : 0;
   const excess = plan && plan.diff > 0 ? plan.diff : 0;
 
+  const priceBandColumns: ExportColumn<PriceBand>[] = [
+    { header: 'Black Seed Price', value: (b) => rupees(b.blackPricePerKg), excel: (b) => b.blackPricePerKg, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Implied Pappu Price', value: (b) => rupees(b.impliedPappuPrice), excel: (b) => b.impliedPappuPrice, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Lorries', value: (b) => b.lorries, align: 'right' },
+    { header: 'Black Seed Remaining (MT)', value: (b) => toTonnes(b.arrivedRemainingKg).toFixed(2), excel: (b) => toTonnes(b.arrivedRemainingKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Pending POs (MT)', value: (b) => toTonnes(b.pendingBlackKg).toFixed(2), excel: (b) => toTonnes(b.pendingBlackKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Committed (MT)', value: (b) => toTonnes(b.allocatedPappuKg).toFixed(2), excel: (b) => toTonnes(b.allocatedPappuKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Available Pappu (MT)', value: (b) => toTonnes(b.availablePappuKg).toFixed(2), excel: (b) => toTonnes(b.availablePappuKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Valuation', value: (b) => rupees(b.value), excel: (b) => b.value, numFmt: '#,##0.00', align: 'right' },
+  ];
+
   return (
     <div className="space-y-6">
-      <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <h1 className="text-2xl font-bold">Order Planner</h1>
+        <ExportButtons
+          filename="Stock_By_Price"
+          title="Stock by Price (Order Planner)"
+          subtitle={`${visible.length} band(s)`}
+          columns={priceBandColumns}
+          rows={visible}
+        />
       </div>
 
       {/* ─── Order Planner ─────────────────────────────────────────────────── */}
@@ -432,7 +477,7 @@ export default function StockByPrice() {
                 )}
                 <span>
                   · {plan.eligibleCount} band{plan.eligibleCount === 1 ? '' : 's'}
-                  {plan.availableBlackKg > 0 && <> · avg cost {rupees(plan.wacPappuCost)}/kg pappu</>}
+                  {plan.availableBlackKg > 0 && <> · cost {rupees(plan.realizedPappuCost)}/kg pappu (dearest seed first)</>}
                 </span>
               </div>
 
@@ -515,7 +560,7 @@ export default function StockByPrice() {
                     {plan.availableBlackKg === 0 ? '-' : `${plan.marginPerKg >= 0 ? '+' : ''}${rupees(plan.marginPerKg)}/kg`}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
-                    {plan.availableBlackKg > 0 ? `sell − avg cost ${rupees(plan.wacPappuCost)}/kg` : 'no eligible stock'}
+                    {plan.availableBlackKg > 0 ? `sell − cost ${rupees(plan.realizedPappuCost)}/kg (dearest first)` : 'no eligible stock'}
                   </div>
                 </div>
               </div>
@@ -641,7 +686,7 @@ export default function StockByPrice() {
                 </TableCell>
               </TableRow>
             )}
-            {visible.map((b) => {
+            {pagedBands.map((b) => {
               const key = b.blackPricePerKg.toFixed(2);
               const isOpen = expanded.has(key);
               const isEligible = plan && !plan.isAllStock ? b.blackPricePerKg <= plan.ceilingBlackPrice + 1e-6 : false;
@@ -830,6 +875,7 @@ export default function StockByPrice() {
             })}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
     </div>
   );

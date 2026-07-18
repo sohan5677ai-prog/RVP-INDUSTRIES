@@ -6,6 +6,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Scale, Loader2 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+
+type InternalWeightRow = {
+  id: string;
+  date: Date;
+  partyName: string;
+  internalWeightKg: number;
+  partyWeightKg: number;
+  balanceKg: number;
+  profitAmount: number;
+};
+
+const INTERNAL_WEIGHT_COLUMNS: ExportColumn<InternalWeightRow>[] = [
+  { header: 'Date', value: (e) => shortDate(e.date.toISOString()) },
+  { header: 'Party', value: (e) => e.partyName },
+  { header: 'Internal Wt (t)', value: (e) => toTonnes(e.internalWeightKg).toFixed(3), excel: (e) => toTonnes(e.internalWeightKg), numFmt: '#,##0.000', align: 'right' },
+  { header: 'Party Wt (t)', value: (e) => toTonnes(e.partyWeightKg).toFixed(3), excel: (e) => toTonnes(e.partyWeightKg), numFmt: '#,##0.000', align: 'right' },
+  { header: 'Balance (t)', value: (e) => toTonnes(e.balanceKg).toFixed(3), excel: (e) => toTonnes(e.balanceKg), numFmt: '#,##0.000', align: 'right' },
+  { header: 'Profit', value: (e) => rupees(e.profitAmount), excel: (e) => e.profitAmount, numFmt: '#,##0.00', align: 'right' },
+];
 
 export default function InternalWeightLedger() {
   const { data: saleOrders, isLoading } = useQuery({
@@ -13,15 +34,7 @@ export default function InternalWeightLedger() {
     queryFn: () => api<SaleOrder[]>('/sale-orders'),
   });
 
-  const ledgerEntries: Array<{
-    id: string;
-    date: Date;
-    partyName: string;
-    internalWeightKg: number;
-    partyWeightKg: number;
-    balanceKg: number;
-    profitAmount: number;
-  }> = [];
+  const ledgerEntries: InternalWeightRow[] = [];
 
   let totalProfit = 0;
   let totalBalanceKg = 0;
@@ -65,6 +78,15 @@ export default function InternalWeightLedger() {
         icon={Scale}
         title="Internal Weight Ledger"
         description="Track moisture gains when the delivered party weight exceeds our internal dispatched weight."
+        actions={
+          <ExportButtons
+            filename="Internal_Weight_Ledger"
+            title="Internal Weight Ledger"
+            subtitle={`${ledgerEntries.length} record(s)`}
+            columns={INTERNAL_WEIGHT_COLUMNS}
+            rows={ledgerEntries}
+          />
+        }
       />
 
       {isLoading ? (

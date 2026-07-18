@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import { PAPPU_OUT_TURN, PAPPU_CONSUMABLE } from '../lib/calc.js';
+import { PAPPU_OUT_TURN, PAPPU_CONSUMABLE, landedPricePerKg } from '../lib/calc.js';
 
 export type LotKind = 'ARRIVED' | 'PENDING' | 'SHORTFALL';
 
@@ -18,6 +18,8 @@ export interface Lot {
   receivedKg: number;
   soldKg: number;
   pricePerKg: number;
+  /** Physical location the seed currently sits at - 'RVP' (mill) or a storage location name. */
+  location: string;
   consumedBy?: { saleDate: string; buyer: string; orderId: string; seedKg: number }[];
 }
 
@@ -108,7 +110,12 @@ async function _computeUnifiedStockEngine(
   for (const po of purchaseOrders) {
     let totalPoNetKg = 0;
     const orderedKg = po.tonnageKg;
-    const partyState = po.party.state || parseState(po.party.address);
+    let partyState = parseState(po.party.state);
+    if (partyState === 'Unknown / Other' && po.party.state) {
+      partyState = po.party.state.trim().split(/[\s,]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    } else if (!po.party.state) {
+      partyState = parseState(po.party.address);
+    }
 
     let hasRvpStockIn = false;
     let hasStorageStockIn = false;
@@ -126,9 +133,20 @@ async function _computeUnifiedStockEngine(
       if (netKg <= 0) continue;
       totalPoNetKg += netKg;
 
-      const price = si.purchase.verification
+      // Party/base rate agreed at PO (or corrected at verification). This is what
+      // the supplier is paid per kg - it never includes inward freight.
+      const basePrice = si.purchase.verification
         ? Number(si.purchase.verification.pricePerKg)
         : Number(po.pricePerKg);
+      // BASE-priced lorries book their inward freight separately (Purchase.freightCharge),
+      // so the company's DELIVERY (landed) price of that seed is base + freight/kg. The
+      // freight is spread over the whole-vehicle tonnage for a SHARED lorry, else this
+      // arrival's net weight. The Order Planner bands and allocates on this delivered
+      // price, and the band value carries the freight loading too. DELIVERY-priced POs
+      // already bake freight into the quoted rate, so their freightCharge is 0 → landed == base.
+      const freight = (po.priceType || 'BASE') === 'BASE' ? Number(si.purchase.freightCharge) || 0 : 0;
+      const freightBasisKg = si.purchase.freightTonnageKg || netKg;
+      const price = landedPricePerKg(basePrice, freightBasisKg, freight);
       const value = Math.round((netKg * price) * 100) / 100;
 
       if (si.loadingLocation !== 'RVP') {
@@ -161,6 +179,7 @@ async function _computeUnifiedStockEngine(
         receivedKg: netKg,
         soldKg: 0,
         pricePerKg: price,
+        location: 'RVP',
       });
     }
 
@@ -169,8 +188,7 @@ async function _computeUnifiedStockEngine(
     const gapKg = Math.max(0, orderedKg - totalPoNetKg);
     if (gapKg > 0) {
       const price = Number(po.pricePerKg);
-      const b = getBand(price);
-      
+
       let isStillComing = false;
       if (po.status === 'PENDING') {
         isStillComing = true;
@@ -181,6 +199,14 @@ async function _computeUnifiedStockEngine(
         }
       }
 
+      // STOCK-bound POs are held out of the planner's pending pool: their tonnage
+      // isn't sellable-as-pending until a lorry actually lands (a direct RVP stock-in
+      // creates an ARRIVED band above; a cold-storage stock-in enters via transfer).
+      // This prevents pre-selling incoming stock that then re-appears at stock-in.
+      // Skip before touching a band so no spurious zero-band is created.
+      if (isStillComing && po.plannedLocation !== 'RVP') continue;
+
+      const b = getBand(price);
       if (isStillComing) {
         b.pendingBlackKg += gapKg;
         b.pendingValue += gapKg * price;
@@ -199,6 +225,7 @@ async function _computeUnifiedStockEngine(
           receivedKg: gapKg,
           soldKg: 0,
           pricePerKg: price,
+          location: 'RVP',
         });
       } else {
         const bufferPappuKg = orderedKg * PAPPU_OUT_TURN * (1 - PAPPU_CONSUMABLE);
@@ -221,6 +248,7 @@ async function _computeUnifiedStockEngine(
           receivedKg: gapKg,
           soldKg: 0,
           pricePerKg: price,
+          location: 'RVP',
         });
       }
     }
@@ -272,13 +300,40 @@ async function _computeUnifiedStockEngine(
         receivedKg: takenKg,
         soldKg: 0,
         pricePerKg: newPrice,
+        location: 'RVP',
       });
     }
   }
 
   const remainingStorageKg = new Map<string, number>();
+  // Stock physically sitting in a non-RVP storage location that was never transferred
+  // to the mill still belongs to the party and must appear in the whole-stock views
+  // (Stock-by-State / Stock-by-Party). It has NOT been milled, so soldKg = 0 and the
+  // full received weight is net stock. These lots are deliberately kept OUT of the
+  // price bands so the RVP-only Pappu planner (getStockByPrice) stays unaffected.
+  const storageLots: Lot[] = [];
   for (const [loc, lots] of storageLotsByLocation.entries()) {
     remainingStorageKg.set(loc, lots.reduce((s, l) => s + l.netKg, 0));
+    for (const lot of lots) {
+      if (lot.netKg <= EPS) continue;
+      storageLots.push({
+        purchaseId: lot.purchaseId,
+        date: lot.date,
+        partyName: lot.partyName,
+        partyState: lot.partyState,
+        partyId: lot.partyId,
+        partyPhone: lot.partyPhone,
+        partyAddress: lot.partyAddress,
+        lorryNumber: lot.lorryNumber,
+        poNumber: lot.poNumber,
+        kind: 'ARRIVED',
+        orderedKg: Math.round(lot.netKg),
+        receivedKg: Math.round(lot.netKg),
+        soldKg: 0,
+        pricePerKg: lot.price,
+        location: loc,
+      });
+    }
   }
   const totalStorageKg = Array.from(remainingStorageKg.values()).reduce((a, b) => a + b, 0);
 
@@ -420,12 +475,15 @@ async function _computeUnifiedStockEngine(
     b.shortfallPappuKg = Math.round(b.shortfallPappuKg);
     
     for(const l of b.lots) allLots.push(l);
-    
+
     return {
       ...b,
       allocatedPappuKg: Math.round(arrivedDebitKg * arrivedYield + pendingDebitKg * arrivedYield),
     };
   });
+
+  // Surface storage-resident (un-transferred) stock in the whole-stock lot list.
+  allLots.push(...storageLots);
 
   return {
     bands: result,

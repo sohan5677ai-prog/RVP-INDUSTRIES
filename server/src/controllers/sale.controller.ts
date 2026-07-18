@@ -55,10 +55,13 @@ function withFulfilment<T extends { tonnageKg: number; dispatches?: { weightKg: 
 }
 
 export async function listSaleOrders(req: Request, res: Response) {
-  const { status, product } = listSaleOrdersSchema.parse(req.query);
+  const { status, product, skip, take, all } = listSaleOrdersSchema.parse(req.query);
+  const isAll = all === 'true';
   const orders = await prisma.saleOrder.findMany({
-    take: 100,
+    // The main listing is paginated (take 100). Aging reports bypass this by passing all=true.
     where: { ...(status ? { status } : {}), ...(product ? { product } : {}) },
+    skip: isAll ? undefined : skip,
+    take: isAll ? undefined : take,
     orderBy: { saleDate: 'desc' },
     include: { buyer: true, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
   });
@@ -128,7 +131,9 @@ export async function createSaleOrder(req: Request, res: Response) {
       tonnageKg: data.tonnageKg,
       ratePerKg: data.ratePerKg,
       dueDays: data.dueDays ?? null,
-      gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
+      reminderDate: data.reminderDate ?? null,
+      gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
+      gstExempt: data.gstExempt || false,
       brokerageRatePerKg: data.brokerageRatePerKg,
       destination,
       freightCharge,
@@ -233,7 +238,9 @@ export async function updateSaleOrder(req: Request, res: Response) {
       tonnageKg: data.tonnageKg,
       ratePerKg: data.ratePerKg,
       dueDays: data.dueDays ?? null,
-      gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
+      reminderDate: data.reminderDate ?? null,
+      gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
+      gstExempt: data.gstExempt || false,
       brokerageRatePerKg: data.brokerageRatePerKg,
       destination,
       freightCharge,
@@ -307,7 +314,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     else internalWeightKg = weightKg;
   }
   const baseAmount = weightKg * Number(order.ratePerKg);
-  const gstAmount = calcGst(weightKg, Number(order.ratePerKg), await gstFractionForProduct(order.product));
+  const gstAmount = order.gstExempt ? 0 : calcGst(weightKg, Number(order.ratePerKg), await gstFractionForProduct(order.product));
   const { freightCharge } = await deriveDestinationFreight(order.buyer, weightKg);
 
   // Lorry freight split (paid by us): destination unloading hamali + kata are
@@ -315,11 +322,19 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // delivery (released to Surya Roadlines at REACHED), and the remainder is the
   // lorry owner's. Only when there is freight to split.
   const company = await getCompanyProfileRow();
-  const isCompanyVehicle = isVehicleExempt(data.vehicleNumber, company.companyVehicles);
+  const transportProvider = data.transportProvider ?? 'SURYA';
+  const isCompanyVehicle = transportProvider === 'KNM';
   const retentionConfig = Number(company.freightRetentionPerTrip ?? 3000);
   const hasFreight = freightCharge > 0;
   const freightKata = calcKataFee(weightKg, isCompanyVehicle);
-  const freightRetention = (hasFreight && !isCompanyVehicle) ? retentionConfig : 0;
+  let freightRetention = 0;
+  if (hasFreight && !isCompanyVehicle) {
+    if (transportProvider === 'SURYA') {
+      freightRetention = retentionConfig;
+    } else if (transportProvider === 'OTHER') {
+      freightRetention = data.customRetention != null ? Number(data.customRetention) : 0;
+    }
+  }
 
   // Loading hamali split (all rates editable in Settings → Hamali Rates):
   //   - Pappu: ₹220/t - lorry funds ₹80/t (off its freight), we bear the rest,
@@ -420,6 +435,8 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         status: 'DISPATCHED',
         vehicleNumber: data.vehicleNumber ?? null,
         kataFileUrl: kataFile ? fileUrl(kataFile.filename) : null,
+        transportProvider,
+        customRetention: transportProvider === 'OTHER' ? (data.customRetention ?? null) : null,
       },
     });
 
@@ -546,7 +563,10 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
       _max: { invoiceSeq: true },
     });
     const seq = (last._max.invoiceSeq ?? 0) + 1;
-    const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fy}`;
+    // Displayed number uses the short financial-year form (e.g. "26-27"), while
+    // invoiceFy keeps the full "2026-27" used for the sequence + unique key.
+    const fyShort = fy.slice(2);
+    const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fyShort}`;
 
     return tx.saleDispatch.update({
       where: { id: dispatch.id },
@@ -591,7 +611,7 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
       throw new HttpError(400, "Buyer's Kata weight cannot be greater than dispatched weight. Contact admin.");
     }
     shortageKg = dispatch.weightKg - data.buyerKataKg;
-    creditNoteAmount = shortageKg > 0 ? shortageKg * rate + calcGst(shortageKg, rate, await gstFractionForProduct(order.product)) : 0;
+    creditNoteAmount = shortageKg > 0 ? shortageKg * rate + (order.gstExempt ? 0 : calcGst(shortageKg, rate, await gstFractionForProduct(order.product))) : 0;
     
     if (dispatch.internalWeightKg && order.product === 'PAPPU') {
       profitWeightKg = data.buyerKataKg - dispatch.internalWeightKg;
@@ -610,12 +630,12 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     // Internal Weight Ledger report, but is no longer posted to the ledger.
     // The retained freight was already credited to Surya Roadlines at dispatch.
 
-    return tx.saleDispatch.update({
+    const result = await tx.saleDispatch.update({
       where: { id: dispatch.id },
       data: {
         status: 'DELIVERED',
-        receivedDate: dispatch.receivedDate ?? new Date(),
-        deliveredDate: new Date(),
+        receivedDate: dispatch.receivedDate ?? (data.deliveredDate ?? new Date()),
+        deliveredDate: data.deliveredDate ?? new Date(),
         ...(data.buyerKataKg !== undefined && {
           buyerKataKg: data.buyerKataKg,
           shortageKg,
@@ -626,6 +646,18 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
       },
       include: { saleOrder: { include: { buyer: true, broker: true } } },
     });
+
+    // Roll the order status forward: once every shipment on a fully-dispatched
+    // order is DELIVERED, the order itself is DELIVERED. Otherwise it stays
+    // DISPATCHED (all shipped, some still in transit) or PARTIAL (remainder unshipped).
+    const siblings = await tx.saleDispatch.findMany({ where: { saleOrderId: order.id } });
+    const dispatchedKg = siblings.reduce((s, d) => s + d.weightKg, 0);
+    const orderStatus = dispatchedKg < order.tonnageKg
+      ? 'PARTIAL'
+      : siblings.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
+    await tx.saleOrder.update({ where: { id: order.id }, data: { status: orderStatus } });
+
+    return result;
   });
 
   res.json(updated);

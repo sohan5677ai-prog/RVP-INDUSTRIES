@@ -1,10 +1,12 @@
-import { Fragment, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Truck, PackageCheck, Clock } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, Truck, PackageCheck, Clock } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -23,9 +25,11 @@ import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
 import { UrpStockInDialog } from '@/components/UrpStockInDialog';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 type StockInRow = StockInType;
-type DocKind = 'invoice' | 'partyKata' | 'rvpWeight';
+type DocKind = 'invoice';
 
 /**
  * Display labels for loading locations. The stored values stay the same (so
@@ -37,6 +41,20 @@ const LOCATION_LABELS: Record<string, string> = {
   Multi: 'KNM Multi',
 };
 const locationLabel = (v: string) => LOCATION_LABELS[v] ?? v;
+
+const STOCKIN_EXPORT_COLUMNS: ExportColumn<StockInRow>[] = [
+  { header: 'PO Number', value: (s) => s.purchaseOrder?.poNumber ?? '' },
+  { header: 'Arrival Date', value: (s) => (s.arrivalDate ? shortDate(s.arrivalDate) : shortDate(s.createdAt)) },
+  { header: 'Party', value: (s) => s.purchaseOrder?.party?.name ?? '' },
+  { header: 'Invoice No', value: (s) => s.invoiceNumber ?? '' },
+  { header: 'Lorry', value: (s) => s.lorryNumber ?? '' },
+  { header: 'Location', value: (s) => locationLabel(s.loadingLocation ?? '') },
+  { header: 'RVP First Wt (kg)', value: (s) => s.rvpFirstWeightKg ?? 0, numFmt: '#,##0', align: 'right' },
+  { header: 'Billing (kg)', value: (s) => s.billingWeightKg ?? 0, numFmt: '#,##0', align: 'right' },
+  { header: 'Party Kata (kg)', value: (s) => s.partyKataKg ?? 0, numFmt: '#,##0', align: 'right' },
+  { header: 'Price/kg', value: (s) => (s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : ''), excel: (s) => (s.purchaseOrder?.pricePerKg ? Number(s.purchaseOrder.pricePerKg) : null), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Purchased', value: (s) => (s.purchase ? 'Yes' : 'Awaiting') },
+];
 
 interface Extracted {
   invoiceNumber?: string;
@@ -53,26 +71,6 @@ interface Extracted {
 /** Loose name key for matching: lowercase, alphanumerics only. */
 function nameKey(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-/** Normalise a vehicle plate: uppercase, alphanumerics only. */
-function plateKey(s: string) {
-  return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
-/**
- * Whether two vehicle numbers can be the same lorry, tolerating a partly-read
- * plate (e.g. a half-printed "TN28BA49" vs the full "TN28BA4946"). They're
- * compatible when equal or when the shorter is a leading part of the longer.
- */
-function platesCompatible(a: string, b: string) {
-  const x = plateKey(a);
-  const y = plateKey(b);
-  if (!x || !y) return true; // nothing to compare against yet
-  if (x === y) return true;
-  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  // Require a reasonable overlap so unrelated short reads don't match by accident.
-  return short.length >= 5 && long.startsWith(short);
 }
 
 /** A single drag-and-drop document zone that runs AI extraction on drop/select. */
@@ -142,62 +140,20 @@ function DropZone({
   );
 }
 
-export default function StockIn() {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [urpOpen, setUrpOpen] = useState(false);
-  const [editing, setEditing] = useState<StockInRow | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AWAITING' | 'PURCHASED'>('ALL');
-  const [partyFilter, setPartyFilter] = useState('ALL');
 
-  const { data: items, isLoading } = useQuery({
-    queryKey: ['stock-in'],
-    queryFn: () => api<StockInRow[]>('/stock-in'),
-  });
-
-  function toggleGroup(poId: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(poId)) next.delete(poId);
-      else next.add(poId);
-      return next;
-    });
-  }
-
-  // Party options for the filter combo, derived from the arrivals themselves.
-  const partyOptions = useMemo(() => {
-    const names = [...new Set((items ?? [])
-      .map((s) => s.purchaseOrder?.party?.name)
-      .filter((n): n is string => !!n))].sort();
-    return [{ value: 'ALL', label: 'All parties' }, ...names.map((n) => ({ value: n, label: n }))];
-  }, [items]);
-
-  // Arrivals shown in the table, filtered by the status tabs and party combo, then
-  // grouped under their logical order (per-lorry POs share a poGroupId) so each
-  // order is one summary row that expands to its lorry invoices/weights. Stat
-  // cards stay on the full data set; only the table is filtered.
-  const visibleGroups = useMemo(() => {
-    const map = new Map<string, { groupId: string; po: StockInRow['purchaseOrder']; rows: StockInRow[] }>();
-    for (const s of items ?? []) {
-      if (partyFilter !== 'ALL' && (s.purchaseOrder?.party?.name ?? '') !== partyFilter) continue;
-      if (statusFilter === 'PURCHASED' && !s.purchase) continue;
-      if (statusFilter === 'AWAITING' && s.purchase) continue;
-      const key = s.purchaseOrder?.poGroupId ?? s.purchaseOrderId;
-      if (!map.has(key)) map.set(key, { groupId: key, po: s.purchaseOrder, rows: [] });
-      map.get(key)!.rows.push(s);
-    }
-    return [...map.values()];
-  }, [items, partyFilter, statusFilter]);
-
-  const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL';
-
-  // Pending POs are the ones awaiting a stock-in.
-  const { data: pendingPOs } = useQuery({
-    queryKey: ['purchase-orders', 'PENDING'],
-    queryFn: () => api<PurchaseOrder[]>('/purchase-orders?status=PENDING'),
-  });
-
+function StockInFormDialog({
+  open,
+  onOpenChange,
+  editing,
+  pendingPOs,
+  onSuccess
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editing: StockInRow | null;
+  pendingPOs: PurchaseOrder[] | undefined;
+  onSuccess: () => void;
+}) {
   const [poId, setPoId] = useState('');
   const [arrivalDate, setArrivalDate] = useState(new Date().toISOString().slice(0, 10));
   const [lorryNumber, setLorryNumber] = useState('');
@@ -210,14 +166,63 @@ export default function StockIn() {
   const [selfVehicle, setSelfVehicle] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [extractingKind, setExtractingKind] = useState<DocKind | null>(null);
-  // Vehicle (lorry) number read from each document, used to confirm the three
-  // documents belong to the same lorry.
-  const [docLorries, setDocLorries] = useState<Partial<Record<DocKind, string>>>({});
 
-  /**
-   * Find the pending PO an invoice belongs to, by supplier name (required) and
-   * price (used to disambiguate when one party has several pending POs).
-   */
+  const [sharedFreight, setSharedFreight] = useState(false);
+  const [totalLorryFreight, setTotalLorryFreight] = useState('');
+  const [totalLorryWeight, setTotalLorryWeight] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      if (editing) {
+        setPoId(editing.purchaseOrderId);
+        setArrivalDate(editing.arrivalDate.slice(0, 10));
+        setLorryNumber(editing.lorryNumber);
+        setInvoiceNumber(editing.invoiceNumber);
+        setRvpFirstWeightKg(String(editing.rvpFirstWeightKg));
+        setBillingWeightKg(String(editing.billingWeightKg));
+        setPartyKataKg(String(editing.partyKataKg));
+        setLoadingLocation((editing.loadingLocation as any) ?? 'RVP');
+        setFreight(String(editing.freightCharge ?? 0));
+        setSelfVehicle(editing.selfVehicle ?? false);
+        setInvoiceFile(null);
+        setSharedFreight(false);
+        setTotalLorryFreight('');
+        setTotalLorryWeight('');
+      } else {
+        setPoId('');
+        setArrivalDate(new Date().toISOString().slice(0, 10));
+        setLorryNumber('');
+        setInvoiceNumber('');
+        setRvpFirstWeightKg('');
+        setBillingWeightKg('');
+        setPartyKataKg('');
+        setLoadingLocation('RVP');
+        setFreight('0');
+        setSelfVehicle(false);
+        setInvoiceFile(null);
+        setSharedFreight(false);
+        setTotalLorryFreight('');
+        setTotalLorryWeight('');
+      }
+    }
+  }, [open, editing]);
+
+  const poOptions = useMemo(() => {
+    return (pendingPOs ?? []).map((po) => ({
+      value: po.id,
+      label: `${po.poNumber} · ${po.party?.name} - ${shortDate(po.poDate)} - ${rupees(po.pricePerKg)}/kg`,
+    }));
+  }, [pendingPOs]);
+
+  const computedProratedFreight = useMemo(() => {
+    if (!sharedFreight || !totalLorryFreight || !totalLorryWeight || !rvpFirstWeightKg) return '0';
+    const tf = Number(totalLorryFreight);
+    const tw = Number(totalLorryWeight);
+    const rvw = Number(rvpFirstWeightKg);
+    if (tw <= 0) return '0';
+    return (Math.round((tf * (rvw / tw)) * 100) / 100).toFixed(2);
+  }, [sharedFreight, totalLorryFreight, totalLorryWeight, rvpFirstWeightKg]);
+
   function matchPendingPo(
     matchedPartyName: string | undefined,
     partyName: string | undefined,
@@ -226,8 +231,6 @@ export default function StockIn() {
     const pos = pendingPOs ?? [];
     if (pos.length === 0) return { status: 'none' };
 
-    // Prefer Gemini's canonical match against our supplier list; fall back to a
-    // loose comparison on the raw supplier name read off the invoice.
     const exactKey = matchedPartyName ? nameKey(matchedPartyName) : '';
     const looseKey = partyName ? nameKey(partyName) : '';
 
@@ -243,9 +246,6 @@ export default function StockIn() {
     if (byName.length === 0) return { status: 'none' };
     if (byName.length === 1) return { status: 'matched', po: byName[0] };
 
-    // Several POs for this party. If they all carry the same price (e.g. per-lorry
-    // POs of one order), any will do - take the first. Otherwise use the invoice
-    // price to pick the closest.
     const prices = new Set(byName.map((po) => Number(po.pricePerKg)));
     if (prices.size === 1) return { status: 'matched', po: byName[0] };
 
@@ -255,7 +255,7 @@ export default function StockIn() {
           Math.abs(Number(a.pricePerKg) - pricePerKg) - Math.abs(Number(b.pricePerKg) - pricePerKg),
       );
       const best = sorted[0];
-      const tolerance = Math.max(1, pricePerKg * 0.02); // ₹1 or 2% of rate
+      const tolerance = Math.max(1, pricePerKg * 0.02);
       if (Math.abs(Number(best.pricePerKg) - pricePerKg) <= tolerance) {
         return { status: 'matched', po: best };
       }
@@ -263,12 +263,11 @@ export default function StockIn() {
     return { status: 'ambiguous' };
   }
 
-  /** Read a dropped document with Gemini (scoped to its kind) and pre-fill. */
   async function extractDoc(file: File, kind: DocKind) {
     setExtractingKind(kind);
     try {
       const fd = new FormData();
-      fd.append('invoice', file); // the extract endpoint reads the file field as "invoice"
+      fd.append('invoice', file);
       fd.append('kind', kind);
       const data = await api<Extracted>('/stock-in/extract', { method: 'POST', body: fd, multipart: true });
 
@@ -276,8 +275,6 @@ export default function StockIn() {
       if (data.invoiceNumber) { setInvoiceNumber(data.invoiceNumber); filled.push('invoice no'); }
       if (data.lorryNumber) {
         setLorryNumber(data.lorryNumber);
-        const ln = data.lorryNumber.toUpperCase().replace(/\s+/g, '');
-        setDocLorries((prev) => ({ ...prev, [kind]: ln }));
         filled.push('lorry no');
       }
       if (data.arrivalDate) { setArrivalDate(data.arrivalDate); filled.push('date'); }
@@ -285,10 +282,6 @@ export default function StockIn() {
       if (data.partyKataKg) { setPartyKataKg(String(data.partyKataKg)); filled.push('party kata'); }
       if (data.rvpFirstWeightKg) { setRvpFirstWeightKg(String(data.rvpFirstWeightKg)); filled.push('RVP first weight'); }
 
-      // From the invoice, best-effort auto-match a pending PO by supplier - but
-      // only as a convenience when the user hasn't already picked one. The PO
-      // dropdown is the source of truth, so we never override a manual choice
-      // and never warn on a miss (the user just picks it themselves).
       if (kind === 'invoice' && !poId && (data.matchedPartyName || data.partyName)) {
         const match = matchPendingPo(data.matchedPartyName, data.partyName, data.pricePerKg);
         if (match.status === 'matched') {
@@ -306,48 +299,13 @@ export default function StockIn() {
     }
   }
 
-  // Inward freight is only collected for BASE-priced POs (DELIVERY includes it).
-  // On edit the PO is no longer pending, so fall back to the stock-in's own PO.
   const selectedPo = pendingPOs?.find((p) => p.id === poId);
   const priceType = editing?.purchaseOrder?.priceType ?? selectedPo?.priceType;
   const isBase = priceType === 'BASE';
 
-  function resetForm() {
-    setPoId('');
-    setArrivalDate(new Date().toISOString().slice(0, 10));
-    setLorryNumber('');
-    setInvoiceNumber('');
-    setRvpFirstWeightKg('');
-    setBillingWeightKg('');
-    setPartyKataKg('');
-    setLoadingLocation('RVP');
-    setFreight('0');
-    setSelfVehicle(false);
-    setInvoiceFile(null);
-    setDocLorries({});
-  }
-
-  function openCreate() {
-    setEditing(null);
-    resetForm();
-    setOpen(true);
-  }
-
-  function openEdit(s: StockInRow) {
-    setEditing(s);
-    setPoId(s.purchaseOrderId);
-    setArrivalDate(s.arrivalDate.slice(0, 10));
-    setLorryNumber(s.lorryNumber);
-    setInvoiceNumber(s.invoiceNumber);
-    setRvpFirstWeightKg(String(s.rvpFirstWeightKg));
-    setBillingWeightKg(String(s.billingWeightKg));
-    setPartyKataKg(String(s.partyKataKg));
-    setLoadingLocation(s.loadingLocation ?? 'RVP');
-    setFreight(String(s.freightCharge ?? 0));
-    setSelfVehicle(s.selfVehicle ?? false);
-    setInvoiceFile(null);
-    setOpen(true);
-  }
+  // Earliest arrival the picker/guard will accept: the PO's own date. A same-day
+  // arrival is fine, but an arrival before the order was placed is not.
+  const poDateMin = (editing?.purchaseOrder?.poDate ?? selectedPo?.poDate)?.slice(0, 10);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -361,7 +319,8 @@ export default function StockIn() {
       fd.append('billingWeightKg', billingWeightKg);
       fd.append('partyKataKg', partyKataKg);
       fd.append('loadingLocation', loadingLocation);
-      fd.append('freightCharge', isBase ? (freight || '0') : '0');
+      const finalFreight = isBase ? (sharedFreight ? computedProratedFreight : (freight || '0')) : '0';
+      fd.append('freightCharge', finalFreight);
       fd.append('selfVehicle', selfVehicle ? 'true' : 'false');
       if (invoiceFile) fd.append('invoice', invoiceFile);
 
@@ -370,25 +329,7 @@ export default function StockIn() {
       return api(url, { method, body: fd, multipart: true });
     },
     onSuccess: () => {
-      // Editing a purchased stock-in rolls back its purchase chain, so refresh
-      // everything downstream too.
-      ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
-        (k) => qc.invalidateQueries({ queryKey: [k] }),
-      );
-      toast.success(editing ? 'Stock-in updated' : 'Stock-in recorded');
-      setOpen(false);
-      resetForm();
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api(`/stock-in/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
-        (k) => qc.invalidateQueries({ queryKey: [k] }),
-      );
-      toast.success('Stock-in deleted');
+      onSuccess();
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -396,221 +337,15 @@ export default function StockIn() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!poId) return toast.error('Select a purchase order');
-    // REMOVED FOR TESTING: if (!invoiceFile && !editing) return toast.error('Attach the lorry invoice');
+    if (poDateMin && arrivalDate < poDateMin) {
+      return toast.error('Arrival date cannot be before the purchase order date');
+    }
     if ((Number(rvpFirstWeightKg) || 0) <= 0) return toast.error('RVP first weight must be positive');
     mutation.mutate();
   }
 
-  // Cross-check the lorry/vehicle number read from each uploaded document.
-  const docLabel: Record<DocKind, string> = { partyKata: 'Party Kata', invoice: 'Invoice', rvpWeight: 'RVP Weight' };
-  const detectedLorries = (Object.entries(docLorries) as [DocKind, string][]).filter(([, v]) => !!v);
-  const detectedPlates = detectedLorries.map(([, v]) => v);
-  // Use the most complete (longest) read as the reference; a partly-printed plate
-  // on one document should still count as a match against the fuller one.
-  const referencePlate = detectedPlates.reduce((a, b) => (b.length > a.length ? b : a), detectedPlates[0] ?? '');
-  const vehicleMatched = detectedPlates.every((p) => platesCompatible(p, referencePlate));
-
-  const allRows = items ?? [];
-  const purchasedRows = allRows.filter((r) => r.purchase).length;
-
   return (
-    <div className="space-y-8">
-      <PageHeader
-        icon={Truck}
-        title="Stock In"
-        description="RVP Kata weights and lorry invoice details captured on arrival, grouped per order."
-        actions={
-          <div className="flex gap-2">
-            <Button onClick={() => setUrpOpen(true)} variant="secondary" className="gap-2">
-              <Plus className="h-4 w-4" />
-              Direct Inward (URP)
-            </Button>
-            <Button onClick={openCreate} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Record Inward Lorry
-            </Button>
-          </div>
-        }
-      />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-        <StatCard label="Kata Entry" value={allRows.length} icon={Truck} tone="taupe" hint="arrivals unloaded" />
-        <StatCard label="Inward" value={purchasedRows} icon={PackageCheck} tone="forest" hint={`of ${allRows.length} lorries`} />
-        <StatCard label="Pending POs" value={pendingPOs?.length ?? 0} icon={Clock} tone="rose" hint="waiting arrival" />
-      </div>
-
-      {pendingPOs?.length === 0 && !editing && (
-        <p className="-mt-4 text-sm text-muted-foreground">No pending purchase orders awaiting arrival.</p>
-      )}
-
-      <div className="glass rounded-2xl overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
-          <h2 className="text-sm font-semibold text-foreground">Arrivals</h2>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Segmented
-              options={[
-                { label: 'All', value: 'ALL' },
-                { label: 'Awaiting', value: 'AWAITING' },
-                { label: 'Purchased', value: 'PURCHASED' },
-              ]}
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-              size="sm"
-            />
-            <Combobox
-              options={partyOptions}
-              value={partyFilter}
-              onChange={setPartyFilter}
-              placeholder="All parties"
-              searchPlaceholder="Search party…"
-              ariaLabel="Filter by party"
-              className="w-52"
-            />
-          </div>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>PO / Arrival</TableHead>
-              <TableHead>Party</TableHead>
-              <TableHead>Invoice No</TableHead>
-              <TableHead>Lorry</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead className="text-right">RVP First Wt</TableHead>
-              <TableHead className="text-right">Billing</TableHead>
-              <TableHead className="text-right">Party kata</TableHead>
-              <TableHead className="text-right">Price/kg</TableHead>
-              <TableHead>Invoice</TableHead>
-              <TableHead className="w-24 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
-            )}
-            {!isLoading && visibleGroups.length === 0 && (
-              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">{filtersActive ? 'No arrivals match the filters.' : 'No stock-ins yet.'}</TableCell></TableRow>
-            )}
-            {visibleGroups.map(({ groupId, po, rows }) => {
-              const isOpen = expanded.has(groupId);
-              const totalRvp = rows.reduce((sum, r) => sum + r.rvpFirstWeightKg, 0);
-              const totalBilling = rows.reduce((sum, r) => sum + r.billingWeightKg, 0);
-              const totalParty = rows.reduce((sum, r) => sum + r.partyKataKg, 0);
-              const purchasedCount = rows.filter((r) => r.purchase).length;
-              const locations = [...new Set(rows.map((r) => r.loadingLocation))];
-              const latestArrival = rows.reduce((d, r) => (r.arrivalDate > d ? r.arrivalDate : d), rows[0].arrivalDate);
-              // PO-number range across the lorries in this order (e.g. DCS-001 – DCS-003)
-              const poNums = rows.map((r) => r.purchaseOrder?.poNumber).filter(Boolean).sort() as string[];
-              const poLabel = poNums.length === 0 ? '-' : poNums.length === 1 ? poNums[0] : `${poNums[0]} – ${poNums[poNums.length - 1]}`;
-
-              return (
-                <Fragment key={groupId}>
-                  {/* Order summary row - click to expand the lorries underneath */}
-                  <TableRow
-                    className="cursor-pointer bg-muted/30 hover:bg-muted/50 font-medium"
-                    onClick={() => toggleGroup(groupId)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {isOpen ? (
-                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        <div>
-                          <span className="font-mono font-semibold">{poLabel}</span>
-                          <span className="block text-[11px] font-normal text-muted-foreground">
-                            latest {shortDate(latestArrival)}
-                          </span>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-semibold">{po?.party?.name ?? '-'}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{rows.length} {rows.length === 1 ? 'lorry' : 'lorries'}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">{purchasedCount}/{rows.length} purchased</span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {locations.map((l) => (
-                          <Badge key={l} variant="outline" className="text-[10px]">{locationLabel(l)}</Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">{kg(totalRvp)}</TableCell>
-                    <TableCell className="text-right">{kg(totalBilling)}</TableCell>
-                    <TableCell className="text-right">{kg(totalParty)}</TableCell>
-                    <TableCell className="text-right">
-                      {po?.pricePerKg ? rupees(po.pricePerKg) : '-'}
-                      {po?.priceType && <span className="block text-[10px] font-normal text-muted-foreground">{po.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>}
-                    </TableCell>
-                    <TableCell />
-                    <TableCell />
-                  </TableRow>
-
-                  {/* Individual lorry invoices for this PO */}
-                  {isOpen && rows.map((s) => (
-                    <TableRow key={s.id} className="bg-background">
-                      <TableCell className="pl-10 text-muted-foreground">{shortDate(s.arrivalDate)}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{s.purchaseOrder?.poNumber ?? '-'}</TableCell>
-                      <TableCell className="font-semibold">{s.invoiceNumber}</TableCell>
-                      <TableCell>{s.lorryNumber}</TableCell>
-                      <TableCell><Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge></TableCell>
-                      <TableCell className="text-right font-semibold">{kg(s.rvpFirstWeightKg)}</TableCell>
-                      <TableCell className="text-right">{kg(s.billingWeightKg)}</TableCell>
-                      <TableCell className="text-right">{kg(s.partyKataKg)}</TableCell>
-                      <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '-'}</TableCell>
-                      <TableCell>
-                        {s.invoiceFileUrl ? (
-                          <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
-                            <FileText className="h-3 w-3" /> View
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title={s.purchase ? 'Edit - this will roll back the recorded purchase' : 'Edit stock-in'}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (s.purchase && !confirm('This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Editing will roll back the purchase (reverting inventory & ledger) and you\'ll need to re-record it. Continue?')) return;
-                              openEdit(s);
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title={s.purchase ? 'Delete - this will also roll back the recorded purchase' : 'Delete stock-in'}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const msg = s.purchase
-                                ? 'This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Deleting will also roll back the purchase (reverting inventory & ledger). Delete anyway?'
-                                : 'Delete this stock-in record?';
-                              if (confirm(msg)) deleteMutation.mutate(s.id);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-
-      <Dialog open={open} onOpenChange={setOpen}>
+<Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>{editing ? 'Edit Stock In' : 'Record Stock In'}</DialogTitle></DialogHeader>
           <form onSubmit={submit} className="space-y-4">
@@ -629,71 +364,33 @@ export default function StockIn() {
                   )}
                 </>
               ) : (
-                <Select value={poId} onValueChange={setPoId}>
-                  <SelectTrigger><SelectValue placeholder="Select a pending PO" /></SelectTrigger>
-                  <SelectContent>
-                    {pendingPOs?.map((po) => (
-                      <SelectItem key={po.id} value={po.id}>
-                        {po.poNumber} · {po.party?.name} - {shortDate(po.poDate)} - {rupees(po.pricePerKg)}/kg
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={poOptions}
+                  value={poId}
+                  onChange={setPoId}
+                  placeholder="Select a pending PO"
+                  searchPlaceholder="Search POs..."
+                  className="w-full"
+                />
               )}
             </div>
 
-            {/* AI document drop zones */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <DropZone
-                title="Party kata slip"
-                hint="Drop party weighbridge slip"
-                accept="application/pdf,image/*"
-                busy={extractingKind === 'partyKata'}
-                onPick={(f) => extractDoc(f, 'partyKata')}
-              />
-              <DropZone
-                title="Invoice (saved)"
-                hint="Drop lorry invoice"
-                accept="application/pdf,image/*"
-                busy={extractingKind === 'invoice'}
-                onPick={(f) => { setInvoiceFile(f); extractDoc(f, 'invoice'); }}
-              />
-              <DropZone
-                title="RVP first weight"
-                hint="Drop RVP weighbridge slip"
-                accept="application/pdf,image/*"
-                busy={extractingKind === 'rvpWeight'}
-                onPick={(f) => extractDoc(f, 'rvpWeight')}
-              />
-            </div>
+            {/* AI document drop zone */}
+            <DropZone
+              title="Invoice (saved)"
+              hint="Drop lorry invoice"
+              accept="application/pdf,image/*"
+              busy={extractingKind === 'invoice'}
+              onPick={(f) => { setInvoiceFile(f); extractDoc(f, 'invoice'); }}
+            />
             {invoiceFile && (
               <p className="text-xs text-muted-foreground">Invoice file to save: <span className="font-medium">{invoiceFile.name}</span></p>
-            )}
-
-            {detectedLorries.length > 0 && (
-              <div className={`rounded-lg border p-3 text-xs ${vehicleMatched ? 'border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/10' : 'border-red-500/40 bg-red-50/40 dark:bg-red-950/10'}`}>
-                <div className={`flex items-center gap-1.5 font-semibold ${vehicleMatched ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {vehicleMatched ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-                  {vehicleMatched ? `Vehicle matched: ${referencePlate}` : 'Vehicle number mismatch across documents'}
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {(['partyKata', 'invoice', 'rvpWeight'] as DocKind[]).map((k) => (
-                    <div key={k} className="flex flex-col">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{docLabel[k]}</span>
-                      <span className={`font-mono font-medium ${docLorries[k] && !platesCompatible(docLorries[k]!, referencePlate) ? 'text-red-600' : ''}`}>{docLorries[k] ?? '-'}</span>
-                    </div>
-                  ))}
-                </div>
-                {!vehicleMatched && (
-                  <p className="mt-1.5 text-[11px] text-red-600">These documents may belong to different lorries. Verify before saving.</p>
-                )}
-              </div>
             )}
 
              <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="arrivalDate">Arrival date</Label>
-                <Input id="arrivalDate" type="date" value={arrivalDate} onChange={(e) => setArrivalDate(e.target.value)} required />
+                <Input id="arrivalDate" type="date" value={arrivalDate} min={poDateMin} onChange={(e) => setArrivalDate(e.target.value)} required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="lorry">Lorry number</Label>
@@ -773,8 +470,330 @@ export default function StockIn() {
           </form>
         </DialogContent>
       </Dialog>
+  );
+}
+
+
+
+
+const StockInGroupRow = React.memo(({
+  groupId, po, rows, isOpen, toggleGroup, openEdit, deleteMutationMutate
+}: any) => {
+  const totalRvp = rows.reduce((sum: number, r: any) => sum + r.rvpFirstWeightKg, 0);
+  const totalBilling = rows.reduce((sum: number, r: any) => sum + r.billingWeightKg, 0);
+  const totalParty = rows.reduce((sum: number, r: any) => sum + r.partyKataKg, 0);
+  const purchasedCount = rows.filter((r: any) => r.purchase).length;
+  const locations = [...new Set(rows.map((r: any) => r.loadingLocation))];
+  const latestArrival = rows.reduce((d: any, r: any) => (r.arrivalDate > d ? r.arrivalDate : d), rows[0].arrivalDate);
+  const poNums = rows.map((r: any) => r.purchaseOrder?.poNumber).filter(Boolean).sort() as string[];
+  const poLabel = poNums.length === 0 ? '-' : poNums.length === 1 ? poNums[0] : `${poNums[0]} – ${poNums[poNums.length - 1]}`;
+
+  return (
+    <Fragment>
+      <TableRow
+        className={`cursor-pointer font-medium transition-colors ${isOpen ? 'bg-secondary hover:bg-secondary border-b-0' : 'bg-muted/30 hover:bg-muted/50'}`}
+        onClick={() => toggleGroup(groupId)}
+      >
+        <TableCell className={isOpen ? 'shadow-[inset_3px_0_0_0_var(--primary)]' : undefined}>
+          <div className="flex items-center gap-2">
+            {isOpen ? (
+              <ChevronDown className="h-4 w-4 text-primary" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )}
+            <div>
+              <span className="font-semibold tracking-tight tabular-nums">{poLabel}</span>
+              <span className="block text-[11px] font-normal text-muted-foreground">
+                latest {shortDate(latestArrival)}
+              </span>
+            </div>
+          </div>
+        </TableCell>
+        <TableCell className="font-semibold">{po?.party?.name ?? '-'}</TableCell>
+        <TableCell>
+          <Badge variant="secondary">{rows.length} {rows.length === 1 ? 'lorry' : 'lorries'}</Badge>
+        </TableCell>
+        <TableCell>
+          <span className="text-xs text-muted-foreground">{purchasedCount}/{rows.length} purchased</span>
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1">
+            {locations.map((l: any) => (
+              <Badge key={l} variant="outline" className="text-[10px]">{locationLabel(l)}</Badge>
+            ))}
+          </div>
+        </TableCell>
+        <TableCell className="text-right font-semibold">{kg(totalRvp)}</TableCell>
+        <TableCell className="text-right">{kg(totalBilling)}</TableCell>
+        <TableCell className="text-right">{kg(totalParty)}</TableCell>
+        <TableCell className="text-right">
+          {po?.pricePerKg ? rupees(po.pricePerKg) : '-'}
+          {po?.priceType && <span className="block text-[10px] font-normal text-muted-foreground">{po.priceType === 'BASE' ? 'Base' : 'Delivery'}</span>}
+        </TableCell>
+        <TableCell />
+        <TableCell />
+      </TableRow>
+
+      {/* Individual lorry invoices for this PO */}
+      {isOpen && rows.map((s: any, idx: number) => (
+        <TableRow key={s.id} className={`bg-accent/60 hover:bg-accent ${idx === rows.length - 1 ? 'border-b-2 border-border' : 'border-b border-border/60'}`}>
+          <TableCell className="pl-12 text-sm text-muted-foreground shadow-[inset_3px_0_0_0_var(--primary)]">{shortDate(s.arrivalDate)}</TableCell>
+          <TableCell className="text-xs text-muted-foreground tracking-tight tabular-nums">{s.purchaseOrder?.poNumber ?? '-'}</TableCell>
+          <TableCell className="font-semibold tracking-tight tabular-nums">{s.invoiceNumber}</TableCell>
+          <TableCell>{s.lorryNumber}</TableCell>
+          <TableCell><Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge></TableCell>
+          <TableCell className="text-right font-semibold">{kg(s.rvpFirstWeightKg)}</TableCell>
+          <TableCell className="text-right">{kg(s.billingWeightKg)}</TableCell>
+          <TableCell className="text-right">{kg(s.partyKataKg)}</TableCell>
+          <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '-'}</TableCell>
+          <TableCell>
+            {s.invoiceFileUrl ? (
+              <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
+                <FileText className="h-3 w-3" /> View
+              </a>
+            ) : (
+              <span className="text-muted-foreground">-</span>
+            )}
+          </TableCell>
+          <TableCell className="text-right">
+            <div className="flex justify-end gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                title={s.purchase ? 'Edit - this will roll back the recorded purchase' : 'Edit stock-in'}
+                onClick={(e: any) => {
+                  e.stopPropagation();
+                  if (s.purchase && !confirm('This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Editing will roll back the purchase (reverting inventory & ledger) and you\'ll need to re-record it. Continue?')) return;
+                  openEdit(s);
+                }}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title={s.purchase ? 'Delete - this will also roll back the recorded purchase' : 'Delete stock-in'}
+                onClick={(e: any) => {
+                  e.stopPropagation();
+                  const msg = s.purchase
+                    ? 'This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Deleting will also roll back the purchase (reverting inventory & ledger). Delete anyway?'
+                    : 'Delete this stock-in record?';
+                  if (confirm(msg)) deleteMutationMutate(s.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </div>
+          </TableCell>
+        </TableRow>
+      ))}
+    </Fragment>
+  );
+});
+
+export default function StockIn() {
+
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [urpOpen, setUrpOpen] = useState(false);
+  const [editing, setEditing] = useState<StockInRow | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AWAITING' | 'PURCHASED'>('ALL');
+  const [partyFilter, setPartyFilter] = useState('ALL');
+
+  const { data: items, isLoading } = useQuery({
+    queryKey: ['stock-in'],
+    queryFn: () => api<StockInRow[]>('/stock-in'),
+  });
+
+  const toggleGroup = useCallback((poId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(poId)) next.delete(poId);
+      else next.add(poId);
+      return next;
+    });
+  }, []);
+
+  // Party options for the filter combo, derived from the arrivals themselves.
+  const partyOptions = useMemo(() => {
+    const names = [...new Set((items ?? [])
+      .map((s) => s.purchaseOrder?.party?.name)
+      .filter((n): n is string => !!n))].sort();
+    return [{ value: 'ALL', label: 'All parties' }, ...names.map((n) => ({ value: n, label: n }))];
+  }, [items]);
+
+  // Arrivals shown in the table, filtered by the status tabs and party combo, then
+  // grouped under their logical order (per-lorry POs share a poGroupId) so each
+  // order is one summary row that expands to its lorry invoices/weights. Stat
+  // cards stay on the full data set; only the table is filtered.
+  const visibleGroups = useMemo(() => {
+    const map = new Map<string, { groupId: string; po: StockInRow['purchaseOrder']; rows: StockInRow[] }>();
+    for (const s of items ?? []) {
+      if (partyFilter !== 'ALL' && (s.purchaseOrder?.party?.name ?? '') !== partyFilter) continue;
+      if (statusFilter === 'PURCHASED' && !s.purchase) continue;
+      if (statusFilter === 'AWAITING' && s.purchase) continue;
+      const key = s.purchaseOrder?.poGroupId ?? s.purchaseOrderId;
+      if (!map.has(key)) map.set(key, { groupId: key, po: s.purchaseOrder, rows: [] });
+      map.get(key)!.rows.push(s);
+    }
+    return [...map.values()];
+  }, [items, partyFilter, statusFilter]);
+
+  const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL';
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visibleGroups, 50);
+
+  // Pending POs are the ones awaiting a stock-in.
+  const { data: pendingPOs } = useQuery({
+    queryKey: ['purchase-orders', 'PENDING'],
+    queryFn: () => api<PurchaseOrder[]>('/purchase-orders?status=PENDING&all=true'),
+  });
+
+  const openCreate = useCallback(() => {
+    setEditing(null);
+    setOpen(true);
+  }, []);
+
+  const openEdit = useCallback((s: StockInRow) => {
+    setEditing(s);
+    setOpen(true);
+  }, []);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api(`/stock-in/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
+      toast.success('Stock-in deleted');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const allRows = items ?? [];
+  const purchasedRows = allRows.filter((r) => r.purchase).length;
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        icon={Truck}
+        title="Stock In"
+        description="RVP Kata weights and lorry invoice details captured on arrival, grouped per order."
+        actions={
+          <div className="flex gap-2">
+            <ExportButtons
+              filename="Stock_In"
+              title="Stock In (Arrivals)"
+              subtitle={`${visibleGroups.reduce((n, g) => n + g.rows.length, 0)} arrival(s)`}
+              columns={STOCKIN_EXPORT_COLUMNS}
+              rows={visibleGroups.flatMap((g) => g.rows)}
+            />
+            <Button onClick={() => setUrpOpen(true)} variant="secondary" className="gap-2">
+              <Plus className="h-4 w-4" />
+              Direct Inward (URP)
+            </Button>
+            <Button onClick={openCreate} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Record Inward Lorry
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+        <StatCard label="Kata Entry" value={allRows.length} icon={Truck} tone="taupe" hint="arrivals unloaded" />
+        <StatCard label="Inward" value={purchasedRows} icon={PackageCheck} tone="forest" hint={`of ${allRows.length} lorries`} />
+        <StatCard label="Pending POs" value={pendingPOs?.length ?? 0} icon={Clock} tone="rose" hint="waiting arrival" />
+      </div>
+
+      {pendingPOs?.length === 0 && !editing && (
+        <p className="-mt-4 text-sm text-muted-foreground">No pending purchase orders awaiting arrival.</p>
+      )}
+
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
+          <h2 className="text-sm font-semibold text-foreground">Arrivals</h2>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Segmented
+              options={[
+                { label: 'All', value: 'ALL' },
+                { label: 'Awaiting', value: 'AWAITING' },
+                { label: 'Purchased', value: 'PURCHASED' },
+              ]}
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              size="sm"
+            />
+            <Combobox
+              options={partyOptions}
+              value={partyFilter}
+              onChange={setPartyFilter}
+              placeholder="All parties"
+              searchPlaceholder="Search party…"
+              ariaLabel="Filter by party"
+              className="w-52"
+            />
+          </div>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>PO / Arrival</TableHead>
+              <TableHead>Party</TableHead>
+              <TableHead>Invoice No</TableHead>
+              <TableHead>Lorry</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead className="text-right">RVP First Wt</TableHead>
+              <TableHead className="text-right">Billing</TableHead>
+              <TableHead className="text-right">Party kata</TableHead>
+              <TableHead className="text-right">Price/kg</TableHead>
+              <TableHead>Invoice</TableHead>
+              <TableHead className="w-24 text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading && (
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+            )}
+            {!isLoading && visibleGroups.length === 0 && (
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">{filtersActive ? 'No arrivals match the filters.' : 'No stock-ins yet.'}</TableCell></TableRow>
+            )}
+            {(pageRows ?? []).map(({ groupId, po, rows }) => (
+              <StockInGroupRow
+                key={groupId}
+                groupId={groupId}
+                po={po}
+                rows={rows}
+                isOpen={expanded.has(groupId)}
+                toggleGroup={toggleGroup}
+                openEdit={openEdit}
+                deleteMutationMutate={deleteMutation.mutate}
+              />
+            ))}
+          </TableBody>
+        </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
+      </div>
+
       
-      <UrpStockInDialog open={urpOpen} onOpenChange={setUrpOpen} />
+      {open && <StockInFormDialog 
+        open={open} 
+        onOpenChange={setOpen} 
+        editing={editing} 
+        pendingPOs={pendingPOs}
+        onSuccess={() => {
+          ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
+            (k) => qc.invalidateQueries({ queryKey: [k] }),
+          );
+          toast.success(editing ? 'Stock-in updated' : 'Stock-in recorded');
+          setOpen(false);
+          setEditing(null);
+        }}
+      />}
+
+      
+      {urpOpen && <UrpStockInDialog open={urpOpen} onOpenChange={setUrpOpen} />}
     </div>
   );
 }

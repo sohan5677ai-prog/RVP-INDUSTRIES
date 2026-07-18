@@ -33,16 +33,21 @@ const hamaliSelect = {
 export async function listPurchases(req: Request, res: Response) {
   if (req.query.view === 'hamali') {
     const purchases = await prisma.purchase.findMany({
-      take: 100,
       orderBy: { createdAt: 'desc' },
       select: hamaliSelect,
     });
     res.json(purchases);
     return;
   }
+  // The main listing is paginated (take 100). Aging reports bypass this by passing all=true.
+  const isAll = req.query.all === 'true';
+  const skipParam = req.query.skip ? parseInt(req.query.skip as string) : undefined;
+  const takeParam = req.query.take ? parseInt(req.query.take as string) : 100;
+
   const purchases = await prisma.purchase.findMany({
-    take: 100,
     orderBy: { createdAt: 'desc' },
+    skip: isAll ? undefined : skipParam,
+    take: isAll ? undefined : takeParam,
     include: purchaseInclude,
   });
   res.json(purchases);
@@ -72,10 +77,17 @@ export async function createPurchase(req: Request, res: Response) {
   if (!stockIn) throw new HttpError(400, 'Stock-in not found');
   if (stockIn.purchase) throw new HttpError(409, 'Purchase already recorded for this stock-in');
 
-  if (data.rvpSecondWeightKg >= stockIn.rvpFirstWeightKg) {
-    throw new HttpError(400, 'RVP second weight must be less than first weight');
+  // Direct-net (URP) stock-ins carry the net in rvpFirstWeightKg with no tare;
+  // everything else needs a positive 2nd weighment strictly below the first.
+  let netWeightKg: number;
+  if (stockIn.directNet) {
+    netWeightKg = stockIn.rvpFirstWeightKg;
+  } else {
+    if (data.rvpSecondWeightKg <= 0 || data.rvpSecondWeightKg >= stockIn.rvpFirstWeightKg) {
+      throw new HttpError(400, 'RVP second weight must be greater than 0 and less than first weight');
+    }
+    netWeightKg = stockIn.rvpFirstWeightKg - data.rvpSecondWeightKg;
   }
-  const netWeightKg = stockIn.rvpFirstWeightKg - data.rvpSecondWeightKg;
 
   const { getCompanyProfileRow, getHamaliRate } = await import('./settings.controller.js');
   const companyProfile = await getCompanyProfileRow();
@@ -88,13 +100,15 @@ export async function createPurchase(req: Request, res: Response) {
   // Inward freight is captured at Stock In (BASE-priced POs only) and carried
   // through here; DELIVERY-priced POs already include freight in the price.
   const freightCharge = stockIn.purchaseOrder.priceType === 'BASE' ? Number(stockIn.freightCharge) : 0;
+  // Shared-lorry tonnage the freight spreads over (BASE only), carried from the StockIn.
+  const freightTonnageKg = stockIn.purchaseOrder.priceType === 'BASE' ? stockIn.freightTonnageKg : null;
 
   const purchase = await prisma.$transaction(async (tx) => {
-    // 1. Update StockIn with rvpSecondWeightKg and rvpKataKg
+    // 1. Update StockIn with rvpSecondWeightKg and rvpKataKg (direct-net keeps 0 tare)
     await tx.stockIn.update({
       where: { id: data.stockInId },
       data: {
-        rvpSecondWeightKg: data.rvpSecondWeightKg,
+        rvpSecondWeightKg: stockIn.directNet ? 0 : data.rvpSecondWeightKg,
         rvpKataKg: netWeightKg,
       },
     });
@@ -108,7 +122,9 @@ export async function createPurchase(req: Request, res: Response) {
         hamaliCharge,
         kataFee,
         bunkerPlace: data.bunkerPlace,
+        ...(data.purchaseDate ? { purchaseDate: data.purchaseDate } : {}),
         freightCharge,
+        freightTonnageKg,
       },
       include: purchaseInclude,
     });
@@ -141,10 +157,17 @@ export async function updatePurchase(req: Request, res: Response) {
   });
   if (!purchase) throw new HttpError(404, 'Purchase not found');
 
-  if (data.rvpSecondWeightKg >= purchase.stockIn.rvpFirstWeightKg) {
-    throw new HttpError(400, 'RVP second weight must be less than first weight');
+  // Direct-net (URP) stock-ins carry the net in rvpFirstWeightKg with no tare;
+  // everything else needs a positive 2nd weighment strictly below the first.
+  let netWeightKg: number;
+  if (purchase.stockIn.directNet) {
+    netWeightKg = purchase.stockIn.rvpFirstWeightKg;
+  } else {
+    if (data.rvpSecondWeightKg <= 0 || data.rvpSecondWeightKg >= purchase.stockIn.rvpFirstWeightKg) {
+      throw new HttpError(400, 'RVP second weight must be greater than 0 and less than first weight');
+    }
+    netWeightKg = purchase.stockIn.rvpFirstWeightKg - data.rvpSecondWeightKg;
   }
-  const netWeightKg = purchase.stockIn.rvpFirstWeightKg - data.rvpSecondWeightKg;
 
   const { getCompanyProfileRow, getHamaliRate } = await import('./settings.controller.js');
   const companyProfile = await getCompanyProfileRow();
@@ -158,6 +181,7 @@ export async function updatePurchase(req: Request, res: Response) {
   const place = data.bunkerPlace !== undefined ? data.bunkerPlace : (purchase.bunkerPlace as 'A' | 'B' | null);
   // Inward freight is sourced from the StockIn record (captured at arrival).
   const freightCharge = purchase.stockIn.purchaseOrder.priceType === 'BASE' ? Number(purchase.stockIn.freightCharge) : 0;
+  const freightTonnageKg = purchase.stockIn.purchaseOrder.priceType === 'BASE' ? purchase.stockIn.freightTonnageKg : null;
 
   const updated = await prisma.$transaction(async (tx) => {
     // 1. Revert the old inventory weight and cost
@@ -173,11 +197,11 @@ export async function updatePurchase(req: Request, res: Response) {
       -oldCost
     );
 
-    // 2. Update StockIn
+    // 2. Update StockIn (direct-net arrivals keep a 0 tare)
     await tx.stockIn.update({
       where: { id: purchase.stockInId },
       data: {
-        rvpSecondWeightKg: data.rvpSecondWeightKg,
+        rvpSecondWeightKg: purchase.stockIn.directNet ? 0 : data.rvpSecondWeightKg,
         rvpKataKg: netWeightKg,
       },
     });
@@ -191,7 +215,9 @@ export async function updatePurchase(req: Request, res: Response) {
         hamaliCharge,
         kataFee,
         bunkerPlace: place,
+        ...(data.purchaseDate ? { purchaseDate: data.purchaseDate } : {}),
         freightCharge,
+        freightTonnageKg,
       },
       include: purchaseInclude,
     });

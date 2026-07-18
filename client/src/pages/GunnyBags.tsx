@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 interface GunnyBagEntry {
   id: string;
@@ -21,6 +23,14 @@ interface GunnyBagEntry {
   amount: string;
   note: string | null;
 }
+
+const GUNNY_COLUMNS: ExportColumn<GunnyBagEntry>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Type', value: (r) => (r.direction === 'PURCHASE' ? 'Purchase' : 'Sale') },
+  { header: 'Bags', value: (r) => r.quantity, numFmt: '#,##0', align: 'right' },
+  { header: 'Amount', value: (r) => rupees(r.amount), excel: (r) => Number(r.amount), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Note', value: (r) => r.note ?? '' },
+];
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -86,7 +96,12 @@ export default function GunnyBags() {
         icon={Package}
         title="Gunny Bags"
         description="Bardana bags purchased and sold. Net cost (purchases − sales) is deducted from the husk recovery pool."
-        actions={<Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>}
+        actions={
+          <>
+            <ExportButtons filename="Gunny_Bags" title="Gunny Bags" subtitle={`${rows.length} entry(s)`} columns={GUNNY_COLUMNS} rows={rows} />
+            <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

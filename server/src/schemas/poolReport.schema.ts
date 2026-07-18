@@ -36,3 +36,9 @@ export const createInterestChargeSchema = z.object({
   amount: z.coerce.number().positive(),
   note: z.string().trim().optional().nullable(),
 });
+
+export const createTermLoanPrincipalSchema = z.object({
+  date: z.coerce.date(),
+  amount: z.coerce.number().positive(),
+  note: z.string().trim().optional().nullable(),
+});

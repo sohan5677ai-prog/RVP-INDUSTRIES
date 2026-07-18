@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 interface BlackSeedRow {
   purchaseId: string;
@@ -85,6 +87,15 @@ function depleteFifo(lots: DateRow[], consumeKg: number): void {
     remaining -= take;
   }
 }
+
+const DATE_STOCK_COLUMNS: ExportColumn<DateRow>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Total Lorries', value: (r) => (r.lorries > 0 ? r.lorries : ''), align: 'right' },
+  { header: 'Remaining MT', value: (r) => toTonnes(r.remWeightKg).toFixed(2), excel: (r) => toTonnes(r.remWeightKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Received MT', value: (r) => toTonnes(r.recvWeightKg).toFixed(2), excel: (r) => toTonnes(r.recvWeightKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Stock Valuation', value: (r) => rupees(r.remValue), excel: (r) => r.remValue, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Weighted Avg Price', value: (r) => rupees(r.avgPrice), excel: (r) => r.avgPrice, numFmt: '#,##0.00', align: 'right' },
+];
 
 // ─── Component ─────────────────────────────────────────────────────────────
 
@@ -212,13 +223,22 @@ export default function StockByDate() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Stock by Date (FIFO)</h1>
-        <p className="text-muted-foreground">
-          Date-wise black-seed lots on a first-in-first-out basis. As pappu is sold, the equivalent black seed is
-          drawn from the oldest dates first - so the running weighted-average price reflects the pooled stock still on hand.
-          Transferred stock appears at its transfer date with capitalised costs. Valuation excludes GST.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Stock by Date (FIFO)</h1>
+          <p className="text-muted-foreground">
+            Date-wise black-seed lots on a first-in-first-out basis. As pappu is sold, the equivalent black seed is
+            drawn from the oldest dates first - so the running weighted-average price reflects the pooled stock still on hand.
+            Transferred stock appears at its transfer date with capitalised costs. Valuation excludes GST.
+          </p>
+        </div>
+        <ExportButtons
+          filename="Stock_By_Date"
+          title="Stock by Date (FIFO)"
+          subtitle={`${visible.length} lot(s)`}
+          columns={DATE_STOCK_COLUMNS}
+          rows={visible}
+        />
       </div>
 
       {/* Headline: overall remaining stock + weighted average */}

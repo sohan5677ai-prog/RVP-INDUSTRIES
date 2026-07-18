@@ -8,14 +8,17 @@ import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban, ClipboardList, Cl
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
-import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
+import { formatPoGroupLabel, kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
 import { Segmented } from '@/components/ui/segmented';
 import { SearchInput } from '@/components/ui/search-input';
-import { DatePicker } from '@/components/ui/date-picker';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
 import { Combobox } from '@/components/ui/combobox';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import {
   Table,
   TableBody,
@@ -63,11 +66,24 @@ const poSchema = z.object({
   partyId: z.string().min(1, 'Party is required'),
   pricePerKg: z.string().min(1, 'Price is required').refine((v) => Number(v) > 0, 'Price must be positive'),
   priceType: z.enum(['BASE', 'DELIVERY']),
+  plannedLocation: z.enum(['RVP', 'STOCK']),
   excludeGst: z.boolean(),
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Tonnage must be positive'),
   lorries: z.string().optional(),
 });
 type POForm = z.infer<typeof poSchema>;
+
+const PO_EXPORT_COLUMNS: ExportColumn<PurchaseOrder>[] = [
+  { header: 'Date', value: (p) => shortDate(p.poDate) },
+  { header: 'PO Number', value: (p) => p.poNumber },
+  { header: 'Party', value: (p) => p.party?.name ?? '' },
+  { header: 'Price/kg', value: (p) => rupees(p.pricePerKg), excel: (p) => Number(p.pricePerKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Price Type', value: (p) => (p.priceType === 'BASE' ? 'Base' : 'Delivery') },
+  { header: 'Planned', value: (p) => (p.plannedLocation === 'STOCK' ? 'Stock' : 'RVP') },
+  { header: 'Tonnage (t)', value: (p) => toTonnes(p.tonnageKg).toFixed(2), excel: (p) => toTonnes(p.tonnageKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Arrived', value: (p) => (p.stockIns?.length ? 'Arrived' : 'Awaiting') },
+  { header: 'Status', value: (p) => p.status },
+];
 
 export default function PurchaseOrders() {
   const qc = useQueryClient();
@@ -82,7 +98,7 @@ export default function PurchaseOrders() {
     queryKey: ['purchase-orders', filter],
     queryFn: () =>
       api<PurchaseOrder[]>(
-        `/purchase-orders${filter === 'ALL' ? '' : `?status=${filter}`}`
+        `/purchase-orders?all=true${filter === 'ALL' ? '' : `&status=${filter}`}`
       ),
   });
 
@@ -112,14 +128,19 @@ export default function PurchaseOrders() {
     queryFn: () => api<Party[]>('/parties'),
   });
 
+  const supplierOptions = useMemo(
+    () => (parties ?? []).filter((p) => p.type !== 'BUYER' && p.commodities?.includes('BLACK_SEED')).map((p) => ({ value: p.id, label: p.name })),
+    [parties]
+  );
+
   const form = useForm<POForm>({
     resolver: zodResolver(poSchema),
-    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', excludeGst: false, tonnes: '', lorries: '' },
+    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', plannedLocation: 'RVP', excludeGst: false, tonnes: '', lorries: ''},
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', excludeGst: false, tonnes: '', lorries: '' });
+    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', plannedLocation: 'RVP', excludeGst: false, tonnes: '', lorries: ''});
     setOpen(true);
   }
 
@@ -130,6 +151,7 @@ export default function PurchaseOrders() {
       partyId: po.partyId,
       pricePerKg: String(po.pricePerKg),
       priceType: po.priceType ?? 'DELIVERY',
+      plannedLocation: po.plannedLocation ?? 'RVP',
       excludeGst: po.hasGst === false,
       tonnes: String(po.tonnageKg / 1000),
       lorries: po.lorryCount ? String(po.lorryCount) : '',
@@ -147,6 +169,7 @@ export default function PurchaseOrders() {
               partyId: v.partyId,
               pricePerKg: Number(v.pricePerKg),
               priceType: v.priceType,
+              plannedLocation: v.plannedLocation,
               hasGst: !v.excludeGst,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
@@ -159,6 +182,7 @@ export default function PurchaseOrders() {
               partyId: v.partyId,
               pricePerKg: Number(v.pricePerKg),
               priceType: v.priceType,
+              plannedLocation: v.plannedLocation,
               hasGst: !v.excludeGst,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
@@ -205,12 +229,14 @@ export default function PurchaseOrders() {
   }));
 
   // Search filters the grouped orders by party name or PO number.
-  const shown = q.trim()
+  const shown = useMemo(() => q.trim()
     ? groups.filter(({ pos }) => {
         const hay = `${pos[0].party?.name ?? ''} ${pos.map((p) => p.poNumber).join(' ')}`.toLowerCase();
         return hay.includes(q.trim().toLowerCase());
       })
-    : groups;
+    : groups, [groups, q]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(shown, 50);
 
   return (
     <div className="space-y-8">
@@ -220,6 +246,13 @@ export default function PurchaseOrders() {
         description="Approximate orders raised to suppliers, split one PO per lorry."
         actions={
           <div className="flex gap-2">
+            <ExportButtons
+              filename="Purchase_Orders"
+              title="Purchase Orders"
+              subtitle={`${shown.reduce((n, g) => n + g.pos.length, 0)} PO(s)`}
+              columns={PO_EXPORT_COLUMNS}
+              rows={shown.flatMap((g) => g.pos)}
+            />
             <Button variant="outline" onClick={() => setBulkOpen(true)}>
               <Table2 className="h-4 w-4" /> Bulk Entry
             </Button>
@@ -261,7 +294,7 @@ export default function PurchaseOrders() {
             {!isLoading && shown.length === 0 && (
               <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">{q ? 'No orders match your search.' : 'No purchase orders.'}</TableCell></TableRow>
             )}
-            {shown.map(({ groupId, pos }) => {
+            {(pageRows ?? []).map(({ groupId, pos }) => {
               const ordered = [...pos].sort((a, b) => (a.poNumber || '').localeCompare(b.poNumber || ''));
               const isOpen = expanded.has(groupId);
               const party = ordered[0].party?.name ?? '-';
@@ -269,22 +302,29 @@ export default function PurchaseOrders() {
               const arrived = ordered.reduce((sum, p) => sum + (p.stockIns?.length ?? 0), 0);
               const statuses = [...new Set(ordered.map((p) => p.status))];
               const combinedStatus = statuses.length === 1 ? statuses[0] : null;
-              const first = ordered[0].poNumber;
-              const last = ordered[ordered.length - 1].poNumber;
-              const label = ordered.length > 1 ? `${first} – ${last}` : first;
+              const label = formatPoGroupLabel(ordered);
 
               return (
                 <Fragment key={groupId}>
                   {/* Order summary row - click to expand its per-lorry POs */}
-                  <TableRow className="cursor-pointer bg-muted/30 hover:bg-muted/50 font-medium" onClick={() => toggleGroup(groupId)}>
-                    <TableCell>
+                  <TableRow className={`cursor-pointer font-medium transition-colors ${isOpen ? 'bg-secondary hover:bg-secondary border-b-0' : 'bg-muted/30 hover:bg-muted/50'}`} onClick={() => toggleGroup(groupId)}>
+                    <TableCell className={isOpen ? 'shadow-[inset_3px_0_0_0_var(--primary)]' : undefined}>
                       <div className="flex items-center gap-2">
-                        {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                        {isOpen
+                          ? <ChevronDown className="h-4 w-4 text-primary" />
+                          : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                         {shortDate(ordered[0].poDate)}
                       </div>
                     </TableCell>
-                    <TableCell className="font-mono font-semibold">{label}</TableCell>
-                    <TableCell className="font-semibold">{party}</TableCell>
+                    <TableCell className="font-semibold tracking-tight tabular-nums">{label}</TableCell>
+                    <TableCell className="font-semibold">
+                      <div className="flex items-center gap-2">
+                        {party}
+                        {ordered[0].plannedLocation === 'STOCK' && (
+                          <Badge variant="outline" className="text-[10px] font-normal" title="Held out of the Order Planner until stocked in">Stock</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
                       {rupees(ordered[0].pricePerKg)}
                       <span className="block text-[10px] font-normal text-muted-foreground">{ordered[0].priceType === 'BASE' ? 'Base price' : 'Delivery price'}</span>
@@ -300,10 +340,10 @@ export default function PurchaseOrders() {
                   </TableRow>
 
                   {/* Individual per-lorry POs */}
-                  {isOpen && ordered.map((po) => (
-                    <TableRow key={po.id} className="bg-background">
-                      <TableCell className="pl-10 text-muted-foreground">{shortDate(po.poDate)}</TableCell>
-                      <TableCell className="font-mono font-semibold">{po.poNumber}</TableCell>
+                  {isOpen && ordered.map((po, idx) => (
+                    <TableRow key={po.id} className={`bg-accent/60 hover:bg-accent ${idx === ordered.length - 1 ? 'border-b-2 border-border' : 'border-b border-border/60'}`}>
+                      <TableCell className="pl-12 text-sm text-muted-foreground shadow-[inset_3px_0_0_0_var(--primary)]">{shortDate(po.poDate)}</TableCell>
+                      <TableCell className="font-semibold tracking-tight tabular-nums">{po.poNumber}</TableCell>
                       <TableCell className="text-muted-foreground text-xs">Lorry</TableCell>
                       <TableCell className="text-right">{rupees(po.pricePerKg)}</TableCell>
                       <TableCell className="text-right text-xs">
@@ -348,6 +388,7 @@ export default function PurchaseOrders() {
             })}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -364,14 +405,7 @@ export default function PurchaseOrders() {
                   <FormItem>
                     <FormLabel>PO Date <span className="text-destructive">*</span></FormLabel>
                     <FormControl>
-                      <DatePicker
-                        value={field.value ? new Date(field.value + 'T00:00:00') : undefined}
-                        onChange={(d) =>
-                          field.onChange(
-                            d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : ''
-                          )
-                        }
-                      />
+                      <Input type="date" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -385,7 +419,7 @@ export default function PurchaseOrders() {
                     <FormLabel>Party (supplier) <span className="text-destructive">*</span></FormLabel>
                     <FormControl>
                       <Combobox
-                        options={(parties ?? []).filter((p) => p.type !== 'BUYER' && p.commodities?.includes('BLACK_SEED')).map((p) => ({ value: p.id, label: p.name }))}
+                        options={supplierOptions}
                         value={field.value}
                         onChange={field.onChange}
                         placeholder="Select party"
@@ -427,6 +461,27 @@ export default function PurchaseOrders() {
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="plannedLocation"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Estimated location <span className="text-destructive">*</span></FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Select destination" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="RVP">RVP (direct to process)</SelectItem>
+                        <SelectItem value="STOCK">Stock (cold storage first)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[0.8rem] text-muted-foreground">
+                      Stock-bound orders stay out of the Order Planner until their lorry is actually stocked in.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField
                 control={form.control}
@@ -491,16 +546,7 @@ export default function PurchaseOrders() {
                           step="0.001"
                           placeholder="e.g. 50"
                           {...field}
-                          onChange={(e) => {
-                            const t = e.target.value;
-                            field.onChange(t);
-                            if (t && !isNaN(Number(t))) {
-                              // Ensure at least 1 lorry for small orders so it doesn't fail backend positive() validation
-                              form.setValue('lorries', String(Math.max(1, Math.round(Number(t) / 25))));
-                            } else {
-                              form.setValue('lorries', '');
-                            }
-                          }}
+                          onChange={(e) => field.onChange(e.target.value)}
                         />
                       </FormControl>
                       <FormMessage />

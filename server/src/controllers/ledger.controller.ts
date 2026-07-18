@@ -238,11 +238,10 @@ export async function getProfitLoss(_req: Request, res: Response) {
     .sort((a, b) => b.amount - a.amount);
   const byproductIncome = r2(byproducts.reduce((s, b) => s + b.amount, 0));
 
-  // Overhead = itemized husk-pool operating costs (same breakdown as the dashboard
-  // recovery card), EXCLUDING the pappu-flagged lines (loading/roasting/net) that are
-  // already captured inside the per-order Pappu P/L, so nothing is double-counted.
+  // Overhead = the FULL itemized husk-pool operating costs, matching the dashboard
+  // recovery card line-for-line — including the pappu-flagged lines (Pappu Loading /
+  // Roasting / Net), which per business instruction are deducted here as well.
   const overheadLedgers = HUSK_EXPENSE_META
-    .filter((m) => !m.pappu)
     .map((m) => ({ code: m.key, name: m.label, amount: r2(huskPool.expenses[m.key]) }))
     .filter((l) => Math.abs(l.amount) >= 0.005)
     .sort((a, b) => b.amount - a.amount);
@@ -347,7 +346,7 @@ function loadDustPurchases(partyId?: string) {
 }
 
 function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+  return Math.round(n); // whole rupees - the ERP carries no paise
 }
 
 function buildPartyLedger(
@@ -568,25 +567,68 @@ function buildPartyLedger(
 }
 
 export async function listPartyLedgers(_req: Request, res: Response) {
-  const [parties, pos, sales, payments, receipts, dustPurchases] = await Promise.all([
-    prisma.party.findMany({ orderBy: { name: 'asc' } }),
-    prisma.purchaseOrder.findMany({
-      select: { partyId: true, stockIns: { select: { arrivalDate: true, purchase: { select: { verification: { select: { totalAmount: true } } } } } } }
-    }),
-    prisma.saleOrder.findMany({
-      select: { buyerId: true, ratePerKg: true, dispatches: { select: { dispatchDate: true, invoiceDate: true, weightKg: true, gstAmount: true } } }
-    }),
-    prisma.payment.findMany({
-      where: { partyId: { not: null } },
-      select: { partyId: true, amount: true, date: true }
-    }),
-    prisma.receipt.findMany({
-      where: { partyId: { not: null } },
-      select: { partyId: true, amount: true, date: true }
-    }),
-    prisma.dustPurchase.findMany({
-      select: { partyId: true, amount: true, purchaseDate: true }
-    })
+  const [
+    parties,
+    salesAgg,
+    purchasesAgg,
+    pendingPurchasesAgg,
+    payments,
+    receipts,
+    dustPurchases
+  ] = await Promise.all([
+    // The Hamali crew has its own dedicated ledger view (Hamali Report -> Ledger
+    // tab), so it's excluded here to avoid duplicating it in the general party list.
+    prisma.party.findMany({ where: { type: { not: 'HAMALI_TEAM' } }, orderBy: { name: 'asc' } }),
+    // Amounts are rounded PER TRANSACTION to whole rupees here so this list total
+    // ties exactly to the per-transaction statement in getPartyLedger/buildPartyLedger.
+    // (Summing raw paise and rounding once diverges by a rupee or two, which showed
+    // up as a party reading e.g. ₹1 DR here while the statement said "Settled".)
+    prisma.$queryRaw<{partyId: string, saleTotal: number, lastTxnDate: Date, dispatchCount: bigint, cnTotal: number}[]>`
+      SELECT
+        so."buyerId" as "partyId",
+        SUM(ROUND(sd."weightKg" * so."ratePerKg") + ROUND(sd."gstAmount")) as "saleTotal",
+        SUM(ROUND(sd."creditNoteAmount")) as "cnTotal",
+        MAX(COALESCE(sd."invoiceDate", sd."dispatchDate")) as "lastTxnDate",
+        COUNT(sd.id) as "dispatchCount"
+      FROM "SaleOrder" so
+      JOIN "SaleDispatch" sd ON sd."saleOrderId" = so.id
+      GROUP BY so."buyerId"
+    `,
+    prisma.$queryRaw<{partyId: string, purchaseTotal: number, lastTxnDate: Date, verifiedCount: bigint}[]>`
+      SELECT
+        po."partyId",
+        SUM(ROUND(v."totalAmount")) as "purchaseTotal",
+        MAX(si."arrivalDate") as "lastTxnDate",
+        COUNT(v.id) as "verifiedCount"
+      FROM "PurchaseOrder" po
+      JOIN "StockIn" si ON si."purchaseOrderId" = po.id
+      JOIN "Purchase" p ON p."stockInId" = si.id
+      JOIN "WeightVerification" v ON v."purchaseId" = p.id
+      GROUP BY po."partyId"
+    `,
+    prisma.$queryRaw<{partyId: string, pendingCount: bigint}[]>`
+      SELECT 
+        po."partyId",
+        COUNT(si.id) as "pendingCount"
+      FROM "PurchaseOrder" po
+      JOIN "StockIn" si ON si."purchaseOrderId" = po.id
+      LEFT JOIN "Purchase" p ON p."stockInId" = si.id
+      LEFT JOIN "WeightVerification" v ON v."purchaseId" = p.id
+      WHERE v.id IS NULL
+      GROUP BY po."partyId"
+    `,
+    prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
+      SELECT "partyId", SUM(ROUND("amount")) as total, MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
+      FROM "Payment" WHERE "partyId" IS NOT NULL GROUP BY "partyId"
+    `,
+    prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
+      SELECT "partyId", SUM(ROUND("amount")) as total, MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
+      FROM "Receipt" WHERE "partyId" IS NOT NULL GROUP BY "partyId"
+    `,
+    prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
+      SELECT "partyId", SUM(ROUND("amount")) as total, MAX("purchaseDate") as "lastTxnDate", COUNT(*)::int as cnt
+      FROM "DustPurchase" GROUP BY "partyId"
+    `
   ]);
 
   const map = new Map<string, any>();
@@ -606,60 +648,60 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     if (!s.lastTxnDate || d.getTime() > new Date(s.lastTxnDate).getTime()) s.lastTxnDate = d;
   };
 
-  for (const po of pos) {
-    const s = map.get(po.partyId);
+  for (const agg of purchasesAgg) {
+    const s = map.get(agg.partyId);
     if (!s) continue;
-    for (const si of po.stockIns) {
-      applyDate(po.partyId, si.arrivalDate);
-      const amt = si.purchase?.verification?.totalAmount;
-      if (amt != null) {
-        s.purchaseTotal += Number(amt);
-        s.totalCredit += Number(amt);
-        s.transactionCount++;
-      } else {
-        s.pendingCount++;
-        s.transactionCount++;
-      }
-    }
-  }
-  for (const sale of sales) {
-    const s = map.get(sale.buyerId);
-    if (!s) continue;
-    const rate = Number(sale.ratePerKg);
-    for (const d of sale.dispatches) {
-      applyDate(sale.buyerId, d.invoiceDate ?? d.dispatchDate);
-      const amt = round2(d.weightKg * rate) + round2(Number(d.gstAmount));
-      s.saleTotal += amt;
-      s.totalDebit += amt;
-      s.transactionCount++;
-    }
-  }
-  for (const pay of payments) {
-    const s = map.get(pay.partyId!);
-    if (!s) continue;
-    applyDate(pay.partyId!, pay.date);
-    const amt = Number(pay.amount);
-    s.paidTotal += amt;
-    s.totalDebit += amt;
-    s.transactionCount++;
-  }
-  for (const rec of receipts) {
-    const s = map.get(rec.partyId!);
-    if (!s) continue;
-    applyDate(rec.partyId!, rec.date);
-    const amt = Number(rec.amount);
-    s.receivedTotal += amt;
-    s.totalCredit += amt;
-    s.transactionCount++;
-  }
-  for (const dp of dustPurchases) {
-    const s = map.get(dp.partyId);
-    if (!s) continue;
-    applyDate(dp.partyId, dp.purchaseDate);
-    const amt = Number(dp.amount);
+    applyDate(agg.partyId, agg.lastTxnDate);
+    const amt = Number(agg.purchaseTotal || 0);
     s.purchaseTotal += amt;
     s.totalCredit += amt;
-    s.transactionCount++;
+    s.transactionCount += Number(agg.verifiedCount);
+  }
+  for (const agg of pendingPurchasesAgg) {
+    const s = map.get(agg.partyId);
+    if (!s) continue;
+    s.pendingCount += Number(agg.pendingCount);
+    s.transactionCount += Number(agg.pendingCount);
+  }
+  for (const agg of salesAgg) {
+    const s = map.get(agg.partyId);
+    if (!s) continue;
+    applyDate(agg.partyId, agg.lastTxnDate);
+    const amt = Number(agg.saleTotal || 0);
+    const cnAmt = Number(agg.cnTotal || 0);
+    s.saleTotal += amt;
+    s.totalDebit += amt;
+    s.totalCredit += cnAmt;
+    s.transactionCount += Number(agg.dispatchCount);
+  }
+  for (const agg of payments) {
+    if (!agg.partyId) continue;
+    const s = map.get(agg.partyId);
+    if (!s) continue;
+    applyDate(agg.partyId, agg.lastTxnDate);
+    const amt = Number(agg.total || 0);
+    s.paidTotal += amt;
+    s.totalDebit += amt;
+    s.transactionCount += Number(agg.cnt);
+  }
+  for (const agg of receipts) {
+    if (!agg.partyId) continue;
+    const s = map.get(agg.partyId);
+    if (!s) continue;
+    applyDate(agg.partyId, agg.lastTxnDate);
+    const amt = Number(agg.total || 0);
+    s.receivedTotal += amt;
+    s.totalCredit += amt;
+    s.transactionCount += Number(agg.cnt);
+  }
+  for (const agg of dustPurchases) {
+    const s = map.get(agg.partyId);
+    if (!s) continue;
+    applyDate(agg.partyId, agg.lastTxnDate);
+    const amt = Number(agg.total || 0);
+    s.purchaseTotal += amt;
+    s.totalCredit += amt;
+    s.transactionCount += Number(agg.cnt);
   }
 
   const rows = Array.from(map.values()).map(s => {

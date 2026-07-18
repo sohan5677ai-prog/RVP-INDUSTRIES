@@ -1,5 +1,5 @@
 export type Role = 'ADMIN' | 'USER' | 'OWNER' | 'DEVELOPER';
-export type PartyType = 'SUPPLIER' | 'BUYER' | 'BOTH';
+export type PartyType = 'SUPPLIER' | 'BUYER' | 'BOTH' | 'HAMALI_TEAM';
 
 export interface User {
   id: string;
@@ -12,8 +12,10 @@ export interface User {
 export interface Party {
   id: string;
   name: string;
+  nickname?: string | null;
   type: PartyType;
   phone: string | null;
+  email?: string | null;
   address: string | null;
   state: string | null;
   pincode?: string | null;
@@ -65,6 +67,7 @@ export interface Purchase {
   freightCharge?: string;
   discountType?: DiscountType | null;
   discountValue?: string;
+  purchaseDate?: string;
   createdAt: string;
   verification?: WeightVerification | null;
 }
@@ -182,6 +185,8 @@ export interface StockIn {
   rvpFirstWeightKg: number;
   rvpSecondWeightKg: number;
   rvpKataKg: number;
+  // Net typed straight in (spot/URP, no tare weighment): rvpFirstWeightKg = net.
+  directNet?: boolean;
   billingWeightKg: number;
   partyKataKg: number;
   invoiceFileUrl: string;
@@ -201,6 +206,7 @@ export interface PurchaseOrder {
   party?: Party;
   pricePerKg: string;
   priceType?: 'BASE' | 'DELIVERY';
+  plannedLocation?: 'RVP' | 'STOCK';
   hasGst?: boolean;
   gstAmount?: string;
   tonnageKg: number;
@@ -211,6 +217,9 @@ export interface PurchaseOrder {
   createdAt: string;
   stockIn?: StockIn | null;
   stockIns?: { id: string }[] | null;
+  poSeriesKey?: string | null;
+  poSerial?: number | null;
+  poFy?: string | null;
 }
 
 // Order-level: PENDING → PARTIAL (some dispatched) → DISPATCHED (fully).
@@ -230,6 +239,8 @@ export interface SaleDispatch {
   status: SaleStatus; // DISPATCHED | DELIVERED
   vehicleNumber: string | null;
   kataFileUrl?: string | null;
+  transportProvider?: string | null; // 'SURYA' | 'KNM' | 'OTHER'
+  customRetention?: string | number | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
   buyerKataKg?: number | null;
@@ -273,17 +284,63 @@ export interface SaleOrder {
   tonnageKg: number; // total weight ORDERED, per RVP kata (kg)
   ratePerKg: string;
   gstAmount: string;
+  gstExempt: boolean;
   brokerageRatePerKg: string;
   destination: string | null;
   freightCharge: string;
   status: SaleStatus;
   marginOverride: boolean;
   dueDays?: number | null;
+  reminderDate?: string | null;
   // Dispatches (shipments) + server-computed fulfilment fields.
   dispatches?: SaleDispatch[];
   dispatchedKg?: number;
   remainingKg?: number;
   createdAt: string;
+}
+
+export type NoteStatus = 'ISSUED' | 'CANCELLED';
+
+interface NoteBase {
+  id: string;
+  noteNumber: string;
+  noteSeq: number;
+  noteFy: string;
+  noteDate: string;
+  partyId: string;
+  party?: Party;
+  saleDispatchId?: string | null;
+  saleDispatch?: SaleDispatch | null;
+  reason: string;
+  taxableValue: string;
+  gstRate: string;
+  gstAmount: string;
+  totalAmount: string;
+  status: NoteStatus;
+  createdAt: string;
+}
+
+export type CreditNote = NoteBase;
+export type DebitNote = NoteBase;
+
+export type EmailDocumentType = 'INVOICE' | 'EWB' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
+export type EmailStatus = 'SENT' | 'FAILED';
+
+export interface EmailLog {
+  id: string;
+  partyId: string;
+  party?: Party;
+  documentType: EmailDocumentType;
+  saleDispatchId?: string | null;
+  creditNoteId?: string | null;
+  debitNoteId?: string | null;
+  referenceLabel: string;
+  recipientEmail: string;
+  subject: string;
+  resendMessageId?: string | null;
+  status: EmailStatus;
+  errorMessage?: string | null;
+  sentAt: string;
 }
 
 export interface CompanyProfile {
@@ -476,6 +533,7 @@ export interface Payment {
   payee?: string | null;
   reference?: string | null;
   description?: string | null;
+  hamaliVerificationId?: string | null;
 }
 
 export interface OutstandingBalance {
@@ -498,6 +556,9 @@ export type ManualHamaliType =
   | 'BAG_CUTTING_NORMAL'
   | 'BAG_CUTTING_DISTANCE'
   | 'PAPPU_NET'
+  | 'HUSK_PACKING'
+  | 'TPS_BROKENS_PACKING'
+  | 'TAMARIND_BYPRODUCTS_PACKING'
   | 'DIESEL'
   | 'MISC'
   | 'PAID';
@@ -519,10 +580,13 @@ export interface ManualHamaliCost {
 export interface HamaliVerification {
   id: string;
   asOfDate: string;
+  periodStart: string | null;
   crewTotal: string;
   note: string | null;
   createdBy: string | null;
   createdAt: string;
+  // Crew-settlement payments booked against this squared-off period.
+  payments?: { id: string; amount: string; date: string; reference: string | null }[];
 }
 
 export type ReceiptType =

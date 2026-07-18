@@ -60,3 +60,13 @@ server/prisma/import*.ts
 server/prisma/reset-transactions.ts
 server/prisma/setArrived.ts
 server/prisma/testPappuSale.ts
+server/query*.ts
+server/diag_tmp.ts
+server/diag_users.ts
+server/delete_party.ts
+server/insert_adj.ts
+server/deleted_duplicate_payments*.json
+
+# DB dumps / restore points (not part of the app)
+server/backups/
+server/scripts/backup_*.json

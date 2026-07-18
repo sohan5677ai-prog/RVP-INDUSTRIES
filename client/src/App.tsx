@@ -40,6 +40,7 @@ const SalesProduct = lazyWithPreload(
   () => import('@/pages/SalesProduct')
 );
 const Husk = lazyWithPreload('/sales/husk', () => import('@/pages/Husk'));
+const CreditDebitNotes = lazyWithPreload('/sales/notes', () => import('@/pages/CreditDebitNotes'));
 const ByproductSales = lazyWithPreload(
   ['/sales/byproducts', '/sales/shell', '/sales/waste'],
   () => import('@/pages/ByproductSales')
@@ -119,6 +120,7 @@ export default function App() {
               <Route path="/sale-orders" element={<SaleOrders />} />
               <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
               <Route path="/sales/husk" element={<Husk />} />
+              <Route path="/sales/notes" element={<CreditDebitNotes />} />
               <Route path="/sales/tps" element={<SalesProduct product="TPS" />} />
               <Route path="/sales/byproducts" element={<ByproductSales />} />
               <Route path="/sales/shell" element={<ByproductSales />} />

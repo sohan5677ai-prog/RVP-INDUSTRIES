@@ -4,8 +4,28 @@ import { HttpError } from '../lib/httpError.js';
 import { createHamaliVerificationSchema } from '../schemas/hamaliVerification.schema.js';
 
 export async function listHamaliVerifications(_req: Request, res: Response) {
-  const rows = await prisma.hamaliVerification.findMany({ orderBy: { asOfDate: 'desc' } });
+  const rows = await prisma.hamaliVerification.findMany({
+    orderBy: { asOfDate: 'desc' },
+    include: {
+      payments: { select: { id: true, amount: true, date: true, reference: true } },
+    },
+  });
   res.json(rows);
+}
+
+/**
+ * Find (or create on first use) the single "Hamali Team" party that crew
+ * settlement payments are booked against. Idempotent - never overwrites edits
+ * made to the party in the Parties master.
+ */
+export async function getHamaliTeamParty(_req: Request, res: Response) {
+  let party = await prisma.party.findFirst({ where: { type: 'HAMALI_TEAM' } });
+  if (!party) {
+    party = await prisma.party.create({
+      data: { name: 'Bikash and Team', type: 'HAMALI_TEAM' },
+    });
+  }
+  res.json(party);
 }
 
 /**
@@ -19,6 +39,7 @@ export async function createHamaliVerification(req: Request, res: Response) {
   const created = await prisma.hamaliVerification.create({
     data: {
       asOfDate: data.asOfDate,
+      periodStart: data.periodStart ?? null,
       crewTotal: Math.round(data.crewTotal * 100) / 100,
       note: data.note ?? null,
       createdBy: req.user?.userId ?? null,

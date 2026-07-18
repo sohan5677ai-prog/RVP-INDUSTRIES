@@ -12,6 +12,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 type Owner = 'SHABRI' | 'REDDY';
 
@@ -24,6 +26,12 @@ interface Drawing {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const DRAWING_COLUMNS: ExportColumn<Drawing>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Amount', value: (r) => rupees(r.amount), excel: (r) => Number(r.amount), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Note', value: (r) => r.note ?? '' },
+];
 
 export default function Drawings() {
   return (
@@ -103,7 +111,10 @@ function OwnerPanel({ owner }: { owner: Owner }) {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
         <StatCard label={`${label} - total drawings`} value={rupees(total)} icon={HandCoins} tone="amber" hint="to husk pool" className="flex-1 max-w-xs" />
-        <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename={`Drawings_${label}`} title={`Drawings — ${label}`} columns={DRAWING_COLUMNS} rows={rows} />
+          <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card overflow-auto">

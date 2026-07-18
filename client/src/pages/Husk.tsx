@@ -19,7 +19,19 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import SalesProduct from './SalesProduct';
+
+const HUSK_TRANSFER_COLUMNS: ExportColumn<HuskTransfer>[] = [
+  { header: 'Date', value: (t) => shortDate(t.transferDate) },
+  { header: 'Route', value: (t) => `${t.fromLocation} → ${t.toLocation}` },
+  { header: 'Lorry', value: (t) => t.lorryNumber ?? '' },
+  { header: 'Weight (kg)', value: (t) => t.weightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Hamali', value: (t) => rupees(t.hamaliCharge), excel: (t) => Number(t.hamaliCharge), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Transport', value: (t) => rupees(t.transportCharge), excel: (t) => Number(t.transportCharge), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Total Cost', value: (t) => rupees(t.totalCost), excel: (t) => Number(t.totalCost), numFmt: '#,##0.00', align: 'right' },
+];
 
 // The storage locations husk can be moved to (RVP is the source factory).
 const HUSK_STORAGES = ['PGR COLD', 'Murugan', 'KNM Multi'] as const;
@@ -118,9 +130,12 @@ function TransfersPanel() {
         <p className="text-sm text-muted-foreground">
           Factory → storage transfers · hamali ₹{SHELL_HAMALI_RATE}/t + ₹{SHELL_TRANSPORT} transport.
         </p>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4" /> Record Transfer
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename="Husk_Transfers" title="Husk Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={HUSK_TRANSFER_COLUMNS} rows={transfers ?? []} />
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4" /> Record Transfer
+          </Button>
+        </div>
       </div>
       <div className="glass rounded-2xl overflow-hidden">
         <Table>

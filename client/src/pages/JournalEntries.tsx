@@ -1,16 +1,60 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { FileSpreadsheet, RefreshCcw, Tag } from 'lucide-react';
 import { api } from '@/lib/api';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import type { JournalEntry } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+
+// One flattened row per journal line, carrying the voucher context — the export
+// is a flat ledger, not the nested voucher cards shown on screen.
+type JournalRow = {
+  date: string; voucher: string; reference: string;
+  code: string; account: string; costCenter: string;
+  debit: number; credit: number;
+};
+
+const JOURNAL_EXPORT_COLUMNS: ExportColumn<JournalRow>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Voucher', value: (r) => r.voucher },
+  { header: 'Reference', value: (r) => r.reference },
+  { header: 'Account Code', value: (r) => r.code },
+  { header: 'Account Name', value: (r) => r.account },
+  { header: 'Cost Center', value: (r) => r.costCenter },
+  { header: 'Debit', value: (r) => (r.debit ? rupees(r.debit) : ''), excel: (r) => r.debit || null, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Credit', value: (r) => (r.credit ? rupees(r.credit) : ''), excel: (r) => r.credit || null, numFmt: '#,##0.00', align: 'right' },
+];
 
 export default function JournalEntries() {
   const { data: entries, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['journal-entries'],
     queryFn: () => api<JournalEntry[]>('/ledger/entries'),
   });
+
+  const journalRows = useMemo<JournalRow[]>(
+    () => (entries ?? []).flatMap((e) =>
+      e.lines.map((line) => ({
+        date: e.date,
+        voucher: e.description,
+        reference: e.reference ?? '',
+        code: line.account?.code ?? '',
+        account: line.account?.name ?? '',
+        costCenter: line.costCenter ?? '',
+        debit: Number(line.debit) || 0,
+        credit: Number(line.credit) || 0,
+      })),
+    ),
+    [entries],
+  );
+
+  // Each voucher is a heavy card with its own inner table; render them
+  // progressively so a long audit log doesn't mount everything on open.
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(entries ?? [], 25);
 
   return (
     <div className="space-y-6">
@@ -19,15 +63,24 @@ export default function JournalEntries() {
           <h1 className="text-2xl font-bold">General Journal Vouchers</h1>
           <p className="text-muted-foreground">Audit log of all double-entry transaction journals posted by the system</p>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={() => refetch()} 
-          disabled={isLoading || isRefetching}
-          className="gap-1.5"
-        >
-          <RefreshCcw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons
+            filename="Journal_Vouchers"
+            title="General Journal"
+            subtitle={`${entries?.length ?? 0} voucher(s)`}
+            columns={JOURNAL_EXPORT_COLUMNS}
+            rows={journalRows}
+          />
+          <Button
+            variant="outline"
+            onClick={() => refetch()}
+            disabled={isLoading || isRefetching}
+            className="gap-1.5"
+          >
+            <RefreshCcw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {isLoading && (
@@ -43,7 +96,7 @@ export default function JournalEntries() {
       )}
 
       <div className="space-y-4">
-        {entries?.map((entry) => (
+        {visible.map((entry) => (
           <div key={entry.id} className="border rounded-lg bg-card overflow-hidden shadow-sm">
             {/* Header info */}
             <div className="bg-muted/40 p-4 border-b flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
@@ -110,6 +163,7 @@ export default function JournalEntries() {
           </div>
         ))}
       </div>
+      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
   );
 }

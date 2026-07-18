@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -16,11 +16,15 @@ import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/PageHeader';
 import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import { cn } from '@/lib/utils';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
 
 const GST_RATE = 0.05;
 
@@ -137,7 +141,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
   const marginById = useMemo(() => new Map((margins ?? []).map((m) => [m.orderId, m])), [margins]);
 
-  const visible = (orders ?? []).filter((o) => {
+  const visible = useMemo(() => (orders ?? []).filter((o) => {
     if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
     if (brokerFilter !== 'ALL') {
       if (brokerFilter === NO_BROKER && o.brokerId) return false;
@@ -148,7 +152,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     if (fromDate && d < fromDate) return false;
     if (toDate && d > toDate) return false;
     return true;
-  });
+  }), [orders, statusFilter, brokerFilter, partyFilter, fromDate, toDate]);
 
   const isLoading = loadingOrders || loadingParties || loadingBrokers;
 
@@ -158,6 +162,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [dispatchTonnes, setDispatchTonnes] = useState('');
   const [extractingKata, setExtractingKata] = useState(false);
+  const [transportProvider, setTransportProvider] = useState<'SURYA' | 'KNM' | 'OTHER'>('SURYA');
+  const [customRetention, setCustomRetention] = useState('');
 
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
@@ -168,6 +174,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setKataFile(null);
     setVehicleNumber('');
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
+    setTransportProvider('SURYA');
+    setCustomRetention('');
   }
 
   async function extractKata(file: File) {
@@ -195,6 +203,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (kataFile) fd.append('kata', kataFile);
       fd.append('vehicleNumber', vehicleNumber);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
+      fd.append('transportProvider', transportProvider);
+      if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -432,6 +442,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const sendInvoiceEmailMutation = useMutation({
+    mutationFn: (id: string) => api(`/sale-dispatches/${id}/einvoice/email`, { method: 'POST' }),
+    onSuccess: () => toast.success('Invoice emailed to buyer'),
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const sendEwbEmailMutation = useMutation({
+    mutationFn: (id: string) => api(`/sale-dispatches/${id}/ewaybill/email`, { method: 'POST' }),
+    onSuccess: () => toast.success('E-Way Bill emailed to buyer'),
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   function openEwb(dispatch: SaleDispatch, order: SaleOrder) {
     setEwbDispatch({ dispatch, order });
     setTransporterId('');
@@ -464,7 +486,21 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const wacPrice = totalSoldKg > 0 ? totalRevenue / totalSoldKg : 0;
   const dispatchedRevenue = visible.reduce((sum, o) => sum + (dispatchedKgOf(o) * Number(o.ratePerKg)), 0);
   const pendingRevenue = totalRevenue - dispatchedRevenue;
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visible, 50);
   const realizationPct = totalRevenue > 0 ? (dispatchedRevenue / totalRevenue) * 100 : 0;
+
+  const exportColumns: ExportColumn<SaleOrder>[] = [
+    { header: 'Date', value: (o) => shortDate(o.saleDate) },
+    { header: 'Party', value: (o) => o.buyer?.name ?? '' },
+    ...(hasBroker ? [{ header: 'Broker', value: (o: SaleOrder) => o.broker?.name ?? '' }] : []),
+    { header: 'Destination', value: (o) => o.destination ?? '' },
+    { header: 'Shipments', value: (o) => (o.dispatches ?? []).length, align: 'right' },
+    { header: 'Ordered (t)', value: (o) => toTonnes(o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Dispatched (t)', value: (o) => toTonnes(dispatchedKgOf(o)).toFixed(2), excel: (o) => toTonnes(dispatchedKgOf(o)), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Remaining (t)', value: (o) => toTonnes(remainingKgOf(o)).toFixed(2), excel: (o) => toTonnes(remainingKgOf(o)), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Price/kg', value: (o) => rupees(o.ratePerKg), excel: (o) => Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Revenue', value: (o) => rupees(o.tonnageKg * Number(o.ratePerKg)), excel: (o) => o.tonnageKg * Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
+  ];
 
   return (
     <div className="space-y-6">
@@ -529,7 +565,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           size="sm"
         />
         <Combobox
-          options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name }))]}
+          options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && p.type !== 'HAMALI_TEAM').map((p) => ({ value: p.id, label: p.name }))]}
           value={partyFilter}
           onChange={setPartyFilter}
           placeholder="All parties"
@@ -553,10 +589,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           <span className="text-muted-foreground text-xs">→</span>
           <Input aria-label="To date" type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="w-40" />
         </div>
-        {filtersActive && (
-          <button type="button" onClick={() => { setStatusFilter('ALL'); setPartyFilter('ALL'); setBrokerFilter('ALL'); setFromDate(''); setToDate(''); }}
-            className="ml-auto text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Clear filters</button>
-        )}
+        <div className="ml-auto flex items-center gap-3">
+          {filtersActive && (
+            <button type="button" onClick={() => { setStatusFilter('ALL'); setPartyFilter('ALL'); setBrokerFilter('ALL'); setFromDate(''); setToDate(''); }}
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Clear filters</button>
+          )}
+          <ExportButtons
+            filename={`${meta.noun}_Sales`}
+            title={`${meta.title}`}
+            subtitle={`${visible.length} order(s)`}
+            columns={exportColumns}
+            rows={visible}
+          />
+        </div>
       </div>
 
       {/* Table */}
@@ -582,7 +627,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             {!isLoading && visible.length === 0 && (
               <TableRow><TableCell colSpan={colCount} className="h-28 text-center text-muted-foreground">No {meta.noun.toLowerCase()} sales matching filters.</TableCell></TableRow>
             )}
-            {visible.map((o) => {
+            {(pageRows ?? []).map((o) => {
               const dispatchedKg = dispatchedKgOf(o);
               const remainingKg = remainingKgOf(o);
               const dispatches = o.dispatches ?? [];
@@ -747,6 +792,17 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 Cancel IRN
                                               </Button>
                                             )}
+                                            {d.irn && (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                title={o.buyer?.email ? undefined : 'Add an email in Parties first'}
+                                                disabled={!o.buyer?.email || sendInvoiceEmailMutation.isPending}
+                                                onClick={() => sendInvoiceEmailMutation.mutate(d.id)}
+                                              >
+                                                <Mail className="h-3.5 w-3.5" /> Send Invoice
+                                              </Button>
+                                            )}
 
                                             {/* E-Way Bill Action Buttons */}
                                             {d.irn && d.irnStatus !== 'CANCELLED' && !d.ewbNumber && (
@@ -761,6 +817,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 </Button>
                                                 <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'ewaybill')}>
                                                   Cancel EWB
+                                                </Button>
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  title={o.buyer?.email ? undefined : 'Add an email in Parties first'}
+                                                  disabled={!o.buyer?.email || sendEwbEmailMutation.isPending}
+                                                  onClick={() => sendEwbEmailMutation.mutate(d.id)}
+                                                >
+                                                  <Mail className="h-3.5 w-3.5" /> Send EWB
                                                 </Button>
                                               </>
                                             )}
@@ -802,6 +867,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             })}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       {/* Dispatch dialog */}
@@ -823,15 +889,34 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             </div>
             <div className="space-y-1.5"><Label className="text-xs">Vehicle No</Label><Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. GJ05AB1234" /></div>
             <div className="space-y-1.5">
+              <Label className="text-xs">Transport</Label>
+              <Segmented
+                value={transportProvider}
+                onValueChange={(v) => setTransportProvider(v as 'SURYA' | 'KNM' | 'OTHER')}
+                options={[
+                  { value: 'SURYA', label: 'Surya Road Lines' },
+                  { value: 'KNM',   label: 'K.N.M. Transport' },
+                  { value: 'OTHER', label: 'Other' },
+                ]}
+              />
+            </div>
+            {transportProvider === 'OTHER' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Retention Amount (₹)</Label>
+                <Input type="number" step="1" value={customRetention} onChange={(e) => setCustomRetention(e.target.value)} placeholder="e.g. 2000" />
+                <p className="text-[11px] text-muted-foreground">Amount held back from lorry freight as transport retention.</p>
+              </div>
+            )}
+            <div className="space-y-1.5">
               <Label className="text-xs">Tonnage from kata (tonnes)</Label>
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">This actual weight bills the sale and depletes the black-seed pool.</p>
               {dispatchOverflow && (
-                <p className="text-[11px] text-destructive">Exceeds the {toTonnes(dispatchRemaining).toFixed(2)} t remaining on this order.</p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining — dispatching the extra is allowed and will bill the full weight.</p>
               )}
             </div>
             <DialogFooter>
-              <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchOverflow || dispatchMutation.isPending}>
+              <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchMutation.isPending}>
                 {dispatchMutation.isPending ? 'Dispatching…' : 'Confirm Dispatch'}
               </Button>
             </DialogFooter>
@@ -1163,7 +1248,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
  * a "where the revenue goes" composition bar, accent-bordered cost tiles, and the
  * date-aware black-seed allocation chips.
  */
-function PappuMarginPanel({ margin }: { margin: PappuMargin }) {
+export function PappuMarginPanel({ margin }: { margin: PappuMargin }) {
   const isProfit = margin.margin >= 0;
   const pnlText = isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
 

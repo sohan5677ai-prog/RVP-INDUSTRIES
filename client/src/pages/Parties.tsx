@@ -41,16 +41,68 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Combobox } from '@/components/ui/combobox';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import type { Commodity, FreightRate } from '@/lib/types';
 
-const COMMODITIES: { value: Commodity; label: string }[] = [
+const PARTY_EXPORT_COLUMNS: ExportColumn<Party>[] = [
+  { header: 'Name', value: (p) => p.name },
+  { header: 'Nickname', value: (p) => p.nickname ?? '' },
+  { header: 'Type', value: (p) => p.type },
+  { header: 'Phone', value: (p) => p.phone ?? '' },
+  { header: 'Email', value: (p) => p.email ?? '' },
+  { header: 'Address', value: (p) => p.address ?? '' },
+  { header: 'State', value: (p) => p.state ?? '' },
+  { header: 'GSTIN', value: (p) => p.gstin ?? '' },
+  { header: 'Bank', value: (p) => p.bankName ?? '' },
+  { header: 'Bank A/C', value: (p) => p.bankAccountNumber ?? '' },
+  { header: 'IFSC', value: (p) => p.bankIfsc ?? '' },
+  { header: 'Commodities', value: (p) => (p.commodities ?? []).join(', ') },
+];
+
+// The 5 tamarind by-product commodities are shown as a single grouped toggle
+// (see COMMODITIES below) but stored individually so per-product filtering
+// elsewhere (e.g. SaleOrders buyer picker) keeps working unchanged.
+const TAMARIND_BYPRODUCT_COMMODITIES: Commodity[] = [
+  'TAMARIND_SHELL', 'TAMARIND_WASTE', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
+];
+
+const COMMODITIES: { value: string; label: string }[] = [
   { value: 'BLACK_SEED', label: 'Black Seed' },
   { value: 'PAPPU', label: 'Pappu' },
   { value: 'HUSK', label: 'Husk' },
-  { value: 'TAMARIND_SHELL', label: 'Tamarind Shell' },
-  { value: 'TAMARIND_WASTE', label: 'Tamarind Waste' },
+  { value: 'TAMARIND_BYPRODUCTS', label: 'Tamarind By-Products' },
   { value: 'TPS_BROKENS', label: 'TPS (Brokens)' },
 ];
+
+// Diacritic/case/whitespace-insensitive name key, used for duplicate detection.
+function normalizeName(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Cheap edit-distance check so "Sohan" vs "Sohan K" (or a typo) can be flagged
+// as a likely duplicate without blocking genuinely distinct names.
+function levenshtein(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function isSimilarName(a: string, b: string): boolean {
+  const an = normalizeName(a);
+  const bn = normalizeName(b);
+  if (an === bn) return false; // exact match is handled separately
+  if (an.startsWith(bn + ' ') || bn.startsWith(an + ' ')) return true;
+  return levenshtein(an, bn) <= 2;
+}
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
@@ -63,8 +115,10 @@ const INDIAN_STATES = [
 
 const partySchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  type: z.enum(['SUPPLIER', 'BUYER', 'BOTH']),
+  nickname: z.string().optional(),
+  type: z.enum(['SUPPLIER', 'BUYER', 'BOTH', 'HAMALI_TEAM']),
   phone: z.string().optional(),
+  email: z.string().email('Invalid email address').optional().or(z.literal('')),
   address: z.string().optional(),
   state: z.string().optional(),
   pincode: z.string().optional(),
@@ -78,7 +132,7 @@ const partySchema = z.object({
 type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
-  name: '', type: 'SUPPLIER', phone: '', address: '', state: '', pincode: '', gstin: '', destination: '',
+  name: '', nickname: '', type: 'SUPPLIER', phone: '', email: '', address: '', state: '', pincode: '', gstin: '', destination: '',
   bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
@@ -119,8 +173,16 @@ export default function Parties() {
       (p.bankAccountNumber?.toLowerCase() || '').includes(q)
     );
 
-    const matchesType = typeFilter === 'ALL' || p.type === typeFilter || p.type === 'BOTH';
-    const matchesCommodity = commodityFilter === 'ALL' || p.commodities?.includes(commodityFilter as Commodity);
+    const matchesType =
+      typeFilter === 'ALL' ||
+      p.type === typeFilter ||
+      // "Both" parties surface under the Buyer and Supplier filters, but not Hamali Team.
+      (p.type === 'BOTH' && (typeFilter === 'BUYER' || typeFilter === 'SUPPLIER'));
+    const matchesCommodity =
+      commodityFilter === 'ALL' ||
+      (commodityFilter === 'TAMARIND_BYPRODUCTS'
+        ? TAMARIND_BYPRODUCT_COMMODITIES.some((c) => p.commodities?.includes(c))
+        : p.commodities?.includes(commodityFilter as Commodity));
     const matchesState = stateFilter === 'ALL' || p.state === stateFilter;
 
     return matchesSearch && matchesType && matchesCommodity && matchesState;
@@ -141,8 +203,10 @@ export default function Parties() {
     setEditing(p);
     form.reset({
       name: p.name,
+      nickname: p.nickname ?? '',
       type: p.type,
       phone: p.phone ?? '',
+      email: p.email ?? '',
       address: p.address ?? '',
       state: p.state ?? '',
       pincode: p.pincode ?? '',
@@ -169,6 +233,30 @@ export default function Parties() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  function handleSave(values: PartyForm) {
+    const enteredName = normalizeName(values.name);
+    const others = (parties ?? []).filter((p) => p.id !== editing?.id);
+
+    const exactMatch = others.find((p) => normalizeName(p.name) === enteredName);
+    if (exactMatch) {
+      form.setError('name', {
+        type: 'manual',
+        message: `A party named "${exactMatch.name}" already exists.`,
+      });
+      return;
+    }
+
+    const similarMatch = others.find((p) => isSimilarName(p.name, values.name));
+    if (similarMatch) {
+      const proceed = confirm(
+        `A similarly named party already exists: "${similarMatch.name}".\n\nContinue creating "${values.name}" anyway?`
+      );
+      if (!proceed) return;
+    }
+
+    saveMutation.mutate(values);
+  }
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/parties/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
@@ -178,6 +266,11 @@ export default function Parties() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // The Hamali crew ("Bikash and Team") is a labour counterparty, not a trading
+  // party — it only needs name, phone and bank details, so the trade-specific
+  // fields (nickname, commodities, GST, address, destination) are hidden for it.
+  const isHamaliTeam = form.watch('type') === 'HAMALI_TEAM';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
@@ -186,9 +279,18 @@ export default function Parties() {
             <h1 className="text-2xl font-bold">Parties</h1>
             <p className="text-muted-foreground">Suppliers and buyers</p>
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-2" /> New Party
-          </Button>
+          <div className="flex items-center gap-2">
+            <ExportButtons
+              filename="Parties"
+              title="Parties (Suppliers & Buyers)"
+              subtitle={`${filteredParties?.length ?? 0} party(s)`}
+              columns={PARTY_EXPORT_COLUMNS}
+              rows={filteredParties ?? []}
+            />
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-2" /> New Party
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -205,6 +307,7 @@ export default function Parties() {
               <SelectItem value="ALL">All Types</SelectItem>
               <SelectItem value="BUYER">Buyer</SelectItem>
               <SelectItem value="SUPPLIER">Supplier</SelectItem>
+              <SelectItem value="HAMALI_TEAM">Hamali Team</SelectItem>
             </SelectContent>
           </Select>
           <Select value={commodityFilter} onValueChange={setCommodityFilter}>
@@ -237,6 +340,7 @@ export default function Parties() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Nickname</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Address</TableHead>
@@ -249,14 +353,14 @@ export default function Parties() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                <TableCell colSpan={9} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {filteredParties?.length === 0 && !isLoading && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                <TableCell colSpan={9} className="text-center text-muted-foreground">
                   No parties found.
                 </TableCell>
               </TableRow>
@@ -264,8 +368,9 @@ export default function Parties() {
             {filteredParties?.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
+                <TableCell className="font-mono text-xs">{p.nickname ?? '-'}</TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{p.type}</Badge>
+                  <Badge variant="secondary">{p.type === 'HAMALI_TEAM' ? 'Hamali Team' : p.type}</Badge>
                 </TableCell>
                 <TableCell>{p.phone ?? '-'}</TableCell>
                 <TableCell>{p.address ?? '-'}</TableCell>
@@ -308,22 +413,40 @@ export default function Parties() {
           </DialogHeader>
           <Form {...form}>
             <form
-              onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))}
+              onSubmit={form.handleSubmit(handleSave)}
               className="space-y-4"
             >
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Name</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {!isHamaliTeam && (
+                  <FormField
+                    control={form.control}
+                    name="nickname"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nickname</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. DCS" {...field} />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">Used as the PO number prefix (Nickname/01/26-27)</p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 )}
-              />
+              </div>
               <FormField
                 control={form.control}
                 name="type"
@@ -340,12 +463,14 @@ export default function Parties() {
                         <SelectItem value="SUPPLIER">Supplier</SelectItem>
                         <SelectItem value="BUYER">Buyer</SelectItem>
                         <SelectItem value="BOTH">Both</SelectItem>
+                        <SelectItem value="HAMALI_TEAM">Hamali Team</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              {!isHamaliTeam && (
               <FormField
                 control={form.control}
                 name="commodities"
@@ -354,15 +479,18 @@ export default function Parties() {
                     <FormLabel>Commodities</FormLabel>
                     <div className="flex flex-wrap gap-2">
                       {COMMODITIES.map((c) => {
-                        const active = field.value?.includes(c.value);
+                        const groupValues: string[] = c.value === 'TAMARIND_BYPRODUCTS'
+                          ? TAMARIND_BYPRODUCT_COMMODITIES
+                          : [c.value];
+                        const active = groupValues.some((v) => field.value?.includes(v));
                         return (
                           <button
                             key={c.value}
                             type="button"
                             onClick={() => {
                               const next = active
-                                ? (field.value ?? []).filter((v: string) => v !== c.value)
-                                : [...(field.value ?? []), c.value];
+                                ? (field.value ?? []).filter((v: string) => !groupValues.includes(v))
+                                : Array.from(new Set([...(field.value ?? []), ...groupValues]));
                               field.onChange(next);
                             }}
                             className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
@@ -380,19 +508,38 @@ export default function Parties() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="phone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {!isHamaliTeam && (
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input type="email" placeholder="e.g. party@example.com" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 )}
-              />
+              </div>
+              {!isHamaliTeam && (
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -425,6 +572,8 @@ export default function Parties() {
                   )}
                 />
               </div>
+              )}
+              {!isHamaliTeam && (
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -480,6 +629,7 @@ export default function Parties() {
                   />
                 )}
               </div>
+              )}
 
               <div className="space-y-3 rounded-lg border p-3 bg-muted/20">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bank Account Details</p>

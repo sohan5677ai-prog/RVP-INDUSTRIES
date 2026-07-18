@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -13,6 +13,21 @@ import { Label } from '@/components/ui/label';
 import { TrendingDown, Loader2, ChevronDown, ChevronRight, Undo2 } from 'lucide-react';
 import { Fragment } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Segmented } from '@/components/ui/segmented';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+
+// Payment-status tabs. "Unpaid" catches anything with even ₹1 still outstanding
+// (i.e. both fully-unpaid and partially-paid bills).
+type PayFilter = 'ALL' | 'PAID' | 'UNPAID';
+
+const PAY_FILTERS: { value: PayFilter; label: string }[] = [
+  { value: 'ALL', label: 'All' },
+  { value: 'PAID', label: 'Paid' },
+  { value: 'UNPAID', label: 'Unpaid' },
+];
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -49,10 +64,24 @@ interface PayDialogState {
   mode: string;
 }
 
+const PURCHASE_DUES_COLUMNS: ExportColumn<OutstandingPurchase>[] = [
+  { header: 'Date Purchased', value: (b) => shortDate(b.purchaseDate.toISOString()) },
+  { header: 'Party (Supplier)', value: (b) => b.partyName },
+  { header: 'Invoice No', value: (b) => b.invoiceNumber ?? '' },
+  { header: 'Price/kg', value: (b) => rupees(b.pricePerKg), excel: (b) => Number(b.pricePerKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Tonnage (t)', value: (b) => toTonnes(b.tonnageKg).toFixed(2), excel: (b) => toTonnes(b.tonnageKg), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Vehicle No', value: (b) => b.lorryNumber ?? '' },
+  { header: 'Total Amount', value: (b) => rupees(b.totalAmount), excel: (b) => b.totalAmount, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Outstanding', value: (b) => rupees(b.amount), excel: (b) => b.amount, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Status', value: (b) => b.status, align: 'center' },
+  { header: 'Due Age (days)', value: (b) => (b.status === 'Paid' ? '' : b.dueAge), align: 'center' },
+];
+
 export default function PurchaseDuesPage() {
   const qc = useQueryClient();
   const [payDialog, setPayDialog] = useState<PayDialogState | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
 
   const { data: parties, isLoading: loadingParties } = useQuery({
     queryKey: ['parties'],
@@ -60,13 +89,16 @@ export default function PurchaseDuesPage() {
   });
 
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
-    queryKey: ['purchases'],
-    queryFn: () => api<PurchaseRow[]>('/purchases'),
+    queryKey: ['purchases', { all: true }],
+    queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
   });
 
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    queryKey: ['payments'],
-    queryFn: () => api<Payment[]>('/payments'),
+    // Must fetch the FULL payment history (not the default latest-100). FIFO
+    // allocation runs across every payment; capping it makes older fully-paid
+    // bills reappear as unpaid and massively overstates Net Outstanding.
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
   });
 
   const payMutation = useMutation({
@@ -95,9 +127,13 @@ export default function PurchaseDuesPage() {
 
   const isLoading = loadingParties || loadingPurchases || loadingPayments;
 
-  const suppliers = parties?.filter((p) => p.type !== 'BUYER') ?? [];
+  // FIFO allocation across every supplier/purchase/payment — O(n²)-ish and must
+  // be memoized so it doesn't recompute on every render (e.g. each keystroke in
+  // the payment dialog, which only touches unrelated state).
+  const { outstandingPurchases, totalBillingAll, totalPaymentsAll } = useMemo(() => {
+  const suppliers = parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [];
 
-  const outstandingPurchases: OutstandingPurchase[] = [];
+  const rows: OutstandingPurchase[] = [];
 
   let totalBillingAll = 0;
   let totalPaymentsAll = 0;
@@ -188,7 +224,7 @@ export default function PurchaseDuesPage() {
       const diffTime = today.getTime() - purchaseDate.getTime();
       const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
-      outstandingPurchases.push({
+      rows.push({
         id: p.id,
         partyId: s.id,
         purchaseDate,
@@ -207,13 +243,26 @@ export default function PurchaseDuesPage() {
     });
   });
 
-  outstandingPurchases.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
+  rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
+  return { outstandingPurchases: rows, totalBillingAll, totalPaymentsAll };
+  }, [parties, purchases, payments]);
 
   const totalOutstanding = outstandingPurchases.reduce((sum, item) => sum + item.amount, 0);
 
+  // Payment tab: All shows everything (incl. fully paid), Paid shows settled
+  // bills, Unpaid shows anything still carrying a balance (partial or none).
+  const paidCount = outstandingPurchases.filter((b) => b.status === 'Paid').length;
+  const unpaidCount = outstandingPurchases.length - paidCount;
+  const shownPurchases = outstandingPurchases.filter((b) => {
+    if (payFilter === 'PAID') return b.status === 'Paid';
+    if (payFilter === 'UNPAID') return b.status !== 'Paid';
+    return true;
+  });
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(shownPurchases, 50);
+
   function openPayDialog(bill: OutstandingPurchase) {
     const today = new Date().toISOString().slice(0, 10);
-    setPayDialog({ bill, date: today, amount: bill.amount.toFixed(2), mode: 'NEFT' });
+    setPayDialog({ bill, date: today, amount: String(Math.round(bill.amount)), mode: 'NEFT' });
   }
 
   function submitPay() {
@@ -235,10 +284,29 @@ export default function PurchaseDuesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Purchase Dues</h1>
-        <p className="text-muted-foreground font-medium">Aging list of outstanding supplier purchases matching payments via FIFO allocation.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Purchase Dues</h1>
+          <p className="text-muted-foreground font-medium">Aging list of outstanding supplier purchases matching payments via FIFO allocation.</p>
+        </div>
+        <ExportButtons
+          filename="Purchase_Dues"
+          title="Purchase Dues (Aging)"
+          subtitle={`${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${shownPurchases.length} bill(s)`}
+          columns={PURCHASE_DUES_COLUMNS}
+          rows={shownPurchases}
+        />
       </div>
+
+      <Segmented
+        options={PAY_FILTERS.map((f) => ({
+          ...f,
+          count: f.value === 'PAID' ? paidCount : f.value === 'UNPAID' ? unpaidCount : undefined,
+        }))}
+        value={payFilter}
+        onValueChange={setPayFilter}
+        size="sm"
+      />
 
       {isLoading ? (
         <div className="flex items-center justify-center h-48">
@@ -292,10 +360,10 @@ export default function PurchaseDuesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {outstandingPurchases.length === 0 ? (
+                {shownPurchases.length === 0 ? (
                   <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No purchase dues found.</TableCell></TableRow>
                 ) : (
-                  outstandingPurchases.map((bill) => (
+                  (pageRows ?? []).map((bill) => (
                     <Fragment key={bill.id}>
                       <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expandedId === bill.id ? null : bill.id)}>
                         <TableCell className="font-medium">
@@ -387,6 +455,7 @@ export default function PurchaseDuesPage() {
               </TableBody>
             </Table>
           </div>
+          <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
         </>
       )}
 

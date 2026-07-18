@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 interface BlackSeedRow {
   purchaseId: string;
@@ -36,6 +38,19 @@ interface BlackSeedStockResponse {
   totalMilledKg: number;
   pendingPoTonnageKg: number;
 }
+
+const BLACK_SEED_COLUMNS: ExportColumn<BlackSeedRow>[] = [
+  { header: 'Date', value: (r) => shortDate(r.date) },
+  { header: 'Invoice No', value: (r) => r.invoiceNumber },
+  { header: 'PO No', value: (r) => r.poNumber ?? '' },
+  { header: 'Lorry No', value: (r) => r.lorryNumber },
+  { header: 'Party Name', value: (r) => r.partyName },
+  { header: 'RVP Net Weight (kg)', value: (r) => r.rvpNetWeightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Price/kg', value: (r) => rupees(r.pricePerKg), excel: (r) => r.pricePerKg, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Location', value: (r) => r.location },
+  { header: 'Value', value: (r) => rupees(r.valueExclHamali), excel: (r) => r.valueExclHamali, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Verified', value: (r) => (r.verified ? 'Yes' : 'No') },
+];
 
 export default function BlackSeedStock() {
   const [fromDate, setFromDate] = useState('');
@@ -95,11 +110,20 @@ export default function BlackSeedStock() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">RVP Black Seed Stock</h1>
-        <p className="text-muted-foreground">
-          Raw black seed on hand, lorry by lorry.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">RVP Black Seed Stock</h1>
+          <p className="text-muted-foreground">
+            Raw black seed on hand, lorry by lorry.
+          </p>
+        </div>
+        <ExportButtons
+          filename="Black_Seed_Stock"
+          title="RVP Black Seed Stock"
+          subtitle={`${items.length} lorry(s)`}
+          columns={BLACK_SEED_COLUMNS}
+          rows={items}
+        />
       </div>
 
       {/* Date filter */}
@@ -277,9 +301,8 @@ export default function BlackSeedStock() {
                 </TableCell>
                 <TableCell className="font-semibold">
                   {r.invoiceNumber}
-                  {r.poNumber && <span className="ml-2 text-[11px] text-muted-foreground font-mono">({r.poNumber})</span>}
                 </TableCell>
-                <TableCell className="font-mono text-sm font-semibold">{r.lorryNumber}</TableCell>
+                <TableCell className="text-sm font-semibold">{r.lorryNumber}</TableCell>
                 <TableCell className="font-medium">{r.partyName}</TableCell>
                 <TableCell className="text-right font-semibold">{kg(r.rvpNetWeightKg)}</TableCell>
                 <TableCell className="text-right font-medium">{rupees(r.pricePerKg)}/kg</TableCell>

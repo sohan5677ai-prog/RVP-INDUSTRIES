@@ -5,6 +5,33 @@ import { rupees, shortDate } from '@/lib/format';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Handshake, Loader2 } from 'lucide-react';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+
+type BrokerageDueRow = {
+  id: string;
+  brokerName: string;
+  saleDate: string;
+  invoiceNumber: string | null;
+  buyerName: string;
+  vehicleNumber: string | null;
+  brokerageAmount: number;
+};
+
+const BROKERAGE_DUES_COLUMNS: ExportColumn<BrokerageDueRow>[] = [
+  { header: 'Broker', value: (o) => o.brokerName },
+  { header: 'Date', value: (o) => shortDate(o.saleDate) },
+  { header: 'Invoice Number', value: (o) => o.invoiceNumber ?? '' },
+  { header: 'Party (Buyer)', value: (o) => o.buyerName },
+  { header: 'Vehicle No', value: (o) => o.vehicleNumber ?? '' },
+  { header: 'Brokerage Due', value: (o) => rupees(o.brokerageAmount), excel: (o) => o.brokerageAmount, numFmt: '#,##0.00', align: 'right' },
+];
+
+// "RVP" is the company's own-orders marker (not a real commission agent), so no
+// brokerage is due on orders booked under it.
+const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
 
 export default function BrokerageDuesPage() {
   const { data: brokers, isLoading: loadingBrokers } = useQuery({
@@ -18,8 +45,9 @@ export default function BrokerageDuesPage() {
   });
 
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    queryKey: ['payments'],
-    queryFn: () => api<Payment[]>('/payments'),
+    // Full history — dues are matched against every payment, not just latest 100.
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
   });
 
   const isLoading = loadingBrokers || loadingSales || loadingPayments;
@@ -39,6 +67,7 @@ export default function BrokerageDuesPage() {
   let totalPaymentsAll = 0;
 
   brokers?.forEach((b) => {
+    if (isOwnBroker(b.name)) return; // own (RVP) orders carry no brokerage
     // 1. Flat ₹2000 brokerage per dispatched shipment under this broker, oldest first.
     const activeOrders = (saleOrders ?? [])
       .filter((o) => o.brokerId === b.id)
@@ -98,12 +127,22 @@ export default function BrokerageDuesPage() {
   outstandingBrokerage.sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
 
   const totalOutstanding = outstandingBrokerage.reduce((sum, item) => sum + item.brokerageAmount, 0);
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(outstandingBrokerage, 50);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Brokerage Dues</h1>
-        <p className="text-muted-foreground font-medium">Outstanding commissions list displaying ₹2,000 flat fee per sale order matched with payments via FIFO.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Brokerage Dues</h1>
+          <p className="text-muted-foreground font-medium">Outstanding commissions list displaying ₹2,000 flat fee per sale order matched with payments via FIFO.</p>
+        </div>
+        <ExportButtons
+          filename="Brokerage_Dues"
+          title="Brokerage Dues"
+          subtitle={`${outstandingBrokerage.length} due(s)`}
+          columns={BROKERAGE_DUES_COLUMNS}
+          rows={outstandingBrokerage}
+        />
       </div>
 
       {isLoading ? (
@@ -157,7 +196,7 @@ export default function BrokerageDuesPage() {
                 {outstandingBrokerage.length === 0 ? (
                   <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No outstanding brokerage dues.</TableCell></TableRow>
                 ) : (
-                  outstandingBrokerage.map((o) => (
+                  (pageRows ?? []).map((o) => (
                     <TableRow key={o.id}>
                       <TableCell className="font-semibold">{o.brokerName}</TableCell>
                       <TableCell>{shortDate(o.saleDate)}</TableCell>
@@ -172,6 +211,7 @@ export default function BrokerageDuesPage() {
                 )}
               </TableBody>
             </Table>
+            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
         </>
       )}

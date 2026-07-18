@@ -16,6 +16,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -35,6 +37,19 @@ export default function BankLoansPage() {
   });
   const loans = data?.loans ?? [];
   const summary = data?.summary;
+
+  const loanColumns: ExportColumn<BankLoan>[] = [
+    { header: 'Date', value: (l) => shortDate(l.drawdownDate) },
+    { header: 'Person / Name / Bank', value: (l) => l.personName ?? l.name ?? l.bankName ?? '' },
+    { header: 'Loan Ref', value: (l) => l.loanRef ?? '' },
+    { header: 'Location', value: (l) => l.location ?? '' },
+    { header: 'Principal', value: (l) => rupees(l.principal), excel: (l) => Number(l.principal), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Rate (%/mo)', value: (l) => toMonthly(Number(l.interestRatePct)), numFmt: '#,##0.000', align: 'right' },
+    { header: 'Repaid', value: (l) => rupees(l.repaidAmount), excel: (l) => Number(l.repaidAmount), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Outstanding', value: (l) => rupees(l.outstanding), excel: (l) => Number(l.outstanding), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Accrued Interest', value: (l) => rupees(l.accruedInterestToDate), excel: (l) => Number(l.accruedInterestToDate), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Status', value: (l) => l.status },
+  ];
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
@@ -161,9 +176,12 @@ export default function BankLoansPage() {
             balance and is capitalised into black seed when it moves from storage to the process.
           </p>
         </div>
-        <Button onClick={() => { resetLoanForm(); setLoanOpen(true); }}>
-          <Plus className="h-4 w-4" /> Add Loan
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename="Bank_Loans" title="Bank Loans" subtitle={`${loans.length} loan(s)`} columns={loanColumns} rows={loans} />
+          <Button onClick={() => { resetLoanForm(); setLoanOpen(true); }}>
+            <Plus className="h-4 w-4" /> Add Loan
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-3">

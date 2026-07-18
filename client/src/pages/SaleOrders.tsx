@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -7,7 +7,8 @@ import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, Table2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
-import type { Party, Broker, SaleOrder, SaleStatus, SaleProduct, Commodity } from '@/lib/types';
+import type { Party, Broker, SaleOrder, SaleStatus, SaleProduct, Commodity, Receipt } from '@/lib/types';
+import { SALE_STATUS_VARIANT, saleDisplayStatus, saleStatusLabel, settledByDispatch } from '@/lib/saleStatus';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,6 +27,10 @@ import {
 } from '@/components/ui/select';
 import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+import { usePagedRows } from '@/lib/usePagedRows';
 
 const GST_RATE = 0.05;
 
@@ -51,14 +56,16 @@ const PRODUCT_TO_COMMODITY: Record<SaleProduct, Commodity> = {
   NALLA_CHINTAPANDU: 'NALLA_CHINTAPANDU',
 };
 
-const statusVariant: Record<SaleStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  PENDING: 'secondary',
-  PARTIAL: 'outline',
-  DISPATCHED: 'default',
-  DELIVERED: 'destructive',
-};
-
 const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED'];
+
+// Payment-status tabs, keyed off receipts (not the lifecycle status). "Received"
+// = every shipment fully paid; "Pending" = any balance still outstanding.
+type PayFilter = 'ALL' | 'RECEIVED' | 'PENDING';
+const PAY_FILTERS: { value: PayFilter; label: string }[] = [
+  { value: 'ALL', label: 'All' },
+  { value: 'RECEIVED', label: 'Received' },
+  { value: 'PENDING', label: 'Pending' },
+];
 
 const NO_BROKER = '__none__';
 
@@ -70,6 +77,7 @@ const saleSchema = z.object({
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Must be positive'),
   ratePerKg: z.string().min(1, 'Price is required').refine((v) => Number(v) > 0, 'Must be positive'),
   dueDays: z.string().optional().refine((v) => !v || Number(v) >= 0, 'Must be 0 or more'),
+  reminderDate: z.string().optional(),
 });
 type SaleForm = z.infer<typeof saleSchema>;
 
@@ -79,19 +87,28 @@ export default function SaleOrders() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState<SaleOrder | null>(null);
   const [statusFilter, setStatusFilter] = useState<'ALL' | SaleStatus>('ALL');
+  const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
   const [productFilter, setProductFilter] = useState<'ALL' | SaleProduct>('ALL');
   const [brokerFilter, setBrokerFilter] = useState<string>('ALL');
   const [partyFilter, setPartyFilter] = useState<string>('ALL');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [override, setOverride] = useState(false);
+  const [gstExempt, setGstExempt] = useState(false);
 
   const { data: orders, isLoading } = useQuery({ queryKey: ['sale-orders'], queryFn: () => api<SaleOrder[]>('/sale-orders') });
   const { data: parties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
   const { data: brokers } = useQuery({ queryKey: ['brokers'], queryFn: () => api<Broker[]>('/brokers') });
+  const { data: receipts } = useQuery({ queryKey: ['receipts'], queryFn: () => api<Receipt[]>('/receipts?all=true') });
+  const settled = useMemo(() => settledByDispatch(receipts), [receipts]);
 
-  const visible = (orders ?? []).filter((o) => {
+  const filtered = (orders ?? []).filter((o) => {
     if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
+    if (payFilter !== 'ALL') {
+      const received = saleDisplayStatus(o, settled) === 'PAID';
+      if (payFilter === 'RECEIVED' && !received) return false;
+      if (payFilter === 'PENDING' && received) return false;
+    }
     if (productFilter !== 'ALL' && o.product !== productFilter) return false;
     if (brokerFilter !== 'ALL') {
       if (brokerFilter === NO_BROKER && o.brokerId) return false;
@@ -105,10 +122,24 @@ export default function SaleOrders() {
 
     return true;
   });
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
+
+  const exportColumns: ExportColumn<SaleOrder>[] = [
+    { header: 'Date', value: (o) => shortDate(o.saleDate) },
+    { header: 'Commodity', value: (o) => PRODUCTS.find((p) => p.value === o.product)?.label ?? o.product },
+    { header: 'Party', value: (o) => o.buyer?.name ?? '' },
+    { header: 'Broker', value: (o) => o.broker?.name ?? '' },
+    { header: 'Destination', value: (o) => o.destination ?? '' },
+    { header: 'Ordered (t)', value: (o) => toTonnes(o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Dispatched (t)', value: (o) => toTonnes(o.dispatchedKg ?? 0).toFixed(2), excel: (o) => toTonnes(o.dispatchedKg ?? 0), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Remaining (t)', value: (o) => toTonnes(o.remainingKg ?? o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.remainingKg ?? o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Price/kg', value: (o) => rupees(o.ratePerKg), excel: (o) => Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Status', value: (o) => saleStatusLabel(saleDisplayStatus(o, settled)) },
+  ];
 
   const form = useForm<SaleForm>({
     resolver: zodResolver(saleSchema),
-    defaultValues: { saleDate: new Date().toISOString().slice(0, 10), product: 'PAPPU', buyerId: '', brokerId: NO_BROKER, tonnes: '', ratePerKg: '', dueDays: '' },
+    defaultValues: { saleDate: new Date().toISOString().slice(0, 10), product: 'PAPPU', buyerId: '', brokerId: NO_BROKER, tonnes: '', ratePerKg: '', dueDays: '', reminderDate: '' },
   });
 
   const watchedProduct = form.watch('product');
@@ -117,13 +148,14 @@ export default function SaleOrders() {
   const weightKg = Math.round(tonnes * 1000);
   const rate = Number(form.watch('ratePerKg')) || 0;
   const base = weightKg * rate;
-  const gst = Math.round(base * GST_RATE * 100) / 100;
+  const gst = gstExempt ? 0 : Math.round(base * GST_RATE * 100) / 100;
   const value = base + gst;
   const buyerDestination = parties?.find((p) => p.id === buyerId)?.destination || null;
 
   function openCreate() {
     setEditing(null);
     setOverride(false);
+    setGstExempt(false);
     form.reset({ saleDate: new Date().toISOString().slice(0, 10), product: 'PAPPU', buyerId: '', brokerId: NO_BROKER, tonnes: '', ratePerKg: '', dueDays: '' });
     setOpen(true);
   }
@@ -131,6 +163,7 @@ export default function SaleOrders() {
   function openEdit(o: SaleOrder) {
     setEditing(o);
     setOverride(o.marginOverride);
+    setGstExempt(o.gstExempt);
     form.reset({
       saleDate: o.saleDate.slice(0, 10),
       product: o.product,
@@ -139,6 +172,7 @@ export default function SaleOrders() {
       tonnes: String(o.tonnageKg / 1000),
       ratePerKg: String(o.ratePerKg),
       dueDays: o.dueDays != null ? String(o.dueDays) : '',
+      reminderDate: o.reminderDate ? o.reminderDate.slice(0, 10) : '',
     });
     setOpen(true);
   }
@@ -157,7 +191,9 @@ export default function SaleOrders() {
           tonnageKg: Math.round(Number(v.tonnes) * 1000),
           ratePerKg: Number(v.ratePerKg),
           dueDays: v.dueDays ? Number(v.dueDays) : null,
+          reminderDate: v.reminderDate ? v.reminderDate : null,
           marginOverride: override,
+          gstExempt,
         },
       });
     },
@@ -197,6 +233,13 @@ export default function SaleOrders() {
           <p className="text-muted-foreground">Take orders to sell products. Dispatch captures the invoice + kata slip.</p>
         </div>
         <div className="flex gap-2">
+          <ExportButtons
+            filename="Sale_Orders"
+            title="Sale Orders"
+            subtitle={`${filtered.length} order(s)`}
+            columns={exportColumns}
+            rows={filtered}
+          />
           <Button variant="outline" onClick={() => setBulkOpen(true)}>
             <Table2 className="h-4 w-4" /> Bulk Entry
           </Button>
@@ -218,6 +261,16 @@ export default function SaleOrders() {
           </div>
         </div>
         <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Payment</Label>
+          <div className="flex gap-1">
+            {PAY_FILTERS.map((f) => (
+              <Button key={f.value} variant={payFilter === f.value ? 'default' : 'outline'} size="sm" onClick={() => setPayFilter(f.value)} className="h-9">
+                {f.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Commodity</Label>
           <Select value={productFilter} onValueChange={(v: any) => setProductFilter(v)}>
             <SelectTrigger className="w-36 bg-card h-9"><SelectValue placeholder="All" /></SelectTrigger>
@@ -230,7 +283,7 @@ export default function SaleOrders() {
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Party (Buyer)</Label>
           <Combobox
-            options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && (productFilter === 'ALL' || p.commodities?.includes(PRODUCT_TO_COMMODITY[productFilter]))).map((p) => ({ value: p.id, label: p.name }))]}
+            options={[{ value: 'ALL', label: 'All parties' }, ...(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && p.type !== 'HAMALI_TEAM' && (productFilter === 'ALL' || p.commodities?.includes(PRODUCT_TO_COMMODITY[productFilter]))).map((p) => ({ value: p.id, label: p.name }))]}
             value={partyFilter}
             onChange={setPartyFilter}
             placeholder="All parties"
@@ -259,10 +312,10 @@ export default function SaleOrders() {
           <Label htmlFor="to-date" className="text-xs text-muted-foreground">To</Label>
           <Input id="to-date" type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="w-36 h-9" />
         </div>
-        {(statusFilter !== 'ALL' || productFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || fromDate || toDate) && (
+        {(statusFilter !== 'ALL' || payFilter !== 'ALL' || productFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || fromDate || toDate) && (
           <button
             type="button"
-            onClick={() => { setStatusFilter('ALL'); setProductFilter('ALL'); setPartyFilter('ALL'); setBrokerFilter('ALL'); setFromDate(''); setToDate(''); }}
+            onClick={() => { setStatusFilter('ALL'); setPayFilter('ALL'); setProductFilter('ALL'); setPartyFilter('ALL'); setBrokerFilter('ALL'); setFromDate(''); setToDate(''); }}
             className="text-xs text-muted-foreground underline-offset-2 hover:underline pb-2.5"
           >
             Clear
@@ -289,7 +342,7 @@ export default function SaleOrders() {
           </TableHeader>
           <TableBody>
             {isLoading && <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-            {!isLoading && visible.length === 0 && (
+            {!isLoading && filtered.length === 0 && (
               <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No sale orders matching filters.</TableCell></TableRow>
             )}
             {visible.map((o) => (
@@ -308,9 +361,10 @@ export default function SaleOrders() {
                 </TableCell>
                 <TableCell className="text-right">{rupees(o.ratePerKg)}/kg</TableCell>
                 <TableCell>
-                  <Badge variant={statusVariant[o.status]}>
-                    {o.status.charAt(0) + o.status.slice(1).toLowerCase()}
-                  </Badge>
+                  {(() => {
+                    const ds = saleDisplayStatus(o, settled);
+                    return <Badge variant={SALE_STATUS_VARIANT[ds]}>{saleStatusLabel(ds)}</Badge>;
+                  })()}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
@@ -333,6 +387,7 @@ export default function SaleOrders() {
           </TableBody>
         </Table>
       </div>
+      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
 
       {/* Create / Edit order dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
@@ -358,7 +413,7 @@ export default function SaleOrders() {
                   <FormLabel>Party (buyer) <span className="text-destructive">*</span></FormLabel>
                   <FormControl>
                     <Combobox
-                      options={(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && p.commodities?.includes(PRODUCT_TO_COMMODITY[watchedProduct])).map((p) => ({ value: p.id, label: p.name }))}
+                      options={(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && p.type !== 'HAMALI_TEAM' && p.commodities?.includes(PRODUCT_TO_COMMODITY[watchedProduct])).map((p) => ({ value: p.id, label: p.name }))}
                       value={field.value}
                       onChange={field.onChange}
                       placeholder="Select buyer"
@@ -408,11 +463,25 @@ export default function SaleOrders() {
                 </FormItem>
               )} />
 
+              <FormField control={form.control} name="reminderDate" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Reminder — dispatch date (optional)</FormLabel>
+                  <FormControl><Input type="date" {...field} /></FormControl>
+                  <p className="text-[11px] text-muted-foreground">For advance orders. You'll be reminded to dispatch from 3 days before this date, every time you log in.</p>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
               <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
                 <div className="flex justify-between"><span className="text-muted-foreground">Base ({toTonnes(weightKg).toFixed(2)} t × {rupees(rate)})</span><span className="font-medium">{base > 0 ? rupees(base) : '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{gst > 0 ? rupees(gst) : '-'}</span></div>
-                <div className="flex justify-between border-t pt-1.5"><span className="text-muted-foreground font-semibold">Value (incl. GST)</span><span className="font-bold text-emerald-600">{value > 0 ? rupees(value) : '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST){gstExempt && <span className="ml-1 text-amber-600">— exempt</span>}</span><span className="font-medium">{gstExempt ? '-' : (gst > 0 ? rupees(gst) : '-')}</span></div>
+                <div className="flex justify-between border-t pt-1.5"><span className="text-muted-foreground font-semibold">Value{gstExempt ? '' : ' (incl. GST)'}</span><span className="font-bold text-emerald-600">{value > 0 ? rupees(value) : '-'}</span></div>
               </div>
+
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input type="checkbox" checked={gstExempt} onChange={(e) => setGstExempt(e.target.checked)} />
+                Without GST (bill this order to the party without GST)
+              </label>
 
               {watchedProduct === 'PAPPU' && (
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -2,7 +2,7 @@ import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { createReceiptSchema } from '../schemas/receipt.schema.js';
+import { createReceiptSchema, listReceiptsSchema } from '../schemas/receipt.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 
@@ -22,8 +22,12 @@ export async function extractReceiptScreenshot(req: Request, res: Response) {
 }
 
 export async function listReceipts(req: Request, res: Response) {
+  const { skip, take, all } = listReceiptsSchema.parse(req.query);
+  const isAll = all === 'true';
   const receipts = await prisma.receipt.findMany({
-    take: 100,
+    // The main listing is paginated (take 100). Aging reports bypass this by passing all=true.
+    skip: isAll ? undefined : skip,
+    take: isAll ? undefined : take,
     orderBy: { date: 'desc' },
     include: {
       party: true,

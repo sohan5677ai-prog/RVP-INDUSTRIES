@@ -6,6 +6,8 @@ import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clo
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, WeightVerification } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -15,6 +17,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import { crossVerify, hamaliSplit } from '@/lib/calc';
 import {
   Dialog,
@@ -109,7 +113,7 @@ export default function Verification() {
 
   const { data: purchases, isLoading } = useQuery({
     queryKey: ['purchases'],
-    queryFn: () => api<PurchaseRow[]>('/purchases'),
+    queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
   });
 
   const verifyMutation = useMutation({
@@ -190,7 +194,7 @@ export default function Verification() {
   const liveTotalAmount = liveNetBase + liveIgst - liveSelfVehicleHamali - liveSelfVehicleKata;
 
   const allPurchases = purchases ?? [];
-  const verifiedCount = allPurchases.filter((p) => p.verification).length;
+  const verifiedCount = useMemo(() => allPurchases.filter((p) => p.verification).length, [allPurchases]);
   const pendingCount = allPurchases.length - verifiedCount;
 
   // Party options for the filter combo, derived from the purchases list.
@@ -202,13 +206,25 @@ export default function Verification() {
   }, [allPurchases]);
 
   // Rows shown after the status tabs and party combo. Stat cards use the full set.
-  const filtered = allPurchases.filter((p) => {
+  const filtered = useMemo(() => allPurchases.filter((p) => {
     if (partyFilter !== 'ALL' && (p.stockIn?.purchaseOrder?.party?.name ?? '') !== partyFilter) return false;
     if (statusFilter === 'PENDING' && p.verification) return false;
     if (statusFilter === 'APPROVED' && !p.verification) return false;
     return true;
-  });
+  }), [allPurchases, partyFilter, statusFilter]);
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL';
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filtered, 50);
+
+  const exportColumns: ExportColumn<PurchaseRow>[] = [
+    { header: 'Date', value: (p) => shortDate(p.purchaseDate ?? p.createdAt) },
+    { header: 'Party', value: (p) => p.stockIn?.purchaseOrder?.party?.name ?? '' },
+    { header: 'PO No', value: (p) => p.stockIn?.purchaseOrder?.poNumber ?? '' },
+    { header: 'Invoice No', value: (p) => p.stockIn?.invoiceNumber ?? '' },
+    { header: 'RVP Net Weight (kg)', value: (p) => p.netWeightKg, numFmt: '#,##0', align: 'right' },
+    { header: 'Price/kg', value: (p) => (p.stockIn?.purchaseOrder?.pricePerKg ? rupees(p.stockIn.purchaseOrder.pricePerKg) : ''), excel: (p) => (p.stockIn?.purchaseOrder?.pricePerKg ? Number(p.stockIn.purchaseOrder.pricePerKg) : null), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Status', value: (p) => (p.verification ? (p.verification.exempt ? 'Exempt' : 'Deducted') : 'Pending Approval') },
+    { header: 'Net Payable', value: (p) => (p.verification ? rupees(p.verification.totalAmount) : ''), excel: (p) => (p.verification ? Number(p.verification.totalAmount) : null), numFmt: '#,##0.00', align: 'right' },
+  ];
 
   return (
     <div className="space-y-8">
@@ -216,6 +232,15 @@ export default function Verification() {
         icon={BadgeCheck}
         title="Verification"
         description="Cross-verify billing vs party-kata vs RVP-kata and compute the supplier's balance payable."
+        actions={
+          <ExportButtons
+            filename="Verification"
+            title="Purchase Verification"
+            subtitle={`${filtered.length} purchase(s)`}
+            columns={exportColumns}
+            rows={filtered}
+          />
+        }
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 stagger">
@@ -273,15 +298,15 @@ export default function Verification() {
             {!isLoading && filtered.length === 0 && (
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">{filtersActive ? 'No purchases match the filters.' : 'No purchases to verify yet.'}</TableCell></TableRow>
             )}
-            {filtered.map((p) => {
+            {(pageRows ?? []).map((p) => {
               const v = p.verification;
               return (
                 <TableRow key={p.id}>
-                  <TableCell>{shortDate(p.createdAt)}</TableCell>
+                  <TableCell>{shortDate(p.purchaseDate ?? p.createdAt)}</TableCell>
                   <TableCell className="font-medium">
                     {p.stockIn?.purchaseOrder?.party?.name ?? '-'}
                     {p.stockIn?.purchaseOrder?.poNumber && (
-                      <span className="ml-2 text-xs text-muted-foreground font-mono">({p.stockIn.purchaseOrder.poNumber})</span>
+                      <span className="ml-2 text-xs text-muted-foreground tracking-tight tabular-nums">({p.stockIn.purchaseOrder.poNumber})</span>
                     )}
                   </TableCell>
                   <TableCell className="font-semibold">{p.stockIn?.invoiceNumber ?? '-'}</TableCell>
@@ -315,6 +340,7 @@ export default function Verification() {
           </TableBody>
         </Table>
         </div>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -345,7 +371,7 @@ export default function Verification() {
                   <p className="text-xs text-muted-foreground">Invoice No: <span className="font-medium text-foreground">{selectedPurchase.stockIn?.invoiceNumber}</span></p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-muted-foreground">{shortDate(selectedPurchase.createdAt)}</p>
+                  <p className="text-xs text-muted-foreground">{shortDate(selectedPurchase.purchaseDate ?? selectedPurchase.createdAt)}</p>
                   <Badge variant={selectedPurchase.verification ? 'default' : 'outline'}>
                     {selectedPurchase.verification ? 'Verified' : 'Awaiting Approval'}
                   </Badge>
@@ -432,7 +458,7 @@ export default function Verification() {
                       <select
                         value={discountType}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-                          setDiscountType(e.target.value);
+                          setDiscountType(e.target.value as any);
                           setDiscountValue('');
                         }}
                         className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -478,8 +504,8 @@ export default function Verification() {
                 <h3 className="text-sm font-semibold">Payment Details</h3>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Base cost ({kg(liveExempt ? calc.referenceKg : calc.displayBaseWeightKg)} @ {rupees(calc.pricePerKg)}/kg)</span>
-                    <span>{rupees(liveExempt ? (calc.referenceKg * calc.pricePerKg) : calc.baseCost)}</span>
+                    <span className="text-muted-foreground">Base cost ({kg(calc.displayBaseWeightKg)} @ {rupees(calc.pricePerKg)}/kg)</span>
+                    <span>{rupees(calc.baseCost)}</span>
                   </div>
                   {(calc.referenceKg - liveCalcFinalWeight) > 0 && (
                     <div className="flex justify-between text-destructive font-medium">

@@ -6,6 +6,18 @@ import { HttpError } from '../lib/httpError.js';
 import { createStockInSchema, createUrpStockInSchema } from '../schemas/purchase.schema.js';
 import { fileUrl } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
+import { computeFY, formatPoNumber, reservePoSerials } from '../lib/poNumber.js';
+
+/**
+ * True when `arrival` falls on a calendar day strictly before `poDate`. Both are
+ * normalised to UTC midnight so a same-day arrival is NOT before the PO (allowed);
+ * only genuinely backdated arrivals (arrival earlier than the order) return true.
+ */
+function isBeforePoDate(arrival: Date, poDate: Date): boolean {
+  const arrivalDay = Date.UTC(arrival.getUTCFullYear(), arrival.getUTCMonth(), arrival.getUTCDate());
+  const poDay = Date.UTC(poDate.getUTCFullYear(), poDate.getUTCMonth(), poDate.getUTCDate());
+  return arrivalDay < poDay;
+}
 
 /**
  * Fully unwind a Purchase that was recorded off a StockIn so the stock-in can be
@@ -70,6 +82,54 @@ async function rollbackPurchaseForStockIn(tx: Prisma.TransactionClient, purchase
   // 4. Finally the purchase itself.
   await tx.purchase.delete({ where: { id: purchase.id } });
 }
+/**
+ * Auto-record the Purchase for a direct/URP arrival and capitalise the seed into
+ * the silo - mirrors createPurchase so the arrival lands on the Verification stage
+ * straight away. Shared by createUrpStockIn (initial record) and updateStockIn
+ * (re-record after an edit rolls the old purchase back). Returns nothing.
+ */
+async function autoRecordUrpPurchase(
+  tx: Prisma.TransactionClient,
+  args: {
+    stockInId: string;
+    netKg: number;
+    pricePerKg: number;
+    lorryNumber: string;
+    freightCharge: number;
+    freightTonnageKg?: number | null;
+    loadingLocation: string;
+    arrivalDate: Date;
+  },
+) {
+  const { getCompanyProfileRow, getHamaliRate } = await import('./settings.controller.js');
+  const { calcHamali, calcKataFee, isVehicleExempt, companyHamaliShare } = await import('../lib/calc.js');
+  const { InventoryService } = await import('../services/inventory.service.js');
+
+  const companyProfile = await getCompanyProfileRow();
+  const isCompanyVehicle = isVehicleExempt(args.lorryNumber, companyProfile.companyVehicles);
+  const hamaliRate = await getHamaliRate('BLACK_SEED_UNLOAD');
+  const hamaliCharge = calcHamali(args.netKg, hamaliRate, isCompanyVehicle);
+  const kataFee = calcKataFee(args.netKg, isCompanyVehicle);
+
+  await tx.purchase.create({
+    data: {
+      stockInId: args.stockInId,
+      netWeightKg: args.netKg,
+      hamaliRate,
+      hamaliCharge,
+      kataFee,
+      freightCharge: args.freightCharge,
+      freightTonnageKg: args.freightTonnageKg ?? null,
+      // URP has no separate Purchases-page step to pick this - it must match the
+      // arrival date typed on the Stock In page, not "today" (the record-creation date).
+      purchaseDate: args.arrivalDate,
+    },
+  });
+  const originalCost =
+    args.netKg * args.pricePerKg + companyHamaliShare(Number(hamaliCharge), isCompanyVehicle) + args.freightCharge;
+  await InventoryService.updateBlackSeedInventory(tx, args.loadingLocation, args.netKg, originalCost);
+}
+
 export async function listStockIns(_req: Request, res: Response) {
   const stockIns = await prisma.stockIn.findMany({
     orderBy: { createdAt: 'desc' },
@@ -129,7 +189,14 @@ export async function createStockIn(req: Request, res: Response) {
     include: { stockIns: true },
   });
   if (!po) throw new HttpError(400, 'Purchase order not found');
-  
+
+  // An arrival cannot predate the order it fulfils. Compare by calendar day
+  // (both are stored at UTC midnight for date-only inputs) so a same-day
+  // arrival is allowed, but any earlier date is rejected.
+  if (isBeforePoDate(data.arrivalDate, po.poDate)) {
+    throw new HttpError(400, 'Arrival date cannot be before the purchase order date');
+  }
+
   const arrivedCount = po.stockIns.length;
   const lorryCount = po.lorryCount || Math.max(1, Math.round(po.tonnageKg / 25000));
   if (arrivedCount >= lorryCount) {
@@ -155,6 +222,8 @@ export async function createStockIn(req: Request, res: Response) {
         loadingLocation: data.loadingLocation,
         // Only BASE-priced POs carry inward freight; DELIVERY already includes it.
         freightCharge: po.priceType === 'BASE' ? data.freightCharge : 0,
+        // Shared-lorry tonnage the freight is spread over (BASE only); null → single party.
+        freightTonnageKg: po.priceType === 'BASE' ? (data.freightTonnageKg ?? null) : null,
         selfVehicle: data.selfVehicle,
       },
     });
@@ -176,34 +245,36 @@ export async function createStockIn(req: Request, res: Response) {
 export async function createUrpStockIn(req: Request, res: Response) {
   const data = createUrpStockInSchema.parse(req.body);
 
+  // Net weight can be supplied two ways: derived from a first/second weighment,
+  // or entered directly (spot purchases with no tare weighment). A positive
+  // direct net wins and is used as-is.
+  const directNetKg = data.rvpNetWeightKg ?? 0;
   const rvpSecondWeightKg = data.rvpSecondWeightKg ?? 0;
-  const rvpKataKg = rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0;
-  if (rvpSecondWeightKg > 0 && rvpSecondWeightKg >= data.rvpFirstWeightKg) {
-    throw new HttpError(400, 'RVP second weight must be less than first weight');
+  let rvpKataKg: number;
+  if (directNetKg > 0) {
+    rvpKataKg = directNetKg;
+  } else {
+    if (rvpSecondWeightKg > 0 && rvpSecondWeightKg >= data.rvpFirstWeightKg) {
+      throw new HttpError(400, 'RVP second weight must be less than first weight');
+    }
+    rvpKataKg = rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0;
   }
 
-  // Dummy invoice string if they didn't provide one (due to no GST)
-  const invoiceNumber = data.invoiceNumber || `URP-${new Date().toISOString().split('T')[0]}-${Math.floor(Math.random() * 1000)}`;
   const gstAmount = data.hasGst ? (rvpKataKg * data.pricePerKg * 0.05) : 0;
 
-  // A URP entry captures both weighments up front, so when a valid 2nd weight is
-  // present we auto-record the Purchase here (same as the Purchases page would),
-  // sending the arrival straight to the Verification stage instead of leaving it
-  // parked on the Stock In page. With no 2nd weight it stays at stock-in.
+  // A URP entry captures the net up front (either from both weighments or a
+  // direct net entry), so whenever we have a positive net we auto-record the
+  // Purchase here (same as the Purchases page would), sending the arrival straight
+  // to the Verification stage instead of leaving it parked on the Stock In page.
+  // With no net it stays at stock-in.
   const willRecordPurchase = rvpKataKg > 0;
-  let hamaliRate = 0, hamaliCharge = 0, kataFee = 0;
-  if (willRecordPurchase) {
-    const { getCompanyProfileRow, getHamaliRate } = await import('./settings.controller.js');
-    const { calcHamali, calcKataFee, isVehicleExempt } = await import('../lib/calc.js');
-    const companyProfile = await getCompanyProfileRow();
-    const isCompanyVehicle = isVehicleExempt(data.lorryNumber, companyProfile.companyVehicles);
-    hamaliRate = await getHamaliRate('BLACK_SEED_UNLOAD');
-    hamaliCharge = calcHamali(rvpKataKg, hamaliRate, isCompanyVehicle);
-    kataFee = calcKataFee(rvpKataKg, isCompanyVehicle);
-  }
 
   const stockIn = await prisma.$transaction(async (tx) => {
-    // 1. Create a 1-lorry PO behind the scenes
+    // 1. Create a 1-lorry PO behind the scenes. URP spot purchases share one
+    // continuing "URP" series across all parties (URP/01/26-27, URP/02/26-27, ...).
+    const fy = computeFY(data.arrivalDate);
+    const serial = await reservePoSerials(tx, 'URP', fy, 1);
+    const poNumber = formatPoNumber('URP', serial, fy);
     const po = await tx.purchaseOrder.create({
       data: {
         poDate: data.arrivalDate,
@@ -216,12 +287,22 @@ export async function createUrpStockIn(req: Request, res: Response) {
         lorryCount: 1,
         status: 'ARRIVED', // Instantly completed/arrived
         createdBy: 'URP_DIRECT',
-        poNumber: `URP-${new Date().getTime().toString().slice(-6)}`, // generate unique identifier
+        poNumber,
+        poSeriesKey: 'URP',
+        poSerial: serial,
+        poFy: fy,
       }
     });
 
+    // Without a real GST invoice, the invoice number just mirrors the PO number
+    // (same URP/NN/FY series) instead of a throwaway placeholder.
+    const invoiceNumber = data.invoiceNumber || poNumber;
+
     // 2. Create the StockIn linked to it
     const freightCharge = po.priceType === 'BASE' ? data.freightCharge : 0;
+    // Shared-lorry tonnage the freight is spread over (BASE only). Null → single-party
+    // lorry, so the freight basis falls back to this arrival's net weight downstream.
+    const freightTonnageKg = po.priceType === 'BASE' ? (data.freightTonnageKg ?? null) : null;
     const created = await tx.stockIn.create({
       data: {
         purchaseOrderId: po.id,
@@ -231,11 +312,15 @@ export async function createUrpStockIn(req: Request, res: Response) {
         rvpFirstWeightKg: data.rvpFirstWeightKg,
         rvpSecondWeightKg,
         rvpKataKg,
+        // Flag a straight net entry so later edits keep the net as-is (rvpFirst)
+        // rather than recomputing first − second (which would zero it out).
+        directNet: directNetKg > 0,
         billingWeightKg: data.billingWeightKg,
         partyKataKg: data.partyKataKg,
         invoiceFileUrl: req.file ? fileUrl(req.file.filename) : "",
         loadingLocation: data.loadingLocation,
         freightCharge,
+        freightTonnageKg,
         selfVehicle: data.selfVehicle,
       },
     });
@@ -243,21 +328,16 @@ export async function createUrpStockIn(req: Request, res: Response) {
     // 3. Auto-record the Purchase (net weight, hamali, kata) and capitalise the
     // seed into inventory - mirrors createPurchase so Verification picks it up.
     if (willRecordPurchase) {
-      const { InventoryService } = await import('../services/inventory.service.js');
-      const { companyHamaliShare } = await import('../lib/calc.js');
-      await tx.purchase.create({
-        data: {
-          stockInId: created.id,
-          netWeightKg: rvpKataKg,
-          hamaliRate,
-          hamaliCharge,
-          kataFee,
-          freightCharge,
-        },
+      await autoRecordUrpPurchase(tx, {
+        stockInId: created.id,
+        netKg: rvpKataKg,
+        pricePerKg: data.pricePerKg,
+        lorryNumber: data.lorryNumber,
+        freightCharge,
+        freightTonnageKg,
+        loadingLocation: created.loadingLocation,
+        arrivalDate: data.arrivalDate,
       });
-      const originalCost =
-        rvpKataKg * data.pricePerKg + companyHamaliShare(hamaliCharge) + freightCharge;
-      await InventoryService.updateBlackSeedInventory(tx, created.loadingLocation, rvpKataKg, originalCost);
     }
 
     return created;
@@ -274,10 +354,26 @@ export async function updateStockIn(req: Request, res: Response) {
   });
   if (!stockIn) throw new HttpError(404, 'Stock-in not found');
 
+  // Same guard as createStockIn: an edited arrival still cannot predate its PO.
+  if (isBeforePoDate(data.arrivalDate, stockIn.purchaseOrder.poDate)) {
+    throw new HttpError(400, 'Arrival date cannot be before the purchase order date');
+  }
+
   const invoiceFileUrl = req.file ? fileUrl(req.file.filename) : stockIn.invoiceFileUrl;
 
-  const rvpSecondWeightKg = data.rvpSecondWeightKg ?? 0;
-  const rvpKataKg = rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0;
+  // A direct-net (URP) arrival typed the net straight in: rvpFirstWeightKg holds
+  // the net and there is no tare, so keep the net as-is instead of computing
+  // first − second (which, with second = 0, would wrongly zero it out).
+  const rvpSecondWeightKg = stockIn.directNet ? 0 : (data.rvpSecondWeightKg ?? 0);
+  const rvpKataKg = stockIn.directNet
+    ? data.rvpFirstWeightKg
+    : (rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0);
+  const freightCharge = stockIn.purchaseOrder.priceType === 'BASE' ? data.freightCharge : 0;
+  // Prefer a freshly-supplied shared-vehicle tonnage; otherwise keep whatever was
+  // captured originally (the generic edit form does not resend it). BASE-only.
+  const freightTonnageKg = stockIn.purchaseOrder.priceType === 'BASE'
+    ? (data.freightTonnageKg ?? stockIn.freightTonnageKg ?? null)
+    : null;
 
   const updated = await prisma.$transaction(async (tx) => {
     // If this stock-in was already purchased (and maybe verified), unwind that
@@ -288,23 +384,42 @@ export async function updateStockIn(req: Request, res: Response) {
       await rollbackPurchaseForStockIn(tx, stockIn.purchase.id);
     }
 
-    return tx.stockIn.update({
+    const row = await tx.stockIn.update({
       where: { id: req.params.id },
       data: {
         arrivalDate: data.arrivalDate,
         lorryNumber: data.lorryNumber,
         invoiceNumber: data.invoiceNumber,
         rvpFirstWeightKg: data.rvpFirstWeightKg,
-        rvpSecondWeightKg: data.rvpSecondWeightKg,
+        rvpSecondWeightKg,
         rvpKataKg,
         billingWeightKg: data.billingWeightKg,
         partyKataKg: data.partyKataKg,
         invoiceFileUrl,
         loadingLocation: data.loadingLocation,
-        freightCharge: stockIn.purchaseOrder.priceType === 'BASE' ? data.freightCharge : 0,
+        freightCharge,
+        freightTonnageKg,
         selfVehicle: data.selfVehicle,
       },
     });
+
+    // Direct-net arrivals auto-record their Purchase (they never pass through the
+    // Purchases page to get a 2nd weighment). The rollback above dropped it, so
+    // re-record it here to keep the arrival on the Verification stage.
+    if (stockIn.directNet && rvpKataKg > 0) {
+      await autoRecordUrpPurchase(tx, {
+        stockInId: row.id,
+        netKg: rvpKataKg,
+        pricePerKg: Number(stockIn.purchaseOrder.pricePerKg),
+        lorryNumber: data.lorryNumber,
+        freightCharge,
+        freightTonnageKg,
+        loadingLocation: row.loadingLocation,
+        arrivalDate: data.arrivalDate,
+      });
+    }
+
+    return row;
   });
 
   res.json(updated);

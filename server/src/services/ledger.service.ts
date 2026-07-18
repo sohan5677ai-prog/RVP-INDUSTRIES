@@ -26,6 +26,7 @@ export const EXPENSE_PAYMENT_ACCOUNTS: Record<
   MAINTENANCE:  { code: '50230', name: 'Repairs & Maintenance',       group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 23 },
   CC_INTEREST:        { code: '50250', name: 'Bank Interest - CC',        group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 24 },
   TERM_LOAN_INTEREST: { code: '50255', name: 'Interest - Term Loan',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 25 },
+  TERM_LOAN_PRINCIPAL:{ code: '50256', name: 'Principal - Term Loan',     group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 26 },
   DRAWINGS:     { code: '30030', name: 'Proprietor Drawings',         group: 'Capital Account',   type: 'EQUITY',  sortOrder: 30 },
 };
 
@@ -34,6 +35,9 @@ export const PAYMENT_TYPES = [
   'SUPPLIER',
   'TRANSPORTER',
   'BROKER',
+  // Crew-settlement payment: debits the Hamali payable (20200) instead of a P&L
+  // expense head (the expense was booked at accrual). Routed in postPayment below.
+  'HAMALI',
   ...Object.keys(EXPENSE_PAYMENT_ACCOUNTS),
   'OTHER',
 ] as [string, ...string[]];
@@ -804,6 +808,10 @@ export class LedgerService {
     } else if (data.type === 'BROKER') {
       debitAccount = '20240'; // Brokerage Payable
       partyRef = data.brokerName || '';
+    } else if (data.type === 'HAMALI') {
+      // Settle the accrued crew liability rather than booking a fresh expense.
+      debitAccount = '20200'; // Outstanding Labor Liability - Hamali (crew payable)
+      partyRef = data.partyName || 'Hamali Team';
     } else if (EXPENSE_PAYMENT_ACCOUNTS[data.type]) {
       // Direct-cash expense / drawings: book straight to its own P&L (or capital) head.
       const acct = EXPENSE_PAYMENT_ACCOUNTS[data.type];
@@ -828,7 +836,12 @@ export class LedgerService {
         accountCode: debitAccount,
         debit: data.amount,
         credit: 0,
-        costCenter: data.type === 'TRANSPORTER' ? data.lorryNumber : undefined,
+        costCenter:
+          data.type === 'TRANSPORTER'
+            ? data.lorryNumber
+            : data.type === 'HAMALI'
+              ? 'Hamali Team'
+              : undefined,
       },
       {
         accountCode: '10400', // Bank / Cash Account

@@ -10,6 +10,17 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
+
+type UserRow = { id: string; name: string; username: string; role: string; email?: string };
+
+const USER_COLUMNS: ExportColumn<UserRow>[] = [
+  { header: 'Name', value: (u) => u.name },
+  { header: 'Username', value: (u) => u.username },
+  { header: 'Role', value: (u) => u.role },
+  { header: 'Email', value: (u) => u.email ?? '' },
+];
 
 export default function Users() {
   const qc = useQueryClient();
@@ -18,7 +29,7 @@ export default function Users() {
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api<{ id: string; name: string; username: string; role: string; email?: string }[]>('/users'),
+    queryFn: () => api<UserRow[]>('/users'),
   });
 
   const createMutation = useMutation({
@@ -50,7 +61,10 @@ export default function Users() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <PageHeader icon={Shield} title="User Management" description="Manage access and roles across the ERP." />
-        <Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> Add User</Button>
+        <div className="flex items-center gap-2">
+          <ExportButtons filename="Users" title="Users" subtitle={`${users?.length ?? 0} user(s)`} columns={USER_COLUMNS} rows={users ?? []} />
+          <Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> Add User</Button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card">

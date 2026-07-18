@@ -6,7 +6,11 @@ services:
     region: singapore
     rootDir: server
     buildCommand: npm install && npm run build
-    startCommand: npx prisma migrate deploy && npm start
+    # The Supabase DB is provisioned directly from a full `prisma db push` +
+    # data load (not the stale migration history), so we do NOT run migrations
+    # on boot — that would conflict with the live schema. Apply future schema
+    # changes with `prisma db push` against Supabase, matching the dev workflow.
+    startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
+import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -123,7 +124,7 @@ export default function SaleDuesPage() {
     }) => api('/receipts', { method: 'POST', body }),
     onSuccess: () => {
       toast.success('Receipt recorded');
-      qc.invalidateQueries({ queryKey: ['receipts'] });
+      invalidateReceiptQueries(qc);
       setReceiveDialog(null);
     },
     onError: () => toast.error('Failed to record receipt'),
@@ -137,7 +138,7 @@ export default function SaleDuesPage() {
     },
     onSuccess: () => {
       toast.success('Receipt removed');
-      qc.invalidateQueries({ queryKey: ['receipts'] });
+      invalidateReceiptQueries(qc);
     },
     onError: () => toast.error('Failed to remove receipt'),
   });

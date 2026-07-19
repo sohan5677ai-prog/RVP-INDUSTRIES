@@ -9,6 +9,7 @@ import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { Receipt, Party, ReceiptType, SaleOrder } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
+import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -265,10 +266,7 @@ export default function ReceiptsPage() {
         },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['receipts'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['journal-entries'] });
-      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      invalidateReceiptQueries(qc);
       toast.success('Receipt recorded successfully');
       setOpen(false);
       resetForm();
@@ -279,9 +277,7 @@ export default function ReceiptsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/receipts/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['receipts'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      invalidateReceiptQueries(qc);
       toast.success('Receipt reversed');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),

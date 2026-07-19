@@ -7,6 +7,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid } from '@/lib/saleStatus';
+import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -383,9 +384,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       },
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      qc.invalidateQueries({ queryKey: ['receipts'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      invalidateReceiptQueries(qc);
       toast.success('Payment recorded successfully');
       setPayDispatch(null);
     },

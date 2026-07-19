@@ -243,7 +243,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   /** A shipment can be undone only while it's still a plain DISPATCHED record. */
   function canUndo(d: SaleDispatch): boolean {
     return d.status === 'DISPATCHED'
-      && !d.invoiceNumber
       && (!d.irn || d.irnStatus === 'CANCELLED')
       && (!d.ewbNumber || d.ewbStatus === 'CANCELLED');
   }

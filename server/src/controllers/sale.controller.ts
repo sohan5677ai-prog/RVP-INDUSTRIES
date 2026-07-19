@@ -520,9 +520,7 @@ export async function undoSaleDispatch(req: Request, res: Response) {
   if (dispatch.status === 'DELIVERED') {
     throw new HttpError(400, 'Cannot undo a delivered shipment - reverse the delivery first.');
   }
-  if (dispatch.invoiceNumber) {
-    throw new HttpError(400, 'Cannot undo a dispatch once its tax invoice is raised.');
-  }
+
   if (dispatch.irn && dispatch.irnStatus !== 'CANCELLED') {
     throw new HttpError(400, 'Cancel the E-Invoice (IRN) before undoing this dispatch.');
   }

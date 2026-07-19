@@ -12,13 +12,34 @@ import { computeUnifiedStockEngine } from '../services/stockEngine.js';
  * committed aggregates the Stock pages need.
  */
 export async function getBlackSeedStock(_req: Request, res: Response) {
-  const rows = await InventoryService.computeBlackSeedRows();
+  // These five reads are independent, so fire them in parallel rather than paying
+  // a serial DB round-trip for each (previously 7 sequential queries). The three
+  // per-product "committed" figures also collapse into ONE sale-order query below.
+  const [rows, dispatches, committedOrders, milledAgg, pos] = await Promise.all([
+    InventoryService.computeBlackSeedRows(),
+    // Product sold = all dispatched shipments (RVP kata weight). Pappu nets down the
+    // raw pool; husk/waste net down their own derived availability.
+    prisma.saleDispatch.findMany({
+      select: { weightKg: true, saleOrder: { select: { product: true } } },
+    }),
+    // Committed amounts drive depletion. A sale draws down the moment the ORDER is
+    // placed. One query covers every product we compute a committed figure for.
+    prisma.saleOrder.findMany({
+      where: { product: { in: ['PAPPU', 'HUSK', 'WASTE'] } },
+      select: { product: true, tonnageKg: true, dispatches: { select: { weightKg: true } } },
+    }),
+    // Total black seed consumed in milling (pappu sold + black seed consumed on it).
+    // This is the authoritative raw-stock depletion figure: once seed enters the mill
+    // it is no longer raw, regardless of whether the output pappu has been sold yet.
+    prisma.processing.aggregate({ _sum: { blackWeightKg: true } }),
+    // Total tonnage committed across all live (non-cancelled) purchase orders,
+    // used to project the pappu we are committed to producing (60% out-turn).
+    prisma.purchaseOrder.findMany({
+      where: { status: { not: 'CANCELLED' } },
+      include: { stockIns: { select: { rvpKataKg: true } } },
+    }),
+  ]);
 
-  // Product sold = all dispatched shipments (RVP kata weight). Pappu nets down the
-  // raw pool; husk/waste net down their own derived availability.
-  const dispatches = await prisma.saleDispatch.findMany({
-    select: { weightKg: true, saleOrder: { select: { product: true } } },
-  });
   const soldKg = (...products: SaleProduct[]) =>
     dispatches
       .filter((d) => products.includes(d.saleOrder.product))
@@ -30,33 +51,19 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
   // shared 10% "Pre Cleaner Husk & Tamarind" pool.
   const wastePoolSoldKg = soldKg('WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU');
 
-  // Committed amounts drive depletion. A sale draws down the moment the ORDER is placed.
-  const getCommittedKg = async (product: SaleProduct) => {
-    const orders = await prisma.saleOrder.findMany({
-      where: { product },
-      include: { dispatches: { select: { weightKg: true } } },
-    });
-    return orders.reduce((sum, so) => {
-      const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
-      return sum + Math.max(so.tonnageKg, dispatched);
-    }, 0);
-  };
-  const pappuCommittedKg = await getCommittedKg('PAPPU');
-  const huskCommittedKg = await getCommittedKg('HUSK');
-  const wasteCommittedKg = await getCommittedKg('WASTE');
+  const committedKg = (product: SaleProduct) =>
+    committedOrders
+      .filter((so) => so.product === product)
+      .reduce((sum, so) => {
+        const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+        return sum + Math.max(so.tonnageKg, dispatched);
+      }, 0);
+  const pappuCommittedKg = committedKg('PAPPU');
+  const huskCommittedKg = committedKg('HUSK');
+  const wasteCommittedKg = committedKg('WASTE');
 
-  // Total black seed consumed in milling (pappu sold + black seed consumed on it).
-  // This is the authoritative raw-stock depletion figure: once seed enters the mill
-  // it is no longer raw, regardless of whether the output pappu has been sold yet.
-  const milledAgg = await prisma.processing.aggregate({ _sum: { blackWeightKg: true } });
   const totalMilledKg = milledAgg._sum.blackWeightKg ?? 0;
 
-  // Total tonnage committed across all live (non-cancelled) purchase orders,
-  // used to project the pappu we are committed to producing (60% out-turn).
-  const pos = await prisma.purchaseOrder.findMany({
-    where: { status: { not: 'CANCELLED' } },
-    include: { stockIns: { select: { rvpKataKg: true } } },
-  });
   const pendingPoTonnageKg = pos.reduce((sum, po) => {
     const arrived = po.stockIns.reduce((s, si) => s + si.rvpKataKg, 0);
     return sum + Math.max(0, po.tonnageKg - arrived);
@@ -388,7 +395,10 @@ async function _computePappuOrderMargins() {
 }
 
 export async function computePappuOrderMargins() {
-  return withCache('pappu_order_margins', 30, _computePappuOrderMargins);
+  // TTL is a safety net only — a successful mutation clears this cache (see the
+  // invalidation middleware in routes/index.ts), so the longer window only speeds
+  // up read-only navigation and never serves post-write stale margins.
+  return withCache('pappu_order_margins', 120, _computePappuOrderMargins);
 }
 
 export async function getPappuOrderMargins(_req: Request, res: Response) {

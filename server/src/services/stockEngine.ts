@@ -500,5 +500,8 @@ export async function computeUnifiedStockEngine(
   depletionStrategy: 'FIFO' | 'MOST_EXPENSIVE_FIRST'
 ): Promise<StockEngineResult> {
   const cacheKey = `unified_stock_engine_${depletionStrategy}`;
-  return withCache(cacheKey, 30, () => _computeUnifiedStockEngine(depletionStrategy));
+  // TTL is a safety net only: any successful mutation clears this cache (see the
+  // invalidation middleware in routes/index.ts), so a longer window just makes
+  // read-only navigation faster without ever serving post-write stale figures.
+  return withCache(cacheKey, 120, () => _computeUnifiedStockEngine(depletionStrategy));
 }

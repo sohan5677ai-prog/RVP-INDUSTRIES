@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -88,11 +87,24 @@ export default function ReceiptsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
-  const { data: receipts, isLoading } = useQuery({
-    // Show the full receipt history, not just the latest 100 (server default).
-    queryKey: ['receipts', { all: true }],
-    queryFn: () => api<Receipt[]>('/receipts?all=true'),
+  // Server-side pagination: only the visible page loads, so the page opens fast
+  // however long the receipt history grows. "All" and Export still pull the full
+  // set on demand.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+  useEffect(() => { setPage(1); }, [pageSize]);
+
+  const { data: pageData, isLoading } = useQuery({
+    queryKey: ['receipts', { page, pageSize }],
+    queryFn: () =>
+      pageSize === Infinity
+        ? api<Receipt[]>('/receipts?all=true').then((rows) => ({ rows, total: rows.length }))
+        : api<{ rows: Receipt[]; total: number }>(`/receipts?skip=${(page - 1) * pageSize}&take=${pageSize}`),
+    placeholderData: keepPreviousData,
   });
+  const visibleReceipts = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const totalPages = pageSize === Infinity ? 1 : Math.max(1, Math.ceil(total / pageSize));
 
   const { data: parties } = useQuery({
     queryKey: ['parties'],
@@ -100,10 +112,6 @@ export default function ReceiptsPage() {
   });
 
   const buyers = parties?.filter((p) => p.type === 'BUYER') ?? [];
-
-  // Render the log progressively so a long receipt history doesn't mount
-  // thousands of rows on open; more append as you scroll.
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleReceipts = [] } = usePagedRows(receipts ?? [], 50);
 
   // Form State
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -205,9 +213,9 @@ export default function ReceiptsPage() {
           <ExportButtons
             filename="Receipts"
             title="Receipts Register"
-            subtitle={`${receipts?.length ?? 0} receipt(s)`}
+            subtitle={`${total} receipt(s)`}
             columns={RECEIPT_EXPORT_COLUMNS}
-            rows={receipts ?? []}
+            rows={() => api<Receipt[]>('/receipts?all=true')}
           />
           <Button onClick={() => { resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Receipt
@@ -232,7 +240,7 @@ export default function ReceiptsPage() {
             {isLoading && (
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {receipts?.length === 0 && (
+            {!isLoading && total === 0 && (
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No receipts recorded yet.</TableCell></TableRow>
             )}
             {visibleReceipts.map((r) => {

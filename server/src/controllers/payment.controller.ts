@@ -30,20 +30,25 @@ export async function extractPaymentScreenshot(req: Request, res: Response) {
 
 export async function listPayments(req: Request, res: Response) {
   const { skip, take, all } = listPaymentsSchema.parse(req.query);
-  const isAll = all === 'true';
-  const payments = await prisma.payment.findMany({
-    skip: isAll ? undefined : skip,
-    take: isAll ? undefined : take,
-    // No take limit: the Purchase Dues page matches payments to bills via FIFO
-    // across a supplier's full payment history. Capping at 100 makes fully-paid
-    // purchases reappear as unpaid once their payment falls off the recent list.
-    orderBy: { date: 'desc' },
-    include: {
-      party: true,
-      broker: true,
-    },
-  });
-  res.json(payments);
+  const include = { party: true, broker: true };
+
+  // all=true → the whole history as a plain array. The Purchase Dues / Payment
+  // Planner / ledger pages match payments to bills via FIFO across a supplier's
+  // FULL payment history, so they must never be capped. This shape is unchanged.
+  if (all === 'true') {
+    const payments = await prisma.payment.findMany({ orderBy: { date: 'desc' }, include });
+    res.json(payments);
+    return;
+  }
+
+  // Otherwise a server-paginated page for the Payments register: return just the
+  // requested slice plus the grand total, so the page renders a server-driven
+  // pager instead of downloading every payment on first load.
+  const [rows, total] = await Promise.all([
+    prisma.payment.findMany({ skip, take, orderBy: { date: 'desc' }, include }),
+    prisma.payment.count(),
+  ]);
+  res.json({ rows, total });
 }
 
 export async function createPayment(req: Request, res: Response) {

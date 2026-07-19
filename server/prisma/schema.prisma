@@ -72,23 +72,23 @@ enum Commodity {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  username  String   @unique
-  password  String
-  role      Role     @default(USER)
+  id          String   @id @default(cuid())
+  name        String
+  username    String   @unique
+  password    String
+  role        Role     @default(USER)
   // Slack member ID (e.g. "U0123ABCD") used to attribute Slack-driven actions to
   // this ERP user. Null until an admin links the account.
-  slackUserId String? @unique
-  createdAt DateTime @default(now())
+  slackUserId String?  @unique
+  createdAt   DateTime @default(now())
 }
 
 model Party {
-  id                String          @id @default(cuid())
+  id                String           @id @default(cuid())
   name              String
   // Short handle used as the PO-number series key, e.g. "DCS" -> DCS/01/26-27.
   nickname          String?
-  type              PartyType       @default(SUPPLIER)
+  type              PartyType        @default(SUPPLIER)
   phone             String?
   email             String?
   address           String?
@@ -104,7 +104,7 @@ model Party {
   bankIfsc          String?
   bankName          String?
   commodities       Commodity[]
-  createdAt         DateTime        @default(now())
+  createdAt         DateTime         @default(now())
   purchaseOrders    PurchaseOrder[]
   saleOrders        SaleOrder[]
   payments          Payment[]
@@ -125,42 +125,46 @@ model Broker {
 }
 
 model PurchaseOrder {
-  id            String   @id @default(cuid())
-  poNumber      String?  @unique
-  poDate        DateTime
-  party         Party    @relation(fields: [partyId], references: [id])
-  partyId       String
-  pricePerKg    Decimal  @db.Decimal(12, 2) // approx
+  id               String           @id @default(cuid())
+  poNumber         String?          @unique
+  poDate           DateTime
+  party            Party            @relation(fields: [partyId], references: [id])
+  partyId          String
+  pricePerKg       Decimal          @db.Decimal(12, 2) // approx
   // Whether pricePerKg is quoted at the supplier's location (BASE) or landed at
   // our location (DELIVERY). Some suppliers quote one, some the other.
-  priceType     PriceType @default(DELIVERY)
+  priceType        PriceType        @default(DELIVERY)
   // Coarse intended destination for this PO's stock, set when the order is placed.
   // STOCK-bound POs are held OUT of the Order Planner's pending pool (not sellable)
   // until their lorry is actually stocked in - the real landing spot is chosen at
   // stock-in (loadingLocation). A STOCK-planned lorry stocked into RVP at arrival
   // still flows into the planner, because the arrived band keys off the real
   // stock-in location, not this flag. Defaults to RVP so existing POs are unaffected.
-  plannedLocation PlannedLocation @default(RVP)
-  hasGst        Boolean  @default(false)
-  gstAmount     Decimal  @default(0) @db.Decimal(14, 2)
-  tonnageKg     Int // approx, in kg
-  actualTonnageKg Int? // actual arrived weight in kg (set at stock-in)
-  lorryCount    Int? // approx number of lorries ordered
+  plannedLocation  PlannedLocation  @default(RVP)
+  hasGst           Boolean          @default(false)
+  gstAmount        Decimal          @default(0) @db.Decimal(14, 2)
+  tonnageKg        Int // approx, in kg
+  actualTonnageKg  Int? // actual arrived weight in kg (set at stock-in)
+  lorryCount       Int? // approx number of lorries ordered
   // Links all per-lorry POs created together from one order, so they can be
   // grouped back into a single logical order in the UI.
-  poGroupId     String?
-  status        POStatus @default(PENDING)
-  expectedYieldPct Decimal @default(60) @db.Decimal(5, 2)
-  createdBy     String
-  createdAt     DateTime @default(now())
-  stockIns      StockIn[]
-  allocations   SaleAllocation[]
+  poGroupId        String?
+  status           POStatus         @default(PENDING)
+  expectedYieldPct Decimal          @default(60) @db.Decimal(5, 2)
+  createdBy        String
+  createdAt        DateTime         @default(now())
+  stockIns         StockIn[]
+  allocations      SaleAllocation[]
   // PO-number components: poNumber = "{poSeriesKey}/{poSerial}/{poFy}" per lorry.
   // A poGroupId batch's collapsed display range is derived from min/max poSerial
   // across its members. Null on legacy/KNM_BATCH rows that predate this scheme.
-  poSeriesKey   String?
-  poSerial      Int?
-  poFy          String?
+  poSeriesKey      String?
+  poSerial         Int?
+  poFy             String?
+
+  // Party ledger + planner group/filter POs by supplier; index the FK so those
+  // GROUP BY / WHERE partyId scans stay index-driven as the table grows.
+  @@index([partyId])
 }
 
 // Running per-series-per-financial-year counter backing PO numbering
@@ -211,11 +215,11 @@ model CreditNote {
   status         NoteStatus    @default(ISSUED)
   createdAt      DateTime      @default(now())
 
-  emailLogs      EmailLog[]
+  emailLogs EmailLog[]
 
+  @@unique([noteFy, noteSeq])
   @@index([partyId])
   @@index([saleDispatchId])
-  @@unique([noteFy, noteSeq])
 }
 
 model DebitNote {
@@ -236,11 +240,11 @@ model DebitNote {
   status         NoteStatus    @default(ISSUED)
   createdAt      DateTime      @default(now())
 
-  emailLogs      EmailLog[]
+  emailLogs EmailLog[]
 
+  @@unique([noteFy, noteSeq])
   @@index([partyId])
   @@index([saleDispatchId])
-  @@unique([noteFy, noteSeq])
 }
 
 enum EmailDocumentType {
@@ -281,19 +285,19 @@ model EmailLog {
 }
 
 model StockIn {
-  id              String        @id @default(cuid())
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  purchaseOrderId String
+  id                String        @id @default(cuid())
+  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId   String
   arrivalDate       DateTime
   lorryNumber       String
   invoiceNumber     String // invoice number (e.g. "69")
-  rvpFirstWeightKg  Int      @default(0) // RVP weighbridge: loaded/gross weight
-  rvpSecondWeightKg Int      @default(0) // RVP weighbridge: empty/tare weight
+  rvpFirstWeightKg  Int           @default(0) // RVP weighbridge: loaded/gross weight
+  rvpSecondWeightKg Int           @default(0) // RVP weighbridge: empty/tare weight
   rvpKataKg         Int // Net weight from our weighbridge (RVP Kata) = first - second
   // Direct net entry (spot/URP): the operator typed the RVP net straight in with no
   // separate tare weighment, so rvpFirstWeightKg holds the net and rvpKataKg = it.
   // Persisted so edits keep the net as-is instead of recomputing first − second (→ 0).
-  directNet         Boolean  @default(false)
+  directNet         Boolean       @default(false)
   billingWeightKg   Int // invoice tonnage
   partyKataKg       Int // party weighbridge
   invoiceFileUrl    String // uploaded invoice
@@ -312,202 +316,209 @@ model StockIn {
   selfVehicle       Boolean       @default(false)
   createdAt         DateTime      @default(now())
   purchase          Purchase?
+
   @@index([purchaseOrderId])
 }
 
 model Purchase {
-  id             String              @id @default(cuid())
-  stockIn        StockIn             @relation(fields: [stockInId], references: [id])
-  stockInId      String              @unique
-  netWeightKg    Int // StockIn.rvpKataKg
-  hamaliRate     Decimal             @default(80) @db.Decimal(8, 2) // per tonne
-  hamaliCharge   Decimal             @db.Decimal(12, 2) // computed
-  kataFee        Decimal             @default(0) @db.Decimal(12, 2) // computed
+  id           String       @id @default(cuid())
+  stockIn      StockIn      @relation(fields: [stockInId], references: [id])
+  stockInId    String       @unique
+  netWeightKg  Int // StockIn.rvpKataKg
+  hamaliRate   Decimal      @default(80) @db.Decimal(8, 2) // per tonne
+  hamaliCharge Decimal      @db.Decimal(12, 2) // computed
+  kataFee      Decimal      @default(0) @db.Decimal(12, 2) // computed
   // Bag-cutting (pouring black seed into a process bunker). Only set when the
   // stock lands directly at the process; storage stock gets it on transfer.
-  bunkerPlace      BunkerPlace?
+  bunkerPlace  BunkerPlace?
 
   // Inward freight to bring BASE-priced stock to our location (capitalised into
   // the seed). DELIVERY-priced POs already include freight in the price → 0.
-  freightCharge    Decimal            @default(0) @db.Decimal(12, 2)
+  freightCharge    Decimal             @default(0) @db.Decimal(12, 2)
   // Whole-vehicle tonnage (kg) the freight is spread over, for SHARED lorries.
   // Null → single-party lorry, basis falls back to netWeightKg. See StockIn.freightTonnageKg.
   freightTonnageKg Int?
-  discountType   DiscountType?
-  discountValue  Decimal             @default(0) @db.Decimal(12, 2)
+  discountType     DiscountType?
+  discountValue    Decimal             @default(0) @db.Decimal(12, 2)
   // Operator-settable purchase date (the effective date of the purchase, shown on
   // the Stock-in Detail and Verification pages). Defaults to when the record was
   // created; existing rows fall back to createdAt in the app.
-  purchaseDate   DateTime            @default(now())
-  createdAt      DateTime            @default(now())
-  verification   WeightVerification?
-  payments       Payment[]
-  processing     Processing?
+  purchaseDate     DateTime            @default(now())
+  createdAt        DateTime            @default(now())
+  verification     WeightVerification?
+  payments         Payment[]
+  processing       Processing?
 }
 
 model WeightVerification {
-  id              String   @id @default(cuid())
-  purchase        Purchase @relation(fields: [purchaseId], references: [id])
-  purchaseId      String   @unique
-  billingWeightKg Int
-  partyKataKg     Int
-  rvpKataKg       Int
-  referenceKg     Int
-  diffKg          Int
-  exempt          Boolean
-  finalWeightKg   Int
-  pricePerKg      Decimal  @db.Decimal(12, 2)
+  id                String   @id @default(cuid())
+  purchase          Purchase @relation(fields: [purchaseId], references: [id])
+  purchaseId        String   @unique
+  billingWeightKg   Int
+  partyKataKg       Int
+  rvpKataKg         Int
+  referenceKg       Int
+  diffKg            Int
+  exempt            Boolean
+  finalWeightKg     Int
+  pricePerKg        Decimal  @db.Decimal(12, 2)
   // Net balance payable to the supplier (already net of any self-vehicle hamali
   // and kata recovery below). Seed inventory value = totalAmount + selfVehicleHamali.
-  totalAmount     Decimal  @db.Decimal(14, 2)
+  totalAmount       Decimal  @db.Decimal(14, 2)
   // ₹ deducted from the party's payable because they used their own vehicle
   // (the lorry's ₹80/t hamali share). 0 for third-party lorries.
-  selfVehicleHamali Decimal @default(0) @db.Decimal(12, 2)
+  selfVehicleHamali Decimal  @default(0) @db.Decimal(12, 2)
   // ₹ deducted from the party's payable because they used their own vehicle
   // (the full weighbridge/kata fee, normally recovered from the transporter).
   // Recovering it lowers the seed's landed cost. 0 for third-party lorries.
-  selfVehicleKata Decimal @default(0) @db.Decimal(12, 2)
-  createdAt       DateTime @default(now())
+  selfVehicleKata   Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+
   @@index([purchaseId])
 }
 
 model Processing {
-  id                  String      @id @default(cuid())
+  id                  String    @id @default(cuid())
   // Optional link back to the verified Purchase this batch was milled from.
   // Nullable so standalone (manually-entered) processing runs remain valid.
-  purchase            Purchase?   @relation(fields: [purchaseId], references: [id])
-  purchaseId          String?     @unique
+  purchase            Purchase? @relation(fields: [purchaseId], references: [id])
+  purchaseId          String?   @unique
   blackWeightKg       Int // input weight processed in mill
-  outTurnPct          Decimal     @default(60) @db.Decimal(5, 2)
+  outTurnPct          Decimal   @default(60) @db.Decimal(5, 2)
   pappuWeightKg       Int // computed
-  huskWeightKg        Int         @default(0) // 25% yield
-  wasteWeightKg       Int         @default(0) // 10% yield
-  lostWeightKg        Int         @default(0) // 5% negligible waste
-  overheadElectricity Decimal     @default(0) @db.Decimal(12, 2)
-  overheadWages       Decimal     @default(0) @db.Decimal(12, 2)
-  overheadMaintenance Decimal     @default(0) @db.Decimal(12, 2)
-  loadingLocation     String      @default("RVP")
+  huskWeightKg        Int       @default(0) // 25% yield
+  wasteWeightKg       Int       @default(0) // 10% yield
+  lostWeightKg        Int       @default(0) // 5% negligible waste
+  overheadElectricity Decimal   @default(0) @db.Decimal(12, 2)
+  overheadWages       Decimal   @default(0) @db.Decimal(12, 2)
+  overheadMaintenance Decimal   @default(0) @db.Decimal(12, 2)
+  loadingLocation     String    @default("RVP")
   processDate         DateTime
 }
 
 model SaleOrder {
-  id             String      @id @default(cuid())
-  saleDate       DateTime
-  product        SaleProduct @default(PAPPU)
-  buyer          Party       @relation(fields: [buyerId], references: [id])
-  buyerId        String
-  broker         Broker?     @relation(fields: [brokerId], references: [id])
-  brokerId       String?
-  tonnageKg      Int // total weight ORDERED, per RVP kata (kg) — never overwritten
-  ratePerKg      Decimal     @db.Decimal(12, 2)
-  gstAmount      Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate (0 when gstExempt)
+  id                 String      @id @default(cuid())
+  saleDate           DateTime
+  product            SaleProduct @default(PAPPU)
+  buyer              Party       @relation(fields: [buyerId], references: [id])
+  buyerId            String
+  broker             Broker?     @relation(fields: [brokerId], references: [id])
+  brokerId           String?
+  tonnageKg          Int // total weight ORDERED, per RVP kata (kg) — never overwritten
+  ratePerKg          Decimal     @db.Decimal(12, 2)
+  gstAmount          Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate (0 when gstExempt)
   // When true, this order (and its dispatches) is billed WITHOUT GST — set per
   // order in the dialog for parties billed on a non-GST basis.
-  gstExempt      Boolean     @default(false)
-  brokerageRatePerKg Decimal   @default(0) @db.Decimal(12, 2)
+  gstExempt          Boolean     @default(false)
+  brokerageRatePerKg Decimal     @default(0) @db.Decimal(12, 2)
   // Delivery destination (Surat/Barshi/Nagar) and the outward freight we bear,
   // since pappu etc. is sold at a delivery price. Freight is our selling expense.
-  destination    String?
-  freightCharge  Decimal     @default(0) @db.Decimal(12, 2)
+  destination        String?
+  freightCharge      Decimal     @default(0) @db.Decimal(12, 2)
   // PENDING (nothing dispatched) → PARTIAL (some, remaining > 0) → DISPATCHED
   // (fully dispatched). The order itself is never DELIVERED; delivery is tracked
   // per dispatch (shipment).
-  status         SaleStatus  @default(PENDING)
-  marginOverride Boolean     @default(false)
+  status             SaleStatus  @default(PENDING)
+  marginOverride     Boolean     @default(false)
   // Payment terms: number of credit days. The clock starts from each dispatch's
   // deliveredDate, so dueDate = dispatch.deliveredDate + dueDays.
-  dueDays        Int?
+  dueDays            Int?
   // Optional dispatch reminder for advance orders: the date the goods are due to
   // be dispatched. The ERP surfaces a login reminder from 3 days before this date.
-  reminderDate   DateTime?
+  reminderDate       DateTime?
 
   // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
-  dispatches     SaleDispatch[]
-  allocations    SaleAllocation[]
+  dispatches  SaleDispatch[]
+  allocations SaleAllocation[]
 
   // --- Legacy columns (pre multi-dispatch). No longer written; kept so the
   // backfill migration can copy them into the first SaleDispatch row. ---
-  receivedDate   DateTime?
-  deliveredDate  DateTime?
-  invoiceNumber  String?
-  vehicleNumber  String?
-  invoiceFileUrl String?
-  kataFileUrl    String?
-  buyerKataKg    Int?
-  shortageKg     Int?
-  creditNoteAmount Decimal?    @db.Decimal(12, 2)
+  receivedDate     DateTime?
+  deliveredDate    DateTime?
+  invoiceNumber    String?
+  vehicleNumber    String?
+  invoiceFileUrl   String?
+  kataFileUrl      String?
+  buyerKataKg      Int?
+  shortageKg       Int?
+  creditNoteAmount Decimal?  @db.Decimal(12, 2)
   buyerKataFileUrl String?
-  invoiceSeq     Int?
-  invoiceFy      String?
-  invoiceDate    DateTime?
+  invoiceSeq       Int?
+  invoiceFy        String?
+  invoiceDate      DateTime?
 
-  createdAt      DateTime    @default(now())
+  createdAt DateTime @default(now())
+
+  // Party ledger + sales lists group/filter orders by buyer (and broker); index
+  // both FKs so those GROUP BY / WHERE scans stay index-driven as the table grows.
+  @@index([buyerId])
+  @@index([brokerId])
 }
 
 // A single physical dispatch (one lorry) shipped against a SaleOrder. Carries the
 // actual kata weight, the sale's ledger posting, its own tax invoice, and the
 // delivery + buyer-kata shortage settlement. An order may have many of these.
 model SaleDispatch {
-  id             String     @id @default(cuid())
-  saleOrder      SaleOrder  @relation(fields: [saleOrderId], references: [id])
-  saleOrderId    String
-  dispatchDate   DateTime   @default(now())
-  weightKg       Int // actual dispatched weight, per RVP kata (kg)
-  internalWeightKg Int? // weight before kata (without moisture gain)
-  gstAmount      Decimal    @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate
-  freightCharge  Decimal    @default(0) @db.Decimal(12, 2)
+  id                String     @id @default(cuid())
+  saleOrder         SaleOrder  @relation(fields: [saleOrderId], references: [id])
+  saleOrderId       String
+  dispatchDate      DateTime   @default(now())
+  weightKg          Int // actual dispatched weight, per RVP kata (kg)
+  internalWeightKg  Int? // weight before kata (without moisture gain)
+  gstAmount         Decimal    @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate
+  freightCharge     Decimal    @default(0) @db.Decimal(12, 2)
   // DISPATCHED → DELIVERED.
-  status         SaleStatus @default(DISPATCHED)
-  vehicleNumber  String?
+  status            SaleStatus @default(DISPATCHED)
+  vehicleNumber     String?
   // Driver of the hired lorry — captured at dispatch (or filled from a confirmed
   // WhatsApp transport confirmation) and sent to the broker/buyer via WhatsApp.
-  driverName     String?
-  driverPhone    String?
-  kataFileUrl    String?
-  transportProvider String?  // 'SURYA' | 'KNM' | 'OTHER'
-  customRetention   Decimal? @db.Decimal(12, 2) // user-entered retention for 'OTHER'
+  driverName        String?
+  driverPhone       String?
+  kataFileUrl       String?
+  transportProvider String? // 'SURYA' | 'KNM' | 'OTHER'
+  customRetention   Decimal?   @db.Decimal(12, 2) // user-entered retention for 'OTHER'
 
   // Delivery matching (buyer's kata slip captured at delivery).
-  receivedDate     DateTime?
-  deliveredDate    DateTime?
-  buyerKataKg      Int?
-  shortageKg       Int?
-  internalWeightProfitAmount Decimal? @db.Decimal(12, 2)
-  creditNoteAmount Decimal?  @db.Decimal(12, 2)
-  buyerKataFileUrl String?
-  tdsAmount        Decimal?  @db.Decimal(12, 2)
+  receivedDate               DateTime?
+  deliveredDate              DateTime?
+  buyerKataKg                Int?
+  shortageKg                 Int?
+  internalWeightProfitAmount Decimal?  @db.Decimal(12, 2)
+  creditNoteAmount           Decimal?  @db.Decimal(12, 2)
+  buyerKataFileUrl           String?
+  tdsAmount                  Decimal?  @db.Decimal(12, 2)
 
   // Generated tax invoice. Number = prefix/seq/FY; seq resets each financial year.
-  invoiceNumber  String?
-  invoiceSeq     Int?
-  invoiceFy      String? // Indian financial year, e.g. "2026-27"
-  invoiceDate    DateTime?
+  invoiceNumber String?
+  invoiceSeq    Int?
+  invoiceFy     String? // Indian financial year, e.g. "2026-27"
+  invoiceDate   DateTime?
 
   // E-Invoice (IRN) details
-  irn            String?
-  irnAckNo       String?
-  irnAckDate     DateTime?
-  irnSignedQr    String?
-  irnStatus      String?    // 'GENERATED', 'CANCELLED'
+  irn              String?
+  irnAckNo         String?
+  irnAckDate       DateTime?
+  irnSignedQr      String?
+  irnStatus        String? // 'GENERATED', 'CANCELLED'
   irnCancelledDate DateTime?
 
   // E-Way Bill details
-  ewbNumber      String?
-  ewbDate        DateTime?
-  ewbValidUpto   DateTime?
-  ewbStatus      String?    // 'GENERATED', 'CANCELLED'
+  ewbNumber        String?
+  ewbDate          DateTime?
+  ewbValidUpto     DateTime?
+  ewbStatus        String? // 'GENERATED', 'CANCELLED'
   ewbCancelledDate DateTime?
-  ewbDistance    Int?       // approx transport distance (km) entered at EWB generation
+  ewbDistance      Int? // approx transport distance (km) entered at EWB generation
 
-  createdAt      DateTime   @default(now())
+  createdAt DateTime @default(now())
 
-  receipts       Receipt[]
-  creditNotes    CreditNote[]
-  debitNotes     DebitNote[]
-  emailLogs      EmailLog[]
+  receipts    Receipt[]
+  creditNotes CreditNote[]
+  debitNotes  DebitNote[]
+  emailLogs   EmailLog[]
 
-  @@index([saleOrderId])
   @@unique([invoiceFy, invoiceSeq])
+  @@index([saleOrderId])
 }
 
 model SaleAllocation {
@@ -626,6 +637,7 @@ model JournalLine {
   debit          Decimal      @db.Decimal(12, 2)
   credit         Decimal      @db.Decimal(12, 2)
   costCenter     String?
+
   @@index([accountId])
   @@index([journalEntryId])
 }
@@ -712,25 +724,25 @@ model HamaliVerification {
 
 // Single-row seller profile printed on generated tax invoices. Edited in Settings.
 model CompanyProfile {
-  id                String   @id @default("default")
-  name              String   @default("RVP INDUSTRIES")
-  address           String? // multi-line seller address
-  gstin             String?
-  stateName         String?
-  stateCode         String? // GST state code, e.g. "37"
-  pincode           String?
-  contact           String?
+  id                      String  @id @default("default")
+  name                    String  @default("RVP INDUSTRIES")
+  address                 String? // multi-line seller address
+  gstin                   String?
+  stateName               String?
+  stateCode               String? // GST state code, e.g. "37"
+  pincode                 String?
+  contact                 String?
   // Bank details printed in the invoice footer.
-  bankAccountName   String?
-  bankName          String?
-  bankAccountNumber String?
-  bankBranchIfsc    String?
+  bankAccountName         String?
+  bankName                String?
+  bankAccountNumber       String?
+  bankBranchIfsc          String?
   // Invoice number = invoicePrefix/seq/FY (e.g. RVP/01/2026-27).
-  invoicePrefix     String   @default("RVP")
+  invoicePrefix           String  @default("RVP")
   // JSON print-layout config (paper size, margins, font, column widths).
-  invoiceLayout     String?
+  invoiceLayout           String?
   // Comma or newline separated list of company vehicles exempt from kata & hamali
-  companyVehicles   String?
+  companyVehicles         String?
   // ₹ held back from each sale lorry freight until delivery, then paid to Surya
   // Roadlines once the kata slip is received (configurable; default ₹3000).
   freightRetentionPerTrip Decimal @default(3000) @db.Decimal(12, 2)
@@ -741,13 +753,13 @@ model CompanyProfile {
   bufferStockPct          Decimal @default(80) @db.Decimal(5, 2)
 
   // TaxPro GSP configuration
-  taxproGspId             String?
-  taxproGspSecret         String?
-  taxproGstUser           String?
-  taxproGstPass           String?
-  taxproSandbox           Boolean  @default(true)
+  taxproGspId     String?
+  taxproGspSecret String?
+  taxproGstUser   String?
+  taxproGstPass   String?
+  taxproSandbox   Boolean @default(true)
 
-  updatedAt         DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 // User-defined per-kg production cost components (electricity, labour, etc.).
@@ -786,27 +798,27 @@ model SiloInventory {
 // unloading), and transfer transport at the destination bunker —
 // all 100% company-borne and capitalised into the seed's value at the process.
 model StockTransfer {
-  id               String       @id @default(cuid())
-  fromLocation     String
-  toLocation       String       @default("RVP")
-  weightKg         Int
-  lorryNumber      String?
-  transportCharge  Decimal      @default(0) @db.Decimal(12, 2)
-  loadingHamali    Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg — no longer charged, always 0
-  unloadingHamali  Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined
-  bunkerPlace      BunkerPlace?
+  id              String       @id @default(cuid())
+  fromLocation    String
+  toLocation      String       @default("RVP")
+  weightKg        Int
+  lorryNumber     String?
+  transportCharge Decimal      @default(0) @db.Decimal(12, 2)
+  loadingHamali   Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg — no longer charged, always 0
+  unloadingHamali Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined
+  bunkerPlace     BunkerPlace?
 
-  hamaliMargin     Decimal      @default(0) @db.Decimal(12, 2) // company profit — no longer applicable, always 0
+  hamaliMargin    Decimal  @default(0) @db.Decimal(12, 2) // company profit — no longer applicable, always 0
   // Bank-loan carrying interest capitalised into the seed at the process:
   // seedCostMoved × rate% × interestDays/365, where interestDays runs from the
   // earliest open loan's drawdown date to the transfer date.
-  interestCharge   Decimal      @default(0) @db.Decimal(12, 2)
-  interestDays     Int          @default(0)
-  interestRatePct  Decimal      @default(0) @db.Decimal(6, 3)
-  seedCostMoved    Decimal      @default(0) @db.Decimal(12, 2) // seed value drawn from source, by price band (landed ex-GST), not MAP
-  movedValue       Decimal      @default(0) @db.Decimal(12, 2) // seedCostMoved + capitalised transfer costs (hamali + transport)
-  transferDate     DateTime
-  createdAt        DateTime     @default(now())
+  interestCharge  Decimal  @default(0) @db.Decimal(12, 2)
+  interestDays    Int      @default(0)
+  interestRatePct Decimal  @default(0) @db.Decimal(6, 3)
+  seedCostMoved   Decimal  @default(0) @db.Decimal(12, 2) // seed value drawn from source, by price band (landed ex-GST), not MAP
+  movedValue      Decimal  @default(0) @db.Decimal(12, 2) // seedCostMoved + capitalised transfer costs (hamali + transport)
+  transferDate    DateTime
+  createdAt       DateTime @default(now())
 }
 
 enum LoanStatus {
@@ -885,44 +897,46 @@ model HuskTransfer {
 // supplier payable (Cr Accounts Payable) against a direct-expense cost
 // (Dr Pre Cleaner Dust Purchases) - see LedgerService.postDustPurchase.
 model DustPurchase {
-  id             String   @id @default(cuid())
-  party          Party    @relation(fields: [partyId], references: [id])
-  partyId        String
-  purchaseDate   DateTime
-  weightKg       Int
-  pricePerKg     Decimal  @db.Decimal(12, 2) // ₹ per kg
-  amount         Decimal  @db.Decimal(14, 2) // pricePerKg × weightKg (payable to the party)
-  lorryNumber    String?
-  invoiceNumber  String?
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  party         Party    @relation(fields: [partyId], references: [id])
+  partyId       String
+  purchaseDate  DateTime
+  weightKg      Int
+  pricePerKg    Decimal  @db.Decimal(12, 2) // ₹ per kg
+  amount        Decimal  @db.Decimal(14, 2) // pricePerKg × weightKg (payable to the party)
+  lorryNumber   String?
+  invoiceNumber String?
+  createdAt     DateTime @default(now())
+
   @@index([partyId])
 }
 
 model Payment {
-  id             String        @id @default(cuid())
-  date           DateTime
-  amount         Decimal       @db.Decimal(12, 2)
-  type           String        // 'SUPPLIER' | 'TRANSPORTER' | 'BROKER' | 'OTHER' | expense heads (DIESEL, HAMALI, ELECTRICITY, …) | 'DRAWINGS'
-  partyId        String?
-  party          Party?        @relation(fields: [partyId], references: [id])
-  purchaseId     String?
-  purchase       Purchase?     @relation(fields: [purchaseId], references: [id])
-  brokerId       String?
-  broker         Broker?       @relation(fields: [brokerId], references: [id])
-  lorryNumber    String?
-  payee          String?       // free-text recipient for expense/drawings payments (e.g. "Shabri Reddy")
-  reference      String?
-  description    String?
+  id                   String              @id @default(cuid())
+  date                 DateTime
+  amount               Decimal             @db.Decimal(12, 2)
+  type                 String // 'SUPPLIER' | 'TRANSPORTER' | 'BROKER' | 'OTHER' | expense heads (DIESEL, HAMALI, ELECTRICITY, …) | 'DRAWINGS'
+  partyId              String?
+  party                Party?              @relation(fields: [partyId], references: [id])
+  purchaseId           String?
+  purchase             Purchase?           @relation(fields: [purchaseId], references: [id])
+  brokerId             String?
+  broker               Broker?             @relation(fields: [brokerId], references: [id])
+  lorryNumber          String?
+  payee                String? // free-text recipient for expense/drawings payments (e.g. "Shabri Reddy")
+  reference            String?
+  description          String?
   // Links a HAMALI crew-settlement payment to the squared-off period it settles,
   // so the Payables tab can derive Paid / Partial / Unpaid status.
   hamaliVerificationId String?
   hamaliVerification   HamaliVerification? @relation(fields: [hamaliVerificationId], references: [id])
   // Uploaded proof-of-payment screenshot (Supabase Storage URL) — attached to the
   // WhatsApp payment notification sent to the party.
-  screenshotUrl  String?
-  journalEntryId String?       @unique
-  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  createdAt      DateTime      @default(now())
+  screenshotUrl        String?
+  journalEntryId       String?             @unique
+  journalEntry         JournalEntry?       @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  createdAt            DateTime            @default(now())
+
   @@index([partyId])
   @@index([purchaseId])
   @@index([brokerId])
@@ -936,17 +950,18 @@ model Receipt {
   amount         Decimal       @db.Decimal(12, 2)
   tdsAmount      Decimal?      @db.Decimal(12, 2) // TDS deducted by buyer (0.1% of sale value)
   shortageAmount Decimal?      @db.Decimal(12, 2) // Kata / weight-shortage deduction
-  type           String        // 'BUYER' | 'OTHER' | income heads (GUNNY_BAGS_SALE, SCRAP_SALE, HAMALI_INCOME, INTEREST_INCOME)
+  type           String // 'BUYER' | 'OTHER' | income heads (GUNNY_BAGS_SALE, SCRAP_SALE, HAMALI_INCOME, INTEREST_INCOME)
   partyId        String?
   party          Party?        @relation(fields: [partyId], references: [id])
   saleDispatchId String?
   saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
-  payer          String?       // free-text payer for direct-income receipts (e.g. "gunny bag buyer")
+  payer          String? // free-text payer for direct-income receipts (e.g. "gunny bag buyer")
   reference      String?
   description    String?
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
+
   @@index([partyId])
   @@index([saleDispatchId])
   @@index([journalEntryId])
@@ -1138,12 +1153,12 @@ model SlackDraft {
   key         String   @unique // channel:threadTs or channel:slackUserId
   flow        String
   step        String?
-  userId      String   // ERP user ID
-  role        String   // ERP user role
+  userId      String // ERP user ID
+  role        String // ERP user role
   slackUserId String
   channel     String
   threadTs    String?
-  data        String   // JSON string of accumulated fields
+  data        String // JSON string of accumulated fields
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

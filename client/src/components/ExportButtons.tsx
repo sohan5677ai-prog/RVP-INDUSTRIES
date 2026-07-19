@@ -15,8 +15,13 @@ type ExportButtonsProps<T> = {
   /** Optional sub-heading (e.g. the active filter). */
   subtitle?: string;
   columns: ExportColumn<T>[];
-  /** Full, already-filtered row set to export (not just the visible page). */
-  rows: T[];
+  /**
+   * Full, already-filtered row set to export (not just the visible page). Pass an
+   * array when the page already holds every row, or a function (sync or async)
+   * that fetches them on demand — used by server-paginated pages so the export
+   * still covers the whole dataset without the page loading it all upfront.
+   */
+  rows: T[] | (() => T[] | Promise<T[]>);
   /** Button size. Defaults to 'sm'. */
   size?: 'sm' | 'xs' | 'default';
   /** Show the Print button. Defaults to true. Set false when the page has its own print view. */
@@ -32,15 +37,19 @@ type ExportButtonsProps<T> = {
 export function ExportButtons<T>({
   filename, title, subtitle, columns, rows, size = 'sm', showPrint = true, className,
 }: ExportButtonsProps<T>) {
-  const [busy, setBusy] = useState<null | 'excel' | 'pdf'>(null);
+  const [busy, setBusy] = useState<null | 'excel' | 'pdf' | 'print'>(null);
 
-  const opts = { filename, title, subtitle, columns, rows };
-  const empty = rows.length === 0;
+  // With an array we know upfront whether there's anything to export; with an
+  // on-demand fetcher we only find out after resolving, so don't pre-disable.
+  const resolveRows = async (): Promise<T[]> =>
+    typeof rows === 'function' ? await rows() : rows;
 
   async function run(kind: 'excel' | 'pdf') {
-    if (empty) { toast.message('Nothing to export yet.'); return; }
     setBusy(kind);
     try {
+      const data = await resolveRows();
+      if (data.length === 0) { toast.message('Nothing to export yet.'); return; }
+      const opts = { filename, title, subtitle, columns, rows: data };
       if (kind === 'excel') await exportToExcel(opts);
       else await exportToPdf(opts);
     } catch (e) {
@@ -50,12 +59,16 @@ export function ExportButtons<T>({
     }
   }
 
-  function doPrint() {
-    if (empty) { toast.message('Nothing to print yet.'); return; }
+  async function doPrint() {
+    setBusy('print');
     try {
-      printTable(opts);
+      const data = await resolveRows();
+      if (data.length === 0) { toast.message('Nothing to print yet.'); return; }
+      printTable({ filename, title, subtitle, columns, rows: data });
     } catch (e) {
       toast.error(`Print failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    } finally {
+      setBusy(null);
     }
   }
 

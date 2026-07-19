@@ -23,17 +23,22 @@ export async function extractReceiptScreenshot(req: Request, res: Response) {
 
 export async function listReceipts(req: Request, res: Response) {
   const { skip, take, all } = listReceiptsSchema.parse(req.query);
-  const isAll = all === 'true';
-  const receipts = await prisma.receipt.findMany({
-    // The main listing is paginated (take 100). Aging reports bypass this by passing all=true.
-    skip: isAll ? undefined : skip,
-    take: isAll ? undefined : take,
-    orderBy: { date: 'desc' },
-    include: {
-      party: true,
-    },
-  });
-  res.json(receipts);
+  const include = { party: true };
+
+  // all=true → whole history as a plain array (Sale Dues / ledger FIFO matching
+  // need the full set uncapped). Shape unchanged for those callers.
+  if (all === 'true') {
+    const receipts = await prisma.receipt.findMany({ orderBy: { date: 'desc' }, include });
+    res.json(receipts);
+    return;
+  }
+
+  // Server-paginated slice + grand total for the Receipts register page.
+  const [rows, total] = await Promise.all([
+    prisma.receipt.findMany({ skip, take, orderBy: { date: 'desc' }, include }),
+    prisma.receipt.count(),
+  ]);
+  res.json({ rows, total });
 }
 
 export async function createReceipt(req: Request, res: Response) {

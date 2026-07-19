@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useMemo, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -97,11 +96,25 @@ export default function PaymentsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
-  const { data: payments, isLoading } = useQuery({
-    // Show the full payment history, not just the latest 100 (the server default).
-    queryKey: ['payments', { all: true }],
-    queryFn: () => api<Payment[]>('/payments?all=true'),
+  // Server-side pagination: only the visible page is fetched, so opening the page
+  // stays fast no matter how long the payment history grows. "All" (Infinity) and
+  // the Export button still pull the full set on demand.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+  useEffect(() => { setPage(1); }, [pageSize]);
+
+  const { data: pageData, isLoading } = useQuery({
+    queryKey: ['payments', { page, pageSize }],
+    queryFn: () =>
+      pageSize === Infinity
+        ? api<Payment[]>('/payments?all=true').then((rows) => ({ rows, total: rows.length }))
+        : api<{ rows: Payment[]; total: number }>(`/payments?skip=${(page - 1) * pageSize}&take=${pageSize}`),
+    // Keep the previous page on screen while the next loads, so paging doesn't flash.
+    placeholderData: keepPreviousData,
   });
+  const visiblePayments = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const totalPages = pageSize === Infinity ? 1 : Math.max(1, Math.ceil(total / pageSize));
 
   const { data: parties } = useQuery({
     queryKey: ['parties'],
@@ -115,10 +128,6 @@ export default function PaymentsPage() {
 
   const suppliers = useMemo(() => parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [], [parties]);
   const hamaliTeams = useMemo(() => parties?.filter((p) => p.type === 'HAMALI_TEAM') ?? [], [parties]);
-
-  // Render the log progressively so opening the page with a long payment history
-  // doesn't mount thousands of rows at once; more append as you scroll.
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visiblePayments = [] } = usePagedRows(payments ?? [], 50);
 
   // Form State
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -247,9 +256,9 @@ export default function PaymentsPage() {
           <ExportButtons
             filename="Payments"
             title="Payments Register"
-            subtitle={`${payments?.length ?? 0} payment(s)`}
+            subtitle={`${total} payment(s)`}
             columns={PAYMENT_EXPORT_COLUMNS}
-            rows={payments ?? []}
+            rows={() => api<Payment[]>('/payments?all=true')}
           />
           <Button onClick={() => { resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Payment
@@ -274,7 +283,7 @@ export default function PaymentsPage() {
             {isLoading && (
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {payments?.length === 0 && (
+            {!isLoading && total === 0 && (
               <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
             )}
             {visiblePayments.map((p) => {

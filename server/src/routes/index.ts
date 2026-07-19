@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { clearCache } from '../lib/cache.js';
 import authRoutes from './auth.routes.js';
 import { parseBulkImport } from '../controllers/bulkImport.controller.js';
 import partyRoutes from './party.routes.js';
@@ -37,6 +38,21 @@ router.post('/webhooks/whatsapp', asyncHandler(handleWhatsAppWebhook));
 
 // Everything below requires a valid token.
 router.use(requireAuth);
+
+// The heavy read aggregates (unified stock engine, pappu-order margins) are memoized
+// in-process. Any successful mutation can invalidate those figures, so bust the whole
+// compute cache after every non-GET that returns a 2xx. Centralizing it here means a
+// new write route can never forget to invalidate — and lets the TTL be longer (fast
+// read-only navigation) without ever serving data a write just changed.
+router.use((req, res, next) => {
+  const method = req.method;
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    res.on('finish', () => {
+      if (res.statusCode < 400) clearCache();
+    });
+  }
+  next();
+});
 
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 router.post('/bulk-import/parse', memUpload.single('file'), asyncHandler(parseBulkImport));

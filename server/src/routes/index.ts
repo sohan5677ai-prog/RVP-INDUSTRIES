@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import { webhookLimiter, bulkImportLimiter } from '../middleware/rateLimit.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearCache } from '../lib/cache.js';
 import authRoutes from './auth.routes.js';
@@ -23,6 +24,7 @@ import taxproRoutes from './taxpro.routes.js';
 import manualHamaliCostRoutes from './manualHamaliCost.routes.js';
 import hamaliVerificationRoutes from './hamaliVerification.routes.js';
 import poolReportRoutes from './poolReport.routes.js';
+import reportRoutes from './report.routes.js';
 import notesRoutes from './notes.routes.js';
 import emailLogRoutes from './emailLog.routes.js';
 import whatsappRoutes from './whatsapp.routes.js';
@@ -33,8 +35,11 @@ const router = Router();
 // Public
 router.use('/auth', authRoutes);
 // Fast2SMS calls this from outside — no JWT. GET answers URL-validation probes.
-router.get('/webhooks/whatsapp', asyncHandler(verifyWhatsAppWebhook));
-router.post('/webhooks/whatsapp', asyncHandler(handleWhatsAppWebhook));
+// No secret in the URL, so it needs its own limiter (the global apiLimiter is
+// per-route via router.use('/api', apiLimiter, ...) but generous 1000/15min
+// buckets are shared across all public+authed traffic).
+router.get('/webhooks/whatsapp', webhookLimiter, asyncHandler(verifyWhatsAppWebhook));
+router.post('/webhooks/whatsapp', webhookLimiter, asyncHandler(handleWhatsAppWebhook));
 
 // Everything below requires a valid token.
 router.use(requireAuth);
@@ -54,8 +59,11 @@ router.use((req, res, next) => {
   next();
 });
 
-const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-router.post('/bulk-import/parse', memUpload.single('file'), asyncHandler(parseBulkImport));
+// Buffered fully into memory before parsing, so cap both the size (was 20MB —
+// spreadsheets this route parses are never anywhere near that) and how often
+// one client can trigger it, to bound worst-case concurrent memory pressure.
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+router.post('/bulk-import/parse', bulkImportLimiter, memUpload.single('file'), asyncHandler(parseBulkImport));
 
 router.use('/parties', partyRoutes);
 router.use('/brokers', brokerRoutes);
@@ -71,6 +79,7 @@ router.use('/', loanRoutes);
 router.use('/', manualHamaliCostRoutes);
 router.use('/', hamaliVerificationRoutes);
 router.use('/', poolReportRoutes);
+router.use('/', reportRoutes);
 router.use('/', notesRoutes);
 router.use('/', emailLogRoutes);
 router.use('/', whatsappRoutes);

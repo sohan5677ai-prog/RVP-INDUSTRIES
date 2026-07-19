@@ -37,3 +37,33 @@ export const chatLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Chat rate limit reached, please wait a moment.' },
 });
+
+/**
+ * Limiter for the public (unauthenticated) WhatsApp webhook. Fast2SMS is the
+ * only expected caller, but the URL has no secret in it — each POST also
+ * triggers a DB write and, for text-shaped payloads, a Gemini call, so an
+ * anonymous flood could both rack up LLM cost and fill WhatsAppLog. Capped
+ * well above real traffic (a burst of inbound replies) but far below abuse
+ * volume.
+ */
+export const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  limit: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many webhook requests.' },
+});
+
+/**
+ * Limiter for the bulk-import parse endpoint. It buffers the whole upload
+ * into memory (multer memoryStorage) before parsing, so a few concurrent
+ * uploads from one client could pressure memory; this caps how often one
+ * client can trigger that even though the route requires auth.
+ */
+export const bulkImportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many bulk import uploads, please wait a moment.' },
+});

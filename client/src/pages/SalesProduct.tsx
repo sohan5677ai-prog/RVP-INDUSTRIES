@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, MessageCircle } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, MessageCircle, Pencil } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -287,8 +287,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   function openDeliver(dispatch: SaleDispatch, order: SaleOrder) {
     setDeliverDispatch({ dispatch, order });
     setDeliverKataFile(null);
-    setBuyerKataTonnes(String(dispatch.weightKg / 1000));
-    setDeliverDate(new Date().toISOString().slice(0, 10));
+    // When editing an already-delivered dispatch, pre-fill with existing values
+    if (dispatch.status === 'DELIVERED') {
+      setBuyerKataTonnes(dispatch.buyerKataKg != null ? String(dispatch.buyerKataKg / 1000) : String(dispatch.weightKg / 1000));
+      setDeliverDate(dispatch.deliveredDate ? new Date(dispatch.deliveredDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    } else {
+      setBuyerKataTonnes(String(dispatch.weightKg / 1000));
+      setDeliverDate(new Date().toISOString().slice(0, 10));
+    }
   }
 
   const buyerKataKg = Math.round((Number(buyerKataTonnes) || 0) * 1000);
@@ -306,7 +312,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Shipment marked as Delivered');
+      toast.success(deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Delivery details updated' : 'Shipment marked as Delivered');
       setDeliverDispatch(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -898,6 +904,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                           )
                                         )}
                                         {d.status === 'DELIVERED' && <Badge variant="success">Delivered</Badge>}
+                                        {d.status === 'DELIVERED' && !isDispatchPaid(d, Number(o.ratePerKg), settled) && (
+                                          <Button size="sm" variant="ghost" className="text-blue-600 hover:bg-blue-50 hover:text-blue-700" onClick={() => openDeliver(d, o)}>
+                                            <Pencil className="h-3.5 w-3.5" /> Edit
+                                          </Button>
+                                        )}
                                         {canUndo(d) && (
                                           <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => setUndoTarget({ dispatch: d, order: o })}>
                                             <Undo2 className="h-3.5 w-3.5" /> Undo
@@ -1031,7 +1042,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Mark Delivered dialog (buyer kata + shortage) */}
       <Dialog open={!!deliverDispatch} onOpenChange={(v) => !v && setDeliverDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Mark as Delivered - {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Edit Delivery' : 'Mark as Delivered'} - {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Confirm the buyer received this shipment. Enter the buyer's kata weight to auto-calculate any shortage &amp; credit note. The payment due date is calculated from the delivered date below.
@@ -1077,7 +1088,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             )}
             <DialogFooter>
               <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverOverweight} variant="forest">
-                <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : 'Confirm Delivered'}
+                <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Update Delivery' : 'Confirm Delivered'}
               </Button>
             </DialogFooter>
           </div>

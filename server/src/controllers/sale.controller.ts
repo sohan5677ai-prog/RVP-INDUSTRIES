@@ -625,8 +625,16 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     include: { saleOrder: { include: { buyer: true } } },
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
-  if (dispatch.status !== 'DISPATCHED') {
+  if (dispatch.status !== 'DISPATCHED' && dispatch.status !== 'DELIVERED') {
     throw new HttpError(400, `Cannot mark a ${dispatch.status} shipment as delivered`);
+  }
+
+  // Block editing delivery details once payment has been recorded against this shipment.
+  if (dispatch.status === 'DELIVERED') {
+    const receiptCount = await prisma.receipt.count({ where: { saleDispatchId: dispatch.id } });
+    if (receiptCount > 0) {
+      throw new HttpError(400, 'Cannot edit delivery — payment has already been recorded against this shipment.');
+    }
   }
 
   const order = dispatch.saleOrder;

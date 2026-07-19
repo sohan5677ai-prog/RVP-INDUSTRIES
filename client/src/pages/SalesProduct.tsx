@@ -27,6 +27,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 
 const GST_RATE = 0.05;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Per-order pappu profit/loss, from the date-aware seed allocation (server). */
 interface PappuMargin {
@@ -307,60 +308,60 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
   const [payTds, setPayTds] = useState('');
+  const [payTdsEnabled, setPayTdsEnabled] = useState(false);
   const [payShortage, setPayShortage] = useState('');
+
+  // Shortage is valued at kgs × rate (base price, GST excluded).
+  function shortageValue(dispatch: SaleDispatch, order: SaleOrder) {
+    return round2((Number(dispatch.shortageKg) || 0) * Number(order.ratePerKg));
+  }
+
+  // TDS (0.1%) is charged on the sale value EXCLUDING GST (the invoice base).
+  function tdsValue(dispatch: SaleDispatch, order: SaleOrder) {
+    return round2(dispatch.weightKg * Number(order.ratePerKg) * 0.001);
+  }
+
+  // Recompute the expected amount received = invoice total − shortage − TDS.
+  function recomputePayAmount(shortage: string, tdsEnabled: boolean) {
+    if (!payDispatch) return;
+    const { dispatch, order } = payDispatch;
+    const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
+    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+    const invoiceTotal = invoiceBase + invoiceGst;
+    const tds = tdsEnabled ? tdsValue(dispatch, order) : 0;
+    setPayTds(tds ? String(tds) : '');
+    setPayAmount(String(round2(invoiceTotal - (Number(shortage) || 0) - tds)));
+  }
 
   function openPaymentDialog(dispatch: SaleDispatch, order: SaleOrder) {
     setPayDispatch({ dispatch, order });
     setPayDate(new Date().toISOString().slice(0, 10));
-    
+
     // Auto calculate defaults
     const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
     const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
     const invoiceTotal = invoiceBase + invoiceGst;
-    const shortageDeduction = Number(dispatch.creditNoteAmount) || 0;
-    const expectedNet = invoiceTotal - shortageDeduction - Number(dispatch.tdsAmount || 0);
-    
+    const shortageDeduction = shortageValue(dispatch, order);
+    const tdsEnabled = Number(dispatch.tdsAmount) > 0;
+    const tds = tdsEnabled ? tdsValue(dispatch, order) : 0;
+    const expectedNet = round2(invoiceTotal - shortageDeduction - tds);
+
     setPayAmount(String(expectedNet));
-    setPayTds(dispatch.tdsAmount ? String(dispatch.tdsAmount) : '');
+    setPayTdsEnabled(tdsEnabled);
+    setPayTds(tds ? String(tds) : '');
     setPayShortage(shortageDeduction > 0 ? String(shortageDeduction) : '');
   }
 
-  function handlePayAmountChange(v: string) {
-    setPayAmount(v);
-    if (!payDispatch) return;
-    const amount = Number(v);
-    const order = payDispatch.order;
-    const dispatch = payDispatch.dispatch;
-    
-    const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
-    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
-    const invoiceTotal = invoiceBase + invoiceGst;
-    const shortageDeduction = Number(payShortage) || 0;
-    const expectedNet = invoiceTotal - shortageDeduction;
-    
-    // If amount is less than expected net, auto-calc TDS as 0.1% of base
-    if (amount < expectedNet) {
-      const autoTds = Math.round(invoiceBase * 0.001);
-      setPayTds(String(autoTds));
-    } else if (amount >= expectedNet) {
-      setPayTds('');
-    }
-  }
-
-  // Recalculate if user changes shortage manually
+  // Recalculate the expected amount if the user edits the shortage manually.
   function handlePayShortageChange(v: string) {
     setPayShortage(v);
-    if (!payDispatch) return;
-    const order = payDispatch.order;
-    const dispatch = payDispatch.dispatch;
-    
-    const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
-    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
-    const invoiceTotal = invoiceBase + invoiceGst;
-    const shortageDeduction = Number(v) || 0;
-    const expectedNet = invoiceTotal - shortageDeduction - Number(payTds || 0);
-    
-    setPayAmount(String(expectedNet));
+    recomputePayAmount(v, payTdsEnabled);
+  }
+
+  // Toggle TDS on/off — auto-fills 0.1% of the GST-excluded sale value.
+  function handleTdsToggle(enabled: boolean) {
+    setPayTdsEnabled(enabled);
+    recomputePayAmount(payShortage, enabled);
   }
 
   const payMutation = useMutation({
@@ -1241,9 +1242,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                       <span>-{rupees(Number(payShortage))}</span>
                     </div>
                   )}
+                  {payTdsEnabled && Number(payTds) > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>TDS (0.1%)</span>
+                      <span>-{rupees(Number(payTds))}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-semibold border-t pt-1.5 border-border">
                     <span>Net Due</span>
-                    <span>{rupees(invoiceTotal - (Number(payShortage) || 0))}</span>
+                    <span>{rupees(invoiceTotal - (Number(payShortage) || 0) - (payTdsEnabled ? Number(payTds) || 0 : 0))}</span>
                   </div>
                 </div>
 
@@ -1256,7 +1263,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     <Label>Amount Received</Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
-                      <Input type="number" step="0.01" className="pl-7" value={payAmount} onChange={(e) => handlePayAmountChange(e.target.value)} />
+                      <Input type="number" step="0.01" className="pl-7" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
                     </div>
                   </div>
                 </div>
@@ -1271,12 +1278,20 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     <p className="text-[11px] text-muted-foreground">Any quality/weight shortage claim by buyer.</p>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>TDS Deducted (0.1%)</Label>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-primary"
+                        checked={payTdsEnabled}
+                        onChange={(e) => handleTdsToggle(e.target.checked)}
+                      />
+                      <span className="text-sm font-medium">Deduct TDS (0.1%)</span>
+                    </label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
-                      <Input type="number" step="0.01" className="pl-7" value={payTds} onChange={(e) => setPayTds(e.target.value)} placeholder="0" />
+                      <Input type="number" step="0.01" className="pl-7" value={payTds} disabled={!payTdsEnabled} onChange={(e) => setPayTds(e.target.value)} placeholder="0" />
                     </div>
-                    <p className="text-[11px] text-muted-foreground">Auto-calc if received amount is less than expected net.</p>
+                    <p className="text-[11px] text-muted-foreground">0.1% of sale value (excluding GST). Tick to auto-calculate.</p>
                   </div>
                 </div>
               </div>

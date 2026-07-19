@@ -33,7 +33,7 @@ app.use(cors({
     cb(new Error(`Origin ${origin} not allowed by CORS`));
   },
 }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 app.get("/api/health", (_req, res) => {
   res.json({

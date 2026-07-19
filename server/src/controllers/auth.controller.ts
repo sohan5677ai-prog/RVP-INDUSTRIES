@@ -5,14 +5,17 @@ import { signToken } from '../lib/jwt.js';
 import { HttpError } from '../lib/httpError.js';
 import { loginSchema } from '../schemas/auth.schema.js';
 
+// Dummy hash so bcrypt.compare always runs, even for unknown usernames -
+// keeps response timing the same whether or not the account exists.
+const DUMMY_HASH = '$2a$10$CwTycUXWue0Thq9StjUM0uJ8Q8lPZC.jQBnQXvhO1kZWm.wZ5ymPO';
+
 export async function login(req: Request, res: Response) {
   const { username, password } = loginSchema.parse(req.body);
 
   const user = await prisma.user.findUnique({ where: { username } });
-  if (!user) throw new HttpError(401, 'Invalid credentials');
 
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) throw new HttpError(401, 'Invalid credentials');
+  const ok = await bcrypt.compare(password, user?.password ?? DUMMY_HASH);
+  if (!user || !ok) throw new HttpError(401, 'Invalid credentials');
 
   const token = signToken({ userId: user.id, role: user.role });
   res.json({

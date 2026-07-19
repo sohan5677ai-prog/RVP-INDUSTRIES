@@ -228,28 +228,10 @@ async function _computeUnifiedStockEngine(
           location: 'RVP',
         });
       } else {
-        const bufferPappuKg = orderedKg * PAPPU_OUT_TURN * (1 - PAPPU_CONSUMABLE);
-        const gapPappuKg = gapKg * PAPPU_OUT_TURN;
-        const consumableDeficit = Math.max(0, gapPappuKg - bufferPappuKg);
-        b.shortfallBlackKg += gapKg;
-        b.shortfallPappuKg += consumableDeficit;
-        b.lots.push({
-          purchaseId: `shortfall-${po.id}`,
-          date: po.poDate,
-          partyName: po.party.name,
-          partyState,
-          partyId: po.party.id,
-          partyPhone: po.party.phone || '',
-          partyAddress: po.party.address || '',
-          lorryNumber: 'SHORT',
-          poNumber: po.poNumber,
-          kind: 'SHORTFALL',
-          orderedKg,
-          receivedKg: gapKg,
-          soldKg: 0,
-          pricePerKg: price,
-          location: 'RVP',
-        });
+        // Gap between ordered and received tonnage on a completed PO is a
+        // normal weighbridge variance, NOT a stock shortage. Real shortages
+        // are only raised when pappu sale demand exceeds available seed
+        // supply (handled by the allocation loop below). Silently ignore.
       }
     }
   }

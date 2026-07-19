@@ -23,6 +23,7 @@ import {
 import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 
 const GST_RATE = 0.05; // fallback IGST fraction (5%) when a commodity has no configured rate
 
@@ -438,6 +439,8 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         freightCharge,
         status: 'DISPATCHED',
         vehicleNumber: data.vehicleNumber ?? null,
+        driverName: data.driverName ?? null,
+        driverPhone: data.driverPhone ?? null,
         kataFileUrl,
         transportProvider,
         customRetention: transportProvider === 'OTHER' ? (data.customRetention ?? null) : null,
@@ -472,6 +475,15 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
     return created;
   });
+
+  // WhatsApp the driver the buyer's name/phone/maps link — fire-and-forget,
+  // only when a driver phone was captured on this dispatch. The broker/buyer
+  // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
+  // (the invoice/EWB don't exist yet at dispatch time).
+  void whatsappService.notifyDispatchDriver(
+    { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
+    { name: order.buyer.name, phone: order.buyer.phone, locationLink: order.buyer.locationLink }
+  );
 
   res.status(201).json(dispatch);
 }

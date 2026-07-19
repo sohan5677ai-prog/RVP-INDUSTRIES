@@ -27,6 +27,8 @@ export const createSaleOrderSchema = z.object({
 // is raised (auto-numbered) as a separate step afterwards.
 export const dispatchSaleOrderSchema = z.object({
   vehicleNumber: z.string().optional().nullable(),
+  driverName: z.string().optional().nullable(),
+  driverPhone: z.string().optional().nullable(),
   tonnageKg: z.coerce.number().int().positive(),
   internalWeightKg: z.coerce.number().int().positive().optional().nullable(),
   transportProvider: z.enum(['SURYA', 'KNM', 'OTHER']).optional().default('SURYA'),

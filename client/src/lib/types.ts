@@ -21,6 +21,7 @@ export interface Party {
   pincode?: string | null;
   gstin: string | null;
   destination: string | null;
+  locationLink?: string | null;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;

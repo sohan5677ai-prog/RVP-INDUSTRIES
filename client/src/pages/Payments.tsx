@@ -130,6 +130,9 @@ export default function PaymentsPage() {
   const [payee, setPayee] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
+  // Retained so the proof screenshot is stored with the payment and WhatsApp'd
+  // to the party.
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
 
   function resetForm() {
     setDate(new Date().toISOString().slice(0, 10));
@@ -141,6 +144,7 @@ export default function PaymentsPage() {
     setPayee('');
     setReference('');
     setDescription('');
+    setScreenshotFile(null);
   }
 
   /** Pre-fill the form from a payment screenshot read by the server OCR. */
@@ -178,21 +182,30 @@ export default function PaymentsPage() {
   }
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api<Payment>('/payments', {
-        method: 'POST',
-        body: {
-          date,
-          amount: Number(amount) || 0,
-          type,
-          partyId: (type === 'SUPPLIER' || type === 'HAMALI') ? partyId || null : null,
-          brokerId: type === 'BROKER' ? brokerId || null : null,
-          lorryNumber: (type === 'TRANSPORTER_INWARD' || type === 'TRANSPORTER_OUTWARD') ? lorryNumber || null : null,
-          payee: !COUNTERPARTY_TYPES.includes(type) ? payee || null : null,
-          reference: reference || null,
-          description: description || null,
-        },
-      }),
+    mutationFn: () => {
+      const fields = {
+        date,
+        amount: Number(amount) || 0,
+        type,
+        partyId: (type === 'SUPPLIER' || type === 'HAMALI') ? partyId || null : null,
+        brokerId: type === 'BROKER' ? brokerId || null : null,
+        lorryNumber: (type === 'TRANSPORTER_INWARD' || type === 'TRANSPORTER_OUTWARD') ? lorryNumber || null : null,
+        payee: !COUNTERPARTY_TYPES.includes(type) ? payee || null : null,
+        reference: reference || null,
+        description: description || null,
+      };
+      // With a proof screenshot the create goes multipart so the server can
+      // persist the file and WhatsApp it to the party; otherwise plain JSON.
+      if (screenshotFile) {
+        const fd = new FormData();
+        for (const [k, v] of Object.entries(fields)) {
+          if (v !== null && v !== undefined) fd.append(k, String(v));
+        }
+        fd.append('screenshot', screenshotFile);
+        return api<Payment>('/payments', { method: 'POST', body: fd, multipart: true });
+      }
+      return api<Payment>('/payments', { method: 'POST', body: fields });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
@@ -324,6 +337,7 @@ export default function PaymentsPage() {
               endpoint="/payments/extract"
               hint="Drop a payment screenshot to auto-fill"
               onExtracted={applyExtracted}
+              onFile={setScreenshotFile}
             />
 
             <div className="grid grid-cols-2 gap-3">

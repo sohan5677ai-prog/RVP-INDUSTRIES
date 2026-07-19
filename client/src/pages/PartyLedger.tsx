@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { PartyLedgerRow, PartyLedgerDetail, PartyLedgerTxn, LedgerKind } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
@@ -16,6 +17,7 @@ import {
   Search, Loader2, ArrowLeft, Printer, Phone, MapPin, Landmark,
   Hash, Wallet, TrendingUp, TrendingDown, Scale, Building2,
   ArrowDownRight, ArrowUpRight, ReceiptText, Copy, Check, Users, IndianRupee,
+  BellRing,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ helpers */
@@ -208,6 +210,19 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
     queryFn: () => api<PartyLedgerDetail>(`/ledger/parties/${partyId}`),
   });
 
+  // WhatsApp "remind about pending loads" — server computes the pending lorries
+  // and throttles repeat sends.
+  const remindMutation = useMutation({
+    mutationFn: () =>
+      api<{ ok: boolean; pendingLorries: number; poLabel: string }>(
+        `/whatsapp/parties/${partyId}/reminder`,
+        { method: 'POST' }
+      ),
+    onSuccess: (r) =>
+      toast.success(`Reminder sent — ${r.pendingLorries} pending lorries (${r.poLabel})`),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const filtered = useMemo(() => {
     let t = data?.transactions ?? [];
     if (kind !== 'ALL') t = t.filter((x) => x.kind === kind || (kind === 'RECEIPT' && x.kind === 'CREDIT_NOTE'));
@@ -249,6 +264,24 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           <ArrowLeft className="h-4 w-4" /> All Parties
         </Button>
         <div className="flex gap-2">
+          {party.type !== 'BUYER' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (confirm(`Send ${party.name} a WhatsApp reminder about their pending loads?`)) {
+                  remindMutation.mutate();
+                }
+              }}
+              disabled={remindMutation.isPending}
+              className="gap-1.5"
+            >
+              {remindMutation.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <BellRing className="h-4 w-4" />}
+              Remind Pending Loads
+            </Button>
+          )}
           <ExportButtons
             filename={`${party.name.replace(/\s+/g, '_')}_Ledger`}
             title={`Party Ledger — ${party.name}`}

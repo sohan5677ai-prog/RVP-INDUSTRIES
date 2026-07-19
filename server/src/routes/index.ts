@@ -24,11 +24,16 @@ import hamaliVerificationRoutes from './hamaliVerification.routes.js';
 import poolReportRoutes from './poolReport.routes.js';
 import notesRoutes from './notes.routes.js';
 import emailLogRoutes from './emailLog.routes.js';
+import whatsappRoutes from './whatsapp.routes.js';
+import { verifyWhatsAppWebhook, handleWhatsAppWebhook } from '../controllers/whatsapp.controller.js';
 import { globalSearch } from '../controllers/search.controller.js';
 const router = Router();
 
 // Public
 router.use('/auth', authRoutes);
+// Fast2SMS calls this from outside — no JWT. GET answers URL-validation probes.
+router.get('/webhooks/whatsapp', asyncHandler(verifyWhatsAppWebhook));
+router.post('/webhooks/whatsapp', asyncHandler(handleWhatsAppWebhook));
 
 // Everything below requires a valid token.
 router.use(requireAuth);
@@ -52,6 +57,7 @@ router.use('/', hamaliVerificationRoutes);
 router.use('/', poolReportRoutes);
 router.use('/', notesRoutes);
 router.use('/', emailLogRoutes);
+router.use('/', whatsappRoutes);
 router.use('/system', systemRoutes);
 router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);

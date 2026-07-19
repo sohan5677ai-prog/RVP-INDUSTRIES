@@ -7,6 +7,7 @@ import { createStockInSchema, createUrpStockInSchema } from '../schemas/purchase
 import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { computeFY, formatPoNumber, reservePoSerials } from '../lib/poNumber.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 
 /**
  * True when `arrival` falls on a calendar day strictly before `poDate`. Both are
@@ -186,7 +187,7 @@ export async function createStockIn(req: Request, res: Response) {
   // Previous stage must exist and not already have reached its lorryCount limit.
   const po = await prisma.purchaseOrder.findUnique({
     where: { id: data.purchaseOrderId },
-    include: { stockIns: true },
+    include: { stockIns: true, party: true },
   });
   if (!po) throw new HttpError(400, 'Purchase order not found');
 
@@ -242,6 +243,13 @@ export async function createStockIn(req: Request, res: Response) {
 
     return created;
   });
+
+  // WhatsApp the party that their lorry has been received — fire-and-forget.
+  void whatsappService.notifyStockIn(
+    { id: stockIn.id, lorryNumber: stockIn.lorryNumber, arrivalDate: stockIn.arrivalDate },
+    { poNumber: po.poNumber },
+    { name: po.party.name, phone: po.party.phone }
+  );
 
   res.json(stockIn);
 }

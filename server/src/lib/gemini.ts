@@ -762,3 +762,94 @@ Known parties: ${JSON.stringify(candidates)}`
   }
   return clean;
 }
+
+/**
+ * Fields parsed from a transport broker's WhatsApp lorry-confirmation message,
+ * e.g. "18/7/26 Punganur To Surat 30 Tones Loading Lorry Details AP 39 T 8217
+ * (14W) Driver Moula 7207012803 Lorry Freight Per Tone Rate Rs 80000/-".
+ */
+export interface ParsedTransportConfirmation {
+  isTransportConfirmation: boolean;
+  messageDate?: string; // ISO yyyy-mm-dd
+  fromPlace?: string;
+  toPlace?: string;
+  tonnageKg?: number;
+  lorryNumber?: string;
+  driverName?: string;
+  driverPhone?: string;
+  freightAmount?: number; // total or per-tonne rupee figure as written
+}
+
+const TRANSPORT_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    isTransportConfirmation: { type: Type.BOOLEAN },
+    messageDate: { type: Type.STRING },
+    fromPlace: { type: Type.STRING },
+    toPlace: { type: Type.STRING },
+    tonnageKg: { type: Type.NUMBER },
+    lorryNumber: { type: Type.STRING },
+    driverName: { type: Type.STRING },
+    driverPhone: { type: Type.STRING },
+    freightAmount: { type: Type.NUMBER },
+  },
+  required: ['isTransportConfirmation'],
+};
+
+/**
+ * Parse a raw WhatsApp text into transport-confirmation fields. Returns null on
+ * any failure or when the text is not a lorry confirmation — the webhook must
+ * never throw because of a parse problem.
+ */
+export async function parseTransportConfirmationText(
+  text: string
+): Promise<ParsedTransportConfirmation | null> {
+  if (!process.env.GEMINI_API_KEY) return null;
+  try {
+    const ai = getClient();
+    const prompt = `You are reading a WhatsApp message received by an Indian tamarind/agro business.
+Transport brokers send lorry-booking confirmations that look roughly like:
+"18/7/26 Punganur To Surat 30 Tones Loading Lorry Details AP 39 T 8217 (14W) Driver Moula 7207012803 Lorry Freight Per Tone Rate Rs 80000/-"
+Wording, order and spelling vary a lot (Tones/Tons/MT, Frieght, etc).
+
+Decide whether THIS message is such a lorry-booking confirmation and return JSON:
+- isTransportConfirmation: true only if the message clearly confirms a booked lorry
+  (it should mention at least a vehicle registration number, plus typically route/driver/freight).
+- messageDate: the date mentioned, ISO yyyy-mm-dd. Dates are written in the INDIAN
+  day/month/year order ("18/7/26" = 18 July 2026), and two-digit years are 20xx.
+- fromPlace / toPlace: the route ("X To Y").
+- tonnageKg: the load size CONVERTED TO KILOGRAMS (30 tonnes -> 30000).
+- lorryNumber: vehicle registration with spaces removed, e.g. "AP39T8217".
+- driverName: the driver's name.
+- driverPhone: the driver's 10-digit mobile number (digits only).
+- freightAmount: the rupee freight figure as a plain number (strip Rs, commas, "/-").
+Only include fields you can read with reasonable confidence. Do not guess.
+
+Message:
+${text}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { responseMimeType: 'application/json', responseSchema: TRANSPORT_SCHEMA },
+    });
+    const out = response.text;
+    if (!out) return null;
+    const parsed = JSON.parse(out);
+    if (typeof parsed?.isTransportConfirmation !== 'boolean') return null;
+
+    const clean: ParsedTransportConfirmation = { isTransportConfirmation: parsed.isTransportConfirmation };
+    if (parsed.messageDate?.toString().trim()) clean.messageDate = parsed.messageDate.toString().trim();
+    if (parsed.fromPlace?.toString().trim()) clean.fromPlace = parsed.fromPlace.toString().trim();
+    if (parsed.toPlace?.toString().trim()) clean.toPlace = parsed.toPlace.toString().trim();
+    if (typeof parsed.tonnageKg === 'number' && parsed.tonnageKg > 0) clean.tonnageKg = Math.round(parsed.tonnageKg);
+    if (parsed.lorryNumber?.toString().trim()) clean.lorryNumber = parsed.lorryNumber.toString().replace(/\s+/g, '').toUpperCase();
+    if (parsed.driverName?.toString().trim()) clean.driverName = parsed.driverName.toString().trim();
+    const phone = parsed.driverPhone?.toString().replace(/\D/g, '') ?? '';
+    if (phone.length >= 10) clean.driverPhone = phone.slice(-10);
+    if (typeof parsed.freightAmount === 'number' && parsed.freightAmount > 0) clean.freightAmount = parsed.freightAmount;
+    return clean;
+  } catch {
+    return null; // never let a parse failure break the webhook
+  }
+}

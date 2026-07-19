@@ -9,9 +9,9 @@ import { emailService } from './email.service.js';
 /**
  * Loads everything needed to render the tax-invoice PDF for a dispatch
  * (buyer, company profile, product tax row) and shapes it into InvoicePdfData.
- * Shared by sendInvoiceEmail/sendEwbEmail below.
+ * Shared by sendInvoiceEmail/sendEwbEmail below and the WhatsApp dispatch bundle.
  */
-async function buildInvoicePdfData(dispatchId: string) {
+export async function buildInvoicePdfData(dispatchId: string) {
   const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: dispatchId },
     include: { saleOrder: { include: { buyer: true } } },

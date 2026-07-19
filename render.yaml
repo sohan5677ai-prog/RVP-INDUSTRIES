@@ -37,3 +37,29 @@ services:
         value: invoices
       - key: SLACK_ENABLED
         value: "false"
+      # WhatsApp via Fast2SMS (shared KNM Multi ERP business number).
+      # Test mode defaults ON in code — set WHATSAPP_TEST_MODE=false only after
+      # the whole pipeline has been verified against WHATSAPP_TEST_NUMBER.
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      - key: WHATSAPP_TEST_MODE
+        value: "true"
+      - key: WHATSAPP_TEST_NUMBER
+        sync: false
+      - key: FAST2SMS_API_KEY
+        sync: false
+      - key: FAST2SMS_PHONE_NUMBER_ID
+        sync: false
+      # Numeric Fast2SMS message_id of each approved template (from the panel).
+      - key: FAST2SMS_TMPL_PO_CREATED
+        sync: false
+      - key: FAST2SMS_TMPL_STOCKIN_CONFIRMED
+        sync: false
+      - key: FAST2SMS_TMPL_PAYMENT_SENT
+        sync: false
+      - key: FAST2SMS_TMPL_DISPATCH_BROKER
+        sync: false
+      - key: FAST2SMS_TMPL_DISPATCH_DRIVER
+        sync: false
+      - key: FAST2SMS_TMPL_REMINDER
+        sync: false

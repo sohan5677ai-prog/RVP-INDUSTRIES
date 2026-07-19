@@ -97,6 +97,9 @@ model Party {
   gstin             String?
   // Default delivery destination for this buyer (maps to a freight rate).
   destination       String?
+  // Google Maps link to the party's delivery point — sent to the lorry driver
+  // on dispatch via WhatsApp.
+  locationLink      String?
   bankAccountNumber String?
   bankIfsc          String?
   bankName          String?
@@ -456,6 +459,10 @@ model SaleDispatch {
   // DISPATCHED → DELIVERED.
   status         SaleStatus @default(DISPATCHED)
   vehicleNumber  String?
+  // Driver of the hired lorry — captured at dispatch (or filled from a confirmed
+  // WhatsApp transport confirmation) and sent to the broker/buyer via WhatsApp.
+  driverName     String?
+  driverPhone    String?
   kataFileUrl    String?
   transportProvider String?  // 'SURYA' | 'KNM' | 'OTHER'
   customRetention   Decimal? @db.Decimal(12, 2) // user-entered retention for 'OTHER'
@@ -910,6 +917,9 @@ model Payment {
   // so the Payables tab can derive Paid / Partial / Unpaid status.
   hamaliVerificationId String?
   hamaliVerification   HamaliVerification? @relation(fields: [hamaliVerificationId], references: [id])
+  // Uploaded proof-of-payment screenshot (Supabase Storage URL) — attached to the
+  // WhatsApp payment notification sent to the party.
+  screenshotUrl  String?
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
@@ -1055,6 +1065,71 @@ model TallyUnmappedVoucher {
   alterId       Int      @default(0)
   resolved      Boolean  @default(false)
   createdAt     DateTime @default(now())
+}
+
+enum WaDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum WaStatus {
+  SENT // handed to Fast2SMS successfully
+  FAILED // send attempt errored
+  SKIPPED // not sent (disabled / unconfigured / no phone) — recorded for visibility
+  RECEIVED // inbound event captured by the webhook
+}
+
+// Audit trail of every WhatsApp message sent (or received) via Fast2SMS.
+// Mirrors EmailLog: one row per attempt, success or failure, so the UI can
+// show delivery state and offer a resend.
+model WhatsAppLog {
+  id           String      @id @default(cuid())
+  direction    WaDirection @default(OUTBOUND)
+  phone        String? // counterparty number (recipient for outbound, sender for inbound)
+  template     String? // template key, e.g. 'PO_CREATED' (outbound only)
+  body         String? // rendered variable values (outbound) / raw text (inbound)
+  mediaUrl     String?
+  // Loose link back to the record that triggered the message, e.g.
+  // ('PO', purchaseOrderId) or ('REMINDER', partyId). No FK — logs outlive edits.
+  relatedType  String?
+  relatedId    String?
+  status       WaStatus
+  errorMessage String?
+  providerId   String? // Fast2SMS request/message id, when returned
+  createdAt    DateTime    @default(now())
+
+  @@index([relatedType, relatedId])
+  @@index([createdAt])
+}
+
+enum TransportConfirmationStatus {
+  DRAFT
+  CONFIRMED
+  DISMISSED
+}
+
+// A transport broker's lorry-confirmation message received on WhatsApp
+// ("18/7 Punganur To Surat 30 Tonnes AP39T8217 Driver Moula 7207012803 ...")
+// parsed into fields by Gemini. Held as a DRAFT until the user reviews it on the
+// Surya Road Transport page; confirming can copy the driver/lorry details onto a
+// SaleDispatch.
+model TransportConfirmation {
+  id             String                      @id @default(cuid())
+  fromPhone      String // WhatsApp sender
+  rawText        String // original message, kept verbatim
+  messageDate    DateTime? // date mentioned in the message
+  fromPlace      String?
+  toPlace        String?
+  tonnageKg      Int?
+  lorryNumber    String?
+  driverName     String?
+  driverPhone    String?
+  freightAmount  Decimal?                    @db.Decimal(12, 2)
+  status         TransportConfirmationStatus @default(DRAFT)
+  saleDispatchId String? // dispatch the confirmed details were applied to
+  createdAt      DateTime                    @default(now())
+
+  @@index([status])
 }
 
 // Persisted drafts for Slack multi-step flows (PO, Stock In, etc.)

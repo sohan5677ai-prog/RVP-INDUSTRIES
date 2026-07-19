@@ -5,6 +5,8 @@ import { HttpError } from '../lib/httpError.js';
 import { createPaymentSchema, listPaymentsSchema } from '../schemas/payment.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
+import { uploadFileToStorage } from '../lib/upload.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 
 /**
  * Read an uploaded payment screenshot (bank/UPI/cheque) with Gemini and return
@@ -46,6 +48,10 @@ export async function listPayments(req: Request, res: Response) {
 
 export async function createPayment(req: Request, res: Response) {
   const data = createPaymentSchema.parse(req.body);
+
+  // Optional proof-of-payment screenshot: upload before the transaction starts
+  // (network I/O shouldn't hold a DB transaction open).
+  const screenshotUrl = req.file ? await uploadFileToStorage(req.file) : null;
 
   // Double-submit guard: reject an identical payment (same counterparty, amount
   // and value date) created within the last 10 seconds. A fast double-click on
@@ -97,6 +103,7 @@ export async function createPayment(req: Request, res: Response) {
         reference: data.reference ?? null,
         description: data.description ?? null,
         hamaliVerificationId: data.hamaliVerificationId ?? null,
+        screenshotUrl,
       },
     });
 
@@ -126,6 +133,25 @@ export async function createPayment(req: Request, res: Response) {
 
     return created;
   });
+
+  // WhatsApp the party (amount + screenshot) — only for payments tied to a
+  // party (supplier settlements etc.), never internal expense heads. Fire-and-forget.
+  if (data.partyId) {
+    void (async () => {
+      const party = await prisma.party.findUnique({ where: { id: data.partyId! } });
+      if (!party || party.type === 'HAMALI_TEAM') return;
+      await whatsappService.notifyPaymentSent(
+        {
+          id: payment.id,
+          amount: Number(data.amount),
+          date: data.date,
+          reference: data.reference ?? null,
+          screenshotUrl,
+        },
+        { name: party.name, phone: party.phone }
+      );
+    })().catch(() => {});
+  }
 
   res.status(201).json(payment);
 }

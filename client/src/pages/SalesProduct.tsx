@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, MessageCircle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -160,6 +160,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [dispatchOrder, setDispatchOrder] = useState<SaleOrder | null>(null);
   const [kataFile, setKataFile] = useState<File | null>(null);
   const [vehicleNumber, setVehicleNumber] = useState('');
+  const [driverName, setDriverName] = useState('');
+  const [driverPhone, setDriverPhone] = useState('');
   const [dispatchTonnes, setDispatchTonnes] = useState('');
   const [extractingKata, setExtractingKata] = useState(false);
   const [transportProvider, setTransportProvider] = useState<'SURYA' | 'KNM' | 'OTHER'>('SURYA');
@@ -173,6 +175,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setDispatchOrder(o);
     setKataFile(null);
     setVehicleNumber('');
+    setDriverName('');
+    setDriverPhone('');
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
     setTransportProvider('SURYA');
     setCustomRetention('');
@@ -202,6 +206,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       const fd = new FormData();
       if (kataFile) fd.append('kata', kataFile);
       fd.append('vehicleNumber', vehicleNumber);
+      if (driverName) fd.append('driverName', driverName);
+      if (driverPhone) fd.append('driverPhone', driverPhone);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
       fd.append('transportProvider', transportProvider);
       if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
@@ -451,6 +457,16 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const sendEwbEmailMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/ewaybill/email`, { method: 'POST' }),
     onSuccess: () => toast.success('E-Way Bill emailed to buyer'),
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  // Invoice + EWB + driver details → broker (or buyer when no real broker) on
+  // WhatsApp, plus buyer name/phone/maps link → the driver.
+  const sendWhatsAppMutation = useMutation({
+    mutationFn: (id: string) =>
+      api<{ ok: boolean; sentTo: string; driverNotified: boolean }>(`/whatsapp/dispatches/${id}/send`, { method: 'POST' }),
+    onSuccess: (r) =>
+      toast.success(`WhatsApp sent to ${r.sentTo}${r.driverNotified ? ' and the driver' : ''}`),
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
@@ -829,6 +845,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 </Button>
                                               </>
                                             )}
+                                            {/* WhatsApp bundle: invoice PDF + EWB + driver → broker/buyer, buyer details → driver */}
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="border-green-200 text-green-700 hover:bg-green-50"
+                                              disabled={sendWhatsAppMutation.isPending}
+                                              onClick={() => sendWhatsAppMutation.mutate(d.id)}
+                                            >
+                                              {sendWhatsAppMutation.isPending
+                                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                : <MessageCircle className="h-3.5 w-3.5" />} WhatsApp
+                                            </Button>
                                           </>
                                         ) : (
                                           <Button size="sm" variant="outline" onClick={() => setInvoiceDispatch({ dispatch: d, order: o })}>
@@ -888,6 +916,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </label>
             </div>
             <div className="space-y-1.5"><Label className="text-xs">Vehicle No</Label><Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. GJ05AB1234" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label className="text-xs">Driver Name</Label><Input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="e.g. Moula" /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Driver Phone</Label><Input value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="e.g. 7207012803" /></div>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Transport</Label>
               <Segmented

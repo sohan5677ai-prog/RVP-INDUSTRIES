@@ -24,11 +24,14 @@ export function ScreenshotUpload({
   label = 'Auto-fill from screenshot',
   hint = 'Drop a bank / UPI / cheque screenshot',
   onExtracted,
+  onFile,
 }: {
   endpoint: string;
   label?: string;
   hint?: string;
   onExtracted: (data: ExtractedTransaction) => void;
+  /** Also hand back the raw file, for forms that persist it on save. */
+  onFile?: (file: File) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -38,6 +41,7 @@ export function ScreenshotUpload({
   async function handle(file: File | null) {
     if (!file) return;
     setName(file.name);
+    onFile?.(file);
     setBusy(true);
     try {
       const fd = new FormData();

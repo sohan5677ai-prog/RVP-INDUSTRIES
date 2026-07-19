@@ -14,6 +14,7 @@ export const createPartySchema = z.object({
   pincode: z.string().optional(),
   gstin: z.string().optional(),
   destination: z.string().optional(),
+  locationLink: z.string().optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),

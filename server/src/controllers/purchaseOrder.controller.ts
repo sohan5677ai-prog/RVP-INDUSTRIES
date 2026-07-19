@@ -7,6 +7,7 @@ import {
   listPurchaseOrdersSchema,
 } from '../schemas/purchase.schema.js';
 import { computeFY, derivePartyPrefix, formatPoNumber, normalizeSeriesKey, reservePoSerials } from '../lib/poNumber.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
   const { status, skip, take, all } = listPurchaseOrdersSchema.parse(req.query);
@@ -92,6 +93,13 @@ export async function createPurchaseOrder(req: Request, res: Response) {
       createdPOs.push(newPo);
     }
   });
+
+  // WhatsApp the party (lorries + price) — fire-and-forget, never blocks the PO.
+  void whatsappService.notifyPoCreated(
+    createdPOs.map((po) => ({ id: po.id, poNumber: po.poNumber })),
+    { name: party.name, phone: party.phone },
+    Number(data.pricePerKg)
+  );
 
   res.status(201).json(createdPOs[0]);
 }

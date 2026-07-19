@@ -124,6 +124,7 @@ const partySchema = z.object({
   pincode: z.string().optional(),
   gstin: z.string().optional(),
   destination: z.string().optional(),
+  locationLink: z.string().optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
@@ -133,7 +134,7 @@ type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
   name: '', nickname: '', type: 'SUPPLIER', phone: '', email: '', address: '', state: '', pincode: '', gstin: '', destination: '',
-  bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
+  locationLink: '', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
 export default function Parties() {
@@ -212,6 +213,7 @@ export default function Parties() {
       pincode: p.pincode ?? '',
       gstin: p.gstin ?? '',
       destination: p.destination ?? '',
+      locationLink: p.locationLink ?? '',
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
@@ -629,6 +631,22 @@ export default function Parties() {
                   />
                 )}
               </div>
+              )}
+              {!isHamaliTeam && (
+              <FormField
+                control={form.control}
+                name="locationLink"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Google Maps Location Link</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. https://maps.app.goo.gl/..." {...field} />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground">Sent to the lorry driver on dispatch via WhatsApp</p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               )}
 
               <div className="space-y-3 rounded-lg border p-3 bg-muted/20">

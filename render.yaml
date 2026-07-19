@@ -14,7 +14,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 20.18.0
+        value: 22.11.0
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

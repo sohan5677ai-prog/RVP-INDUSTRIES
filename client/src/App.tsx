@@ -58,6 +58,8 @@ const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/page
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
+const GstReport = lazyWithPreload('/reports/gst', () => import('@/pages/Reports/GstReport'));
+const TdsReport = lazyWithPreload('/reports/tds', () => import('@/pages/Reports/TdsReport'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
@@ -149,6 +151,8 @@ export default function App() {
               <Route path="/reports/drawings" element={<Drawings />} />
               <Route path="/reports/interest" element={<Interest />} />
               <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
+              <Route path="/reports/gst" element={<GstReport />} />
+              <Route path="/reports/tds" element={<TdsReport />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
             </Route>

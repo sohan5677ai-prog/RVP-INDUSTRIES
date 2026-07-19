@@ -110,6 +110,8 @@ const sections: NavSection[] = [
     heading: 'Reports',
     items: [
       { to: '/reports/irn-ewb', label: 'IRN/EWB', icon: FileText },
+      { to: '/reports/gst', label: 'GST Report', icon: Receipt },
+      { to: '/reports/tds', label: 'TDS Report', icon: Landmark },
       { to: '/reports/purchase-dues', label: 'Purchase Dues', icon: TrendingDown },
       { to: '/reports/payment-planner', label: 'Payment Planner', icon: Wallet },
       { to: '/reports/sale-dues', label: 'Sale Dues', icon: TrendingUp },

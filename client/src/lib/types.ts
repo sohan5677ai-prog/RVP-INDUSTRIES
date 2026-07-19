@@ -665,3 +665,128 @@ export interface PartyLedgerDetail {
   summary: PartyLedgerSummary;
   transactions: PartyLedgerTxn[];
 }
+
+// --- GST report -------------------------------------------------------------
+
+export interface GstSalesLine {
+  id: string;
+  date: string;
+  invoiceNumber: string | null;
+  partyName: string;
+  gstin: string | null;
+  stateName: string | null;
+  product: string;
+  weightKg: number;
+  taxableValue: number;
+  gstRate: number;
+  gstAmount: number;
+  igst: number;
+  cgst: number;
+  sgst: number;
+  invoiceTotal: number;
+}
+
+export interface GstNoteLine {
+  id: string;
+  date: string;
+  noteNumber: string;
+  partyName: string;
+  gstin: string | null;
+  reason: string;
+  taxableValue: number;
+  gstRate: number;
+  gstAmount: number;
+  igst: number;
+  cgst: number;
+  sgst: number;
+  total: number;
+}
+
+export interface GstPurchaseLine {
+  id: string;
+  date: string;
+  invoiceNumber: string;
+  poNumber: string | null;
+  partyName: string;
+  gstin: string | null;
+  stateName: string | null;
+  weightKg: number;
+  taxableValue: number;
+  gstRate: number;
+  gstAmount: number;
+  igst: number;
+  cgst: number;
+  sgst: number;
+  invoiceTotal: number;
+}
+
+export interface GstReport {
+  period: { from: string; to: string; fy: string };
+  company: { name: string; gstin: string | null; stateName: string | null; stateCode: string | null } | null;
+  output: {
+    sales: GstSalesLine[];
+    creditNotes: GstNoteLine[];
+    debitNotes: GstNoteLine[];
+    taxableTotal: number;
+    igstTotal: number;
+    cgstTotal: number;
+    sgstTotal: number;
+    gstTotal: number;
+    cnGstTotal: number;
+    dnGstTotal: number;
+    netOutputTax: number;
+  };
+  input: {
+    purchases: GstPurchaseLine[];
+    taxableTotal: number;
+    igstTotal: number;
+    cgstTotal: number;
+    sgstTotal: number;
+    gstTotal: number;
+  };
+  summary: {
+    outputTax: number;
+    creditNoteTax: number;
+    debitNoteTax: number;
+    netOutputTax: number;
+    inputTaxCredit: number;
+    netPayable: number;
+  };
+}
+
+// --- TDS report -------------------------------------------------------------
+
+export interface TdsEntry {
+  id: string;
+  date: string;
+  deductorName: string;
+  gstin: string | null;
+  pan: string | null;
+  invoiceNumber: string | null;
+  section: string;
+  saleValue: number;
+  tdsRate: number;
+  tdsAmount: number;
+  source: 'RECEIPT' | 'DISPATCH';
+}
+
+export interface TdsDeductorSummary {
+  deductorName: string;
+  gstin: string | null;
+  pan: string | null;
+  entryCount: number;
+  saleValue: number;
+  tdsAmount: number;
+}
+
+export interface TdsReport {
+  period: { from: string; to: string; fy: string };
+  entries: TdsEntry[];
+  byDeductor: TdsDeductorSummary[];
+  summary: {
+    totalSaleValue: number;
+    totalTds: number;
+    entryCount: number;
+    deductorCount: number;
+  };
+}

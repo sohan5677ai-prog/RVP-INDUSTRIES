@@ -163,6 +163,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
   const [dispatchTonnes, setDispatchTonnes] = useState('');
+  const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [extractingKata, setExtractingKata] = useState(false);
   const [transportProvider, setTransportProvider] = useState<'SURYA' | 'KNM' | 'OTHER'>('SURYA');
   const [customRetention, setCustomRetention] = useState('');
@@ -178,6 +179,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setDriverName('');
     setDriverPhone('');
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
+    setDispatchDate(new Date().toISOString().slice(0, 10));
     setTransportProvider('SURYA');
     setCustomRetention('');
   }
@@ -209,6 +211,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (driverName) fd.append('driverName', driverName);
       if (driverPhone) fd.append('driverPhone', driverPhone);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
+      if (dispatchDate) fd.append('dispatchDate', new Date(dispatchDate).toISOString());
       fd.append('transportProvider', transportProvider);
       if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
@@ -939,6 +942,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <p className="text-[11px] text-muted-foreground">Amount held back from lorry freight as transport retention.</p>
               </div>
             )}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Dispatch date</Label>
+              <Input type="date" value={dispatchDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDispatchDate(e.target.value)} />
+              <p className="text-[11px] text-muted-foreground">The date this lorry was actually dispatched.</p>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Tonnage from kata (tonnes)</Label>
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />

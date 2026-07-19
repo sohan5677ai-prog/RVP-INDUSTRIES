@@ -31,6 +31,7 @@ export const dispatchSaleOrderSchema = z.object({
   driverPhone: z.string().optional().nullable(),
   tonnageKg: z.coerce.number().int().positive(),
   internalWeightKg: z.coerce.number().int().positive().optional().nullable(),
+  dispatchDate: z.coerce.date().optional().nullable(),
   transportProvider: z.enum(['SURYA', 'KNM', 'OTHER']).optional().default('SURYA'),
   customRetention: z.coerce.number().nonnegative().optional().nullable(),
 });

@@ -435,6 +435,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         saleOrderId: order.id,
         weightKg,
         internalWeightKg,
+        ...(data.dispatchDate ? { dispatchDate: data.dispatchDate } : {}),
         gstAmount,
         freightCharge,
         status: 'DISPATCHED',

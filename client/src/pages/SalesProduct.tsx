@@ -367,12 +367,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const payMutation = useMutation({
     mutationFn: () => api(`/sale-dispatches/${payDispatch!.dispatch.id}/mark-paid`, {
       method: 'POST',
-      body: JSON.stringify({
+      body: {
         date: new Date(payDate).toISOString(),
         amount: Number(payAmount),
         tdsAmount: Number(payTds) || 0,
         shortageAmount: Number(payShortage) || 0,
-      }),
+      },
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });

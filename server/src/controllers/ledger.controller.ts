@@ -451,7 +451,9 @@ function buildPartyLedger(
         d.invoiceNumber ?? (d.invoiceSeq && d.invoiceFy ? `${d.invoiceSeq}/${d.invoiceFy}` : null);
       txns.push({
         id: `SALE-${d.id}`,
-        date: (d.invoiceDate ?? d.dispatchDate).toISOString(),
+        // Ledger sale date = the day the goods left (dispatch date), not the
+        // invoice date (invoices are often raised days later).
+        date: d.dispatchDate.toISOString(),
         kind: 'SALE',
         particulars: `Sale - ${s.product}`,
         invoiceNumber: invoiceLabel,

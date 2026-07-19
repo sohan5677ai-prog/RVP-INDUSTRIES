@@ -64,7 +64,21 @@ export async function listSaleOrders(req: Request, res: Response) {
     skip: isAll ? undefined : skip,
     take: isAll ? undefined : take,
     orderBy: { saleDate: 'desc' },
-    include: { buyer: true, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
+    include: {
+      buyer: true,
+      broker: true,
+      dispatches: {
+        orderBy: { dispatchDate: 'asc' },
+        // Buyer receipts let the sales page show a shipment as Paid once
+        // cleared (settledByDispatch sums amount + TDS + shortage).
+        include: {
+          receipts: {
+            where: { type: 'BUYER' },
+            select: { id: true, saleDispatchId: true, type: true, amount: true, tdsAmount: true, shortageAmount: true },
+          },
+        },
+      },
+    },
   });
   res.json(orders.map(withFulfilment));
 }
@@ -701,6 +715,12 @@ export async function markDispatchPaid(req: Request, res: Response) {
         data: {
           date: data.date,
           amount: data.amount,
+          // Link the receipt to its shipment and record any buyer-side
+          // deductions on it, so the dispatch reads as fully settled
+          // (settledByDispatch sums amount + TDS + shortage) and flips to Paid.
+          saleDispatchId: dispatch.id,
+          tdsAmount: data.tdsAmount > 0 ? data.tdsAmount : null,
+          shortageAmount: data.shortageAmount > 0 ? data.shortageAmount : null,
           type: 'BUYER',
           partyId: buyer.id,
           description: `Payment for Invoice ${dispatch.invoiceNumber ?? dispatch.id}`,

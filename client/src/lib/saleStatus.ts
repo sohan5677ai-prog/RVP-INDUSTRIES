@@ -30,9 +30,14 @@ function dispatchTotal(d: SaleDispatch, ratePerKg: number): number {
   return Math.round(base + gst);
 }
 
+/** Just the receipt fields needed to tally what a shipment has cleared. Lets
+ *  callers pass either full Receipt rows or the trimmed shape the sales list
+ *  embeds on each dispatch. */
+type SettleReceipt = Pick<Receipt, 'type' | 'saleDispatchId' | 'amount' | 'tdsAmount' | 'shortageAmount'>;
+
 /** Amount cleared against each shipment from its directly-linked buyer receipts
  *  (cash + TDS + shortage all count as clearing, same as Sale Dues FIFO). */
-export function settledByDispatch(receipts: Receipt[] | undefined): Map<string, number> {
+export function settledByDispatch(receipts: SettleReceipt[] | undefined): Map<string, number> {
   const m = new Map<string, number>();
   for (const r of receipts ?? []) {
     if (r.type !== 'BUYER' || !r.saleDispatchId) continue;

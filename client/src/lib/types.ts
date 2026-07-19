@@ -256,6 +256,9 @@ export interface SaleDispatch {
   invoiceFy?: string | null;
   invoiceDate?: string | null;
   createdAt: string;
+  // Buyer receipts linked to this shipment (embedded by the sales list so the
+  // page can show it as Paid once cleared).
+  receipts?: Receipt[];
 
   // E-Invoice (IRN) details
   irn?: string | null;

@@ -6,6 +6,7 @@ import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, 
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
+import { settledByDispatch, isDispatchPaid } from '@/lib/saleStatus';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -141,6 +142,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     enabled: isPappu,
   });
   const marginById = useMemo(() => new Map((margins ?? []).map((m) => [m.orderId, m])), [margins]);
+
+  // Cleared amount per shipment (from its embedded buyer receipts) → drives the
+  // Paid vs Mark Paid action on each delivered dispatch.
+  const settled = useMemo(
+    () => settledByDispatch((orders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.receipts ?? [])),
+    [orders],
+  );
 
   const visible = useMemo(() => (orders ?? []).filter((o) => {
     if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
@@ -376,6 +384,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['receipts'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success('Payment recorded successfully');
       setPayDispatch(null);
@@ -881,9 +890,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                           </Button>
                                         )}
                                         {d.status === 'DELIVERED' && (
-                                          <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openPaymentDialog(d, o)}>
-                                            <IndianRupee className="h-3.5 w-3.5" /> Mark Paid
-                                          </Button>
+                                          isDispatchPaid(d, Number(o.ratePerKg), settled) ? (
+                                            <Badge variant="default"><IndianRupee className="h-3.5 w-3.5" /> Paid</Badge>
+                                          ) : (
+                                            <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openPaymentDialog(d, o)}>
+                                              <IndianRupee className="h-3.5 w-3.5" /> Mark Paid
+                                            </Button>
+                                          )
                                         )}
                                         {d.status === 'DELIVERED' && <Badge variant="success">Delivered</Badge>}
                                         {canUndo(d) && (

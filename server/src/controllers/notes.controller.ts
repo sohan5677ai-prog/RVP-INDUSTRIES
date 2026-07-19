@@ -166,3 +166,70 @@ export function emailNote(kind: Kind) {
     res.json(result);
   };
 }
+
+/**
+ * Shortage amounts already posted to the party ledger (SaleDispatch.creditNoteAmount
+ * from buyer-kata mismatch, or Receipt.shortageAmount entered at payment time) but
+ * with no formal CreditNote document raised yet. Mirrors the same-amount-once rule
+ * used when building the party ledger: a receipt-level shortage on a dispatch takes
+ * priority over the dispatch-level auto amount.
+ */
+export async function listPendingCreditNotes(_req: Request, res: Response) {
+  const dispatches = await prisma.saleDispatch.findMany({
+    where: {
+      OR: [{ creditNoteAmount: { gt: 0 } }, { receipts: { some: { shortageAmount: { gt: 0 } } } }],
+    },
+    include: {
+      saleOrder: { include: { buyer: true } },
+      receipts: true,
+      creditNotes: true,
+    },
+    orderBy: { dispatchDate: 'desc' },
+  });
+
+  const pending = dispatches
+    .filter((d) => d.creditNotes.length === 0)
+    .map((d) => {
+      const receiptShortage = d.receipts.find((r) => Number(r.shortageAmount ?? 0) > 0);
+      if (receiptShortage) {
+        const amount = Number(receiptShortage.shortageAmount);
+        return {
+          saleDispatchId: d.id,
+          invoiceNumber: d.invoiceNumber,
+          date: receiptShortage.date,
+          partyId: d.saleOrder.buyerId,
+          partyName: d.saleOrder.buyer.name,
+          shortageKg: d.shortageKg,
+          taxableValue: amount,
+          gstRate: 0,
+          totalAmount: amount,
+          source: 'RECEIPT' as const,
+        };
+      }
+      const amount = Number(d.creditNoteAmount ?? 0);
+      const gstExempt = d.saleOrder.gstExempt;
+      const shortageKg = d.shortageKg ?? 0;
+      const rate = Number(d.saleOrder.ratePerKg);
+      const taxableValue = round2(shortageKg * rate);
+      const gstRate = gstExempt || taxableValue <= 0 ? 0 : round2(((amount - taxableValue) / taxableValue) * 100);
+      return {
+        saleDispatchId: d.id,
+        invoiceNumber: d.invoiceNumber,
+        date: d.receivedDate ?? d.deliveredDate ?? d.dispatchDate,
+        partyId: d.saleOrder.buyerId,
+        partyName: d.saleOrder.buyer.name,
+        shortageKg: d.shortageKg,
+        taxableValue,
+        gstRate,
+        totalAmount: amount,
+        source: 'DISPATCH' as const,
+      };
+    })
+    .filter((p) => p.totalAmount > 0);
+
+  res.json(pending);
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}

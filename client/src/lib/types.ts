@@ -327,6 +327,22 @@ interface NoteBase {
 export type CreditNote = NoteBase;
 export type DebitNote = NoteBase;
 
+// A shortage already posted to the party ledger (dispatch or receipt level) with
+// no formal CreditNote raised yet — surfaced on the Credit/Debit Notes page so it
+// can be turned into an actual document.
+export interface PendingCreditNote {
+  saleDispatchId: string;
+  invoiceNumber: string | null;
+  date: string;
+  partyId: string;
+  partyName: string;
+  shortageKg: number | null;
+  taxableValue: number;
+  gstRate: number;
+  totalAmount: number;
+  source: 'DISPATCH' | 'RECEIPT';
+}
+
 export type EmailDocumentType = 'INVOICE' | 'EWB' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
 export type EmailStatus = 'SENT' | 'FAILED';
 

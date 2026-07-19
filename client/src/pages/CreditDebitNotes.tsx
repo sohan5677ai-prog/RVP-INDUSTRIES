@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Mail, FileText, FileMinus2 } from 'lucide-react';
+import { Plus, Mail, FileText, FileMinus2, ReceiptText } from 'lucide-react';
 import { api, getErrorMessage, getToken } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
 import { rupees, shortDate } from '@/lib/format';
-import type { CreditNote, DebitNote, Party, SaleOrder } from '@/lib/types';
+import type { CreditNote, DebitNote, Party, SaleOrder, PendingCreditNote } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -106,6 +106,58 @@ function NotesTable({
   );
 }
 
+function PendingShortagesCard({
+  items,
+  isLoading,
+  onRaise,
+}: {
+  items: PendingCreditNote[];
+  isLoading: boolean;
+  onRaise: (item: PendingCreditNote) => void;
+}) {
+  if (!isLoading && items.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="px-4 py-3 border-b">
+        <h3 className="text-sm font-semibold flex items-center gap-1.5"><ReceiptText className="h-4 w-4" /> Recorded Shortages Awaiting a Credit Note</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">Already posted to the party ledger — raise a formal note to send to the buyer.</p>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Invoice</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Party</TableHead>
+            <TableHead>Shortage</TableHead>
+            <TableHead className="text-right">Amount</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading && (
+            <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+          )}
+          {items.map((item) => (
+            <TableRow key={item.saleDispatchId}>
+              <TableCell className="font-mono text-sm">{item.invoiceNumber ?? '-'}</TableCell>
+              <TableCell>{shortDate(item.date)}</TableCell>
+              <TableCell className="font-medium">{item.partyName}</TableCell>
+              <TableCell className="text-muted-foreground">{item.shortageKg != null ? `${item.shortageKg} kg` : '-'}</TableCell>
+              <TableCell className="text-right font-semibold">{rupees(item.totalAmount)}</TableCell>
+              <TableCell className="text-right">
+                <Button size="sm" onClick={() => onRaise(item)}>
+                  <Plus className="h-3.5 w-3.5 mr-1.5" /> Raise Note
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export default function CreditDebitNotes() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<NoteKind>('CREDIT');
@@ -123,6 +175,10 @@ export default function CreditDebitNotes() {
   const { data: saleOrders } = useQuery({
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+  });
+  const { data: pendingCreditNotes, isLoading: loadingPending } = useQuery({
+    queryKey: ['credit-notes-pending'],
+    queryFn: () => api<PendingCreditNote[]>('/credit-notes/pending'),
   });
 
   const buyers = parties?.filter((p) => p.type === 'BUYER' || p.type === 'BOTH') ?? [];
@@ -166,6 +222,7 @@ export default function CreditDebitNotes() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [tab === 'CREDIT' ? 'credit-notes' : 'debit-notes'] });
+      if (tab === 'CREDIT') qc.invalidateQueries({ queryKey: ['credit-notes-pending'] });
       toast.success(`${tab === 'CREDIT' ? 'Credit' : 'Debit'} note created`);
       setOpen(false);
       resetForm();
@@ -182,6 +239,17 @@ export default function CreditDebitNotes() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
     onSettled: () => setSendingId(null),
   });
+
+  function raiseNote(item: PendingCreditNote) {
+    setTab('CREDIT');
+    setPartyId(item.partyId);
+    setSaleDispatchId(item.saleDispatchId);
+    setReason(`Shortage of ${item.shortageKg ?? 0} kg${item.invoiceNumber ? ` on invoice ${item.invoiceNumber}` : ''}`);
+    setTaxableValue(String(item.taxableValue));
+    setGstRate(String(item.gstRate));
+    setNoteDate(new Date().toISOString().slice(0, 10));
+    setOpen(true);
+  }
 
   const gstAmount = (Number(taxableValue) || 0) * (Number(gstRate) || 0) / 100;
   const totalAmount = (Number(taxableValue) || 0) + gstAmount;
@@ -214,7 +282,12 @@ export default function CreditDebitNotes() {
           <TabsTrigger value="DEBIT">Debit Notes</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="CREDIT">
+        <TabsContent value="CREDIT" className="space-y-4">
+          <PendingShortagesCard
+            items={pendingCreditNotes ?? []}
+            isLoading={loadingPending}
+            onRaise={raiseNote}
+          />
           <NotesTable
             kind="CREDIT"
             notes={creditNotes ?? []}

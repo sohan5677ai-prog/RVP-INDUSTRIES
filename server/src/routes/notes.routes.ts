@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { listNotes, getNote, createNote, getNotePdf, emailNote } from '../controllers/notes.controller.js';
+import { listNotes, getNote, createNote, getNotePdf, emailNote, listPendingCreditNotes } from '../controllers/notes.controller.js';
 
 const router = Router();
 
 router.get('/credit-notes', asyncHandler(listNotes('CREDIT')));
+router.get('/credit-notes/pending', asyncHandler(listPendingCreditNotes));
 router.get('/credit-notes/:id', asyncHandler(getNote('CREDIT')));
 router.post('/credit-notes', asyncHandler(createNote('CREDIT')));
 router.get('/credit-notes/:id/pdf', asyncHandler(getNotePdf('CREDIT')));

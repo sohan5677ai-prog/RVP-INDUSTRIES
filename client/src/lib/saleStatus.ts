@@ -24,7 +24,7 @@ export function saleStatusLabel(s: SaleDisplayStatus): string {
  *  has no gstAmount. Adding a 5% GST fallback here (as before) made a dispatch that
  *  Sale Dues already settled at base look 5% short, so it wrongly kept showing an
  *  unpaid "Mark Paid" action on the product sales pages. */
-function dispatchTotal(d: SaleDispatch, ratePerKg: number): number {
+export function dispatchTotal(d: SaleDispatch, ratePerKg: number): number {
   const base = d.weightKg * ratePerKg;
   const gst = Number(d.gstAmount) || 0;
   return Math.round(base + gst);
@@ -47,10 +47,13 @@ export function settledByDispatch(receipts: SettleReceipt[] | undefined): Map<st
   return m;
 }
 
-/** A shipment is Paid once its receipts cover its full invoice value. */
+/** A shipment is Paid once its receipts cover its full invoice value.
+ *  Whole-rupee tolerance: bills round to whole rupees while receipt TDS/shortage
+ *  can carry paise, so a sub-₹1 remainder is rounding noise — treat as settled.
+ *  Shared by the Pappu/Husk sales pages AND the Sale Dues page so both agree. */
 export function isDispatchPaid(d: SaleDispatch, ratePerKg: number, settled: Map<string, number>): boolean {
   const got = settled.get(d.id) ?? 0;
-  return got > 0 && got >= dispatchTotal(d, ratePerKg) - 0.01;
+  return got > 0 && got >= dispatchTotal(d, ratePerKg) - 1;
 }
 
 /** Order status for display: PAID once it is fully shipped and every shipment is

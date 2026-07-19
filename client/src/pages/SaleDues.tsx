@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
+import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -143,120 +144,72 @@ export default function SaleDuesPage() {
 
   const isLoading = loadingParties || loadingSales || loadingReceipts;
 
-  // FIFO allocation is O(buyers × orders × dispatches × receipts) and must NOT
-  // re-run on every render — otherwise typing in the receipt dialog (which only
-  // touches unrelated state) recomputes the whole thing per keystroke and lags.
-  // Keyed strictly on the source data, so it recomputes only when data changes.
+  // Settlement is invoice-based ONLY — no FIFO, no on-account spillover. Each
+  // shipment is cleared solely by the buyer receipts stamped with its own
+  // saleDispatchId, and the Paid decision runs through the SAME shared helpers
+  // (settledByDispatch / isDispatchPaid) the Pappu/Husk sales pages use, so the
+  // "Mark Paid" button and this page can never disagree. A general receipt with
+  // no saleDispatchId clears nothing here. Keyed strictly on the source data so
+  // it recomputes only when data changes (not on every keystroke in the dialog).
   const outstandingInvoices = useMemo<OutstandingInvoice[]>(() => {
   const buyers = parties?.filter((p) => p.type === 'BUYER') ?? [];
-
   const rows: OutstandingInvoice[] = [];
+  const today = new Date();
 
-  // FIFO allocation runs across ALL of a buyer's products (receipts aren't tied to
-  // one product) so remaining-due figures stay correct; the product filter below
-  // only slices the already-allocated results for display.
+  // Single source of truth for "cleared per dispatch", identical to the sales pages.
+  const settled = settledByDispatch(receipts);
+
   buyers.forEach((b) => {
+    const buyerReceipts = receipts?.filter((r) => r.type === 'BUYER' && r.partyId === b.id) ?? [];
     const shipments = (saleOrders ?? [])
       .filter((o) => o.buyerId === b.id)
-      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })))
-      .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
-      .map(({ d, o }) => {
-        const base = Number(d.weightKg) * Number(o.ratePerKg);
-        const gst = Number(d.gstAmount) || 0;
-        const total = Math.round(base + gst);
-        return {
-          d,
-          o,
-          billAmount: total,
-          totalAmount: total,
-          remainingAmount: total,
-          cashReceived: 0,
-          appliedReceipts: [] as OutstandingInvoice['appliedReceipts'],
-          deletableReceiptIds: [] as string[],
-        };
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })));
+
+    shipments.forEach(({ d, o }) => {
+      const rate = Number(o.ratePerKg);
+      const total = dispatchTotal(d, rate);
+      const cleared = settled.get(d.id) ?? 0;
+
+      // Per-receipt detail (for the expandable panel, cash summary, and Undo).
+      const linked = buyerReceipts.filter((r) => r.saleDispatchId === d.id);
+      let cashReceived = 0;
+      const appliedReceipts: OutstandingInvoice['appliedReceipts'] = [];
+      const deletableReceiptIds: string[] = [];
+      linked.forEach((r) => {
+        const cash = Number(r.amount);
+        const clearing = cash + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
+        cashReceived += cash;
+        deletableReceiptIds.push(r.id);
+        appliedReceipts.push({ date: r.date, amount: clearing, isTdsOrShortage: cash === 0 });
       });
 
-    // FIFO: count cash + TDS + shortage all as clearing amounts
-    const buyerReceipts = receipts?.filter((r) => r.type === 'BUYER' && r.partyId === b.id)
-      .sort((a, z) => new Date(a.date).getTime() - new Date(z.date).getTime()) ?? [];
+      const paid = isDispatchPaid(d, rate, settled);
+      const remaining = paid ? 0 : Math.max(0, total - cleared);
+      const status = paid ? 'Paid' : cleared > 0.01 ? 'Partially Paid' : 'Unpaid';
 
-    // Apply direct receipts first
-    shipments.forEach((s) => {
-      const directReceipts = buyerReceipts.filter((r) => r.saleDispatchId === s.d.id);
-      directReceipts.forEach((receipt) => {
-        s.deletableReceiptIds.push(receipt.id);
-        const available = Number(receipt.amount) + Number(receipt.tdsAmount ?? 0) + Number(receipt.shortageAmount ?? 0);
-        if (s.remainingAmount > 0 && available > 0) {
-          const applied = Math.min(available, s.remainingAmount);
-          s.remainingAmount -= applied;
-          s.cashReceived += applied * (Number(receipt.amount) / available);
-          s.appliedReceipts.push({
-            date: receipt.date,
-            amount: applied,
-            isTdsOrShortage: Number(receipt.amount) === 0 // If it was pure TDS/Shortage
-          });
-        }
-      });
-    });
-
-    let availableReceipts = buyerReceipts
-      .filter((r) => !r.saleDispatchId)
-      .map(r => ({
-        ...r,
-        available: Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0),
-      }));
-
-    shipments.forEach((s) => {
-      for (const receipt of availableReceipts) {
-        if (s.remainingAmount <= 0) break;
-        if (receipt.available > 0) {
-          const applied = Math.min(receipt.available, s.remainingAmount);
-          const cashPortion = applied * (Number(receipt.amount) / receipt.available);
-          receipt.available -= applied;
-          s.remainingAmount -= applied;
-          s.cashReceived += cashPortion;
-
-          s.appliedReceipts.push({
-            date: receipt.date,
-            amount: applied,
-            isTdsOrShortage: Number(receipt.amount) === 0 // If it was pure TDS/Shortage
-          });
-        }
-      }
-    });
-
-    const today = new Date();
-    shipments.forEach((s) => {
-      let status = 'Unpaid';
-      if (s.remainingAmount <= 0.01) status = 'Paid';
-      else if (s.remainingAmount < s.totalAmount - 0.01) status = 'Partially Paid';
-
-      const start = s.d.deliveredDate || s.d.dispatchDate;
-      const limitDays = s.o.dueDays || 0;
+      const start = d.deliveredDate || d.dispatchDate;
       const dueDate = new Date(start);
-      dueDate.setDate(dueDate.getDate() + limitDays);
-
-      const diffTime = today.getTime() - dueDate.getTime();
-      const dueDaysAfter = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+      dueDate.setDate(dueDate.getDate() + (o.dueDays || 0));
+      const dueDaysAfter = Math.max(0, Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
 
       rows.push({
-        id: s.d.id,
+        id: d.id,
         partyId: b.id,
-        product: s.o.product,
-        brokerName: s.o.broker?.name ?? null,
+        product: o.product,
+        brokerName: o.broker?.name ?? null,
         dueDate,
         partyName: b.name,
-        invoiceNumber: s.d.invoiceNumber,
-        billDate: new Date(s.d.dispatchDate),
-        billAmount: s.billAmount,
+        invoiceNumber: d.invoiceNumber,
+        billDate: new Date(d.dispatchDate),
+        billAmount: total,
         discount: 0,
-        netAmount: s.remainingAmount,
-        totalAmount: s.totalAmount,
-        cashReceived: s.cashReceived,
+        netAmount: remaining,
+        totalAmount: total,
+        cashReceived,
         dueDaysAfter,
         status,
-        appliedReceipts: s.appliedReceipts,
-        deletableReceiptIds: s.deletableReceiptIds,
+        appliedReceipts,
+        deletableReceiptIds,
       });
     });
   });

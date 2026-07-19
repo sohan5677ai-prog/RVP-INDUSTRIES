@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2 } from 'lucide-react';
@@ -7,7 +7,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { Receipt, Party, ReceiptType } from '@/lib/types';
+import type { Receipt, Party, ReceiptType, SaleOrder } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
@@ -58,6 +58,19 @@ const RECEIPT_TYPES: { value: ReceiptType; label: string }[] = [
 // Types that settle a specific buyer (they have their own picker below).
 // Everything else is a direct-cash income that uses the free-text payer.
 const COLLECTION_TYPES: ReceiptType[] = ['BUYER'];
+
+// Sentinel for the "no specific invoice" option in the invoice picker (shadcn
+// Select can't use an empty-string value).
+const NO_INVOICE = '__none__';
+
+/** One of a buyer's outstanding invoiced shipments, for the receipt picker. */
+interface BuyerInvoice {
+  id: string;            // saleDispatch id
+  invoiceNumber: string | null;
+  billAmount: number;    // billed total (base + GST), whole rupees
+  remaining: number;     // still due after prior receipts (FIFO), whole rupees
+  shortageStored: number; // ₹ shortage recorded from the buyer's kata at delivery
+}
 
 // Receipts created from a detail page (currently only Gunny Bag sales).
 // Read-only here — delete them on their own page so both sides stay in sync.
@@ -121,6 +134,67 @@ export default function ReceiptsPage() {
   const [payer, setPayer] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
+  const [saleDispatchId, setSaleDispatchId] = useState('');
+  const [shortage, setShortage] = useState('');
+
+  // Outstanding-invoice data — only pulled while the dialog is open, so the
+  // register itself stays fast. Sale orders carry the buyer-kata shortage
+  // (creditNoteAmount) recorded at delivery; receipts let us net off prior
+  // collections so fully-paid invoices drop out of the picker.
+  const { data: allSaleOrders } = useQuery({
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+    enabled: open,
+  });
+  const { data: allReceipts } = useQuery({
+    queryKey: ['receipts', { all: true }],
+    queryFn: () => api<Receipt[]>('/receipts?all=true'),
+    enabled: open,
+  });
+
+  // FIFO outstanding for the selected buyer, mirroring the Sale Dues page:
+  // direct (invoice-tagged) receipts settle their own shipment first, then any
+  // unallocated buyer receipts flow oldest-invoice-first. TDS + shortage count
+  // as clearing amounts, same as there.
+  const buyerInvoices = useMemo<BuyerInvoice[]>(() => {
+    if (type !== 'BUYER' || !partyId) return [];
+    const shipments = (allSaleOrders ?? [])
+      .filter((o) => o.buyerId === partyId)
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })))
+      .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
+      .map(({ d, o }) => {
+        const total = Math.round(Number(d.weightKg) * Number(o.ratePerKg) + (Number(d.gstAmount) || 0));
+        return { d, remaining: total, billAmount: total };
+      });
+
+    const buyerReceipts = (allReceipts ?? [])
+      .filter((r) => r.type === 'BUYER' && r.partyId === partyId)
+      .sort((a, z) => new Date(a.date).getTime() - new Date(z.date).getTime());
+    const clearing = (r: Receipt) => Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
+
+    shipments.forEach((s) => {
+      buyerReceipts.filter((r) => r.saleDispatchId === s.d.id).forEach((r) => {
+        if (s.remaining > 0) s.remaining -= Math.min(clearing(r), s.remaining);
+      });
+    });
+    const pool = buyerReceipts.filter((r) => !r.saleDispatchId).map((r) => ({ available: clearing(r) }));
+    shipments.forEach((s) => {
+      for (const r of pool) {
+        if (s.remaining <= 0) break;
+        if (r.available > 0) { const ap = Math.min(r.available, s.remaining); r.available -= ap; s.remaining -= ap; }
+      }
+    });
+
+    return shipments
+      .filter((s) => s.remaining > 0.5)
+      .map((s) => ({
+        id: s.d.id,
+        invoiceNumber: s.d.invoiceNumber,
+        billAmount: s.billAmount,
+        remaining: Math.round(s.remaining),
+        shortageStored: Math.round(Number(s.d.creditNoteAmount) || 0),
+      }));
+  }, [type, partyId, allSaleOrders, allReceipts]);
 
   function resetForm() {
     setDate(new Date().toISOString().slice(0, 10));
@@ -130,6 +204,20 @@ export default function ReceiptsPage() {
     setPayer('');
     setReference('');
     setDescription('');
+    setSaleDispatchId('');
+    setShortage('');
+  }
+
+  /** Pick an invoice to settle → tie the receipt to it and auto-fill the
+   *  recorded kata shortage + the net cash still expected. */
+  function selectInvoice(v: string) {
+    if (v === NO_INVOICE) { setSaleDispatchId(''); setShortage(''); return; }
+    setSaleDispatchId(v);
+    const inv = buyerInvoices.find((i) => i.id === v);
+    if (inv) {
+      setShortage(inv.shortageStored > 0 ? String(inv.shortageStored) : '');
+      setAmount(String(Math.max(0, inv.remaining - inv.shortageStored)));
+    }
   }
 
   /** Pre-fill the form from a receipt screenshot read by the server OCR. */
@@ -169,6 +257,8 @@ export default function ReceiptsPage() {
           amount: Number(amount) || 0,
           type,
           partyId: type === 'BUYER' ? partyId || null : null,
+          saleDispatchId: type === 'BUYER' && saleDispatchId ? saleDispatchId : null,
+          shortageAmount: type === 'BUYER' ? (Number(shortage) || 0) : 0,
           payer: !COLLECTION_TYPES.includes(type) ? payer || null : null,
           reference: reference || null,
           description: description || null,
@@ -178,6 +268,7 @@ export default function ReceiptsPage() {
       qc.invalidateQueries({ queryKey: ['receipts'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success('Receipt recorded successfully');
       setOpen(false);
       resetForm();
@@ -314,7 +405,7 @@ export default function ReceiptsPage() {
 
             <div className="space-y-2">
               <Label>Receipt Type</Label>
-              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); }}>
+              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setSaleDispatchId(''); setShortage(''); }}>
                 <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
                   {RECEIPT_TYPE_GROUPS.map((g) => (
@@ -332,7 +423,7 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label>Buyer</Label>
-                <Select value={partyId} onValueChange={setPartyId}>
+                <Select value={partyId} onValueChange={(v) => { setPartyId(v); setSaleDispatchId(''); setShortage(''); }}>
                   <SelectTrigger><SelectValue placeholder="Select buyer" /></SelectTrigger>
                   <SelectContent>
                     {buyers.map((b) => (
@@ -340,6 +431,35 @@ export default function ReceiptsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {type === 'BUYER' && partyId && (
+              <div className="space-y-2">
+                <Label>Against Invoice (optional)</Label>
+                <Select value={saleDispatchId || NO_INVOICE} onValueChange={selectInvoice}>
+                  <SelectTrigger><SelectValue placeholder="Unallocated" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_INVOICE}>Unallocated (no specific invoice)</SelectItem>
+                    {buyerInvoices.map((inv) => (
+                      <SelectItem key={inv.id} value={inv.id}>
+                        {inv.invoiceNumber ?? 'No invoice'} · due {rupees(inv.remaining)}
+                        {inv.shortageStored > 0 ? ` · shortage ${rupees(inv.shortageStored)}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {buyerInvoices.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground">No outstanding invoices for this buyer.</p>
+                )}
+              </div>
+            )}
+
+            {type === 'BUYER' && (
+              <div className="space-y-2">
+                <Label htmlFor="shortage">Shortage / Kata Deduction (₹)</Label>
+                <Input id="shortage" type="number" step="1" value={shortage} onChange={(e) => setShortage(e.target.value)} placeholder="0" />
+                <p className="text-[10px] text-muted-foreground">Auto-filled from the buyer's kata shortage recorded at delivery. Adjust if needed.</p>
               </div>
             )}
 

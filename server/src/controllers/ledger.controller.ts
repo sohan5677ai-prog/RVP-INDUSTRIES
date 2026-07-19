@@ -296,7 +296,7 @@ export async function listSilos(req: Request, res: Response) {
 // (payable to a supplier).
 // ---------------------------------------------------------------------------
 
-type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE';
+type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE';
 
 interface LedgerTxn {
   id: string;
@@ -427,9 +427,21 @@ function buildPartyLedger(
     });
   }
 
+  // Shortage & TDS can be captured either on the dispatch (buyer-kata at
+  // delivery / Mark-as-Paid) or on the receipt itself (Sale Dues / Receipts
+  // page). We surface each in the ledger exactly once: if a receipt tied to a
+  // dispatch already carries the deduction, we show that and suppress the
+  // dispatch-level line to avoid double-counting the same amount.
+  const linkedShortageDispatchIds = new Set(
+    receipts.filter((r) => r.partyId === partyId && r.saleDispatchId && Number(r.shortageAmount ?? 0) > 0).map((r) => r.saleDispatchId as string)
+  );
+  const linkedTdsDispatchIds = new Set(
+    receipts.filter((r) => r.partyId === partyId && r.saleDispatchId && Number(r.tdsAmount ?? 0) > 0).map((r) => r.saleDispatchId as string)
+  );
+
   // 2. Sales - buyer takes goods → they owe us (DEBIT). Each dispatch (lorry) is a
   //    billed shipment; an order is only a receivable once dispatched. Credit note
-  //    (delivery shortage) reduces it.
+  //    (delivery shortage) and TDS deducted by the buyer both reduce it.
   for (const s of sales.filter((x) => x.buyerId === partyId)) {
     const rate = Number(s.ratePerKg);
     for (const d of s.dispatches) {
@@ -456,7 +468,7 @@ function buildPartyLedger(
       });
 
       const cn = Number(d.creditNoteAmount ?? 0);
-      if (cn > 0) {
+      if (cn > 0 && !linkedShortageDispatchIds.has(d.id)) {
         txns.push({
           id: `CN-${d.id}`,
           date: (d.receivedDate ?? d.deliveredDate ?? d.dispatchDate).toISOString(),
@@ -472,6 +484,27 @@ function buildPartyLedger(
           product: s.product,
           debit: 0,
           credit: round2(cn),
+          status: 'POSTED',
+        });
+      }
+
+      const tds = Number(d.tdsAmount ?? 0);
+      if (tds > 0 && !linkedTdsDispatchIds.has(d.id)) {
+        txns.push({
+          id: `TDS-${d.id}`,
+          date: (d.receivedDate ?? d.deliveredDate ?? d.dispatchDate).toISOString(),
+          kind: 'TDS',
+          particulars: 'TDS deducted by buyer',
+          invoiceNumber: invoiceLabel,
+          vehicleNumber: d.vehicleNumber,
+          reference: s.destination,
+          utr: null,
+          transferredDate: null,
+          weightKg: null,
+          ratePerKg: null,
+          product: s.product,
+          debit: 0,
+          credit: round2(tds),
           status: 'POSTED',
         });
       }
@@ -500,6 +533,8 @@ function buildPartyLedger(
   }
 
   // 4. Receipts we collected from the party (as a buyer) → CREDIT (clears A/R).
+  //    A receipt can also carry a TDS and/or shortage deduction the buyer took
+  //    off the invoice; each is its own credit line so the A/R clears in full.
   for (const r of receipts.filter((x) => x.partyId === partyId)) {
     txns.push({
       id: `REC-${r.id}`,
@@ -518,6 +553,48 @@ function buildPartyLedger(
       credit: round2(Number(r.amount)),
       status: 'RECEIVED',
     });
+
+    const rTds = Number(r.tdsAmount ?? 0);
+    if (rTds > 0) {
+      txns.push({
+        id: `REC-TDS-${r.id}`,
+        date: r.date.toISOString(),
+        kind: 'TDS',
+        particulars: 'TDS deducted by buyer',
+        invoiceNumber: null,
+        vehicleNumber: null,
+        reference: r.reference,
+        utr: null,
+        transferredDate: r.date.toISOString(),
+        weightKg: null,
+        ratePerKg: null,
+        product: null,
+        debit: 0,
+        credit: round2(rTds),
+        status: 'POSTED',
+      });
+    }
+
+    const rShort = Number(r.shortageAmount ?? 0);
+    if (rShort > 0) {
+      txns.push({
+        id: `REC-SH-${r.id}`,
+        date: r.date.toISOString(),
+        kind: 'SHORTAGE',
+        particulars: 'Shortage / kata deduction',
+        invoiceNumber: null,
+        vehicleNumber: null,
+        reference: r.reference,
+        utr: null,
+        transferredDate: r.date.toISOString(),
+        weightKg: null,
+        ratePerKg: null,
+        product: null,
+        debit: 0,
+        credit: round2(rShort),
+        status: 'POSTED',
+      });
+    }
   }
 
   // Chronological order, then a running balance (Dr positive / Cr negative).
@@ -583,11 +660,15 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     // ties exactly to the per-transaction statement in getPartyLedger/buildPartyLedger.
     // (Summing raw paise and rounding once diverges by a rupee or two, which showed
     // up as a party reading e.g. ₹1 DR here while the statement said "Settled".)
-    prisma.$queryRaw<{partyId: string, saleTotal: number, lastTxnDate: Date, dispatchCount: bigint, cnTotal: number}[]>`
+    // cnTotal / tdsTotal exclude any dispatch whose shortage/TDS is already
+    // carried on a linked receipt, so the balance ties to buildPartyLedger
+    // (which suppresses the dispatch-level line in that case).
+    prisma.$queryRaw<{partyId: string, saleTotal: number, lastTxnDate: Date, dispatchCount: bigint, cnTotal: number, tdsTotal: number}[]>`
       SELECT
         so."buyerId" as "partyId",
         SUM(ROUND(sd."weightKg" * so."ratePerKg") + ROUND(sd."gstAmount")) as "saleTotal",
-        SUM(ROUND(sd."creditNoteAmount")) as "cnTotal",
+        SUM(ROUND(sd."creditNoteAmount") * (CASE WHEN EXISTS (SELECT 1 FROM "Receipt" r WHERE r."saleDispatchId" = sd.id AND COALESCE(r."shortageAmount", 0) > 0) THEN 0 ELSE 1 END)) as "cnTotal",
+        SUM(ROUND(COALESCE(sd."tdsAmount", 0)) * (CASE WHEN EXISTS (SELECT 1 FROM "Receipt" r WHERE r."saleDispatchId" = sd.id AND COALESCE(r."tdsAmount", 0) > 0) THEN 0 ELSE 1 END)) as "tdsTotal",
         MAX(COALESCE(sd."invoiceDate", sd."dispatchDate")) as "lastTxnDate",
         COUNT(sd.id) as "dispatchCount"
       FROM "SaleOrder" so
@@ -621,8 +702,12 @@ export async function listPartyLedgers(_req: Request, res: Response) {
       SELECT "partyId", SUM(ROUND("amount")) as total, MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
       FROM "Payment" WHERE "partyId" IS NOT NULL GROUP BY "partyId"
     `,
-    prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
-      SELECT "partyId", SUM(ROUND("amount")) as total, MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
+    prisma.$queryRaw<{partyId: string, total: number, tdsTotal: number, shortageTotal: number, lastTxnDate: Date, cnt: number}[]>`
+      SELECT "partyId",
+        SUM(ROUND("amount")) as total,
+        SUM(ROUND(COALESCE("tdsAmount", 0))) as "tdsTotal",
+        SUM(ROUND(COALESCE("shortageAmount", 0))) as "shortageTotal",
+        MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
       FROM "Receipt" WHERE "partyId" IS NOT NULL GROUP BY "partyId"
     `,
     prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
@@ -669,9 +754,10 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     applyDate(agg.partyId, agg.lastTxnDate);
     const amt = Number(agg.saleTotal || 0);
     const cnAmt = Number(agg.cnTotal || 0);
+    const tdsAmt = Number(agg.tdsTotal || 0);
     s.saleTotal += amt;
     s.totalDebit += amt;
-    s.totalCredit += cnAmt;
+    s.totalCredit += cnAmt + tdsAmt;
     s.transactionCount += Number(agg.dispatchCount);
   }
   for (const agg of payments) {
@@ -690,8 +776,10 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     if (!s) continue;
     applyDate(agg.partyId, agg.lastTxnDate);
     const amt = Number(agg.total || 0);
+    const tdsAmt = Number(agg.tdsTotal || 0);
+    const shortageAmt = Number(agg.shortageTotal || 0);
     s.receivedTotal += amt;
-    s.totalCredit += amt;
+    s.totalCredit += amt + tdsAmt + shortageAmt;
     s.transactionCount += Number(agg.cnt);
   }
   for (const agg of dustPurchases) {

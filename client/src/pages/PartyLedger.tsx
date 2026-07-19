@@ -28,6 +28,8 @@ const KIND_META: Record<LedgerKind, { label: string; cls: string }> = {
   PAYMENT: { label: 'Payment', cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' },
   RECEIPT: { label: 'Receipt', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' },
   CREDIT_NOTE: { label: 'Credit Note', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
+  TDS: { label: 'TDS', cls: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20' },
+  SHORTAGE: { label: 'Shortage', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
 };
 
 const TYPE_LABEL: Record<string, string> = { SUPPLIER: 'Supplier', BUYER: 'Buyer', BOTH: 'Supplier & Buyer' };
@@ -225,7 +227,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
 
   const filtered = useMemo(() => {
     let t = data?.transactions ?? [];
-    if (kind !== 'ALL') t = t.filter((x) => x.kind === kind || (kind === 'RECEIPT' && x.kind === 'CREDIT_NOTE'));
+    if (kind !== 'ALL') t = t.filter((x) => x.kind === kind || (kind === 'RECEIPT' && (x.kind === 'CREDIT_NOTE' || x.kind === 'TDS' || x.kind === 'SHORTAGE')));
     if (from) t = t.filter((x) => x.date >= from);
     if (to) t = t.filter((x) => x.date <= to + 'T23:59:59');
     const term = q.trim().toLowerCase();

@@ -272,11 +272,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [deliverDispatch, setDeliverDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
   const [deliverKataFile, setDeliverKataFile] = useState<File | null>(null);
   const [buyerKataTonnes, setBuyerKataTonnes] = useState('');
+  const [deliverDate, setDeliverDate] = useState(new Date().toISOString().slice(0, 10));
 
   function openDeliver(dispatch: SaleDispatch, order: SaleOrder) {
     setDeliverDispatch({ dispatch, order });
     setDeliverKataFile(null);
     setBuyerKataTonnes(String(dispatch.weightKg / 1000));
+    setDeliverDate(new Date().toISOString().slice(0, 10));
   }
 
   const buyerKataKg = Math.round((Number(buyerKataTonnes) || 0) * 1000);
@@ -288,6 +290,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       const fd = new FormData();
       if (deliverKataFile) fd.append('kata', deliverKataFile);
       if (buyerKataKg > 0) fd.append('buyerKataKg', String(buyerKataKg));
+      if (deliverDate) fd.append('deliveredDate', new Date(deliverDate).toISOString());
       return api(`/sale-dispatches/${deliverDispatch!.dispatch.id}/deliver`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -500,10 +503,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || !!fromDate || !!toDate;
 
   // ── Metrics (for Husk) ──────────────────────────────────────────────────
+  // Revenue figures are shown GST-inclusive — the amount the buyer actually
+  // pays. GST-exempt orders carry no GST. Weighted-avg price stays the ex-GST
+  // ₹/kg rate.
+  const gstFactor = (o: SaleOrder) => (o.gstExempt ? 1 : 1 + GST_RATE);
   const totalSoldKg = visible.reduce((sum, o) => sum + o.tonnageKg, 0);
-  const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
-  const wacPrice = totalSoldKg > 0 ? totalRevenue / totalSoldKg : 0;
-  const dispatchedRevenue = visible.reduce((sum, o) => sum + (dispatchedKgOf(o) * Number(o.ratePerKg)), 0);
+  const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg) * gstFactor(o)), 0);
+  const baseRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
+  const wacPrice = totalSoldKg > 0 ? baseRevenue / totalSoldKg : 0;
+  const dispatchedRevenue = visible.reduce((sum, o) => sum + (dispatchedKgOf(o) * Number(o.ratePerKg) * gstFactor(o)), 0);
   const pendingRevenue = totalRevenue - dispatchedRevenue;
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visible, 50);
   const realizationPct = totalRevenue > 0 ? (dispatchedRevenue / totalRevenue) * 100 : 0;
@@ -518,7 +526,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     { header: 'Dispatched (t)', value: (o) => toTonnes(dispatchedKgOf(o)).toFixed(2), excel: (o) => toTonnes(dispatchedKgOf(o)), numFmt: '#,##0.00', align: 'right' },
     { header: 'Remaining (t)', value: (o) => toTonnes(remainingKgOf(o)).toFixed(2), excel: (o) => toTonnes(remainingKgOf(o)), numFmt: '#,##0.00', align: 'right' },
     { header: 'Price/kg', value: (o) => rupees(o.ratePerKg), excel: (o) => Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
-    { header: 'Revenue', value: (o) => rupees(o.tonnageKg * Number(o.ratePerKg)), excel: (o) => o.tonnageKg * Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Revenue (incl. GST)', value: (o) => rupees(o.tonnageKg * Number(o.ratePerKg) * gstFactor(o)), excel: (o) => o.tonnageKg * Number(o.ratePerKg) * gstFactor(o), numFmt: '#,##0.00', align: 'right' },
   ];
 
   return (
@@ -560,7 +568,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-sky-600">{rupees(totalRevenue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Total gross revenue</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Total revenue · incl. GST</p>
           </CardContent>
         </Card>
         <Card>
@@ -570,7 +578,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-rose-600">{rupees(pendingRevenue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">{realizationPct.toFixed(0)}% revenue realized</p>
+            <p className="text-[10px] text-muted-foreground mt-1">{realizationPct.toFixed(0)}% realized · incl. GST</p>
           </CardContent>
         </Card>
       </div>
@@ -1013,7 +1021,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           <DialogHeader><DialogTitle>Mark as Delivered - {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Confirm the buyer received this shipment. Enter the buyer's kata weight to auto-calculate any shortage &amp; credit note. The delivered date is set to today and the payment due date is calculated from it.
+              Confirm the buyer received this shipment. Enter the buyer's kata weight to auto-calculate any shortage &amp; credit note. The payment due date is calculated from the delivered date below.
             </p>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -1024,6 +1032,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <Label className="text-xs">Invoice Rate</Label>
                 <div className="text-sm font-medium">{deliverDispatch ? rupees(deliverDispatch.order.ratePerKg) : 0}/kg + 5% GST</div>
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Delivered date</Label>
+              <Input type="date" value={deliverDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDeliverDate(e.target.value)} />
+              <p className="text-[11px] text-muted-foreground">The date the buyer received it. Payment due date counts from here.</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Buyer's Kata Weight (tonnes)</Label>

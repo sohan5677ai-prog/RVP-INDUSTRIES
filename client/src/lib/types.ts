@@ -617,7 +617,7 @@ export interface Receipt {
 
 // --- Party Ledger -----------------------------------------------------------
 
-export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE';
+export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE';
 export type BalanceType = 'DR' | 'CR';
 export type BunkerPlace = 'A' | 'B';
 

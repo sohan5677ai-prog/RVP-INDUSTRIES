@@ -30,6 +30,7 @@ interface BulkRow {
   product: string;
   lorryNo: string;
   invoiceNo: string;
+  gstExempt: boolean;
   status: 'pending' | 'success' | 'error';
   errorMsg: string;
 }
@@ -57,6 +58,7 @@ function emptyRow(): BulkRow {
     product: 'PAPPU',
     lorryNo: '',
     invoiceNo: '',
+    gstExempt: false,
     status: 'pending',
     errorMsg: '',
   };
@@ -124,6 +126,7 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
         product: r.product ?? 'PAPPU',
         lorryNo: r.lorryNo ?? '',
         invoiceNo: r.invoiceNo ?? '',
+        gstExempt: r.gstExempt ?? false,
         status: 'pending',
         errorMsg: '',
       }));
@@ -237,6 +240,7 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
               ratePerKg: parseFloat(row.price),
               marginOverride: false,
               brokerageRatePerKg: 0,
+              gstExempt: row.gstExempt,
             }),
           });
         }
@@ -384,6 +388,18 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
                       {type === 'po' && <th className="px-2 py-2 text-left font-medium w-28">Price Type</th>}
                       {type === 'sale' && <th className="px-2 py-2 text-left font-medium w-24">Product</th>}
                       {type === 'sale' && <th className="px-2 py-2 text-left font-medium w-28">Invoice</th>}
+                      {type === 'sale' && (
+                        <th className="px-2 py-2 text-center font-medium w-20" title="Bill without GST">
+                          <label className="flex items-center justify-center gap-1 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={rows.length > 0 && rows.every((r) => r.gstExempt)}
+                              onChange={(e) => setRows((prev) => prev.map((r) => ({ ...r, gstExempt: e.target.checked })))}
+                            />
+                            Excl. GST
+                          </label>
+                        </th>
+                      )}
                       <th className="px-2 py-2 w-8"></th>
                     </tr>
                   </thead>
@@ -473,6 +489,15 @@ export function BulkImportDialog({ type, open, onOpenChange, onSuccess }: Props)
                                 value={row.invoiceNo}
                                 placeholder="RVP/01/26-27"
                                 onChange={(e) => updateRow(row.id, { invoiceNo: e.target.value })}
+                              />
+                            </td>
+                          )}
+                          {type === 'sale' && (
+                            <td className="px-2 py-1 text-center">
+                              <input
+                                type="checkbox"
+                                checked={row.gstExempt}
+                                onChange={(e) => updateRow(row.id, { gstExempt: e.target.checked })}
                               />
                             </td>
                           )}

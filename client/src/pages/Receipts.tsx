@@ -9,6 +9,7 @@ import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { Receipt, Party, ReceiptType, SaleOrder } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
+import { shortageGst, shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Button } from '@/components/ui/button';
 import {
@@ -70,7 +71,9 @@ interface BuyerInvoice {
   invoiceNumber: string | null;
   billAmount: number;    // billed total (base + GST), whole rupees
   remaining: number;     // still due after prior receipts (FIFO), whole rupees
-  shortageStored: number; // ₹ shortage recorded from the buyer's kata at delivery
+  saleBase: number;      // sale value EXCLUDING GST — the TDS calc base
+  shortageBase: number;  // buyer-kata shortage goods value (GST-excluded) at delivery
+  gstExempt: boolean;    // whether 5% GST applies to the shortage deduction
 }
 
 // Receipts created from a detail page (currently only Gunny Bag sales).
@@ -137,6 +140,8 @@ export default function ReceiptsPage() {
   const [description, setDescription] = useState('');
   const [saleDispatchId, setSaleDispatchId] = useState('');
   const [shortage, setShortage] = useState('');
+  const [enableTds, setEnableTds] = useState(false);
+  const [tds, setTds] = useState('');
 
   // Outstanding-invoice data — only pulled while the dialog is open, so the
   // register itself stays fast. Sale orders carry the buyer-kata shortage
@@ -164,8 +169,16 @@ export default function ReceiptsPage() {
       .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })))
       .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
       .map(({ d, o }) => {
-        const total = Math.round(Number(d.weightKg) * Number(o.ratePerKg) + (Number(d.gstAmount) || 0));
-        return { d, remaining: total, billAmount: total };
+        const rate = Number(o.ratePerKg);
+        const total = Math.round(Number(d.weightKg) * rate + (Number(d.gstAmount) || 0));
+        return {
+          d,
+          remaining: total,
+          billAmount: total,
+          saleBase: Number(d.weightKg) * rate,
+          shortageBase: (Number(d.shortageKg) || 0) * rate,
+          gstExempt: o.gstExempt,
+        };
       });
 
     const buyerReceipts = (allReceipts ?? [])
@@ -193,7 +206,9 @@ export default function ReceiptsPage() {
         invoiceNumber: s.d.invoiceNumber,
         billAmount: s.billAmount,
         remaining: Math.round(s.remaining),
-        shortageStored: Math.round(Number(s.d.creditNoteAmount) || 0),
+        saleBase: s.saleBase,
+        shortageBase: s.shortageBase,
+        gstExempt: s.gstExempt,
       }));
   }, [type, partyId, allSaleOrders, allReceipts]);
 
@@ -207,17 +222,24 @@ export default function ReceiptsPage() {
     setDescription('');
     setSaleDispatchId('');
     setShortage('');
+    setEnableTds(false);
+    setTds('');
   }
 
   /** Pick an invoice to settle → tie the receipt to it and auto-fill the
-   *  recorded kata shortage + the net cash still expected. */
+   *  recorded kata shortage (goods value), its 5% GST, TDS, and the net cash
+   *  still expected. Mirrors the "Mark as Paid" and Sale Dues dialogs. */
   function selectInvoice(v: string) {
-    if (v === NO_INVOICE) { setSaleDispatchId(''); setShortage(''); return; }
+    if (v === NO_INVOICE) { setSaleDispatchId(''); setShortage(''); setEnableTds(false); setTds(''); return; }
     setSaleDispatchId(v);
     const inv = buyerInvoices.find((i) => i.id === v);
     if (inv) {
-      setShortage(inv.shortageStored > 0 ? String(inv.shortageStored) : '');
-      setAmount(String(Math.max(0, inv.remaining - inv.shortageStored)));
+      const shortageBase = inv.shortageBase > 0 ? round2(inv.shortageBase) : 0;
+      const shortageTotal = shortageWithGst(shortageBase, inv.gstExempt);
+      setShortage(shortageBase > 0 ? String(shortageBase) : '');
+      setEnableTds(false);
+      setTds(String(saleTds(inv.saleBase)));
+      setAmount(String(round2(Math.max(0, inv.remaining - shortageTotal))));
     }
   }
 
@@ -249,6 +271,8 @@ export default function ReceiptsPage() {
     else toast.message('Could not read the screenshot. Enter details manually.');
   }
 
+  const selectedInvoice = buyerInvoices.find((i) => i.id === saleDispatchId);
+
   const mutation = useMutation({
     mutationFn: () =>
       api<Receipt>('/receipts', {
@@ -259,7 +283,11 @@ export default function ReceiptsPage() {
           type,
           partyId: type === 'BUYER' ? partyId || null : null,
           saleDispatchId: type === 'BUYER' && saleDispatchId ? saleDispatchId : null,
-          shortageAmount: type === 'BUYER' ? (Number(shortage) || 0) : 0,
+          // Shortage clears the GST-inclusive invoice → book base + 5% GST on it.
+          shortageAmount: type === 'BUYER'
+            ? shortageWithGst(Number(shortage) || 0, selectedInvoice?.gstExempt ?? false)
+            : 0,
+          tdsAmount: type === 'BUYER' && enableTds ? (Number(tds) || 0) : 0,
           payer: !COLLECTION_TYPES.includes(type) ? payer || null : null,
           reference: reference || null,
           description: description || null,
@@ -401,7 +429,7 @@ export default function ReceiptsPage() {
 
             <div className="space-y-2">
               <Label>Receipt Type</Label>
-              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setSaleDispatchId(''); setShortage(''); }}>
+              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setSaleDispatchId(''); setShortage(''); setEnableTds(false); setTds(''); }}>
                 <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
                   {RECEIPT_TYPE_GROUPS.map((g) => (
@@ -419,7 +447,7 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label>Buyer</Label>
-                <Select value={partyId} onValueChange={(v) => { setPartyId(v); setSaleDispatchId(''); setShortage(''); }}>
+                <Select value={partyId} onValueChange={(v) => { setPartyId(v); setSaleDispatchId(''); setShortage(''); setEnableTds(false); setTds(''); }}>
                   <SelectTrigger><SelectValue placeholder="Select buyer" /></SelectTrigger>
                   <SelectContent>
                     {buyers.map((b) => (
@@ -440,7 +468,7 @@ export default function ReceiptsPage() {
                     {buyerInvoices.map((inv) => (
                       <SelectItem key={inv.id} value={inv.id}>
                         {inv.invoiceNumber ?? 'No invoice'} · due {rupees(inv.remaining)}
-                        {inv.shortageStored > 0 ? ` · shortage ${rupees(inv.shortageStored)}` : ''}
+                        {inv.shortageBase > 0 ? ` · shortage ${rupees(inv.shortageBase)}` : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -454,10 +482,56 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label htmlFor="shortage">Shortage / Kata Deduction (₹)</Label>
-                <Input id="shortage" type="number" step="1" value={shortage} onChange={(e) => setShortage(e.target.value)} placeholder="0" />
-                <p className="text-[10px] text-muted-foreground">Auto-filled from the buyer's kata shortage recorded at delivery. Adjust if needed.</p>
+                <Input id="shortage" type="number" step="0.01" value={shortage} onChange={(e) => setShortage(e.target.value)} placeholder="0" />
+                <p className="text-[10px] text-muted-foreground">
+                  Goods value of the buyer's kata shortage (auto-filled from delivery). 5% GST is added on top. Adjust if needed.
+                </p>
               </div>
             )}
+
+            {type === 'BUYER' && (
+              <div className="space-y-2">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary"
+                    checked={enableTds}
+                    onChange={(e) => {
+                      setEnableTds(e.target.checked);
+                      if (e.target.checked && !tds && selectedInvoice) setTds(String(saleTds(selectedInvoice.saleBase)));
+                    }}
+                  />
+                  <span className="text-sm font-medium">Deduct TDS (0.1%)</span>
+                </label>
+                {enableTds && (
+                  <>
+                    <Input id="recv-tds" type="number" step="0.01" value={tds} onChange={(e) => setTds(e.target.value)} placeholder="0" />
+                    <p className="text-[10px] text-muted-foreground">0.1% of sale value (excluding GST). Auto-filled when an invoice is selected.</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Settlement summary — mirrors the "Mark as Paid" / Sale Dues breakdown */}
+            {type === 'BUYER' && (Number(amount) > 0 || Number(shortage) > 0 || (enableTds && Number(tds) > 0)) && (() => {
+              const received = Number(amount) || 0;
+              const tdsAmt = enableTds ? (Number(tds) || 0) : 0;
+              const shortageBase = Number(shortage) || 0;
+              const shortageGstAmt = shortageGst(shortageBase, selectedInvoice?.gstExempt ?? false);
+              const settled = received + tdsAmt + shortageBase + shortageGstAmt;
+              return (
+                <div className="rounded-md bg-muted/50 px-3 py-2 text-xs space-y-0.5">
+                  <div className="flex justify-between"><span>Cash received</span><span>{rupees(received)}</span></div>
+                  {enableTds && <div className="flex justify-between"><span>TDS</span><span>{rupees(tdsAmt)}</span></div>}
+                  {shortageBase > 0 && <div className="flex justify-between"><span>Shortage</span><span>{rupees(shortageBase)}</span></div>}
+                  {shortageGstAmt > 0 && <div className="flex justify-between"><span>GST on shortage (5%)</span><span>{rupees(shortageGstAmt)}</span></div>}
+                  <div className="flex justify-between font-semibold border-t pt-1 mt-1">
+                    <span>Total settled</span>
+                    <span>{rupees(settled)}</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {!COLLECTION_TYPES.includes(type) && (
               <div className="space-y-2">

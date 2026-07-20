@@ -7,6 +7,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid } from '@/lib/saleStatus';
+import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -329,26 +330,28 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [payTdsEnabled, setPayTdsEnabled] = useState(false);
   const [payShortage, setPayShortage] = useState('');
 
-  // Shortage is valued at kgs × rate (base price, GST excluded).
+  // Shortage BASE is valued at kgs × rate (goods value, GST excluded). The 5% GST
+  // on the shortage is added on top when it deducts from the (GST-inclusive) bill.
   function shortageValue(dispatch: SaleDispatch, order: SaleOrder) {
     return round2((Number(dispatch.shortageKg) || 0) * Number(order.ratePerKg));
   }
 
   // TDS (0.1%) is charged on the sale value EXCLUDING GST (the invoice base).
   function tdsValue(dispatch: SaleDispatch, order: SaleOrder) {
-    return round2(dispatch.weightKg * Number(order.ratePerKg) * 0.001);
+    return saleTds(dispatch.weightKg * Number(order.ratePerKg));
   }
 
-  // Recompute the expected amount received = invoice total − shortage − TDS.
-  function recomputePayAmount(shortage: string, tdsEnabled: boolean) {
+  // Recompute the expected amount received = invoice total − shortage(base+GST) − TDS.
+  function recomputePayAmount(shortageBase: string, tdsEnabled: boolean) {
     if (!payDispatch) return;
     const { dispatch, order } = payDispatch;
     const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
     const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
     const invoiceTotal = invoiceBase + invoiceGst;
+    const shortageTotal = shortageWithGst(Number(shortageBase) || 0, order.gstExempt);
     const tds = tdsEnabled ? tdsValue(dispatch, order) : 0;
     setPayTds(tds ? String(tds) : '');
-    setPayAmount(String(round2(invoiceTotal - (Number(shortage) || 0) - tds)));
+    setPayAmount(String(round2(invoiceTotal - shortageTotal - tds)));
   }
 
   function openPaymentDialog(dispatch: SaleDispatch, order: SaleOrder) {
@@ -359,15 +362,16 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
     const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
     const invoiceTotal = invoiceBase + invoiceGst;
-    const shortageDeduction = shortageValue(dispatch, order);
+    const shortageBase = shortageValue(dispatch, order);
+    const shortageTotal = shortageWithGst(shortageBase, order.gstExempt);
     const tdsEnabled = Number(dispatch.tdsAmount) > 0;
     const tds = tdsEnabled ? tdsValue(dispatch, order) : 0;
-    const expectedNet = round2(invoiceTotal - shortageDeduction - tds);
+    const expectedNet = round2(invoiceTotal - shortageTotal - tds);
 
     setPayAmount(String(expectedNet));
     setPayTdsEnabled(tdsEnabled);
     setPayTds(tds ? String(tds) : '');
-    setPayShortage(shortageDeduction > 0 ? String(shortageDeduction) : '');
+    setPayShortage(shortageBase > 0 ? String(shortageBase) : '');
   }
 
   // Recalculate the expected amount if the user edits the shortage manually.
@@ -389,7 +393,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         date: new Date(payDate).toISOString(),
         amount: Number(payAmount),
         tdsAmount: Number(payTds) || 0,
-        shortageAmount: Number(payShortage) || 0,
+        // Shortage clears the GST-inclusive invoice, so send base + 5% GST on it.
+        shortageAmount: shortageWithGst(Number(payShortage) || 0, payDispatch!.order.gstExempt),
       },
     }),
     onSuccess: () => {
@@ -589,16 +594,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             <p className="text-[10px] text-muted-foreground mt-1">Total revenue · incl. GST</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pending Value</CardTitle>
-            <Truck className="h-4 w-4 text-rose-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-rose-600">{rupees(pendingRevenue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">{realizationPct.toFixed(0)}% realized · incl. GST</p>
-          </CardContent>
-        </Card>
+        {product !== 'HUSK' && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pending Value</CardTitle>
+              <Truck className="h-4 w-4 text-rose-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-rose-600">{rupees(pendingRevenue)}</div>
+              <p className="text-[10px] text-muted-foreground mt-1">{realizationPct.toFixed(0)}% realized · incl. GST</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Filters */}
@@ -1254,6 +1261,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             const invoiceBase = d.weightKg * Number(o.ratePerKg);
             const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
             const invoiceTotal = invoiceBase + invoiceGst;
+            const shortageBase = Number(payShortage) || 0;
+            const shortageGstAmt = shortageGst(shortageBase, o.gstExempt);
+            const tdsAmt = payTdsEnabled ? (Number(payTds) || 0) : 0;
+            const netDue = invoiceTotal - shortageBase - shortageGstAmt - tdsAmt;
 
             return (
               <div className="space-y-4">
@@ -1262,11 +1273,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     <span>Invoice Total</span>
                     <span className="font-medium text-foreground">{rupees(invoiceTotal)}</span>
                   </div>
-                  {Number(payShortage) > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
-                      <span>Shortage Deduction</span>
-                      <span>-{rupees(Number(payShortage))}</span>
-                    </div>
+                  {shortageBase > 0 && (
+                    <>
+                      <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                        <span>Shortage Deduction</span>
+                        <span>-{rupees(shortageBase)}</span>
+                      </div>
+                      {shortageGstAmt > 0 && (
+                        <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                          <span>GST on Shortage (5%)</span>
+                          <span>-{rupees(shortageGstAmt)}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                   {payTdsEnabled && Number(payTds) > 0 && (
                     <div className="flex justify-between text-amber-600 dark:text-amber-500">
@@ -1276,7 +1295,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   )}
                   <div className="flex justify-between font-semibold border-t pt-1.5 border-border">
                     <span>Net Due</span>
-                    <span>{rupees(invoiceTotal - (Number(payShortage) || 0) - (payTdsEnabled ? Number(payTds) || 0 : 0))}</span>
+                    <span>{rupees(netDue)}</span>
                   </div>
                 </div>
 
@@ -1301,7 +1320,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
                       <Input type="number" step="0.01" className="pl-7" value={payShortage} onChange={(e) => handlePayShortageChange(e.target.value)} placeholder="0" />
                     </div>
-                    <p className="text-[11px] text-muted-foreground">Any quality/weight shortage claim by buyer.</p>
+                    <p className="text-[11px] text-muted-foreground">Goods value of the buyer's shortage/kata claim. 5% GST is added on top.</p>
                   </div>
                   <div className="space-y-1.5">
                     <label className="flex cursor-pointer items-center gap-2">

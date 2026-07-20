@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
+import { shortageGst, shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,8 +20,6 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-
-const TDS_RATE = 0.001; // 0.1% of sale value
 
 // Byproducts share one tab group in the Sales nav; group them the same way here.
 const BYPRODUCT_PRODUCTS: SaleProduct[] = ['WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'];
@@ -60,7 +59,10 @@ interface OutstandingInvoice {
   partyName: string;
   invoiceNumber: string | null;
   billDate: Date;
-  billAmount: number;   // original invoice value (used for TDS calc base)
+  billAmount: number;   // billed total (base + GST), whole rupees
+  saleBase: number;     // sale value EXCLUDING GST — the TDS calc base
+  shortageBase: number; // buyer-kata shortage goods value (GST-excluded) recorded at delivery
+  gstExempt: boolean;   // whether 5% GST applies to the shortage deduction
   discount: number;
   netAmount: number;    // remaining due after FIFO allocation
   totalAmount: number;
@@ -203,6 +205,9 @@ export default function SaleDuesPage() {
         invoiceNumber: d.invoiceNumber,
         billDate: new Date(d.dispatchDate),
         billAmount: total,
+        saleBase: d.weightKg * rate,
+        shortageBase: (Number(d.shortageKg) || 0) * rate,
+        gstExempt: o.gstExempt,
         discount: 0,
         netAmount: remaining,
         totalAmount: total,
@@ -239,29 +244,29 @@ export default function SaleDuesPage() {
 
   function openReceiveDialog(inv: OutstandingInvoice) {
     const today = new Date().toISOString().slice(0, 10);
-    const tds = Math.round(inv.billAmount * TDS_RATE); // whole rupees
+    // TDS (0.1%) is on the sale value EXCLUDING GST — not the GST-inclusive bill.
+    const tds = saleTds(inv.saleBase);
+    // Auto-deduct the buyer-kata shortage (goods value) recorded at delivery, and
+    // net it — plus its 5% GST — off the cash we expect to receive.
+    const shortageBase = inv.shortageBase > 0 ? inv.shortageBase : 0;
+    const shortageTotal = shortageWithGst(shortageBase, inv.gstExempt);
     setEnableTds(false);
     setReceiveDialog({
       inv,
       date: today,
-      amountReceived: String(Math.round(inv.netAmount)),
+      amountReceived: String(round2(Math.max(0, inv.netAmount - shortageTotal))),
       tdsAmount: String(tds),
-      shortageAmount: '0',
+      shortageAmount: shortageBase > 0 ? String(round2(shortageBase)) : '0',
     });
-  }
-
-  // Derived: shortage = outstanding - amountReceived - TDS (when short)
-  function getAutoShortage(d: ReceiveDialogState): number {
-    const received = parseFloat(d.amountReceived) || 0;
-    const tds = enableTds ? (parseFloat(d.tdsAmount) || 0) : 0;
-    return Math.max(0, d.inv.netAmount - received - tds);
   }
 
   function submitReceive() {
     if (!receiveDialog) return;
     const received = parseFloat(receiveDialog.amountReceived);
     const tds = enableTds ? (parseFloat(receiveDialog.tdsAmount) || 0) : 0;
-    const shortage = parseFloat(receiveDialog.shortageAmount) || 0;
+    const shortageBase = parseFloat(receiveDialog.shortageAmount) || 0;
+    // Shortage clears the GST-inclusive invoice, so book base + 5% GST on it.
+    const shortage = shortageWithGst(shortageBase, receiveDialog.inv.gstExempt);
     if (!receiveDialog.date || isNaN(received) || received < 0) {
       toast.error('Please enter a valid date and amount received');
       return;
@@ -280,8 +285,6 @@ export default function SaleDuesPage() {
       saleDispatchId: receiveDialog.inv.id,
     });
   }
-
-  const autoShortage = receiveDialog ? getAutoShortage(receiveDialog) : 0;
 
   return (
     <div className="space-y-6">
@@ -525,7 +528,7 @@ export default function SaleDuesPage() {
                   <Label htmlFor="recv-tds">
                     TDS (₹)
                     <span className="ml-2 text-xs text-muted-foreground font-normal">
-                      0.1% of bill = {rupees(receiveDialog.inv.billAmount * TDS_RATE)}
+                      0.1% of sale value (excl. GST) = {rupees(saleTds(receiveDialog.inv.saleBase))}
                     </span>
                   </Label>
                   <Input
@@ -539,14 +542,7 @@ export default function SaleDuesPage() {
               )}
 
               <div className="space-y-1">
-                <Label htmlFor="recv-shortage">
-                  Shortage / Kata (₹)
-                  {autoShortage > 0 && (
-                    <span className="ml-2 text-xs text-amber-600 font-normal">
-                      auto: {rupees(autoShortage)}
-                    </span>
-                  )}
-                </Label>
+                <Label htmlFor="recv-shortage">Shortage / Kata (₹)</Label>
                 <Input
                   id="recv-shortage"
                   type="number"
@@ -555,21 +551,23 @@ export default function SaleDuesPage() {
                   onChange={(e) => setReceiveDialog((d) => d && ({ ...d, shortageAmount: e.target.value }))}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Enter the shortage/weight deduction from party kata. Leave 0 if full amount received.
+                  Goods value of the party-kata shortage (auto-filled from delivery). 5% GST is added on top. Leave 0 if full amount received.
                 </p>
               </div>
 
-              {/* Settlement summary */}
+              {/* Settlement summary — mirrors the "Mark as Paid" breakdown so both agree */}
               {(() => {
                 const received = parseFloat(receiveDialog.amountReceived) || 0;
                 const tds = enableTds ? (parseFloat(receiveDialog.tdsAmount) || 0) : 0;
-                const shortage = parseFloat(receiveDialog.shortageAmount) || 0;
-                const total = received + tds + shortage;
+                const shortageBase = parseFloat(receiveDialog.shortageAmount) || 0;
+                const shortageGstAmt = shortageGst(shortageBase, receiveDialog.inv.gstExempt);
+                const total = received + tds + shortageBase + shortageGstAmt;
                 return (
                   <div className="rounded-md bg-muted/50 px-3 py-2 text-xs space-y-0.5">
                     <div className="flex justify-between"><span>Cash received</span><span>{rupees(received)}</span></div>
                     {enableTds && <div className="flex justify-between"><span>TDS</span><span>{rupees(tds)}</span></div>}
-                    <div className="flex justify-between"><span>Shortage</span><span>{rupees(shortage)}</span></div>
+                    {shortageBase > 0 && <div className="flex justify-between"><span>Shortage</span><span>{rupees(shortageBase)}</span></div>}
+                    {shortageGstAmt > 0 && <div className="flex justify-between"><span>GST on shortage (5%)</span><span>{rupees(shortageGstAmt)}</span></div>}
                     <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                       <span>Total settled</span>
                       <span className={total > receiveDialog.inv.netAmount + 0.01 ? 'text-amber-600' : 'text-emerald-600'}>

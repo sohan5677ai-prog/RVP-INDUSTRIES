@@ -36,28 +36,19 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
-app.get("/api/health", async (_req, res) => {
-  // Run a trivial query so the keep-alive ping actually reaches Supabase.
-  // Render sleeps after 15 min idle AND Supabase free tier pauses a project
-  // after 7 days of no DB activity — a static response would only wake Render,
-  // leaving the database to be paused. `SELECT 1` touches Postgres cheaply.
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({
-      status: "ok",
-      service: "rvp-server",
-      db: "up",
-      time: new Date().toISOString(),
-    });
-  } catch (err) {
-    logger.error("health check DB query failed", err);
-    res.status(503).json({
-      status: "degraded",
-      service: "rvp-server",
-      db: "down",
-      time: new Date().toISOString(),
-    });
-  }
+app.get("/api/health", (_req, res) => {
+  // Keep-alive ping. Render sleeps after 15 min idle AND Supabase free tier
+  // pauses a project after 7 days of no DB activity, so we fire a trivial
+  // `SELECT 1` to touch Postgres — but fire-and-forget, never awaited. If we
+  // awaited it and Supabase were slow/paused, the request would stall until
+  // Render returned a multi-KB HTML 502/504 page, which the uptime monitor
+  // (cron-job.org) rejects as "output too large". Responding immediately with
+  // a tiny plain-text body keeps the response well under that limit no matter
+  // what the database is doing.
+  prisma.$queryRaw`SELECT 1`.catch((err) =>
+    logger.error("health check DB keep-alive query failed", err)
+  );
+  res.type("text/plain").send("OK");
 });
 
 app.use("/api", apiLimiter, apiRoutes);

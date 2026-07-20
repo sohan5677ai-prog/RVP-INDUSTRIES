@@ -7,7 +7,6 @@ export const MANUAL_HAMALI_TYPES = [
   'HUSK_PACKING',
   'TPS_BROKENS_PACKING',
   'TAMARIND_BYPRODUCTS_PACKING',
-  'DIESEL',
   'MISC',
   'PAID',
 ] as const;

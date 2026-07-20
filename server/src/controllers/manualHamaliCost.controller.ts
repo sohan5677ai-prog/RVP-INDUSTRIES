@@ -8,7 +8,6 @@ const LABELS: Record<string, string> = {
   BAG_CUTTING_NORMAL: 'Bag Cutting (Place A)',
   BAG_CUTTING_DISTANCE: 'Bag Cutting (Place B)',
   PAPPU_NET: 'Pappu Net',
-  DIESEL: 'Diesel Cost',
   MISC: 'Miscellaneous',
   PAID: 'Paid to Hamali',
 };
@@ -24,10 +23,10 @@ export async function listManualHamaliCosts(_req: Request, res: Response) {
  * Record a manually-entered hamali cost that can't be derived from purchases or
  * sales. Two flavours:
  *   - Per-bag charge (bag cutting / pappu net): amount = bags × ratePerBag.
- *   - Flat amount (diesel / misc / paid): amount entered directly.
+ *   - Flat amount (misc / paid): amount entered directly.
  *
  * GL posting:
- *   - Charges (bag cutting, pappu net, diesel, misc) accrue what we owe the crew:
+ *   - Charges (bag cutting, pappu net, misc) accrue what we owe the crew:
  *       Dr Factory Labor Expense (50020) / Cr Hamali payable (20200).
  *   - PAID is a cash disbursement that settles that payable:
  *       Dr Hamali payable (20200) / Cr Cash-in-Hand (10410).

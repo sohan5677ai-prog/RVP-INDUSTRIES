@@ -580,7 +580,6 @@ export type ManualHamaliType =
   | 'HUSK_PACKING'
   | 'TPS_BROKENS_PACKING'
   | 'TAMARIND_BYPRODUCTS_PACKING'
-  | 'DIESEL'
   | 'MISC'
   | 'PAID';
 

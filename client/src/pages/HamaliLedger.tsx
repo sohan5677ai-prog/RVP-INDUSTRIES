@@ -30,7 +30,6 @@ const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; d
   { value: 'HUSK_PACKING', label: 'Husk Packing', perBag: true },
   { value: 'TPS_BROKENS_PACKING', label: 'TPS Brokens Packing', perBag: true },
   { value: 'TAMARIND_BYPRODUCTS_PACKING', label: 'Tamarind Byproducts Packing', perBag: true },
-  { value: 'DIESEL', label: 'Diesel Cost', perBag: false },
   { value: 'MISC', label: 'Miscellaneous', perBag: false },
   { value: 'PAID', label: 'Paid to Hamali', perBag: false },
 ];
@@ -471,7 +470,7 @@ export default function HamaliLedger() {
   const squareValid = (verifiedThroughDay == null || squareDate > verifiedThroughDay) && pendingCrewTotal > 0;
 
   // Crew payable across the currently filtered rows (Hamali view metric). This
-  // now also folds in the Recorded Charges (bag cutting, pappu net, diesel, misc)
+  // now also folds in the Recorded Charges (bag cutting, pappu net, misc)
   // net of amounts already paid to the crew — so the tile reflects the FULL crew
   // dues, not just the derived purchase/sale/transfer shares. Manual charges carry
   // no party, so they're only added when no party filter/search is narrowing the
@@ -1119,7 +1118,7 @@ export default function HamaliLedger() {
             <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
 
-          {/* Manually-recorded charges (bag cutting, pappu net, diesel, misc, paid) */}
+          {/* Manually-recorded charges (bag cutting, pappu net, misc, paid) */}
           <div className="rounded-lg border bg-card overflow-x-auto">
             <div className="px-5 py-4 border-b flex flex-wrap items-center justify-between gap-3">
               <span className="font-semibold text-sm">Recorded Charges</span>
@@ -1145,7 +1144,7 @@ export default function HamaliLedger() {
                 {manualSorted.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                      No charges recorded. Use “Record” to add bag cutting, pappu net, diesel, or paid amounts.
+                      No charges recorded. Use “Record” to add bag cutting, pappu net, or paid amounts.
                     </TableCell>
                   </TableRow>
                 ) : (

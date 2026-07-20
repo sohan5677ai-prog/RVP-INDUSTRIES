@@ -84,11 +84,11 @@ export interface HuskExpenses {
   tWasteLoading: number;
   bagCutting: number;
   pappuNet: number;
-  diesel: number;
   misc: number;
   gunnyBags: number;
   electricity: number;
   maintenance: number;
+  miscExpense: number;
   storageElectricity: number;
   storageSalaries: number;
   drawingsShabri: number;
@@ -109,11 +109,11 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'tWasteLoading',      label: 'T-Waste Loading',      pappu: false },
   { key: 'bagCutting',         label: 'Bag Cutting',          pappu: false },
   { key: 'pappuNet',           label: 'Pappu Net (Rasi)',     pappu: true  },
-  { key: 'diesel',             label: 'Diesel',               pappu: false },
   { key: 'misc',               label: 'Miscellaneous',        pappu: false },
   { key: 'gunnyBags',          label: 'Gunny Bags (net)',     pappu: false },
   { key: 'electricity',        label: 'Electricity',          pappu: false },
   { key: 'maintenance',        label: 'Maintenance',          pappu: false },
+  { key: 'miscExpense',        label: 'Miscellaneous Expenses', pappu: false },
   { key: 'storageElectricity', label: 'Storage Electricity',  pappu: false },
   { key: 'storageSalaries',    label: 'Storage Salaries',     pappu: false },
   { key: 'drawingsShabri',     label: 'Drawings - Shabri',    pappu: false },
@@ -209,7 +209,6 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     );
     const bagCutting = (manual['BAG_CUTTING_NORMAL'] ?? 0) + (manual['BAG_CUTTING_DISTANCE'] ?? 0);
     const pappuNet = manual['PAPPU_NET'] ?? 0;
-    const diesel = manual['DIESEL'] ?? 0;
     const misc = manual['MISC'] ?? 0;
 
     // ── Static/Standalone Expenses ──────────
@@ -246,7 +245,6 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       tWasteLoading,
       bagCutting,
       pappuNet,
-      diesel,
       misc,
       gunnyBags,
       electricity,

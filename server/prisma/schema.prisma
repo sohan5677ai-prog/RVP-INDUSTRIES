@@ -751,6 +751,10 @@ model CompanyProfile {
   loanInterestRatePct     Decimal @default(0) @db.Decimal(6, 3)
   // Buffer percentage (e.g. 80) of expected yield allowed for soft allocation.
   bufferStockPct          Decimal @default(80) @db.Decimal(5, 2)
+  // Owner/admin mobile that receives internal WhatsApp alerts (weekly summary,
+  // daily dues digest, deferred-dispatch reminders). Falls back to
+  // WHATSAPP_TEST_NUMBER when blank. Not printed on invoices.
+  ownerWhatsappNumber     String?
 
   // TaxPro GSP configuration
   taxproGspId     String?

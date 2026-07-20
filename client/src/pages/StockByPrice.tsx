@@ -484,7 +484,7 @@ export default function StockByPrice() {
               {/* Result tiles */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <div className="rounded-lg border p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1" title={plannerBasis === 'COMMITTED' ? 'Committed Pappu = sellable pappu from arrived seed + still-coming (pending PO) seed, after existing sale commitments' : 'Available Pappu = sellable pappu from arrived seed only (what can be milled & shipped today)'}>
                     <Wheat className="h-3 w-3" /> {plannerBasis === 'COMMITTED' ? 'Committed Pappu' : 'Available Pappu'}
                   </div>
                   <div className="text-xl font-bold text-sky-600 mt-1">{toTonnes(plan.poolPappu).toFixed(2)} MT</div>
@@ -504,7 +504,7 @@ export default function StockByPrice() {
                 </div>
 
                 <div className="rounded-lg border p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1" title="The tonnage (in Metric Tonnes) the customer is asking for">
                     <Scale className="h-3 w-3" /> Asked
                   </div>
                   <div className="text-xl font-bold mt-1">{hasTonnage ? `${tonnage.toFixed(2)} MT` : '-'}</div>
@@ -515,7 +515,7 @@ export default function StockByPrice() {
                 {hasTonnage ? (
                   shortage > 0 ? (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-600 flex items-center gap-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-600 flex items-center gap-1" title="Shortage = how much pappu you're short of to fulfil the asked order from eligible stock">
                         <AlertTriangle className="h-3 w-3" /> Shortage
                       </div>
                       <div className="text-xl font-bold text-rose-600 mt-1">{toTonnes(shortage).toFixed(2)} MT</div>
@@ -523,7 +523,7 @@ export default function StockByPrice() {
                     </div>
                   ) : (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 flex items-center gap-1" title="Excess = spare pappu remaining after fulfilling the order">
                         <CheckCircle2 className="h-3 w-3" /> Excess
                       </div>
                       <div className="text-xl font-bold text-emerald-600 mt-1">{toTonnes(excess).toFixed(2)} MT</div>
@@ -540,7 +540,7 @@ export default function StockByPrice() {
 
                 {/* Black seed needed to cover a shortage */}
                 <div className={`rounded-lg border p-3 ${hasTonnage && shortage > 0 ? 'border-rose-200 bg-rose-50' : ''}`}>
-                  <div className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1 ${hasTonnage && shortage > 0 ? 'text-rose-600' : 'text-muted-foreground'}`}>
+                  <div className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1 ${hasTonnage && shortage > 0 ? 'text-rose-600' : 'text-muted-foreground'}`} title="Extra black seed (in MT) you'd need to buy from outside if your current eligible stock can't cover the order">
                     <Factory className="h-3 w-3" /> Seed Needed
                   </div>
                   <div className={`text-xl font-bold mt-1 ${hasTonnage && shortage > 0 ? 'text-rose-600' : 'text-muted-foreground'}`}>
@@ -553,7 +553,7 @@ export default function StockByPrice() {
 
                 {/* Margin */}
                 <div className="rounded-lg border p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1" title="Margin per kg = Pappu sell price − pappu cost (costed dearest seed first). Positive = profit, Negative = loss">
                     {plan.marginPerKg >= 0 ? <ArrowUpRight className="h-3 w-3 text-emerald-500" /> : <ArrowDownRight className="h-3 w-3 text-rose-500" />} Margin
                   </div>
                   <div className={`text-xl font-bold mt-1 ${plan.availableBlackKg === 0 ? 'text-muted-foreground' : plan.marginPerKg >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
@@ -589,7 +589,7 @@ export default function StockByPrice() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Weighted Avg</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Weighted Average Cost — the blended average purchase price of black seed across all (or eligible) price bands">Weighted Avg</CardTitle>
             <Tag className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
@@ -602,7 +602,7 @@ export default function StockByPrice() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Black Seed Remaining</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Physical black seed on hand from arrived lorries, after deducting seed consumed by sale order commitments">Black Seed Remaining</CardTitle>
             <Factory className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
@@ -613,7 +613,7 @@ export default function StockByPrice() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Committed Black Seed</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Total black seed you can count on = seed remaining on hand + consumable portion of pending (still-coming) PO seed">Committed Black Seed</CardTitle>
             <Factory className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
@@ -624,7 +624,7 @@ export default function StockByPrice() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Committed Orders</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Pappu (in MT) already promised/allocated to sale orders — this is how much pappu has been committed to buyers">Committed Orders</CardTitle>
             <Factory className="h-4 w-4 text-rose-500" />
           </CardHeader>
           <CardContent>
@@ -667,13 +667,13 @@ export default function StockByPrice() {
           <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-card [&_th]:shadow-[0_1px_0_0] [&_th]:shadow-border">
             <TableRow>
               <TableHead className="w-10"></TableHead>
-              <TableHead>Black Seed Price</TableHead>
-              <TableHead>Implied Pappu Price</TableHead>
-              <TableHead className="text-right">Lorries</TableHead>
-              <TableHead className="text-right">Black Seed Remaining</TableHead>
-              <TableHead className="text-right">Committed (MT)</TableHead>
-              <TableHead className="text-right">Available Pappu (MT)</TableHead>
-              <TableHead className="text-right">Valuation</TableHead>
+              <TableHead title="Purchase price per kg of black seed for this band">Black Seed Price</TableHead>
+              <TableHead title="Cost per kg of pappu implied by the seed price (= seed price ÷ 0.6 out-turn)">Implied Pappu Price</TableHead>
+              <TableHead className="text-right" title="Number of truck loads at this price band">Lorries</TableHead>
+              <TableHead className="text-right" title="Physical black seed on hand (arrived) after deducting seed consumed by sale orders. MT = Metric Tonnes (1 MT = 1,000 kg)">Black Seed Remaining</TableHead>
+              <TableHead className="text-right" title="Pappu (in Metric Tonnes) already promised/allocated to sale orders from this price band">Committed (MT)</TableHead>
+              <TableHead className="text-right" title="Sellable pappu remaining from arrived seed after commitments. MT = Metric Tonnes. Seed × 0.6 out-turn = pappu">Available Pappu (MT)</TableHead>
+              <TableHead className="text-right" title="Rupee value of remaining seed at its purchase price">Valuation</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -772,12 +772,12 @@ export default function StockByPrice() {
                                 <TableRow className="hover:bg-transparent">
                                   <TableHead className="h-8 py-1 text-xs">Date</TableHead>
                                   <TableHead className="h-8 py-1 text-xs">Party</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs">Lorry</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs">PO</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs">Type</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs text-right">Remaining Seed</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs text-right">Gross Sold</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs text-right">Remaining Pappu</TableHead>
+                                  <TableHead className="h-8 py-1 text-xs" title="Lorry / truck number">Lorry</TableHead>
+                                  <TableHead className="h-8 py-1 text-xs" title="Purchase Order number">PO</TableHead>
+                                  <TableHead className="h-8 py-1 text-xs" title="Arrived = lorry received at RVP. Pending = PO placed, lorry not yet arrived. Short = lorry arrived but delivered less than ordered">Type</TableHead>
+                                  <TableHead className="h-8 py-1 text-xs text-right" title="Black seed left in this lot after sale orders consumed from it (in kg)">Remaining Seed</TableHead>
+                                  <TableHead className="h-8 py-1 text-xs text-right" title="Total black seed consumed from this lot by sale orders (in kg)">Gross Sold</TableHead>
+                                  <TableHead className="h-8 py-1 text-xs text-right" title="Sellable pappu remaining from this lot's seed. Seed × 0.6 out-turn = pappu. For pending lots, 20% is kept as buffer">Remaining Pappu</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>

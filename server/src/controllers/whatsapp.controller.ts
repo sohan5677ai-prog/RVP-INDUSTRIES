@@ -7,6 +7,7 @@ import { parseTransportConfirmationText } from '../lib/gemini.js';
 import { buildInvoicePdfData } from '../services/saleDocumentEmail.service.js';
 import { renderInvoicePdf } from '../lib/invoicePdf.js';
 import { uploadFileToStorage } from '../lib/upload.js';
+import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 
 // ---------------------------------------------------------------------------
 // Inbound webhook (public — Fast2SMS calls this, no JWT)
@@ -100,6 +101,22 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
   });
 }
 
+/**
+ * Run a scheduled WhatsApp job on demand (public, secret-guarded — so an external
+ * cron can drive it despite Render's free-tier spin-down). Job name in the path:
+ * `daily`, `weekly` or `dispatch-reminders`. Auth via CRON_SECRET (X-Cron-Secret
+ * header or ?secret= query).
+ */
+export async function runWhatsAppJob(req: Request, res: Response) {
+  const secret = process.env.CRON_SECRET;
+  const provided = req.header('x-cron-secret') || (typeof req.query.secret === 'string' ? req.query.secret : undefined);
+  if (!secret || provided !== secret) throw new HttpError(401, 'Invalid or missing cron secret');
+  const runner = JOB_RUNNERS[req.params.job];
+  if (!runner) throw new HttpError(404, `Unknown job "${req.params.job}"`);
+  const result = await runner();
+  res.json({ job: req.params.job, result });
+}
+
 // ---------------------------------------------------------------------------
 // Authenticated endpoints
 // ---------------------------------------------------------------------------
@@ -138,6 +155,7 @@ export async function sendPartyReminder(req: Request, res: Response) {
   const pending = pendingPOs
     .map((po) => ({
       poNumber: po.poNumber,
+      pricePerKg: Number(po.pricePerKg),
       remaining: Math.max(0, (po.lorryCount || 1) - po.stockIns.length),
     }))
     .filter((p) => p.remaining > 0);
@@ -145,18 +163,18 @@ export async function sendPartyReminder(req: Request, res: Response) {
   if (pendingLorries === 0) {
     throw new HttpError(400, 'No pending lorries against this party — nothing to remind about');
   }
-  const poLabel =
-    pending.length === 1
-      ? pending[0].poNumber ?? '-'
-      : `${pending[0].poNumber ?? '-'} & ${pending.length - 1} more`;
+  // Priced per-PO breakdown, e.g. "RVP/01: 3 lorry @ ₹95/kg · RVP/02: 2 @ ₹96/kg".
+  const breakdown = pending
+    .map((p) => `${p.poNumber ?? '-'}: ${p.remaining} lorry @ ₹${p.pricePerKg}/kg`)
+    .join(' · ');
 
   const result = await whatsappService.sendReminder(
     { id: party.id, name: party.name, phone: party.phone },
     pendingLorries,
-    poLabel
+    breakdown
   );
   if (!result.ok) throw new HttpError(502, result.error ?? 'WhatsApp send failed');
-  res.json({ ok: true, pendingLorries, poLabel });
+  res.json({ ok: true, pendingLorries, breakdown });
 }
 
 // --- Transport-confirmation drafts (Surya Road Transport page) --------------
@@ -246,13 +264,18 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
 
   const bundle = await whatsappService.sendDispatchBundle({
     dispatchId: dispatch.id,
+    recipientName: recipient.label,
     orderRef: dispatch.invoiceNumber!,
     vehicleNumber: dispatch.vehicleNumber,
+    quantityKg: dispatch.weightKg,
     driverName: dispatch.driverName,
     driverPhone: dispatch.driverPhone,
     ewbNumber: dispatch.ewbNumber,
-    invoicePdfUrl,
-    invoiceFilename: filename,
+    // The Tax Invoice PDF is the document header; the E-Way Bill number rides in
+    // the message body. (When an EWB PDF source exists, merge it into this buffer
+    // and pass the combined document here.)
+    documentUrl: invoicePdfUrl,
+    documentFilename: filename,
     toPhone: recipient.phone,
   });
   if (!bundle.ok) throw new HttpError(502, bundle.error ?? 'WhatsApp send failed');

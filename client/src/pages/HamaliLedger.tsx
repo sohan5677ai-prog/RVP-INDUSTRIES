@@ -26,7 +26,7 @@ import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, Che
 const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; defaultRate?: number }[] = [
   { value: 'BAG_CUTTING_NORMAL', label: 'Bag Cutting (Place A)', perBag: true, defaultRate: 3 },
   { value: 'BAG_CUTTING_DISTANCE', label: 'Bag Cutting (Place B)', perBag: true, defaultRate: 6 },
-  { value: 'PAPPU_NET', label: 'Pappu Net', perBag: true, defaultRate: 6 },
+  { value: 'PAPPU_NET', label: 'Pappu Net', perBag: true, defaultRate: 3 },
   { value: 'HUSK_PACKING', label: 'Husk Packing', perBag: true },
   { value: 'TPS_BROKENS_PACKING', label: 'TPS Brokens Packing', perBag: true },
   { value: 'TAMARIND_BYPRODUCTS_PACKING', label: 'Tamarind Byproducts Packing', perBag: true },

@@ -94,6 +94,12 @@ app.listen(port, "0.0.0.0", () => {
       .then(({ startSlackBot }) => startSlackBot())
       .catch((err) => logger.error("[slack] failed to start:", err));
   }
+
+  // Register in-process WhatsApp cron jobs (daily dues/dispatch, weekly summary).
+  // No-op unless WHATSAPP_CRON_ENABLED=true; isolated so it can never crash boot.
+  import("./jobs/whatsappJobs.js")
+    .then(({ registerWhatsappCron }) => registerWhatsappCron())
+    .catch((err) => logger.error("[whatsapp-cron] failed to register:", err));
 });
 
 

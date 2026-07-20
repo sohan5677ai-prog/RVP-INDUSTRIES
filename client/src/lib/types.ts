@@ -378,6 +378,7 @@ export interface CompanyProfile {
   bankBranchIfsc: string | null;
   invoicePrefix: string;
   companyVehicles?: string | null;
+  ownerWhatsappNumber?: string | null;
   freightRetentionPerTrip?: string | number;
   invoiceLayout?: string | null;
 

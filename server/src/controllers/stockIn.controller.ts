@@ -435,6 +435,19 @@ export async function updateStockIn(req: Request, res: Response) {
       });
     }
 
+    // A URP/direct arrival owns a synthetic 1-lorry PO whose "ordered" tonnage is
+    // not independently ordered - it is DEFINED by the arrived net weight (that is
+    // how createUrpStockIn seeds it). If an edit corrects the weight but we leave
+    // the PO's tonnageKg at its old value, the Order Planner compares the stale
+    // ordered figure against the corrected net and reports a phantom shortfall
+    // (e.g. ordered 267 t vs the fixed 26.7 t net). Re-sync it here.
+    if (stockIn.purchaseOrder.createdBy === 'URP_DIRECT' && rvpKataKg > 0) {
+      await tx.purchaseOrder.update({
+        where: { id: stockIn.purchaseOrderId },
+        data: { tonnageKg: rvpKataKg },
+      });
+    }
+
     return row;
   });
 

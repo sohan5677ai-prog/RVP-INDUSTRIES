@@ -6,6 +6,42 @@ import { createVerificationSchema } from '../schemas/purchase.schema.js';
 import { crossVerify, companyHamaliShare, hamaliSplit } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { whatsappService } from '../services/whatsapp.service.js';
+import { buildPartyStatementData } from './ledger.controller.js';
+import { renderStatementPdf } from '../lib/statementPdf.js';
+import { uploadFileToStorage } from '../lib/upload.js';
+
+/**
+ * After a lorry is unloaded & weight-verified, WhatsApp the supplier the
+ * "unloaded" confirmation with their up-to-date account statement attached
+ * (use case #4). Fire-and-forget: rendering/upload/send never blocks or fails
+ * the verification response.
+ */
+async function sendVerificationStatement(
+  party: { id: string; name: string; phone: string | null },
+  details: { lorryNumber: string; netWeightKg: number; amount: number },
+  verificationId: string
+) {
+  try {
+    if (!party.phone) return; // nothing to send to — skip the PDF work entirely
+    const statement = await buildPartyStatementData(party.id);
+    let url: string | undefined;
+    let filename: string | undefined;
+    if (statement) {
+      const { getCompanyProfileRow } = await import('./settings.controller.js');
+      const profile = await getCompanyProfileRow();
+      const buffer = await renderStatementPdf(
+        { name: profile.name, address: profile.address, gstin: profile.gstin, contact: profile.contact },
+        statement
+      );
+      filename = `Statement-${party.name.replace(/[^\w]+/g, '-')}.pdf`;
+      url = await uploadFileToStorage({ originalname: filename, mimetype: 'application/pdf', buffer } as Express.Multer.File);
+    }
+    await whatsappService.notifyVerificationStatement(party, details, url, filename, verificationId);
+  } catch (e) {
+    logger.error('[whatsapp] verification statement failed', e);
+  }
+}
 
 const verificationInclude = {
   purchase: {
@@ -194,6 +230,14 @@ export async function createVerification(req: Request, res: Response) {
     debitNoteAmount: debitNoteAmount > 0 ? debitNoteAmount : null,
     debitNoteReason: debitNoteAmount > 0 ? `Weighbridge shortage of ${shortageKg} kg exceeded 0.5% tolerance limit.` : null
   });
+
+  // WhatsApp the supplier: lorry unloaded + verified, with their statement attached.
+  const notifyParty = purchase.stockIn.purchaseOrder.party;
+  void sendVerificationStatement(
+    { id: notifyParty.id, name: notifyParty.name, phone: notifyParty.phone },
+    { lorryNumber: purchase.stockIn.lorryNumber, netWeightKg: finalWeight, amount: totalAmount },
+    verification.id
+  );
 }
 
 export async function deleteVerification(req: Request, res: Response) {

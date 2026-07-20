@@ -63,3 +63,21 @@ services:
         sync: false
       - key: FAST2SMS_TMPL_REMINDER
         sync: false
+      - key: FAST2SMS_TMPL_PAYMENT_REMINDER
+        sync: false
+      - key: FAST2SMS_TMPL_VERIFICATION_STATEMENT
+        sync: false
+      - key: FAST2SMS_TMPL_PAYMENT_SENT_TEXT
+        sync: false
+      - key: FAST2SMS_TMPL_OWNER_DISPATCH_REMINDER
+        sync: false
+      - key: FAST2SMS_TMPL_OWNER_WEEKLY_SUMMARY
+        sync: false
+      - key: FAST2SMS_TMPL_OWNER_DUES_DIGEST
+        sync: false
+      # Scheduled WhatsApp jobs (owner/party reminders). Off until ready.
+      - key: WHATSAPP_CRON_ENABLED
+        value: "false"
+      # Shared secret for the public /webhooks/whatsapp/jobs/:job cron endpoints.
+      - key: CRON_SECRET
+        sync: false

@@ -29,10 +29,16 @@ const FAST2SMS_URL = 'https://www.fast2sms.com/dev/whatsapp';
 export type WaTemplateKey =
   | 'PO_CREATED' // rvp_po_created: party, po number(s), lorries, price/kg
   | 'STOCKIN_CONFIRMED' // rvp_stockin_confirmed: party, lorry, po number, date
+  | 'VERIFICATION_STATEMENT' // rvp_verification_statement (document header): party, lorry, net weight, amount
   | 'PAYMENT_SENT' // rvp_payment_sent (image header): party, amount, date, reference
-  | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): order ref, lorry, driver, phone, ewb
+  | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header — used when no screenshot): party, amount, date, reference
+  | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): recipient, invoice, lorry, qty, driver, phone, ewb
   | 'DISPATCH_DRIVER' // rvp_dispatch_driver: lorry, party, phone, maps link
-  | 'REMINDER'; // rvp_reminder: party, pending lorries, po number
+  | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
+  | 'PAYMENT_REMINDER' // rvp_payment_reminder: buyer, amount, overdue invoice list
+  | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
+  | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range, seed loads, sale orders, husk orders
+  | 'OWNER_DUES_DIGEST'; // rvp_owner_dues: date, total receivable, overdue, top pending
 
 function templateId(key: WaTemplateKey): string | undefined {
   return process.env[`FAST2SMS_TMPL_${key}`]?.trim() || undefined;
@@ -60,6 +66,29 @@ function fmtDate(d: Date): string {
 /** Indian-grouped amount, e.g. 450000 → "4,50,000". */
 function fmtInr(amount: number): string {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(amount));
+}
+
+/** Weight in tonnes with the kg in brackets, e.g. 12340 → "12.34 MT (12,340 kg)". */
+function fmtWeight(kg: number): string {
+  const mt = (kg / 1000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${mt} MT (${fmtInr(kg)} kg)`;
+}
+
+/**
+ * Owner/admin mobile for internal alerts: the number set in Company Settings,
+ * falling back to WHATSAPP_TEST_NUMBER so the owner flows still have a target
+ * before the field is filled in. Never throws.
+ */
+export async function resolveOwnerNumber(): Promise<string | null> {
+  try {
+    const profile = await prisma.companyProfile.findUnique({
+      where: { id: 'default' },
+      select: { ownerWhatsappNumber: true },
+    });
+    return profile?.ownerWhatsappNumber?.trim() || process.env.WHATSAPP_TEST_NUMBER?.trim() || null;
+  } catch {
+    return process.env.WHATSAPP_TEST_NUMBER?.trim() || null;
+  }
 }
 
 /** Variable values are pipe-joined on the wire — strip pipes/newlines from each. */
@@ -213,15 +242,42 @@ export const whatsappService = {
     });
   },
 
-  /** Payment recorded → party (screenshot attached when uploaded). */
+  /**
+   * Payment recorded → party. Uses the image-header template with the screenshot
+   * when one was uploaded; otherwise falls back to a text-only template so the
+   * message still goes out (the image-header template can't send without media).
+   */
   async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: { name: string; phone: string | null }) {
+    const hasImage = !!payment.screenshotUrl;
     await sendWhatsAppTemplate({
-      templateKey: 'PAYMENT_SENT',
+      templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
       to: party.phone,
       variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
       mediaUrl: payment.screenshotUrl ?? undefined,
       relatedType: 'PAYMENT',
       relatedId: payment.id,
+    });
+  },
+
+  /**
+   * Lorry unloaded & weight-verified → supplier gets the "unloaded" confirmation
+   * with their account statement attached as a PDF (document header).
+   */
+  async notifyVerificationStatement(
+    party: { id?: string; name: string; phone: string | null },
+    details: { lorryNumber: string; netWeightKg: number; amount: number },
+    statementPdfUrl: string | undefined,
+    statementFilename: string | undefined,
+    relatedId: string
+  ) {
+    await sendWhatsAppTemplate({
+      templateKey: 'VERIFICATION_STATEMENT',
+      to: party.phone,
+      variables: [party.name, details.lorryNumber, fmtWeight(details.netWeightKg), fmtInr(details.amount)],
+      mediaUrl: statementPdfUrl,
+      documentFilename: statementFilename,
+      relatedType: 'VERIFICATION',
+      relatedId,
     });
   },
 
@@ -244,21 +300,31 @@ export const whatsappService = {
    */
   async sendDispatchBundle(args: {
     dispatchId: string;
+    recipientName: string;
     orderRef: string;
     vehicleNumber: string | null;
+    quantityKg: number | null;
     driverName: string | null;
     driverPhone: string | null;
     ewbNumber: string | null;
-    invoicePdfUrl?: string;
-    invoiceFilename?: string;
+    documentUrl?: string; // combined Tax Invoice + EWB PDF
+    documentFilename?: string;
     toPhone: string | null;
   }) {
     return sendWhatsAppTemplate({
       templateKey: 'DISPATCH_BROKER',
       to: args.toPhone,
-      variables: [args.orderRef, args.vehicleNumber ?? '-', args.driverName ?? '-', args.driverPhone ?? '-', args.ewbNumber ?? '-'],
-      mediaUrl: args.invoicePdfUrl,
-      documentFilename: args.invoiceFilename,
+      variables: [
+        args.recipientName,
+        args.orderRef,
+        args.vehicleNumber ?? '-',
+        args.quantityKg != null ? fmtWeight(args.quantityKg) : '-',
+        args.driverName ?? '-',
+        args.driverPhone ?? '-',
+        args.ewbNumber ?? '-',
+      ],
+      mediaUrl: args.documentUrl,
+      documentFilename: args.documentFilename,
       relatedType: 'DISPATCH',
       relatedId: args.dispatchId,
     });
@@ -275,10 +341,73 @@ export const whatsappService = {
     });
   },
 
+  /**
+   * Sales-dues reminder → buyer. `invoiceListText` is the pre-formatted list of
+   * overdue invoices (e.g. "RVP/12 (₹1,20,000) · RVP/15 (₹80,000)"). Fired by the
+   * daily job and by the manual "Remind" button on the ledger.
+   */
+  async sendSalesDuesReminder(buyer: { id: string; name: string; phone: string | null }, outstanding: number, invoiceListText: string) {
+    return sendWhatsAppTemplate({
+      templateKey: 'PAYMENT_REMINDER',
+      to: buyer.phone,
+      variables: [buyer.name, fmtInr(outstanding), invoiceListText],
+      relatedType: 'PAYMENT_REMINDER',
+      relatedId: buyer.id,
+    });
+  },
+
+  /**
+   * Owner alert: an advance sale order's dispatch date has arrived but it is not
+   * yet dispatched. Goes to the owner number (Settings), NOT the buyer.
+   */
+  async notifyOwnerDispatch(order: { id: string; buyerName: string; orderSummary: string; dispatchBy: Date; ref: string }) {
+    const to = await resolveOwnerNumber();
+    return sendWhatsAppTemplate({
+      templateKey: 'OWNER_DISPATCH_REMINDER',
+      to,
+      variables: [order.buyerName, order.orderSummary, fmtDate(order.dispatchBy), order.ref],
+      relatedType: 'OWNER_DISPATCH_REMINDER',
+      relatedId: order.id,
+    });
+  },
+
+  /** Owner weekly business summary. */
+  async sendOwnerWeeklySummary(range: string, counts: { seedLoads: number; saleOrders: number; huskOrders: number }, weekKey: string) {
+    const to = await resolveOwnerNumber();
+    return sendWhatsAppTemplate({
+      templateKey: 'OWNER_WEEKLY_SUMMARY',
+      to,
+      variables: [range, counts.seedLoads, counts.saleOrders, counts.huskOrders],
+      relatedType: 'OWNER_WEEKLY_SUMMARY',
+      relatedId: weekKey,
+    });
+  },
+
+  /** Owner daily outstanding-sales-dues digest. */
+  async sendOwnerDuesDigest(totals: { asOn: Date; totalReceivable: number; overdue: number; topPending: string }, dayKey: string) {
+    const to = await resolveOwnerNumber();
+    return sendWhatsAppTemplate({
+      templateKey: 'OWNER_DUES_DIGEST',
+      to,
+      variables: [fmtDate(totals.asOn), fmtInr(totals.totalReceivable), fmtInr(totals.overdue), totals.topPending],
+      relatedType: 'OWNER_DUES_DIGEST',
+      relatedId: dayKey,
+    });
+  },
+
   /** Last reminder sent to this party (throttle guard for the reminder button). */
   async lastReminderAt(partyId: string): Promise<Date | null> {
+    return this.lastSentAt('REMINDER', partyId);
+  },
+
+  /**
+   * Timestamp of the most recent SENT message of a given relatedType/relatedId.
+   * Used by scheduled jobs to throttle (buyer dues reminders) and to guard against
+   * duplicate owner digests when the process restarts within the same window.
+   */
+  async lastSentAt(relatedType: string, relatedId: string): Promise<Date | null> {
     const row = await prisma.whatsAppLog.findFirst({
-      where: { relatedType: 'REMINDER', relatedId: partyId, status: 'SENT' },
+      where: { relatedType, relatedId, status: 'SENT' },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
     });

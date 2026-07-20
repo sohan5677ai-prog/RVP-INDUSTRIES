@@ -28,7 +28,7 @@ import reportRoutes from './report.routes.js';
 import notesRoutes from './notes.routes.js';
 import emailLogRoutes from './emailLog.routes.js';
 import whatsappRoutes from './whatsapp.routes.js';
-import { verifyWhatsAppWebhook, handleWhatsAppWebhook } from '../controllers/whatsapp.controller.js';
+import { verifyWhatsAppWebhook, handleWhatsAppWebhook, runWhatsAppJob } from '../controllers/whatsapp.controller.js';
 import { globalSearch } from '../controllers/search.controller.js';
 const router = Router();
 
@@ -40,6 +40,9 @@ router.use('/auth', authRoutes);
 // buckets are shared across all public+authed traffic).
 router.get('/webhooks/whatsapp', webhookLimiter, asyncHandler(verifyWhatsAppWebhook));
 router.post('/webhooks/whatsapp', webhookLimiter, asyncHandler(handleWhatsAppWebhook));
+// Scheduled WhatsApp jobs, runnable by an external cron. Public but guarded by
+// CRON_SECRET inside the handler (like the webhook, no JWT).
+router.post('/webhooks/whatsapp/jobs/:job', webhookLimiter, asyncHandler(runWhatsAppJob));
 
 // Everything below requires a valid token.
 router.use(requireAuth);

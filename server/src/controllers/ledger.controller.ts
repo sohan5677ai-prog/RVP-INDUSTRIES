@@ -811,9 +811,14 @@ export async function listPartyLedgers(_req: Request, res: Response) {
   res.json(rows);
 }
 
-export async function getPartyLedger(req: Request, res: Response) {
-  const party = await prisma.party.findUnique({ where: { id: req.params.id } });
-  if (!party) throw new HttpError(404, 'Party not found');
+/**
+ * Build a party's full A-to-Z account statement (transactions + summary). Shared
+ * by the HTTP endpoint and the WhatsApp verification-statement PDF so both read
+ * from one source of truth. Returns null when the party doesn't exist.
+ */
+export async function buildPartyStatementData(partyId: string) {
+  const party = await prisma.party.findUnique({ where: { id: partyId } });
+  if (!party) return null;
 
   const [pos, sales, payments, receipts, dustPurchases] = await Promise.all([
     loadPurchaseOrders(party.id),
@@ -824,5 +829,13 @@ export async function getPartyLedger(req: Request, res: Response) {
   ]);
 
   const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases);
-  res.json({ party, summary, transactions: txns });
+  return { party, transactions: txns, summary };
+}
+
+export type PartyStatementData = NonNullable<Awaited<ReturnType<typeof buildPartyStatementData>>>;
+
+export async function getPartyLedger(req: Request, res: Response) {
+  const data = await buildPartyStatementData(req.params.id);
+  if (!data) throw new HttpError(404, 'Party not found');
+  res.json({ party: data.party, summary: data.summary, transactions: data.transactions });
 }

@@ -280,7 +280,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
 
   const invoiceBase = invoiceDispatch ? invoiceDispatch.dispatch.weightKg * Number(invoiceDispatch.order.ratePerKg) : 0;
-  const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+  const invoiceGst = invoiceDispatch?.order.gstExempt ? 0 : Math.round(invoiceBase * GST_RATE * 100) / 100;
 
   // ── Mark Delivered dialog (captures buyer kata + shortage) ───────────────────
   const [deliverDispatch, setDeliverDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
@@ -346,7 +346,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     if (!payDispatch) return;
     const { dispatch, order } = payDispatch;
     const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
-    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+    const invoiceGst = order.gstExempt ? 0 : Math.round(invoiceBase * GST_RATE * 100) / 100;
     const invoiceTotal = invoiceBase + invoiceGst;
     const shortageTotal = shortageWithGst(Number(shortageBase) || 0, order.gstExempt);
     const tds = tdsEnabled ? tdsValue(dispatch, order) : 0;
@@ -360,7 +360,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
     // Auto calculate defaults
     const invoiceBase = dispatch.weightKg * Number(order.ratePerKg);
-    const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+    const invoiceGst = order.gstExempt ? 0 : Math.round(invoiceBase * GST_RATE * 100) / 100;
     const invoiceTotal = invoiceBase + invoiceGst;
     const shortageBase = shortageValue(dispatch, order);
     const shortageTotal = shortageWithGst(shortageBase, order.gstExempt);
@@ -747,7 +747,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                           ) : (
                             <div className="space-y-2.5">
                               {dispatches.map((d) => {
-                                const netDue = (d.weightKg * Number(o.ratePerKg) * (1 + GST_RATE));
+                                const netDue = (d.weightKg * Number(o.ratePerKg) * (o.gstExempt ? 1 : 1 + GST_RATE));
                                 const dueIso = dueDateIso(d.deliveredDate, o.dueDays);
                                 const overdue = isOverdue(dueIso);
                                 const soon = isDueSoon(dueIso);
@@ -1259,7 +1259,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             const d = payDispatch.dispatch;
             const o = payDispatch.order;
             const invoiceBase = d.weightKg * Number(o.ratePerKg);
-            const invoiceGst = Math.round(invoiceBase * GST_RATE * 100) / 100;
+            const invoiceGst = o.gstExempt ? 0 : Math.round(invoiceBase * GST_RATE * 100) / 100;
             const invoiceTotal = invoiceBase + invoiceGst;
             const shortageBase = Number(payShortage) || 0;
             const shortageGstAmt = shortageGst(shortageBase, o.gstExempt);

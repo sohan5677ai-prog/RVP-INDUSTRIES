@@ -6,6 +6,9 @@ import { whatsappService } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText } from '../lib/gemini.js';
 import { buildInvoicePdfData } from '../services/saleDocumentEmail.service.js';
 import { renderInvoicePdf } from '../lib/invoicePdf.js';
+import { renderEwbPdf } from '../lib/ewbPdf.js';
+import { qrPngBuffer } from '../lib/qrcode.js';
+import { mergePdfs } from '../lib/pdfMerge.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 
@@ -252,11 +255,35 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
     throw new HttpError(400, `${recipient.label} has no phone number on file — add one first`);
   }
 
-  // Render the invoice PDF and park it in Supabase Storage so Fast2SMS can
-  // fetch it as the template's document header.
-  const buffer = await renderInvoicePdf(pdfData);
-  const filename = `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
-  const invoicePdfUrl = await uploadFileToStorage({
+  // A WhatsApp template message carries only ONE document. So when an E-Way Bill
+  // exists, render it too and MERGE it onto the tax invoice, producing a single
+  // combined PDF (invoice pages + EWB page) for the template's document header.
+  const invoiceBuffer = await renderInvoicePdf(pdfData);
+  const hasEwb = !!(dispatch.ewbNumber && dispatch.ewbDate && dispatch.ewbValidUpto);
+  let buffer = invoiceBuffer;
+  let filename = `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
+  if (hasEwb) {
+    const ewbBuffer = await renderEwbPdf({
+      company: pdfData.company,
+      buyer: pdfData.buyer,
+      invoiceNumber: pdfData.invoiceNumber,
+      invoiceDate: pdfData.invoiceDate,
+      vehicleNumber: pdfData.vehicleNumber,
+      line: pdfData.line,
+      gstRate: pdfData.gstRate,
+      ewbNumber: dispatch.ewbNumber!,
+      ewbDate: dispatch.ewbDate!,
+      ewbValidUpto: dispatch.ewbValidUpto!,
+      ewbDistance: dispatch.ewbDistance,
+      dispatchDate: dispatch.dispatchDate,
+      qrPngBuffer: await qrPngBuffer(dispatch.ewbNumber!),
+    });
+    buffer = await mergePdfs([invoiceBuffer, ewbBuffer]);
+    filename = `Invoice-EWB-${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
+  }
+  // Park the (combined) PDF in Supabase Storage so Fast2SMS can fetch it as the
+  // template's document header.
+  const documentUrl = await uploadFileToStorage({
     originalname: filename,
     mimetype: 'application/pdf',
     buffer,
@@ -271,10 +298,8 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
     driverName: dispatch.driverName,
     driverPhone: dispatch.driverPhone,
     ewbNumber: dispatch.ewbNumber,
-    // The Tax Invoice PDF is the document header; the E-Way Bill number rides in
-    // the message body. (When an EWB PDF source exists, merge it into this buffer
-    // and pass the combined document here.)
-    documentUrl: invoicePdfUrl,
+    // Single combined Tax Invoice + E-Way Bill PDF (EWB number also rides in the body).
+    documentUrl,
     documentFilename: filename,
     toPhone: recipient.phone,
   });

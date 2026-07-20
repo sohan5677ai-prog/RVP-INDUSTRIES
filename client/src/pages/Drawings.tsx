@@ -33,14 +33,16 @@ const DRAWING_COLUMNS: ExportColumn<Drawing>[] = [
   { header: 'Note', value: (r) => r.note ?? '' },
 ];
 
-export default function Drawings() {
+export default function Drawings({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div className="space-y-7">
-      <PageHeader
-        icon={HandCoins}
-        title="Drawings"
-        description="Owner drawings. Each drawing is deducted from the husk recovery pool."
-      />
+      {!embedded && (
+        <PageHeader
+          icon={HandCoins}
+          title="Drawings"
+          description="Owner drawings. Each drawing is deducted from the husk recovery pool."
+        />
+      )}
       <Tabs defaultValue="SHABRI">
         <TabsList>
           <TabsTrigger value="SHABRI">Shabri</TabsTrigger>

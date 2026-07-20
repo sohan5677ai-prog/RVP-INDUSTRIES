@@ -36,14 +36,16 @@ interface InterestCharge {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function Interest() {
+export default function Interest({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div className="space-y-6">
-      <PageHeader
-        icon={Percent}
-        title="Interest"
-        description="Bank loan interest charged on cash-credit and term-loan facilities. Deducted from the husk pool and the Profit & Loss as an operating expense."
-      />
+      {!embedded && (
+        <PageHeader
+          icon={Percent}
+          title="Interest"
+          description="Bank loan interest charged on cash-credit and term-loan facilities. Deducted from the husk pool and the Profit & Loss as an operating expense."
+        />
+      )}
       <Tabs defaultValue="cc" className="gap-4">
         <TabsList>
           <TabsTrigger value="cc">CC Interest</TabsTrigger>

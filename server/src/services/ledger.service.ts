@@ -23,6 +23,8 @@ export const EXPENSE_PAYMENT_ACCOUNTS: Record<
   GUNNY_BAGS:   { code: '50240', name: 'Packing Material - Gunny Bags', group: 'Direct Expenses',   type: 'EXPENSE', sortOrder: 21 },
   TRANSPORT:    { code: '50260', name: 'Transport Fee',               group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 21 },
   ELECTRICITY:  { code: '50220', name: 'Electricity Charges',         group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 22 },
+  STORAGE_ELECTRICITY: { code: '50222', name: 'Storage Electricity Charges', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 27 },
+  STORAGE_SALARY:      { code: '50210', name: 'Storage Staff Salaries',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 28 },
   MAINTENANCE:  { code: '50230', name: 'Repairs & Maintenance',       group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 23 },
   CC_INTEREST:        { code: '50250', name: 'Bank Interest - CC',        group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 24 },
   TERM_LOAN_INTEREST: { code: '50255', name: 'Interest - Term Loan',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 25 },

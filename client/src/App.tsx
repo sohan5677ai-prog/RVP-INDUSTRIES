@@ -73,6 +73,7 @@ const Electricity = lazyWithPreload('/reports/electricity', () => import('@/page
 const Maintenance = lazyWithPreload('/reports/maintenance', () => import('@/pages/Maintenance'));
 const Drawings = lazyWithPreload('/reports/drawings', () => import('@/pages/Drawings'));
 const Interest = lazyWithPreload('/reports/interest', () => import('@/pages/Interest'));
+const Expenses = lazyWithPreload('/reports/expenses', () => import('@/pages/Expenses'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
 
 function Fallback() {
@@ -150,6 +151,7 @@ export default function App() {
               <Route path="/reports/maintenance" element={<Maintenance />} />
               <Route path="/reports/drawings" element={<Drawings />} />
               <Route path="/reports/interest" element={<Interest />} />
+              <Route path="/reports/expenses" element={<Expenses />} />
               <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
               <Route path="/reports/gst" element={<GstReport />} />
               <Route path="/reports/tds" element={<TdsReport />} />

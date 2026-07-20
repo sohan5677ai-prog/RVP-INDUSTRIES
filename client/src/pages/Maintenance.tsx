@@ -31,7 +31,7 @@ const MAINTENANCE_COLUMNS: ExportColumn<MaintenanceExpense>[] = [
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function Maintenance() {
+export default function Maintenance({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ date: today(), description: '', amount: '', note: '' });
@@ -80,19 +80,28 @@ export default function Maintenance() {
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
 
+  const actions = (
+    <>
+      <ExportButtons filename="Maintenance_Expenses" title="Maintenance Expenses" subtitle={`${rows.length} entry(s)`} columns={MAINTENANCE_COLUMNS} rows={rows} />
+      <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+    </>
+  );
+
   return (
     <div className="space-y-7">
-      <PageHeader
-        icon={Wrench}
-        title="Maintenance"
-        description="Factory maintenance expenses (QED AMC, repairs, etc.). Deducted from the husk recovery pool."
-        actions={
-          <>
-            <ExportButtons filename="Maintenance_Expenses" title="Maintenance Expenses" subtitle={`${rows.length} entry(s)`} columns={MAINTENANCE_COLUMNS} rows={rows} />
-            <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
-          </>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Factory maintenance expenses (QED AMC, repairs, etc.). Deducted from the husk recovery pool.</p>
+          <div className="flex items-center gap-2">{actions}</div>
+        </div>
+      ) : (
+        <PageHeader
+          icon={Wrench}
+          title="Maintenance"
+          description="Factory maintenance expenses (QED AMC, repairs, etc.). Deducted from the husk recovery pool."
+          actions={actions}
+        />
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard label="Total maintenance" value={rupees(total)} icon={Wrench} tone="amber" hint="to husk pool" />

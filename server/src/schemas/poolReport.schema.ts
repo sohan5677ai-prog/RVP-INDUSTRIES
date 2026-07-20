@@ -42,3 +42,11 @@ export const createTermLoanPrincipalSchema = z.object({
   amount: z.coerce.number().positive(),
   note: z.string().trim().optional().nullable(),
 });
+
+export const createStorageMaintenanceSchema = z.object({
+  date: z.coerce.date(),
+  kind: z.enum(['ELECTRICITY', 'SALARY']),
+  label: z.string().trim().optional().nullable(),
+  amount: z.coerce.number().positive(),
+  note: z.string().trim().optional().nullable(),
+});

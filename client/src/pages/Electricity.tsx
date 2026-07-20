@@ -34,7 +34,7 @@ const ELECTRICITY_COLUMNS: ExportColumn<ElectricityBill>[] = [
 const today = () => new Date().toISOString().slice(0, 10);
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
-export default function Electricity() {
+export default function Electricity({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ date: today(), month: thisMonth(), units: '', amount: '', note: '' });
@@ -85,19 +85,28 @@ export default function Electricity() {
   const totalBill = rows.reduce((s, r) => s + Number(r.amount), 0);
   const totalUnits = rows.reduce((s, r) => s + r.units, 0);
 
+  const actions = (
+    <>
+      <ExportButtons filename="Electricity_Bills" title="Electricity Bills" subtitle={`${rows.length} bill(s)`} columns={ELECTRICITY_COLUMNS} rows={rows} />
+      <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+    </>
+  );
+
   return (
     <div className="space-y-7">
-      <PageHeader
-        icon={Zap}
-        title="Electricity"
-        description="Monthly electricity bills. The total bill amount is deducted from the husk recovery pool."
-        actions={
-          <>
-            <ExportButtons filename="Electricity_Bills" title="Electricity Bills" subtitle={`${rows.length} bill(s)`} columns={ELECTRICITY_COLUMNS} rows={rows} />
-            <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
-          </>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Monthly electricity bills. The total bill amount is deducted from the husk recovery pool.</p>
+          <div className="flex items-center gap-2">{actions}</div>
+        </div>
+      ) : (
+        <PageHeader
+          icon={Zap}
+          title="Electricity"
+          description="Monthly electricity bills. The total bill amount is deducted from the husk recovery pool."
+          actions={actions}
+        />
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Total billed" value={rupees(totalBill)} icon={Zap} tone="amber" hint="to husk pool" />

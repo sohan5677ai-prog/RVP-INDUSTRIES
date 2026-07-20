@@ -38,6 +38,8 @@ export interface HuskExpenses {
   gunnyBags: number;
   electricity: number;
   maintenance: number;
+  storageElectricity: number;
+  storageSalaries: number;
   drawingsShabri: number;
   drawingsReddy: number;
   ccInterest: number;
@@ -76,6 +78,8 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'gunnyBags', label: 'Gunny Bags (net)' },
   { key: 'electricity', label: 'Electricity' },
   { key: 'maintenance', label: 'Maintenance' },
+  { key: 'storageElectricity', label: 'Storage Electricity' },
+  { key: 'storageSalaries', label: 'Storage Salaries' },
   { key: 'drawingsShabri', label: 'Drawings - Shabri' },
   { key: 'drawingsReddy', label: 'Drawings - Reddy' },
   { key: 'ccInterest', label: 'CC Interest' },

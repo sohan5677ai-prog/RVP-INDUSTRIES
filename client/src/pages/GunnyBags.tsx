@@ -34,7 +34,7 @@ const GUNNY_COLUMNS: ExportColumn<GunnyBagEntry>[] = [
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function GunnyBags() {
+export default function GunnyBags({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ date: today(), direction: 'PURCHASE', quantity: '', amount: '', note: '' });
@@ -90,19 +90,28 @@ export default function GunnyBags() {
   const totalSold = sold.reduce((s, r) => s + Number(r.amount), 0);
   const netCost = totalPurchased - totalSold;
 
+  const actions = (
+    <>
+      <ExportButtons filename="Gunny_Bags" title="Gunny Bags" subtitle={`${rows.length} entry(s)`} columns={GUNNY_COLUMNS} rows={rows} />
+      <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+    </>
+  );
+
   return (
     <div className="space-y-7">
-      <PageHeader
-        icon={Package}
-        title="Gunny Bags"
-        description="Bardana bags purchased and sold. Net cost (purchases − sales) is deducted from the husk recovery pool."
-        actions={
-          <>
-            <ExportButtons filename="Gunny_Bags" title="Gunny Bags" subtitle={`${rows.length} entry(s)`} columns={GUNNY_COLUMNS} rows={rows} />
-            <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
-          </>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Bardana bags purchased and sold. Net cost (purchases − sales) is deducted from the husk recovery pool.</p>
+          <div className="flex items-center gap-2">{actions}</div>
+        </div>
+      ) : (
+        <PageHeader
+          icon={Package}
+          title="Gunny Bags"
+          description="Bardana bags purchased and sold. Net cost (purchases − sales) is deducted from the husk recovery pool."
+          actions={actions}
+        />
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Bags purchased" value={rupees(totalPurchased)} icon={Package} tone="clay" hint={`${purchased.reduce((s, r) => s + r.quantity, 0)} bags`} />

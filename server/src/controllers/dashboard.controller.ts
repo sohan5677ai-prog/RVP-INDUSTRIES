@@ -89,6 +89,8 @@ export interface HuskExpenses {
   gunnyBags: number;
   electricity: number;
   maintenance: number;
+  storageElectricity: number;
+  storageSalaries: number;
   drawingsShabri: number;
   drawingsReddy: number;
   ccInterest: number;
@@ -112,6 +114,8 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'gunnyBags',          label: 'Gunny Bags (net)',     pappu: false },
   { key: 'electricity',        label: 'Electricity',          pappu: false },
   { key: 'maintenance',        label: 'Maintenance',          pappu: false },
+  { key: 'storageElectricity', label: 'Storage Electricity',  pappu: false },
+  { key: 'storageSalaries',    label: 'Storage Salaries',     pappu: false },
   { key: 'drawingsShabri',     label: 'Drawings - Shabri',    pappu: false },
   { key: 'drawingsReddy',      label: 'Drawings - Reddy',     pappu: false },
   { key: 'ccInterest',         label: 'CC Interest',          pappu: false },
@@ -133,6 +137,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     gunnyByDir,
     electricityAgg,
     maintenanceAgg,
+    storageByKind,
     drawingsByOwner,
     interestByType,
     pappuRate,
@@ -156,6 +161,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       (prisma.gunnyBagEntry.groupBy as any)({ by: ['direction'], _sum: { amount: true } }),
       prisma.electricityBill.aggregate({ _sum: { amount: true } }),
       prisma.maintenanceExpense.aggregate({ _sum: { amount: true } }),
+      (prisma.storageMaintenanceExpense.groupBy as any)({ by: ['kind'], _sum: { amount: true } }),
       (prisma.drawing.groupBy as any)({ by: ['owner'], _sum: { amount: true } }),
       (prisma.interestCharge.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
       getHamaliRateFull('PAPPU_LOADING'),
@@ -216,6 +222,11 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     const gunnyBags = (gunny['PURCHASE'] ?? 0) - (gunny['SALE'] ?? 0);
     const electricity = Number(electricityAgg._sum.amount ?? 0);
     const maintenance = Number(maintenanceAgg._sum.amount ?? 0);
+    const storage = Object.fromEntries(
+      (storageByKind as any[]).map((r) => [r.kind, Number(r._sum.amount ?? 0)]),
+    );
+    const storageElectricity = storage['ELECTRICITY'] ?? 0;
+    const storageSalaries = storage['SALARY'] ?? 0;
     const drawings = Object.fromEntries(
       (drawingsByOwner as any[]).map((r) => [r.owner, Number(r._sum.amount ?? 0)]),
     );
@@ -237,6 +248,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       gunnyBags,
       electricity,
       maintenance,
+      storageElectricity,
+      storageSalaries,
       drawingsShabri: drawings['SHABRI'] ?? 0,
       drawingsReddy: drawings['REDDY'] ?? 0,
       ccInterest: interest['CC'] ?? 0,

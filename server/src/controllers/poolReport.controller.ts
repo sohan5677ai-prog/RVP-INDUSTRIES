@@ -10,6 +10,7 @@ import {
   createDrawingSchema,
   createInterestChargeSchema,
   createTermLoanPrincipalSchema,
+  createStorageMaintenanceSchema,
 } from '../schemas/poolReport.schema.js';
 
 /**
@@ -262,4 +263,50 @@ export async function deleteTermLoanPrincipal(req: Request, res: Response) {
     await tx.termLoanPrincipal.delete({ where: { id: row.id } });
   });
   res.json({ message: 'Term loan principal entry deleted' });
+}
+
+// ── Storage maintenance (godown electricity / staff salaries) ─────────────────
+export async function listStorageMaintenance(req: Request, res: Response) {
+  const kind = req.query.kind;
+  const where =
+    kind === 'ELECTRICITY' || kind === 'SALARY'
+      ? { kind: kind as 'ELECTRICITY' | 'SALARY' }
+      : undefined;
+  res.json(await prisma.storageMaintenanceExpense.findMany({ where, orderBy: { date: 'desc' } }));
+}
+
+export async function createStorageMaintenance(req: Request, res: Response) {
+  const data = createStorageMaintenanceSchema.parse(req.body);
+  const isElectricity = data.kind === 'ELECTRICITY';
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.storageMaintenanceExpense.create({
+      data: {
+        date: data.date,
+        kind: data.kind,
+        label: data.label ?? null,
+        amount: data.amount,
+        note: data.note ?? null,
+      },
+    });
+    await LedgerService.recordLinkedPayment(tx, {
+      date: data.date,
+      amount: Number(data.amount),
+      type: isElectricity ? 'STORAGE_ELECTRICITY' : 'STORAGE_SALARY',
+      payee: data.label ?? (isElectricity ? 'Storage Electricity' : 'Storage Salary'),
+      description: data.note ?? undefined,
+      refKey: `STORAGEEXP-${row.id}`,
+    });
+    return row;
+  });
+  res.status(201).json(created);
+}
+
+export async function deleteStorageMaintenance(req: Request, res: Response) {
+  const row = await prisma.storageMaintenanceExpense.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Storage maintenance entry not found');
+  await prisma.$transaction(async (tx) => {
+    await reverseLinkedEntry(tx, `STORAGEEXP-${row.id}`);
+    await tx.storageMaintenanceExpense.delete({ where: { id: row.id } });
+  });
+  res.json({ message: 'Storage maintenance entry deleted' });
 }

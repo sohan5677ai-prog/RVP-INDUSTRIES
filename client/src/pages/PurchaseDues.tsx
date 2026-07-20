@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import type { Party, Purchase, Payment } from '@/lib/types';
+import type { Party, Purchase, Payment, DustPurchase } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -42,6 +42,10 @@ type PurchaseRow = Purchase & {
 
 interface OutstandingPurchase {
   id: string;
+  // GRAIN = a verified stock-in purchase (FIFO-matched to payments).
+  // DUST  = a pre-cleaner dust / tamarind byproduct purchase (matched to
+  //         payments only by a direct DUST:<id>:<mode> reference — never FIFO).
+  kind: 'GRAIN' | 'DUST';
   partyId: string;
   purchaseDate: Date;
   partyName: string;
@@ -101,6 +105,15 @@ export default function PurchaseDuesPage() {
     queryFn: () => api<Payment[]>('/payments?all=true'),
   });
 
+  // Pre-cleaner dust / tamarind byproduct purchases live in their own table and
+  // raise a real supplier payable, but they never flow through the StockIn →
+  // Purchase → verification chain the grain list is built from. Pull them in so
+  // they show as dues too.
+  const { data: dustPurchases, isLoading: loadingDust } = useQuery({
+    queryKey: ['dust-purchases'],
+    queryFn: () => api<DustPurchase[]>('/dust-purchases'),
+  });
+
   const payMutation = useMutation({
     mutationFn: (body: { date: string; amount: number; type: string; partyId: string; purchaseId?: string; reference?: string }) =>
       api('/payments', { method: 'POST', body }),
@@ -125,12 +138,13 @@ export default function PurchaseDuesPage() {
     onError: () => toast.error('Failed to remove payment'),
   });
 
-  const isLoading = loadingParties || loadingPurchases || loadingPayments;
+  const isLoading = loadingParties || loadingPurchases || loadingPayments || loadingDust;
 
   // FIFO allocation across every supplier/purchase/payment — O(n²)-ish and must
   // be memoized so it doesn't recompute on every render (e.g. each keystroke in
   // the payment dialog, which only touches unrelated state).
   const { outstandingPurchases, totalBillingAll, totalPaymentsAll } = useMemo(() => {
+  const isDustRef = (ref?: string | null) => !!ref && ref.startsWith('DUST:');
   const suppliers = parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [];
 
   const rows: OutstandingPurchase[] = [];
@@ -184,8 +198,11 @@ export default function PurchaseDuesPage() {
       });
     });
 
+    // Grain FIFO pool = the party's floating (non-bill-linked) payments. Exclude
+    // any dust-tagged payment (reference "DUST:…") so a payment made against a
+    // dust/byproduct bill can never be silently absorbed by a grain bill.
     let availablePayments = partyPayments
-      .filter((p) => !p.purchaseId)
+      .filter((p) => !p.purchaseId && !isDustRef(p.reference))
       .map(p => ({
         ...p,
         available: Number(p.amount)
@@ -226,6 +243,7 @@ export default function PurchaseDuesPage() {
 
       rows.push({
         id: p.id,
+        kind: 'GRAIN',
         partyId: s.id,
         purchaseDate,
         partyName: s.name,
@@ -241,11 +259,57 @@ export default function PurchaseDuesPage() {
         deletablePaymentIds: p.deletablePaymentIds,
       });
     });
+
+    // ── Dust / tamarind byproduct purchases for this supplier ────────────────
+    // These are matched to payments by a DIRECT reference tag only (never FIFO):
+    // the "Paid" button records a SUPPLIER payment with reference
+    // "DUST:<dustId>:<mode>", and we settle each bill against payments carrying
+    // its own tag. That keeps them fully isolated from the grain payment pool.
+    const supplierDust = dustPurchases?.filter((d) => d.partyId === s.id) ?? [];
+    supplierDust.forEach((d) => {
+      const total = Math.round(Number(d.amount));
+      totalBillingAll += total;
+
+      const tag = `DUST:${d.id}:`;
+      const linked = partyPayments.filter((pay) => pay.reference?.startsWith(tag));
+      const paid = linked.reduce((sum, pay) => sum + Number(pay.amount), 0);
+      const remaining = Math.max(0, total - paid);
+
+      let status = 'Unpaid';
+      if (remaining <= 0.01) status = 'Paid';
+      else if (paid > 0.01) status = 'Partially Paid';
+
+      const purchaseDate = new Date(d.purchaseDate);
+      const diffTime = today.getTime() - purchaseDate.getTime();
+      const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+      rows.push({
+        id: d.id,
+        kind: 'DUST',
+        partyId: s.id,
+        purchaseDate,
+        partyName: s.name,
+        invoiceNumber: d.invoiceNumber ?? null,
+        pricePerKg: d.pricePerKg,
+        tonnageKg: d.weightKg,
+        lorryNumber: d.lorryNumber ?? null,
+        dueAge,
+        amount: remaining,
+        totalAmount: total,
+        status,
+        appliedPayments: linked.map((pay) => ({
+          date: pay.date,
+          amount: Number(pay.amount),
+          mode: pay.reference?.split(':')[2] || 'Manual',
+        })),
+        deletablePaymentIds: linked.map((pay) => pay.id),
+      });
+    });
   });
 
   rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
   return { outstandingPurchases: rows, totalBillingAll, totalPaymentsAll };
-  }, [parties, purchases, payments]);
+  }, [parties, purchases, payments, dustPurchases]);
 
   const totalOutstanding = outstandingPurchases.reduce((sum, item) => sum + item.amount, 0);
 
@@ -272,13 +336,18 @@ export default function PurchaseDuesPage() {
       toast.error('Please enter a valid date and amount');
       return;
     }
+    const { bill } = payDialog;
     payMutation.mutate({
       date: payDialog.date,
       amount: amt,
       type: 'SUPPLIER',
-      partyId: payDialog.bill.partyId,
-      purchaseId: payDialog.bill.id,
-      reference: payDialog.mode,
+      partyId: bill.partyId,
+      // Dust/byproduct bills carry no Purchase row to link to, so instead of a
+      // purchaseId we tag the payment with the bill's id + mode. The dues memo
+      // settles the bill against payments carrying this exact tag (no FIFO).
+      ...(bill.kind === 'DUST'
+        ? { reference: `DUST:${bill.id}:${payDialog.mode}` }
+        : { purchaseId: bill.id, reference: payDialog.mode }),
     });
   }
 
@@ -372,7 +441,16 @@ export default function PurchaseDuesPage() {
                             {shortDate(bill.purchaseDate.toISOString())}
                           </div>
                         </TableCell>
-                        <TableCell>{bill.partyName}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {bill.partyName}
+                            {bill.kind === 'DUST' && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                                Dust / Byproduct
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{bill.invoiceNumber ?? '-'}</TableCell>
                         <TableCell className="text-right">{rupees(bill.pricePerKg)}/kg</TableCell>
                         <TableCell className="text-right font-semibold">{toTonnes(bill.tonnageKg).toFixed(2)} t</TableCell>

@@ -169,6 +169,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
       tonnageKg: number;
       ratePerKg: number;
       dueDays?: number;
+      gstExempt?: boolean;
       marginOverride?: boolean;
     }>;
   };
@@ -186,6 +187,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
         tonnageKg: row.tonnageKg,
         ratePerKg: row.ratePerKg,
         dueDays: row.dueDays,
+        gstExempt: row.gstExempt ?? false,
         marginOverride: row.marginOverride ?? false,
         brokerageRatePerKg: 0,
       });
@@ -206,7 +208,8 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           tonnageKg: data.tonnageKg,
           ratePerKg: data.ratePerKg,
           dueDays: data.dueDays ?? null,
-          gstAmount: calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
+          gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
+          gstExempt: data.gstExempt || false,
           brokerageRatePerKg: 0,
           destination,
           freightCharge,

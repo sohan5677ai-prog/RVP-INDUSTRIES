@@ -1016,6 +1016,18 @@ model MaintenanceExpense {
   createdAt   DateTime @default(now())
 }
 
+// Catch-all miscellaneous operating expense recorded on the Expenses → Misc tab
+// (anything that doesn't fit the dedicated heads). Posts a linked Payment to its
+// own P&L expense head and is deducted from the husk recovery pool.
+model MiscExpense {
+  id          String   @id @default(cuid())
+  date        DateTime
+  description String // free-text label of the expense
+  amount      Decimal  @db.Decimal(12, 2)
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
 enum DrawingOwner {
   SHABRI
   REDDY

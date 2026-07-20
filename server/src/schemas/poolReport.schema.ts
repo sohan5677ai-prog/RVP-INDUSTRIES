@@ -23,6 +23,13 @@ export const createMaintenanceExpenseSchema = z.object({
   note: z.string().trim().optional().nullable(),
 });
 
+export const createMiscExpenseSchema = z.object({
+  date: z.coerce.date(),
+  description: z.string().trim().min(1),
+  amount: z.coerce.number().nonnegative(),
+  note: z.string().trim().optional().nullable(),
+});
+
 export const createDrawingSchema = z.object({
   date: z.coerce.date(),
   owner: z.enum(['SHABRI', 'REDDY']),

@@ -26,6 +26,7 @@ export const EXPENSE_PAYMENT_ACCOUNTS: Record<
   STORAGE_ELECTRICITY: { code: '50222', name: 'Storage Electricity Charges', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 27 },
   STORAGE_SALARY:      { code: '50210', name: 'Storage Staff Salaries',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 28 },
   MAINTENANCE:  { code: '50230', name: 'Repairs & Maintenance',       group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 23 },
+  MISC_EXPENSE: { code: '50270', name: 'Miscellaneous Expenses',       group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 29 },
   CC_INTEREST:        { code: '50250', name: 'Bank Interest - CC',        group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 24 },
   TERM_LOAN_INTEREST: { code: '50255', name: 'Interest - Term Loan',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 25 },
   TERM_LOAN_PRINCIPAL:{ code: '50256', name: 'Principal - Term Loan',     group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 26 },

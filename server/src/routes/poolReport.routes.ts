@@ -4,6 +4,7 @@ import {
   listGunnyBags, createGunnyBag, deleteGunnyBag,
   listElectricityBills, createElectricityBill, deleteElectricityBill,
   listMaintenanceExpenses, createMaintenanceExpense, deleteMaintenanceExpense,
+  listMiscExpenses, createMiscExpense, deleteMiscExpense,
   listDrawings, createDrawing, deleteDrawing,
   listInterestCharges, createInterestCharge, deleteInterestCharge,
   listTermLoanPrincipals, createTermLoanPrincipal, deleteTermLoanPrincipal,
@@ -23,6 +24,10 @@ router.delete('/electricity-bills/:id', asyncHandler(deleteElectricityBill));
 router.get('/maintenance-expenses', asyncHandler(listMaintenanceExpenses));
 router.post('/maintenance-expenses', asyncHandler(createMaintenanceExpense));
 router.delete('/maintenance-expenses/:id', asyncHandler(deleteMaintenanceExpense));
+
+router.get('/misc-expenses', asyncHandler(listMiscExpenses));
+router.post('/misc-expenses', asyncHandler(createMiscExpense));
+router.delete('/misc-expenses/:id', asyncHandler(deleteMiscExpense));
 
 router.get('/drawings', asyncHandler(listDrawings));
 router.post('/drawings', asyncHandler(createDrawing));

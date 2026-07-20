@@ -7,6 +7,7 @@ import {
   createGunnyBagSchema,
   createElectricityBillSchema,
   createMaintenanceExpenseSchema,
+  createMiscExpenseSchema,
   createDrawingSchema,
   createInterestChargeSchema,
   createTermLoanPrincipalSchema,
@@ -141,6 +142,45 @@ export async function deleteMaintenanceExpense(req: Request, res: Response) {
     await tx.maintenanceExpense.delete({ where: { id: row.id } });
   });
   res.json({ message: 'Maintenance expense deleted' });
+}
+
+// ── Miscellaneous expenses ──────────────────────────────────────────────────
+export async function listMiscExpenses(_req: Request, res: Response) {
+  res.json(await prisma.miscExpense.findMany({ orderBy: { date: 'desc' } }));
+}
+
+export async function createMiscExpense(req: Request, res: Response) {
+  const data = createMiscExpenseSchema.parse(req.body);
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.miscExpense.create({
+      data: {
+        date: data.date,
+        description: data.description,
+        amount: data.amount,
+        note: data.note ?? null,
+      },
+    });
+    await LedgerService.recordLinkedPayment(tx, {
+      date: data.date,
+      amount: Number(data.amount),
+      type: 'MISC_EXPENSE',
+      payee: data.description,
+      description: data.note ?? undefined,
+      refKey: `MISCEXP-${row.id}`,
+    });
+    return row;
+  });
+  res.status(201).json(created);
+}
+
+export async function deleteMiscExpense(req: Request, res: Response) {
+  const row = await prisma.miscExpense.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Miscellaneous expense not found');
+  await prisma.$transaction(async (tx) => {
+    await reverseLinkedEntry(tx, `MISCEXP-${row.id}`);
+    await tx.miscExpense.delete({ where: { id: row.id } });
+  });
+  res.json({ message: 'Miscellaneous expense deleted' });
 }
 
 // ── Drawings (Shabri / Reddy) ────────────────────────────────────────────────

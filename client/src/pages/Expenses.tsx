@@ -4,14 +4,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import GunnyBags from '@/pages/GunnyBags';
 import Electricity from '@/pages/Electricity';
 import Maintenance from '@/pages/Maintenance';
+import Miscellaneous from '@/pages/Miscellaneous';
 import Drawings from '@/pages/Drawings';
 import Interest from '@/pages/Interest';
 import StorageMaintenance from '@/pages/StorageMaintenance';
 
 /**
  * Unified Expenses workspace. Clubs the standalone operating-expense reports
- * (Gunny Bags, Electricity, Maintenance, Drawings, Interest) plus the new
- * Storage Maintenance tab into a single tabbed page. Every tab feeds the husk
+ * (Gunny Bags, Electricity, Maintenance, Miscellaneous, Drawings, Interest) plus
+ * the Storage Maintenance tab into a single tabbed page. Every tab feeds the husk
  * recovery pool and the Profit & Loss.
  */
 export default function Expenses() {
@@ -27,6 +28,7 @@ export default function Expenses() {
           <TabsTrigger value="gunny">Gunny Bags</TabsTrigger>
           <TabsTrigger value="electricity">Electricity</TabsTrigger>
           <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
+          <TabsTrigger value="misc">Miscellaneous</TabsTrigger>
           <TabsTrigger value="drawings">Drawings</TabsTrigger>
           <TabsTrigger value="interest">Interest</TabsTrigger>
           <TabsTrigger value="storage">Storage Maintenance</TabsTrigger>
@@ -35,6 +37,7 @@ export default function Expenses() {
         <TabsContent value="gunny"><GunnyBags embedded /></TabsContent>
         <TabsContent value="electricity"><Electricity embedded /></TabsContent>
         <TabsContent value="maintenance"><Maintenance embedded /></TabsContent>
+        <TabsContent value="misc"><Miscellaneous embedded /></TabsContent>
         <TabsContent value="drawings"><Drawings embedded /></TabsContent>
         <TabsContent value="interest"><Interest embedded /></TabsContent>
         <TabsContent value="storage"><StorageMaintenance /></TabsContent>

@@ -7,6 +7,7 @@ import apiRoutes from "./routes/index.js";
 import { errorHandler } from "./middleware/error.js";
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { assertJwtSecret } from "./lib/jwt.js";
+import { prisma } from "./lib/prisma.js";
 
 // Fail fast if the JWT secret isn't configured, rather than booting an insecure
 // server that only errors on the first login.
@@ -35,12 +36,28 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
-app.get("/api/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    service: "rvp-server",
-    time: new Date().toISOString(),
-  });
+app.get("/api/health", async (_req, res) => {
+  // Run a trivial query so the keep-alive ping actually reaches Supabase.
+  // Render sleeps after 15 min idle AND Supabase free tier pauses a project
+  // after 7 days of no DB activity — a static response would only wake Render,
+  // leaving the database to be paused. `SELECT 1` touches Postgres cheaply.
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({
+      status: "ok",
+      service: "rvp-server",
+      db: "up",
+      time: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error("health check DB query failed", err);
+    res.status(503).json({
+      status: "degraded",
+      service: "rvp-server",
+      db: "down",
+      time: new Date().toISOString(),
+    });
+  }
 });
 
 app.use("/api", apiLimiter, apiRoutes);

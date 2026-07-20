@@ -203,7 +203,9 @@ export class TaxproService {
     // mismatch (error 2235), so we compute the tax from the assessable value at
     // that rate here — this is the source of truth and stays correct even when a
     // legacy dispatch row stored gstAmount as 0.
-    const gstRate = taxInfo?.gstRate != null ? Number(taxInfo.gstRate) : 5;
+    // A GST-exempt order is billed WITHOUT tax — force 0% so NIC generates the IRN
+    // GST-free (and it matches the invoice/EWB PDFs, which also honor gstExempt).
+    const gstRate = order.gstExempt ? 0 : (taxInfo?.gstRate != null ? Number(taxInfo.gstRate) : 5);
     const gstAmount = Math.round(baseAmount * gstRate) / 100; // = AssVal * GstRt%
     const totalAmount = Math.round((baseAmount + gstAmount) * 100) / 100;
 

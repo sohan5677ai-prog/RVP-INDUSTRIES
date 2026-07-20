@@ -29,7 +29,9 @@ export async function buildInvoicePdfData(dispatchId: string) {
 
   const buyerGstin = order.buyer.gstin ?? null;
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
-  const gstFraction = (taxRow?.gstRate != null ? Number(taxRow.gstRate) : 5) / 100;
+  // A GST-exempt order (and every dispatch under it) is billed WITHOUT GST — the
+  // invoice/EWB must show a 0% rate regardless of the product's default tax row.
+  const gstFraction = order.gstExempt ? 0 : (taxRow?.gstRate != null ? Number(taxRow.gstRate) : 5) / 100;
 
   const irn = dispatch.irn
     ? {

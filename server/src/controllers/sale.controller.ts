@@ -504,9 +504,9 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 }
 
 /**
- * Undo a dispatch made by mistake. Only allowed while the shipment is still a
- * plain DISPATCHED record - once it is delivered, invoiced, or has an E-Invoice /
- * E-Way Bill against it, the undo is blocked (those must be reversed first). The
+ * Undo a dispatch made by mistake. Allowed while the shipment is DISPATCHED or
+ * DELIVERED (delivery posts nothing new), but blocked once a payment, E-Invoice
+ * (IRN), or E-Way Bill exists against it - those must be reversed first. The
  * reversal: restores the inventory consumed at dispatch (black-seed pool for
  * pappu, shell store for shell), deletes the sale's ledger posting, removes the
  * SaleDispatch, and recomputes the order status from the remaining shipments.
@@ -517,8 +517,13 @@ export async function undoSaleDispatch(req: Request, res: Response) {
     include: { saleOrder: true },
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
-  if (dispatch.status === 'DELIVERED') {
-    throw new HttpError(400, 'Cannot undo a delivered shipment - reverse the delivery first.');
+
+  // Delivery adds no inventory/GL postings of its own (those happened at dispatch),
+  // so a delivered shipment can still be undone cleanly - unless a payment has been
+  // recorded against it, in which case the receipt must be reversed first.
+  const receiptCount = await prisma.receipt.count({ where: { saleDispatchId: dispatch.id } });
+  if (receiptCount > 0) {
+    throw new HttpError(400, 'A payment has been recorded against this shipment - reverse the receipt before undoing.');
   }
 
   if (dispatch.irn && dispatch.irnStatus !== 'CANCELLED') {

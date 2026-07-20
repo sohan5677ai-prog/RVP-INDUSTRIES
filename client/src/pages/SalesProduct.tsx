@@ -240,9 +240,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // ── Undo dispatch (mistaken dispatch) ───────────────────────────────────────
   const [undoTarget, setUndoTarget] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
 
-  /** A shipment can be undone only while it's still a plain DISPATCHED record. */
-  function canUndo(d: SaleDispatch): boolean {
-    return d.status === 'DISPATCHED'
+  /**
+   * A shipment can be undone while it's DISPATCHED or DELIVERED (delivery adds no
+   * postings of its own) - but not once it's paid or carries an active IRN / EWB.
+   */
+  function canUndo(d: SaleDispatch, o: SaleOrder): boolean {
+    return (d.status === 'DISPATCHED' || d.status === 'DELIVERED')
+      && !isDispatchPaid(d, Number(o.ratePerKg), settled)
       && (!d.irn || d.irnStatus === 'CANCELLED')
       && (!d.ewbNumber || d.ewbStatus === 'CANCELLED');
   }
@@ -908,7 +912,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             <Pencil className="h-3.5 w-3.5" /> Edit
                                           </Button>
                                         )}
-                                        {canUndo(d) && (
+                                        {canUndo(d, o) && (
                                           <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => setUndoTarget({ dispatch: d, order: o })}>
                                             <Undo2 className="h-3.5 w-3.5" /> Undo
                                           </Button>

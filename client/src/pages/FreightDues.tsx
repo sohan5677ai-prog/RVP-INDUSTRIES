@@ -63,6 +63,48 @@ function titleCase(s: string) {
   return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
+type PayFilterValue = 'all' | 'unpaid' | 'paid';
+
+/** Narrow rows to a paid/unpaid subset using the shared per-lorry status. */
+function filterByPayment(
+  rows: FreightRow[],
+  filter: PayFilterValue,
+  statusFor: (row: FreightRow) => PaymentStatus,
+): FreightRow[] {
+  if (filter === 'all') return rows;
+  return rows.filter((r) => {
+    const paid = statusFor(r) === 'Paid';
+    return filter === 'paid' ? paid : !paid; // "unpaid" = Pending or Partial
+  });
+}
+
+/** Small segmented All / Unpaid / Paid toggle shown above each freight table. */
+function PayFilter({ value, onChange }: { value: PayFilterValue; onChange: (v: PayFilterValue) => void }) {
+  const opts: { key: PayFilterValue; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'unpaid', label: 'Unpaid' },
+    { key: 'paid', label: 'Paid' },
+  ];
+  return (
+    <div className="inline-flex rounded-md border bg-background p-0.5">
+      {opts.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          onClick={() => onChange(o.key)}
+          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+            value === o.key
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function FreightTable({
   freightLabel,
   exportName,
@@ -83,14 +125,16 @@ function FreightTable({
   paymentsByLorry: Map<string, { date: string, amount: number, reference: string | null }[]>;
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(rows, 50);
+  const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
+  const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
 
   const t = {
-    freight: rows.reduce((s, r) => s + r.freight, 0),
-    hamali: rows.reduce((s, r) => s + r.hamali, 0),
-    kata: rows.reduce((s, r) => s + r.kata, 0),
-    transport: rows.reduce((s, r) => s + r.transport, 0),
-    net: rows.reduce((s, r) => s + r.net, 0),
+    freight: filteredRows.reduce((s, r) => s + r.freight, 0),
+    hamali: filteredRows.reduce((s, r) => s + r.hamali, 0),
+    kata: filteredRows.reduce((s, r) => s + r.kata, 0),
+    transport: filteredRows.reduce((s, r) => s + r.transport, 0),
+    net: filteredRows.reduce((s, r) => s + r.net, 0),
   };
 
   const exportColumns: ExportColumn<FreightRow>[] = [
@@ -116,8 +160,9 @@ function FreightTable({
 
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
-      <div className="flex justify-end px-3 py-2 border-b">
-        <ExportButtons filename={exportName} title={`${freightLabel} Dues`} subtitle={`${rows.length} record(s)`} columns={exportColumns} rows={rows} />
+      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b">
+        <PayFilter value={payFilter} onChange={setPayFilter} />
+        <ExportButtons filename={exportName} title={`${freightLabel} Dues`} subtitle={`${filteredRows.length} record(s)`} columns={exportColumns} rows={filteredRows} />
       </div>
       <Table>
         <TableHeader>
@@ -139,7 +184,7 @@ function FreightTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.length === 0 && (
+          {filteredRows.length === 0 && (
             <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No records.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
@@ -226,7 +271,7 @@ function FreightTable({
             );
           })}
         </TableBody>
-        {rows.length > 0 && (
+        {filteredRows.length > 0 && (
           <tfoot>
             <TableRow className="border-t-2 font-bold bg-muted/30">
               <TableCell colSpan={hideDeductions ? 6 : 3}>Total</TableCell>
@@ -268,8 +313,10 @@ function TransfersTable({
   dueFor: (row: FreightRow) => number;
   onPay: (lorry: string, due: number) => void;
 }) {
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(rows, 50);
-  const totalTransport = rows.reduce((s, r) => s + r.net, 0);
+  const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
+  const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
+  const totalTransport = filteredRows.reduce((s, r) => s + r.net, 0);
 
   const exportColumns: ExportColumn<FreightRow>[] = [
     { header: 'Date', value: (r) => shortDate(r.date) },
@@ -284,8 +331,9 @@ function TransfersTable({
 
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
-      <div className="flex justify-end px-3 py-2 border-b">
-        <ExportButtons filename="Freight_Dues_KNM_Transfers" title="KNM Transfer Transport" subtitle={`${rows.length} transfer(s)`} columns={exportColumns} rows={rows} />
+      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b">
+        <PayFilter value={payFilter} onChange={setPayFilter} />
+        <ExportButtons filename="Freight_Dues_KNM_Transfers" title="KNM Transfer Transport" subtitle={`${filteredRows.length} transfer(s)`} columns={exportColumns} rows={filteredRows} />
       </div>
       <Table>
         <TableHeader>
@@ -301,7 +349,7 @@ function TransfersTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.length === 0 && (
+          {filteredRows.length === 0 && (
             <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
@@ -343,7 +391,7 @@ function TransfersTable({
             );
           })}
         </TableBody>
-        {rows.length > 0 && (
+        {filteredRows.length > 0 && (
           <tfoot>
             <TableRow className="border-t-2 font-bold bg-muted/30">
               <TableCell colSpan={5}>Total</TableCell>
@@ -665,19 +713,25 @@ export default function FreightDuesPage() {
               </Card>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                <Truck className="h-4 w-4" /> Usual Freights
-              </h3>
-              <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
-            </div>
+            <Tabs defaultValue="usual" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="usual" className="gap-1.5">
+                  <Truck className="h-4 w-4" /> Usual Freights
+                </TabsTrigger>
+                <TabsTrigger value="transfers" className="gap-1.5">
+                  <ArrowLeftRight className="h-4 w-4" /> Transfers
+                </TabsTrigger>
+              </TabsList>
 
-            <div className="space-y-3">
-              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                <ArrowLeftRight className="h-4 w-4" /> Transfers <span className="normal-case font-normal text-muted-foreground/80">· husk, seed &amp; pre-cleaner dust transport billed to KNM Transport</span>
-              </h3>
-              <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} />
-            </div>
+              <TabsContent value="usual">
+                <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+              </TabsContent>
+
+              <TabsContent value="transfers" className="space-y-2">
+                <p className="text-xs text-muted-foreground">Husk, seed &amp; pre-cleaner dust transport billed to KNM Transport.</p>
+                <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
       )}

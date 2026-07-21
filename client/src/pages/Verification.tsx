@@ -111,13 +111,17 @@ export default function Verification() {
   const [discountType, setDiscountType] = useState<'WEIGHT' | 'PRICE' | 'AMOUNT' | ''>('');
   const [discountValue, setDiscountValue] = useState('');
 
+  // Bill addables: extra costs added on top of the seed value (loading,
+  // brokerage, misc). Each row is a label + rupee amount.
+  const [addables, setAddables] = useState<{ label: string; amount: string }[]>([]);
+
   const { data: purchases, isLoading } = useQuery({
     queryKey: ['purchases'],
     queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
   });
 
   const verifyMutation = useMutation({
-    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number; forceExempt: boolean }) =>
+    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number; forceExempt: boolean; billAddables?: { label: string; amount: number }[] }) =>
       api('/verifications', { method: 'POST', body: args }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
@@ -151,6 +155,7 @@ export default function Verification() {
       setDiscountType('');
       setDiscountValue('');
     }
+    setAddables([]);
     setForceExempt(false);
     setOpen(true);
   }
@@ -191,7 +196,17 @@ export default function Verification() {
   const liveIgst = liveHasGst ? Math.round(liveBillingAmount * 0.05 * 100) / 100 : 0;
   const liveSelfVehicleHamali = calc?.selfVehicleHamali ?? 0;
   const liveSelfVehicleKata = calc?.selfVehicleKata ?? 0;
-  const liveTotalAmount = liveNetBase + liveIgst - liveSelfVehicleHamali - liveSelfVehicleKata;
+
+  // Bill addables total from the input rows (unverified) or the stored record
+  // (verified). Adds to the net payable.
+  const liveAddables = selectedPurchase?.verification
+    ? (selectedPurchase.verification.billAddables ?? []).map((a) => ({ label: a.label, amount: a.amount }))
+    : addables
+        .map((a) => ({ label: a.label.trim(), amount: Number(a.amount) || 0 }))
+        .filter((a) => a.label && a.amount > 0);
+  const liveAddablesTotal = liveAddables.reduce((sum, a) => sum + a.amount, 0);
+
+  const liveTotalAmount = liveNetBase + liveIgst + liveAddablesTotal - liveSelfVehicleHamali - liveSelfVehicleKata;
 
   const allPurchases = purchases ?? [];
   const verifiedCount = useMemo(() => allPurchases.filter((p) => p.verification).length, [allPurchases]);
@@ -485,6 +500,56 @@ export default function Verification() {
                       </div>
                     )}
                   </div>
+
+                  {/* Bill Addables: extra costs added to the payable */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                        <ReceiptText className="h-3.5 w-3.5 text-muted-foreground" /> Bill Addables
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setAddables((rows) => [...rows, { label: '', amount: '' }])}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        + Add cost
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground -mt-1">Extra costs (loading, brokerage, misc) added on top of the seed value.</p>
+                    {addables.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground italic">No extra costs added.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {addables.map((row, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={row.label}
+                              onChange={(e) => setAddables((rows) => rows.map((r, j) => (j === i ? { ...r, label: e.target.value } : r)))}
+                              className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              placeholder="Cost name (e.g. Loading)"
+                            />
+                            <input
+                              type="number"
+                              step="any"
+                              value={row.amount}
+                              onChange={(e) => setAddables((rows) => rows.map((r, j) => (j === i ? { ...r, amount: e.target.value } : r)))}
+                              className="w-28 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              placeholder="₹ amount"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAddables((rows) => rows.filter((_, j) => j !== i))}
+                              className="h-9 w-9 shrink-0 rounded-md border border-input text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors"
+                              aria-label="Remove cost"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-lg border p-3 bg-muted/10 space-y-1.5 text-xs">
@@ -529,6 +594,12 @@ export default function Verification() {
                       <span>{rupees(liveIgst)}</span>
                     </div>
                   )}
+                  {liveAddables.map((a, i) => (
+                    <div key={i} className="flex justify-between text-foreground">
+                      <span className="text-muted-foreground">{a.label}</span>
+                      <span>+{rupees(a.amount)}</span>
+                    </div>
+                  ))}
                   {liveSelfVehicleHamali > 0 && (
                     <div className="flex justify-between text-destructive font-medium">
                       <span>Self-vehicle hamali (₹80/t on party's own lorry)</span>
@@ -587,6 +658,9 @@ export default function Verification() {
                         discountType: discountType || null,
                         discountValue: Number(discountValue) || 0,
                         forceExempt: forceExempt,
+                        billAddables: addables
+                          .map((a) => ({ label: a.label.trim(), amount: Number(a.amount) || 0 }))
+                          .filter((a) => a.label && a.amount > 0),
                       })}
                       disabled={verifyMutation.isPending}
                     >

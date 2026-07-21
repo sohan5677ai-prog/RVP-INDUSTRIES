@@ -53,7 +53,13 @@ export interface WeightVerification {
   totalAmount: string;
   selfVehicleHamali?: string;
   selfVehicleKata?: string;
+  billAddables?: BillAddable[] | null;
   createdAt: string;
+}
+
+export interface BillAddable {
+  label: string;
+  amount: number;
 }
 
 

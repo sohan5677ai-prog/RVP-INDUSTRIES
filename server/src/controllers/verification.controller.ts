@@ -148,7 +148,16 @@ export async function createVerification(req: Request, res: Response) {
   const selfVehicleKata = purchase.stockIn.selfVehicle
     ? Number(purchase.kataFee)
     : 0;
-  const totalAmount = Math.max(0, grossPayable - selfVehicleHamali - selfVehicleKata);
+
+  // Bill addables: extra costs the user itemises at approval (loading, brokerage,
+  // misc). They ADD to the party's net payable and capitalise into the seed's
+  // landed cost. Only positive-amount, labelled rows are kept.
+  const billAddables = (data.billAddables ?? [])
+    .filter((a) => a.label.trim() && a.amount > 0)
+    .map((a) => ({ label: a.label.trim(), amount: a.amount }));
+  const addablesTotal = billAddables.reduce((sum, a) => sum + a.amount, 0);
+
+  const totalAmount = Math.max(0, grossPayable + addablesTotal - selfVehicleHamali - selfVehicleKata);
 
   // Shortage check for Auto Debit Note (shortage > 0.5%)
   const shortageKg = billingWeightKg - rvpKataKg;
@@ -180,6 +189,7 @@ export async function createVerification(req: Request, res: Response) {
         totalAmount,
         selfVehicleHamali,
         selfVehicleKata,
+        billAddables,
       },
     });
 
@@ -194,8 +204,10 @@ export async function createVerification(req: Request, res: Response) {
     // Seed value is capitalised EXCLUDING GST (netBaseCost, not grossPayable) - the
     // input IGST is claimable tax credit, not stock cost. The self-vehicle hamali is
     // recovered from the party and does not lower the seed's cost; the self-vehicle
-    // kata DOES lower the seed's landed cost (the party reimburses it).
-    const totalInventoryCost = netBaseCost - selfVehicleKata + ourHamali + freight;
+    // kata DOES lower the seed's landed cost (the party reimburses it). Bill
+    // addables are extra acquisition costs, so they capitalise into the seed too
+    // (mirrors the ledger's stock debit, which derives from totalAmount).
+    const totalInventoryCost = netBaseCost + addablesTotal - selfVehicleKata + ourHamali + freight;
 
     // Subtract original purchase stock from inventory
     await InventoryService.updateBlackSeedInventory(

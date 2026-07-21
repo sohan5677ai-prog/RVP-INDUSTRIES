@@ -372,6 +372,12 @@ model WeightVerification {
   // (the full weighbridge/kata fee, normally recovered from the transporter).
   // Recovering it lowers the seed's landed cost. 0 for third-party lorries.
   selfVehicleKata   Decimal  @default(0) @db.Decimal(12, 2)
+  // Extra billed-on costs the user itemises at approval (loading, brokerage,
+  // misc). Stored as [{ label, amount }]. Each ADDS to the supplier's net
+  // payable AND capitalises into the seed's landed cost, so the ledger and the
+  // silo MAP stay balanced (both derive from totalAmount, which already
+  // includes the addables total).
+  billAddables      Json?
   createdAt         DateTime @default(now())
 
   @@index([purchaseId])

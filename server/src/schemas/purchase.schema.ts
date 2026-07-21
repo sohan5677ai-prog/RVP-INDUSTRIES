@@ -135,11 +135,19 @@ export const createDustPurchaseSchema = z.object({
   purchaseDate: z.coerce.date(),
 });
 
+export const billAddableSchema = z.object({
+  label: z.string().trim().min(1),
+  amount: z.coerce.number().nonnegative(),
+});
+
 export const createVerificationSchema = z.object({
   purchaseId: z.string().min(1),
   discountType: z.enum(['WEIGHT', 'PRICE', 'AMOUNT']).optional().nullable(),
   discountValue: z.coerce.number().nonnegative().optional().default(0),
   forceExempt: z.boolean().optional().default(false),
+  // Extra costs billed on top of the seed value (loading, brokerage, misc).
+  // Each adds to the party's net payable and capitalises into the seed cost.
+  billAddables: z.array(billAddableSchema).optional().default([]),
 });
 
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;

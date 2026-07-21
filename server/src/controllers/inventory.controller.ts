@@ -105,7 +105,7 @@ export async function getStockByPrice(_req: Request, res: Response) {
 }
 
 export async function getStockByParty(req: Request, res: Response) {
-  const { allLots } = await computeUnifiedStockEngine('FIFO');
+  const { allLots } = await computeUnifiedStockEngine('MOST_EXPENSIVE_FIRST');
 
   // 'RVP' shows only seed physically at the mill; anything else (default/'ALL')
   // combines RVP with stock still sitting at outside storage locations.

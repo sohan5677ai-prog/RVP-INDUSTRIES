@@ -16,7 +16,9 @@ import { logger } from '../lib/logger.js';
  *
  * Env:
  *  - FAST2SMS_API_KEY          Fast2SMS Dev API key (Authorization header)
- *  - FAST2SMS_PHONE_NUMBER_ID  WABA phone number id of the shared business number
+ *  - FAST2SMS_PHONE_NUMBER_ID  (optional) Fast2SMS phone-number id; omit to use the
+ *                              account's connected number. Do NOT put a Meta
+ *                              phone-number-id here — Fast2SMS rejects it.
  *  - WHATSAPP_ENABLED          'true' to send at all (default off, like SLACK_ENABLED)
  *  - WHATSAPP_TEST_MODE        anything but 'false' reroutes to the test number
  *  - WHATSAPP_TEST_NUMBER      where test-mode messages land (owner's phone)
@@ -79,6 +81,28 @@ function fmtWeight(kg: number): string {
  * falling back to WHATSAPP_TEST_NUMBER so the owner flows still have a target
  * before the field is filled in. Never throws.
  */
+/**
+ * Resolve the effective test-mode + test-number. The UI toggle stored on the
+ * CompanyProfile is authoritative; the WHATSAPP_TEST_MODE / WHATSAPP_TEST_NUMBER
+ * env vars are only a fallback for when the row can't be read. Never throws.
+ */
+export async function resolveWhatsAppMode(): Promise<{ testMode: boolean; testNumber: string | null }> {
+  const envTestMode = process.env.WHATSAPP_TEST_MODE !== 'false'; // safety default: ON
+  const envTestNumber = process.env.WHATSAPP_TEST_NUMBER?.trim() || null;
+  try {
+    const p = await prisma.companyProfile.findUnique({
+      where: { id: 'default' },
+      select: { whatsappTestMode: true, whatsappTestNumber: true, ownerWhatsappNumber: true },
+    });
+    return {
+      testMode: p?.whatsappTestMode ?? envTestMode,
+      testNumber: p?.whatsappTestNumber?.trim() || envTestNumber || p?.ownerWhatsappNumber?.trim() || null,
+    };
+  } catch {
+    return { testMode: envTestMode, testNumber: envTestNumber };
+  }
+}
+
 export async function resolveOwnerNumber(): Promise<string | null> {
   try {
     const profile = await prisma.companyProfile.findUnique({
@@ -136,17 +160,16 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
   const apiKey = process.env.FAST2SMS_API_KEY;
   const phoneNumberId = process.env.FAST2SMS_PHONE_NUMBER_ID;
   const enabled = process.env.WHATSAPP_ENABLED === 'true';
-  // Safety default: test mode stays ON until explicitly turned off.
-  const testMode = process.env.WHATSAPP_TEST_MODE !== 'false';
-  const testNumber = process.env.WHATSAPP_TEST_NUMBER;
+  // Test mode + test number come from the Settings toggle (DB), env as fallback.
+  const { testMode, testNumber } = await resolveWhatsAppMode();
 
   if (!enabled) {
     await log(args, 'SKIPPED', { error: 'WHATSAPP_ENABLED is not true' });
     return { ok: false, skipped: true, error: 'WhatsApp sending is disabled (WHATSAPP_ENABLED)' };
   }
-  if (!apiKey || !phoneNumberId) {
-    await log(args, 'SKIPPED', { error: 'FAST2SMS_API_KEY / FAST2SMS_PHONE_NUMBER_ID not configured' });
-    return { ok: false, skipped: true, error: 'Fast2SMS credentials are not configured' };
+  if (!apiKey) {
+    await log(args, 'SKIPPED', { error: 'FAST2SMS_API_KEY not configured' });
+    return { ok: false, skipped: true, error: 'Fast2SMS API key is not configured' };
   }
   const messageId = templateId(args.templateKey);
   if (!messageId) {
@@ -166,9 +189,12 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
 
   const params = new URLSearchParams({
     message_id: messageId,
-    phone_number_id: phoneNumberId,
     numbers: target,
   });
+  // phone_number_id is optional on Fast2SMS: when omitted it uses the number
+  // connected to the account. Only send it when explicitly configured (a wrong
+  // value — e.g. a Meta phone-number-id — is rejected with "not connected").
+  if (phoneNumberId) params.set('phone_number_id', phoneNumberId);
   const variablesValues = args.variables.map(cleanVar).join('|');
   if (variablesValues) params.set('variables_values', variablesValues);
   if (args.mediaUrl) params.set('media_url', args.mediaUrl);

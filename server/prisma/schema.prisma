@@ -755,6 +755,13 @@ model CompanyProfile {
   // daily dues digest, deferred-dispatch reminders). Falls back to
   // WHATSAPP_TEST_NUMBER when blank. Not printed on invoices.
   ownerWhatsappNumber     String?
+  // WhatsApp test-mode toggle (UI-controlled, no redeploy needed). When ON,
+  // every outbound WhatsApp is rerouted to whatsappTestNumber instead of the
+  // real party. Defaults ON as a safety net. Overrides the WHATSAPP_TEST_MODE env.
+  whatsappTestMode        Boolean @default(true)
+  // Where test-mode messages land. Falls back to WHATSAPP_TEST_NUMBER env, then
+  // ownerWhatsappNumber, when blank.
+  whatsappTestNumber      String?
 
   // TaxPro GSP configuration
   taxproGspId     String?

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck } from 'lucide-react';
+import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, ProductionCostComponent, HamaliRate } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,7 @@ export default function Settings() {
           <TabsTrigger value="freight">Freight Rates</TabsTrigger>
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
           <TabsTrigger value="production">Production Cost</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
         </TabsList>
 
@@ -61,6 +62,10 @@ export default function Settings() {
 
         <TabsContent value="production" className="focus-visible:outline-none focus-visible:ring-0">
           <ProductionCostSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0">
+          <WhatsAppSection qc={qc} />
         </TabsContent>
 
         <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">
@@ -162,6 +167,8 @@ const emptyCompany: CompanyProfile = {
   id: 'default', name: '', address: '', gstin: '', stateName: '', stateCode: '', contact: '',
   bankAccountName: '', bankName: '', bankAccountNumber: '', bankBranchIfsc: '', invoicePrefix: 'RVP',
   ownerWhatsappNumber: '',
+  whatsappTestMode: true,
+  whatsappTestNumber: '',
   freightRetentionPerTrip: 3000,
   taxproGspId: '', taxproGspSecret: '', taxproGstUser: '', taxproGstPass: '', taxproSandbox: true,
 };
@@ -577,6 +584,81 @@ function HamaliRatesSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             </div>
             {hasUnnamed && <p className="text-xs text-destructive">Give every custom cost a name before saving.</p>}
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- WhatsApp test-mode toggle --------------------------------------------------
+
+function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
+  const { data, isLoading } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
+  const [form, setForm] = useState<CompanyProfile>(emptyCompany);
+  useEffect(() => { if (data) setForm({ ...emptyCompany, ...data }); }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => api<CompanyProfile>('/settings/company', { method: 'PUT', body: form }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company'] }); toast.success('WhatsApp settings saved'); },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const testMode = form.whatsappTestMode ?? true;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <MessageCircle className="h-5 w-5 text-green-500" />
+        <CardTitle className="text-base">WhatsApp Messaging</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+          <>
+            <div className={`flex items-center justify-between rounded-lg border p-4 ${testMode ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30' : 'border-green-300 bg-green-50 dark:bg-green-950/30'}`}>
+              <div className="space-y-0.5">
+                <div className="text-sm font-semibold">Test mode</div>
+                <p className="text-xs text-muted-foreground max-w-md">
+                  {testMode
+                    ? 'ON — every WhatsApp message is sent ONLY to the test number below. Real parties are never messaged.'
+                    : 'OFF — messages are sent to the actual parties (using the phone number in their Parties record).'}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={testMode}
+                onClick={() => setForm((p) => ({ ...p, whatsappTestMode: !testMode }))}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${testMode ? 'bg-amber-500' : 'bg-green-600'}`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${testMode ? 'translate-x-0.5' : 'translate-x-[22px]'}`} />
+              </button>
+            </div>
+
+            <div className="space-y-1.5 max-w-xs">
+              <Label className="text-xs">Test number (test mode target)</Label>
+              <Input
+                value={form.whatsappTestNumber ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, whatsappTestNumber: e.target.value }))}
+                placeholder="918019965187"
+                disabled={!testMode}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                10-digit Indian mobile (or 91XXXXXXXXXX). Used only while test mode is ON; falls back to the owner WhatsApp number if left blank.
+              </p>
+            </div>
+
+            {!testMode && (
+              <p className="rounded-md bg-green-50 dark:bg-green-950/30 px-3 py-2 text-xs text-green-800 dark:text-green-300">
+                ⚠️ Live mode: real parties will receive WhatsApp messages. Make sure their phone numbers in Parties are correct.
+              </p>
+            )}
+
+            <div className="flex justify-end">
+              <Button onClick={() => save.mutate()} disabled={save.isPending}>
+                <Save className="h-4 w-4" /> {save.isPending ? 'Saving…' : 'Save WhatsApp settings'}
+              </Button>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

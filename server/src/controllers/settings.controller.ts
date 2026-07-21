@@ -238,6 +238,8 @@ const companyProfileSchema = z.object({
   invoicePrefix: z.string().trim().min(1).default('RVP'),
   companyVehicles: z.string().optional().nullable(),
   ownerWhatsappNumber: z.string().optional().nullable(),
+  whatsappTestMode: z.boolean().optional(),
+  whatsappTestNumber: z.string().optional().nullable(),
   freightRetentionPerTrip: z.coerce.number().nonnegative().optional(),
   taxproGspId: z.string().optional().nullable(),
   taxproGspSecret: z.string().optional().nullable(),

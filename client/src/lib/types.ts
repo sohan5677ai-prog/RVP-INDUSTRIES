@@ -379,6 +379,8 @@ export interface CompanyProfile {
   invoicePrefix: string;
   companyVehicles?: string | null;
   ownerWhatsappNumber?: string | null;
+  whatsappTestMode?: boolean;
+  whatsappTestNumber?: string | null;
   freightRetentionPerTrip?: string | number;
   invoiceLayout?: string | null;
 

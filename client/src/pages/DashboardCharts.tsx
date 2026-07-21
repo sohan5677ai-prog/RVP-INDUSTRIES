@@ -33,6 +33,9 @@ export interface HuskExpenses {
   tWasteLoading: number;
   bagCutting: number;
   pappuNet: number;
+  huskPacking: number;
+  tpsBrokensPacking: number;
+  tamarindByproductsPacking: number;
   misc: number;
   gunnyBags: number;
   electricity: number;
@@ -73,6 +76,9 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'tWasteLoading', label: 'T-Waste Loading' },
   { key: 'bagCutting', label: 'Bag Cutting' },
   { key: 'pappuNet', label: 'Pappu Net (Rasi)' },
+  { key: 'huskPacking', label: 'Husk Packing' },
+  { key: 'tpsBrokensPacking', label: 'TPS Brokens Packing' },
+  { key: 'tamarindByproductsPacking', label: 'Tamarind Byproducts Packing' },
   { key: 'misc', label: 'Miscellaneous' },
   { key: 'gunnyBags', label: 'Gunny Bags (net)' },
   { key: 'electricity', label: 'Electricity' },

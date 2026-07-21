@@ -8,6 +8,9 @@ const LABELS: Record<string, string> = {
   BAG_CUTTING_NORMAL: 'Bag Cutting (Place A)',
   BAG_CUTTING_DISTANCE: 'Bag Cutting (Place B)',
   PAPPU_NET: 'Pappu Net',
+  HUSK_PACKING: 'Husk Packing',
+  TPS_BROKENS_PACKING: 'TPS Brokens Packing',
+  TAMARIND_BYPRODUCTS_PACKING: 'Tamarind Byproducts Packing',
   MISC: 'Miscellaneous',
   PAID: 'Paid to Hamali',
 };

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -173,6 +174,10 @@ export default function HamaliLedger() {
   const [mRate, setMRate] = useState('3');
   const [mAmount, setMAmount] = useState('');
   const [mNote, setMNote] = useState('');
+
+  // Recorded-charges table filter: searchable type picker + free-text note search
+  const [chargeFilter, setChargeFilter] = useState<'ALL' | ManualHamaliType>('ALL');
+  const [chargeSearch, setChargeSearch] = useState('');
 
   const mMeta = manualTypeMeta(mType);
   const mComputed = mMeta.perBag ? (Number(mBags) || 0) * (Number(mRate) || 0) : Number(mAmount) || 0;
@@ -441,9 +446,21 @@ export default function HamaliLedger() {
 
   // Manual costs - charges accrue what we owe the crew; PAID entries settle it.
   const manualSorted = [...(manualCosts ?? [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const manualCharged = manualSorted.filter((c) => c.type !== 'PAID').reduce((s, c) => s + Number(c.amount), 0);
-  const manualPaid = manualSorted.filter((c) => c.type === 'PAID').reduce((s, c) => s + Number(c.amount), 0);
-  const manualOutstanding = manualCharged - manualPaid;
+
+  // Rows shown in the Recorded Charges table + their own header totals honor the
+  // type/search filter; the crew-payable metrics above stay on the full set.
+  const manualFiltered = useMemo(() => {
+    const needle = chargeSearch.trim().toLowerCase();
+    return manualSorted.filter((c) => {
+      if (chargeFilter !== 'ALL' && c.type !== chargeFilter) return false;
+      if (needle && !(`${c.note ?? ''} ${manualTypeMeta(c.type).label}`.toLowerCase().includes(needle))) return false;
+      return true;
+    });
+  }, [manualSorted, chargeFilter, chargeSearch]);
+  const manualFilteredCharged = manualFiltered.filter((c) => c.type !== 'PAID').reduce((s, c) => s + Number(c.amount), 0);
+  const manualFilteredPaid = manualFiltered.filter((c) => c.type === 'PAID').reduce((s, c) => s + Number(c.amount), 0);
+  const manualFilteredOutstanding = manualFilteredCharged - manualFilteredPaid;
+  const chargeFilterActive = chargeFilter !== 'ALL' || chargeSearch.trim() !== '';
 
   // --- Reconciliation checkpoints (Hamali view) ---
   // Rows dated on/before the latest checkpoint are cross-verified and locked; the
@@ -1121,11 +1138,31 @@ export default function HamaliLedger() {
           {/* Manually-recorded charges (bag cutting, pappu net, misc, paid) */}
           <div className="rounded-lg border bg-card overflow-x-auto">
             <div className="px-5 py-4 border-b flex flex-wrap items-center justify-between gap-3">
-              <span className="font-semibold text-sm">Recorded Charges</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-sm">Recorded Charges</span>
+                <Combobox
+                  className="h-9 w-52"
+                  ariaLabel="Filter by charge type"
+                  placeholder="All charge types"
+                  searchPlaceholder="Search charge type…"
+                  value={chargeFilter}
+                  onChange={(v) => setChargeFilter(v as 'ALL' | ManualHamaliType)}
+                  options={[{ value: 'ALL', label: 'All charge types' }, ...MANUAL_TYPES.map((m) => ({ value: m.value, label: m.label }))]}
+                />
+                <Input
+                  className="h-9 w-44"
+                  placeholder="Search note…"
+                  value={chargeSearch}
+                  onChange={(e) => setChargeSearch(e.target.value)}
+                />
+                {chargeFilterActive && (
+                  <Button variant="ghost" size="sm" className="h-9" onClick={() => { setChargeFilter('ALL'); setChargeSearch(''); }}>Clear</Button>
+                )}
+              </div>
               <div className="flex gap-4 text-xs">
-                <span className="text-muted-foreground">Charged: <b className="text-primary">{rupees(manualCharged)}</b></span>
-                <span className="text-muted-foreground">Paid: <b className="text-emerald-600 dark:text-emerald-400">{rupees(manualPaid)}</b></span>
-                <span className="text-muted-foreground">Outstanding: <b className={manualOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : ''}>{rupees(manualOutstanding)}</b></span>
+                <span className="text-muted-foreground">Charged: <b className="text-primary">{rupees(manualFilteredCharged)}</b></span>
+                <span className="text-muted-foreground">Paid: <b className="text-emerald-600 dark:text-emerald-400">{rupees(manualFilteredPaid)}</b></span>
+                <span className="text-muted-foreground">Outstanding: <b className={manualFilteredOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : ''}>{rupees(manualFilteredOutstanding)}</b></span>
               </div>
             </div>
             <Table>
@@ -1141,14 +1178,16 @@ export default function HamaliLedger() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {manualSorted.length === 0 ? (
+                {manualFiltered.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                      No charges recorded. Use “Record” to add bag cutting, pappu net, or paid amounts.
+                      {chargeFilterActive
+                        ? 'No charges match this filter.'
+                        : 'No charges recorded. Use “Record” to add bag cutting, pappu net, or paid amounts.'}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  manualSorted.map((c) => (
+                  manualFiltered.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell>{shortDate(c.date)}</TableCell>
                       <TableCell>

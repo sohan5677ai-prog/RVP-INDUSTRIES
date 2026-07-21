@@ -84,6 +84,9 @@ export interface HuskExpenses {
   tWasteLoading: number;
   bagCutting: number;
   pappuNet: number;
+  huskPacking: number;
+  tpsBrokensPacking: number;
+  tamarindByproductsPacking: number;
   misc: number;
   gunnyBags: number;
   electricity: number;
@@ -109,6 +112,9 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'tWasteLoading',      label: 'T-Waste Loading',      pappu: false },
   { key: 'bagCutting',         label: 'Bag Cutting',          pappu: false },
   { key: 'pappuNet',           label: 'Pappu Net (Rasi)',     pappu: true  },
+  { key: 'huskPacking',        label: 'Husk Packing',         pappu: false },
+  { key: 'tpsBrokensPacking',  label: 'TPS Brokens Packing',  pappu: false },
+  { key: 'tamarindByproductsPacking', label: 'Tamarind Byproducts Packing', pappu: false },
   { key: 'misc',               label: 'Miscellaneous',        pappu: false },
   { key: 'gunnyBags',          label: 'Gunny Bags (net)',     pappu: false },
   { key: 'electricity',        label: 'Electricity',          pappu: false },
@@ -209,7 +215,12 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     );
     const bagCutting = (manual['BAG_CUTTING_NORMAL'] ?? 0) + (manual['BAG_CUTTING_DISTANCE'] ?? 0);
     const pappuNet = manual['PAPPU_NET'] ?? 0;
+    const huskPacking = manual['HUSK_PACKING'] ?? 0;
+    const tpsBrokensPacking = manual['TPS_BROKENS_PACKING'] ?? 0;
+    const tamarindByproductsPacking = manual['TAMARIND_BYPRODUCTS_PACKING'] ?? 0;
     const misc = manual['MISC'] ?? 0;
+    // NOTE: PAID entries settle the 20200 hamali payable (Dr payable / Cr cash) —
+    // they are not an operating expense, so they are deliberately not summed here.
 
     // ── Static/Standalone Expenses ──────────
     const transferCosts = 
@@ -245,6 +256,9 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       tWasteLoading,
       bagCutting,
       pappuNet,
+      huskPacking,
+      tpsBrokensPacking,
+      tamarindByproductsPacking,
       misc,
       gunnyBags,
       electricity,

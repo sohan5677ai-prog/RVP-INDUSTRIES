@@ -24,7 +24,8 @@ export async function createHuskTransfer(req: Request, res: Response) {
   const { getHamaliRate } = await import('./settings.controller.js');
   const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(
     data.weightKg,
-    await getHamaliRate('SHELL_TRANSFER')
+    await getHamaliRate('SHELL_TRANSFER'),
+    data.toLocation
   );
 
   const transfer = await prisma.$transaction(async (tx) => {

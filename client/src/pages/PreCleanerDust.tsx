@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Plus, Trash2, ArrowRight, Package, ShoppingCart, IndianRupee } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { ShellTransfer, SaleOrder, DustPurchase, Party } from '@/lib/types';
-import { shellTransferCost, SHELL_HAMALI_RATE, SHELL_TRANSPORT } from '@/lib/calc';
+import { shellTransferCost, SHELL_HAMALI_RATE, transferTransportRate } from '@/lib/calc';
 import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { StatCard } from '@/components/StatCard';
@@ -306,7 +306,7 @@ function TransfersPanel() {
 
   const weightKg = Number(weight) || 0;
   const weightValid = weightKg > 0;
-  const cost = weightValid ? shellTransferCost(weightKg) : { hamaliCharge: 0, transportCharge: 0, totalCost: 0 };
+  const cost = weightValid ? shellTransferCost(weightKg, SHELL_HAMALI_RATE, DUST_STORAGE) : { hamaliCharge: 0, transportCharge: 0, totalCost: 0 };
 
   function resetForm() {
     setWeight('');
@@ -349,7 +349,7 @@ function TransfersPanel() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Factory → {DUST_STORAGE} transfers · hamali ₹{SHELL_HAMALI_RATE}/t + ₹{SHELL_TRANSPORT} transport.
+          Factory → {DUST_STORAGE} transfers · hamali ₹{SHELL_HAMALI_RATE}/t + ₹{transferTransportRate(DUST_STORAGE)}/t transport billed to KNM Transport.
         </p>
         <div className="flex items-center gap-2">
           <ExportButtons filename="PreCleaner_Dust_Transfers" title="Pre Cleaner Dust Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={DUST_TRANSFER_COLUMNS} rows={transfers ?? []} />
@@ -437,7 +437,7 @@ function TransfersPanel() {
                 <span className="font-medium">{rupees(cost.hamaliCharge)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Transport (fixed)</span>
+                <span className="text-muted-foreground">Transport (₹{transferTransportRate(DUST_STORAGE)}/t → KNM Transport)</span>
                 <span className="font-medium">{rupees(cost.transportCharge)}</span>
               </div>
               <div className="flex justify-between border-t pt-2">

@@ -242,14 +242,37 @@ export function internalHamaliLeg(
   return { charge, crew: round2(charge - margin), margin };
 }
 
+// --- Transfer transport (billed to KNM Transport) ----------------------------
+// Transfer transport is per (rounded) tonne and billed to KNM Transport - for
+// husk, seed (stock) and pre-cleaner-dust (shell) transfers alike. The rate is
+// keyed to the storage location involved (destination for husk/dust, source for
+// seed): PGR COLD / Murugan ₹250/t, KNM Multi ₹100/t. Replaces the former flat
+// ₹500 per transfer.
+export const TRANSFER_TRANSPORT_RATES: Record<string, number> = {
+  'PGR COLD': 250,
+  Murugan: 250,
+  'KNM Multi': 100,
+};
+export const DEFAULT_TRANSFER_TRANSPORT_RATE = 250;
+
+/** Per-tonne transfer transport rate for a storage location (₹/tonne). */
+export function transferTransportRate(location: string | null | undefined): number {
+  if (!location) return DEFAULT_TRANSFER_TRANSPORT_RATE;
+  return TRANSFER_TRANSPORT_RATES[location.trim()] ?? DEFAULT_TRANSFER_TRANSPORT_RATE;
+}
+
+/** Transfer transport charge in rupees: rounded tonnes × the location's rate. */
+export function transferTransportCharge(weightKg: number, location: string | null | undefined): number {
+  const tonnes = Math.round(weightKg / 1000);
+  return tonnes * transferTransportRate(location);
+}
+
 // --- Stock transfer (storage → process) hamali -------------------------------
-// All charges are per (rounded) tonne unless noted:
-//   - load + process-unload (combined): ₹270/t, fully crew (no margin)
-//   - transport: a fixed ₹500 per transfer (not per tonne)
-// The storage-unload leg (formerly ₹80/t) is no longer charged.
-// Everything is 100% company-borne and capitalised into the seed at the process.
+// Load + process-unload hamali is ₹270/t (rounded tonnes), fully crew (no
+// margin); the storage-unload leg (formerly ₹80/t) is no longer charged. Both
+// the hamali and the per-tonne transfer transport are capitalised into the seed
+// at the process.
 export const TRANSFER_HANDLING_RATE = 270; // ₹/tonne - load + unload combined, all crew
-export const TRANSFER_TRANSPORT = 500; // ₹ fixed per transfer
 
 export interface TransferHamali {
   unloadCharge: number; // storage unload leg - no longer charged, always 0
@@ -273,12 +296,12 @@ export function transferHamali(
   return { unloadCharge: 0, handlingCharge: charge, charge, crew: charge, margin: 0 };
 }
 
-// --- Tamarind shell transfer (process → Rampalli) ----------------------------
-// Shell is a production byproduct moved to the Rampalli storage for later sale.
-// Packing + loading + unloading hamali is ₹333/tonne; transport is a fixed ₹500.
-// Both are capitalised into the shell's value at Rampalli.
-export const SHELL_HAMALI_RATE = 333; // ₹/tonne - packing + loading + unloading at Rampalli
-export const SHELL_TRANSPORT = 500; // ₹ fixed per transfer
+// --- Byproduct transfer cost (shell / husk / pre-cleaner dust) ----------------
+// A production byproduct moved to a storage location for later sale. Packing +
+// loading + unloading hamali is ₹333/tonne; transport is per-tonne, billed to
+// KNM Transport at the location's rate (see transferTransportCharge). Both are
+// capitalised into the byproduct's value at the destination.
+export const SHELL_HAMALI_RATE = 333; // ₹/tonne - packing + loading + unloading
 
 export interface ShellTransferCost {
   hamaliCharge: number;
@@ -287,14 +310,19 @@ export interface ShellTransferCost {
 }
 
 /**
- * Cost breakdown for one process→Rampalli shell transfer. Tonnes are rounded.
+ * Cost breakdown for one byproduct transfer to `location`. Tonnes are rounded.
  * The packing+loading+unloading hamali ₹/tonne (`rate`, default ₹333/t) is
- * configurable in Settings; transport stays a fixed ₹500.
+ * configurable in Settings; transport is per-tonne by location (₹250/t for
+ * PGR COLD / Murugan, ₹100/t for KNM Multi), billed to KNM Transport.
  */
-export function shellTransferCost(weightKg: number, rate: number = SHELL_HAMALI_RATE): ShellTransferCost {
+export function shellTransferCost(
+  weightKg: number,
+  rate: number = SHELL_HAMALI_RATE,
+  location: string = 'PGR COLD'
+): ShellTransferCost {
   const tonnes = Math.round(weightKg / 1000);
   const hamaliCharge = tonnes * rate;
-  const transportCharge = SHELL_TRANSPORT;
+  const transportCharge = transferTransportCharge(weightKg, location);
   return { hamaliCharge, transportCharge, totalCost: hamaliCharge + transportCharge };
 }
 

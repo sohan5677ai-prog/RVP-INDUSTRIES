@@ -341,10 +341,10 @@ export class LedgerService {
     }
 
     // 3. Transfer transport - capitalised into the seed at the destination,
-    // owed to the transporter.
+    // owed to KNM Transport.
     if (data.transportCharge > 0) {
       lines.push({ accountCode: '10010', debit: data.transportCharge, credit: 0, costCenter: data.toLocation }); // Raw Material Inventory
-      lines.push({ accountCode: '20210', debit: 0, credit: data.transportCharge });
+      lines.push({ accountCode: '20260', debit: 0, credit: data.transportCharge }); // KNM Transport Payable
     }
 
     // 5. Bank-loan carrying interest - expensed, owed to the bank.
@@ -367,7 +367,7 @@ export class LedgerService {
    * Post a tamarind shell transfer to another location. Shell is no longer held as
    * a valued silo - the transfer is purely a physical movement, so its cost
    * (hamali crew + transport) is EXPENSED (not capitalised): the crew is owed via
-   * the hamali payable and the transport via the transfer transport payable.
+   * the hamali payable and the transport via the KNM Transport payable.
    */
   static async postShellTransfer(
     tx: Prisma.TransactionClient,
@@ -388,7 +388,7 @@ export class LedgerService {
 
     if (data.transportCharge > 0) {
       lines.push({ accountCode: '50090', debit: data.transportCharge, credit: 0, costCenter: data.toLocation }); // Transport Expense (Internal)
-      lines.push({ accountCode: '20210', debit: 0, credit: data.transportCharge });
+      lines.push({ accountCode: '20260', debit: 0, credit: data.transportCharge }); // KNM Transport Payable
     }
 
     if (lines.length === 0) return;
@@ -403,8 +403,8 @@ export class LedgerService {
 
   /**
    * Post a husk transfer from the factory to a storage location. Like the shell
-   * transfer, the ₹333/t hamali and fixed ₹500 transport are expensed against the
-   * hamali team / transport payables. Physical-movement + cost record only.
+   * transfer, the ₹333/t hamali and per-tonne transport are expensed against the
+   * hamali team / KNM Transport payables. Physical-movement + cost record only.
    */
   static async postHuskTransfer(
     tx: Prisma.TransactionClient,
@@ -425,7 +425,7 @@ export class LedgerService {
 
     if (data.transportCharge > 0) {
       lines.push({ accountCode: '50090', debit: data.transportCharge, credit: 0, costCenter: data.toLocation }); // Transport Expense (Internal)
-      lines.push({ accountCode: '20210', debit: 0, credit: data.transportCharge });
+      lines.push({ accountCode: '20260', debit: 0, credit: data.transportCharge }); // KNM Transport Payable
     }
 
     if (lines.length === 0) return;

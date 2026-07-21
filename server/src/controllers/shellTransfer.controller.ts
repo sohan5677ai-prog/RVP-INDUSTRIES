@@ -27,7 +27,8 @@ export async function createShellTransfer(req: Request, res: Response) {
   const { getHamaliRate } = await import('./settings.controller.js');
   const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(
     data.weightKg,
-    await getHamaliRate('SHELL_TRANSFER')
+    await getHamaliRate('SHELL_TRANSFER'),
+    SHELL_STORAGE
   );
 
   const transfer = await prisma.$transaction(async (tx) => {

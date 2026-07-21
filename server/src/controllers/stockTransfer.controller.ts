@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createStockTransferSchema } from '../schemas/purchase.schema.js';
-import { transferHamali, TRANSFER_TRANSPORT, companyHamaliShare } from '../lib/calc.js';
+import { transferHamali, transferTransportCharge, companyHamaliShare } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 
@@ -84,8 +84,9 @@ export async function listStockTransfers(_req: Request, res: Response) {
  * valued by the specific PRICE BAND it is drawn from (top-to-bottom, highest band
  * first - see {@link drawStorageBandValue}), NOT the silo's blended MAP average.
  * A fixed hamali (₹270/t load+unload, all crew - the storage-unload leg is no
- * longer charged) and a fixed ₹500 transport are capitalised into the seed's value
- * at the process silo. Company-vehicle exemption does not apply to transfers
+ * longer charged) and a per-tonne transport (₹250/t from PGR COLD / Murugan,
+ * ₹100/t from KNM Multi, billed to KNM Transport) are capitalised into the seed's
+ * value at the process silo. Company-vehicle exemption does not apply to transfers
  * (only to arrivals).
  */
 export async function createStockTransfer(req: Request, res: Response) {
@@ -104,13 +105,15 @@ export async function createStockTransfer(req: Request, res: Response) {
 
   const { getHamaliRate } = await import('./settings.controller.js');
   const hamali = transferHamali(data.weightKg, await getHamaliRate('TRANSFER_FROM_STORAGE'));
-  const transportCharge = TRANSFER_TRANSPORT;
+  // Transfer transport is per-tonne, keyed to the source storage location, and
+  // billed to KNM Transport (still capitalised into the seed at the process).
+  const transportCharge = transferTransportCharge(data.weightKg, data.fromLocation);
 
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;
   const legMargin = hamali.margin;
 
-  // The transfer hamali (₹270/t) + fixed ₹500 transport travel WITH the seed:
+  // The transfer hamali (₹270/t) + per-tonne transport travel WITH the seed:
   // they are capitalised into the seed's value at the destination, so the value
   // arriving at RVP = seed value moved + these costs. No bank-loan interest is
   // charged on transfers.

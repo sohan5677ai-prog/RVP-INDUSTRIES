@@ -11,6 +11,7 @@ import {
   productLoadingHamali,
   transferHamali,
   shellTransferCost,
+  transferTransportCharge,
   roundRupee,
   calcSaleFreight,
   landedPricePerKg,
@@ -116,12 +117,24 @@ describe('configurable hamali rates', () => {
     expect(t.crew).toBe(25 * 270);         // 6750
   });
 
-  it('shellTransferCost: configurable hamali, fixed ₹500 transport', () => {
-    const s = shellTransferCost(20000); // default 333/t
+  it('shellTransferCost: configurable hamali, per-tonne transport by location', () => {
+    const s = shellTransferCost(20000); // default 333/t hamali, PGR COLD transport
     expect(s.hamaliCharge).toBe(20 * 333); // 6660
-    expect(s.transportCharge).toBe(500);
-    expect(s.totalCost).toBe(6660 + 500);
+    expect(s.transportCharge).toBe(20 * 250); // PGR COLD ₹250/t = 5000
+    expect(s.totalCost).toBe(6660 + 5000);
     expect(shellTransferCost(20000, 400).hamaliCharge).toBe(20 * 400); // 8000
+    // KNM Multi is billed at ₹100/t
+    expect(shellTransferCost(20000, 333, 'KNM Multi').transportCharge).toBe(20 * 100); // 2000
+  });
+
+  it('transferTransportCharge: rounded tonnes × the location rate', () => {
+    expect(transferTransportCharge(20000, 'PGR COLD')).toBe(20 * 250);
+    expect(transferTransportCharge(20000, 'Murugan')).toBe(20 * 250);
+    expect(transferTransportCharge(20000, 'KNM Multi')).toBe(20 * 100);
+    expect(transferTransportCharge(24000, 'KNM Multi')).toBe(24 * 100);
+    // unknown / missing location falls back to the default ₹250/t
+    expect(transferTransportCharge(10000, 'Somewhere')).toBe(10 * 250);
+    expect(transferTransportCharge(10000, null)).toBe(10 * 250);
   });
 });
 

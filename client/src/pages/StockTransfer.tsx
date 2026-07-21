@@ -5,8 +5,8 @@ import { Plus, Trash2, ArrowRight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { StockTransfer, SiloInventory } from '@/lib/types';
 import {
-  transferHamali,
-  TRANSFER_HANDLING_RATE, TRANSFER_TRANSPORT,
+  transferHamali, transferTransportCharge, transferTransportRate,
+  TRANSFER_HANDLING_RATE,
 } from '@/lib/calc';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -66,7 +66,7 @@ export default function StockTransferPage() {
 
   const hamali = weightValid ? transferHamali(weightKg) : { unloadCharge: 0, handlingCharge: 0, charge: 0, crew: 0, margin: 0 };
 
-  const transportCharge = weightValid ? TRANSFER_TRANSPORT : 0;
+  const transportCharge = weightValid ? transferTransportCharge(weightKg, fromLocation) : 0;
 
   // Hamali + transport travel with the seed and are capitalised into its value at
   // RVP. The seed's own value is drawn from the specific price band(s)
@@ -117,7 +117,7 @@ export default function StockTransferPage() {
           <h1 className="text-2xl font-bold">Stock Transfer</h1>
           <p className="text-muted-foreground">
             Move black seed from a storage (Rampalli/Murugan/Multi) to the process. Adds a fixed hamali
-            (₹{TRANSFER_HANDLING_RATE}/t load &amp; unload), and ₹{TRANSFER_TRANSPORT} transport to the seed's value.
+            (₹{TRANSFER_HANDLING_RATE}/t load &amp; unload), and per-tonne transport (₹250/t PGR COLD &amp; Murugan, ₹100/t KNM Multi, billed to KNM Transport) to the seed's value.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -233,11 +233,11 @@ export default function StockTransferPage() {
                 <span className="font-medium">{rupees(hamali.handlingCharge)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Transfer transport (fixed)</span>
+                <span className="text-muted-foreground">Transfer transport (₹{transferTransportRate(fromLocation)}/t → KNM Transport)</span>
                 <span className="font-medium">{rupees(transportCharge)}</span>
               </div>
               <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew) and ₹{TRANSFER_TRANSPORT} transport are capitalised into that seed value.
+                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew) and ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport) are capitalised into that seed value.
               </p>
             </div>
 

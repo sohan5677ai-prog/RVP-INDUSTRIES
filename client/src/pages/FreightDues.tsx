@@ -2,7 +2,7 @@ import { useState, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus } from '@/lib/types';
+import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { calcHamali, calcKataFee, pappuLoadingHamali } from '@/lib/calc';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck } from 'lucide-react';
+import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -42,9 +42,11 @@ interface FreightRow {
   transport: number;
   net: number;
   deliveryStatus: string;
-  sourced: 'Purchase' | 'Sale';
+  sourced: 'Purchase' | 'Sale' | 'Transfer';
   destination: string | null;
   party: string | null;
+  kind?: 'Husk' | 'Seed' | 'Dust';
+  weightKg?: number;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -243,6 +245,119 @@ function FreightTable({
   );
 }
 
+const kindVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
+  Husk: 'secondary',
+  Seed: 'default',
+  Dust: 'outline',
+};
+
+/**
+ * Transfer transport payable to KNM Transport (husk / seed / pre-cleaner dust).
+ * The whole transport charge is the net due; payment status/due come from the
+ * same per-lorry pool as the usual KNM freight (transfers without a lorry number
+ * are info-only - no Pay action).
+ */
+function TransfersTable({
+  rows,
+  paymentStatusFor,
+  dueFor,
+  onPay,
+}: {
+  rows: FreightRow[];
+  paymentStatusFor: (row: FreightRow) => PaymentStatus;
+  dueFor: (row: FreightRow) => number;
+  onPay: (lorry: string, due: number) => void;
+}) {
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(rows, 50);
+  const totalTransport = rows.reduce((s, r) => s + r.net, 0);
+
+  const exportColumns: ExportColumn<FreightRow>[] = [
+    { header: 'Date', value: (r) => shortDate(r.date) },
+    { header: 'Type', value: (r) => r.kind ?? '' },
+    { header: 'Route', value: (r) => r.destination ?? '' },
+    { header: 'Lorry No', value: (r) => r.lorry ?? '' },
+    { header: 'Weight (kg)', value: (r) => r.weightKg ?? 0, numFmt: '#,##0', align: 'right' },
+    { header: 'Transport', value: (r) => rupees(r.net), excel: (r) => r.net, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Payment Status', value: (r) => paymentStatusFor(r) },
+    { header: 'Due', value: (r) => rupees(dueFor(r)), excel: (r) => dueFor(r), numFmt: '#,##0.00', align: 'right' },
+  ];
+
+  return (
+    <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="flex justify-end px-3 py-2 border-b">
+        <ExportButtons filename="Freight_Dues_KNM_Transfers" title="KNM Transfer Transport" subtitle={`${rows.length} transfer(s)`} columns={exportColumns} rows={rows} />
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Date</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Route</TableHead>
+            <TableHead>Lorry No</TableHead>
+            <TableHead className="text-right">Weight</TableHead>
+            <TableHead className="text-right">Transport</TableHead>
+            <TableHead>Payment Status</TableHead>
+            <TableHead className="text-right">Action</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 && (
+            <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
+          )}
+          {(pageRows ?? []).map((r) => {
+            const pay = paymentStatusFor(r);
+            const due = dueFor(r);
+            return (
+              <TableRow key={r.id}>
+                <TableCell>{shortDate(r.date)}</TableCell>
+                <TableCell><Badge variant={kindVariant[r.kind ?? ''] ?? 'secondary'}>{r.kind}</Badge></TableCell>
+                <TableCell className="text-sm">{r.destination ?? '-'}</TableCell>
+                <TableCell className="font-mono text-sm font-semibold">{r.lorry ?? '-'}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{r.weightKg != null ? `${(r.weightKg / 1000).toFixed(2)} t` : '-'}</TableCell>
+                <TableCell className="text-right font-bold">{rupees(r.net)}</TableCell>
+                <TableCell>
+                  {r.lorry ? (
+                    <span
+                      className={`text-xs font-semibold ${
+                        pay === 'Paid'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : pay === 'Partial'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {pay}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">No lorry</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
+                  {r.lorry && pay !== 'Paid' ? (
+                    <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due)}>
+                      Pay
+                    </Button>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+        {rows.length > 0 && (
+          <tfoot>
+            <TableRow className="border-t-2 font-bold bg-muted/30">
+              <TableCell colSpan={5}>Total</TableCell>
+              <TableCell className="text-right">{rupees(totalTransport)}</TableCell>
+              <TableCell colSpan={2} />
+            </TableRow>
+          </tfoot>
+        )}
+      </Table>
+      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
+    </div>
+  );
+}
+
 export default function FreightDuesPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState('outward');
@@ -270,6 +385,20 @@ export default function FreightDuesPage() {
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
   });
+  // Transfer transport (husk / seed / pre-cleaner dust) is billed to KNM Transport
+  // and settles from the same per-lorry pool as the usual KNM freight.
+  const { data: huskTransfers } = useQuery({
+    queryKey: ['husk-transfers'],
+    queryFn: () => api<HuskTransfer[]>('/husk-transfers'),
+  });
+  const { data: shellTransfers } = useQuery({
+    queryKey: ['shell-transfers'],
+    queryFn: () => api<ShellTransfer[]>('/shell-transfers'),
+  });
+  const { data: stockTransfers } = useQuery({
+    queryKey: ['stock-transfers'],
+    queryFn: () => api<StockTransfer[]>('/stock-transfers'),
+  });
 
   const isLoading = loadingPurchases || loadingSales || loadingPayments;
 
@@ -277,7 +406,7 @@ export default function FreightDuesPage() {
   // payment matching) is heavy and depends only on the fetched data. Memoize it
   // so the payment dialog's keystrokes don't recompute the whole thing per
   // render. retention/knmList live inside so the memo stays referentially stable.
-  const { outwardRows, inwardRows, knmRows, rowStatus, rowDue, paymentsByLorry } = useMemo(() => {
+  const { outwardRows, inwardRows, knmRows, transferRows, rowStatus, rowDue, paymentsByLorry } = useMemo(() => {
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
   const knmList = (company?.companyVehicles || '').split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
 
@@ -343,6 +472,40 @@ export default function FreightDuesPage() {
   const outwardRows = allOutwardRows.filter(r => !r.lorry || !knmList.includes(r.lorry.toLowerCase()));
   const inwardRows = allInwardRows.filter(r => !r.lorry || !knmList.includes(r.lorry.toLowerCase()));
 
+  // Transfer transport rows (husk / seed / pre-cleaner dust). The whole transport
+  // charge is the net payable to KNM Transport - no hamali/kata/retention deducted.
+  const mkTransferRow = (
+    prefix: string,
+    kind: 'Husk' | 'Seed' | 'Dust',
+    t: { id: string; transferDate: string; lorryNumber: string | null; transportCharge: string | number; fromLocation: string; toLocation: string; weightKg: number },
+  ): FreightRow => {
+    const freight = round2(Number(t.transportCharge));
+    return {
+      id: `${prefix}-${t.id}`,
+      date: t.transferDate,
+      lorry: t.lorryNumber?.trim().toUpperCase() ?? null,
+      invoice: null,
+      freight,
+      hamali: 0,
+      kata: 0,
+      transport: 0,
+      net: freight,
+      deliveryStatus: 'RECEIVED',
+      sourced: 'Transfer',
+      destination: `${t.fromLocation} → ${t.toLocation}`,
+      party: 'KNM Transport',
+      kind,
+      weightKg: t.weightKg,
+    };
+  };
+  const transferRows: FreightRow[] = [
+    ...(huskTransfers ?? []).map((t) => mkTransferRow('husk', 'Husk', t)),
+    ...(stockTransfers ?? []).map((t) => mkTransferRow('seed', 'Seed', t)),
+    ...(shellTransfers ?? []).map((t) => mkTransferRow('dust', 'Dust', t)),
+  ]
+    .filter((r) => r.freight > 0)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
   // Payment status is settled per lorry (transporter payments aren't tagged to a
   // single invoice): a lorry's total net freight vs its total transporter paid.
   const paidByLorry = new Map<string, number>();
@@ -360,7 +523,7 @@ export default function FreightDuesPage() {
   const rowStatus = new Map<string, PaymentStatus>();
   const rowDue = new Map<string, number>();
   
-  const allRows = [...inwardRows, ...outwardRows, ...knmRows];
+  const allRows = [...inwardRows, ...outwardRows, ...knmRows, ...transferRows];
   const rowsByLorry = new Map<string, FreightRow[]>();
   
   allRows.forEach((r) => {
@@ -390,8 +553,8 @@ export default function FreightDuesPage() {
       }
     }
   }
-  return { outwardRows, inwardRows, knmRows, rowStatus, rowDue, paymentsByLorry };
-  }, [saleOrders, purchases, payments, company]);
+  return { outwardRows, inwardRows, knmRows, transferRows, rowStatus, rowDue, paymentsByLorry };
+  }, [saleOrders, purchases, payments, company, huskTransfers, shellTransfers, stockTransfers]);
 
   function paymentStatusFor(r: FreightRow): PaymentStatus {
     return r.lorry ? (rowStatus.get(r.id) ?? 'Pending') : 'Pending';
@@ -432,7 +595,8 @@ export default function FreightDuesPage() {
 
   const outwardNet = outwardRows.reduce((s, r) => s + r.net, 0);
   const inwardNet = inwardRows.reduce((s, r) => s + r.net, 0);
-  const knmNet = knmRows.reduce((s, r) => s + r.net, 0);
+  const knmUsualNet = knmRows.reduce((s, r) => s + r.net, 0);
+  const transfersNet = transferRows.reduce((s, r) => s + r.net, 0);
 
   return (
     <div className="space-y-6">
@@ -479,14 +643,41 @@ export default function FreightDuesPage() {
             <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
           </TabsContent>
 
-          <TabsContent value="knm" className="space-y-4">
-            <Card className="bg-card/50 border shadow-sm max-w-xs">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">KNM Net Freight</CardTitle>
-              </CardHeader>
-              <CardContent><div className="text-xl font-bold">{rupees(knmNet)}</div></CardContent>
-            </Card>
-            <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+          <TabsContent value="knm" className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+              <Card className="bg-card/50 border shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Usual Freight Net</CardTitle>
+                </CardHeader>
+                <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet)}</div></CardContent>
+              </Card>
+              <Card className="bg-card/50 border shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transfers Payable</CardTitle>
+                </CardHeader>
+                <CardContent><div className="text-xl font-bold">{rupees(transfersNet)}</div></CardContent>
+              </Card>
+              <Card className="bg-card/50 border shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">KNM Total</CardTitle>
+                </CardHeader>
+                <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet + transfersNet)}</div></CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                <Truck className="h-4 w-4" /> Usual Freights
+              </h3>
+              <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                <ArrowLeftRight className="h-4 w-4" /> Transfers <span className="normal-case font-normal text-muted-foreground/80">· husk, seed &amp; pre-cleaner dust transport billed to KNM Transport</span>
+              </h3>
+              <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} />
+            </div>
           </TabsContent>
         </Tabs>
       )}

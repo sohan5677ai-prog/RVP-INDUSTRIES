@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { Layers, Plus, Trash2, ArrowRight, Package } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { HuskTransfer } from '@/lib/types';
-import { shellTransferCost, SHELL_HAMALI_RATE, SHELL_TRANSPORT } from '@/lib/calc';
+import { shellTransferCost, SHELL_HAMALI_RATE, transferTransportRate } from '@/lib/calc';
 import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -86,7 +86,7 @@ function TransfersPanel() {
 
   const weightKg = Number(weight) || 0;
   const weightValid = weightKg > 0 && !!toLocation;
-  const cost = weightKg > 0 ? shellTransferCost(weightKg) : { hamaliCharge: 0, transportCharge: 0, totalCost: 0 };
+  const cost = weightKg > 0 ? shellTransferCost(weightKg, SHELL_HAMALI_RATE, toLocation) : { hamaliCharge: 0, transportCharge: 0, totalCost: 0 };
 
   function resetForm() {
     setToLocation(HUSK_STORAGES[0]);
@@ -128,7 +128,7 @@ function TransfersPanel() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Factory → storage transfers · hamali ₹{SHELL_HAMALI_RATE}/t + ₹{SHELL_TRANSPORT} transport.
+          Factory → storage transfers · hamali ₹{SHELL_HAMALI_RATE}/t + per-tonne transport (₹250/t PGR COLD &amp; Murugan, ₹100/t KNM Multi) billed to KNM Transport.
         </p>
         <div className="flex items-center gap-2">
           <ExportButtons filename="Husk_Transfers" title="Husk Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={HUSK_TRANSFER_COLUMNS} rows={transfers ?? []} />
@@ -228,7 +228,7 @@ function TransfersPanel() {
                 <span className="font-medium">{rupees(cost.hamaliCharge)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Transport (fixed)</span>
+                <span className="text-muted-foreground">Transport (₹{transferTransportRate(toLocation)}/t → KNM Transport)</span>
                 <span className="font-medium">{rupees(cost.transportCharge)}</span>
               </div>
               <div className="flex justify-between border-t pt-2">

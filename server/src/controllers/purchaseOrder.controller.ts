@@ -6,7 +6,7 @@ import {
   createPurchaseOrderSchema,
   listPurchaseOrdersSchema,
 } from '../schemas/purchase.schema.js';
-import { computeFY, derivePartyPrefix, formatPoNumber, normalizeSeriesKey, reservePoSerials } from '../lib/poNumber.js';
+import { computeFY, derivePartyPrefix, formatPoNumber, normalizeSeriesKey, releasePoSerial, reservePoSerials } from '../lib/poNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
@@ -227,8 +227,14 @@ export async function deletePurchaseOrder(req: Request, res: Response) {
   if (po.stockIns.length > 0) {
     throw new HttpError(400, 'Cannot delete purchase order that has already arrived (has stock-in)');
   }
-  await prisma.purchaseOrder.delete({
-    where: { id: req.params.id },
+  await prisma.$transaction(async (tx) => {
+    await tx.purchaseOrder.delete({
+      where: { id: req.params.id },
+    });
+    // Roll the serial counter back so the freed PO number is reused next time.
+    if (po.poSeriesKey && po.poFy) {
+      await releasePoSerial(tx, po.poSeriesKey, po.poFy);
+    }
   });
   res.json({ message: 'Purchase order deleted' });
 }

@@ -60,3 +60,37 @@ export async function reservePoSerials(
   });
   return counter.lastSerial - count + 1;
 }
+
+/**
+ * After a PO is deleted/cancelled, recalculate the serial counter for its
+ * series+FY so freed tail numbers are reused. Only rolls the counter back
+ * when the deleted PO held the **highest** serial(s) — interior gaps are
+ * left as-is because filling them would break the sequential guarantee of
+ * `reservePoSerials`.
+ */
+export async function releasePoSerial(
+  tx: Prisma.TransactionClient,
+  seriesKey: string,
+  fy: string
+): Promise<void> {
+  // Find the highest serial still in use for this series+FY.
+  const highest = await tx.purchaseOrder.aggregate({
+    where: { poSeriesKey: seriesKey, poFy: fy },
+    _max: { poSerial: true },
+  });
+  const newLast = highest._max.poSerial ?? 0;
+
+  if (newLast === 0) {
+    // No POs left in this series — delete the counter row entirely.
+    await tx.poSerialCounter.deleteMany({
+      where: { seriesKey, fy },
+    });
+  } else {
+    // Only roll back if it would actually decrease the counter.
+    await tx.poSerialCounter.updateMany({
+      where: { seriesKey, fy, lastSerial: { gt: newLast } },
+      data: { lastSerial: newLast },
+    });
+  }
+}
+

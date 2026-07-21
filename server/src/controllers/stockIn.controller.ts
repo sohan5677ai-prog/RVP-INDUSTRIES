@@ -6,7 +6,7 @@ import { HttpError } from '../lib/httpError.js';
 import { createStockInSchema, createUrpStockInSchema } from '../schemas/purchase.schema.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
-import { computeFY, formatPoNumber, reservePoSerials } from '../lib/poNumber.js';
+import { computeFY, formatPoNumber, releasePoSerial, reservePoSerials } from '../lib/poNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 
 /**
@@ -475,6 +475,10 @@ export async function deleteStockIn(req: Request, res: Response) {
     // to PENDING so the arrival can be re-recorded.
     if (stockIn.purchaseOrder.createdBy === 'URP_DIRECT' || stockIn.purchaseOrder.createdBy === 'KNM_BATCH') {
       await tx.purchaseOrder.delete({ where: { id: stockIn.purchaseOrderId } });
+      // Roll the serial counter back so the freed PO number is reused.
+      if (stockIn.purchaseOrder.poSeriesKey && stockIn.purchaseOrder.poFy) {
+        await releasePoSerial(tx, stockIn.purchaseOrder.poSeriesKey, stockIn.purchaseOrder.poFy);
+      }
     } else {
       await tx.purchaseOrder.update({
         where: { id: stockIn.purchaseOrderId },

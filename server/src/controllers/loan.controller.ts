@@ -37,6 +37,24 @@ export async function getEarliestOpenLoanDate(): Promise<Date | null> {
 }
 
 /**
+ * Annual interest rate (%) to capitalise onto seed transferred OUT of a storage
+ * location, taken from the OPEN bank loans booked against THAT location - this is
+ * what wires the Stock Transfer to the Storage Loans section. Uses the highest
+ * open-loan rate at the location (conservative when several differ). Falls back
+ * to the global CompanyProfile rate only when no loan is booked there.
+ */
+export async function getLocationLoanRate(location: string): Promise<number> {
+  const loans = await prisma.bankLoan.findMany({
+    where: { status: 'OPEN', location },
+    select: { interestRatePct: true },
+  });
+  if (loans.length > 0) {
+    return Math.max(...loans.map((l) => Number(l.interestRatePct)));
+  }
+  return getCurrentLoanRate(); // global fallback when no loan funds this location
+}
+
+/**
  * List all loans with computed repaid/outstanding/accrued-interest, plus a
  * portfolio summary (the current rate, total outstanding, accrued interest to
  * date, and the interest already capitalised into stock via transfers).

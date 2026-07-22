@@ -12,7 +12,7 @@ import {
 } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { getCompanyProfileRow } from './settings.controller.js';
+import { getLocationLoanRate } from './loan.controller.js';
 
 /**
  * Value the next `weightKg` of black seed drawn from a storage location by PRICE
@@ -120,8 +120,10 @@ export async function createStockTransfer(req: Request, res: Response) {
   // Transfer transport is per-tonne, keyed to the source storage location, and
   // billed to KNM Transport (still capitalised into the seed at the process).
   const transportCharge = transferTransportCharge(data.weightKg, data.fromLocation);
-  // Global annual bank-loan rate that storage carrying interest accrues at.
-  const interestRatePct = Number((await getCompanyProfileRow()).loanInterestRatePct);
+  // Annual rate that storage carrying interest accrues at, taken from the OPEN
+  // bank loans booked against the source location (falls back to the global rate
+  // when no loan funds it). This is what ties the transfer to the Storage Loans.
+  const interestRatePct = await getLocationLoanRate(data.fromLocation);
 
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;

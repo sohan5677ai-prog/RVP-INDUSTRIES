@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { registerPreload } from '@/lib/preload';
 
 function lazyWithPreload(paths: string | string[], importFn: () => Promise<any>) {
@@ -93,9 +94,10 @@ function Fallback() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Suspense fallback={<Fallback />}>
-        <Routes>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Suspense fallback={<Fallback />}>
+          <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
@@ -162,5 +164,6 @@ export default function App() {
         </Routes>
       </Suspense>
     </BrowserRouter>
+  </ErrorBoundary>
   );
 }

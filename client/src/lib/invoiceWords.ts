@@ -6,14 +6,14 @@ const ONES = [
 const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
 function below1000(n: number): string {
-  if (n === 0) return '';
-  if (n < 20) return ONES[n];
-  if (n < 100) return `${TENS[Math.floor(n / 10)]}${n % 10 ? ' ' + ONES[n % 10] : ''}`;
-  return `${ONES[Math.floor(n / 100)]} Hundred${n % 100 ? ' ' + below1000(n % 100) : ''}`;
+  if (!n || isNaN(n) || n <= 0) return '';
+  if (n < 20) return ONES[n] || '';
+  if (n < 100) return `${TENS[Math.floor(n / 10)] || ''}${n % 10 ? ' ' + (ONES[n % 10] || '') : ''}`;
+  return `${ONES[Math.floor(n / 100)] || ''} Hundred${n % 100 ? ' ' + below1000(n % 100) : ''}`;
 }
 
 function wholeToWords(n: number): string {
-  if (n === 0) return 'Zero';
+  if (!n || isNaN(n) || n <= 0) return 'Zero';
   const parts: string[] = [];
   const crore = Math.floor(n / 10000000); n %= 10000000;
   const lakh = Math.floor(n / 100000); n %= 100000;
@@ -27,6 +27,7 @@ function wholeToWords(n: number): string {
 
 /** e.g. 1559250 -> "INR Fifteen Lakh Fifty Nine Thousand Two Hundred Fifty Only". */
 export function rupeesInWords(amount: number): string {
+  if (amount == null || isNaN(amount) || amount <= 0) return 'INR Zero Only';
   const rounded = Math.round(amount * 100) / 100;
   const rupees = Math.floor(rounded);
   const paise = Math.round((rounded - rupees) * 100);
@@ -37,5 +38,6 @@ export function rupeesInWords(amount: number): string {
 
 /** Indian-grouped amount with two decimals, e.g. 1485000 -> "14,85,000.00". */
 export function inr(amount: number): string {
+  if (amount == null || isNaN(amount)) return '0.00';
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 }

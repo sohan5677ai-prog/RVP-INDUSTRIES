@@ -28,8 +28,11 @@ const DEFAULT_LAYOUT: InvoiceLayout = {
   cols: { sl: 5, desc: 33, hsn: 11, qty: 15, rate: 12, per: 7, amt: 17 },
 };
 
-function fmtDate(d: Date): string {
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }).replace(/ /g, '-');
+function fmtDate(d: Date | string | null | undefined): string {
+  if (!d) return '';
+  const dateObj = typeof d === 'string' ? new Date(d) : d;
+  if (isNaN(dateObj.getTime())) return '';
+  return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }).replace(/ /g, '-');
 }
 
 const PRODUCT_FALLBACK: Record<string, string> = {
@@ -61,10 +64,10 @@ export default function InvoiceView() {
   });
 
   const tax = taxRows?.find((t) => t.product === order?.product);
-  const gstFraction = (tax?.gstRate != null ? Number(tax.gstRate) : GST_RATE * 100) / 100;
+  const gstFraction = order?.gstExempt ? 0 : (tax?.gstRate != null ? Number(tax.gstRate) : GST_RATE * 100) / 100;
   const amounts = useMemo(() => {
     if (!dispatch || !order) return { base: 0, gst: 0, total: 0 };
-    const base = dispatch.weightKg * Number(order.ratePerKg);
+    const base = (dispatch.weightKg ?? 0) * (Number(order.ratePerKg) || 0);
     const gst = Math.round(base * gstFraction * 100) / 100;
     return { base, gst, total: base + gst };
   }, [dispatch, order, gstFraction]);
@@ -77,7 +80,7 @@ export default function InvoiceView() {
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
   const description = tax?.description || PRODUCT_FALLBACK[order.product] || order.product;
   const hsn = tax?.hsn || '';
-  const qtyStr = `${dispatch.weightKg.toLocaleString('en-IN')} Kgs`;
+  const qtyStr = `${(dispatch.weightKg ?? 0).toLocaleString('en-IN')} Kgs`;
   const c = layout.cols;
 
   return (

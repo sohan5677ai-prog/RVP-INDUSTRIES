@@ -285,6 +285,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(`Invoice ${saved.invoiceNumber} generated`);
       setInvoiceDispatch(null);
+      if (saved?.id) {
+        navigate(`/sale-dispatches/${saved.id}/invoice`);
+      }
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });

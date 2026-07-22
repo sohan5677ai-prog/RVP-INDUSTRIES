@@ -96,11 +96,12 @@ export function isVehicleExempt(vehicleNumber: string | null | undefined, compan
   return list.includes(target);
 }
 
-/** Hamali (unloading labour) charge in rupees. rounded tonnes * rate. */
+/** Hamali (unloading labour) charge in rupees. exact tonnes * rate (no tonne rounding). */
 export function calcHamali(netKg: number, rate: number = DEFAULT_HAMALI_RATE, isCompanyVehicle: boolean = false): number {
   // Company vehicles no longer skip the charge entirely; the crew must still be paid,
   // but the lorry share becomes 0 and the company bears 100% of the cost.
-  return Math.round(netKg / 1000) * rate;
+  // Exact tonnage: 17.5 t is charged as 17.5 t, not rounded up to 18 t.
+  return Math.round((netKg / 1000) * rate * 100) / 100;
 }
 
 /** Pappu (white seed) output in kg, rounded to whole kg. */
@@ -200,13 +201,13 @@ export function pappuLoadingHamali(
   lorryRate: number = PAPPU_LOADING_HAMALI_LORRY_RATE,
   marginRate: number = PAPPU_LOADING_HAMALI_MARGIN_RATE
 ): LoadingHamaliSplit {
-  const tonnes = Math.round(weightKg / 1000);
-  const total = tonnes * rate;
+  const tonnes = weightKg / 1000; // exact tonnage, no rounding
+  const total = round2(tonnes * rate);
   // Lorry & margin can never exceed the total they are carved out of.
-  const lorry = isCompanyVehicle ? 0 : Math.min(total, tonnes * lorryRate);
-  const margin = Math.min(total, tonnes * marginRate);
-  const company = total - lorry;
-  const crew = total - margin;
+  const lorry = isCompanyVehicle ? 0 : Math.min(total, round2(tonnes * lorryRate));
+  const margin = Math.min(total, round2(tonnes * marginRate));
+  const company = round2(total - lorry);
+  const crew = round2(total - margin);
   return { total, company, lorry, crew, margin };
 }
 
@@ -221,12 +222,12 @@ export function customLoadingHamali(
   marginRate: number,
   isCompanyVehicle: boolean = false
 ): LoadingHamaliSplit {
-  const tonnes = Math.round(weightKg / 1000);
-  const total = tonnes * rate;
-  const lorry = isCompanyVehicle ? 0 : Math.min(total, tonnes * lorryRate);
-  const margin = Math.min(total, tonnes * marginRate);
-  const company = total - lorry;
-  const crew = total - margin;
+  const tonnes = weightKg / 1000; // exact tonnage, no rounding
+  const total = round2(tonnes * rate);
+  const lorry = isCompanyVehicle ? 0 : Math.min(total, round2(tonnes * lorryRate));
+  const margin = Math.min(total, round2(tonnes * marginRate));
+  const company = round2(total - lorry);
+  const crew = round2(total - margin);
   return { total, company, lorry, crew, margin };
 }
 
@@ -237,7 +238,7 @@ export function customLoadingHamali(
  */
 export function productLoadingHamali(weightKg: number, rate: number, isCompanyVehicle: boolean = false): number {
   if (isCompanyVehicle) return 0;
-  return Math.round(weightKg / 1000) * rate;
+  return Math.round((weightKg / 1000) * rate * 100) / 100; // exact tonnage, no rounding
 }
 
 export interface InternalHamaliLeg {
@@ -257,13 +258,13 @@ export function internalHamaliLeg(
   isCompanyVehicle: boolean = false
 ): InternalHamaliLeg {
   if (isCompanyVehicle) return { charge: 0, crew: 0, margin: 0 };
-  const charge = Math.round(weightKg / 1000) * rate;
+  const charge = round2((weightKg / 1000) * rate); // exact tonnage, no rounding
   const margin = round2(charge * HAMALI_MARGIN_FRACTION);
   return { charge, crew: round2(charge - margin), margin };
 }
 
 // --- Transfer transport (billed to KNM Transport) ----------------------------
-// Transfer transport is per (rounded) tonne and billed to KNM Transport - for
+// Transfer transport is per (exact) tonne and billed to KNM Transport - for
 // husk, seed (stock) and pre-cleaner-dust (shell) transfers alike. The rate is
 // keyed to the storage location involved (destination for husk/dust, source for
 // seed): PGR COLD / Murugan ₹250/t, KNM Multi ₹100/t. Replaces the former flat
@@ -281,14 +282,14 @@ export function transferTransportRate(location: string | null | undefined): numb
   return TRANSFER_TRANSPORT_RATES[location.trim()] ?? DEFAULT_TRANSFER_TRANSPORT_RATE;
 }
 
-/** Transfer transport charge in rupees: rounded tonnes × the location's rate. */
+/** Transfer transport charge in rupees: exact tonnes × the location's rate (no tonne rounding). */
 export function transferTransportCharge(weightKg: number, location: string | null | undefined): number {
-  const tonnes = Math.round(weightKg / 1000);
-  return tonnes * transferTransportRate(location);
+  const tonnes = weightKg / 1000; // exact tonnage, no rounding
+  return Math.round(tonnes * transferTransportRate(location) * 100) / 100;
 }
 
 // --- Stock transfer (storage → process) hamali -------------------------------
-// Load + process-unload hamali is ₹270/t (rounded tonnes), fully crew (no
+// Load + process-unload hamali is ₹270/t (exact tonnes), fully crew (no
 // margin); the storage-unload leg (formerly ₹80/t) is no longer charged. Both
 // the hamali and the per-tonne transfer transport are capitalised into the seed
 // at the process.
@@ -303,7 +304,7 @@ export interface TransferHamali {
 }
 
 /**
- * Hamali breakdown for one storage→process stock transfer. Tonnes are rounded.
+ * Hamali breakdown for one storage→process stock transfer. Tonnes are exact.
  * The ₹/tonne (`rate`, default ₹270/t) is configurable in Settings and is
  * charged in full to the crew - the storage-unload leg is not charged.
  */
@@ -311,8 +312,8 @@ export function transferHamali(
   weightKg: number,
   rate: number = TRANSFER_HANDLING_RATE
 ): TransferHamali {
-  const tonnes = Math.round(weightKg / 1000);
-  const charge = tonnes * rate;
+  const tonnes = weightKg / 1000; // exact tonnage, no rounding
+  const charge = Math.round(tonnes * rate * 100) / 100;
   return { unloadCharge: 0, handlingCharge: charge, charge, crew: charge, margin: 0 };
 }
 
@@ -330,7 +331,7 @@ export interface ShellTransferCost {
 }
 
 /**
- * Cost breakdown for one byproduct transfer to `location`. Tonnes are rounded.
+ * Cost breakdown for one byproduct transfer to `location`. Tonnes are exact.
  * The packing+loading+unloading hamali ₹/tonne (`rate`, default ₹333/t) is
  * configurable in Settings; transport is per-tonne by location (₹250/t for
  * PGR COLD / Murugan, ₹100/t for KNM Multi), billed to KNM Transport.
@@ -340,10 +341,10 @@ export function shellTransferCost(
   rate: number = SHELL_HAMALI_RATE,
   location: string = 'PGR COLD'
 ): ShellTransferCost {
-  const tonnes = Math.round(weightKg / 1000);
-  const hamaliCharge = tonnes * rate;
+  const tonnes = weightKg / 1000; // exact tonnage, no rounding
+  const hamaliCharge = Math.round(tonnes * rate * 100) / 100;
   const transportCharge = transferTransportCharge(weightKg, location);
-  return { hamaliCharge, transportCharge, totalCost: hamaliCharge + transportCharge };
+  return { hamaliCharge, transportCharge, totalCost: round2(hamaliCharge + transportCharge) };
 }
 
 // --- Bank-loan carrying interest ---------------------------------------------

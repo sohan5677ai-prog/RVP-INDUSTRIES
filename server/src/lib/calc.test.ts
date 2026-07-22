@@ -77,9 +77,10 @@ describe('crossVerify', () => {
 });
 
 describe('calcHamali', () => {
-  it('default rate 150/tonne with rounded tonnage', () => {
-    expect(calcHamali(10400)).toBe(1500); // 10.4 -> 10 tonnes * 150 = 1500
-    expect(calcHamali(10550)).toBe(1650); // 10.55 -> 11 tonnes * 150 = 1650
+  it('default rate 150/tonne with exact tonnage (no tonne rounding)', () => {
+    expect(calcHamali(10400)).toBe(1560); // 10.4 tonnes * 150 = 1560
+    expect(calcHamali(10550)).toBe(1582.5); // 10.55 tonnes * 150 = 1582.5
+    expect(calcHamali(17500)).toBe(2625); // 17.5 tonnes * 150 = 2625 (NOT charged as 18t)
   });
   it('custom rate', () => {
     expect(calcHamali(5000, 100)).toBe(500);
@@ -103,8 +104,8 @@ describe('configurable hamali rates', () => {
     expect(lh.company).toBe(6500 - 2000); // 4500
   });
 
-  it('productLoadingHamali: flat rate × rounded tonnes', () => {
-    expect(productLoadingHamali(16020, 333)).toBe(16 * 333); // husk: 5328
+  it('productLoadingHamali: flat rate × exact tonnes', () => {
+    expect(productLoadingHamali(16020, 333)).toBeCloseTo(16.02 * 333, 2); // husk: 5334.66 (not 16t)
     expect(productLoadingHamali(16020, 333, true)).toBe(0);  // company vehicle exempt
   });
 
@@ -117,6 +118,12 @@ describe('configurable hamali rates', () => {
     expect(t.crew).toBe(25 * 270);         // 6750
   });
 
+  it('transferHamali: exact tonnage on a half-tonne load', () => {
+    const t = transferHamali(17500); // 17.5 tonnes @ 270/t
+    expect(t.charge).toBe(4725); // 17.5 * 270 = 4725 (NOT 18t = 4860)
+    expect(t.crew).toBe(4725);
+  });
+
   it('shellTransferCost: configurable hamali, per-tonne transport by location', () => {
     const s = shellTransferCost(20000); // default 333/t hamali, PGR COLD transport
     expect(s.hamaliCharge).toBe(20 * 333); // 6660
@@ -127,11 +134,18 @@ describe('configurable hamali rates', () => {
     expect(shellTransferCost(20000, 333, 'KNM Multi').transportCharge).toBe(20 * 100); // 2000
   });
 
-  it('transferTransportCharge: rounded tonnes × the location rate', () => {
+  it('shellTransferCost: exact tonnage on a half-tonne load', () => {
+    const s = shellTransferCost(17500); // 17.5 tonnes, PGR COLD
+    expect(s.hamaliCharge).toBeCloseTo(17.5 * 333, 2); // 5827.5 (not 18t)
+    expect(s.transportCharge).toBeCloseTo(17.5 * 250, 2); // 4375
+  });
+
+  it('transferTransportCharge: exact tonnes × the location rate', () => {
     expect(transferTransportCharge(20000, 'PGR COLD')).toBe(20 * 250);
     expect(transferTransportCharge(20000, 'Murugan')).toBe(20 * 250);
     expect(transferTransportCharge(20000, 'KNM Multi')).toBe(20 * 100);
     expect(transferTransportCharge(24000, 'KNM Multi')).toBe(24 * 100);
+    expect(transferTransportCharge(17500, 'PGR COLD')).toBeCloseTo(17.5 * 250, 2); // 4375 (not 18t)
     // unknown / missing location falls back to the default ₹250/t
     expect(transferTransportCharge(10000, 'Somewhere')).toBe(10 * 250);
     expect(transferTransportCharge(10000, null)).toBe(10 * 250);

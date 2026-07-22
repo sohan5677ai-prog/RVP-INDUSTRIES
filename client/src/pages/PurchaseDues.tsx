@@ -198,20 +198,48 @@ export default function PurchaseDuesPage() {
       });
     });
 
-    // Grain FIFO pool = the party's floating (non-bill-linked) payments. Exclude
-    // any dust-tagged payment (reference "DUST:…") so a payment made against a
-    // dust/byproduct bill can never be silently absorbed by a grain bill.
-    let availablePayments = partyPayments
+    // Grain FIFO pool = floating (non-bill-linked) general payments.
+    // Process floating payments in chronological order of payment date so past payments
+    // settle invoices existing at that time without retroactively absorbing newly verified bills.
+    const floatingPayments = partyPayments
       .filter((p) => !p.purchaseId && !isDustRef(p.reference))
-      .map(p => ({
+      .map((p) => ({
         ...p,
-        available: Number(p.amount)
-      }));
+        available: Number(p.amount),
+        payTime: new Date(p.date).getTime(),
+      }))
+      .sort((a, b) => a.payTime - b.payTime);
 
-    activePurchases.forEach((p) => {
-      for (const payment of availablePayments) {
-        if (p.remainingAmount <= 0) break;
-        if (payment.available > 0) {
+    floatingPayments.forEach((payment) => {
+      if (payment.available <= 0) return;
+
+      // Eligible purchases: unpaid purchases with purchaseDate <= paymentDate
+      const eligiblePurchases = activePurchases
+        .filter((p) => p.remainingAmount > 0 && new Date(p.stockIn?.arrivalDate || p.createdAt).getTime() <= payment.payTime);
+
+      for (const p of eligiblePurchases) {
+        if (payment.available <= 0) break;
+        const applied = Math.min(payment.available, p.remainingAmount);
+        payment.available -= applied;
+        p.remainingAmount -= applied;
+
+        if (!p.deletablePaymentIds.includes(payment.id)) {
+          p.deletablePaymentIds.push(payment.id);
+        }
+
+        p.appliedPayments.push({
+          date: payment.date,
+          amount: applied,
+          mode: payment.reference || 'Manual',
+        });
+      }
+
+      // If the floating payment still has unused amount (advance payment), apply to remaining open purchases
+      if (payment.available > 0) {
+        const upcomingPurchases = activePurchases.filter((p) => p.remainingAmount > 0);
+
+        for (const p of upcomingPurchases) {
+          if (payment.available <= 0) break;
           const applied = Math.min(payment.available, p.remainingAmount);
           payment.available -= applied;
           p.remainingAmount -= applied;
@@ -220,12 +248,10 @@ export default function PurchaseDuesPage() {
             p.deletablePaymentIds.push(payment.id);
           }
 
-          let mode = payment.reference || 'Manual';
-
           p.appliedPayments.push({
             date: payment.date,
             amount: applied,
-            mode: mode
+            mode: payment.reference || 'Manual',
           });
         }
       }

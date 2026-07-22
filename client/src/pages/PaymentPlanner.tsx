@@ -107,14 +107,33 @@ export default function PaymentPlannerPage() {
       });
     });
 
-    const availablePayments = partyPayments
+    const floatingPayments = partyPayments
       .filter((p) => !p.purchaseId)
-      .map((p) => ({ ...p, available: Number(p.amount) }));
+      .map((p) => ({
+        ...p,
+        available: Number(p.amount),
+        payTime: new Date(p.date).getTime(),
+      }))
+      .sort((a, b) => a.payTime - b.payTime);
 
-    activePurchases.forEach((p) => {
-      for (const payment of availablePayments) {
-        if (p.remainingAmount <= 0) break;
-        if (payment.available > 0) {
+    floatingPayments.forEach((payment) => {
+      if (payment.available <= 0) return;
+
+      const eligiblePurchases = activePurchases
+        .filter((p) => p.remainingAmount > 0 && new Date(p.stockIn?.arrivalDate || p.createdAt).getTime() <= payment.payTime);
+
+      for (const p of eligiblePurchases) {
+        if (payment.available <= 0) break;
+        const applied = Math.min(payment.available, p.remainingAmount);
+        payment.available -= applied;
+        p.remainingAmount -= applied;
+      }
+
+      if (payment.available > 0) {
+        const upcomingPurchases = activePurchases.filter((p) => p.remainingAmount > 0);
+
+        for (const p of upcomingPurchases) {
+          if (payment.available <= 0) break;
           const applied = Math.min(payment.available, p.remainingAmount);
           payment.available -= applied;
           p.remainingAmount -= applied;

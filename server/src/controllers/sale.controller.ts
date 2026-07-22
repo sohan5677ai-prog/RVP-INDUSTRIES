@@ -588,15 +588,21 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
   if (dispatch.invoiceNumber) return res.json(dispatch);
 
+  // Un-Registered Sales get their own "URS" numbering pool, kept separate from the
+  // regular registered "RVP" tax-invoice sequence.
+  const unregistered = req.body?.unregistered === true;
+  const series = unregistered ? 'URS' : 'RVP';
+
   const company = await getCompanyProfileRow();
-  const prefix = company.invoicePrefix || 'RVP';
+  const prefix = unregistered ? 'URS' : (company.invoicePrefix || 'RVP');
   const invoiceDate = new Date();
   const fy = indianFinancialYear(invoiceDate);
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Next sequence within this financial year (across all dispatches).
+    // Next sequence within this financial year, scoped to this series so RVP and
+    // URS each run their own 01, 02, 03… independently.
     const last = await tx.saleDispatch.aggregate({
-      where: { invoiceFy: fy },
+      where: { invoiceFy: fy, invoiceSeries: series },
       _max: { invoiceSeq: true },
     });
     const seq = (last._max.invoiceSeq ?? 0) + 1;
@@ -607,7 +613,7 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
 
     return tx.saleDispatch.update({
       where: { id: dispatch.id },
-      data: { invoiceSeq: seq, invoiceFy: fy, invoiceDate, invoiceNumber },
+      data: { invoiceSeq: seq, invoiceFy: fy, invoiceSeries: series, invoiceDate, invoiceNumber },
       include: { saleOrder: { include: { buyer: true, broker: true } } },
     });
   });

@@ -6,7 +6,7 @@ import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, 
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
-import { settledByDispatch, isDispatchPaid } from '@/lib/saleStatus';
+import { settledByDispatch, isDispatchPaid, saleDisplayStatus, type SaleDisplayStatus } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import {
@@ -71,7 +71,7 @@ const statusVariant: Record<SaleStatus, 'soft' | 'warning' | 'success' | 'outlin
   DELIVERED: 'success',
 };
 
-const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED'];
+const STATUS_FILTERS: ('ALL' | SaleDisplayStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED', 'DELIVERED', 'PAID'];
 const NO_BROKER = '__none__';
 
 const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
@@ -117,7 +117,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // in the expandable panel.
   const colCount = 10 + (hasBroker ? 1 : 0);
 
-  const [statusFilter, setStatusFilter] = useState<'ALL' | SaleStatus>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | SaleDisplayStatus>('ALL');
   const [brokerFilter, setBrokerFilter] = useState<string>('ALL');
   const [partyFilter, setPartyFilter] = useState<string>('ALL');
   const [fromDate, setFromDate] = useState('');
@@ -153,7 +153,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   );
 
   const visible = useMemo(() => (orders ?? []).filter((o) => {
-    if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
+    if (statusFilter !== 'ALL' && saleDisplayStatus(o, settled) !== statusFilter) return false;
     if (brokerFilter !== 'ALL') {
       if (brokerFilter === NO_BROKER && o.brokerId) return false;
       if (brokerFilter !== NO_BROKER && o.brokerId !== brokerFilter) return false;
@@ -163,7 +163,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     if (fromDate && d < fromDate) return false;
     if (toDate && d > toDate) return false;
     return true;
-  }), [orders, statusFilter, brokerFilter, partyFilter, fromDate, toDate]);
+  }), [orders, settled, statusFilter, brokerFilter, partyFilter, fromDate, toDate]);
 
   const isLoading = loadingOrders || loadingParties || loadingBrokers;
 
@@ -267,14 +267,24 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   // ── Raise Invoice (per dispatch) ────────────────────────────────────────────
   const [invoiceDispatch, setInvoiceDispatch] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+  // Un-Registered Sale: generates a "URS/01/26-27" number instead of the regular
+  // registered "RVP/01/26-27" series.
+  const [invoiceUnregistered, setInvoiceUnregistered] = useState(false);
+
+  function openInvoice(dispatch: SaleDispatch, order: SaleOrder) {
+    setInvoiceUnregistered(false);
+    setInvoiceDispatch({ dispatch, order });
+  }
 
   const raiseInvoiceMutation = useMutation({
-    mutationFn: () => api<SaleDispatch>(`/sale-dispatches/${invoiceDispatch!.dispatch.id}/invoice`, { method: 'POST' }),
+    mutationFn: () => api<SaleDispatch>(`/sale-dispatches/${invoiceDispatch!.dispatch.id}/invoice`, {
+      method: 'POST',
+      body: { unregistered: invoiceUnregistered },
+    }),
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(`Invoice ${saved.invoiceNumber} generated`);
       setInvoiceDispatch(null);
-      navigate(`/sale-dispatches/${saved.id}/invoice`);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -895,11 +905,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             </Button>
                                           </>
                                         ) : (
-                                          <Button size="sm" variant="outline" onClick={() => setInvoiceDispatch({ dispatch: d, order: o })}>
+                                          <Button size="sm" variant="outline" onClick={() => openInvoice(d, o)}>
                                             <FileText className="h-3.5 w-3.5" /> Raise invoice
                                           </Button>
                                         )}
-                                        {d.status === 'DISPATCHED' && (
+                                        {d.status === 'DISPATCHED' && d.invoiceNumber && (
                                           <Button size="sm" variant="forest" onClick={() => openDeliver(d, o)}>
                                             <PackageCheck className="h-3.5 w-3.5" /> Mark delivered
                                           </Button>
@@ -1034,7 +1044,23 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         <DialogContent>
           <DialogHeader><DialogTitle>Raise Invoice - {invoiceDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">A tax invoice will be generated for this shipment with the next auto number.</p>
+            <p className="text-sm text-muted-foreground">
+              {invoiceUnregistered
+                ? 'An Un-Registered Sale invoice will be generated under the separate URS series (e.g. URS/01/26-27).'
+                : 'A tax invoice will be generated for this shipment with the next auto number (e.g. RVP/01/26-27).'}
+            </p>
+            <label className="flex items-start gap-2.5 rounded-lg border bg-muted/40 p-3 cursor-pointer hover:bg-muted/60">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 accent-forest"
+                checked={invoiceUnregistered}
+                onChange={(e) => setInvoiceUnregistered(e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-medium">Un Registered Sale (URS)</span>
+                <span className="block text-[11px] text-muted-foreground">Numbers under the URS series instead of the registered RVP series.</span>
+              </span>
+            </label>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
               <div className="flex justify-between"><span className="text-muted-foreground">Base ({invoiceDispatch ? toTonnes(invoiceDispatch.dispatch.weightKg).toFixed(2) : 0} t × {rupees(invoiceDispatch?.order.ratePerKg ?? 0)})</span><span className="font-medium">{rupees(invoiceBase)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{rupees(invoiceGst)}</span></div>

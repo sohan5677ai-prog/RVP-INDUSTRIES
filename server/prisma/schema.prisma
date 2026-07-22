@@ -495,9 +495,12 @@ model SaleDispatch {
   tdsAmount                  Decimal?  @db.Decimal(12, 2)
 
   // Generated tax invoice. Number = prefix/seq/FY; seq resets each financial year.
+  // invoiceSeries separates the numbering pools: "RVP" (registered tax invoices)
+  // vs "URS" (Un-Registered Sales) - each series keeps its own running sequence.
   invoiceNumber String?
   invoiceSeq    Int?
   invoiceFy     String? // Indian financial year, e.g. "2026-27"
+  invoiceSeries String    @default("RVP")
   invoiceDate   DateTime?
 
   // E-Invoice (IRN) details
@@ -523,7 +526,7 @@ model SaleDispatch {
   debitNotes  DebitNote[]
   emailLogs   EmailLog[]
 
-  @@unique([invoiceFy, invoiceSeq])
+  @@unique([invoiceFy, invoiceSeq, invoiceSeries])
   @@index([saleOrderId])
 }
 

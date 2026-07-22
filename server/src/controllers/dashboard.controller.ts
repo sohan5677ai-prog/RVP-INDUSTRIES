@@ -98,6 +98,7 @@ export interface HuskExpenses {
   drawingsReddy: number;
   ccInterest: number;
   termLoanInterest: number;
+  loanInterestUnabsorbed: number;
   termLoanPrincipal: number;
 }
 
@@ -126,6 +127,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'drawingsReddy',      label: 'Drawings - Reddy',     pappu: false },
   { key: 'ccInterest',         label: 'CC Interest',          pappu: false },
   { key: 'termLoanInterest',   label: 'Term Loan Interest',   pappu: false },
+  { key: 'loanInterestUnabsorbed', label: 'Loan Interest (unabsorbed)', pappu: false },
   { key: 'termLoanPrincipal',  label: 'Term Loan Principal',  pappu: false },
 ];
 
@@ -155,6 +157,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     shellAgg,
     huskAgg,
     termLoanPrincipalAgg,
+    interestCapitalisedAgg,
+    interestPaidAgg,
   ] = await Promise.all([
       prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
       prisma.$queryRaw<{product: string, weightKg: bigint}[]>`
@@ -180,6 +184,10 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       prisma.shellTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
       prisma.huskTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
       prisma.termLoanPrincipal.aggregate({ _sum: { amount: true } }),
+      // Storage-loan carrying interest: capitalised onto transferred seed vs
+      // actually paid to the bank at repayment (see loan reconciliation).
+      prisma.stockTransfer.aggregate({ _sum: { interestCharge: true } }),
+      prisma.loanRepayment.aggregate({ _sum: { interest: true } }),
     ]);
 
     // ── Revenue: pooled byproduct sales revenue (net credits on 40010) ──────────
@@ -247,6 +255,19 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       (interestByType as any[]).map((r) => [r.type, Number(r._sum.amount ?? 0)]),
     );
 
+    // Storage-loan interest sweep: interest CAPITALISED into transferred seed is
+    // already a cost in the Pappu P/L (via seed cost → COGS). Interest actually
+    // PAID to the bank is the real cash cost. The unabsorbed remainder = paid −
+    // capitalised is a period financing cost booked here, so the total interest in
+    // the P&L nets to exactly what was paid (cash basis, no double-count). It is a
+    // SIGNED figure: positive when the loan ran past the transfer (extra days,
+    // e.g. a 90-day capitalisation repaid at 120 days), negative before repayment
+    // (the capitalised-but-unpaid amount is credited back, deferring the cost to
+    // when it is actually paid). The still-unpaid accrual stays on account 20280.
+    const interestCapitalised = Number(interestCapitalisedAgg._sum.interestCharge ?? 0);
+    const interestPaidToBank = Number(interestPaidAgg._sum.interest ?? 0);
+    const loanInterestUnabsorbed = Math.round((interestPaidToBank - interestCapitalised) * 100) / 100;
+
     const expenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
       transferCosts,
@@ -270,6 +291,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       drawingsReddy: drawings['REDDY'] ?? 0,
       ccInterest: interest['CC'] ?? 0,
       termLoanInterest: interest['TERM_LOAN'] ?? 0,
+      loanInterestUnabsorbed,
       termLoanPrincipal: Number(termLoanPrincipalAgg._sum.amount ?? 0),
     };
 

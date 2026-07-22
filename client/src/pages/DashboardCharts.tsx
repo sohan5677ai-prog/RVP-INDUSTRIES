@@ -47,6 +47,7 @@ export interface HuskExpenses {
   drawingsReddy: number;
   ccInterest: number;
   termLoanInterest: number;
+  loanInterestUnabsorbed: number;
   termLoanPrincipal: number;
 }
 export interface HuskPnl {
@@ -90,6 +91,7 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'drawingsReddy', label: 'Drawings - Reddy' },
   { key: 'ccInterest', label: 'CC Interest' },
   { key: 'termLoanInterest', label: 'Term Loan Interest' },
+  { key: 'loanInterestUnabsorbed', label: 'Loan Interest (unabsorbed)' },
   { key: 'termLoanPrincipal', label: 'Term Loan Principal' },
 ];
 

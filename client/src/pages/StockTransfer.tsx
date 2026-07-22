@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, ArrowRight } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { StockTransfer, SiloInventory } from '@/lib/types';
+import type { StockTransfer } from '@/lib/types';
 import {
   transferHamali, transferTransportCharge, transferTransportRate,
   TRANSFER_HANDLING_RATE,
@@ -46,14 +46,30 @@ export default function StockTransferPage() {
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
   });
 
-  const { data: silos } = useQuery({
-    queryKey: ['silos'],
-    queryFn: () => api<SiloInventory[]>('/inventory/silos'),
+  // Physical black-seed stock per location, computed the SAME way as the Stock by
+  // Location page: RVP kata net weight received (excluding synthetic transfer-in
+  // rows) − transfers out + transfers in. The SiloInventory aggregate is NOT used
+  // here because at verification it stores the exempted `finalWeightKg` (the higher
+  // reference weight the supplier is paid for), which over-counts physical stock by
+  // the forgiven ≤80 kg shortages. Using kata net keeps these storage figures in
+  // lock-step with Stock by Location, which values physical kata weight.
+  const { data: seedData } = useQuery({
+    queryKey: ['black-seed-stock'],
+    queryFn: () => api<{ rows: { rvpNetWeightKg: number; location: string; isTransferredIn?: boolean }[] }>('/inventory/black-seed'),
   });
 
-  const storageSilo = (loc: string) =>
-    silos?.find((s) => s.itemType === 'BLACK_SEED' && s.location === loc);
-  const storageStock = (loc: string) => storageSilo(loc)?.weightKg ?? 0;
+  const storageStock = (loc: string) => {
+    const received = (seedData?.rows ?? [])
+      .filter((r) => !r.isTransferredIn && (r.location || 'RVP') === loc)
+      .reduce((s, r) => s + r.rvpNetWeightKg, 0);
+    const out = (transfers ?? [])
+      .filter((t) => t.fromLocation === loc)
+      .reduce((s, t) => s + t.weightKg, 0);
+    const inbound = (transfers ?? [])
+      .filter((t) => t.toLocation === loc)
+      .reduce((s, t) => s + t.weightKg, 0);
+    return received - out + inbound;
+  };
 
   const [fromLocation, setFromLocation] = useState<string>('');
   const [weight, setWeight] = useState('');
@@ -92,7 +108,7 @@ export default function StockTransferPage() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stock-transfers'] });
-      qc.invalidateQueries({ queryKey: ['silos'] });
+      qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
       toast.success('Stock transfer recorded');
       setOpen(false);
       resetForm();
@@ -104,7 +120,7 @@ export default function StockTransferPage() {
     mutationFn: (id: string) => api(`/stock-transfers/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stock-transfers'] });
-      qc.invalidateQueries({ queryKey: ['silos'] });
+      qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
       toast.success('Transfer reversed');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),

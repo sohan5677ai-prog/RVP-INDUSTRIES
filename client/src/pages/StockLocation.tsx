@@ -266,10 +266,10 @@ export default function StockLocation() {
       const fromBands = locBands[t.fromLocation];
       if (!fromBands || t.weightKg <= 0) continue;
 
-      // Value arriving at the destination = the seed drawn from storage PLUS the
-      // capitalised transfer costs (hamali + transport) that travel with it - this
-      // is exactly what the server persists as movedValue. Bank-loan interest is
-      // EXPENSED, not capitalised, so it must NOT inflate the seed value here.
+      // Value arriving at the destination = the seed drawn from storage PLUS all
+      // capitalised transfer costs (hamali + transport + bank-loan carrying
+      // interest) that travel with it - exactly what the server persists as
+      // movedValue, so this page ties out with the server's computeBlackSeedRows.
       const totalTransferValue = Number(t.movedValue);
       const breakdown = depletePriceBands(fromBands, t.weightKg);
       if (breakdown.size === 0) continue;

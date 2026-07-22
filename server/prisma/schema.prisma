@@ -871,7 +871,8 @@ model LoanRepayment {
   id        String   @id @default(cuid())
   loan      BankLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
   loanId    String
-  amount    Decimal  @db.Decimal(14, 2)
+  amount    Decimal  @db.Decimal(14, 2) // principal portion — reduces the loan's outstanding
+  interest  Decimal  @default(0) @db.Decimal(14, 2) // interest portion — settles the 20280 accrual (Dr 20280 / Cr Bank)
   date      DateTime
   reference String?
   createdAt DateTime @default(now())

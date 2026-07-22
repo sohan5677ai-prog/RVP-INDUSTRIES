@@ -244,7 +244,11 @@ async function _computeUnifiedStockEngine(
     let remainingTransferKg = t.weightKg;
     if (remainingTransferKg <= 0) continue;
 
-    const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge)) / t.weightKg : 0;
+    // Capitalised transfer costs travelling with the seed to RVP: hamali +
+    // transport + bank-loan carrying interest. Must match movedValue and
+    // computeBlackSeedRows so the Order Planner / Stock by Party / Stock by State /
+    // Dashboard value transferred-in seed identically (see calc.test.ts tie-out).
+    const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge) + Number(t.interestCharge)) / t.weightKg : 0;
 
     const lots = (storageLotsByLocation.get(t.fromLocation) ?? [])
       .sort((a, z) => (z.price - a.price) || (a.date.getTime() - z.date.getTime()));

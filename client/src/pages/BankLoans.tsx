@@ -127,20 +127,37 @@ export default function BankLoansPage() {
   // --- Add repayment ---------------------------------------------------------
   const [repayLoan, setRepayLoan] = useState<BankLoan | null>(null);
   const [repayAmount, setRepayAmount] = useState('');
+  const [repayInterest, setRepayInterest] = useState('');
   const [repayDate, setRepayDate] = useState(today());
   const [repayRef, setRepayRef] = useState('');
+
+  // Open the repayment dialog, prefilling the interest portion with the loan's
+  // accrued interest to date (editable to the bank's actual figure).
+  function openRepay(loan: BankLoan) {
+    setRepayLoan(loan);
+    setRepayAmount('');
+    setRepayInterest(loan.accruedInterestToDate ? String(loan.accruedInterestToDate) : '');
+    setRepayDate(today());
+    setRepayRef('');
+  }
 
   const repayMutation = useMutation({
     mutationFn: () =>
       api(`/loans/${repayLoan!.id}/repayments`, {
         method: 'POST',
-        body: { amount: Number(repayAmount), date: repayDate, reference: repayRef || null },
+        body: {
+          amount: Number(repayAmount),
+          interest: repayInterest !== '' ? Number(repayInterest) : 0,
+          date: repayDate,
+          reference: repayRef || null,
+        },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] });
       toast.success('Repayment recorded');
       setRepayLoan(null);
       setRepayAmount('');
+      setRepayInterest('');
       setRepayDate(today());
       setRepayRef('');
     },
@@ -226,6 +243,30 @@ export default function BankLoansPage() {
         </div>
       </div>
 
+      {/* Interest reconciliation: capitalised onto stock (as transfers happen) vs
+          actually paid to the bank (at repayment). The gap is the accrual still
+          sitting in Bank Loan Interest Payable (20280). */}
+      <div className="rounded-lg border bg-card p-4">
+        <div className="text-sm font-semibold mb-3">Interest reconciliation</div>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="text-xs text-muted-foreground">Capitalised into stock</div>
+            <div className="text-lg font-bold">{rupees(summary?.interestCapitalised ?? 0)}</div>
+            <div className="text-xs text-muted-foreground">accrued onto transferred seed</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Paid to bank</div>
+            <div className="text-lg font-bold">{rupees(summary?.interestPaidToBank ?? 0)}</div>
+            <div className="text-xs text-muted-foreground">interest portion of repayments</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Net accrued (unpaid)</div>
+            <div className="text-lg font-bold">{rupees(summary?.interestAccruedOutstanding ?? 0)}</div>
+            <div className="text-xs text-muted-foreground">still owed in loan-interest payable</div>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-lg border bg-card overflow-x-auto">
         <Table>
           <TableHeader>
@@ -286,7 +327,7 @@ export default function BankLoansPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => { setRepayLoan(loan); setRepayAmount(''); setRepayDate(today()); setRepayRef(''); }}
+                          onClick={() => openRepay(loan)}
                         >
                           Repay
                         </Button>
@@ -319,6 +360,9 @@ export default function BankLoansPage() {
                               <span>{shortDate(r.date)}{r.reference ? ` · ${r.reference}` : ''}</span>
                               <span className="flex items-center gap-2">
                                 <span className="font-medium">{rupees(r.amount)}</span>
+                                {Number(r.interest) > 0 && (
+                                  <span className="text-xs text-muted-foreground">+ {rupees(r.interest)} int</span>
+                                )}
                                 <button
                                   onClick={() => {
                                     if (confirm('Reverse this repayment?')) deleteRepayMutation.mutate(r.id);
@@ -433,17 +477,31 @@ export default function BankLoansPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label htmlFor="ramount">Amount (₹)</Label>
+                  <Label htmlFor="ramount">Principal (₹)</Label>
                   <Input id="ramount" type="number" value={repayAmount} onChange={(e) => setRepayAmount(e.target.value)} placeholder="500000" />
+                  <p className="text-xs text-muted-foreground">reduces the outstanding loan</p>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rinterest">Interest (₹)</Label>
+                  <Input id="rinterest" type="number" value={repayInterest} onChange={(e) => setRepayInterest(e.target.value)} placeholder="0" />
+                  <p className="text-xs text-muted-foreground">settles capitalised interest</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="rdate">Date</Label>
                   <Input id="rdate" type="date" value={repayDate} onChange={(e) => setRepayDate(e.target.value)} />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rref">Reference</Label>
+                  <Input id="rref" value={repayRef} onChange={(e) => setRepayRef(e.target.value)} placeholder="optional" />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="rref">Reference</Label>
-                <Input id="rref" value={repayRef} onChange={(e) => setRepayRef(e.target.value)} placeholder="optional" />
+              <div className="rounded-lg border bg-muted/40 p-3 flex justify-between text-sm">
+                <span className="text-muted-foreground">Total cash out</span>
+                <span className="font-semibold">
+                  {rupees((Number(repayAmount) || 0) + (Number(repayInterest) || 0))}
+                </span>
               </div>
               <DialogFooter>
                 <Button

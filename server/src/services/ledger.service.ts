@@ -20,17 +20,17 @@ export const EXPENSE_PAYMENT_ACCOUNTS: Record<
   string,
   { code: string; name: string; group: string; type: 'EXPENSE' | 'EQUITY'; sortOrder: number }
 > = {
-  GUNNY_BAGS:   { code: '50240', name: 'Packing Material - Gunny Bags', group: 'Direct Expenses',   type: 'EXPENSE', sortOrder: 21 },
-  TRANSPORT:    { code: '50260', name: 'Transport Fee',               group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 21 },
-  ELECTRICITY:  { code: '50220', name: 'Electricity Charges',         group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 22 },
+  GUNNY_BAGS: { code: '50240', name: 'Packing Material - Gunny Bags', group: 'Direct Expenses', type: 'EXPENSE', sortOrder: 21 },
+  TRANSPORT: { code: '50260', name: 'Transport Fee', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 21 },
+  ELECTRICITY: { code: '50220', name: 'Electricity Charges', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 22 },
   STORAGE_ELECTRICITY: { code: '50222', name: 'Storage Electricity Charges', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 27 },
-  STORAGE_SALARY:      { code: '50210', name: 'Storage Staff Salaries',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 28 },
-  MAINTENANCE:  { code: '50230', name: 'Repairs & Maintenance',       group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 23 },
-  MISC_EXPENSE: { code: '50270', name: 'Miscellaneous Expenses',       group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 29 },
-  CC_INTEREST:        { code: '50250', name: 'Bank Interest - CC',        group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 24 },
-  TERM_LOAN_INTEREST: { code: '50255', name: 'Interest - Term Loan',      group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 25 },
-  TERM_LOAN_PRINCIPAL:{ code: '50256', name: 'Principal - Term Loan',     group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 26 },
-  DRAWINGS:     { code: '30030', name: 'Proprietor Drawings',         group: 'Capital Account',   type: 'EQUITY',  sortOrder: 30 },
+  STORAGE_SALARY: { code: '50210', name: 'Storage Staff Salaries', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 28 },
+  MAINTENANCE: { code: '50230', name: 'Repairs & Maintenance', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 23 },
+  MISC_EXPENSE: { code: '50270', name: 'Miscellaneous Expenses', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 29 },
+  CC_INTEREST: { code: '50250', name: 'Bank Interest - CC', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 24 },
+  TERM_LOAN_INTEREST: { code: '50255', name: 'Interest - Term Loan', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 25 },
+  TERM_LOAN_PRINCIPAL: { code: '50256', name: 'Principal - Term Loan', group: 'Indirect Expenses', type: 'EXPENSE', sortOrder: 26 },
+  DRAWINGS: { code: '30030', name: 'Proprietor Drawings', group: 'Capital Account', type: 'EQUITY', sortOrder: 30 },
 };
 
 /** All payment `type` values accepted by the ERP (counterparty settlements + direct expenses). */
@@ -55,10 +55,10 @@ export const INCOME_RECEIPT_ACCOUNTS: Record<
   string,
   { code: string; name: string; group: string; type: 'REVENUE'; sortOrder: number }
 > = {
-  GUNNY_BAGS_SALE: { code: '40110', name: 'Gunny Bag Sales',    group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 20 },
-  SCRAP_SALE:      { code: '40120', name: 'Scrap & Waste Sales', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 21 },
-  HAMALI_INCOME:   { code: '40030', name: 'Hamali Income',       group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 2 },
-  INTEREST_INCOME: { code: '40130', name: 'Interest Income',     group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 22 },
+  GUNNY_BAGS_SALE: { code: '40110', name: 'Gunny Bag Sales', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 20 },
+  SCRAP_SALE: { code: '40120', name: 'Scrap & Waste Sales', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 21 },
+  HAMALI_INCOME: { code: '40030', name: 'Hamali Income', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 2 },
+  INTEREST_INCOME: { code: '40130', name: 'Interest Income', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 22 },
 };
 
 /** All receipt `type` values accepted by the ERP (receivable collection + direct incomes). */
@@ -347,10 +347,14 @@ export class LedgerService {
       lines.push({ accountCode: '20260', debit: 0, credit: data.transportCharge }); // KNM Transport Payable
     }
 
-    // 5. Bank-loan carrying interest - expensed, owed to the bank.
+    // 5. Bank-loan carrying interest - CAPITALISED into the seed at the destination
+    // (Dr Raw Material Inventory), accrued as a payable to the bank. It reaches the
+    // P&L exactly once - via COGS when the seed is sold - NOT as a separate interest
+    // expense here (that would double-count). The 20280 accrual is later settled by
+    // the interest portion of a loan repayment (Dr 20280 / Cr Bank).
     if (data.interestCharge && data.interestCharge > 0) {
-      lines.push({ accountCode: '50080', debit: data.interestCharge, credit: 0, costCenter: data.toLocation }); // Interest Expense
-      lines.push({ accountCode: '20280', debit: 0, credit: data.interestCharge }); // Bank Loan Interest Payable
+      lines.push({ accountCode: '10010', debit: data.interestCharge, credit: 0, costCenter: data.toLocation }); // Raw Material Inventory
+      lines.push({ accountCode: '20280', debit: 0, credit: data.interestCharge }); // Bank Loan Interest Payable (accrued)
     }
 
     if (lines.length === 0) return;
@@ -482,23 +486,40 @@ export class LedgerService {
   }
 
   /**
-   * Post a bank-loan repayment: principal paid back out of cash.
-   * Dr Bank Loan Payable (Principal) / Cr Bank/Cash.
+   * Post a bank-loan repayment out of cash: a principal portion that reduces the
+   * loan payable (Dr 20290) and an optional interest portion that settles the
+   * capitalised-interest accrual (Dr 20280 - NOT interest expense, since the
+   * interest already reached the P&L via COGS on the seed it was capitalised into).
+   * Both are funded by Bank/Cash (Cr 10400).
    */
   static async postLoanRepayment(
     tx: Prisma.TransactionClient,
     repaymentId: string,
-    data: { date: Date; amount: number; reference?: string | null }
+    data: { date: Date; amount: number; interest?: number; reference?: string | null }
   ) {
-    if (data.amount <= 0) return;
+    const interest = data.interest && data.interest > 0 ? data.interest : 0;
+    const cashOut = data.amount + interest;
+    if (cashOut <= 0) return;
+
+    const lines: JournalLineInput[] = [];
+    if (data.amount > 0) {
+      lines.push({ accountCode: '20290', debit: data.amount, credit: 0 }); // Bank Loan Payable (Principal)
+    }
+    if (interest > 0) {
+      lines.push({ accountCode: '20280', debit: interest, credit: 0 }); // Bank Loan Interest Payable (accrual settled)
+    }
+    lines.push({ accountCode: '10400', debit: 0, credit: cashOut }); // Bank / Cash
+
+    const desc =
+      `Bank loan repayment of ₹${data.amount.toFixed(2)}` +
+      (interest > 0 ? ` + interest ₹${interest.toFixed(2)}` : '') +
+      (data.reference ? ` (${data.reference})` : '');
+
     await this.postJournalEntry(tx, {
       date: data.date,
       reference: `LOAN-REPAY-${repaymentId}`,
-      description: `Bank loan repayment of ₹${data.amount.toFixed(2)}${data.reference ? ` (${data.reference})` : ''}`,
-      lines: [
-        { accountCode: '20290', debit: data.amount, credit: 0 }, // Bank Loan Payable (Principal)
-        { accountCode: '10400', debit: 0, credit: data.amount }, // Bank / Cash
-      ],
+      description: desc,
+      lines,
     });
   }
 

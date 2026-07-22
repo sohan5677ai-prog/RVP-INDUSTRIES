@@ -56,6 +56,7 @@ export async function listLoans(_req: Request, res: Response) {
 
   const rows = loans.map((loan) => {
     const repaidAmount = loan.repayments.reduce((s, r) => s + Number(r.amount), 0);
+    const interestPaid = loan.repayments.reduce((s, r) => s + Number(r.interest), 0);
     const outstanding = outstandingOf(loan);
     // Accrued interest to date on the outstanding balance, at the loan's rate.
     const accruedInterestToDate =
@@ -65,6 +66,7 @@ export async function listLoans(_req: Request, res: Response) {
     return {
       ...loan,
       repaidAmount: Math.round(repaidAmount * 100) / 100,
+      interestPaid: Math.round(interestPaid * 100) / 100,
       outstanding,
       accruedInterestToDate,
     };
@@ -74,13 +76,25 @@ export async function listLoans(_req: Request, res: Response) {
   const totalAccruedInterest = rows.reduce((s, r) => s + r.accruedInterestToDate, 0);
   const earliestOpenLoanDate = await getEarliestOpenLoanDate();
 
+  // Interest reconciliation (portfolio-level — capitalised interest is accrued on
+  // SEED, not attributable to one loan): interest capitalised into transferred
+  // stock (credits to 20280) vs interest actually paid to the bank (debits to
+  // 20280). The difference is the outstanding capitalised-interest accrual still
+  // sitting in 20280 — a positive number means we've capitalised more onto stock
+  // than we've yet paid the bank.
+  const interestCapitalised = Number(capitalisedAgg._sum.interestCharge ?? 0);
+  const interestPaidToBank = rows.reduce((s, r) => s + r.interestPaid, 0);
+  const interestAccruedOutstanding = Math.round((interestCapitalised - interestPaidToBank) * 100) / 100;
+
   res.json({
     loans: rows,
     summary: {
       rate,
       totalOutstanding: Math.round(totalOutstanding * 100) / 100,
       totalAccruedInterest: Math.round(totalAccruedInterest * 100) / 100,
-      interestCapitalised: Number(capitalisedAgg._sum.interestCharge ?? 0),
+      interestCapitalised,
+      interestPaidToBank: Math.round(interestPaidToBank * 100) / 100,
+      interestAccruedOutstanding,
       earliestOpenLoanDate,
     },
   });
@@ -150,11 +164,13 @@ export async function createRepayment(req: Request, res: Response) {
     throw new HttpError(400, `Repayment ₹${data.amount} exceeds the outstanding ₹${outstanding}`);
   }
 
+  const interest = data.interest ?? 0;
   const repayment = await prisma.$transaction(async (tx) => {
     const created = await tx.loanRepayment.create({
       data: {
         loanId: loan.id,
         amount: data.amount,
+        interest,
         date: data.date,
         reference: data.reference ?? null,
       },
@@ -162,6 +178,7 @@ export async function createRepayment(req: Request, res: Response) {
     await LedgerService.postLoanRepayment(tx, created.id, {
       date: data.date,
       amount: data.amount,
+      interest,
       reference: data.reference,
     });
     // Close the loan when the outstanding balance is cleared.

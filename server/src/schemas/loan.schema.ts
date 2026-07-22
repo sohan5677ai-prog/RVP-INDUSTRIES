@@ -14,7 +14,8 @@ export const createLoanSchema = z.object({
 });
 
 export const createRepaymentSchema = z.object({
-  amount: z.coerce.number().positive(),
+  amount: z.coerce.number().positive(), // principal portion — reduces the loan's outstanding
+  interest: z.coerce.number().nonnegative().optional(), // interest portion — settles the 20280 accrual
   date: z.coerce.date(),
   reference: z.string().trim().optional().nullable(),
 });

@@ -350,8 +350,9 @@ export function shellTransferCost(
 // --- Bank-loan carrying interest ---------------------------------------------
 // Black seed sitting in a storage location is funded by bank loans. When it is
 // moved storage→process, the interest accrued on its value while it sat in
-// storage is capitalised into the seed (like the other transfer costs). Days are
-// counted from the earliest open loan's drawdown date to the transfer date.
+// storage is capitalised into the seed (like the other transfer costs). Interest
+// is accrued PER LOT by its own storage dwell time (arrival→transfer days) at the
+// global annual rate, so it reflects how long each lot actually sat in storage.
 
 /** Whole days between two dates (clamped to ≥ 0). */
 export function daysBetween(from: Date, to: Date): number {
@@ -361,6 +362,39 @@ export function daysBetween(from: Date, to: Date): number {
 /** Carrying interest on a value: value × rate% × days/365, rounded to paise. */
 export function loanInterest(value: number, ratePct: number, days: number): number {
   return Math.round(value * (ratePct / 100) * (days / 365) * 100) / 100;
+}
+
+/** One lot's slice drawn at a transfer: its ex-GST landed value and the date it
+ * arrived at the storage location it is now being moved out of. */
+export interface DrawnSeedSlice {
+  value: number; // ex-GST landed value drawn from this lot
+  arrivalDate: Date; // when this lot arrived at the storage location
+}
+
+/**
+ * Bank-loan carrying interest capitalised onto seed at transfer, accrued PER LOT
+ * by actual storage dwell time (each slice's arrival→transfer days) at the global
+ * annual `ratePct`. Returns the total interest (paise-rounded) and the
+ * value-weighted average dwell days (for display on the transfer row).
+ */
+export function storageSeedInterest(
+  slices: DrawnSeedSlice[],
+  ratePct: number,
+  transferDate: Date
+): { interest: number; weightedDays: number } {
+  let interest = 0;
+  let valueDays = 0;
+  let totalValue = 0;
+  for (const s of slices) {
+    const days = daysBetween(s.arrivalDate, transferDate);
+    interest += loanInterest(s.value, ratePct, days);
+    valueDays += s.value * days;
+    totalValue += s.value;
+  }
+  return {
+    interest: Math.round(interest * 100) / 100,
+    weightedDays: totalValue > 0 ? Math.round(valueDays / totalValue) : 0,
+  };
 }
 
 

@@ -454,7 +454,11 @@ export class InventoryService {
       let remainingTransferKg = t.weightKg;
       if (remainingTransferKg <= 0) continue;
 
-      const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge)) / t.weightKg : 0;
+      // Capitalised transfer costs that travel with the seed to RVP: hamali +
+      // transport + bank-loan carrying interest. Same total that is persisted as
+      // the transfer's movedValue, so every stock page values transferred-in seed
+      // identically (see the tie-out test in calc.test.ts).
+      const addedCostPerKg = t.weightKg > 0 ? (Number(t.loadingHamali) + Number(t.unloadingHamali) + Number(t.transportCharge) + Number(t.interestCharge)) / t.weightKg : 0;
 
       const sourceRows = storageRowsByLocation.get(t.fromLocation) ?? [];
 

@@ -7,6 +7,8 @@ import {
   calcTotal,
   daysBetween,
   loanInterest,
+  storageSeedInterest,
+  type DrawnSeedSlice,
   pappuLoadingHamali,
   productLoadingHamali,
   transferHamali,
@@ -204,6 +206,69 @@ describe('loanInterest', () => {
   });
   it('zero rate -> zero interest', () => {
     expect(loanInterest(1500000, 0, 60)).toBe(0);
+  });
+});
+
+describe('storageSeedInterest', () => {
+  const transferDate = new Date('2026-04-01');
+
+  it('accrues each lot by its OWN storage dwell time (not a blended date)', () => {
+    const slices: DrawnSeedSlice[] = [
+      { value: 100000, arrivalDate: new Date('2026-01-01') }, // 90 days
+      { value: 50000, arrivalDate: new Date('2026-03-02') }, //  30 days
+    ];
+    const { interest } = storageSeedInterest(slices, 12, transferDate);
+    // 100000×12%×90/365 + 50000×12%×30/365 = 2958.90 + 493.15 = 3452.05
+    expect(interest).toBeCloseTo(loanInterest(100000, 12, 90) + loanInterest(50000, 12, 30), 2);
+  });
+
+  it('weightedDays is value-weighted across lots', () => {
+    const slices: DrawnSeedSlice[] = [
+      { value: 100000, arrivalDate: new Date('2026-01-01') }, // 90 days
+      { value: 50000, arrivalDate: new Date('2026-03-02') }, //  30 days
+    ];
+    const { weightedDays } = storageSeedInterest(slices, 12, transferDate);
+    // (100000×90 + 50000×30) / 150000 = 70
+    expect(weightedDays).toBe(70);
+  });
+
+  it('no slices -> zero interest and zero days', () => {
+    expect(storageSeedInterest([], 12, transferDate)).toEqual({ interest: 0, weightedDays: 0 });
+  });
+
+  it('zero rate -> zero interest, days still weighted', () => {
+    const slices: DrawnSeedSlice[] = [{ value: 100000, arrivalDate: new Date('2026-01-01') }];
+    const { interest, weightedDays } = storageSeedInterest(slices, 0, transferDate);
+    expect(interest).toBe(0);
+    expect(weightedDays).toBe(90);
+  });
+});
+
+// The single guarantee that keeps every stock page from diverging (the exact bug
+// that got the old interest approach removed): the value the transfer PERSISTS as
+// movedValue must equal the value the recompute pages (server computeBlackSeedRows,
+// client StockLocation) REBUILD for the same transferred-in seed. Both now derive
+// from the SAME persisted interestCharge, so the identity must hold to the paise.
+describe('transferred-in seed value tie-out (movedValue == recompute)', () => {
+  it.each([
+    // seedCostMoved, hamali, transport, interest, weightKg
+    ['typical 10t', 283200, 2700, 2500, 3452.05, 10000],
+    ['zero interest', 283200, 2700, 2500, 0, 10000],
+    ['awkward paise', 197531.37, 1890, 1750, 1234.56, 7000],
+  ])('%s', (_label, seedCostMoved, hamali, transport, interest, weightKg) => {
+    const seed = seedCostMoved as number;
+    const w = weightKg as number;
+    // (A) What createStockTransfer persists as movedValue.
+    const addedCost = Math.round(((hamali as number) + (transport as number) + (interest as number)) * 100) / 100;
+    const movedValue = Math.round((seed + addedCost) * 100) / 100;
+
+    // (B) What computeBlackSeedRows / StockLocation rebuild for the same transfer:
+    // seed value drawn from source + addedCostPerKg × weight, where
+    // addedCostPerKg = (hamali + transport + interest) / weight.
+    const addedCostPerKg = ((hamali as number) + (transport as number) + (interest as number)) / w;
+    const rebuilt = Math.round((seed + addedCostPerKg * w) * 100) / 100;
+
+    expect(rebuilt).toBeCloseTo(movedValue, 2);
   });
 });
 

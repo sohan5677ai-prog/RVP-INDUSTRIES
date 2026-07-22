@@ -104,7 +104,8 @@ export type LoanStatus = 'OPEN' | 'CLOSED';
 export interface LoanRepayment {
   id: string;
   loanId: string;
-  amount: string;
+  amount: string; // principal portion
+  interest: string; // interest portion (settles the 20280 accrual)
   date: string;
   reference: string | null;
   createdAt: string;
@@ -127,6 +128,7 @@ export interface BankLoan {
   repayments: LoanRepayment[];
   // Server-computed
   repaidAmount: number;
+  interestPaid: number;
   outstanding: number;
   accruedInterestToDate: number;
 }
@@ -136,6 +138,8 @@ export interface LoanSummary {
   totalOutstanding: number;
   totalAccruedInterest: number;
   interestCapitalised: number;
+  interestPaidToBank: number;
+  interestAccruedOutstanding: number;
   earliestOpenLoanDate: string | null;
 }
 

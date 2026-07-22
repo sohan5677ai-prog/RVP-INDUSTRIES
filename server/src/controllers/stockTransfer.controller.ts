@@ -3,9 +3,16 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createStockTransferSchema } from '../schemas/purchase.schema.js';
-import { transferHamali, transferTransportCharge, companyHamaliShare } from '../lib/calc.js';
+import {
+  transferHamali,
+  transferTransportCharge,
+  companyHamaliShare,
+  storageSeedInterest,
+  type DrawnSeedSlice,
+} from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { getCompanyProfileRow } from './settings.controller.js';
 
 /**
  * Value the next `weightKg` of black seed drawn from a storage location by PRICE
@@ -20,7 +27,7 @@ async function drawStorageBandValue(
   tx: Prisma.TransactionClient,
   fromLocation: string,
   weightKg: number
-): Promise<number> {
+): Promise<{ value: number; slices: DrawnSeedSlice[] }> {
   const purchases = await tx.purchase.findMany({
     where: { stockIn: { loadingLocation: fromLocation } },
     include: { verification: true, stockIn: { include: { purchaseOrder: true } } },
@@ -34,7 +41,7 @@ async function drawStorageBandValue(
     const price = p.verification ? Number(p.verification.pricePerKg) : Number(p.stockIn.purchaseOrder.pricePerKg);
     const ourHamali = companyHamaliShare(Number(p.hamaliCharge));
     const freight = Number(p.freightCharge);
-    
+
     // The transferred seed value must carry its share of inward company hamali and inward freight,
     // otherwise the crediting value falls short and orphaned balances are left at the source location.
     const landedPerKg = price + (ourHamali / netKg) + (freight / netKg);
@@ -59,17 +66,22 @@ async function drawStorageBandValue(
     priorKg -= take;
   }
 
-  // Value this transfer's weight from what's left, at each lot's band price.
+  // Value this transfer's weight from what's left, at each lot's band price, and
+  // record each drawn slice (value + its storage arrival date) so carrying
+  // interest can be accrued per lot by its actual dwell time.
   let needKg = weightKg;
   let value = 0;
+  const slices: DrawnSeedSlice[] = [];
   for (let i = 0; i < lots.length && needKg > 0; i++) {
     const take = Math.min(needKg, remaining[i]);
     if (take <= 0) continue;
-    value += take * lots[i].perKg;
+    const sliceValue = take * lots[i].perKg;
+    value += sliceValue;
+    slices.push({ value: sliceValue, arrivalDate: lots[i].date });
     needKg -= take;
   }
 
-  return Math.round(value * 100) / 100;
+  return { value: Math.round(value * 100) / 100, slices };
 }
 
 export async function listStockTransfers(_req: Request, res: Response) {
@@ -108,25 +120,35 @@ export async function createStockTransfer(req: Request, res: Response) {
   // Transfer transport is per-tonne, keyed to the source storage location, and
   // billed to KNM Transport (still capitalised into the seed at the process).
   const transportCharge = transferTransportCharge(data.weightKg, data.fromLocation);
+  // Global annual bank-loan rate that storage carrying interest accrues at.
+  const interestRatePct = Number((await getCompanyProfileRow()).loanInterestRatePct);
 
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;
   const legMargin = hamali.margin;
 
-  // The transfer hamali (₹270/t) + per-tonne transport travel WITH the seed:
-  // they are capitalised into the seed's value at the destination, so the value
-  // arriving at RVP = seed value moved + these costs. No bank-loan interest is
-  // charged on transfers.
-  const addedCost = legCharge + transportCharge;
-
   const transfer = await prisma.$transaction(async (tx) => {
     // Value the seed by the specific PRICE BAND being depleted (top-to-bottom),
-    // NOT the source silo's blended MAP average.
-    const seedCostMoved = await drawStorageBandValue(tx, data.fromLocation, data.weightKg);
+    // NOT the source silo's blended MAP average. `slices` carries each drawn lot's
+    // value + storage arrival date so interest can accrue by actual dwell time.
+    const { value: seedCostMoved, slices } = await drawStorageBandValue(tx, data.fromLocation, data.weightKg);
+
+    // Bank-loan carrying interest accrued PER LOT (arrival→transfer days) at the
+    // global rate, capitalised into the seed alongside the other transfer costs.
+    const { interest: interestCharge, weightedDays: interestDays } = storageSeedInterest(
+      slices,
+      interestRatePct,
+      data.transferDate
+    );
+
+    // The transfer hamali (₹270/t) + per-tonne transport + carrying interest travel
+    // WITH the seed: they are all capitalised into the seed's value at the
+    // destination, so the value arriving at RVP = seed value moved + these costs.
+    const addedCost = Math.round((legCharge + transportCharge + interestCharge) * 100) / 100;
 
     // Physically move the seed: remove the weight + its band value from the source
-    // silo, and add the weight + band value + the capitalised transfer costs to the
-    // destination silo.
+    // silo, and add the weight + band value + the capitalised transfer costs
+    // (hamali + transport + interest) to the destination silo.
     await InventoryService.updateBlackSeedInventory(tx, data.fromLocation, -data.weightKg, -seedCostMoved);
     await InventoryService.updateBlackSeedInventory(tx, data.toLocation, data.weightKg, seedCostMoved + addedCost);
 
@@ -143,9 +165,9 @@ export async function createStockTransfer(req: Request, res: Response) {
         loadingHamali: hamali.unloadCharge, // storage unload leg - no longer charged, always 0
         unloadingHamali: hamali.handlingCharge, // load + unload combined
         hamaliMargin: legMargin,
-        interestCharge: 0,
-        interestDays: 0,
-        interestRatePct: 0,
+        interestCharge,
+        interestDays,
+        interestRatePct,
         seedCostMoved,
         movedValue,
         transferDate: data.transferDate,
@@ -161,6 +183,7 @@ export async function createStockTransfer(req: Request, res: Response) {
       legCrew,
       legMargin,
       transportCharge,
+      interestCharge,
     });
 
     return created;
@@ -170,9 +193,10 @@ export async function createStockTransfer(req: Request, res: Response) {
 }
 
 /**
- * Reverse a transfer: move the seed back to the source silo. Uses the
- * destination's current MAP, so the source is restored to roughly its prior
- * value (the original journal entry is left in place for audit).
+ * Reverse a transfer: move the seed back to the source silo (at the destination's
+ * current MAP) and drop the transfer's journal entry, so the capitalised interest
+ * accrual (20280) and inventory lines don't linger after the transfer row is gone.
+ * This keeps Σ transfer.interestCharge in step with the 20280 balance.
  */
 export async function deleteStockTransfer(req: Request, res: Response) {
   const transfer = await prisma.stockTransfer.findUnique({ where: { id: req.params.id } });
@@ -196,6 +220,9 @@ export async function deleteStockTransfer(req: Request, res: Response) {
       transfer.weightKg,
       0
     );
+    // Reverse the GL: remove the seed-move, capitalised hamali/transport and the
+    // capitalised interest accrual posted at TRANSFER-<id>.
+    await tx.journalEntry.deleteMany({ where: { reference: `TRANSFER-${transfer.id}` } });
     await tx.stockTransfer.delete({ where: { id: transfer.id } });
   });
 

@@ -343,6 +343,11 @@ export function loanInterest(value: number, ratePct: number, days: number): numb
   return Math.round(value * (ratePct / 100) * (days / 365) * 100) / 100;
 }
 
+// Storage→process carrying interest is a FLAT 1% per month (= 12% p.a.), day-
+// prorated by each lot's storage dwell. Fixed rate, independent of bank-loan rates.
+export const STORAGE_INTEREST_MONTHLY_PCT = 1;
+export const STORAGE_INTEREST_ANNUAL_PCT = STORAGE_INTEREST_MONTHLY_PCT * 12;
+
 // ── Order Planner roll-up ─────────────────────────────────────────────────────
 // Black seed → pappu bridge. One out-turn (60%) converts seed to milled pappu;
 // the server's /inventory/by-price endpoint already does the per-band allocation

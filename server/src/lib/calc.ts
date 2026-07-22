@@ -364,6 +364,12 @@ export function loanInterest(value: number, ratePct: number, days: number): numb
   return Math.round(value * (ratePct / 100) * (days / 365) * 100) / 100;
 }
 
+// Storage→process carrying interest is a FLAT 1% per month (= 12% p.a.), day-
+// prorated by each lot's storage dwell via loanInterest (…days/365). It is a
+// fixed business rate, independent of the individual bank-loan rates.
+export const STORAGE_INTEREST_MONTHLY_PCT = 1;
+export const STORAGE_INTEREST_ANNUAL_PCT = STORAGE_INTEREST_MONTHLY_PCT * 12;
+
 /** One lot's slice drawn at a transfer: its ex-GST landed value and the date it
  * arrived at the storage location it is now being moved out of. */
 export interface DrawnSeedSlice {

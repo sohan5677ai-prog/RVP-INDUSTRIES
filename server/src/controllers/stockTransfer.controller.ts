@@ -8,11 +8,11 @@ import {
   transferTransportCharge,
   companyHamaliShare,
   storageSeedInterest,
+  STORAGE_INTEREST_ANNUAL_PCT,
   type DrawnSeedSlice,
 } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { getStorageLoanRate } from './loan.controller.js';
 
 /**
  * Value the next `weightKg` of black seed drawn from a storage location by PRICE
@@ -120,10 +120,9 @@ export async function createStockTransfer(req: Request, res: Response) {
   // Transfer transport is per-tonne, keyed to the source storage location, and
   // billed to KNM Transport (still capitalised into the seed at the process).
   const transportCharge = transferTransportCharge(data.weightKg, data.fromLocation);
-  // Annual rate that storage carrying interest accrues at, taken from the shared
-  // pool of OPEN storage loans (the same loans fund all three storages), falling
-  // back to the global rate when none is open. Ties the transfer to Storage Loans.
-  const interestRatePct = await getStorageLoanRate();
+  // Storage carrying interest is a flat 1% per month (12% p.a.), day-prorated per
+  // lot by its days in storage. A fixed business rate, not the bank-loan rate.
+  const interestRatePct = STORAGE_INTEREST_ANNUAL_PCT;
 
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;

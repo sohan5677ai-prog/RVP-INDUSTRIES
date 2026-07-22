@@ -36,24 +36,6 @@ export async function getEarliestOpenLoanDate(): Promise<Date | null> {
   return open ? open.drawdownDate : null;
 }
 
-/**
- * Annual interest rate (%) to capitalise onto seed transferred out of ANY storage
- * (PGR COLD / Murugan / KNM Multi) - this is what wires the Stock Transfer to the
- * Storage Loans. The storage loans are ONE SHARED POOL funding all three storages,
- * so every transfer uses the pool rate regardless of source location. Uses the
- * highest open-loan rate (conservative when several differ). Falls back to the
- * global CompanyProfile rate only when no loan is open at all.
- */
-export async function getStorageLoanRate(): Promise<number> {
-  const loans = await prisma.bankLoan.findMany({
-    where: { status: 'OPEN' },
-    select: { interestRatePct: true },
-  });
-  if (loans.length > 0) {
-    return Math.max(...loans.map((l) => Number(l.interestRatePct)));
-  }
-  return getCurrentLoanRate(); // global fallback when no storage loan is open
-}
 
 /**
  * List all loans with computed repaid/outstanding/accrued-interest, plus a

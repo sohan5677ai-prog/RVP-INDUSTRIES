@@ -59,19 +59,19 @@ export default function StockTransferPage() {
     queryFn: () => api<{ rows: { rvpNetWeightKg: number; location: string; isTransferredIn?: boolean }[] }>('/inventory/black-seed'),
   });
 
-  // Storage loans drive the carrying-interest rate: a transfer out of a location
-  // accrues interest at the OPEN loans booked against THAT location (highest rate
-  // if several), falling back to the global rate when none. Mirrors the server's
-  // getLocationLoanRate so the dialog can preview which rate will apply.
+  // Storage loans drive the carrying-interest rate: they are ONE SHARED POOL that
+  // funds all three storages, so every transfer accrues at the pool's rate (highest
+  // open-loan rate), falling back to the global rate when none is open. Mirrors the
+  // server's getStorageLoanRate so the dialog can preview which rate will apply.
   const { data: loansData } = useQuery({
     queryKey: ['loans'],
     queryFn: () => api<LoansResponse>('/loans'),
   });
-  const loanRateFor = (loc: string): number => {
-    const open = (loansData?.loans ?? []).filter((l) => l.status === 'OPEN' && (l.location ?? '') === loc);
-    if (open.length) return Math.max(...open.map((l) => Number(l.interestRatePct)));
-    return loansData?.summary.rate ?? 0;
-  };
+  const openLoans = (loansData?.loans ?? []).filter((l) => l.status === 'OPEN');
+  const storageLoanRate = openLoans.length
+    ? Math.max(...openLoans.map((l) => Number(l.interestRatePct)))
+    : (loansData?.summary.rate ?? 0);
+  const hasStorageLoan = openLoans.length > 0;
 
   const storageStock = (loc: string) => {
     const received = (seedData?.rows ?? [])
@@ -99,11 +99,8 @@ export default function StockTransferPage() {
 
   const transportCharge = weightValid ? transferTransportCharge(weightKg, fromLocation) : 0;
 
-  // Annual carrying-interest rate that will apply, from the loans at this source.
-  const applicableRate = fromLocation ? loanRateFor(fromLocation) : 0;
-  const hasLocationLoan = fromLocation
-    ? (loansData?.loans ?? []).some((l) => l.status === 'OPEN' && (l.location ?? '') === fromLocation)
-    : false;
+  // Annual carrying-interest rate that will apply (shared pool, source-independent).
+  const applicableRate = storageLoanRate;
 
   // Hamali + transport travel with the seed and are capitalised into its value at
   // RVP. The seed's own value is drawn from the specific price band(s)
@@ -282,21 +279,17 @@ export default function StockTransferPage() {
                 <span className="font-medium">{rupees(transportCharge)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Storage-loan interest{fromLocation ? ` (${applicableRate}%/yr)` : ''}
-                </span>
+                <span className="text-muted-foreground">Storage-loan interest</span>
                 <span className="font-medium">
-                  {!fromLocation
-                    ? '-'
-                    : hasLocationLoan
-                      ? `${applicableRate}%/yr · per lot on save`
-                      : applicableRate > 0
-                        ? `${applicableRate}%/yr (global)`
-                        : 'no loan at ' + fromLocation}
+                  {hasStorageLoan
+                    ? `${applicableRate}%/yr · per lot on save`
+                    : applicableRate > 0
+                      ? `${applicableRate}%/yr (global)`
+                      : 'no open storage loan'}
                 </span>
               </div>
               <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and bank-loan carrying interest (accrued per lot by its days in storage × the {fromLocation || 'source'} loan rate) are capitalised into that seed value. {fromLocation && !hasLocationLoan && applicableRate === 0 ? `Add an open loan for ${fromLocation} in Storage Loans to charge interest.` : ''}
+                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and bank-loan carrying interest (accrued per lot by its days in storage × the shared storage-loan rate — the same loans fund all three storages) are capitalised into that seed value. {!hasStorageLoan && applicableRate === 0 ? 'Add an open loan in Storage Loans to charge interest.' : ''}
               </p>
             </div>
 

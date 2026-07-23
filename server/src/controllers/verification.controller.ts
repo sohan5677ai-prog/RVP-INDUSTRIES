@@ -18,12 +18,12 @@ import { uploadFileToStorage } from '../lib/upload.js';
  * the verification response.
  */
 async function sendVerificationStatement(
-  party: { id: string; name: string; phone: string | null },
+  party: { id: string; name: string; phone: string | null; phone2?: string | null },
   details: { lorryNumber: string; netWeightKg: number; amount: number },
   verificationId: string
 ) {
   try {
-    if (!party.phone) return; // nothing to send to — skip the PDF work entirely
+    if (!party.phone && !party.phone2) return; // nothing to send to — skip the PDF work entirely
     const statement = await buildPartyStatementData(party.id);
     let url: string | undefined;
     let filename: string | undefined;

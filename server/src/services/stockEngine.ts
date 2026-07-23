@@ -153,7 +153,7 @@ async function _computeUnifiedStockEngine(
         const lots = storageLotsByLocation.get(si.loadingLocation) ?? [];
         lots.push({
           price, netKg, value, date: si.arrivalDate,
-          purchaseId: si.purchase.id, partyName: po.party.name, partyState, partyId: po.party.id, partyPhone: po.party.phone || '', partyAddress: po.party.address || '',
+          purchaseId: si.purchase.id, partyName: po.party.name, partyState, partyId: po.party.id, partyPhone: [po.party.phone, po.party.phone2].filter(Boolean).join(' / ') || '', partyAddress: po.party.address || '',
           lorryNumber: si.lorryNumber, poNumber: po.poNumber,
         });
         storageLotsByLocation.set(si.loadingLocation, lots);
@@ -170,7 +170,7 @@ async function _computeUnifiedStockEngine(
         partyName: po.party.name,
         partyState,
         partyId: po.party.id,
-        partyPhone: po.party.phone || '',
+        partyPhone: [po.party.phone, po.party.phone2].filter(Boolean).join(' / ') || '',
         partyAddress: po.party.address || '',
         lorryNumber: si.lorryNumber,
         poNumber: po.poNumber,

@@ -49,7 +49,8 @@ const PARTY_EXPORT_COLUMNS: ExportColumn<Party>[] = [
   { header: 'Name', value: (p) => p.name },
   { header: 'Nickname', value: (p) => p.nickname ?? '' },
   { header: 'Type', value: (p) => p.type },
-  { header: 'Phone', value: (p) => p.phone ?? '' },
+  { header: 'Phone 1', value: (p) => p.phone ?? '' },
+  { header: 'Phone 2', value: (p) => p.phone2 ?? '' },
   { header: 'Email', value: (p) => p.email ?? '' },
   { header: 'Address', value: (p) => p.address ?? '' },
   { header: 'State', value: (p) => p.state ?? '' },
@@ -118,6 +119,7 @@ const partySchema = z.object({
   nickname: z.string().optional(),
   type: z.enum(['SUPPLIER', 'BUYER', 'BOTH', 'HAMALI_TEAM']),
   phone: z.string().optional(),
+  phone2: z.string().optional(),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   address: z.string().optional(),
   state: z.string().optional(),
@@ -133,7 +135,7 @@ const partySchema = z.object({
 type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
-  name: '', nickname: '', type: 'SUPPLIER', phone: '', email: '', address: '', state: '', pincode: '', gstin: '', destination: '',
+  name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', state: '', pincode: '', gstin: '', destination: '',
   locationLink: '', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
@@ -170,6 +172,8 @@ export default function Parties() {
     const q = searchQuery.toLowerCase();
     const matchesSearch = !q || (
       (p.name?.toLowerCase() || '').includes(q) ||
+      (p.phone?.toLowerCase() || '').includes(q) ||
+      (p.phone2?.toLowerCase() || '').includes(q) ||
       (p.gstin?.toLowerCase() || '').includes(q) ||
       (p.bankAccountNumber?.toLowerCase() || '').includes(q)
     );
@@ -207,6 +211,7 @@ export default function Parties() {
       nickname: p.nickname ?? '',
       type: p.type,
       phone: p.phone ?? '',
+      phone2: p.phone2 ?? '',
       email: p.email ?? '',
       address: p.address ?? '',
       state: p.state ?? '',
@@ -374,7 +379,10 @@ export default function Parties() {
                 <TableCell>
                   <Badge variant="secondary">{p.type === 'HAMALI_TEAM' ? 'Hamali Team' : p.type}</Badge>
                 </TableCell>
-                <TableCell>{p.phone ?? '-'}</TableCell>
+                <TableCell className="text-xs">
+                  <div>{p.phone ?? '-'}</div>
+                  {p.phone2 && <div className="text-muted-foreground">{p.phone2}</div>}
+                </TableCell>
                 <TableCell>{p.address ?? '-'}</TableCell>
                 <TableCell>{p.state ?? '-'}</TableCell>
                 <TableCell className="font-mono text-xs">{p.gstin ?? '-'}</TableCell>
@@ -517,30 +525,45 @@ export default function Parties() {
                   name="phone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone</FormLabel>
+                      <FormLabel>Phone Number 1</FormLabel>
                       <FormControl>
-                        <Input {...field} />
+                        <Input placeholder="e.g. 9876543210" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                {!isHamaliTeam && (
                 <FormField
                   control={form.control}
-                  name="email"
+                  name="phone2"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email</FormLabel>
+                      <FormLabel>Phone Number 2</FormLabel>
                       <FormControl>
-                        <Input type="email" placeholder="e.g. party@example.com" {...field} />
+                        <Input placeholder="e.g. 9876543211" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                )}
               </div>
+              {!isHamaliTeam && (
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input type="email" placeholder="e.g. party@example.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
               {!isHamaliTeam && (
               <div className="grid grid-cols-2 gap-4">
                 <FormField

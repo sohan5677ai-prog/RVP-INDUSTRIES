@@ -8,6 +8,7 @@ export const createPartySchema = z.object({
   nickname: z.string().optional(),
   type: partyTypeEnum.default('SUPPLIER'),
   phone: z.string().optional(),
+  phone2: z.string().optional(),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   address: z.string().optional(),
   state: z.string().optional(),

@@ -29,6 +29,7 @@ export interface BuyerDues {
   buyerId: string;
   name: string;
   phone: string | null;
+  phone2?: string | null;
   outstanding: number; // total across all unsettled shipments
   overdueOutstanding: number; // subset that is past its due date
   invoices: InvoiceDue[];
@@ -54,7 +55,7 @@ function addDays(base: Date, days: number): Date {
 export async function computeBuyerDues(asOf: Date = new Date()): Promise<DuesPortfolio> {
   const dispatches = await prisma.saleDispatch.findMany({
     include: {
-      saleOrder: { include: { buyer: { select: { id: true, name: true, phone: true } } } },
+      saleOrder: { include: { buyer: { select: { id: true, name: true, phone: true, phone2: true } } } },
       receipts: { select: { type: true, amount: true, tdsAmount: true, shortageAmount: true } },
     },
   });
@@ -81,7 +82,7 @@ export async function computeBuyerDues(asOf: Date = new Date()): Promise<DuesPor
     const buyer = order.buyer;
     let row = byBuyer.get(buyer.id);
     if (!row) {
-      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, outstanding: 0, overdueOutstanding: 0, invoices: [], overdueInvoices: [] };
+      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, outstanding: 0, overdueOutstanding: 0, invoices: [], overdueInvoices: [] };
       byBuyer.set(buyer.id, row);
     }
     const invoice: InvoiceDue = {

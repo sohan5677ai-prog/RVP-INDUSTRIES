@@ -15,6 +15,7 @@ export interface Party {
   nickname?: string | null;
   type: PartyType;
   phone: string | null;
+  phone2?: string | null;
   email?: string | null;
   address: string | null;
   state: string | null;

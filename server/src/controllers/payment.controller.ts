@@ -153,7 +153,7 @@ export async function createPayment(req: Request, res: Response) {
           reference: data.reference ?? null,
           screenshotUrl,
         },
-        { name: party.name, phone: party.phone }
+        { name: party.name, phone: party.phone, phone2: party.phone2 }
       );
     })().catch(() => {});
   }

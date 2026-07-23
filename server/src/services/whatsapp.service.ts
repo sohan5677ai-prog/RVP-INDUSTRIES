@@ -159,7 +159,7 @@ function cleanVar(v: string | number | null | undefined): string {
 
 interface SendArgs {
   templateKey: WaTemplateKey;
-  to: string | null | undefined; // raw phone, normalised inside
+  to: string | string[] | null | undefined; // raw phone(s), normalised inside
   variables: Array<string | number | null | undefined>;
   mediaUrl?: string; // required by templates with a media header
   documentFilename?: string; // PDF display name
@@ -191,6 +191,7 @@ async function log(args: SendArgs, status: 'SENT' | 'FAILED' | 'SKIPPED', extra:
 /**
  * Send one approved template. Never throws — the outcome (SENT/FAILED/SKIPPED)
  * is recorded in WhatsAppLog and mirrored in the return value.
+ * Supports passing a single phone number or array of phone numbers (e.g. party phone 1 & 2).
  */
 export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
   const apiKey = process.env.FAST2SMS_API_KEY;
@@ -213,59 +214,87 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
     return { ok: false, skipped: true, error: `Template id for ${args.templateKey} is not configured` };
   }
 
-  const realNumber = normalizeWhatsAppNumber(args.to);
-  const target = testMode ? normalizeWhatsAppNumber(testNumber) : realNumber;
-  if (!target) {
+  const rawList = (Array.isArray(args.to) ? args.to : [args.to]).filter(Boolean);
+  const targets: Array<{ realNumber: string | null; targetNumber: string | null }> = [];
+
+  for (const raw of rawList) {
+    const realNumber = normalizeWhatsAppNumber(raw);
+    const targetNumber = testMode ? normalizeWhatsAppNumber(testNumber) : realNumber;
+    if (realNumber || targetNumber) {
+      targets.push({ realNumber, targetNumber });
+    }
+  }
+
+  if (targets.length === 0) {
     const error = testMode
       ? 'WHATSAPP_TEST_NUMBER is missing/invalid (test mode is on)'
-      : `Recipient phone "${args.to ?? ''}" is missing or not a valid Indian mobile`;
-    await log(args, 'FAILED', { phone: realNumber, error });
+      : `Recipient phone "${Array.isArray(args.to) ? args.to.join(', ') : args.to ?? ''}" is missing or not a valid Indian mobile`;
+    await log(args, 'FAILED', { phone: null, error });
     return { ok: false, error };
   }
 
-  const params = new URLSearchParams({
-    message_id: messageId,
-    numbers: target,
-  });
-  // phone_number_id is optional on Fast2SMS: when omitted it uses the number
-  // connected to the account. Only send it when explicitly configured (a wrong
-  // value — e.g. a Meta phone-number-id — is rejected with "not connected").
-  if (phoneNumberId) params.set('phone_number_id', phoneNumberId);
-  const variablesValues = args.variables.map(cleanVar).join('|');
-  if (variablesValues) params.set('variables_values', variablesValues);
-  if (args.mediaUrl) params.set('media_url', args.mediaUrl);
-  if (args.documentFilename) params.set('document_filename', args.documentFilename);
+  const results: Array<{ ok: boolean; skipped?: boolean; error?: string }> = [];
 
-  try {
-    const res = await fetch(`${FAST2SMS_URL}?${params.toString()}`, {
-      headers: { Authorization: apiKey },
+  for (const { realNumber, targetNumber } of targets) {
+    const target = targetNumber;
+    if (!target) {
+      const error = testMode
+        ? 'WHATSAPP_TEST_NUMBER is missing/invalid (test mode is on)'
+        : `Recipient phone "${realNumber ?? ''}" is missing or not a valid Indian mobile`;
+      await log(args, 'FAILED', { phone: realNumber, error });
+      results.push({ ok: false, error });
+      continue;
+    }
+
+    const params = new URLSearchParams({
+      message_id: messageId,
+      numbers: target,
     });
-    const text = await res.text();
-    if (!res.ok) {
-      await log(args, 'FAILED', { phone: target, error: `HTTP ${res.status}: ${text.slice(0, 500)}` });
-      return { ok: false, error: `Fast2SMS error ${res.status}` };
-    }
-    // Response may be JSON ({return: true, request_id}) or plain text — keep whatever id we can find.
-    let providerId: string | undefined;
+    // phone_number_id is optional on Fast2SMS: when omitted it uses the number
+    // connected to the account. Only send it when explicitly configured (a wrong
+    // value — e.g. a Meta phone-number-id — is rejected with "not connected").
+    if (phoneNumberId) params.set('phone_number_id', phoneNumberId);
+    const variablesValues = args.variables.map(cleanVar).join('|');
+    if (variablesValues) params.set('variables_values', variablesValues);
+    if (args.mediaUrl) params.set('media_url', args.mediaUrl);
+    if (args.documentFilename) params.set('document_filename', args.documentFilename);
+
     try {
-      const parsed = JSON.parse(text);
-      providerId = parsed.request_id ?? parsed.message_id ?? undefined;
-      if (parsed.return === false) {
-        await log(args, 'FAILED', { phone: target, error: text.slice(0, 500) });
-        return { ok: false, error: parsed.message ?? 'Fast2SMS rejected the message' };
+      const res = await fetch(`${FAST2SMS_URL}?${params.toString()}`, {
+        headers: { Authorization: apiKey },
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        await log(args, 'FAILED', { phone: target, error: `HTTP ${res.status}: ${text.slice(0, 500)}` });
+        results.push({ ok: false, error: `Fast2SMS error ${res.status}` });
+        continue;
       }
-    } catch {
-      /* plain-text success body */
+      // Response may be JSON ({return: true, request_id}) or plain text — keep whatever id we can find.
+      let providerId: string | undefined;
+      try {
+        const parsed = JSON.parse(text);
+        providerId = parsed.request_id ?? parsed.message_id ?? undefined;
+        if (parsed.return === false) {
+          await log(args, 'FAILED', { phone: target, error: text.slice(0, 500) });
+          results.push({ ok: false, error: parsed.message ?? 'Fast2SMS rejected the message' });
+          continue;
+        }
+      } catch {
+        /* plain-text success body */
+      }
+      await log(args, 'SENT', { phone: target, providerId });
+      logger.info(`[whatsapp] ${args.templateKey} sent to ${target}${testMode ? ' (test mode)' : ''}`);
+      results.push({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await log(args, 'FAILED', { phone: target, error: msg });
+      logger.error(`[whatsapp] ${args.templateKey} send failed: ${msg}`);
+      results.push({ ok: false, error: msg });
     }
-    await log(args, 'SENT', { phone: target, providerId });
-    logger.info(`[whatsapp] ${args.templateKey} sent to ${target}${testMode ? ' (test mode)' : ''}`);
-    return { ok: true };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await log(args, 'FAILED', { phone: target, error: msg });
-    logger.error(`[whatsapp] ${args.templateKey} send failed: ${msg}`);
-    return { ok: false, error: msg };
   }
+
+  const anyOk = results.some((r) => r.ok);
+  return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error ?? 'Send failed' };
 }
 
 // ---------------------------------------------------------------------------
@@ -294,14 +323,14 @@ export const whatsappService = {
    * PO created → party. One order may split into several per-lorry POs
    * (poGroupId); send a single message covering the group.
    */
-  async notifyPoCreated(pos: Array<{ id: string; poNumber: string | null }>, party: { name: string; phone: string | null }, pricePerKg: number) {
+  async notifyPoCreated(pos: Array<{ id: string; poNumber: string | null }>, party: { name: string; phone: string | null; phone2?: string | null }, pricePerKg: number) {
     if (pos.length === 0) return;
     const first = pos[0].poNumber ?? '';
     const last = pos[pos.length - 1].poNumber ?? '';
     const poLabel = pos.length === 1 ? first : `${first} to ${last}`;
     await sendWhatsAppTemplate({
       templateKey: 'PO_CREATED',
-      to: party.phone,
+      to: [party.phone, party.phone2].filter(Boolean) as string[],
       variables: [party.name, poLabel, pos.length, pricePerKg],
       relatedType: 'PO',
       relatedId: pos[0].id,
@@ -309,10 +338,10 @@ export const whatsappService = {
   },
 
   /** Lorry stocked in → party. */
-  async notifyStockIn(stockIn: { id: string; lorryNumber: string; arrivalDate: Date }, po: { poNumber: string | null }, party: { name: string; phone: string | null }) {
+  async notifyStockIn(stockIn: { id: string; lorryNumber: string; arrivalDate: Date }, po: { poNumber: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
     await sendWhatsAppTemplate({
       templateKey: 'STOCKIN_CONFIRMED',
-      to: party.phone,
+      to: [party.phone, party.phone2].filter(Boolean) as string[],
       variables: [party.name, stockIn.lorryNumber, po.poNumber ?? '-', fmtDate(stockIn.arrivalDate)],
       relatedType: 'STOCKIN',
       relatedId: stockIn.id,
@@ -324,11 +353,11 @@ export const whatsappService = {
    * when one was uploaded; otherwise falls back to a text-only template so the
    * message still goes out (the image-header template can't send without media).
    */
-  async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: { name: string; phone: string | null }) {
+  async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
     const hasImage = !!payment.screenshotUrl;
     await sendWhatsAppTemplate({
       templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
-      to: party.phone,
+      to: [party.phone, party.phone2].filter(Boolean) as string[],
       variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
       mediaUrl: payment.screenshotUrl ?? undefined,
       relatedType: 'PAYMENT',
@@ -341,7 +370,7 @@ export const whatsappService = {
    * with their account statement attached as a PDF (document header).
    */
   async notifyVerificationStatement(
-    party: { id?: string; name: string; phone: string | null },
+    party: { id?: string; name: string; phone: string | null; phone2?: string | null },
     details: { lorryNumber: string; netWeightKg: number; amount: number },
     statementPdfUrl: string | undefined,
     statementFilename: string | undefined,
@@ -349,7 +378,7 @@ export const whatsappService = {
   ) {
     await sendWhatsAppTemplate({
       templateKey: 'VERIFICATION_STATEMENT',
-      to: party.phone,
+      to: [party.phone, party.phone2].filter(Boolean) as string[],
       variables: [party.name, details.lorryNumber, fmtWeight(details.netWeightKg), fmtInr(details.amount)],
       mediaUrl: statementPdfUrl,
       documentFilename: statementFilename,
@@ -387,7 +416,7 @@ export const whatsappService = {
     brokerName?: string | null; // set → include the "Through Broker" line
     documentUrl?: string; // combined Tax Invoice + EWB PDF
     documentFilename?: string;
-    toPhone: string | null;
+    toPhone: string | string[] | null;
   }) {
     const base = [
       args.buyerName,
@@ -447,10 +476,10 @@ export const whatsappService = {
   },
 
   /** Pending-loads reminder → party (manual button on the Party Ledger). */
-  async sendReminder(party: { id: string; name: string; phone: string | null }, pendingLorries: number, poLabel: string) {
+  async sendReminder(party: { id: string; name: string; phone: string | null; phone2?: string | null }, pendingLorries: number, poLabel: string) {
     return sendWhatsAppTemplate({
       templateKey: 'REMINDER',
-      to: party.phone,
+      to: [party.phone, party.phone2].filter(Boolean) as string[],
       variables: [party.name, pendingLorries, poLabel],
       relatedType: 'REMINDER',
       relatedId: party.id,
@@ -462,10 +491,10 @@ export const whatsappService = {
    * overdue invoices (e.g. "RVP/12 (₹1,20,000) · RVP/15 (₹80,000)"). Fired by the
    * daily job and by the manual "Remind" button on the ledger.
    */
-  async sendSalesDuesReminder(buyer: { id: string; name: string; phone: string | null }, outstanding: number, invoiceListText: string) {
+  async sendSalesDuesReminder(buyer: { id: string; name: string; phone: string | null; phone2?: string | null }, outstanding: number, invoiceListText: string) {
     return sendWhatsAppTemplate({
       templateKey: 'PAYMENT_REMINDER',
-      to: buyer.phone,
+      to: [buyer.phone, buyer.phone2].filter(Boolean) as string[],
       variables: [buyer.name, fmtInr(outstanding), invoiceListText],
       relatedType: 'PAYMENT_REMINDER',
       relatedId: buyer.id,

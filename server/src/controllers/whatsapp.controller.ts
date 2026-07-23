@@ -142,7 +142,7 @@ const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h — a double-click must n
 export async function sendPartyReminder(req: Request, res: Response) {
   const party = await prisma.party.findUnique({ where: { id: req.params.partyId } });
   if (!party) throw new HttpError(404, 'Party not found');
-  if (!party.phone) throw new HttpError(400, `${party.name} has no phone number on file — add one in Parties first`);
+  if (!party.phone && !party.phone2) throw new HttpError(400, `${party.name} has no phone number on file — add one in Parties first`);
 
   const lastAt = await whatsappService.lastReminderAt(party.id);
   if (lastAt && Date.now() - lastAt.getTime() < REMINDER_THROTTLE_MS) {
@@ -172,7 +172,7 @@ export async function sendPartyReminder(req: Request, res: Response) {
     .join(' · ');
 
   const result = await whatsappService.sendReminder(
-    { id: party.id, name: party.name, phone: party.phone },
+    { id: party.id, name: party.name, phone: party.phone, phone2: party.phone2 },
     pendingLorries,
     breakdown
   );
@@ -294,7 +294,8 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
     r.ok ? 'sent' : r.skipped ? 'skipped' : 'failed';
 
   // Party (buyer) — always. Includes the broker reference when there's a real broker.
-  const partyResult = order.buyer.phone
+  const buyerPhones = [order.buyer.phone, order.buyer.phone2].filter(Boolean) as string[];
+  const partyResult = buyerPhones.length > 0
     ? await whatsappService.sendDispatchToParty({
         dispatchId: dispatch.id,
         buyerName: order.buyer.name,
@@ -306,7 +307,7 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
         brokerName,
         documentUrl,
         documentFilename: filename,
-        toPhone: order.buyer.phone,
+        toPhone: buyerPhones,
       })
     : { ok: false, skipped: true, error: `${order.buyer.name} has no phone number on file` };
 

@@ -248,7 +248,7 @@ export async function createStockIn(req: Request, res: Response) {
   void whatsappService.notifyStockIn(
     { id: stockIn.id, lorryNumber: stockIn.lorryNumber, arrivalDate: stockIn.arrivalDate },
     { poNumber: po.poNumber },
-    { name: po.party.name, phone: po.party.phone }
+    { name: po.party.name, phone: po.party.phone, phone2: po.party.phone2 }
   );
 
   res.json(stockIn);

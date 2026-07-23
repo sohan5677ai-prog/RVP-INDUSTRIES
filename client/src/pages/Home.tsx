@@ -74,6 +74,7 @@ export default function Home() {
           filter={(p, q) =>
             p.name.toLowerCase().includes(q) ||
             (p.phone ?? '').toLowerCase().includes(q) ||
+            (p.phone2 ?? '').toLowerCase().includes(q) ||
             (p.gstin ?? '').toLowerCase().includes(q)
           }
           getKey={(p) => p.id}
@@ -84,7 +85,7 @@ export default function Home() {
                 <span className="font-medium truncate">{p.name}</span>
                 <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 shrink-0">{p.type}</Badge>
               </div>
-              <span className="text-xs text-muted-foreground shrink-0">{p.phone ?? '-'}</span>
+              <span className="text-xs text-muted-foreground shrink-0">{[p.phone, p.phone2].filter(Boolean).join(' / ') || '-'}</span>
             </>
           )}
         />

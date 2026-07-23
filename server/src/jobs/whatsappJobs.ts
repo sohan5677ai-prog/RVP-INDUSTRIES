@@ -58,11 +58,11 @@ async function runOwnerDuesDigest() {
 async function runBuyerDuesReminders() {
   const portfolio = await computeBuyerDues();
   for (const buyer of portfolio.buyers) {
-    if (buyer.overdueInvoices.length === 0 || !buyer.phone) continue;
+    if (buyer.overdueInvoices.length === 0 || (!buyer.phone && !buyer.phone2)) continue;
     const last = await whatsappService.lastSentAt('PAYMENT_REMINDER', buyer.buyerId);
     if (last && Date.now() - last.getTime() < DUES_THROTTLE_MS) continue; // throttled
     await whatsappService.sendSalesDuesReminder(
-      { id: buyer.buyerId, name: buyer.name, phone: buyer.phone },
+      { id: buyer.buyerId, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2 },
       buyer.overdueOutstanding,
       invoiceListText(buyer.overdueInvoices)
     );

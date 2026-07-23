@@ -97,7 +97,7 @@ export async function createPurchaseOrder(req: Request, res: Response) {
   // WhatsApp the party (lorries + price) — fire-and-forget, never blocks the PO.
   void whatsappService.notifyPoCreated(
     createdPOs.map((po) => ({ id: po.id, poNumber: po.poNumber })),
-    { name: party.name, phone: party.phone },
+    { name: party.name, phone: party.phone, phone2: party.phone2 },
     Number(data.pricePerKg)
   );
 

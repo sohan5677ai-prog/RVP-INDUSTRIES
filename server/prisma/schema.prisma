@@ -90,6 +90,7 @@ model Party {
   nickname          String?
   type              PartyType        @default(SUPPLIER)
   phone             String?
+  phone2            String?
   email             String?
   address           String?
   state             String?

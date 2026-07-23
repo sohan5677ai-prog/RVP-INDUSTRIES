@@ -95,7 +95,7 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
     const term = q.trim().toLowerCase();
     if (term) {
       r = r.filter((p) =>
-        [p.name, p.phone, p.address, p.state, p.gstin, p.bankAccountNumber]
+        [p.name, p.phone, p.phone2, p.address, p.state, p.gstin, p.bankAccountNumber]
           .some((f) => f?.toLowerCase().includes(term)),
       );
     }
@@ -170,7 +170,10 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] font-medium">{TYPE_LABEL[p.type] ?? p.type}</Badge>
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{p.phone ?? '-'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <div>{p.phone ?? '-'}</div>
+                    {p.phone2 && <div>{p.phone2}</div>}
+                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{[p.address, p.state].filter(Boolean).join(', ') || '-'}</TableCell>
                   <TableCell className="text-center text-sm text-muted-foreground">{p.lastTxnDate ? shortDate(p.lastTxnDate) : '-'}</TableCell>
                   <TableCell className="text-right font-medium">{rupees(p.totalBusiness)}</TableCell>
@@ -309,7 +312,11 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
                 <Badge variant="outline" className="font-medium">{TYPE_LABEL[party.type] ?? party.type}</Badge>
               </div>
               <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-muted-foreground">
-                {party.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {party.phone}</span>}
+                {(party.phone || party.phone2) && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5" /> {[party.phone, party.phone2].filter(Boolean).join(' / ')}
+                  </span>
+                )}
                 {(party.address || party.state) && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" /> {[party.address, party.state].filter(Boolean).join(', ')}</span>}
                 {party.gstin && <span className="inline-flex items-center gap-1.5 group font-mono"><Hash className="h-3.5 w-3.5" /> {party.gstin} <CopyBtn value={party.gstin} /></span>}
               </div>

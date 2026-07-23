@@ -226,7 +226,7 @@ export default function StockTransferPage() {
                 <TableCell className="text-right">{rupees(t.transportCharge)}</TableCell>
                 <TableCell className="text-right">
                   {Number(t.interestCharge) > 0 ? (
-                    <span title={`${t.interestDays} days @ ${Number(t.interestRatePct) / 12}%/mo`}>{rupees(t.interestCharge)}</span>
+                    <span title={`${t.interestDays} days since loan @ ${Number(t.interestRatePct) / 12}%/mo`}>{rupees(t.interestCharge)}</span>
                   ) : (
                     <span className="text-muted-foreground">-</span>
                   )}
@@ -297,8 +297,8 @@ export default function StockTransferPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">
-                  Storage carrying interest ({monthlyRate ?? '…'}%/mo
-                  {preview && preview.interestDays > 0 ? ` · ${preview.interestDays} day${preview.interestDays === 1 ? '' : 's'} in storage` : ''})
+                  Loan carrying interest ({monthlyRate ?? '…'}%/mo
+                  {preview && preview.interestDays > 0 ? ` · ${preview.interestDays} day${preview.interestDays === 1 ? '' : 's'} since loan` : ''})
                 </span>
                 <span className="font-medium">
                   {!weightValid ? '—' : previewLoading && !preview ? 'Calculating…' : preview ? rupees(preview.interestCharge) : '—'}
@@ -317,7 +317,7 @@ export default function StockTransferPage() {
                 </>
               )}
               <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and carrying interest at the storage-loan rate of {monthlyRate ?? '…'}% per month (set on the Bank Loans page, accrued per lot by its days in storage) are capitalised into that seed value.
+                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and carrying interest at the storage-loan rate of {monthlyRate ?? '…'}% per month (set on the Bank Loans page, accrued per lot by its days from the loan availed date) are capitalised into that seed value.
               </p>
             </div>
 

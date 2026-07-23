@@ -7,8 +7,8 @@ import {
   calcTotal,
   daysBetween,
   loanInterest,
-  storageSeedInterest,
-  type DrawnSeedSlice,
+  transferLoanInterest,
+  TRANSFER_LOAN_PER_KG,
   pappuLoadingHamali,
   productLoadingHamali,
   transferHamali,
@@ -209,38 +209,35 @@ describe('loanInterest', () => {
   });
 });
 
-describe('storageSeedInterest', () => {
-  const transferDate = new Date('2026-04-01');
+describe('transferLoanInterest', () => {
+  const loanDate = new Date('2026-03-15'); // earliest open loan
+  const transferDate = new Date('2026-07-23'); // 130 days later
 
-  it('accrues each lot by its OWN storage dwell time (not a blended date)', () => {
-    const slices: DrawnSeedSlice[] = [
-      { value: 100000, arrivalDate: new Date('2026-01-01') }, // 90 days
-      { value: 50000, arrivalDate: new Date('2026-03-02') }, //  30 days
-    ];
-    const { interest } = storageSeedInterest(slices, 12, transferDate);
-    // 100000×12%×90/365 + 50000×12%×30/365 = 2958.90 + 493.15 = 3452.05
-    expect(interest).toBeCloseTo(loanInterest(100000, 12, 90) + loanInterest(50000, 12, 30), 2);
+  it('charges fixed per-kg loan value × (days/30) × 0.85%/month × weight', () => {
+    const { interest, days } = transferLoanInterest(100000, loanDate, transferDate);
+    expect(days).toBe(130);
+    // perKg = TRANSFER_LOAN_PER_KG × (130/30) × 0.85%; × 100000 kg
+    const expected = TRANSFER_LOAN_PER_KG * (130 / 30) * (0.85 / 100) * 100000;
+    expect(interest).toBeCloseTo(Math.round(expected * 100) / 100, 2);
+    // ~₹88,568 for 100 t over 130 days
+    expect(interest).toBeGreaterThan(88000);
+    expect(interest).toBeLessThan(89000);
   });
 
-  it('weightedDays is value-weighted across lots', () => {
-    const slices: DrawnSeedSlice[] = [
-      { value: 100000, arrivalDate: new Date('2026-01-01') }, // 90 days
-      { value: 50000, arrivalDate: new Date('2026-03-02') }, //  30 days
-    ];
-    const { weightedDays } = storageSeedInterest(slices, 12, transferDate);
-    // (100000×90 + 50000×30) / 150000 = 70
-    expect(weightedDays).toBe(70);
+  it('scales linearly with transferred weight (within paise rounding)', () => {
+    const a = transferLoanInterest(50000, loanDate, transferDate).interest;
+    const b = transferLoanInterest(100000, loanDate, transferDate).interest;
+    expect(Math.abs(b - a * 2)).toBeLessThanOrEqual(0.01);
   });
 
-  it('no slices -> zero interest and zero days', () => {
-    expect(storageSeedInterest([], 12, transferDate)).toEqual({ interest: 0, weightedDays: 0 });
+  it('no open loan date -> zero interest and zero days', () => {
+    expect(transferLoanInterest(100000, null, transferDate)).toEqual({ interest: 0, days: 0 });
   });
 
-  it('zero rate -> zero interest, days still weighted', () => {
-    const slices: DrawnSeedSlice[] = [{ value: 100000, arrivalDate: new Date('2026-01-01') }];
-    const { interest, weightedDays } = storageSeedInterest(slices, 0, transferDate);
+  it('same-day transfer -> zero interest', () => {
+    const { interest, days } = transferLoanInterest(100000, transferDate, transferDate);
+    expect(days).toBe(0);
     expect(interest).toBe(0);
-    expect(weightedDays).toBe(90);
   });
 });
 

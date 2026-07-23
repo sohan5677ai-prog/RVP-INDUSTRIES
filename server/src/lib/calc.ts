@@ -377,30 +377,39 @@ export interface DrawnSeedSlice {
   arrivalDate: Date; // when this lot arrived at the storage location
 }
 
+// ── Transfer carrying interest ───────────────────────────────────────────────
+// Bank-loan interest capitalised onto seed at transfer. Instead of accruing per
+// lot by dwell time, the loan is spread evenly across the whole seed stock as a
+// FIXED per-kg carrying value (total bank loan ÷ total seed stock) and charged at
+// a flat 0.85% PER MONTH for the number of days the loan has been outstanding
+// (earliest open loan date → transfer date):
+//   perKg    = (totalLoan / totalKg) × (days / 30) × 0.85%
+//   interest = perKg × weightKg
+// The per-kg carrying value is a fixed business constant and is deliberately NOT
+// rounded before the interest maths — that ratio precision matters.
+export const TRANSFER_LOAN_TOTAL = 61_300_000; // ₹6.13 Cr — total bank loan
+export const TRANSFER_LOAN_TOTAL_KG = 2_548_960; // total black-seed stock (kg)
+/** Loan carrying value spread per kg of seed (₹/kg, intentionally unrounded). */
+export const TRANSFER_LOAN_PER_KG = TRANSFER_LOAN_TOTAL / TRANSFER_LOAN_TOTAL_KG;
+/** Flat carrying-interest rate: 0.85% per month. */
+export const TRANSFER_INTEREST_MONTHLY_PCT = 0.85;
+
 /**
- * Bank-loan carrying interest capitalised onto seed at transfer, accrued PER LOT
- * by actual storage dwell time (each slice's arrival→transfer days) at the global
- * annual `ratePct`. Returns the total interest (paise-rounded) and the
- * value-weighted average dwell days (for display on the transfer row).
+ * Carrying interest capitalised onto a transfer of `weightKg`, charged from the
+ * `loanDate` (earliest open loan drawdown) to the `transferDate` at a flat 0.85%
+ * per month on a fixed per-kg loan carrying value. Returns the paise-rounded
+ * interest and the day count (for the transfer-row display).
  */
-export function storageSeedInterest(
-  slices: DrawnSeedSlice[],
-  ratePct: number,
+export function transferLoanInterest(
+  weightKg: number,
+  loanDate: Date | null,
   transferDate: Date
-): { interest: number; weightedDays: number } {
-  let interest = 0;
-  let valueDays = 0;
-  let totalValue = 0;
-  for (const s of slices) {
-    const days = daysBetween(s.arrivalDate, transferDate);
-    interest += loanInterest(s.value, ratePct, days);
-    valueDays += s.value * days;
-    totalValue += s.value;
-  }
-  return {
-    interest: Math.round(interest * 100) / 100,
-    weightedDays: totalValue > 0 ? Math.round(valueDays / totalValue) : 0,
-  };
+): { interest: number; days: number } {
+  const days = loanDate ? daysBetween(loanDate, transferDate) : 0;
+  const perKg =
+    TRANSFER_LOAN_PER_KG * (days / 30) * (TRANSFER_INTEREST_MONTHLY_PCT / 100);
+  const interest = Math.round(perKg * weightKg * 100) / 100;
+  return { interest, days };
 }
 
 

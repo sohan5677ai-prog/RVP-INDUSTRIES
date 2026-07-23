@@ -25,10 +25,19 @@ export async function getCurrentLoanRate(): Promise<number> {
 
 /**
  * Earliest drawdown date among loans still OPEN (outstanding > 0). Drives the
- * days-held used to capitalise interest onto stock at transfer. Null when no
- * loan is open, in which case transfers capitalise zero interest.
+ * days-held used to capitalise interest onto stock at transfer.
  */
-export async function getEarliestOpenLoanDate(): Promise<Date | null> {
+export async function getEarliestOpenLoanDate(location?: string): Promise<Date | null> {
+  if (location) {
+    const locOpen = await prisma.bankLoan.findFirst({
+      where: {
+        status: 'OPEN',
+        location: { contains: location, mode: 'insensitive' },
+      },
+      orderBy: { drawdownDate: 'asc' },
+    });
+    if (locOpen) return locOpen.drawdownDate;
+  }
   const open = await prisma.bankLoan.findFirst({
     where: { status: 'OPEN' },
     orderBy: { drawdownDate: 'asc' },

@@ -264,18 +264,17 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       (interestByType as any[]).map((r) => [r.type, Number(r._sum.amount ?? 0)]),
     );
 
-    // Storage-loan interest sweep: interest CAPITALISED into transferred seed is
-    // already a cost in the Pappu P/L (via seed cost → COGS). Interest actually
-    // PAID to the bank is the real cash cost. The unabsorbed remainder = paid −
-    // capitalised is a period financing cost booked here, so the total interest in
-    // the P&L nets to exactly what was paid (cash basis, no double-count). It is a
-    // SIGNED figure: positive when the loan ran past the transfer (extra days,
-    // e.g. a 90-day capitalisation repaid at 120 days), negative before repayment
-    // (the capitalised-but-unpaid amount is credited back, deferring the cost to
-    // when it is actually paid). The still-unpaid accrual stays on account 20280.
+    // Storage-loan interest sweep: the NET ACCRUAL of loan interest is booked to
+    // the husk pool as an unabsorbed financing cost. Net accrual = interest
+    // CAPITALISED onto transferred seed − interest actually PAID to the bank (the
+    // live balance still sitting on account 20280). Positive when we have loaded
+    // more interest onto stock than we have yet paid the bank (the usual case),
+    // burdening the husk pool with the still-owed accrual; negative once repayments
+    // overtake the capitalised amount. (Owner's directive 2026-07-23: the net
+    // accrual comes to husk as unabsorbed.)
     const interestCapitalised = Number(interestCapitalisedAgg._sum.interestCharge ?? 0);
     const interestPaidToBank = Number(interestPaidAgg._sum.interest ?? 0);
-    const loanInterestUnabsorbed = Math.round((interestPaidToBank - interestCapitalised) * 100) / 100;
+    const loanInterestUnabsorbed = Math.round((interestCapitalised - interestPaidToBank) * 100) / 100;
 
     const expenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),

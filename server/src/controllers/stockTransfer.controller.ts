@@ -7,12 +7,18 @@ import {
   transferHamali,
   transferTransportCharge,
   companyHamaliShare,
-  storageSeedInterest,
+  transferLoanInterest,
+  TRANSFER_INTEREST_MONTHLY_PCT,
   type DrawnSeedSlice,
 } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { getCurrentLoanRate } from './loan.controller.js';
+import { getEarliestOpenLoanDate } from './loan.controller.js';
+
+// The transfer carrying-interest rate is a flat 0.85%/month; we persist it on the
+// transfer row as an annual-equivalent so the client's existing "/12 → %/mo"
+// display renders 0.85%/mo unchanged.
+const TRANSFER_INTEREST_ANNUAL_PCT = TRANSFER_INTEREST_MONTHLY_PCT * 12;
 
 /**
  * Value the next `weightKg` of black seed drawn from a storage location by PRICE
@@ -26,7 +32,8 @@ import { getCurrentLoanRate } from './loan.controller.js';
 async function drawStorageBandValue(
   tx: Prisma.TransactionClient,
   fromLocation: string,
-  weightKg: number
+  weightKg: number,
+  loanAvailedDate?: Date | null
 ): Promise<{ value: number; slices: DrawnSeedSlice[] }> {
   const purchases = await tx.purchase.findMany({
     where: { stockIn: { loadingLocation: fromLocation } },
@@ -45,7 +52,8 @@ async function drawStorageBandValue(
     // The transferred seed value must carry its share of inward company hamali and inward freight,
     // otherwise the crediting value falls short and orphaned balances are left at the source location.
     const landedPerKg = price + (ourHamali / netKg) + (freight / netKg);
-    lots.push({ price: landedPerKg, netKg, perKg: landedPerKg, date: p.stockIn.arrivalDate });
+    const arrivalDate = loanAvailedDate ?? p.stockIn.arrivalDate;
+    lots.push({ price: landedPerKg, netKg, perKg: landedPerKg, date: arrivalDate });
   }
 
   // Highest price band first; oldest lot first within the same band.
@@ -111,17 +119,18 @@ export async function previewStockTransfer(req: Request, res: Response) {
   const { getHamaliRate } = await import('./settings.controller.js');
   const hamali = transferHamali(weightKg, await getHamaliRate('TRANSFER_FROM_STORAGE'));
   const transportCharge = transferTransportCharge(weightKg, fromLocation);
-  // Carrying interest uses the global storage-loan rate from the Bank Loans page
-  // (CompanyProfile.loanInterestRatePct), day-prorated per lot by its storage dwell.
-  const interestRatePct = await getCurrentLoanRate();
 
+  const loanAvailedDate = await getEarliestOpenLoanDate(fromLocation);
   // `drawStorageBandValue` only reads, so the base client satisfies the tx type.
-  const { value: seedCostMoved, slices } = await drawStorageBandValue(prisma, fromLocation, weightKg);
-  const { interest: interestCharge, weightedDays: interestDays } = storageSeedInterest(
-    slices,
-    interestRatePct,
+  const { value: seedCostMoved } = await drawStorageBandValue(prisma, fromLocation, weightKg, loanAvailedDate);
+  // Carrying interest: fixed per-kg loan value × days since the loan was availed
+  // (earliest open loan → transfer) × 0.85%/month. Independent of the drawn bands.
+  const { interest: interestCharge, days: interestDays } = transferLoanInterest(
+    weightKg,
+    loanAvailedDate,
     transferDate
   );
+  const interestRatePct = TRANSFER_INTEREST_ANNUAL_PCT;
 
   const addedCost = Math.round((hamali.charge + transportCharge + interestCharge) * 100) / 100;
   const movedValue = Math.round((seedCostMoved + addedCost) * 100) / 100;
@@ -166,10 +175,10 @@ export async function createStockTransfer(req: Request, res: Response) {
   // Transfer transport is per-tonne, keyed to the source storage location, and
   // billed to KNM Transport (still capitalised into the seed at the process).
   const transportCharge = transferTransportCharge(data.weightKg, data.fromLocation);
-  // Storage carrying interest uses the global storage-loan rate set on the Bank
-  // Loans page (CompanyProfile.loanInterestRatePct), day-prorated per lot by its
-  // days in storage. Editing that rate flows straight through to new transfers.
-  const interestRatePct = await getCurrentLoanRate();
+  // Carrying interest is a flat 0.85%/month on a fixed per-kg loan value, charged
+  // from the earliest open loan date to the transfer date (see transferLoanInterest).
+  const interestRatePct = TRANSFER_INTEREST_ANNUAL_PCT;
+  const loanAvailedDate = await getEarliestOpenLoanDate(data.fromLocation);
 
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;
@@ -179,13 +188,13 @@ export async function createStockTransfer(req: Request, res: Response) {
     // Value the seed by the specific PRICE BAND being depleted (top-to-bottom),
     // NOT the source silo's blended MAP average. `slices` carries each drawn lot's
     // value + storage arrival date so interest can accrue by actual dwell time.
-    const { value: seedCostMoved, slices } = await drawStorageBandValue(tx, data.fromLocation, data.weightKg);
+    const { value: seedCostMoved } = await drawStorageBandValue(tx, data.fromLocation, data.weightKg, loanAvailedDate);
 
-    // Bank-loan carrying interest accrued PER LOT (arrival→transfer days) at the
-    // global rate, capitalised into the seed alongside the other transfer costs.
-    const { interest: interestCharge, weightedDays: interestDays } = storageSeedInterest(
-      slices,
-      interestRatePct,
+    // Bank-loan carrying interest: fixed per-kg loan value × days since the loan
+    // was availed × 0.85%/month, capitalised into the seed with the other costs.
+    const { interest: interestCharge, days: interestDays } = transferLoanInterest(
+      data.weightKg,
+      loanAvailedDate,
       data.transferDate
     );
 

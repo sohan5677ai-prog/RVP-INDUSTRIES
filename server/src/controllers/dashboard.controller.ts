@@ -107,8 +107,8 @@ export interface HuskExpenses {
 // pappu-flagged ones so Net Profit does not double-count them.
 export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu: boolean }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
-  { key: 'transferHamali',     label: 'Transfer Hamali Charge', pappu: false },
-  { key: 'transferTransport',  label: 'Transfer Transport Charge', pappu: false },
+  { key: 'transferHamali',     label: 'Byproduct Transfer Hamali', pappu: false },
+  { key: 'transferTransport',  label: 'Byproduct Transfer Transport', pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
@@ -155,7 +155,6 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     huskRate,
     wasteRate,
     customRates,
-    transferAgg,
     shellAgg,
     huskAgg,
     termLoanPrincipalAgg,
@@ -182,7 +181,6 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       getHamaliRateFull('HUSK_LOADING'),
       getHamaliRateFull('WASTE_LOADING'),
       getCustomHamaliRates(),
-      prisma.stockTransfer.aggregate({ _sum: { transportCharge: true, unloadingHamali: true } }),
       prisma.shellTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
       prisma.huskTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
       prisma.termLoanPrincipal.aggregate({ _sum: { amount: true } }),
@@ -233,13 +231,17 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     // they are not an operating expense, so they are deliberately not summed here.
 
     // ── Static/Standalone Expenses ──────────
-    const transferHamali = 
-      Number(transferAgg._sum.unloadingHamali || 0) +
+    // Byproduct (shell/husk) transfer costs ONLY. The black-seed StockTransfer
+    // hamali + transport are deliberately EXCLUDED here: they are capitalised into
+    // the seed's landed value (movedValue) and so are already inside the Pappu P/L
+    // via COGS. Adding them here too would double-count them. Byproduct income in
+    // this pool is gross revenue with no COGS, so shell/husk transfer costs are a
+    // real net cost counted exactly once. (Same logic as loanInterestUnabsorbed.)
+    const transferHamali =
       Number(shellAgg._sum.hamaliCharge || 0) +
       Number(huskAgg._sum.hamaliCharge || 0);
 
-    const transferTransport = 
-      Number(transferAgg._sum.transportCharge || 0) +
+    const transferTransport =
       Number(shellAgg._sum.transportCharge || 0) +
       Number(huskAgg._sum.transportCharge || 0);
 

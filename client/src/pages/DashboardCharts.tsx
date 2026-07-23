@@ -71,8 +71,8 @@ export type PurchaseRow = Purchase & {
 // Display order + labels for the itemized husk-pool deductions.
 const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading' },
-  { key: 'transferHamali', label: 'Transfer Hamali Charge' },
-  { key: 'transferTransport', label: 'Transfer Transport Charge' },
+  { key: 'transferHamali', label: 'Byproduct Transfer Hamali' },
+  { key: 'transferTransport', label: 'Byproduct Transfer Transport' },
   { key: 'pappuLoading', label: 'Pappu Loading' },
   { key: 'pappuRoasting', label: 'Pappu Roasting' },
   { key: 'huskLoading', label: 'Husk Loading' },

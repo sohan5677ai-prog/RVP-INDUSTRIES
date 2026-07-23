@@ -13,6 +13,7 @@ import {
   listStockTransfers,
   createStockTransfer,
   deleteStockTransfer,
+  previewStockTransfer,
 } from '../controllers/stockTransfer.controller.js';
 import {
   listShellTransfers,
@@ -41,6 +42,7 @@ router.get('/inventory/silos', asyncHandler(getSilos));
 router.get('/inventory/calculator-defaults', asyncHandler(getCalculatorDefaults));
 
 router.get('/stock-transfers', asyncHandler(listStockTransfers));
+router.get('/stock-transfers/preview', asyncHandler(previewStockTransfer));
 router.post('/stock-transfers', asyncHandler(createStockTransfer));
 router.delete('/stock-transfers/:id', asyncHandler(deleteStockTransfer));
 

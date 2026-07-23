@@ -92,6 +92,50 @@ export async function listStockTransfers(_req: Request, res: Response) {
 }
 
 /**
+ * Dry-run the transfer costing WITHOUT persisting anything, so the Record Transfer
+ * dialog can show a live breakdown - seed value drawn from the price bands, the
+ * capitalised hamali + transport, and the storage carrying interest with its
+ * value-weighted dwell days - before the user commits. Runs the exact same band
+ * draw + interest accrual the real save does, just against the live (read-only)
+ * client instead of the write transaction.
+ */
+export async function previewStockTransfer(req: Request, res: Response) {
+  const fromLocation = String(req.query.fromLocation ?? '');
+  const weightKg = Number(req.query.weightKg);
+  const transferDate = req.query.transferDate ? new Date(String(req.query.transferDate)) : new Date();
+
+  if (!fromLocation || !Number.isFinite(weightKg) || weightKg <= 0) {
+    throw new HttpError(400, 'fromLocation and a positive weightKg are required');
+  }
+
+  const { getHamaliRate } = await import('./settings.controller.js');
+  const hamali = transferHamali(weightKg, await getHamaliRate('TRANSFER_FROM_STORAGE'));
+  const transportCharge = transferTransportCharge(weightKg, fromLocation);
+  const interestRatePct = STORAGE_INTEREST_ANNUAL_PCT;
+
+  // `drawStorageBandValue` only reads, so the base client satisfies the tx type.
+  const { value: seedCostMoved, slices } = await drawStorageBandValue(prisma, fromLocation, weightKg);
+  const { interest: interestCharge, weightedDays: interestDays } = storageSeedInterest(
+    slices,
+    interestRatePct,
+    transferDate
+  );
+
+  const addedCost = Math.round((hamali.charge + transportCharge + interestCharge) * 100) / 100;
+  const movedValue = Math.round((seedCostMoved + addedCost) * 100) / 100;
+
+  res.json({
+    seedCostMoved,
+    hamaliCharge: hamali.handlingCharge,
+    transportCharge,
+    interestCharge,
+    interestDays,
+    interestRatePct,
+    movedValue,
+  });
+}
+
+/**
  * Record a black-seed transfer from a storage location to the process. The seed is
  * valued by the specific PRICE BAND it is drawn from (top-to-bottom, highest band
  * first - see {@link drawStorageBandValue}), NOT the silo's blended MAP average.

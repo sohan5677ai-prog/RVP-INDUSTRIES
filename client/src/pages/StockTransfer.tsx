@@ -88,6 +88,25 @@ export default function StockTransferPage() {
 
   const transportCharge = weightValid ? transferTransportCharge(weightKg, fromLocation) : 0;
 
+  // Live costing preview from the server: the storage carrying interest depends on
+  // the specific price band(s) drawn and each lot's days in storage, which only the
+  // server can resolve. Runs the exact same band-draw + interest accrual as save,
+  // without persisting, so the dialog can show the interest and its dwell days.
+  const { data: preview, isFetching: previewLoading } = useQuery({
+    queryKey: ['stock-transfer-preview', fromLocation, weightKg, transferDate],
+    queryFn: () =>
+      api<{
+        seedCostMoved: number;
+        hamaliCharge: number;
+        transportCharge: number;
+        interestCharge: number;
+        interestDays: number;
+        interestRatePct: number;
+        movedValue: number;
+      }>(`/stock-transfers/preview?fromLocation=${encodeURIComponent(fromLocation)}&weightKg=${weightKg}&transferDate=${transferDate}`),
+    enabled: open && weightValid,
+  });
+
 
   // Hamali + transport travel with the seed and are capitalised into its value at
   // RVP. The seed's own value is drawn from the specific price band(s)
@@ -266,9 +285,26 @@ export default function StockTransferPage() {
                 <span className="font-medium">{rupees(transportCharge)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Storage carrying interest</span>
-                <span className="font-medium">{STORAGE_INTEREST_MONTHLY_PCT}%/mo · per lot on save</span>
+                <span className="text-muted-foreground">
+                  Storage carrying interest ({STORAGE_INTEREST_MONTHLY_PCT}%/mo
+                  {preview && preview.interestDays > 0 ? ` · ${preview.interestDays} day${preview.interestDays === 1 ? '' : 's'} in storage` : ''})
+                </span>
+                <span className="font-medium">
+                  {!weightValid ? '—' : previewLoading && !preview ? 'Calculating…' : preview ? rupees(preview.interestCharge) : '—'}
+                </span>
               </div>
+              {preview && weightValid && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Seed value drawn (from price band)</span>
+                    <span className="font-medium">{rupees(preview.seedCostMoved)}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2 mt-1">
+                    <span className="text-muted-foreground font-medium">Moved value at destination</span>
+                    <span className="font-semibold">{rupees(preview.movedValue)}</span>
+                  </div>
+                </>
+              )}
               <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
                 Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and carrying interest at a flat {STORAGE_INTEREST_MONTHLY_PCT}% per month (accrued per lot by its days in storage) are capitalised into that seed value.
               </p>

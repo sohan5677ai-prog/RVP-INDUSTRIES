@@ -34,7 +34,9 @@ export type WaTemplateKey =
   | 'VERIFICATION_STATEMENT' // rvp_verification_statement (document header): party, lorry, net weight, amount
   | 'PAYMENT_SENT' // rvp_payment_sent (image header): party, amount, date, reference
   | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header — used when no screenshot): party, amount, date, reference
-  | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): recipient, invoice, lorry, qty, driver, phone, ewb
+  | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone — self-taken orders (no broker)
+  | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker — buyer copy when a broker exists
+  | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone — broker copy
   | 'DISPATCH_DRIVER' // rvp_dispatch_driver: lorry, party, phone, maps link
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // rvp_payment_reminder: buyer, amount, overdue invoice list
@@ -113,6 +115,40 @@ export async function resolveOwnerNumber(): Promise<string | null> {
   } catch {
     return process.env.WHATSAPP_TEST_NUMBER?.trim() || null;
   }
+}
+
+/**
+ * The internal-alert distribution list (dispatch reminders, weekly summary,
+ * daily dues digest). Set as up to 3 name+number members in Settings and stored
+ * as a JSON string on CompanyProfile.alertRecipients. Falls back to the single
+ * ownerWhatsappNumber, then WHATSAPP_TEST_NUMBER, when the list is empty. Returns
+ * de-duplicated, valid Indian mobiles only. Never throws.
+ */
+export async function resolveAlertRecipients(): Promise<string[]> {
+  const numbers: string[] = [];
+  const push = (raw: string | null | undefined) => {
+    const n = normalizeWhatsAppNumber(raw);
+    if (n && !numbers.includes(n)) numbers.push(n);
+  };
+  try {
+    const profile = await prisma.companyProfile.findUnique({
+      where: { id: 'default' },
+      select: { alertRecipients: true, ownerWhatsappNumber: true },
+    });
+    if (profile?.alertRecipients) {
+      try {
+        const parsed = JSON.parse(profile.alertRecipients) as Array<{ name?: string; phone?: string }>;
+        if (Array.isArray(parsed)) for (const r of parsed) push(r?.phone);
+      } catch {
+        /* malformed JSON — fall through to fallbacks */
+      }
+    }
+    if (numbers.length === 0) push(profile?.ownerWhatsappNumber);
+  } catch {
+    /* DB unreachable — env fallback below */
+  }
+  if (numbers.length === 0) push(process.env.WHATSAPP_TEST_NUMBER);
+  return numbers;
 }
 
 /** Variable values are pipe-joined on the wire — strip pipes/newlines from each. */
@@ -236,6 +272,21 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
 // Trigger helpers — one per business event. All fire-and-forget safe.
 // ---------------------------------------------------------------------------
 
+/**
+ * Send an internal-alert template to every configured alert recipient (1..3
+ * members from Settings, else the owner/test fallback). Returns a single
+ * aggregate result: ok if at least one recipient was reached. Never throws.
+ */
+async function fanOutToAlertRecipients(
+  send: (to: string) => Promise<{ ok: boolean; skipped?: boolean; error?: string }>
+): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const recipients = await resolveAlertRecipients();
+  if (recipients.length === 0) return { ok: false, skipped: true, error: 'No alert recipients configured' };
+  const results = await Promise.all(recipients.map((to) => send(to)));
+  const anyOk = results.some((r) => r.ok);
+  return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error };
+}
+
 export const whatsappService = {
   send: sendWhatsAppTemplate,
 
@@ -307,10 +358,10 @@ export const whatsappService = {
     });
   },
 
-  /** Dispatch → driver gets the buyer's name, phone and maps link. */
+  /** Dispatch → driver gets the buyer's name, phone and maps link. Returns null when no driver phone. */
   async notifyDispatchDriver(dispatch: { id: string; vehicleNumber: string | null; driverPhone: string | null }, buyer: { name: string; phone: string | null; locationLink: string | null }) {
-    if (!dispatch.driverPhone) return; // no driver captured — nothing to send
-    await sendWhatsAppTemplate({
+    if (!dispatch.driverPhone) return null; // no driver captured — nothing to send
+    return sendWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
       variables: [dispatch.vehicleNumber ?? '-', buyer.name, buyer.phone ?? '-', buyer.locationLink ?? '-'],
@@ -320,19 +371,58 @@ export const whatsappService = {
   },
 
   /**
-   * Invoice + EWB + driver bundle → broker (or buyer when the order has no real
-   * broker). Called from the explicit "Send via WhatsApp" action once the
-   * invoice/EWB exist — not automatically at dispatch, where they don't yet.
+   * Invoice + EWB + driver details → the buyer (party). Fired from the explicit
+   * "Send via WhatsApp" action once the invoice/EWB exist. When the order came
+   * through a broker, `brokerName` is set and a broker-reference template is used
+   * so the buyer sees whose broking it was; self-taken orders omit that line.
    */
-  async sendDispatchBundle(args: {
+  async sendDispatchToParty(args: {
     dispatchId: string;
-    recipientName: string;
+    buyerName: string;
     orderRef: string;
     vehicleNumber: string | null;
     quantityKg: number | null;
     driverName: string | null;
     driverPhone: string | null;
-    ewbNumber: string | null;
+    brokerName?: string | null; // set → include the "Through Broker" line
+    documentUrl?: string; // combined Tax Invoice + EWB PDF
+    documentFilename?: string;
+    toPhone: string | null;
+  }) {
+    const base = [
+      args.buyerName,
+      args.orderRef,
+      args.vehicleNumber ?? '-',
+      args.quantityKg != null ? fmtWeight(args.quantityKg) : '-',
+      args.driverName ?? '-',
+      args.driverPhone ?? '-',
+    ];
+    const hasBroker = !!args.brokerName;
+    return sendWhatsAppTemplate({
+      templateKey: hasBroker ? 'DISPATCH_PARTY_BROKER' : 'DISPATCH_PARTY',
+      to: args.toPhone,
+      variables: hasBroker ? [...base, args.brokerName] : base,
+      mediaUrl: args.documentUrl,
+      documentFilename: args.documentFilename,
+      relatedType: 'DISPATCH',
+      relatedId: args.dispatchId,
+    });
+  },
+
+  /**
+   * Invoice + EWB + driver details → the broker, greeting them and naming the
+   * buyer so they know whose order it is. Only sent when the order has a real
+   * broker. Called from the explicit "Send via WhatsApp" action.
+   */
+  async sendDispatchBundle(args: {
+    dispatchId: string;
+    recipientName: string; // broker name
+    buyerName: string;
+    orderRef: string;
+    vehicleNumber: string | null;
+    quantityKg: number | null;
+    driverName: string | null;
+    driverPhone: string | null;
     documentUrl?: string; // combined Tax Invoice + EWB PDF
     documentFilename?: string;
     toPhone: string | null;
@@ -342,12 +432,12 @@ export const whatsappService = {
       to: args.toPhone,
       variables: [
         args.recipientName,
+        args.buyerName,
         args.orderRef,
         args.vehicleNumber ?? '-',
         args.quantityKg != null ? fmtWeight(args.quantityKg) : '-',
         args.driverName ?? '-',
         args.driverPhone ?? '-',
-        args.ewbNumber ?? '-',
       ],
       mediaUrl: args.documentUrl,
       documentFilename: args.documentFilename,
@@ -387,38 +477,41 @@ export const whatsappService = {
    * yet dispatched. Goes to the owner number (Settings), NOT the buyer.
    */
   async notifyOwnerDispatch(order: { id: string; buyerName: string; orderSummary: string; dispatchBy: Date; ref: string }) {
-    const to = await resolveOwnerNumber();
-    return sendWhatsAppTemplate({
-      templateKey: 'OWNER_DISPATCH_REMINDER',
-      to,
-      variables: [order.buyerName, order.orderSummary, fmtDate(order.dispatchBy), order.ref],
-      relatedType: 'OWNER_DISPATCH_REMINDER',
-      relatedId: order.id,
-    });
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: 'OWNER_DISPATCH_REMINDER',
+        to,
+        variables: [order.buyerName, order.orderSummary, fmtDate(order.dispatchBy), order.ref],
+        relatedType: 'OWNER_DISPATCH_REMINDER',
+        relatedId: order.id,
+      })
+    );
   },
 
   /** Owner weekly business summary. */
   async sendOwnerWeeklySummary(range: string, counts: { seedLoads: number; saleOrders: number; huskOrders: number }, weekKey: string) {
-    const to = await resolveOwnerNumber();
-    return sendWhatsAppTemplate({
-      templateKey: 'OWNER_WEEKLY_SUMMARY',
-      to,
-      variables: [range, counts.seedLoads, counts.saleOrders, counts.huskOrders],
-      relatedType: 'OWNER_WEEKLY_SUMMARY',
-      relatedId: weekKey,
-    });
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: 'OWNER_WEEKLY_SUMMARY',
+        to,
+        variables: [range, counts.seedLoads, counts.saleOrders, counts.huskOrders],
+        relatedType: 'OWNER_WEEKLY_SUMMARY',
+        relatedId: weekKey,
+      })
+    );
   },
 
   /** Owner daily outstanding-sales-dues digest. */
   async sendOwnerDuesDigest(totals: { asOn: Date; totalReceivable: number; overdue: number; topPending: string }, dayKey: string) {
-    const to = await resolveOwnerNumber();
-    return sendWhatsAppTemplate({
-      templateKey: 'OWNER_DUES_DIGEST',
-      to,
-      variables: [fmtDate(totals.asOn), fmtInr(totals.totalReceivable), fmtInr(totals.overdue), totals.topPending],
-      relatedType: 'OWNER_DUES_DIGEST',
-      relatedId: dayKey,
-    });
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: 'OWNER_DUES_DIGEST',
+        to,
+        variables: [fmtDate(totals.asOn), fmtInr(totals.totalReceivable), fmtInr(totals.overdue), totals.topPending],
+        relatedType: 'OWNER_DUES_DIGEST',
+        relatedId: dayKey,
+      })
+    );
   },
 
   /** Last reminder sent to this party (throttle guard for the reminder button). */

@@ -389,6 +389,8 @@ export interface CompanyProfile {
   invoicePrefix: string;
   companyVehicles?: string | null;
   ownerWhatsappNumber?: string | null;
+  // JSON string: [{ name, phone }] — up to 3 internal-alert recipients.
+  alertRecipients?: string | null;
   whatsappTestMode?: boolean;
   whatsappTestNumber?: string | null;
   freightRetentionPerTrip?: string | number;

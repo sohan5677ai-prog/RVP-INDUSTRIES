@@ -77,7 +77,8 @@ const WASTE_LOADING_PRODUCTS = new Set([
  */
 export interface HuskExpenses {
   blackSeedUnloading: number;
-  transferCosts: number;
+  transferHamali: number;
+  transferTransport: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -106,7 +107,8 @@ export interface HuskExpenses {
 // pappu-flagged ones so Net Profit does not double-count them.
 export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu: boolean }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
-  { key: 'transferCosts',      label: 'Stock Transfer Costs', pappu: false },
+  { key: 'transferHamali',     label: 'Transfer Hamali Charge', pappu: false },
+  { key: 'transferTransport',  label: 'Transfer Transport Charge', pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
@@ -231,10 +233,15 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     // they are not an operating expense, so they are deliberately not summed here.
 
     // ── Static/Standalone Expenses ──────────
-    const transferCosts = 
-      (Number(transferAgg._sum.transportCharge || 0) + Number(transferAgg._sum.unloadingHamali || 0)) +
-      (Number(shellAgg._sum.transportCharge || 0) + Number(shellAgg._sum.hamaliCharge || 0)) +
-      (Number(huskAgg._sum.transportCharge || 0) + Number(huskAgg._sum.hamaliCharge || 0));
+    const transferHamali = 
+      Number(transferAgg._sum.unloadingHamali || 0) +
+      Number(shellAgg._sum.hamaliCharge || 0) +
+      Number(huskAgg._sum.hamaliCharge || 0);
+
+    const transferTransport = 
+      Number(transferAgg._sum.transportCharge || 0) +
+      Number(shellAgg._sum.transportCharge || 0) +
+      Number(huskAgg._sum.transportCharge || 0);
 
     const gunny = Object.fromEntries(
       (gunnyByDir as any[]).map((r) => [r.direction, Number(r._sum.amount ?? 0)]),
@@ -270,7 +277,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
 
     const expenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
-      transferCosts,
+      transferHamali,
+      transferTransport,
       pappuLoading,
       pappuRoasting,
       huskLoading,

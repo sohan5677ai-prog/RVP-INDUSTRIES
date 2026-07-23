@@ -244,16 +244,14 @@ export async function dismissTransportConfirmation(req: Request, res: Response) 
 export async function sendDispatchWhatsApp(req: Request, res: Response) {
   const { dispatch, order, pdfData } = await buildInvoicePdfData(req.params.id);
 
+  // A broker named "RVP" (or no broker) means it's our own order — the buyer is
+  // messaged directly with no broker reference; otherwise the buyer's copy names
+  // the broker and the broker gets their own greeting copy.
   const broker = order.brokerId
     ? await prisma.broker.findUnique({ where: { id: order.brokerId } })
     : null;
   const isOwnBroker = !broker || broker.name.trim().toUpperCase() === 'RVP';
-  const recipient = isOwnBroker
-    ? { label: order.buyer.name, phone: order.buyer.phone }
-    : { label: broker!.name, phone: broker!.phone };
-  if (!recipient.phone) {
-    throw new HttpError(400, `${recipient.label} has no phone number on file — add one first`);
-  }
+  const brokerName = isOwnBroker ? null : broker!.name;
 
   // A WhatsApp template message carries only ONE document. So when an E-Way Bill
   // exists, render it too and MERGE it onto the tax invoice, producing a single
@@ -289,27 +287,59 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
     buffer,
   } as Express.Multer.File);
 
-  const bundle = await whatsappService.sendDispatchBundle({
-    dispatchId: dispatch.id,
-    recipientName: recipient.label,
-    orderRef: dispatch.invoiceNumber!,
-    vehicleNumber: dispatch.vehicleNumber,
-    quantityKg: dispatch.weightKg,
-    driverName: dispatch.driverName,
-    driverPhone: dispatch.driverPhone,
-    ewbNumber: dispatch.ewbNumber,
-    // Single combined Tax Invoice + E-Way Bill PDF (EWB number also rides in the body).
-    documentUrl,
-    documentFilename: filename,
-    toPhone: recipient.phone,
-  });
-  if (!bundle.ok) throw new HttpError(502, bundle.error ?? 'WhatsApp send failed');
+  // Each leg is sent independently: one failing (e.g. a missing phone or a
+  // not-yet-approved template) must never suppress the others. In particular the
+  // driver leg used to sit behind the bundle's throw and silently never ran.
+  const outcome = (r: { ok: boolean; skipped?: boolean; error?: string }) =>
+    r.ok ? 'sent' : r.skipped ? 'skipped' : 'failed';
 
-  // Driver leg is best-effort: skipped silently when no driver phone is on the dispatch.
-  await whatsappService.notifyDispatchDriver(
+  // Party (buyer) — always. Includes the broker reference when there's a real broker.
+  const partyResult = order.buyer.phone
+    ? await whatsappService.sendDispatchToParty({
+        dispatchId: dispatch.id,
+        buyerName: order.buyer.name,
+        orderRef: dispatch.invoiceNumber!,
+        vehicleNumber: dispatch.vehicleNumber,
+        quantityKg: dispatch.weightKg,
+        driverName: dispatch.driverName,
+        driverPhone: dispatch.driverPhone,
+        brokerName,
+        documentUrl,
+        documentFilename: filename,
+        toPhone: order.buyer.phone,
+      })
+    : { ok: false, skipped: true, error: `${order.buyer.name} has no phone number on file` };
+
+  // Broker — only when the order came through a real broker with a phone on file.
+  let brokerResult: { ok: boolean; skipped?: boolean; error?: string } | null = null;
+  if (brokerName && broker?.phone) {
+    brokerResult = await whatsappService.sendDispatchBundle({
+      dispatchId: dispatch.id,
+      recipientName: broker.name,
+      buyerName: order.buyer.name,
+      orderRef: dispatch.invoiceNumber!,
+      vehicleNumber: dispatch.vehicleNumber,
+      quantityKg: dispatch.weightKg,
+      driverName: dispatch.driverName,
+      driverPhone: dispatch.driverPhone,
+      documentUrl,
+      documentFilename: filename,
+      toPhone: broker.phone,
+    });
+  } else if (brokerName && !broker?.phone) {
+    brokerResult = { ok: false, skipped: true, error: `${broker!.name} has no phone number on file` };
+  }
+
+  // Driver — best-effort, independent of the above; returns early when no driver phone.
+  const driverResult = await whatsappService.notifyDispatchDriver(
     { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
     { name: order.buyer.name, phone: order.buyer.phone, locationLink: order.buyer.locationLink }
   );
 
-  res.json({ ok: true, sentTo: recipient.label, driverNotified: !!dispatch.driverPhone });
+  res.json({
+    ok: partyResult.ok || !!brokerResult?.ok,
+    party: outcome(partyResult),
+    broker: brokerResult ? outcome(brokerResult) : 'na',
+    driver: dispatch.driverPhone ? 'sent' : 'skipped',
+  });
 }

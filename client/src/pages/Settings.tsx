@@ -167,6 +167,7 @@ const emptyCompany: CompanyProfile = {
   id: 'default', name: '', address: '', gstin: '', stateName: '', stateCode: '', contact: '',
   bankAccountName: '', bankName: '', bankAccountNumber: '', bankBranchIfsc: '', invoicePrefix: 'RVP',
   ownerWhatsappNumber: '',
+  alertRecipients: '',
   whatsappTestMode: true,
   whatsappTestNumber: '',
   freightRetentionPerTrip: 3000,
@@ -592,16 +593,40 @@ function HamaliRatesSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
 
 // --- WhatsApp test-mode toggle --------------------------------------------------
 
+type AlertMember = { name: string; phone: string };
+
+function parseAlertMembers(raw?: string | null): AlertMember[] {
+  try {
+    const arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr)) return arr.map((m) => ({ name: m?.name ?? '', phone: m?.phone ?? '' }));
+  } catch { /* malformed — treat as empty */ }
+  return [];
+}
+
 function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
   const { data, isLoading } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
   const [form, setForm] = useState<CompanyProfile>(emptyCompany);
-  useEffect(() => { if (data) setForm({ ...emptyCompany, ...data }); }, [data]);
+  // 3 fixed rows so the inputs stay put while typing; empties are dropped on save.
+  const [members, setMembers] = useState<AlertMember[]>([{ name: '', phone: '' }, { name: '', phone: '' }, { name: '', phone: '' }]);
+  useEffect(() => {
+    if (!data) return;
+    setForm({ ...emptyCompany, ...data });
+    const parsed = parseAlertMembers(data.alertRecipients);
+    setMembers([0, 1, 2].map((i) => parsed[i] ?? { name: '', phone: '' }));
+  }, [data]);
 
   const save = useMutation({
-    mutationFn: () => api<CompanyProfile>('/settings/company', { method: 'PUT', body: form }),
+    mutationFn: () => {
+      const cleaned = members.filter((m) => m.name.trim() || m.phone.trim());
+      const alertRecipients = cleaned.length ? JSON.stringify(cleaned) : '';
+      return api<CompanyProfile>('/settings/company', { method: 'PUT', body: { ...form, alertRecipients } });
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['company'] }); toast.success('WhatsApp settings saved'); },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
+
+  const setMember = (i: number, key: keyof AlertMember, value: string) =>
+    setMembers((prev) => prev.map((m, j) => (j === i ? { ...m, [key]: value } : m)));
 
   const testMode = form.whatsappTestMode ?? true;
 
@@ -644,6 +669,34 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               />
               <p className="text-[11px] text-muted-foreground">
                 10-digit Indian mobile (or 91XXXXXXXXXX). Used only while test mode is ON; falls back to the owner WhatsApp number if left blank.
+              </p>
+            </div>
+
+            <div className="space-y-2 rounded-lg border p-4">
+              <div className="space-y-0.5">
+                <div className="text-sm font-semibold">Dispatch &amp; alert recipients</div>
+                <p className="text-xs text-muted-foreground max-w-md">
+                  Up to 3 members who receive internal WhatsApp alerts — dispatch reminders, the weekly summary and the daily dues digest.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {members.map((m, i) => (
+                  <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Input
+                      value={m.name}
+                      onChange={(e) => setMember(i, 'name', e.target.value)}
+                      placeholder={`Member ${i + 1} name`}
+                    />
+                    <Input
+                      value={m.phone}
+                      onChange={(e) => setMember(i, 'phone', e.target.value)}
+                      placeholder="9876543210"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                10-digit Indian mobile (or 91XXXXXXXXXX) per member. Leave a row blank to skip it. While test mode is ON these also reroute to the test number.
               </p>
             </div>
 

@@ -26,7 +26,8 @@ export interface Summary {
 
 export interface HuskExpenses {
   blackSeedUnloading: number;
-  transferCosts: number;
+  transferHamali: number;
+  transferTransport: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -70,7 +71,8 @@ export type PurchaseRow = Purchase & {
 // Display order + labels for the itemized husk-pool deductions.
 const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading' },
-  { key: 'transferCosts', label: 'Stock Transfer Costs' },
+  { key: 'transferHamali', label: 'Transfer Hamali Charge' },
+  { key: 'transferTransport', label: 'Transfer Transport Charge' },
   { key: 'pappuLoading', label: 'Pappu Loading' },
   { key: 'pappuRoasting', label: 'Pappu Roasting' },
   { key: 'huskLoading', label: 'Husk Loading' },

@@ -57,6 +57,10 @@ services:
         sync: false
       - key: FAST2SMS_TMPL_PAYMENT_SENT
         sync: false
+      - key: FAST2SMS_TMPL_DISPATCH_PARTY
+        sync: false
+      - key: FAST2SMS_TMPL_DISPATCH_PARTY_BROKER
+        sync: false
       - key: FAST2SMS_TMPL_DISPATCH_BROKER
         sync: false
       - key: FAST2SMS_TMPL_DISPATCH_DRIVER

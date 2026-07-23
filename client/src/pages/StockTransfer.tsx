@@ -314,11 +314,12 @@ export default function StockTransferPage() {
                     <span className="text-muted-foreground font-medium">Moved value at destination</span>
                     <span className="font-semibold">{rupees(preview.movedValue)}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground font-medium">Final landed cost / kg</span>
+                    <span className="font-semibold">{weightKg > 0 ? rupees(preview.movedValue / weightKg) : '—'}</span>
+                  </div>
                 </>
               )}
-              <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and carrying interest at the storage-loan rate of {monthlyRate ?? '…'}% per month (set on the Bank Loans page, accrued per lot by its days from the loan availed date) are capitalised into that seed value.
-              </p>
             </div>
 
             <DialogFooter>

@@ -8,11 +8,11 @@ import {
   transferTransportCharge,
   companyHamaliShare,
   storageSeedInterest,
-  STORAGE_INTEREST_ANNUAL_PCT,
   type DrawnSeedSlice,
 } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { getCurrentLoanRate } from './loan.controller.js';
 
 /**
  * Value the next `weightKg` of black seed drawn from a storage location by PRICE
@@ -111,7 +111,9 @@ export async function previewStockTransfer(req: Request, res: Response) {
   const { getHamaliRate } = await import('./settings.controller.js');
   const hamali = transferHamali(weightKg, await getHamaliRate('TRANSFER_FROM_STORAGE'));
   const transportCharge = transferTransportCharge(weightKg, fromLocation);
-  const interestRatePct = STORAGE_INTEREST_ANNUAL_PCT;
+  // Carrying interest uses the global storage-loan rate from the Bank Loans page
+  // (CompanyProfile.loanInterestRatePct), day-prorated per lot by its storage dwell.
+  const interestRatePct = await getCurrentLoanRate();
 
   // `drawStorageBandValue` only reads, so the base client satisfies the tx type.
   const { value: seedCostMoved, slices } = await drawStorageBandValue(prisma, fromLocation, weightKg);
@@ -164,9 +166,10 @@ export async function createStockTransfer(req: Request, res: Response) {
   // Transfer transport is per-tonne, keyed to the source storage location, and
   // billed to KNM Transport (still capitalised into the seed at the process).
   const transportCharge = transferTransportCharge(data.weightKg, data.fromLocation);
-  // Storage carrying interest is a flat 1% per month (12% p.a.), day-prorated per
-  // lot by its days in storage. A fixed business rate, not the bank-loan rate.
-  const interestRatePct = STORAGE_INTEREST_ANNUAL_PCT;
+  // Storage carrying interest uses the global storage-loan rate set on the Bank
+  // Loans page (CompanyProfile.loanInterestRatePct), day-prorated per lot by its
+  // days in storage. Editing that rate flows straight through to new transfers.
+  const interestRatePct = await getCurrentLoanRate();
 
   const legCharge = hamali.charge;
   const legCrew = hamali.crew;

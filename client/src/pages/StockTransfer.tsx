@@ -6,7 +6,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import type { StockTransfer } from '@/lib/types';
 import {
   transferHamali, transferTransportCharge, transferTransportRate,
-  TRANSFER_HANDLING_RATE, STORAGE_INTEREST_MONTHLY_PCT,
+  TRANSFER_HANDLING_RATE,
 } from '@/lib/calc';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -106,6 +106,17 @@ export default function StockTransferPage() {
       }>(`/stock-transfers/preview?fromLocation=${encodeURIComponent(fromLocation)}&weightKg=${weightKg}&transferDate=${transferDate}`),
     enabled: open && weightValid,
   });
+
+  // The carrying-interest rate is the global storage-loan rate (Bank Loans page).
+  // Fetched here so the dialog can label the rate even before a preview loads; the
+  // preview's own interestRatePct is authoritative once it arrives. Stored annual,
+  // shown monthly to match the Bank Loans page convention.
+  const { data: loanSettings } = useQuery({
+    queryKey: ['loan-settings'],
+    queryFn: () => api<{ loanInterestRatePct: number }>('/loans/settings'),
+  });
+  const annualRate = preview?.interestRatePct ?? loanSettings?.loanInterestRatePct;
+  const monthlyRate = annualRate != null ? Math.round((annualRate / 12) * 1000) / 1000 : null;
 
 
   // Hamali + transport travel with the seed and are capitalised into its value at
@@ -286,7 +297,7 @@ export default function StockTransferPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">
-                  Storage carrying interest ({STORAGE_INTEREST_MONTHLY_PCT}%/mo
+                  Storage carrying interest ({monthlyRate ?? '…'}%/mo
                   {preview && preview.interestDays > 0 ? ` · ${preview.interestDays} day${preview.interestDays === 1 ? '' : 's'} in storage` : ''})
                 </span>
                 <span className="font-medium">
@@ -306,7 +317,7 @@ export default function StockTransferPage() {
                 </>
               )}
               <p className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and carrying interest at a flat {STORAGE_INTEREST_MONTHLY_PCT}% per month (accrued per lot by its days in storage) are capitalised into that seed value.
+                Seed value is drawn from the specific price band(s) at {fromLocation || 'the source'}, top-to-bottom (highest price first) - landed cost excluding GST - and finalised on save (see the <span className="font-medium">Moved value</span> column). The ₹{TRANSFER_HANDLING_RATE}/t hamali (fully paid to the crew), ₹{transferTransportRate(fromLocation)}/t transport (billed to KNM Transport), and carrying interest at the storage-loan rate of {monthlyRate ?? '…'}% per month (set on the Bank Loans page, accrued per lot by its days in storage) are capitalised into that seed value.
               </p>
             </div>
 

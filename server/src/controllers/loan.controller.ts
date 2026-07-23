@@ -219,13 +219,23 @@ export async function getLoanSettings(_req: Request, res: Response) {
   res.json({ loanInterestRatePct: Number(profile.loanInterestRatePct) });
 }
 
-/** Update the global annual loan interest rate. */
+/**
+ * Update the global annual loan interest rate. This is the master rate: saving it
+ * also re-rates EVERY existing loan to the new figure, so all the per-loan rates
+ * shown on the page and the total accrued interest (computed from each loan's rate)
+ * move together. New stock-transfer carrying interest reads the same global rate.
+ */
 export async function updateLoanSettings(req: Request, res: Response) {
   const { loanInterestRatePct } = updateLoanSettingsSchema.parse(req.body);
   await getCompanyProfileRow(); // ensure the row exists
-  const saved = await prisma.companyProfile.update({
-    where: { id: 'default' },
-    data: { loanInterestRatePct },
+  const saved = await prisma.$transaction(async (tx) => {
+    const profile = await tx.companyProfile.update({
+      where: { id: 'default' },
+      data: { loanInterestRatePct },
+    });
+    // Re-rate all loans so the box drives every row's rate + accrued interest.
+    await tx.bankLoan.updateMany({ data: { interestRatePct: loanInterestRatePct } });
+    return profile;
   });
   res.json({ loanInterestRatePct: Number(saved.loanInterestRatePct) });
 }

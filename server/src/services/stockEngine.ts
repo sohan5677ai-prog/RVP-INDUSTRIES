@@ -206,6 +206,14 @@ async function _computeUnifiedStockEngine(
       // Skip before touching a band so no spurious zero-band is created.
       if (isStillComing && po.plannedLocation !== 'RVP') continue;
 
+      // BASE-priced POs commit only the party rate at PO time; the inward freight
+      // (and therefore the true landed cost) is unknown until the lorry arrives and
+      // freight is captured at stock-in. So pending BASE tonnage is held FULLY out
+      // of the planner - not sellable/bandable until it lands, at which point the
+      // arrived loop above bands it at landed cost (base + freight/kg). DELIVERY POs
+      // bake freight into the quoted rate, so their pending tonnage still plans.
+      if (isStillComing && (po.priceType || 'BASE') === 'BASE') continue;
+
       const b = getBand(price);
       if (isStillComing) {
         b.pendingBlackKg += gapKg;

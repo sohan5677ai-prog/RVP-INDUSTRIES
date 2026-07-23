@@ -27,7 +27,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public handleReset = () => {
-    this.setState({ hasError: false, error: null });
+    // Reloading fetches the latest HTML and JS build assets from Vercel
+    window.location.reload();
   };
 
   public render() {
@@ -36,6 +37,12 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
+      const isChunkError =
+        this.state.error?.message?.includes('Failed to fetch dynamically imported module') ||
+        this.state.error?.message?.includes('Importing a module script failed') ||
+        this.state.error?.name === 'ChunkLoadError' ||
+        this.state.error?.toString()?.includes('dynamically imported module');
+
       return (
         <div className="min-h-screen flex items-center justify-center p-6 bg-background text-foreground">
           <div className="max-w-md w-full rounded-2xl border border-border bg-card p-6 shadow-lg space-y-4 text-center">
@@ -43,9 +50,13 @@ export class ErrorBoundary extends Component<Props, State> {
               <AlertTriangle className="h-6 w-6" />
             </div>
             <div className="space-y-2">
-              <h2 className="text-lg font-bold">Something went wrong</h2>
+              <h2 className="text-lg font-bold">
+                {isChunkError ? 'App Updated / Reload Required' : 'Something went wrong'}
+              </h2>
               <p className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded text-left overflow-auto max-h-32">
-                {this.state.error?.message || 'An unexpected error occurred while rendering this page.'}
+                {isChunkError
+                  ? 'A new update was deployed or a page module failed to load. Click "Try Again" to load the latest version.'
+                  : this.state.error?.message || 'An unexpected error occurred while rendering this page.'}
               </p>
             </div>
             <div className="flex justify-center gap-3 pt-2">

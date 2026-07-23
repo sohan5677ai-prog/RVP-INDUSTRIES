@@ -6,12 +6,38 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { registerPreload } from '@/lib/preload';
 
 function lazyWithPreload(paths: string | string[], importFn: () => Promise<any>) {
+  const safeImportFn = async () => {
+    try {
+      const component = await importFn();
+      const primaryKey = Array.isArray(paths) ? paths[0] : paths;
+      sessionStorage.removeItem(`chunk_retry_${primaryKey}`);
+      return component;
+    } catch (err: any) {
+      const isChunkError =
+        err?.message?.includes('Failed to fetch dynamically imported module') ||
+        err?.message?.includes('Importing a module script failed') ||
+        err?.name === 'ChunkLoadError' ||
+        err?.toString()?.includes('dynamically imported module');
+
+      if (isChunkError) {
+        const primaryKey = Array.isArray(paths) ? paths[0] : paths;
+        const sessionKey = `chunk_retry_${primaryKey}`;
+        if (!sessionStorage.getItem(sessionKey)) {
+          sessionStorage.setItem(sessionKey, 'true');
+          window.location.reload();
+          return new Promise(() => {}); // Prevent rendering while page reloads
+        }
+      }
+      throw err;
+    }
+  };
+
   if (Array.isArray(paths)) {
-    paths.forEach((p) => registerPreload(p, importFn));
+    paths.forEach((p) => registerPreload(p, safeImportFn));
   } else {
-    registerPreload(paths, importFn);
+    registerPreload(paths, safeImportFn);
   }
-  return lazy(importFn);
+  return lazy(safeImportFn);
 }
 
 const Login = lazyWithPreload('/login', () => import('@/pages/Login'));

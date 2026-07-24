@@ -1,4 +1,5 @@
 import { useState, useMemo, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -18,6 +19,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
+import SuryaRoadTransport from '@/pages/SuryaRoadTransport';
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -407,6 +409,9 @@ function TransfersTable({
 }
 
 export default function FreightDuesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialMainTab = searchParams.get('tab') === 'transport' ? 'transport' : 'dues';
+  const [mainTab, setMainTab] = useState(initialMainTab);
   const qc = useQueryClient();
   const [tab, setTab] = useState('outward');
 
@@ -650,91 +655,115 @@ export default function FreightDuesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Freight Dues</h1>
-        <p className="text-muted-foreground">Transporter freight net of hamali, kata &amp; transport retention - outward and inward.</p>
+        <p className="text-muted-foreground">Transporter freight dues, net payable &amp; transport retention report.</p>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center h-48">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      ) : (
-        <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="outward" className="gap-1.5">
-              <ArrowUpFromLine className="h-4 w-4" /> Outward (Sales)
-            </TabsTrigger>
-            <TabsTrigger value="inward" className="gap-1.5">
-              <ArrowDownToLine className="h-4 w-4" /> Inward (Purchases)
-            </TabsTrigger>
-            <TabsTrigger value="knm" className="gap-1.5">
-              <Truck className="h-4 w-4" /> KNM Freight
-            </TabsTrigger>
-          </TabsList>
+      <Tabs
+        value={mainTab}
+        onValueChange={(v) => {
+          setMainTab(v);
+          setSearchParams(v === 'transport' ? { tab: 'transport' } : {});
+        }}
+        className="space-y-6"
+      >
+        <TabsList className="bg-card border shadow-sm">
+          <TabsTrigger value="dues" className="gap-2 text-sm font-semibold">
+            <Truck className="h-4 w-4" /> Freight Dues
+          </TabsTrigger>
+          <TabsTrigger value="transport" className="gap-2 text-sm font-semibold">
+            <Truck className="h-4 w-4" /> Transport Report
+          </TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="outward" className="space-y-4">
-            <Card className="bg-card/50 border shadow-sm max-w-xs">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Outward Net Freight</CardTitle>
-              </CardHeader>
-              <CardContent><div className="text-xl font-bold">{rupees(outwardNet)}</div></CardContent>
-            </Card>
-            <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
-          </TabsContent>
-
-          <TabsContent value="inward" className="space-y-4">
-            <Card className="bg-card/50 border shadow-sm max-w-xs">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inward Net Freight</CardTitle>
-              </CardHeader>
-              <CardContent><div className="text-xl font-bold">{rupees(inwardNet)}</div></CardContent>
-            </Card>
-            <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
-          </TabsContent>
-
-          <TabsContent value="knm" className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
-              <Card className="bg-card/50 border shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Usual Freight Net</CardTitle>
-                </CardHeader>
-                <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet)}</div></CardContent>
-              </Card>
-              <Card className="bg-card/50 border shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transfers Payable</CardTitle>
-                </CardHeader>
-                <CardContent><div className="text-xl font-bold">{rupees(transfersNet)}</div></CardContent>
-              </Card>
-              <Card className="bg-card/50 border shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">KNM Total</CardTitle>
-                </CardHeader>
-                <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet + transfersNet)}</div></CardContent>
-              </Card>
+        <TabsContent value="dues" className="space-y-6">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-48">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-
-            <Tabs defaultValue="usual" className="space-y-4">
+          ) : (
+            <Tabs value={tab} onValueChange={setTab} className="space-y-4">
               <TabsList>
-                <TabsTrigger value="usual" className="gap-1.5">
-                  <Truck className="h-4 w-4" /> Usual Freights
+                <TabsTrigger value="outward" className="gap-1.5">
+                  <ArrowUpFromLine className="h-4 w-4" /> Outward (Sales)
                 </TabsTrigger>
-                <TabsTrigger value="transfers" className="gap-1.5">
-                  <ArrowLeftRight className="h-4 w-4" /> Transfers
+                <TabsTrigger value="inward" className="gap-1.5">
+                  <ArrowDownToLine className="h-4 w-4" /> Inward (Purchases)
+                </TabsTrigger>
+                <TabsTrigger value="knm" className="gap-1.5">
+                  <Truck className="h-4 w-4" /> KNM Freight
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="usual">
-                <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+              <TabsContent value="outward" className="space-y-4">
+                <Card className="bg-card/50 border shadow-sm max-w-xs">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Outward Net Freight</CardTitle>
+                  </CardHeader>
+                  <CardContent><div className="text-xl font-bold">{rupees(outwardNet)}</div></CardContent>
+                </Card>
+                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
-              <TabsContent value="transfers" className="space-y-2">
-                <p className="text-xs text-muted-foreground">Husk, seed &amp; pre-cleaner dust transport billed to KNM Transport.</p>
-                <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} />
+              <TabsContent value="inward" className="space-y-4">
+                <Card className="bg-card/50 border shadow-sm max-w-xs">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inward Net Freight</CardTitle>
+                  </CardHeader>
+                  <CardContent><div className="text-xl font-bold">{rupees(inwardNet)}</div></CardContent>
+                </Card>
+                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
+              </TabsContent>
+
+              <TabsContent value="knm" className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+                  <Card className="bg-card/50 border shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Usual Freight Net</CardTitle>
+                    </CardHeader>
+                    <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet)}</div></CardContent>
+                  </Card>
+                  <Card className="bg-card/50 border shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transfers Payable</CardTitle>
+                    </CardHeader>
+                    <CardContent><div className="text-xl font-bold">{rupees(transfersNet)}</div></CardContent>
+                  </Card>
+                  <Card className="bg-card/50 border shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">KNM Total</CardTitle>
+                    </CardHeader>
+                    <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet + transfersNet)}</div></CardContent>
+                  </Card>
+                </div>
+
+                <Tabs defaultValue="usual" className="space-y-4">
+                  <TabsList>
+                    <TabsTrigger value="usual" className="gap-1.5">
+                      <Truck className="h-4 w-4" /> Usual Freights
+                    </TabsTrigger>
+                    <TabsTrigger value="transfers" className="gap-1.5">
+                      <ArrowLeftRight className="h-4 w-4" /> Transfers
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="usual">
+                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+                  </TabsContent>
+
+                  <TabsContent value="transfers" className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Husk, seed &amp; pre-cleaner dust transport billed to KNM Transport.</p>
+                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} />
+                  </TabsContent>
+                </Tabs>
               </TabsContent>
             </Tabs>
-          </TabsContent>
-        </Tabs>
-      )}
+          )}
+        </TabsContent>
+
+        <TabsContent value="transport">
+          <SuryaRoadTransport embedded />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={payLorry !== null} onOpenChange={(o) => { if (!o) setPayLorry(null); }}>
         <DialogContent className="max-w-md">

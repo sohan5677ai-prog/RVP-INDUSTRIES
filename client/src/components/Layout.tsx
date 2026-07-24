@@ -105,9 +105,8 @@ const sections: NavSection[] = [
   {
     heading: 'Reports',
     items: [
+      { to: '/reports/taxes', label: 'Taxes', icon: Scale },
       { to: '/reports/irn-ewb', label: 'IRN/EWB', icon: FileText },
-      { to: '/reports/gst', label: 'GST Report', icon: Receipt },
-      { to: '/reports/tds', label: 'TDS Report', icon: Landmark },
       { to: '/reports/purchase-dues', label: 'Purchase Dues', icon: TrendingDown },
       { to: '/reports/payment-planner', label: 'Payment Planner', icon: Wallet },
       { to: '/reports/sale-dues', label: 'Sale Dues', icon: TrendingUp },
@@ -116,7 +115,6 @@ const sections: NavSection[] = [
       { to: '/accounts/party-ledger', label: 'Party Ledger', icon: BookOpen },
       { to: '/accounts/hamali-ledger', label: 'Hamali Report', icon: Coins },
       { to: '/accounts/kata-fee-ledger', label: 'Kata Report', icon: Receipt },
-      { to: '/accounts/surya-road-transport', label: 'Transport Report', icon: Truck },
       { to: '/reports/expenses', label: 'Income & Expenses', icon: Wallet },
     ],
   },

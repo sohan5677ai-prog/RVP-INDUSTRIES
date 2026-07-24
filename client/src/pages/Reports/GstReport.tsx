@@ -23,7 +23,7 @@ const Num = ({ v, bold }: { v: number; bold?: boolean }) => (
   </span>
 );
 
-export default function GstReport() {
+export default function GstReport({ embedded = false }: { embedded?: boolean } = {}) {
   const now = new Date();
   const [fy, setFy] = useState(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1);
   const [month, setMonth] = useState<number | 'ALL'>('ALL');
@@ -70,18 +70,25 @@ export default function GstReport() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        icon={Receipt}
-        title="GST Report"
-        description="Output tax on sales and input tax credit on purchases — reconciled for your GSTR filing."
-        actions={
-          data && (
-            <div className="flex flex-wrap items-center gap-2">
-              <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
-            </div>
-          )
-        }
-      />
+      {!embedded ? (
+        <PageHeader
+          icon={Receipt}
+          title="GST Report"
+          description="Output tax on sales and input tax credit on purchases — reconciled for your GSTR filing."
+          actions={
+            data && (
+              <div className="flex flex-wrap items-center gap-2">
+                <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
+              </div>
+            )
+          }
+        />
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Output tax on sales and input tax credit on purchases — reconciled for your GSTR filing.</p>
+          <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
+        </div>
+      )}
 
       {isLoading ? (
         <Card className="p-8 text-center text-muted-foreground">Loading GST report…</Card>

@@ -87,6 +87,7 @@ const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/page
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
+const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/Reports/Taxes'));
 const GstReport = lazyWithPreload('/reports/gst', () => import('@/pages/Reports/GstReport'));
 const TdsReport = lazyWithPreload('/reports/tds', () => import('@/pages/Reports/TdsReport'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
@@ -165,7 +166,7 @@ export default function App() {
               <Route path="/accounts/party-ledger" element={<PartyLedger />} />
               <Route path="/accounts/hamali-ledger" element={<HamaliLedger />} />
               <Route path="/accounts/kata-fee-ledger" element={<KataFeeLedger />} />
-              <Route path="/accounts/surya-road-transport" element={<SuryaRoadTransport />} />
+              <Route path="/accounts/surya-road-transport" element={<Navigate to="/reports/freight-dues?tab=transport" replace />} />
               <Route path="/accounts/brokerage-ledger" element={<BrokerageLedger />} />
               <Route path="/accounts/chart-of-accounts" element={<Ledgers />} />
               <Route path="/accounts/balance-sheet" element={<BalanceSheet />} />
@@ -186,8 +187,9 @@ export default function App() {
               <Route path="/reports/interest" element={<Interest />} />
               <Route path="/reports/expenses" element={<Expenses />} />
               <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
-              <Route path="/reports/gst" element={<GstReport />} />
-              <Route path="/reports/tds" element={<TdsReport />} />
+              <Route path="/reports/taxes" element={<Taxes />} />
+              <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
+              <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
               <Route path="/subscription" element={<Subscription />} />

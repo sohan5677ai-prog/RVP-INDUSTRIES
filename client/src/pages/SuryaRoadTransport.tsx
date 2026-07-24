@@ -32,7 +32,7 @@ interface RetentionRow {
   provider: TransportTab;
 }
 
-export default function SuryaRoadTransport() {
+export default function SuryaRoadTransport({ embedded = false }: { embedded?: boolean } = {}) {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [tab, setTab] = useState<TransportTab>('SURYA');
@@ -120,10 +120,14 @@ export default function SuryaRoadTransport() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Transport Report</h1>
-          <p className="text-muted-foreground">Per-trip freight retention by transport provider — bifurcated view</p>
-        </div>
+        {!embedded ? (
+          <div>
+            <h1 className="text-2xl font-bold">Transport Report</h1>
+            <p className="text-muted-foreground">Per-trip freight retention by transport provider — bifurcated view</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Per-trip freight retention by transport provider — bifurcated view</p>
+        )}
         <ExportButtons
           filename={`Transport_${tab}`}
           title={`Transport Report — ${tabLabels[tab]}`}

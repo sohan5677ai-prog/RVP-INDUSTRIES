@@ -20,7 +20,7 @@ const Num = ({ v, bold }: { v: number; bold?: boolean }) => (
   </span>
 );
 
-export default function TdsReport() {
+export default function TdsReport({ embedded = false }: { embedded?: boolean } = {}) {
   const now = new Date();
   const [fy, setFy] = useState(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1);
   const [month, setMonth] = useState<number | 'ALL'>('ALL');
@@ -57,12 +57,19 @@ export default function TdsReport() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        icon={Landmark}
-        title="TDS Report"
-        description="TDS deducted by buyers on your sales under Section 194Q — your credit in Form 26AS at income-tax filing."
-        actions={data && <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />}
-      />
+      {!embedded ? (
+        <PageHeader
+          icon={Landmark}
+          title="TDS Report"
+          description="TDS deducted by buyers on your sales under Section 194Q — your credit in Form 26AS at income-tax filing."
+          actions={data && <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">TDS deducted by buyers on your sales under Section 194Q — your credit in Form 26AS at income-tax filing.</p>
+          <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
+        </div>
+      )}
 
       {isLoading ? (
         <Card className="p-8 text-center text-muted-foreground">Loading TDS report…</Card>

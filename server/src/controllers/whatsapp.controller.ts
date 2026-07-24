@@ -166,10 +166,11 @@ export async function sendPartyReminder(req: Request, res: Response) {
   if (pendingLorries === 0) {
     throw new HttpError(400, 'No pending lorries against this party — nothing to remind about');
   }
-  // Priced per-PO breakdown, e.g. "RVP/01: 3 lorry @ ₹95/kg · RVP/02: 2 @ ₹96/kg".
+  // Priced per-PO breakdown, price → lorries → (PO), e.g.
+  // "• ₹95/kg — 3 lorries (RVP/01)\n• ₹96/kg — 2 lorries (RVP/02)".
   const breakdown = pending
-    .map((p) => `${p.poNumber ?? '-'}: ${p.remaining} lorry @ ₹${p.pricePerKg}/kg`)
-    .join(' · ');
+    .map((p) => `• ₹${p.pricePerKg}/kg — ${p.remaining} lorr${p.remaining === 1 ? 'y' : 'ies'} (${p.poNumber ?? '-'})`)
+    .join('\n');
 
   const result = await whatsappService.sendReminder(
     { id: party.id, name: party.name, phone: party.phone, phone2: party.phone2 },

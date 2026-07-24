@@ -44,8 +44,14 @@ export type WaTemplateKey =
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range, seed loads, sale orders, husk orders
   | 'OWNER_DUES_DIGEST'; // rvp_owner_dues: date, total receivable, overdue, top pending
 
+const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
+  DISPATCH_PARTY: '26405',
+  DISPATCH_PARTY_BROKER: '26406',
+  DISPATCH_BROKER: '26407',
+};
+
 function templateId(key: WaTemplateKey): string | undefined {
-  return process.env[`FAST2SMS_TMPL_${key}`]?.trim() || undefined;
+  return process.env[`FAST2SMS_TMPL_${key}`]?.trim() || DEFAULT_TEMPLATE_IDS[key] || undefined;
 }
 
 /**

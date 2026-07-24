@@ -19,7 +19,31 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Segmented } from '@/components/ui/segmented';
-import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, CheckCircle2, ReceiptText, Users, Phone, Landmark } from 'lucide-react';
+import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, CheckCircle2, ReceiptText, Users, Phone, Landmark, Calculator, RotateCcw } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+function getRoundOptions(amount: number): { label: string; value: number }[] {
+  if (!amount || isNaN(amount)) return [];
+  const rawOpts: { label: string; value: number }[] = [
+    { label: 'Nearest 100', value: Math.round(amount / 100) * 100 },
+    { label: 'Nearest 1,000', value: Math.round(amount / 1000) * 1000 },
+    { label: 'Round Down 100', value: Math.floor(amount / 100) * 100 },
+    { label: 'Round Up 100', value: Math.ceil(amount / 100) * 100 },
+    { label: 'Round Down 1,000', value: Math.floor(amount / 1000) * 1000 },
+    { label: 'Round Up 1,000', value: Math.ceil(amount / 1000) * 1000 },
+    { label: 'Exact Integer', value: Math.round(amount) },
+  ];
+
+  const seen = new Set<number>();
+  const unique: { label: string; value: number }[] = [];
+  for (const opt of rawOpts) {
+    if (opt.value > 0 && !seen.has(opt.value)) {
+      seen.add(opt.value);
+      unique.push(opt);
+    }
+  }
+  return unique.sort((a, b) => b.value - a.value);
+}
 
 // Manual hamali charge categories the crew is paid for but that can't be derived
 // from purchases/sales. Per-bag types compute amount = bags × rate; flat types
@@ -93,6 +117,15 @@ export default function HamaliLedger() {
   const [search, setSearch] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+
+  const [roundedValues, setRoundedValues] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('hamali_rounded_values');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases', 'hamali'],
@@ -479,7 +512,9 @@ export default function HamaliLedger() {
     if (verifiedThroughDay != null && d <= verifiedThroughDay) return false;
     return d <= squareDate;
   };
-  const pendingCrewFromEntries = allHamaliEntries.filter((e) => inSquareWindow(e.date)).reduce((s, e) => s + e.crew, 0);
+  const pendingCrewFromEntries = allHamaliEntries
+    .filter((e) => inSquareWindow(e.date))
+    .reduce((s, e) => s + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0);
   const pendingCrewFromManual = manualSorted
     .filter((c) => inSquareWindow(c.date))
     .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0);
@@ -504,7 +539,7 @@ export default function HamaliLedger() {
         .filter((c) => inDateWindow(c.date))
         .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0)
     : 0;
-  const totalCrew = filtered.reduce((acc, e) => acc + e.crew, 0) + manualNetInWindow;
+  const totalCrew = filtered.reduce((acc, e) => acc + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0) + manualNetInWindow;
 
   // ── Payables tab: one row per squared-off period ──────────────────────────
   // Crew-settlement payments (HAMALI) grouped by the period they settle.
@@ -606,6 +641,17 @@ export default function HamaliLedger() {
       { header: 'Lorry Share', value: (e: HamaliEntry) => rupees(e.lorryShare), excel: (e: HamaliEntry) => e.lorryShare, numFmt: '#,##0.00', align: 'right' as const },
     ] : []),
     { header: 'Crew Paid', value: (e) => rupees(e.crew), excel: (e) => e.crew, numFmt: '#,##0.00', align: 'right' },
+    ...(view === 'hamali'
+      ? [
+          {
+            header: 'Rounded Off',
+            value: (e: HamaliEntry) => (roundedValues[e.id] !== undefined ? rupees(roundedValues[e.id]) : rupees(e.crew)),
+            excel: (e: HamaliEntry) => (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew),
+            numFmt: '#,##0.00',
+            align: 'right' as const,
+          },
+        ]
+      : []),
     ...(view === 'company'
       ? [{ header: 'Company P/L', value: (e: HamaliEntry) => rupees(e.pl), excel: (e: HamaliEntry) => e.pl, numFmt: '#,##0.00', align: 'right' as const }]
       : [{ header: 'Status', value: (e: HamaliEntry) => (isVerified(e.date) ? 'Verified' : 'Current') }]),
@@ -621,7 +667,9 @@ export default function HamaliLedger() {
   };
   const currentPeriodCrew =
     Math.round(
-      (allHamaliEntries.filter((e) => sinceCheckpoint(e.date)).reduce((s, e) => s + e.crew, 0) +
+      (allHamaliEntries
+        .filter((e) => sinceCheckpoint(e.date))
+        .reduce((s, e) => s + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0) +
         manualSorted
           .filter((c) => sinceCheckpoint(c.date))
           .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0)) *
@@ -1089,6 +1137,7 @@ export default function HamaliLedger() {
                   {view === 'company' && <TableHead className="text-right">Our Share</TableHead>}
                   {view === 'company' && <TableHead className="text-right">Lorry Share</TableHead>}
                   <TableHead className="text-right">Crew Paid</TableHead>
+                  {view === 'hamali' && <TableHead className="text-right min-w-[210px]">Rounded Off</TableHead>}
                   {view === 'company' && <TableHead className="text-right">Company P/L</TableHead>}
                   {view === 'hamali' && <TableHead>Status</TableHead>}
                 </TableRow>
@@ -1096,7 +1145,7 @@ export default function HamaliLedger() {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
                       No hamali transactions match selected filters.
                     </TableCell>
                   </TableRow>
@@ -1117,6 +1166,83 @@ export default function HamaliLedger() {
                       {view === 'company' && <TableCell className="text-right font-semibold text-amber-600">{rupees(e.ourShare)}</TableCell>}
                       {view === 'company' && <TableCell className="text-right text-muted-foreground">{rupees(e.lorryShare)}</TableCell>}
                       <TableCell className="text-right">{rupees(e.crew)}</TableCell>
+                      {view === 'hamali' && (
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Input
+                              type="number"
+                              step="1"
+                              className="w-28 h-8 text-right font-semibold text-xs bg-card"
+                              placeholder={rupees(e.crew)}
+                              value={roundedValues[e.id] !== undefined ? roundedValues[e.id] : ''}
+                              onChange={(evt) => {
+                                const valStr = evt.target.value;
+                                setRoundedValues((prev) => {
+                                  const next = { ...prev };
+                                  if (valStr === '') {
+                                    delete next[e.id];
+                                  } else {
+                                    next[e.id] = Number(valStr);
+                                  }
+                                  localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                  return next;
+                                });
+                              }}
+                            />
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" size="sm" className="h-8 px-2 text-xs gap-1 shrink-0">
+                                  <Calculator className="h-3.5 w-3.5 text-primary" />
+                                  Round Off
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-3" align="end">
+                                <div className="text-xs font-semibold mb-2 text-muted-foreground flex items-center justify-between border-b pb-1.5">
+                                  <span>Round Off Options</span>
+                                  <span className="font-mono text-[11px] text-primary">{rupees(e.crew)}</span>
+                                </div>
+                                <div className="space-y-1">
+                                  {getRoundOptions(e.crew).map((opt) => (
+                                    <Button
+                                      key={opt.label}
+                                      variant="ghost"
+                                      size="sm"
+                                      className="w-full justify-between h-8 text-xs font-normal hover:bg-primary/10"
+                                      onClick={() => {
+                                        setRoundedValues((prev) => {
+                                          const next = { ...prev, [e.id]: opt.value };
+                                          localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                          return next;
+                                        });
+                                      }}
+                                    >
+                                      <span className="font-semibold text-primary">{rupees(opt.value)}</span>
+                                      <span className="text-[10px] text-muted-foreground">{opt.label}</span>
+                                    </Button>
+                                  ))}
+                                  {roundedValues[e.id] !== undefined && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="w-full justify-center h-7 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 border-t mt-1 pt-1"
+                                      onClick={() => {
+                                        setRoundedValues((prev) => {
+                                          const next = { ...prev };
+                                          delete next[e.id];
+                                          localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                          return next;
+                                        });
+                                      }}
+                                    >
+                                      <RotateCcw className="h-3 w-3 mr-1" /> Reset to Original ({rupees(e.crew)})
+                                    </Button>
+                                  )}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </TableCell>
+                      )}
                       {view === 'company' && <TableCell className="text-right font-semibold text-emerald-600 dark:text-emerald-400">{rupees(e.pl)}</TableCell>}
                       {view === 'hamali' && (
                         <TableCell>

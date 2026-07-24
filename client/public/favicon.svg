@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b1a0e" />
+      <stop offset="100%" stop-color="#1a0a05" />
+    </linearGradient>
+    <linearGradient id="podGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="45%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#92400e" />
+    </linearGradient>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Dark mahogany tile container with subtle border -->
+  <rect width="64" height="64" rx="16" fill="url(#bgGrad)" stroke="#78350f" stroke-width="1.5" />
+  
+  <!-- Soft warm ambient glow -->
+  <circle cx="32" cy="34" r="22" fill="#f59e0b" opacity="0.12" />
+
+  <!-- Tamarind Fruit Pod Graphic -->
+  <g transform="rotate(-12 32 32)">
+    <!-- Stem -->
+    <path d="M 44 14 Q 48 18 45 23" fill="none" stroke="#92400e" stroke-width="3" stroke-linecap="round" />
+    
+    <!-- Leaves -->
+    <path d="M 45 15 Q 52 12 54 17 Q 48 20 45 15 Z" fill="url(#leafGrad)" />
+    <path d="M 42 17 Q 37 11 34 14 Q 39 19 42 17 Z" fill="url(#leafGrad)" opacity="0.85" />
+    
+    <!-- Connected Lobes for the Tamarind Pod -->
+    <circle cx="40" cy="26" r="8.5" fill="url(#podGrad)" />
+    <circle cx="31" cy="35" r="9.5" fill="url(#podGrad)" />
+    <circle cx="21" cy="44" r="8.5" fill="url(#podGrad)" />
+    
+    <!-- Pod Shell Main Silhouette -->
+    <path d="M 46 22 C 38 18 24 30 14 40 C 13 47 22 52 28 50 C 38 48 48 36 48 28 Z" fill="url(#podGrad)" />
+    
+    <!-- Inner Contour Shading for Tamarind Shell Structure -->
+    <path d="M 37 20 Q 30 30 20 40" fill="none" stroke="#78350f" stroke-width="1.5" opacity="0.4" stroke-linecap="round" />
+    
+    <!-- Top Shell Specular Highlight -->
+    <path d="M 43 23 Q 33 30 23 41" fill="none" stroke="#fef3c7" stroke-width="1.8" opacity="0.4" stroke-linecap="round" />
+  </g>
+</svg>

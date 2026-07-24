@@ -3,8 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Receipt, Landmark, Scale } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import GstReport from '@/pages/reports/GstReport';
-import TdsReport from '@/pages/reports/TdsReport';
+import GstReport from '@/pages/Reports/GstReport';
+import TdsReport from '@/pages/Reports/TdsReport';
 
 export default function TaxesPage() {
   const [searchParams, setSearchParams] = useSearchParams();

@@ -86,7 +86,7 @@ const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/page
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
-const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/reports/Taxes'));
+const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/Reports/Taxes'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));

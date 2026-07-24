@@ -55,11 +55,13 @@ interface KataEntry {
   kataFee: number;
 }
 
-function getWeightBracket(weightKg: number): string {
+function getWeightBracket(weightKg: number, kataFee: number): string {
+  if (kataFee === 0) return 'Exempt (₹0)';
   const tonnes = weightKg / 1000;
-  if (tonnes <= 15) return '≤ 15 tonnes (₹50)';
-  if (tonnes <= 30) return '15-30 tonnes (₹150)';
-  return '> 30 tonnes (₹200)';
+  if (tonnes <= 5) return '≤ 5 tonnes (₹50)';
+  if (tonnes <= 15) return '5-15 tonnes (₹100)';
+  if (tonnes <= 25) return '15-25 tonnes (₹150)';
+  return '> 25 tonnes (₹200)';
 }
 
 function kataSourceLabel(source: KataEntry['source']): string {
@@ -76,7 +78,7 @@ const KATA_EXPORT_COLUMNS: ExportColumn<KataEntry>[] = [
   { header: 'Lorry No', value: (e) => e.lorryNumber ?? '' },
   { header: 'Reference', value: (e) => e.reference },
   { header: 'Net Weight (kg)', value: (e) => e.netWeightKg, numFmt: '#,##0', align: 'right' },
-  { header: 'Weight Bracket', value: (e) => getWeightBracket(e.netWeightKg) },
+  { header: 'Weight Bracket', value: (e) => getWeightBracket(e.netWeightKg, e.kataFee) },
   { header: 'Kata Fee', value: (e) => rupees(e.kataFee), excel: (e) => e.kataFee, numFmt: '#,##0.00', align: 'right' },
 ];
 
@@ -248,13 +250,18 @@ export default function KataFeeLedger() {
   // Bracket counts
   const brackets = filtered.reduce(
     (acc, e) => {
-      const tonnes = e.netWeightKg / 1000;
-      if (tonnes <= 15) acc.bracket1 += 1;
-      else if (tonnes <= 30) acc.bracket2 += 1;
-      else acc.bracket3 += 1;
+      if (e.kataFee === 0) {
+        acc.exempt += 1;
+      } else {
+        const tonnes = e.netWeightKg / 1000;
+        if (tonnes <= 5) acc.b5 += 1;
+        else if (tonnes <= 15) acc.b15 += 1;
+        else if (tonnes <= 25) acc.b25 += 1;
+        else acc.bOver += 1;
+      }
       return acc;
     },
-    { bracket1: 0, bracket2: 0, bracket3: 0 }
+    { b5: 0, b15: 0, b25: 0, bOver: 0, exempt: 0 }
   );
 
   return (
@@ -333,17 +340,27 @@ export default function KataFeeLedger() {
               <CardContent>
                 <div className="text-xs space-y-1 mt-0.5">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">≤15t (₹50):</span>
-                    <span className="font-semibold">{brackets.bracket1}</span>
+                    <span className="text-muted-foreground">≤5t (₹50):</span>
+                    <span className="font-semibold">{brackets.b5}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">15-30t (₹150):</span>
-                    <span className="font-semibold">{brackets.bracket2}</span>
+                    <span className="text-muted-foreground">5-15t (₹100):</span>
+                    <span className="font-semibold">{brackets.b15}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">&gt;30t (₹200):</span>
-                    <span className="font-semibold">{brackets.bracket3}</span>
+                    <span className="text-muted-foreground">15-25t (₹150):</span>
+                    <span className="font-semibold">{brackets.b25}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">&gt;25t (₹200):</span>
+                    <span className="font-semibold">{brackets.bOver}</span>
+                  </div>
+                  {brackets.exempt > 0 && (
+                    <div className="flex justify-between pt-1 border-t">
+                      <span className="text-muted-foreground">Exempt (₹0):</span>
+                      <span className="font-semibold text-emerald-600">{brackets.exempt}</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -400,7 +417,7 @@ export default function KataFeeLedger() {
                       <TableCell>{e.lorryNumber ?? '-'}</TableCell>
                       <TableCell className="font-mono text-xs">{e.reference}</TableCell>
                       <TableCell className="text-right font-medium">{kg(e.netWeightKg)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{getWeightBracket(e.netWeightKg)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{getWeightBracket(e.netWeightKg, e.kataFee)}</TableCell>
                       <TableCell className="text-right font-bold text-primary">{rupees(e.kataFee)}</TableCell>
                     </TableRow>
                   ))

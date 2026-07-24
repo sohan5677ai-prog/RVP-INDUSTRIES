@@ -20,11 +20,13 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Segmented } from '@/components/ui/segmented';
 import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, CheckCircle2, ReceiptText, Users, Phone, Landmark, Calculator, RotateCcw } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverTrigger, PopoverClose } from '@/components/ui/popover';
 
 function getRoundOptions(amount: number): { label: string; value: number }[] {
   if (!amount || isNaN(amount)) return [];
   const rawOpts: { label: string; value: number }[] = [
+    { label: 'Nearest 10', value: Math.round(amount / 10) * 10 },
+    { label: 'Nearest 50', value: Math.round(amount / 50) * 50 },
     { label: 'Nearest 100', value: Math.round(amount / 100) * 100 },
     { label: 'Nearest 1,000', value: Math.round(amount / 1000) * 1000 },
     { label: 'Round Down 100', value: Math.floor(amount / 100) * 100 },
@@ -1203,39 +1205,42 @@ export default function HamaliLedger() {
                                 </div>
                                 <div className="space-y-1">
                                   {getRoundOptions(e.crew).map((opt) => (
-                                    <Button
-                                      key={opt.label}
-                                      variant="ghost"
-                                      size="sm"
-                                      className="w-full justify-between h-8 text-xs font-normal hover:bg-primary/10"
-                                      onClick={() => {
-                                        setRoundedValues((prev) => {
-                                          const next = { ...prev, [e.id]: opt.value };
-                                          localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                          return next;
-                                        });
-                                      }}
-                                    >
-                                      <span className="font-semibold text-primary">{rupees(opt.value)}</span>
-                                      <span className="text-[10px] text-muted-foreground">{opt.label}</span>
-                                    </Button>
+                                    <PopoverClose asChild key={opt.label}>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="w-full justify-between h-8 text-xs font-normal hover:bg-primary/10"
+                                        onClick={() => {
+                                          setRoundedValues((prev) => {
+                                            const next = { ...prev, [e.id]: opt.value };
+                                            localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                            return next;
+                                          });
+                                        }}
+                                      >
+                                        <span className="font-semibold text-primary">{rupees(opt.value)}</span>
+                                        <span className="text-[10px] text-muted-foreground">{opt.label}</span>
+                                      </Button>
+                                    </PopoverClose>
                                   ))}
                                   {roundedValues[e.id] !== undefined && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="w-full justify-center h-7 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 border-t mt-1 pt-1"
-                                      onClick={() => {
-                                        setRoundedValues((prev) => {
-                                          const next = { ...prev };
-                                          delete next[e.id];
-                                          localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                          return next;
-                                        });
-                                      }}
-                                    >
-                                      <RotateCcw className="h-3 w-3 mr-1" /> Reset to Original ({rupees(e.crew)})
-                                    </Button>
+                                    <PopoverClose asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="w-full justify-center h-7 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 border-t mt-1 pt-1"
+                                        onClick={() => {
+                                          setRoundedValues((prev) => {
+                                            const next = { ...prev };
+                                            delete next[e.id];
+                                            localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                            return next;
+                                          });
+                                        }}
+                                      >
+                                        <RotateCcw className="h-3 w-3 mr-1" /> Reset to Original ({rupees(e.crew)})
+                                      </Button>
+                                    </PopoverClose>
                                   )}
                                 </div>
                               </PopoverContent>

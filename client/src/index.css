@@ -228,6 +228,19 @@
   .glass-thin {
     background-color: var(--card);
   }
+  /* Login inputs sit on an always-dark card even in light theme, so force the
+     browser autofill overlay (which paints its own pale bg + dark text via an
+     internal box-shadow that bg-* utilities can't override) back to dark. */
+  .login-field:-webkit-autofill,
+  .login-field:-webkit-autofill:hover,
+  .login-field:-webkit-autofill:focus,
+  .login-field:-webkit-autofill:active {
+    -webkit-text-fill-color: #fff;
+    caret-color: #fff;
+    -webkit-box-shadow: 0 0 0 1000px rgb(9 9 11 / 0.9) inset;
+    box-shadow: 0 0 0 1000px rgb(9 9 11 / 0.9) inset;
+    transition: background-color 9999s ease-in-out 0s;
+  }
   /* numeric values that must never overflow their tile */
   .num-fit {
     font-variant-numeric: tabular-nums;

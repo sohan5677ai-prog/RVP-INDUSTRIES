@@ -161,7 +161,7 @@ export default function Login() {
                     onChange={(e) => setUsername(e.target.value)}
                     required
                     placeholder="admin"
-                    className="pl-10 h-12 bg-zinc-950/50 border-white/10 text-white placeholder:text-zinc-600 focus-visible:ring-amber-500/50 rounded-xl"
+                    className="login-field pl-10 h-12 !bg-zinc-950/70 border-white/10 !text-white placeholder:text-zinc-500 focus-visible:ring-amber-500/50 rounded-xl"
                   />
                 </div>
               </div>
@@ -178,7 +178,7 @@ export default function Login() {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     placeholder="••••••••"
-                    className="pl-10 pr-10 h-12 bg-zinc-950/50 border-white/10 text-white placeholder:text-zinc-600 focus-visible:ring-amber-500/50 rounded-xl"
+                    className="login-field pl-10 pr-10 h-12 !bg-zinc-950/70 border-white/10 !text-white placeholder:text-zinc-500 focus-visible:ring-amber-500/50 rounded-xl"
                   />
                   <button
                     type="button"

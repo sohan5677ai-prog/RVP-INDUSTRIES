@@ -852,6 +852,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 {generateIrnMutation.isPending ? 'IRN...' : 'Gen IRN'}
                                               </Button>
                                             )}
+                                            {d.irn && (
+                                              <Button size="sm" variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => navigate(`/sale-dispatches/${d.id}/einvoice-print`)}>
+                                                <Printer className="h-3.5 w-3.5 mr-1" /> e-Invoice
+                                              </Button>
+                                            )}
                                             {d.irn && d.irnStatus !== 'CANCELLED' && (
                                               <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'einvoice')}>
                                                 Cancel IRN

@@ -63,6 +63,7 @@ const StockByState = lazyWithPreload('/stock/state', () => import('@/pages/Stock
 const SaleOrders = lazyWithPreload('/sale-orders', () => import('@/pages/SaleOrders'));
 const InvoiceView = lazyWithPreload('/sale-dispatches/:id/invoice', () => import('@/pages/InvoiceView'));
 const EWayBillView = lazyWithPreload('/sale-dispatches/:id/ewaybill', () => import('@/pages/EWayBillView'));
+const EInvoiceView = lazyWithPreload('/sale-dispatches/:id/einvoice-print', () => import('@/pages/EInvoiceView'));
 const SalesProduct = lazyWithPreload(
   ['/sales/pappu', '/sales/tps'],
   () => import('@/pages/SalesProduct')
@@ -131,6 +132,7 @@ export default function App() {
             <Route element={<SubscriptionBoundary />}>
             <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
             <Route path="/sale-dispatches/:id/ewaybill" element={<EWayBillView />} />
+            <Route path="/sale-dispatches/:id/einvoice-print" element={<EInvoiceView />} />
             <Route element={<Layout />}>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<Dashboard />} />

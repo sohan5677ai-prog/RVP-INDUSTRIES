@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FileText, Truck, Printer, Search, Mail } from 'lucide-react';
@@ -26,6 +27,7 @@ const DOC_TYPE_LABEL: Record<EmailLog['documentType'], string> = {
 
 export default function IrnEwbReport() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
 
   const { data, isLoading } = useQuery<TaxproReportData>({
@@ -71,66 +73,12 @@ export default function IrnEwbReport() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  // Open the full official-format print pages (rendered from the signed IRN /
+  // EWB data), not a stripped-down popup.
   const handlePrint = (dispatch: SaleDispatch, type: 'IRN' | 'EWB') => {
-    // A robust ERP would generate a PDF or open a printable window.
-    // We'll construct a simple printable view in a new window.
-    const win = window.open('', '_blank');
-    if (!win) return;
-    
-    const isIRN = type === 'IRN';
-    const title = isIRN ? 'Tax Invoice & E-Invoice' : 'E-Way Bill Details';
-    const numberLabel = isIRN ? 'IRN:' : 'E-Way Bill No:';
-    const numberValue = isIRN ? dispatch.irn : dispatch.ewbNumber;
-    
-    const html = `
-      <html>
-        <head>
-          <title>Print ${type}</title>
-          <style>
-            body { font-family: system-ui, sans-serif; padding: 40px; color: #111; line-height: 1.6; }
-            .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-            .title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
-            .row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-            .col { flex: 1; }
-            .label { font-size: 12px; color: #666; text-transform: uppercase; font-weight: bold; }
-            .value { font-size: 16px; font-weight: 500; word-break: break-all; }
-            .box { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-top: 30px; background: #fafafa; }
-            @media print { body { padding: 0; } }
-          </style>
-        </head>
-        <body onload="window.print()">
-          <div class="header">
-            <div class="title">${title}</div>
-            <div>Invoice No: <strong>${dispatch.invoiceNumber || 'N/A'}</strong></div>
-          </div>
-          
-          <div class="row">
-            <div class="col">
-              <div class="label">Party Name</div>
-              <div class="value">${dispatch.saleOrder?.buyer?.name || 'N/A'}</div>
-            </div>
-            <div class="col">
-              <div class="label">Invoice Date</div>
-              <div class="value">${dispatch.invoiceDate ? shortDate(dispatch.invoiceDate) : 'N/A'}</div>
-            </div>
-          </div>
-          
-          <div class="box">
-            <div class="label">${numberLabel}</div>
-            <div class="value">${numberValue}</div>
-            ${isIRN ? `
-              <div class="label" style="margin-top:15px">Ack No & Date</div>
-              <div class="value">${dispatch.irnAckNo || 'N/A'} &middot; ${dispatch.irnAckDate ? shortDate(dispatch.irnAckDate) : 'N/A'}</div>
-            ` : `
-              <div class="label" style="margin-top:15px">Valid Upto</div>
-              <div class="value">${dispatch.ewbValidUpto ? shortDate(dispatch.ewbValidUpto) : 'N/A'}</div>
-            `}
-          </div>
-        </body>
-      </html>
-    `;
-    win.document.write(html);
-    win.document.close();
+    navigate(type === 'IRN'
+      ? `/sale-dispatches/${dispatch.id}/einvoice-print`
+      : `/sale-dispatches/${dispatch.id}/ewaybill`);
   };
 
   return (

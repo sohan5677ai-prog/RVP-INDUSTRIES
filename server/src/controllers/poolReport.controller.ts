@@ -26,17 +26,18 @@ async function reverseLinkedEntry(tx: Prisma.TransactionClient, refKey: string) 
 
 // ── Gunny bags ────────────────────────────────────────────────────────────────
 export async function listGunnyBags(_req: Request, res: Response) {
-  const rows = await prisma.gunnyBagEntry.findMany({ orderBy: { date: 'desc' } });
+  const rows = await prisma.gunnyBagEntry.findMany({ orderBy: { date: 'asc' } });
   // Backfill in-memory for old rows (direction is set but debit/credit are 0)
   const backfilled = rows.map((r) => {
     const debitVal = Number(r.debit || 0);
     const creditVal = Number(r.credit || 0);
+    const amountVal = Number(r.amount || 0);
     if (debitVal === 0 && creditVal === 0 && r.direction) {
       return {
         ...r,
-        debit: r.direction === 'PURCHASE' ? Number(r.amount || 0) : 0,
-        credit: r.direction === 'SALE' ? Number(r.amount || 0) : 0,
-        payment: r.direction === 'PURCHASE' ? Number(r.amount || 0) : 0,
+        debit: r.direction === 'PURCHASE' ? amountVal : 0,
+        credit: r.direction === 'SALE' ? amountVal : 0,
+        payment: r.type === 'PAYMENT' ? amountVal : 0,
       };
     }
     return r;
@@ -51,7 +52,7 @@ export async function createGunnyBag(req: Request, res: Response) {
     let debit = 0, credit = 0, payment = 0;
     if (data.type === 'PURCHASE') {
       debit = Number(data.amount);
-      payment = Number(data.amount); // auto-paid
+      // Purchase is on credit into Feroz Ledger (no auto-paid)
     } else if (data.type === 'SALE') {
       credit = Number(data.amount);
     } else if (data.type === 'PAYMENT') {
@@ -76,10 +77,10 @@ export async function createGunnyBag(req: Request, res: Response) {
     const bagDesc = data.quantity ? `${data.quantity} bags` : 'Payment';
     const desc = `${bagDesc}${data.note ? ` — ${data.note}` : ''}`;
 
-    // Purchase & Sale → linked Payment/Receipt; Payment → just a Payment (no receipt)
-    if (data.type === 'PURCHASE') {
-      await LedgerService.recordLinkedPayment(tx, { date: data.date, amount: Number(data.amount), type: 'GUNNY_BAGS', description: desc, refKey });
-    } else if (data.type === 'SALE') {
+    // Purchase is on credit (no auto payment).
+    // Sale -> linked Receipt (gunny bag sales income)
+    // Payment -> linked Payment (cash/bank paid to Feroz)
+    if (data.type === 'SALE') {
       await LedgerService.recordLinkedReceipt(tx, { date: data.date, amount: Number(data.amount), type: 'GUNNY_BAGS_SALE', description: desc, refKey });
     } else if (data.type === 'PAYMENT') {
       await LedgerService.recordLinkedPayment(tx, { date: data.date, amount: Number(data.amount), type: 'GUNNY_BAGS', description: desc, refKey });

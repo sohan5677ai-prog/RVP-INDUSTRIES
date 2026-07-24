@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 export const createGunnyBagSchema = z.object({
   date: z.coerce.date(),
-  direction: z.enum(['PURCHASE', 'SALE']),
-  quantity: z.coerce.number().int().positive(),
-  amount: z.coerce.number().nonnegative(),
+  type: z.enum(['PURCHASE', 'SALE', 'PAYMENT']),
+  quantity: z.coerce.number().int().positive().optional(), // null for PAYMENT entries
+  amount: z.coerce.number().nonnegative(), // PURCHASE/SALE amount (for PAYMENT, this is the paid amount)
   note: z.string().trim().optional().nullable(),
 });
 

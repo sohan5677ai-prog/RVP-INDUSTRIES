@@ -18,29 +18,29 @@ import type { ExportColumn } from '@/lib/export';
 interface GunnyBagEntry {
   id: string;
   date: string;
-  direction: 'PURCHASE' | 'SALE';
-  quantity: number;
-  amount: string;
+  type: 'PURCHASE' | 'SALE' | 'PAYMENT';
+  quantity: number | null;
+  debit: number;
+  credit: number;
+  payment: number;
   note: string | null;
 }
 
-// A ledger row = a GunnyBagEntry plus the running balance after it. Every entry
-// auto-posts a full linked Payment/Receipt at record time (see poolReport.controller
-// createGunnyBag), so "Paid" always equals the entry amount — there is no
-// on-credit state to track. Balance is the running net cost (purchases − sales)
-// still carried on Feroz's account.
+// A ledger row = a GunnyBagEntry plus the running balance after it.
+// Debit (purchase) increases balance, Credit (sale) decreases it.
+// Balance tracks the account payable to Feroz.
 interface LedgerRow extends GunnyBagEntry {
   balance: number;
 }
 
 const FEROZ_LEDGER_COLUMNS: ExportColumn<LedgerRow>[] = [
   { header: 'Date', value: (r) => shortDate(r.date) },
-  { header: 'Type', value: (r) => (r.direction === 'PURCHASE' ? 'Purchase' : 'Sale') },
-  { header: 'Bags', value: (r) => r.quantity, numFmt: '#,##0', align: 'right' },
-  { header: 'Purchase Amount', value: (r) => (r.direction === 'PURCHASE' ? rupees(r.amount) : ''), excel: (r) => (r.direction === 'PURCHASE' ? Number(r.amount) : 0), numFmt: '#,##0.00', align: 'right' },
-  { header: 'Sale Amount', value: (r) => (r.direction === 'SALE' ? rupees(r.amount) : ''), excel: (r) => (r.direction === 'SALE' ? Number(r.amount) : 0), numFmt: '#,##0.00', align: 'right' },
-  { header: 'Paid', value: (r) => rupees(r.amount), excel: (r) => Number(r.amount), numFmt: '#,##0.00', align: 'right' },
-  { header: 'Balance', value: (r) => rupees(r.balance), excel: (r) => r.balance, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Type', value: (r) => ({ PURCHASE: 'Purchase', SALE: 'Sale', PAYMENT: 'Payment' }[r.type]) },
+  { header: 'Bags', value: (r) => r.quantity?.toLocaleString('en-IN') ?? '', numFmt: '#,##0', align: 'right' },
+  { header: 'Debit', value: (r) => (r.debit ? rupees(r.debit) : ''), excel: (r) => r.debit || 0, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Credit', value: (r) => (r.credit ? rupees(r.credit) : ''), excel: (r) => r.credit || 0, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Payment', value: (r) => (r.payment ? rupees(r.payment) : ''), excel: (r) => r.payment || 0, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Balance', value: (r) => rupees(Math.abs(r.balance)) + ' ' + (r.balance >= 0 ? 'DR' : 'CR'), excel: (r) => r.balance, numFmt: '#,##0.00', align: 'right' },
   { header: 'Note', value: (r) => r.note ?? '' },
 ];
 
@@ -49,7 +49,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export default function GunnyBags({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ date: today(), direction: 'PURCHASE', quantity: '', amount: '', note: '' });
+  const [form, setForm] = useState({ date: today(), type: 'PURCHASE' as 'PURCHASE' | 'SALE' | 'PAYMENT', quantity: '', amount: '', note: '' });
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['gunny-bags'],
@@ -68,7 +68,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       setOpen(false);
-      setForm({ date: today(), direction: 'PURCHASE', quantity: '', amount: '', note: '' });
+      setForm({ date: today(), type: 'PURCHASE', quantity: '', amount: '', note: '' });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -89,27 +89,30 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
   });
 
   function submit() {
-    const quantity = parseInt(form.quantity, 10);
+    const quantity = form.quantity ? parseInt(form.quantity, 10) : null;
     const amount = parseFloat(form.amount);
-    if (!form.date || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(amount) || amount < 0) {
-      toast.error('Enter a valid date, quantity and amount');
+    if (!form.date || !Number.isFinite(amount) || amount < 0) {
+      toast.error('Enter a valid date and amount');
       return;
     }
-    createMutation.mutate({ date: form.date, direction: form.direction, quantity, amount, note: form.note || null });
+    if ((form.type === 'PURCHASE' || form.type === 'SALE') && (!quantity || quantity <= 0)) {
+      toast.error('Enter a valid quantity for Purchase/Sale');
+      return;
+    }
+    createMutation.mutate({ date: form.date, type: form.type, quantity, amount, note: form.note || null });
   }
 
-  const purchased = rows.filter((r) => r.direction === 'PURCHASE');
-  const sold = rows.filter((r) => r.direction === 'SALE');
-  const totalPurchased = purchased.reduce((s, r) => s + Number(r.amount), 0);
-  const totalSold = sold.reduce((s, r) => s + Number(r.amount), 0);
-  const netCost = totalPurchased - totalSold;
+  const totalDebits = rows.reduce((s, r) => s + r.debit, 0);
+  const totalCredits = rows.reduce((s, r) => s + r.credit, 0);
+  const netBalance = totalDebits - totalCredits;
 
   // Account-statement style: oldest first, running balance carried forward.
+  // Balance = cumulative (debit - credit); payment doesn't affect balance, just tracks cash.
   const ledgerRows: LedgerRow[] = useMemo(() => {
     const asc = [...rows].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     let running = 0;
     return asc.map((r) => {
-      running += r.direction === 'PURCHASE' ? Number(r.amount) : -Number(r.amount);
+      running += r.debit - r.credit;
       return { ...r, balance: Math.round(running * 100) / 100 };
     });
   }, [rows]);
@@ -139,9 +142,9 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Bags purchased" value={rupees(totalPurchased)} icon={ReceiptText} tone="clay" hint={`${purchased.reduce((s, r) => s + r.quantity, 0)} bags`} />
-        <StatCard label="Bags sold" value={rupees(totalSold)} icon={ReceiptText} tone="forest" hint={`${sold.reduce((s, r) => s + r.quantity, 0)} bags`} />
-        <StatCard label="Net balance (to husk pool)" value={rupees(netCost)} icon={ReceiptText} tone="amber" hint="purchases − sales" />
+        <StatCard label="Total debits" value={rupees(totalDebits)} icon={ReceiptText} tone="clay" hint="purchases booked" />
+        <StatCard label="Total credits" value={rupees(totalCredits)} icon={ReceiptText} tone="forest" hint="sales booked" />
+        <StatCard label="Payable to Feroz" value={rupees(netBalance)} icon={ReceiptText} tone="amber" hint="debit − credit" />
       </div>
 
       <div className="rounded-lg border bg-card overflow-auto">
@@ -152,9 +155,9 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
               <TableHead>Date</TableHead>
               <TableHead>Type</TableHead>
               <TableHead className="text-right">Bags</TableHead>
-              <TableHead className="text-right">Purchase Amount</TableHead>
-              <TableHead className="text-right">Sale Amount</TableHead>
-              <TableHead className="text-right">Paid</TableHead>
+              <TableHead className="text-right">Debit</TableHead>
+              <TableHead className="text-right">Credit</TableHead>
+              <TableHead className="text-right">Payment</TableHead>
               <TableHead className="text-right">Balance</TableHead>
               <TableHead>Note</TableHead>
               <TableHead className="text-center">Action</TableHead>
@@ -169,16 +172,14 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
               <TableRow key={r.id}>
                 <TableCell>{shortDate(r.date)}</TableCell>
                 <TableCell>
-                  <span className={`font-semibold ${r.direction === 'PURCHASE' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                    {r.direction === 'PURCHASE' ? 'Purchase' : 'Sale'}
+                  <span className={`font-semibold ${r.type === 'PURCHASE' ? 'text-rose-600 dark:text-rose-400' : r.type === 'SALE' ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                    {r.type === 'PURCHASE' ? 'Purchase' : r.type === 'SALE' ? 'Sale' : 'Payment'}
                   </span>
                 </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{r.quantity.toLocaleString('en-IN')}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{r.direction === 'PURCHASE' ? rupees(r.amount) : <span className="text-muted-foreground/50">-</span>}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{r.direction === 'SALE' ? rupees(r.amount) : <span className="text-muted-foreground/50">-</span>}</TableCell>
-                <TableCell className={`text-right font-mono tabular-nums ${r.direction === 'PURCHASE' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                  {rupees(r.amount)}
-                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{r.quantity ? r.quantity.toLocaleString('en-IN') : '-'}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{r.debit ? rupees(r.debit) : <span className="text-muted-foreground/50">-</span>}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{r.credit ? rupees(r.credit) : <span className="text-muted-foreground/50">-</span>}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{r.payment ? rupees(r.payment) : <span className="text-muted-foreground/50">-</span>}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums font-semibold">
                   {rupees(Math.abs(r.balance))} <span className="text-[9px] font-bold text-muted-foreground">{r.balance >= 0 ? 'DR' : 'CR'}</span>
                 </TableCell>
@@ -196,7 +197,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record Gunny Bags</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Record Feroz Ledger Entry</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -204,21 +205,31 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
             </div>
             <div className="space-y-1">
               <Label>Type</Label>
-              <Select value={form.direction} onValueChange={(v) => setForm((f) => ({ ...f, direction: v }))}>
+              <Select value={form.type} onValueChange={(v: any) => setForm((f) => ({ ...f, type: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="PURCHASE">Purchase (bags bought)</SelectItem>
+                  <SelectItem value="PURCHASE">Purchase (bags bought, auto-paid)</SelectItem>
                   <SelectItem value="SALE">Sale (bags sold)</SelectItem>
+                  <SelectItem value="PAYMENT">Payment (cash paid to Feroz)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {form.type !== 'PAYMENT' && (
+              <div className="space-y-1">
+                <Label>Number of bags</Label>
+                <Input type="number" value={form.quantity} onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} />
+              </div>
+            )}
             <div className="space-y-1">
-              <Label>Number of bags</Label>
-              <Input type="number" value={form.quantity} onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Total amount (₹)</Label>
-              <Input type="number" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
+              <Label>
+                Amount (₹) {form.type === 'PURCHASE' && <span className="text-xs text-muted-foreground ml-1">(auto-paid)</span>}
+              </Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.amount}
+                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+              />
             </div>
             <div className="space-y-1">
               <Label>Note (optional)</Label>

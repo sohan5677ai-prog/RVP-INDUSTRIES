@@ -1005,17 +1005,30 @@ enum GunnyBagDirection {
   SALE
 }
 
+enum GunnyBagEntryType {
+  PURCHASE  // Bags bought (debit, husk-pool cost)
+  SALE      // Bags sold (credit, gunny-sales income)
+  PAYMENT   // Cash paid (separate payment line, reduces payable)
+}
+
 // Gunny (bardana) bags bought or sold — the "Feroz Ledger". PURCHASE is a husk-pool
 // cost; SALE is booked separately as husk-pool income (Gunny Sales), not netted
 // against the purchase cost (see computeHuskPool / getProfitLoss income section).
+// PAYMENT tracks cash paid out to Feroz (reduces the payable balance).
 model GunnyBagEntry {
-  id        String            @id @default(cuid())
+  id        String             @id @default(cuid())
   date      DateTime
-  direction GunnyBagDirection
-  quantity  Int // number of bags
-  amount    Decimal           @db.Decimal(12, 2) // total ₹ for this entry
+  type      GunnyBagEntryType  @default(PURCHASE)
+  // Legacy fields (kept for backward compat during migration)
+  direction GunnyBagDirection?
+  amount    Decimal?           @db.Decimal(12, 2)
+  // New fields (ledger-style: separate debit/credit columns + payment tracking)
+  quantity  Int? // number of bags (null for PAYMENT entries)
+  debit     Decimal            @default(0) @db.Decimal(12, 2) // PURCHASE amount or 0
+  credit    Decimal            @default(0) @db.Decimal(12, 2) // SALE amount or 0
+  payment   Decimal            @default(0) @db.Decimal(12, 2) // cash paid (PURCHASE auto-fills this, PAYMENT sets it)
   note      String?
-  createdAt DateTime          @default(now())
+  createdAt DateTime           @default(now())
 }
 
 // Free-form "Other Income" entries (husk-pool Income tab) — anything that doesn't

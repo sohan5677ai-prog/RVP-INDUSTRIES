@@ -196,7 +196,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       `,
       prisma.purchase.aggregate({ _sum: { hamaliCharge: true } }),
       (prisma.manualHamaliCost.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
-      (prisma.gunnyBagEntry.groupBy as any)({ by: ['direction'], _sum: { amount: true } }),
+      // Sum debit (purchases) and credit (sales) separately; ignore PAYMENT type (doesn't affect husk cost)
+      prisma.gunnyBagEntry.aggregate({ _sum: { debit: true, credit: true } }),
       prisma.electricityBill.aggregate({ _sum: { amount: true } }),
       prisma.maintenanceExpense.aggregate({ _sum: { amount: true } }),
       prisma.miscExpense.aggregate({ _sum: { amount: true } }),
@@ -282,11 +283,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
 
     // Purchases are a husk-pool cost; sales are booked separately as income
     // (gunnySales below), not netted here — see [[expense-pages-linked-payments]].
-    const gunny = Object.fromEntries(
-      (gunnyByDir as any[]).map((r) => [r.direction, Number(r._sum.amount ?? 0)]),
-    );
-    const gunnyBags = gunny['PURCHASE'] ?? 0;
-    const gunnySales = gunny['SALE'] ?? 0;
+    const gunnyBags = Number(gunnyByDir._sum.debit ?? 0);
+    const gunnySales = Number(gunnyByDir._sum.credit ?? 0);
     const electricity = Number(electricityAgg._sum.amount ?? 0);
     const maintenance = Number(maintenanceAgg._sum.amount ?? 0);
     const miscExpense = Number(miscExpenseAgg._sum.amount ?? 0);

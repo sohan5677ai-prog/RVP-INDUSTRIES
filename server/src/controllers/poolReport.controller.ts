@@ -26,30 +26,63 @@ async function reverseLinkedEntry(tx: Prisma.TransactionClient, refKey: string) 
 
 // ── Gunny bags ────────────────────────────────────────────────────────────────
 export async function listGunnyBags(_req: Request, res: Response) {
-  res.json(await prisma.gunnyBagEntry.findMany({ orderBy: { date: 'desc' } }));
+  const rows = await prisma.gunnyBagEntry.findMany({ orderBy: { date: 'desc' } });
+  // Backfill in-memory for old rows (direction is set but debit/credit are 0)
+  const backfilled = rows.map((r) => {
+    const debitVal = Number(r.debit || 0);
+    const creditVal = Number(r.credit || 0);
+    if (debitVal === 0 && creditVal === 0 && r.direction) {
+      return {
+        ...r,
+        debit: r.direction === 'PURCHASE' ? Number(r.amount || 0) : 0,
+        credit: r.direction === 'SALE' ? Number(r.amount || 0) : 0,
+        payment: r.direction === 'PURCHASE' ? Number(r.amount || 0) : 0,
+      };
+    }
+    return r;
+  });
+  res.json(backfilled);
 }
 
 export async function createGunnyBag(req: Request, res: Response) {
   const data = createGunnyBagSchema.parse(req.body);
   const created = await prisma.$transaction(async (tx) => {
+    // Populate debit/credit/payment based on type
+    let debit = 0, credit = 0, payment = 0;
+    if (data.type === 'PURCHASE') {
+      debit = Number(data.amount);
+      payment = Number(data.amount); // auto-paid
+    } else if (data.type === 'SALE') {
+      credit = Number(data.amount);
+    } else if (data.type === 'PAYMENT') {
+      payment = Number(data.amount);
+    }
+
     const row = await tx.gunnyBagEntry.create({
       data: {
         date: data.date,
-        direction: data.direction,
-        quantity: data.quantity,
-        amount: data.amount,
+        type: data.type,
+        quantity: data.quantity ?? null,
+        debit,
+        credit,
+        payment,
         note: data.note ?? null,
+        // Backfill legacy fields for old data that might still reference them
+        direction: data.type === 'PURCHASE' ? 'PURCHASE' : data.type === 'SALE' ? 'SALE' : null,
+        amount: data.amount,
       },
     });
     const refKey = `GUNNYBAG-${row.id}`;
-    const desc = `${data.quantity} bags${data.note ? ` — ${data.note}` : ''}`;
-    // Purchase → a Payment (expense); Sale → a Receipt (income). Both show on the
-    // Payments/Receipts pages and in the main P&L; the Husk Pool report keeps
-    // reading the gunnyBagEntry table directly, so it is unaffected.
-    if (data.direction === 'PURCHASE') {
+    const bagDesc = data.quantity ? `${data.quantity} bags` : 'Payment';
+    const desc = `${bagDesc}${data.note ? ` — ${data.note}` : ''}`;
+
+    // Purchase & Sale → linked Payment/Receipt; Payment → just a Payment (no receipt)
+    if (data.type === 'PURCHASE') {
       await LedgerService.recordLinkedPayment(tx, { date: data.date, amount: Number(data.amount), type: 'GUNNY_BAGS', description: desc, refKey });
-    } else {
+    } else if (data.type === 'SALE') {
       await LedgerService.recordLinkedReceipt(tx, { date: data.date, amount: Number(data.amount), type: 'GUNNY_BAGS_SALE', description: desc, refKey });
+    } else if (data.type === 'PAYMENT') {
+      await LedgerService.recordLinkedPayment(tx, { date: data.date, amount: Number(data.amount), type: 'GUNNY_BAGS', description: desc, refKey });
     }
     return row;
   });

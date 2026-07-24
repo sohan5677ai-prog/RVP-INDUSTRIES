@@ -11,16 +11,16 @@ import type { ExportColumn } from '@/lib/export';
 interface GunnyBagEntry {
   id: string;
   date: string;
-  direction: 'PURCHASE' | 'SALE';
-  quantity: number;
-  amount: string;
+  type: 'PURCHASE' | 'SALE' | 'PAYMENT';
+  quantity: number | null;
+  credit: number;
   note: string | null;
 }
 
 const GUNNY_SALES_COLUMNS: ExportColumn<GunnyBagEntry>[] = [
   { header: 'Date', value: (r) => shortDate(r.date) },
-  { header: 'Bags', value: (r) => r.quantity, numFmt: '#,##0', align: 'right' },
-  { header: 'Amount', value: (r) => rupees(r.amount), excel: (r) => Number(r.amount), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Bags', value: (r) => r.quantity?.toLocaleString('en-IN') ?? '', numFmt: '#,##0', align: 'right' },
+  { header: 'Amount', value: (r) => rupees(r.credit), excel: (r) => r.credit, numFmt: '#,##0.00', align: 'right' },
   { header: 'Note', value: (r) => r.note ?? '' },
 ];
 
@@ -33,9 +33,9 @@ export default function GunnySales() {
     queryFn: () => api<GunnyBagEntry[]>('/gunny-bags'),
   });
 
-  const sold = rows.filter((r) => r.direction === 'SALE').sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const total = sold.reduce((s, r) => s + Number(r.amount), 0);
-  const bags = sold.reduce((s, r) => s + r.quantity, 0);
+  const sold = rows.filter((r) => r.type === 'SALE').sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const total = sold.reduce((s, r) => s + r.credit, 0);
+  const bags = sold.reduce((s, r) => s + (r.quantity ?? 0), 0);
 
   return (
     <div className="space-y-7">
@@ -70,8 +70,8 @@ export default function GunnySales() {
             ) : sold.map((r) => (
               <TableRow key={r.id}>
                 <TableCell>{shortDate(r.date)}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{r.quantity.toLocaleString('en-IN')}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{rupees(r.amount)}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{r.quantity?.toLocaleString('en-IN') ?? '-'}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{rupees(r.credit)}</TableCell>
                 <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
               </TableRow>
             ))}

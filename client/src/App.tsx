@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SubscriptionBoundary from '@/components/SubscriptionBoundary';
@@ -79,7 +79,6 @@ const PurchaseStatement = lazyWithPreload('/purchases/:purchaseId/statement', ()
 const PartyLedger = lazyWithPreload('/accounts/party-ledger', () => import('@/pages/PartyLedger'));
 const HamaliLedger = lazyWithPreload('/accounts/hamali-ledger', () => import('@/pages/HamaliLedger'));
 const KataFeeLedger = lazyWithPreload('/accounts/kata-fee-ledger', () => import('@/pages/KataFeeLedger'));
-const SuryaRoadTransport = lazyWithPreload('/accounts/surya-road-transport', () => import('@/pages/SuryaRoadTransport'));
 const BrokerageLedger = lazyWithPreload('/accounts/brokerage-ledger', () => import('@/pages/BrokerageLedger'));
 const Ledgers = lazyWithPreload('/accounts/chart-of-accounts', () => import('@/pages/Ledgers'));
 const BalanceSheet = lazyWithPreload('/accounts/balance-sheet', () => import('@/pages/BalanceSheet'));
@@ -87,9 +86,7 @@ const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/page
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
-const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/Reports/Taxes'));
-const GstReport = lazyWithPreload('/reports/gst', () => import('@/pages/Reports/GstReport'));
-const TdsReport = lazyWithPreload('/reports/tds', () => import('@/pages/Reports/TdsReport'));
+const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/reports/Taxes'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));

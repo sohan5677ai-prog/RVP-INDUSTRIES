@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, ChevronDown, Target, ShoppingCart, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, ChevronDown, Target, ShoppingCart, AlertTriangle, CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { api } from '@/lib/api';
 import { kg, rupees, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -86,6 +86,8 @@ export default function StockByParty() {
   const [targetInput, setTargetInput] = useState('');
   const [buyPriceInput, setBuyPriceInput] = useState('');
   const [locationFilter, setLocationFilter] = useState<LocationFilter>('ALL');
+  const [sortField, setSortField] = useState<'netStockKg' | 'weightedAveragePrice' | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const { data: partyStocks, isLoading } = useQuery<PartyStock[]>({
     queryKey: ['party-stocks', locationFilter],
@@ -149,6 +151,23 @@ export default function StockByParty() {
     );
   }) ?? [];
 
+  function handleSort(field: 'netStockKg' | 'weightedAveragePrice') {
+    if (sortField === field) {
+      setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortField(field);
+      setSortOrder('desc');
+    }
+  }
+
+  const sortedPartyStocks = [...filteredPartyStocks].sort((a, b) => {
+    if (!sortField) return 0;
+    const valA = a[sortField] ?? 0;
+    const valB = b[sortField] ?? 0;
+    if (valA === valB) return 0;
+    return sortOrder === 'desc' ? valB - valA : valA - valB;
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -161,17 +180,17 @@ export default function StockByParty() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Stock by Party</h1>
+          <h1 className="text-2xl font-bold">Purchases by Party</h1>
           <p className="text-muted-foreground">
             Track raw black seed stock balances credited to individual suppliers with price pooling
           </p>
         </div>
         <ExportButtons
-          filename="Stock_By_Party"
-          title="Stock by Party"
-          subtitle={`${filteredPartyStocks.length} supplier(s)`}
+          filename="Purchases_By_Party"
+          title="Purchases by Party"
+          subtitle={`${sortedPartyStocks.length} supplier(s)`}
           columns={PARTY_STOCK_COLUMNS}
-          rows={filteredPartyStocks}
+          rows={sortedPartyStocks}
         />
       </div>
 
@@ -420,8 +439,44 @@ export default function StockByParty() {
               <TableHead className="w-10"></TableHead>
               <TableHead>Supplier Party</TableHead>
               <TableHead>Location / Address</TableHead>
-              <TableHead className="text-right font-bold text-primary">Total Received Stock</TableHead>
-              <TableHead className="text-right">Avg Cost (WAC)</TableHead>
+              <TableHead className="text-right">
+                <button
+                  type="button"
+                  onClick={() => handleSort('netStockKg')}
+                  className="inline-flex items-center gap-1.5 font-bold text-primary hover:opacity-80 transition-opacity ml-auto cursor-pointer"
+                  title="Click to sort by Total Received Stock (Descending / Ascending)"
+                >
+                  <span>Total Received Stock</span>
+                  {sortField === 'netStockKg' ? (
+                    sortOrder === 'desc' ? (
+                      <ArrowDown className="h-4 w-4 text-primary shrink-0" />
+                    ) : (
+                      <ArrowUp className="h-4 w-4 text-primary shrink-0" />
+                    )
+                  ) : (
+                    <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                  )}
+                </button>
+              </TableHead>
+              <TableHead className="text-right">
+                <button
+                  type="button"
+                  onClick={() => handleSort('weightedAveragePrice')}
+                  className="inline-flex items-center gap-1.5 font-semibold text-foreground hover:opacity-80 transition-opacity ml-auto cursor-pointer"
+                  title="Click to sort by Avg Cost WAC (Descending / Ascending)"
+                >
+                  <span>Avg Cost (WAC)</span>
+                  {sortField === 'weightedAveragePrice' ? (
+                    sortOrder === 'desc' ? (
+                      <ArrowDown className="h-4 w-4 text-amber-600 shrink-0" />
+                    ) : (
+                      <ArrowUp className="h-4 w-4 text-amber-600 shrink-0" />
+                    )
+                  ) : (
+                    <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                  )}
+                </button>
+              </TableHead>
               <TableHead className="text-right">Valuation</TableHead>
               <TableHead className="text-right">
                 {planActive ? `Buy to reach ${rupees(targetAvg)}` : 'Buy to reach target'}
@@ -429,14 +484,14 @@ export default function StockByParty() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredPartyStocks.length === 0 ? (
+            {sortedPartyStocks.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No supplier stock details found.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredPartyStocks.map((p) => {
+              sortedPartyStocks.map((p) => {
                 const isExpanded = expandedParties.has(p.partyId);
                 const hasStock = p.netStockKg > 0;
                 

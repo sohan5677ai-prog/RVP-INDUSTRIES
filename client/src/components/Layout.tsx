@@ -80,7 +80,7 @@ const sections: NavSection[] = [
       { to: '/stock/date', label: 'Stock by Date (FIFO)', icon: CalendarDays },
       { to: '/stock/location', label: 'Stock by Location (Band Price)', icon: MapPin },
       { to: '/stock/transfer', label: 'Stock Transfer', icon: ArrowLeftRight },
-      { to: '/stock/party', label: 'Stock by Party', icon: Users },
+      { to: '/stock/party', label: 'Purchases by Party', icon: Users },
       { to: '/stock/state', label: 'Stock by State', icon: Globe },
     ],
   },

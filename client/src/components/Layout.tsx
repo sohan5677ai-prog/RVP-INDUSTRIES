@@ -117,7 +117,7 @@ const sections: NavSection[] = [
       { to: '/accounts/hamali-ledger', label: 'Hamali Report', icon: Coins },
       { to: '/accounts/kata-fee-ledger', label: 'Kata Report', icon: Receipt },
       { to: '/accounts/surya-road-transport', label: 'Transport Report', icon: Truck },
-      { to: '/reports/expenses', label: 'Expenses', icon: Wallet },
+      { to: '/reports/expenses', label: 'Income & Expenses', icon: Wallet },
     ],
   },
   {

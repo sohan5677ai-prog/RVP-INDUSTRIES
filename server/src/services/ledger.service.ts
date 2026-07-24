@@ -59,6 +59,7 @@ export const INCOME_RECEIPT_ACCOUNTS: Record<
   SCRAP_SALE: { code: '40120', name: 'Scrap & Waste Sales', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 21 },
   HAMALI_INCOME: { code: '40030', name: 'Hamali Income', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 2 },
   INTEREST_INCOME: { code: '40130', name: 'Interest Income', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 22 },
+  OTHER_INCOME: { code: '40140', name: 'Other Income', group: 'Indirect Incomes', type: 'REVENUE', sortOrder: 23 },
 };
 
 /** All receipt `type` values accepted by the ERP (receivable collection + direct incomes). */

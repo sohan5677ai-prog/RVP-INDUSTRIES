@@ -82,7 +82,7 @@ const KATA_EXPORT_COLUMNS: ExportColumn<KataEntry>[] = [
   { header: 'Kata Fee', value: (e) => rupees(e.kataFee), excel: (e) => e.kataFee, numFmt: '#,##0.00', align: 'right' },
 ];
 
-export default function KataFeeLedger() {
+export default function KataFeeLedger({ embedded = false }: { embedded?: boolean } = {}) {
   const [partyId, setPartyId] = useState<string>('ALL');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -267,10 +267,14 @@ export default function KataFeeLedger() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Kata Report</h1>
-          <p className="text-muted-foreground">Weighbridge fees across purchases, dust buys, sale freight and byproduct transfers (KNM vehicles exempt)</p>
-        </div>
+        {embedded ? (
+          <p className="text-sm text-muted-foreground">Weighbridge fees collected across purchases, dust buys, sale freight and byproduct transfers — booked as Kata Income (KNM vehicles exempt).</p>
+        ) : (
+          <div>
+            <h1 className="text-2xl font-bold">Kata Report</h1>
+            <p className="text-muted-foreground">Weighbridge fees across purchases, dust buys, sale freight and byproduct transfers (KNM vehicles exempt)</p>
+          </div>
+        )}
         <ExportButtons
           filename="Kata_Report"
           title="Kata (Weighbridge) Report"

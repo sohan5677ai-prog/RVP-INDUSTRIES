@@ -51,10 +51,18 @@ export interface HuskExpenses {
   loanInterestUnabsorbed: number;
   termLoanPrincipal: number;
 }
+export interface HuskIncome {
+  kataIncome: number;
+  hamaliCompanyProfit: number;
+  gunnySales: number;
+  otherIncome: number;
+}
 export interface HuskPnl {
   revenue: number;
   expenses: HuskExpenses;
+  income: HuskIncome;
   totalExpenses: number;
+  totalIncomeAdd: number;
   netRecovery: number;
 }
 
@@ -83,7 +91,7 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'tpsBrokensPacking', label: 'TPS Brokens Packing' },
   { key: 'tamarindByproductsPacking', label: 'Tamarind Byproducts Packing' },
   { key: 'misc', label: 'Miscellaneous' },
-  { key: 'gunnyBags', label: 'Gunny Bags (net)' },
+  { key: 'gunnyBags', label: 'Gunny Bags (purchases)' },
   { key: 'electricity', label: 'Electricity' },
   { key: 'maintenance', label: 'Maintenance' },
   { key: 'miscExpense', label: 'Miscellaneous Expenses' },
@@ -95,6 +103,14 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'termLoanInterest', label: 'Term Loan Interest' },
   { key: 'loanInterestUnabsorbed', label: 'Loan Interest (unabsorbed)' },
   { key: 'termLoanPrincipal', label: 'Term Loan Principal' },
+];
+
+// Display order + labels for the itemized husk-pool income streams.
+const HUSK_INCOME_ROWS: { key: keyof HuskIncome; label: string }[] = [
+  { key: 'kataIncome', label: 'Kata Income' },
+  { key: 'hamaliCompanyProfit', label: 'Hamali Company Profit' },
+  { key: 'gunnySales', label: 'Gunny Bag Sales' },
+  { key: 'otherIncome', label: 'Other Income' },
 ];
 
 // Theme-aware colours - CSS vars adapt automatically to dark mode.
@@ -345,6 +361,23 @@ export default function DashboardCharts({ data, accounts, purchases, poAll, sale
                 <div className={`text-2xl font-bold tracking-tight ${(huskPnl?.netRecovery ?? 0) >= 0 ? 'text-forest' : 'text-destructive'}`}>
                   {rupees(huskPnl?.netRecovery ?? 0)}
                 </div>
+                <div className="text-[10px] text-muted-foreground mt-1">Byproduct sales + other income − pooled expenses</div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Other Income Streams</span>
+                  <span className="font-mono text-xs text-muted-foreground">{rupees(huskPnl?.totalIncomeAdd ?? 0)} total</span>
+                </div>
+                <div className="space-y-3">
+                  {HUSK_INCOME_ROWS.map((row) => (
+                    <IncomeBar
+                      key={row.key}
+                      label={row.label}
+                      value={huskPnl?.income?.[row.key] ?? 0}
+                      max={huskPnl?.totalIncomeAdd ?? 1}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -460,6 +493,21 @@ function ExpenseBar({ label, value, max }: { label: string; value: number; max: 
       </div>
       <div className="h-2 bg-muted/60 rounded-full overflow-hidden">
         <div className="h-full bg-rose-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function IncomeBar({ label, value, max }: { label: string; value: number; max: number }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div>
+      <div className="flex justify-between items-center text-xs mb-1.5">
+        <span className="font-medium text-muted-foreground">{label}</span>
+        <span className="font-mono text-foreground font-medium">{rupees(value)}</span>
+      </div>
+      <div className="h-2 bg-muted/60 rounded-full overflow-hidden">
+        <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );

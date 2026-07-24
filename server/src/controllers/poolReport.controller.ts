@@ -12,6 +12,7 @@ import {
   createInterestChargeSchema,
   createTermLoanPrincipalSchema,
   createStorageMaintenanceSchema,
+  createOtherIncomeSchema,
 } from '../schemas/poolReport.schema.js';
 
 /**
@@ -349,4 +350,43 @@ export async function deleteStorageMaintenance(req: Request, res: Response) {
     await tx.storageMaintenanceExpense.delete({ where: { id: row.id } });
   });
   res.json({ message: 'Storage maintenance entry deleted' });
+}
+
+// ── Other income (husk-pool Income tab catch-all) ──────────────────────────────
+export async function listOtherIncome(_req: Request, res: Response) {
+  res.json(await prisma.otherIncomeEntry.findMany({ orderBy: { date: 'desc' } }));
+}
+
+export async function createOtherIncome(req: Request, res: Response) {
+  const data = createOtherIncomeSchema.parse(req.body);
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.otherIncomeEntry.create({
+      data: {
+        date: data.date,
+        label: data.label,
+        amount: data.amount,
+        note: data.note ?? null,
+      },
+    });
+    await LedgerService.recordLinkedReceipt(tx, {
+      date: data.date,
+      amount: Number(data.amount),
+      type: 'OTHER_INCOME',
+      payer: data.label,
+      description: data.note ?? undefined,
+      refKey: `OTHERINCOME-${row.id}`,
+    });
+    return row;
+  });
+  res.status(201).json(created);
+}
+
+export async function deleteOtherIncome(req: Request, res: Response) {
+  const row = await prisma.otherIncomeEntry.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Other income entry not found');
+  await prisma.$transaction(async (tx) => {
+    await reverseLinkedEntry(tx, `OTHERINCOME-${row.id}`);
+    await tx.otherIncomeEntry.delete({ where: { id: row.id } });
+  });
+  res.json({ message: 'Other income entry deleted' });
 }

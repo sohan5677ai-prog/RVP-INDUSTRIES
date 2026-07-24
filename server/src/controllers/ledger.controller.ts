@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
-import { computeHuskPool, HUSK_EXPENSE_META } from './dashboard.controller.js';
+import { computeHuskPool, HUSK_EXPENSE_META, HUSK_INCOME_META } from './dashboard.controller.js';
 
 // ---------------------------------------------------------------------------
 // Tally-style grouped reporting. Every ledger's closing balance is SIGNED:
@@ -247,7 +247,15 @@ export async function getProfitLoss(_req: Request, res: Response) {
     .sort((a, b) => b.amount - a.amount);
   const overheadExpenses = r2(overheadLedgers.reduce((s, l) => s + l.amount, 0));
 
-  const huskPoolNet = r2(byproductIncome - overheadExpenses); // surplus + / deficit −
+  // Income tab streams (Kata Income, Hamali Company Profit, Gunny Sales, Other
+  // Income) — added to the husk pool as income, same as the byproduct sales.
+  const incomeLines = HUSK_INCOME_META
+    .map((m) => ({ code: m.key, name: m.label, amount: r2(huskPool.income[m.key]) }))
+    .filter((l) => Math.abs(l.amount) >= 0.005)
+    .sort((a, b) => b.amount - a.amount);
+  const otherIncomeTotal = r2(incomeLines.reduce((s, l) => s + l.amount, 0));
+
+  const huskPoolNet = r2(byproductIncome + otherIncomeTotal - overheadExpenses); // surplus + / deficit −
   const netProfit = r2(pappuProfitLoss + huskPoolNet);
 
   res.json({
@@ -256,6 +264,8 @@ export async function getProfitLoss(_req: Request, res: Response) {
     huskPool: {
       byproductIncome,
       byproducts,
+      otherIncomeTotal,
+      incomeLines,
       overheadExpenses,
       overheadLedgers,
       net: huskPoolNet,

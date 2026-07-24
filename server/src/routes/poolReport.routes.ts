@@ -9,6 +9,7 @@ import {
   listInterestCharges, createInterestCharge, deleteInterestCharge,
   listTermLoanPrincipals, createTermLoanPrincipal, deleteTermLoanPrincipal,
   listStorageMaintenance, createStorageMaintenance, deleteStorageMaintenance,
+  listOtherIncome, createOtherIncome, deleteOtherIncome,
 } from '../controllers/poolReport.controller.js';
 
 const router = Router();
@@ -44,5 +45,9 @@ router.delete('/term-loan-principals/:id', asyncHandler(deleteTermLoanPrincipal)
 router.get('/storage-maintenance', asyncHandler(listStorageMaintenance));
 router.post('/storage-maintenance', asyncHandler(createStorageMaintenance));
 router.delete('/storage-maintenance/:id', asyncHandler(deleteStorageMaintenance));
+
+router.get('/other-income', asyncHandler(listOtherIncome));
+router.post('/other-income', asyncHandler(createOtherIncome));
+router.delete('/other-income/:id', asyncHandler(deleteOtherIncome));
 
 export default router;

@@ -55,6 +55,7 @@ const RECEIPT_TYPE_GROUPS: { label: string; items: { value: ReceiptType; label: 
 const RECEIPT_TYPES: { value: ReceiptType; label: string }[] = [
   ...RECEIPT_TYPE_GROUPS.flatMap((g) => g.items),
   { value: 'GUNNY_BAGS_SALE', label: 'Gunny Bag Sales' },
+  { value: 'OTHER_INCOME', label: 'Other Income' },
 ];
 
 // Types that settle a specific buyer (they have their own picker below).
@@ -76,10 +77,11 @@ interface BuyerInvoice {
   gstExempt: boolean;    // whether 5% GST applies to the shortage deduction
 }
 
-// Receipts created from a detail page (currently only Gunny Bag sales).
+// Receipts created from a detail page (Gunny Bag sales, Other Income).
 // Read-only here — delete them on their own page so both sides stay in sync.
 const MANAGED_ELSEWHERE: Partial<Record<ReceiptType, string>> = {
   GUNNY_BAGS_SALE: 'Gunny Bags page',
+  OTHER_INCOME: 'Other Income page',
 };
 
 function receiptTypeLabel(r: Receipt): string {

@@ -1005,8 +1005,9 @@ enum GunnyBagDirection {
   SALE
 }
 
-// Gunny (bardana) bags bought or sold. Net cost fed to the husk pool =
-// Σ PURCHASE.amount − Σ SALE.amount.
+// Gunny (bardana) bags bought or sold — the "Feroz Ledger". PURCHASE is a husk-pool
+// cost; SALE is booked separately as husk-pool income (Gunny Sales), not netted
+// against the purchase cost (see computeHuskPool / getProfitLoss income section).
 model GunnyBagEntry {
   id        String            @id @default(cuid())
   date      DateTime
@@ -1015,6 +1016,18 @@ model GunnyBagEntry {
   amount    Decimal           @db.Decimal(12, 2) // total ₹ for this entry
   note      String?
   createdAt DateTime          @default(now())
+}
+
+// Free-form "Other Income" entries (husk-pool Income tab) — anything that doesn't
+// fit Kata Income, Hamali Company Profit or Gunny Sales. Posts a linked Receipt
+// (type OTHER_INCOME) the same way the expense detail pages post linked Payments.
+model OtherIncomeEntry {
+  id        String   @id @default(cuid())
+  date      DateTime
+  label     String
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String?
+  createdAt DateTime @default(now())
 }
 
 // Monthly electricity bill. `amount` (total bill) is the husk-pool expense; units

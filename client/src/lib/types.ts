@@ -505,12 +505,23 @@ export interface ProfitLoss {
   huskPool: {
     byproductIncome: number;
     byproducts: { product: string; amount: number }[];
+    otherIncomeTotal: number;
+    incomeLines: { code: string; name: string; amount: number }[];
     overheadExpenses: number;
     overheadLedgers: { code: string; name: string; amount: number }[];
     net: number;
     isDeficit: boolean;
   };
   totals: { netProfit: number; isProfit: boolean };
+}
+
+export interface OtherIncomeEntry {
+  id: string;
+  date: string;
+  label: string;
+  amount: string;
+  note: string | null;
+  createdAt: string;
 }
 
 export interface FreightRate {
@@ -630,6 +641,7 @@ export type ReceiptType =
   | 'SCRAP_SALE'
   | 'HAMALI_INCOME'
   | 'INTEREST_INCOME'
+  | 'OTHER_INCOME'
   | 'OTHER';
 
 export interface Receipt {

@@ -8,39 +8,74 @@ import Miscellaneous from '@/pages/Miscellaneous';
 import Drawings from '@/pages/Drawings';
 import Interest from '@/pages/Interest';
 import StorageMaintenance from '@/pages/StorageMaintenance';
+import KataFeeLedger from '@/pages/KataFeeLedger';
+import HamaliCompanyProfit from '@/pages/HamaliCompanyProfit';
+import GunnySales from '@/pages/GunnySales';
+import OtherIncome from '@/pages/OtherIncome';
 
 /**
- * Unified Expenses workspace. Clubs the standalone operating-expense reports
- * (Gunny Bags, Electricity, Maintenance, Miscellaneous, Drawings, Interest) plus
- * the Storage Maintenance tab into a single tabbed page. Every tab feeds the husk
- * recovery pool and the Profit & Loss.
+ * Unified Income & Expenses workspace.
+ *
+ * Expenses tab: the standalone operating-expense reports (Feroz Ledger/Gunny Bags,
+ * Electricity, Maintenance, Miscellaneous, Drawings, Interest) plus Storage
+ * Maintenance — unchanged from before. Every tab feeds the husk recovery pool
+ * and the Profit & Loss.
+ *
+ * Income tab: Kata Income, Hamali Company Profit, Gunny Sales and Other Income —
+ * all four are added to the husk recovery pool as income and to the Profit &
+ * Loss (Accounts section) as profit, alongside byproduct sales.
  */
 export default function Expenses() {
   return (
     <div className="space-y-7">
       <PageHeader
         icon={Wallet}
-        title="Expenses"
-        description="All operating expenses in one place. Each entry is deducted from the husk recovery pool and posts to the Profit & Loss."
+        title="Income & Expenses"
+        description="Every operating expense and every income stream in one place — both feed the husk recovery pool and the Profit & Loss."
       />
-      <Tabs defaultValue="gunny" className="gap-5">
-        <TabsList className="h-auto flex-wrap">
-          <TabsTrigger value="gunny">Gunny Bags</TabsTrigger>
-          <TabsTrigger value="electricity">Electricity</TabsTrigger>
-          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
-          <TabsTrigger value="misc">Miscellaneous</TabsTrigger>
-          <TabsTrigger value="drawings">Drawings</TabsTrigger>
-          <TabsTrigger value="interest">Interest</TabsTrigger>
-          <TabsTrigger value="storage">Storage Maintenance</TabsTrigger>
+      <Tabs defaultValue="expenses" className="gap-5">
+        <TabsList>
+          <TabsTrigger value="income">Income</TabsTrigger>
+          <TabsTrigger value="expenses">Expenses</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="gunny"><GunnyBags embedded /></TabsContent>
-        <TabsContent value="electricity"><Electricity embedded /></TabsContent>
-        <TabsContent value="maintenance"><Maintenance embedded /></TabsContent>
-        <TabsContent value="misc"><Miscellaneous embedded /></TabsContent>
-        <TabsContent value="drawings"><Drawings embedded /></TabsContent>
-        <TabsContent value="interest"><Interest embedded /></TabsContent>
-        <TabsContent value="storage"><StorageMaintenance /></TabsContent>
+        <TabsContent value="income">
+          <Tabs defaultValue="kata" className="gap-5">
+            <TabsList className="h-auto flex-wrap">
+              <TabsTrigger value="kata">Kata Income</TabsTrigger>
+              <TabsTrigger value="hamali">Hamali Company Profit</TabsTrigger>
+              <TabsTrigger value="gunny-sales">Gunny Sales</TabsTrigger>
+              <TabsTrigger value="other">Other Income</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="kata"><KataFeeLedger embedded /></TabsContent>
+            <TabsContent value="hamali"><HamaliCompanyProfit /></TabsContent>
+            <TabsContent value="gunny-sales"><GunnySales /></TabsContent>
+            <TabsContent value="other"><OtherIncome embedded /></TabsContent>
+          </Tabs>
+        </TabsContent>
+
+        <TabsContent value="expenses">
+          <Tabs defaultValue="gunny" className="gap-5">
+            <TabsList className="h-auto flex-wrap">
+              <TabsTrigger value="gunny">Feroz Ledger</TabsTrigger>
+              <TabsTrigger value="electricity">Electricity</TabsTrigger>
+              <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
+              <TabsTrigger value="misc">Miscellaneous</TabsTrigger>
+              <TabsTrigger value="drawings">Drawings</TabsTrigger>
+              <TabsTrigger value="interest">Interest</TabsTrigger>
+              <TabsTrigger value="storage">Storage Maintenance</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="gunny"><GunnyBags embedded /></TabsContent>
+            <TabsContent value="electricity"><Electricity embedded /></TabsContent>
+            <TabsContent value="maintenance"><Maintenance embedded /></TabsContent>
+            <TabsContent value="misc"><Miscellaneous embedded /></TabsContent>
+            <TabsContent value="drawings"><Drawings embedded /></TabsContent>
+            <TabsContent value="interest"><Interest embedded /></TabsContent>
+            <TabsContent value="storage"><StorageMaintenance /></TabsContent>
+          </Tabs>
+        </TabsContent>
       </Tabs>
     </div>
   );

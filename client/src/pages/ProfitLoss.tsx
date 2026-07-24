@@ -110,6 +110,17 @@ export default function ProfitLoss() {
                   <Row key={b.product} label={prettyProduct(b.product)} amount={b.amount} muted indent />
                 ))}
 
+                {/* Other income streams: Kata Income, Hamali Company Profit, Gunny Sales, Other Income */}
+                <div className="mt-2 border-t pt-2">
+                  <Row label="Other income" amount={data.huskPool.otherIncomeTotal} strong />
+                  {data.huskPool.incomeLines.length === 0 && (
+                    <div className="py-1 pl-4 text-[13px] italic text-muted-foreground">No other income recorded yet.</div>
+                  )}
+                  {data.huskPool.incomeLines.map((l) => (
+                    <Row key={l.code} label={l.name} amount={l.amount} muted indent />
+                  ))}
+                </div>
+
                 {/* Overheads */}
                 <div className="mt-2 border-t pt-2">
                   <Row label="Less: operating overheads" amount={-data.huskPool.overheadExpenses} strong />

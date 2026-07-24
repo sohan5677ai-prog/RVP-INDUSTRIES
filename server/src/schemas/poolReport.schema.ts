@@ -57,3 +57,10 @@ export const createStorageMaintenanceSchema = z.object({
   amount: z.coerce.number().positive(),
   note: z.string().trim().optional().nullable(),
 });
+
+export const createOtherIncomeSchema = z.object({
+  date: z.coerce.date(),
+  label: z.string().trim().min(1),
+  amount: z.coerce.number().positive(),
+  note: z.string().trim().optional().nullable(),
+});

@@ -2,7 +2,7 @@ import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.js';
-import { customLoadingHamali } from '../lib/calc.js';
+import { customLoadingHamali, calcKataFee, isVehicleExempt } from '../lib/calc.js';
 
 import { computeUnifiedStockEngine } from '../services/stockEngine.js';
 
@@ -103,7 +103,7 @@ export interface HuskExpenses {
   termLoanPrincipal: number;
 }
 
-// Map frontend expense labels to their exact backend keys. Also flag the 
+// Map frontend expense labels to their exact backend keys. Also flag the
 // pappu-flagged ones so Net Profit does not double-count them.
 export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu: boolean }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
@@ -119,7 +119,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'tpsBrokensPacking',  label: 'TPS Brokens Packing',  pappu: false },
   { key: 'tamarindByproductsPacking', label: 'Tamarind Byproducts Packing', pappu: false },
   { key: 'misc',               label: 'Miscellaneous',        pappu: false },
-  { key: 'gunnyBags',          label: 'Gunny Bags (net)',     pappu: false },
+  { key: 'gunnyBags',          label: 'Gunny Bags (purchases)', pappu: false },
   { key: 'electricity',        label: 'Electricity',          pappu: false },
   { key: 'maintenance',        label: 'Maintenance',          pappu: false },
   { key: 'miscExpense',        label: 'Miscellaneous Expenses', pappu: false },
@@ -133,14 +133,31 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'termLoanPrincipal',  label: 'Term Loan Principal',  pappu: false },
 ];
 
+// Husk-pool INCOME lines (Income tab): each is added on top of the pooled
+// byproduct revenue, in both the dashboard recovery card and the P&L husk pool.
+export interface HuskIncome {
+  kataIncome: number;
+  hamaliCompanyProfit: number;
+  gunnySales: number;
+  otherIncome: number;
+}
+
+export const HUSK_INCOME_META: { key: keyof HuskIncome; label: string }[] = [
+  { key: 'kataIncome',          label: 'Kata Income' },
+  { key: 'hamaliCompanyProfit', label: 'Hamali Company Profit' },
+  { key: 'gunnySales',          label: 'Gunny Bag Sales' },
+  { key: 'otherIncome',         label: 'Other Income' },
+];
+
 // Shared husk-pool computation: pooled byproduct revenue + every operating cost,
 // itemized. Loading-hamali lines are recomputed from current ₹/tonne rates ×
 // dispatched tonnage; the four standalone reports (gunny/electricity/maintenance/
 // drawings) are read from their own tables. Used by the dashboard recovery card
 // and by the P&L page's husk pool.
-export async function computeHuskPool(): Promise<{ revenue: number; expenses: HuskExpenses }> {
+export async function computeHuskPool(): Promise<{ revenue: number; expenses: HuskExpenses; income: HuskIncome }> {
   const [
     revAccount,
+    hamaliIncomeAccount,
     dispatches,
     blackSeedHamali,
     manualByType,
@@ -160,8 +177,17 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     termLoanPrincipalAgg,
     interestCapitalisedAgg,
     interestPaidAgg,
+    otherIncomeAgg,
+    purchaseKataAgg,
+    dustPurchasesForKata,
+    saleDispatchesForKata,
+    stockTransfersForKata,
+    shellTransfersForKata,
+    huskTransfersForKata,
+    companyProfile,
   ] = await Promise.all([
       prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
+      prisma.account.findUnique({ where: { code: '40030' }, select: { id: true } }),
       prisma.$queryRaw<{product: string, weightKg: bigint}[]>`
         SELECT so."product", SUM(sd."weightKg") as "weightKg"
         FROM "SaleOrder" so
@@ -188,6 +214,15 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       // actually paid to the bank at repayment (see loan reconciliation).
       prisma.stockTransfer.aggregate({ _sum: { interestCharge: true } }),
       prisma.loanRepayment.aggregate({ _sum: { interest: true } }),
+      // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income) ──
+      prisma.otherIncomeEntry.aggregate({ _sum: { amount: true } }),
+      prisma.purchase.aggregate({ _sum: { kataFee: true } }),
+      prisma.dustPurchase.findMany({ select: { weightKg: true, lorryNumber: true } }),
+      prisma.saleDispatch.findMany({ select: { weightKg: true, vehicleNumber: true } }),
+      prisma.stockTransfer.findMany({ select: { weightKg: true, lorryNumber: true } }),
+      prisma.shellTransfer.findMany({ select: { weightKg: true, lorryNumber: true } }),
+      prisma.huskTransfer.findMany({ select: { weightKg: true, lorryNumber: true } }),
+      prisma.companyProfile.findFirst({ select: { companyVehicles: true } }),
     ]);
 
     // ── Revenue: pooled byproduct sales revenue (net credits on 40010) ──────────
@@ -245,10 +280,13 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       Number(shellAgg._sum.transportCharge || 0) +
       Number(huskAgg._sum.transportCharge || 0);
 
+    // Purchases are a husk-pool cost; sales are booked separately as income
+    // (gunnySales below), not netted here — see [[expense-pages-linked-payments]].
     const gunny = Object.fromEntries(
       (gunnyByDir as any[]).map((r) => [r.direction, Number(r._sum.amount ?? 0)]),
     );
-    const gunnyBags = (gunny['PURCHASE'] ?? 0) - (gunny['SALE'] ?? 0);
+    const gunnyBags = gunny['PURCHASE'] ?? 0;
+    const gunnySales = gunny['SALE'] ?? 0;
     const electricity = Number(electricityAgg._sum.amount ?? 0);
     const maintenance = Number(maintenanceAgg._sum.amount ?? 0);
     const miscExpense = Number(miscExpenseAgg._sum.amount ?? 0);
@@ -304,13 +342,49 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       termLoanPrincipal: Number(termLoanPrincipalAgg._sum.amount ?? 0),
     };
 
-  return { revenue, expenses };
+    // ── Hamali Company Profit: every hamali margin (purchase unloading + sale
+    // loading + stock-transfer legs) posts to GL 40030 "Hamali Income" at the
+    // moment it's booked (see ledger.service.ts). Summing that account directly
+    // is exact and avoids re-deriving the per-row margin split here.
+    let hamaliCompanyProfit = 0;
+    if (hamaliIncomeAccount) {
+      const hamaliLines = await prisma.journalLine.aggregate({
+        _sum: { credit: true, debit: true },
+        where: { accountId: hamaliIncomeAccount.id },
+      });
+      hamaliCompanyProfit = Number(hamaliLines._sum.credit ?? 0) - Number(hamaliLines._sum.debit ?? 0);
+    }
+
+    // ── Kata Income: the weighbridge fee collected across every lorry (purchase,
+    // dust buy, sale freight, byproduct transfer) — mirrors the Kata Report ledger.
+    // Purchase.kataFee is already exemption-aware (computed at StockIn time); the
+    // rest are recomputed the same way the Kata Report does client-side.
+    const companyVehicles = companyProfile?.companyVehicles;
+    const exempt = (lorry: string | null | undefined) => isVehicleExempt(lorry, companyVehicles);
+    const purchaseKata = Number(purchaseKataAgg._sum.kataFee ?? 0);
+    const dustKata = dustPurchasesForKata.reduce((s, d) => s + calcKataFee(d.weightKg, exempt(d.lorryNumber)), 0);
+    const saleKata = saleDispatchesForKata.reduce((s, d) => s + calcKataFee(d.weightKg, exempt(d.vehicleNumber)), 0);
+    const transferKata =
+      stockTransfersForKata.reduce((s, t) => s + calcKataFee(t.weightKg, exempt(t.lorryNumber)), 0) +
+      shellTransfersForKata.reduce((s, t) => s + calcKataFee(t.weightKg, exempt(t.lorryNumber)), 0) +
+      huskTransfersForKata.reduce((s, t) => s + calcKataFee(t.weightKg, exempt(t.lorryNumber)), 0);
+    const kataIncome = purchaseKata + dustKata + saleKata + transferKata;
+
+    const income: HuskIncome = {
+      kataIncome,
+      hamaliCompanyProfit,
+      gunnySales,
+      otherIncome: Number(otherIncomeAgg._sum.amount ?? 0),
+    };
+
+  return { revenue, expenses, income };
 }
 
 // Dashboard husk-recovery card: full itemized pool (includes pappu-flagged costs).
 export async function huskPnl(_req: Request, res: Response) {
-  const { revenue, expenses } = await computeHuskPool();
+  const { revenue, expenses, income } = await computeHuskPool();
   const totalExpenses = Object.values(expenses).reduce((s, v) => s + v, 0);
-  const netRecovery = revenue - totalExpenses;
-  res.json({ revenue, expenses, totalExpenses, netRecovery });
+  const totalIncomeAdd = Object.values(income).reduce((s, v) => s + v, 0);
+  const netRecovery = revenue + totalIncomeAdd - totalExpenses;
+  res.json({ revenue, expenses, income, totalExpenses, totalIncomeAdd, netRecovery });
 }

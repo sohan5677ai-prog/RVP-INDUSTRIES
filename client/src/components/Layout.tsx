@@ -38,6 +38,7 @@ import {
   Wallet,
   Landmark,
   FileSpreadsheet,
+  CreditCard,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -45,7 +46,7 @@ import { preloadRoute } from '@/lib/preload';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import DispatchReminders from '@/components/DispatchReminders';
 
-type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean };
+type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean };
 type NavSection = { heading?: string; items: NavItem[] };
 
 const sections: NavSection[] = [
@@ -146,6 +147,7 @@ const sections: NavSection[] = [
     items: [
       { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
       { to: '/users', label: 'Users', icon: Shield },
+      { to: '/subscription', label: 'Subscription', icon: CreditCard, devOnly: true },
     ],
   },
 ];
@@ -261,7 +263,9 @@ export default function Layout() {
                         'relative ml-[1.15rem] mb-1 pl-3 border-l border-sidebar-border/80'
                     )}
                   >
-                    {section.items.map(({ to, label, icon: Icon, end }) => (
+                    {section.items
+                      .filter((it) => !it.devOnly || user?.role === 'DEVELOPER')
+                      .map(({ to, label, icon: Icon, end }) => (
                       <NavLink
                         key={to}
                         to={to}

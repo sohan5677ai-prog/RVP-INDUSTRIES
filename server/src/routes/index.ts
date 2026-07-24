@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import { subscriptionGate } from '../middleware/subscription.js';
 import { webhookLimiter, bulkImportLimiter } from '../middleware/rateLimit.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearCache } from '../lib/cache.js';
@@ -30,6 +31,7 @@ import emailLogRoutes from './emailLog.routes.js';
 import whatsappRoutes from './whatsapp.routes.js';
 import { verifyWhatsAppWebhook, handleWhatsAppWebhook, runWhatsAppJob } from '../controllers/whatsapp.controller.js';
 import { globalSearch } from '../controllers/search.controller.js';
+import subscriptionRoutes from './subscription.routes.js';
 const router = Router();
 
 // Public
@@ -44,8 +46,19 @@ router.post('/webhooks/whatsapp', webhookLimiter, asyncHandler(handleWhatsAppWeb
 // CRON_SECRET inside the handler (like the webhook, no JWT).
 router.post('/webhooks/whatsapp/jobs/:job', webhookLimiter, asyncHandler(runWhatsAppJob));
 
+// Subscription/licensing endpoints. Mounted BEFORE the global requireAuth and
+// the subscription gate: its Razorpay webhook is public (no JWT), and its
+// status/pay routes must stay reachable while the deployment is locked so the
+// paywall can function. It applies its own per-route auth internally.
+router.use('/subscription', subscriptionRoutes);
+
 // Everything below requires a valid token.
 router.use(requireAuth);
+
+// Licensing gate: once past auth, a locked deployment 402s every protected call
+// (the DEVELOPER role bypasses). Runs before the cache/route handlers so no
+// business route executes while unpaid.
+router.use(subscriptionGate);
 
 // The heavy read aggregates (unified stock engine, pappu-order margins) are memoized
 // in-process. Any successful mutation can invalidate those figures, so bust the whole

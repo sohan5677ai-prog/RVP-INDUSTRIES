@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import SubscriptionBoundary from '@/components/SubscriptionBoundary';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { registerPreload } from '@/lib/preload';
 
@@ -102,6 +103,7 @@ const Drawings = lazyWithPreload('/reports/drawings', () => import('@/pages/Draw
 const Interest = lazyWithPreload('/reports/interest', () => import('@/pages/Interest'));
 const Expenses = lazyWithPreload('/reports/expenses', () => import('@/pages/Expenses'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
+const Subscription = lazyWithPreload('/subscription', () => import('@/pages/Subscription'));
 
 function Fallback() {
   return (
@@ -126,6 +128,7 @@ export default function App() {
           <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
+            <Route element={<SubscriptionBoundary />}>
             <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
             <Route path="/sale-dispatches/:id/ewaybill" element={<EWayBillView />} />
             <Route element={<Layout />}>
@@ -185,6 +188,8 @@ export default function App() {
               <Route path="/reports/tds" element={<TdsReport />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
+              <Route path="/subscription" element={<Subscription />} />
+            </Route>
             </Route>
           </Route>
         </Routes>

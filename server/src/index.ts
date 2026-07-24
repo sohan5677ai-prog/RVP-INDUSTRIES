@@ -34,7 +34,17 @@ app.use(cors({
     cb(new Error(`Origin ${origin} not allowed by CORS`));
   },
 }));
-app.use(express.json({ limit: '2mb' }));
+app.use(
+  express.json({
+    limit: '2mb',
+    // Stash the raw request body so the Razorpay webhook can verify its HMAC
+    // signature over the exact bytes Razorpay signed (JSON.stringify of the
+    // parsed body would not byte-match).
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  })
+);
 
 app.get("/api/health", (_req, res) => {
   // Keep-alive ping. Render sleeps after 15 min idle AND Supabase free tier

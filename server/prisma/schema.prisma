@@ -1220,3 +1220,45 @@ model SlackDraft {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// ---------------------------------------------------------------------------
+// SaaS licensing / monthly subscription gate. Singleton config row (there is
+// only ever one, id = 1) that decides whether non-DEVELOPER users are locked
+// out. The DEVELOPER role (the vendor) always bypasses. Amounts are stored in
+// paise (INR * 100) to match Razorpay's smallest-currency-unit convention.
+// ---------------------------------------------------------------------------
+model Subscription {
+  id              Int       @id @default(autoincrement())
+  active          Boolean   @default(false) // master switch; false = gate OFF (safe default, never locks a fresh install)
+  servicesStopped Boolean   @default(false) // developer kill switch: locks users & admins NOW, ignoring paidUntil
+  monthlyAmount   Int       @default(0) // paise (INR * 100)
+  billingDay      Int       @default(1) // day of month the fee is due (1-28)
+  paidUntil       DateTime? // access granted through this instant
+  lastPaymentId   String? // last razorpay payment id
+  // Auto-recurring (Razorpay Subscriptions). Single-tenant, so at most one
+  // active recurring mandate at a time; null when only the manual monthly
+  // checkout is in use.
+  razorpayPlanId  String? // reused across cycles while the amount is unchanged
+  razorpaySubId   String? // the active recurring subscription id
+  subStatus       String? // mirrors Razorpay: created|authenticated|active|halted|cancelled|completed
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// One row per payment attempt — a manual one-time order OR a recurring charge.
+// Lets us verify the payment server-side and keep an audit trail of what each
+// payment bought.
+model SubscriptionPayment {
+  id                Int       @id @default(autoincrement())
+  // Manual one-time flow has an order id; recurring charges have an invoice id
+  // instead, so both are nullable+unique (Postgres allows many NULLs).
+  razorpayOrderId   String?   @unique
+  razorpayPaymentId String?
+  razorpaySubId     String? // set for recurring charges
+  invoiceId         String?   @unique // recurring charge id — the webhook idempotency key
+  source            String    @default("manual") // manual | recurring
+  amount            Int // paise
+  status            String    @default("created") // created | paid | failed
+  periodEnd         DateTime? // paidUntil this payment bought
+  createdAt         DateTime  @default(now())
+}

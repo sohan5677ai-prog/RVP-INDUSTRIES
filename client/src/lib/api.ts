@@ -54,6 +54,13 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     clearToken();
   }
 
+  // 402 = the licensing gate rejected the call (subscription expired / stopped).
+  // Broadcast it so SubscriptionBoundary can flip to the paywall without a
+  // manual refresh, even if this particular call's error is swallowed.
+  if (res.status === 402) {
+    window.dispatchEvent(new Event('subscription:locked'));
+  }
+
   if (!res.ok) {
     let message = res.statusText;
     let details: unknown;

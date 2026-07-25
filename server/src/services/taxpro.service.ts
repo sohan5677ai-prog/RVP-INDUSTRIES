@@ -169,6 +169,16 @@ export class TaxproService {
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
   }
 
+  /** Format Date -> "DD/MM/YYYY hh:mm:ss AM/PM" as required by the printewb payload. */
+  private static formatNICDateTime(date: Date): string {
+    const d = new Date(date);
+    let hours = d.getHours();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    const time = `${String(hours).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')} ${ampm}`;
+    return `${this.formatNICDate(d)} ${time}`;
+  }
+
   /**
    * Formats a dispatch into the NIC E-Invoice JSON payload (schema v1.1).
    */
@@ -448,11 +458,158 @@ export class TaxproService {
   }
 
   /**
+   * Fetches the official ASP-rendered E-Way Bill PDF (government print format).
+   * NOTE: unlike Generate/Cancel (NIC pass-through under /eicore, /eiewb,
+   * /ewaybillapi), `printewb` is a TaxPro/ASP convenience endpoint. Endpoint +
+   * payload shape are taken from TaxPro's official sandbox Postman collection
+   * (2026-07-25); the collection called it against the PRODUCTION host
+   * (einvapi.charteredinfo.com) even from its sandbox folder, so this has NOT
+   * been exercised live (no ASP credentials configured yet). Verify against
+   * sandbox once `taxproGspId`/`taxproGspSecret` are set, then adjust the base
+   * host or response handling below if NIC/TaxPro returns something other than
+   * a raw `application/pdf` body.
+   */
+  public static async printEWayBillPdf(dispatchId: string): Promise<Buffer> {
+    const dispatch = await prisma.saleDispatch.findUnique({
+      where: { id: dispatchId },
+      include: { saleOrder: { include: { buyer: true } } },
+    });
+    if (!dispatch || !dispatch.ewbNumber) throw new Error('E-Way Bill number not found on dispatch');
+    if (!dispatch.ewbDate || !dispatch.ewbValidUpto) throw new Error('E-Way Bill dates missing on dispatch');
+
+    const order = dispatch.saleOrder;
+    const buyer = order.buyer;
+    const company = await getCompanyProfileRow();
+    if (this.credsMissing(company)) {
+      throw new Error('TaxPro credentials are not configured — cannot fetch the official EWB PDF');
+    }
+
+    const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
+    const description = taxInfo?.description || `${order.product} Sale`;
+    const hsn = taxInfo?.hsn || '120799';
+
+    const sellerStateCode = company.gstin?.slice(0, 2) || '';
+    const buyerStateCode = buyer.gstin?.slice(0, 2) || '';
+    const isSameState = sellerStateCode === buyerStateCode && sellerStateCode !== '';
+
+    const weight = dispatch.weightKg;
+    const rate = Number(order.ratePerKg);
+    const baseAmount = Math.round(weight * rate * 100) / 100;
+    const gstRate = order.gstExempt ? 0 : (taxInfo?.gstRate != null ? Number(taxInfo.gstRate) : 5);
+    const gstAmount = Math.round(baseAmount * gstRate) / 100;
+    const totalAmount = Math.round((baseAmount + gstAmount) * 100) / 100;
+    const cgstAmt = isSameState ? Math.round((gstAmount / 2) * 100) / 100 : 0;
+    const sgstAmt = isSameState ? Math.round((gstAmount / 2) * 100) / 100 : 0;
+    const igstAmt = isSameState ? 0 : gstAmount;
+
+    const noValidDays = Math.max(
+      1,
+      Math.ceil((dispatch.ewbValidUpto.getTime() - dispatch.ewbDate.getTime()) / (24 * 60 * 60 * 1000)),
+    );
+
+    const payload = {
+      ewbNo: Number(dispatch.ewbNumber),
+      ewayBillDate: this.formatNICDateTime(dispatch.ewbDate),
+      genMode: 'API',
+      userGstin: company.gstin,
+      supplyType: 'O',
+      subSupplyType: '1',
+      docType: 'INV',
+      docNo: dispatch.invoiceNumber || `DISP-${dispatch.id.slice(-6)}`,
+      docDate: this.formatNICDate(dispatch.invoiceDate || dispatch.dispatchDate),
+      fromGstin: company.gstin,
+      fromTrdName: company.name,
+      fromAddr1: company.address || '',
+      fromAddr2: '',
+      fromPlace: company.stateName || '',
+      fromPincode: Number((company as any).pincode) || 0,
+      fromStateCode: Number(sellerStateCode) || 0,
+      toGstin: buyer.gstin || 'URP',
+      toTrdName: buyer.name,
+      toAddr1: buyer.address || '',
+      toAddr2: '',
+      toPlace: buyer.state || '',
+      toPincode: Number((buyer as any).pincode) || 0,
+      toStateCode: Number(buyerStateCode) || 0,
+      totalValue: baseAmount,
+      totInvValue: totalAmount,
+      cgstValue: cgstAmt,
+      sgstValue: sgstAmt,
+      igstValue: igstAmt,
+      cessValue: 0,
+      transporterId: '',
+      transporterName: '',
+      status: dispatch.ewbStatus === 'CANCELLED' ? 'CNL' : 'ACT',
+      actualDist: dispatch.ewbDistance || 0,
+      noValidDays,
+      validUpto: this.formatNICDateTime(dispatch.ewbValidUpto),
+      extendedTimes: 0,
+      rejectStatus: 'N',
+      vehicleType: 'R',
+      actFromStateCode: Number(sellerStateCode) || 0,
+      actToStateCode: Number(buyerStateCode) || 0,
+      transactionType: 1,
+      otherValue: 0,
+      cessNonAdvolValue: 0,
+      itemList: [
+        {
+          itemNo: 1,
+          productId: 0,
+          productName: description,
+          productDesc: description,
+          hsnCode: Number(hsn) || 0,
+          quantity: weight,
+          qtyUnit: 'KGS',
+          cgstRate: isSameState ? gstRate / 2 : 0,
+          sgstRate: isSameState ? gstRate / 2 : 0,
+          igstRate: isSameState ? 0 : gstRate,
+          cessRate: 0,
+          cessNonAdvol: 0,
+          taxableAmount: baseAmount,
+        },
+      ],
+      VehiclListDetails: [
+        {
+          updMode: 'API',
+          vehicleNo: dispatch.vehicleNumber || '',
+          fromPlace: company.stateName || '',
+          fromState: Number(sellerStateCode) || 0,
+          tripshtNo: 0,
+          userGSTINTransin: company.gstin,
+          enteredDate: this.formatNICDateTime(dispatch.ewbDate),
+          transMode: '1',
+          transDocNo: '',
+          transDocDate: null,
+          groupNo: '0',
+        },
+      ],
+    };
+
+    const base = this.baseUrls(company.taxproSandbox)[0];
+    const res = await fetch(`${base}/aspapi/v1.0/printewb`, {
+      method: 'POST',
+      headers: this.baseHeaders(company, company.gstin || ''),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('pdf') || contentType.includes('octet-stream')) {
+      return Buffer.from(await res.arrayBuffer());
+    }
+
+    // Not a PDF — surface whatever error TaxPro/NIC sent back as JSON.
+    const json = await res.json().catch(() => ({}));
+    const msg = json?.error?.message || json?.ErrorDetails?.[0]?.ErrorMessage || `Unexpected response (HTTP ${res.status})`;
+    throw new Error(`TaxPro printewb error: ${msg}`);
+  }
+
+  /**
    * Cancels E-Way Bill.
-   * NOTE: EWB *cancellation* is NOT part of the e-invoice pass-through. NIC exposes
-   * it only through the separate E-Way Bill API (own base + `ewbpwd` credential),
-   * so the path below is a placeholder and is unverified against the sandbox
-   * (all /eiewb cancel paths 404). Wire up the EWB API before relying on this.
+   * NOTE: EWB *cancellation* is NOT part of the /eicore e-invoice pass-through —
+   * it lives under the separate `/ewaybillapi` path. Endpoint + payload shape
+   * confirmed against TaxPro's official sandbox Postman collection (2026-07-25):
+   * POST /ewaybillapi/dec/v1.03/ewayapi?action=CANEWB, body {ewbNo, cancelRsnCode, cancelRmrk}.
    */
   public static async cancelEWayBill(dispatchId: string, cancelReason: string, cancelRemarks: string) {
     const dispatch = await prisma.saleDispatch.findUnique({ where: { id: dispatchId } });

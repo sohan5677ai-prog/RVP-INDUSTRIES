@@ -169,6 +169,22 @@ router.post(
   })
 );
 
+// Fetch the official ASP-rendered E-Way Bill PDF.
+router.get(
+  '/sale-dispatches/:id/ewaybill/print-pdf',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found to print');
+
+    const pdf = await runTaxpro(() => TaxproService.printEWayBillPdf(id));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="EWB-${dispatch.ewbNumber}.pdf"`);
+    res.send(pdf);
+  })
+);
+
 // Cancel E-Way Bill
 router.post(
   '/sale-dispatches/:id/ewaybill/cancel',

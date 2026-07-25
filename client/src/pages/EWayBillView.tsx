@@ -1,9 +1,33 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Printer, FileText } from 'lucide-react';
-import { api } from '@/lib/api';
+import { ArrowLeft, Printer, FileText, FileDown } from 'lucide-react';
+import { toast } from 'sonner';
+import { api, getToken } from '@/lib/api';
 import type { SaleDispatch, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+
+/** Fetch the official ASP-rendered EWB PDF with the auth header and open it in
+ * a new tab (window.open with a raw path would miss the Authorization header). */
+async function openOfficialEwbPdf(dispatchId: string, setLoading: (v: boolean) => void) {
+  setLoading(true);
+  try {
+    const base = import.meta.env.VITE_API_URL ?? '/api';
+    const token = getToken();
+    const res = await fetch(`${base}/sale-dispatches/${dispatchId}/ewaybill/print-pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      toast.error(body?.error || 'Failed to load official EWB PDF');
+      return;
+    }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } finally {
+    setLoading(false);
+  }
+}
 
 function fmtDate(d: Date | string): string {
   const date = new Date(d);
@@ -27,6 +51,7 @@ const PRODUCT_FALLBACK: Record<string, string> = {
 export default function EWayBillView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const { data: dispatch, isLoading } = useQuery({ 
     queryKey: ['sale-dispatch', id], 
@@ -109,6 +134,15 @@ export default function EWayBillView() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pdfLoading}
+            onClick={() => id && openOfficialEwbPdf(id, setPdfLoading)}
+            title="Fetches the government-format PDF rendered by TaxPro (requires ASP credentials to be configured in Settings)"
+          >
+            <FileDown className="h-4 w-4 mr-1" /> {pdfLoading ? 'Loading…' : 'Official PDF'}
+          </Button>
           <Button size="sm" onClick={() => window.print()} className="bg-emerald-600 hover:bg-emerald-700 text-white">
             <Printer className="h-4 w-4 mr-1" /> Print E-Way Bill
           </Button>

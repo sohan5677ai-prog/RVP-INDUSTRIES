@@ -544,22 +544,28 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
 
   const generateEwbMutation = useMutation({
-    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${ewbDispatch!.dispatch.id}/ewaybill`, {
-      method: 'POST',
-      body: {
-        transporterId,
-        transporterName,
-        transDistance,
-        transMode,
-        vehicleNumber: ewbVehicleNo,
-        vehicleType,
-        transDocNo,
-        transDocDt,
-      },
-    }),
+    mutationFn: async () => {
+      const dispatchId = ewbDispatch!.dispatch.id;
+      if (!ewbDispatch!.dispatch.irn) {
+        await api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/einvoice`, { method: 'POST' });
+      }
+      return api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
+        method: 'POST',
+        body: {
+          transporterId,
+          transporterName,
+          transDistance,
+          transMode,
+          vehicleNumber: ewbVehicleNo,
+          vehicleType,
+          transDocNo,
+          transDocDt,
+        },
+      });
+    },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      toast.success(res.message);
+      toast.success(res.message || 'E-Way Bill generated successfully');
       setEwbDispatch(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),

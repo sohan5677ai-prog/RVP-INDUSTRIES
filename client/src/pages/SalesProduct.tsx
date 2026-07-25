@@ -270,27 +270,115 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // Un-Registered Sale: generates a "URS/01/26-27" number instead of the regular
   // registered "RVP/01/26-27" series.
   const [invoiceUnregistered, setInvoiceUnregistered] = useState(false);
+  const [invoiceActionLoading, setInvoiceActionLoading] = useState<'normal' | 'irn' | 'both' | null>(null);
 
   function openInvoice(dispatch: SaleDispatch, order: SaleOrder) {
     setInvoiceUnregistered(false);
     setInvoiceDispatch({ dispatch, order });
   }
 
-  const raiseInvoiceMutation = useMutation({
-    mutationFn: () => api<SaleDispatch>(`/sale-dispatches/${invoiceDispatch!.dispatch.id}/invoice`, {
-      method: 'POST',
-      body: { unregistered: invoiceUnregistered },
-    }),
-    onSuccess: (saved) => {
+  // Option 1: Normal Invoice
+  async function handleRaiseNormalInvoice() {
+    if (!invoiceDispatch) return;
+    setInvoiceActionLoading('normal');
+    try {
+      const saved = await api<SaleDispatch>(`/sale-dispatches/${invoiceDispatch.dispatch.id}/invoice`, {
+        method: 'POST',
+        body: { unregistered: invoiceUnregistered },
+      });
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      toast.success(`Invoice ${saved.invoiceNumber} generated`);
+      toast.success(`Normal Invoice ${saved.invoiceNumber} generated`);
       setInvoiceDispatch(null);
       if (saved?.id) {
         navigate(`/sale-dispatches/${saved.id}/invoice`);
       }
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
+    } catch (e: any) {
+      toast.error(getErrorMessage(e));
+    } finally {
+      setInvoiceActionLoading(null);
+    }
+  }
+
+  // Option 2: Generate IRN Only
+  async function handleGenerateIrnOnly() {
+    if (!invoiceDispatch) return;
+    setInvoiceActionLoading('irn');
+    try {
+      let dispatchId = invoiceDispatch.dispatch.id;
+      if (!invoiceDispatch.dispatch.invoiceNumber) {
+        const saved = await api<SaleDispatch>(`/sale-dispatches/${dispatchId}/invoice`, {
+          method: 'POST',
+          body: { unregistered: invoiceUnregistered },
+        });
+        dispatchId = saved.id;
+      }
+      const res = await api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/einvoice`, {
+        method: 'POST',
+      });
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message || 'E-Invoice IRN generated');
+      setInvoiceDispatch(null);
+      if (dispatchId) {
+        navigate(`/sale-dispatches/${dispatchId}/einvoice-print`);
+      }
+    } catch (e: any) {
+      toast.error(getErrorMessage(e));
+    } finally {
+      setInvoiceActionLoading(null);
+    }
+  }
+
+  // Option 3: Generate IRN & E-Way Bill Simultaneously
+  async function handleRaiseIrnAndEwb() {
+    if (!invoiceDispatch) return;
+    setInvoiceActionLoading('both');
+    try {
+      const dispatchId = invoiceDispatch.dispatch.id;
+      let savedInvoiceNumber = invoiceDispatch.dispatch.invoiceNumber;
+      
+      // Step 1: Raise normal invoice if not already raised
+      if (!savedInvoiceNumber) {
+        const saved = await api<SaleDispatch>(`/sale-dispatches/${dispatchId}/invoice`, {
+          method: 'POST',
+          body: { unregistered: invoiceUnregistered },
+        });
+        savedInvoiceNumber = saved.invoiceNumber;
+      }
+
+      // Step 2: Generate IRN if not already generated
+      if (!invoiceDispatch.dispatch.irn) {
+        await api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/einvoice`, {
+          method: 'POST',
+        });
+      }
+
+      // Step 3: Generate E-Way Bill
+      const ewbRes = await api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
+        method: 'POST',
+        body: {
+          transporterId,
+          transporterName,
+          transDistance: Number(transDistance) || 0,
+          transMode: transMode || '1',
+          vehicleNumber: invoiceDispatch.dispatch.vehicleNumber || ewbVehicleNo || '',
+          vehicleType: vehicleType || 'R',
+          transDocNo,
+          transDocDt,
+        },
+      });
+
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(ewbRes.message || `IRN & E-Way Bill generated successfully for ${savedInvoiceNumber}`);
+      setInvoiceDispatch(null);
+      navigate(`/sale-dispatches/${dispatchId}/ewaybill`);
+    } catch (e: any) {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.error(`Error generating IRN / E-Way Bill: ${getErrorMessage(e)}`);
+      setInvoiceDispatch(null);
+    } finally {
+      setInvoiceActionLoading(null);
+    }
+  }
 
   const invoiceBase = invoiceDispatch ? invoiceDispatch.dispatch.weightKg * Number(invoiceDispatch.order.ratePerKg) : 0;
   const invoiceGst = invoiceDispatch?.order.gstExempt ? 0 : Math.round(invoiceBase * GST_RATE * 100) / 100;
@@ -1048,14 +1136,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       </Dialog>
 
       {/* Raise Invoice dialog */}
-      <Dialog open={!!invoiceDispatch} onOpenChange={(v) => !v && setInvoiceDispatch(null)}>
-        <DialogContent>
+      <Dialog open={!!invoiceDispatch} onOpenChange={(v) => !v && !invoiceActionLoading && setInvoiceDispatch(null)}>
+        <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Raise Invoice - {invoiceDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               {invoiceUnregistered
                 ? 'An Un-Registered Sale invoice will be generated under the separate URS series (e.g. URS/01/26-27).'
-                : 'A tax invoice will be generated for this shipment with the next auto number (e.g. RVP/01/26-27).'}
+                : 'Select an option to raise normal tax invoice, generate IRN e-invoice, or perform both simultaneously.'}
             </p>
             <label className="flex items-start gap-2.5 rounded-lg border bg-muted/40 p-3 cursor-pointer hover:bg-muted/60">
               <input
@@ -1063,6 +1151,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 className="mt-0.5 h-4 w-4 accent-forest"
                 checked={invoiceUnregistered}
                 onChange={(e) => setInvoiceUnregistered(e.target.checked)}
+                disabled={!!invoiceActionLoading}
               />
               <span className="text-sm">
                 <span className="font-medium">Un Registered Sale (URS)</span>
@@ -1074,11 +1163,61 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{rupees(invoiceGst)}</span></div>
               <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
             </div>
-            <DialogFooter>
-              <Button onClick={() => raiseInvoiceMutation.mutate()} disabled={raiseInvoiceMutation.isPending}>
-                <FileText className="h-4 w-4" /> {raiseInvoiceMutation.isPending ? 'Generating…' : 'Generate Invoice'}
-              </Button>
-            </DialogFooter>
+
+            <div className="space-y-2 pt-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Option</div>
+              <div className="grid grid-cols-1 gap-2">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-2.5 text-left h-auto py-2.5 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  onClick={handleRaiseNormalInvoice}
+                  disabled={!!invoiceActionLoading}
+                >
+                  {invoiceActionLoading === 'normal' ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-slate-600 shrink-0" />
+                  ) : (
+                    <FileText className="h-4 w-4 text-slate-600 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-medium text-xs text-slate-900 dark:text-slate-100">Normal Invoice</div>
+                    <div className="text-[11px] text-muted-foreground font-normal">Generate normal tax invoice only</div>
+                  </div>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-2.5 text-left h-auto py-2.5 border-indigo-200 bg-indigo-50/40 hover:bg-indigo-100/60 dark:bg-indigo-950/30 dark:border-indigo-800"
+                  onClick={handleGenerateIrnOnly}
+                  disabled={!!invoiceActionLoading}
+                >
+                  {invoiceActionLoading === 'irn' ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-indigo-600 shrink-0" />
+                  ) : (
+                    <Printer className="h-4 w-4 text-indigo-600 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-medium text-xs text-indigo-700 dark:text-indigo-300">Generate IRN</div>
+                    <div className="text-[11px] text-indigo-600/80 dark:text-indigo-400 font-normal">Generate e-Invoice IRN only</div>
+                  </div>
+                </Button>
+
+                <Button
+                  className="w-full justify-start gap-2.5 text-left h-auto py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={handleRaiseIrnAndEwb}
+                  disabled={!!invoiceActionLoading}
+                >
+                  {invoiceActionLoading === 'both' ? (
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  ) : (
+                    <Truck className="h-4 w-4 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-medium text-xs">Generate IRN and E-Way Bill</div>
+                    <div className="text-[11px] text-emerald-100 font-normal">Generate e-Invoice IRN &amp; E-Way Bill simultaneously</div>
+                  </div>
+                </Button>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

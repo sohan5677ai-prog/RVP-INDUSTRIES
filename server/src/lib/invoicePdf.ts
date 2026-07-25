@@ -139,6 +139,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     doc.font('Helvetica').fontSize(8);
     if (data.buyer.address) { doc.text(data.buyer.address, LEFT + 4, ly, { width: splitX - LEFT - 8 }); ly = doc.y; }
     if (data.buyer.gstin) { doc.text(`GSTIN/UIN : ${data.buyer.gstin}`, LEFT + 4, ly, { width: splitX - LEFT - 8 }); ly = doc.y; }
+    if (data.buyer.gstin && data.buyer.gstin.length >= 12) { doc.text(`PAN/IT No : ${data.buyer.gstin.slice(2, 12)}`, LEFT + 4, ly, { width: splitX - LEFT - 8 }); ly = doc.y; }
     if (data.buyer.stateName) {
       doc.text(`State Name : ${data.buyer.stateName}${data.buyer.stateCode ? ', Code : ' + data.buyer.stateCode : ''}`, LEFT + 4, ly, { width: splitX - LEFT - 8 });
       ly = doc.y;

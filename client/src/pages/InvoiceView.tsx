@@ -142,27 +142,32 @@ export default function InvoiceView() {
           className="inv-page shadow-lg"
           style={{ width: `${paperW}mm`, padding: `${layout.marginMm}mm`, fontSize: `${layout.fontPx}px` }}
         >
-          <div className="center font-bold text-2xl mb-1">Tax Invoice</div>
+          {/* Title & IRN / e-Invoice header block */}
+          {dispatch.irn ? (
+            <div className="relative mb-2 pb-2 border-b border-black">
+              <div className="center font-bold text-2xl">Tax Invoice</div>
+              <div className="absolute right-0 top-0 text-sm font-sans">e-Invoice</div>
+              
+              <div className="flex justify-between items-start mt-2">
+                <div className="text-[0.85em] space-y-0.5">
+                  <div className="flex"><span className="font-bold w-16">IRN</span><span className="font-mono font-bold break-all">: {dispatch.irn}</span></div>
+                  <div className="flex"><span className="font-bold w-16">Ack No.</span><span className="font-bold">: {dispatch.irnAckNo || '-'}</span></div>
+                  <div className="flex"><span className="font-bold w-16">Ack Date</span><span className="font-bold">: {dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : '-'}</span></div>
+                </div>
 
-          {dispatch.irn && (
-            <div className="flex gap-3 border border-black px-2 py-1 mb-1.5 text-[0.85em] items-center">
-              <div className="flex-1">
-                <div><span className="font-bold">IRN:</span> <span className="font-mono break-all text-[1.05em]">{dispatch.irn}</span></div>
-                <div className="flex gap-8 mt-1">
-                  <div><span className="font-bold">Ack No:</span> {dispatch.irnAckNo}</div>
-                  <div><span className="font-bold">Ack Date:</span> {dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : ''}</div>
-                </div>
+                {dispatch.irnSignedQr && (
+                  <div className="w-24 h-24 border border-black p-1 flex items-center justify-center shrink-0">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(dispatch.irnSignedQr)}`} 
+                      alt="e-Invoice QR Code"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                )}
               </div>
-              {dispatch.irnSignedQr && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid #ddd', paddingLeft: 8 }}>
-                  <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=${encodeURIComponent(dispatch.irnSignedQr)}`} 
-                    alt="E-Invoice QR Code"
-                    style={{ width: 64, height: 64 }}
-                  />
-                </div>
-              )}
             </div>
+          ) : (
+            <div className="center font-bold text-2xl mb-2">Tax Invoice</div>
           )}
 
           {/* Header: seller/buyer + meta grid */}
@@ -188,6 +193,7 @@ export default function InvoiceView() {
                     <div style={{ fontWeight: 'bold', fontSize: '1.05em' }}>{order.buyer?.name}</div>
                     {order.buyer?.address && <div className="lbl" style={{ whiteSpace: 'pre-line' }}>{order.buyer.address}</div>}
                     {buyerGstin && <div className="lbl">GSTIN/UIN : {buyerGstin}</div>}
+                    {buyerGstin && buyerGstin.length >= 12 && <div className="lbl">PAN/IT No : {buyerGstin.slice(2, 12)}</div>}
                     {order.buyer?.state && <div className="lbl">State Name : {order.buyer.state}{buyerStateCode ? `, Code : ${buyerStateCode}` : ''}</div>}
                     {order.buyer?.state && <div className="lbl">Place of Supply : {order.buyer.state}</div>}
                   </div>
@@ -200,7 +206,7 @@ export default function InvoiceView() {
               <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell label="Other References" value="" /></tr>
               <tr><MetaCell colSpan={2} label="Buyer's Order No." value="" /><MetaCell label="Dated" value="" /></tr>
               <tr><MetaCell colSpan={2} label="Dispatch Doc No." value="" /><MetaCell label="Delivery Note Date" value="" /></tr>
-              <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" /><MetaCell label="Destination" value={order.destination ?? ''} /></tr>
+              <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" /><MetaCell label="Destination" value={order.destination || order.buyer?.state || ''} /></tr>
               <tr><MetaCell colSpan={2} label="Bill of Lading/LR-RR No." value="" /><MetaCell label="Motor Vehicle No." value={dispatch.vehicleNumber ?? ''} /></tr>
               <tr><MetaCell colSpan={3} label="Terms of Delivery" value="" /></tr>
             </tbody>

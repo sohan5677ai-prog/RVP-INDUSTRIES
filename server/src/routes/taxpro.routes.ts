@@ -169,18 +169,24 @@ router.post(
   })
 );
 
-// Fetch the official ASP-rendered E-Way Bill PDF.
+// Fetch the official ASP-rendered E-Way Bill PDF (the real government print,
+// not our HTML replica). ?detail=1 returns the EWB portal's "detailed" layout.
 router.get(
   '/sale-dispatches/:id/ewaybill/print-pdf',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const detailed = req.query.detail === '1' || req.query.detail === 'true';
+
     const dispatch = await prisma.saleDispatch.findUnique({ where: { id } });
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
     if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found to print');
 
-    const pdf = await runTaxpro(() => TaxproService.printEWayBillPdf(id));
+    const pdf = await runTaxpro(() =>
+      detailed ? TaxproService.printEWayBillDetailPdf(id) : TaxproService.printEWayBillPdf(id)
+    );
+    const suffix = detailed ? '-detailed' : '';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="EWB-${dispatch.ewbNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="EWB-${dispatch.ewbNumber}${suffix}.pdf"`);
     res.send(pdf);
   })
 );

@@ -458,18 +458,11 @@ export class TaxproService {
   }
 
   /**
-   * Fetches the official ASP-rendered E-Way Bill PDF (government print format).
-   * NOTE: unlike Generate/Cancel (NIC pass-through under /eicore, /eiewb,
-   * /ewaybillapi), `printewb` is a TaxPro/ASP convenience endpoint. Endpoint +
-   * payload shape are taken from TaxPro's official sandbox Postman collection
-   * (2026-07-25); the collection called it against the PRODUCTION host
-   * (einvapi.charteredinfo.com) even from its sandbox folder, so this has NOT
-   * been exercised live (no ASP credentials configured yet). Verify against
-   * sandbox once `taxproGspId`/`taxproGspSecret` are set, then adjust the base
-   * host or response handling below if NIC/TaxPro returns something other than
-   * a raw `application/pdf` body.
+   * Builds the `printewb`/`printdetailewb` request body for a dispatch.
+   * This is the flat EWB-portal record shape (NOT the NIC e-invoice schema) —
+   * the ASP print service re-renders the government layout from these fields.
    */
-  public static async printEWayBillPdf(dispatchId: string): Promise<Buffer> {
+  private static async buildEwbPrintPayload(dispatchId: string) {
     const dispatch = await prisma.saleDispatch.findUnique({
       where: { id: dispatchId },
       include: { saleOrder: { include: { buyer: true } } },
@@ -585,23 +578,65 @@ export class TaxproService {
       ],
     };
 
-    const base = this.baseUrls(company.taxproSandbox)[0];
-    const res = await fetch(`${base}/aspapi/v1.0/printewb`, {
+    return { company, payload };
+  }
+
+  /**
+   * POSTs an EWB print payload to one of the ASP print endpoints and returns the PDF.
+   *
+   * Unlike every other call in this service, the `/aspapi` print endpoints are a
+   * TaxPro *rendering* service rather than a NIC pass-through, so:
+   *  - they live on the PRODUCTION host even when the rest of the integration is
+   *    pointed at sandbox (TaxPro's own sandbox Postman collection calls them on
+   *    einvapi.charteredinfo.com), and
+   *  - they authenticate via QUERY STRING (aspid/password/Gstin). We also send the
+   *    usual headers, which the /dec/ gateway accepts, so either style works.
+   */
+  private static async fetchEwbPrintPdf(
+    company: TaxproConfig,
+    endpoint: 'printewb' | 'printdetailewb',
+    payload: unknown,
+  ): Promise<Buffer> {
+    const qs = new URLSearchParams({
+      aspid: company.taxproGspId || '',
+      password: company.taxproGspSecret || '',
+      Gstin: company.gstin || '',
+    });
+    const url = `${this.PRODUCTION_BASE_URLS[0]}/aspapi/v1.0/${endpoint}?${qs}`;
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: this.baseHeaders(company, company.gstin || ''),
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
     });
 
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('pdf') || contentType.includes('octet-stream')) {
-      return Buffer.from(await res.arrayBuffer());
-    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    // A PDF always starts with "%PDF-"; trust the magic bytes over Content-Type,
+    // which TaxPro is not guaranteed to set correctly.
+    if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return buf;
 
-    // Not a PDF — surface whatever error TaxPro/NIC sent back as JSON.
-    const json = await res.json().catch(() => ({}));
-    const msg = json?.error?.message || json?.ErrorDetails?.[0]?.ErrorMessage || `Unexpected response (HTTP ${res.status})`;
-    throw new Error(`TaxPro printewb error: ${msg}`);
+    let msg = `Unexpected non-PDF response (HTTP ${res.status})`;
+    try {
+      const json = JSON.parse(buf.toString('utf8'));
+      msg = json?.error?.message || json?.ErrorDetails?.[0]?.ErrorMessage || json?.message || msg;
+    } catch {
+      const text = buf.toString('utf8').trim();
+      if (text) msg = `${msg}: ${text.slice(0, 300)}`;
+    }
+    throw new Error(`TaxPro ${endpoint} error: ${msg}`);
+  }
+
+  /** Official government-format E-Way Bill PDF (standard print). */
+  public static async printEWayBillPdf(dispatchId: string): Promise<Buffer> {
+    const { company, payload } = await this.buildEwbPrintPayload(dispatchId);
+    return this.fetchEwbPrintPdf(company, 'printewb', payload);
+  }
+
+  /** Official government-format E-Way Bill PDF (detailed print). */
+  public static async printEWayBillDetailPdf(dispatchId: string): Promise<Buffer> {
+    const { company, payload } = await this.buildEwbPrintPayload(dispatchId);
+    return this.fetchEwbPrintPdf(company, 'printdetailewb', payload);
   }
 
   /**

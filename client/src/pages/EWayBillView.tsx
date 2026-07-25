@@ -7,25 +7,33 @@ import { api, getToken } from '@/lib/api';
 import type { SaleDispatch, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 
-/** Fetch the official ASP-rendered EWB PDF with the auth header and open it in
- * a new tab (window.open with a raw path would miss the Authorization header). */
-async function openOfficialEwbPdf(dispatchId: string, setLoading: (v: boolean) => void) {
-  setLoading(true);
+/** Fetch the official government-format EWB PDF (rendered by TaxPro from the
+ * live NIC record) and open it in a new tab. Uses fetch rather than a plain
+ * window.open because the API requires the Authorization header. */
+async function openOfficialEwbPdf(
+  dispatchId: string,
+  detailed: boolean,
+  setLoading: (v: 'std' | 'detail' | null) => void,
+) {
+  setLoading(detailed ? 'detail' : 'std');
   try {
     const base = import.meta.env.VITE_API_URL ?? '/api';
     const token = getToken();
-    const res = await fetch(`${base}/sale-dispatches/${dispatchId}/ewaybill/print-pdf`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const res = await fetch(
+      `${base}/sale-dispatches/${dispatchId}/ewaybill/print-pdf${detailed ? '?detail=1' : ''}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      toast.error(body?.error || 'Failed to load official EWB PDF');
+      toast.error(body?.error || 'Failed to load the official EWB PDF');
       return;
     }
     const blob = await res.blob();
     window.open(URL.createObjectURL(blob), '_blank');
+  } catch {
+    toast.error('Could not reach the server to fetch the official EWB PDF');
   } finally {
-    setLoading(false);
+    setLoading(null);
   }
 }
 
@@ -51,7 +59,7 @@ const PRODUCT_FALLBACK: Record<string, string> = {
 export default function EWayBillView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'std' | 'detail' | null>(null);
 
   const { data: dispatch, isLoading } = useQuery({ 
     queryKey: ['sale-dispatch', id], 
@@ -131,20 +139,30 @@ export default function EWayBillView() {
           <Button size="sm" variant="outline" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
           <span className="text-sm font-medium text-muted-foreground ml-2 flex items-center gap-1">
             <FileText className="h-4 w-4" /> E-Way Bill Viewer
+            <span className="ml-1 text-xs text-amber-600">(on-screen replica — use “Official PDF” for the government document)</span>
           </span>
         </div>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
-            disabled={pdfLoading}
-            onClick={() => id && openOfficialEwbPdf(id, setPdfLoading)}
-            title="Fetches the government-format PDF rendered by TaxPro (requires ASP credentials to be configured in Settings)"
+            disabled={pdfLoading !== null}
+            onClick={() => id && openOfficialEwbPdf(id, false, setPdfLoading)}
+            title="The real government-format e-Way Bill PDF, rendered from the live NIC record (requires TaxPro credentials in Settings)"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
-            <FileDown className="h-4 w-4 mr-1" /> {pdfLoading ? 'Loading…' : 'Official PDF'}
+            <FileDown className="h-4 w-4 mr-1" /> {pdfLoading === 'std' ? 'Loading…' : 'Official PDF'}
           </Button>
-          <Button size="sm" onClick={() => window.print()} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-            <Printer className="h-4 w-4 mr-1" /> Print E-Way Bill
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pdfLoading !== null}
+            onClick={() => id && openOfficialEwbPdf(id, true, setPdfLoading)}
+            title="The government 'detailed print' layout of the e-Way Bill"
+          >
+            <FileDown className="h-4 w-4 mr-1" /> {pdfLoading === 'detail' ? 'Loading…' : 'Official (Detailed)'}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => window.print()} title="Print this on-screen replica (not the government document)">
+            <Printer className="h-4 w-4 mr-1" /> Print Replica
           </Button>
         </div>
       </div>

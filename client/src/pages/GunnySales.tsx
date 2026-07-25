@@ -140,7 +140,7 @@ export default function GunnySales() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Gunny Sales Income" value={rupees(totalAmount)} icon={PackageCheck} tone="forest" hint="total sales revenue" />
-        <StatCard label="Total Bags Sold" value={totalBags.toLocaleString('en-IN')} icon={PackageCheck} tone="ocean" hint="bags" />
+        <StatCard label="Total Bags Sold" value={totalBags.toLocaleString('en-IN')} icon={PackageCheck} tone="clay" hint="bags" />
         <StatCard label="Total Entries" value={sortedRows.length} icon={PackageCheck} tone="amber" hint="sale transactions" />
       </div>
 

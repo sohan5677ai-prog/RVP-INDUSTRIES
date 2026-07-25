@@ -157,9 +157,14 @@ export async function resolveAlertRecipients(): Promise<string[]> {
   return numbers;
 }
 
-/** Variable values are pipe-joined on the wire — strip pipes/newlines from each. */
+/** Variable values are pipe-joined on the wire — strip pipes (the delimiter) from each while preserving newlines. */
 function cleanVar(v: string | number | null | undefined): string {
-  const s = (v ?? '').toString().replace(/[|\r\n]+/g, ' ').trim();
+  const s = (v ?? '')
+    .toString()
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\|+/g, ' ')
+    .trim();
   return s || '-';
 }
 

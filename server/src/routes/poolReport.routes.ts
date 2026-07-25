@@ -10,6 +10,7 @@ import {
   listTermLoanPrincipals, createTermLoanPrincipal, deleteTermLoanPrincipal,
   listStorageMaintenance, createStorageMaintenance, deleteStorageMaintenance,
   listOtherIncome, createOtherIncome, deleteOtherIncome,
+  listGunnySales, createGunnySale, deleteGunnySale,
 } from '../controllers/poolReport.controller.js';
 
 const router = Router();
@@ -17,6 +18,11 @@ const router = Router();
 router.get('/gunny-bags', asyncHandler(listGunnyBags));
 router.post('/gunny-bags', asyncHandler(createGunnyBag));
 router.delete('/gunny-bags/:id', asyncHandler(deleteGunnyBag));
+
+router.get('/gunny-sales', asyncHandler(listGunnySales));
+router.post('/gunny-sales', asyncHandler(createGunnySale));
+router.delete('/gunny-sales/:id', asyncHandler(deleteGunnySale));
+
 
 router.get('/electricity-bills', asyncHandler(listElectricityBills));
 router.post('/electricity-bills', asyncHandler(createElectricityBill));

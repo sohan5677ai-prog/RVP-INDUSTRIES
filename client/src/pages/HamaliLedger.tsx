@@ -100,6 +100,29 @@ interface HamaliEntry {
   pl: number;
 }
 
+// A single row of the combined "Hamali Disbursements & Charges" table — either a
+// derived HamaliEntry (purchase/sale/transfer) or a manually recorded charge,
+// normalized to one shape so both kinds can share one sorted, paginated table.
+interface UnifiedRow {
+  id: string;
+  kind: 'ENTRY' | 'MANUAL';
+  date: string;
+  typeLabel: string;
+  badgeVariant: 'default' | 'secondary' | 'outline';
+  party: string;
+  lorryOrBags: string;
+  referenceOrNote: string;
+  netWeightKg: number | null;
+  fullCharge: number | null;
+  ourShare: number | null;
+  lorryShare: number | null;
+  amount: number;
+  isPaidOut: boolean;
+  pl: number | null;
+  entry?: HamaliEntry;
+  manual?: ManualHamaliCost;
+}
+
 // A squared-off period surfaced in the Payables tab: its window, snapshot amount
 // due, how much has been settled, and the derived settlement status.
 interface PayableRow {
@@ -472,8 +495,6 @@ export default function HamaliLedger() {
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
-
   // Metrics
   const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0);
   const totalPl = filtered.reduce((acc, e) => acc + e.pl, 0);
@@ -496,6 +517,51 @@ export default function HamaliLedger() {
   const manualFilteredPaid = manualFiltered.filter((c) => c.type === 'PAID').reduce((s, c) => s + Number(c.amount), 0);
   const manualFilteredOutstanding = manualFilteredCharged - manualFilteredPaid;
   const chargeFilterActive = chargeFilter !== 'ALL' || chargeSearch.trim() !== '';
+
+  // Combined "Hamali Disbursements & Charges" table — derived entries and
+  // manually recorded charges merged into one list, sorted by date, so the
+  // page shows a single section instead of two separate tables.
+  const unifiedRows: UnifiedRow[] = useMemo(() => {
+    const entryRows: UnifiedRow[] = filtered.map((e) => ({
+      id: e.id,
+      kind: 'ENTRY' as const,
+      date: e.date,
+      typeLabel: e.label || (e.source === 'SALE' ? 'Sale Loading' : e.source === 'TRANSFER' ? 'Transfer' : 'Purchase'),
+      badgeVariant: (e.source === 'SALE' ? 'default' : e.source === 'TRANSFER' ? 'secondary' : 'outline') as UnifiedRow['badgeVariant'],
+      party: e.partyName,
+      lorryOrBags: e.lorryNumber ?? '-',
+      referenceOrNote: e.reference,
+      netWeightKg: e.netWeightKg,
+      fullCharge: e.fullCharge,
+      ourShare: e.ourShare,
+      lorryShare: e.lorryShare,
+      amount: roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew,
+      isPaidOut: false,
+      pl: e.pl,
+      entry: e,
+    }));
+    const manualRows: UnifiedRow[] = manualFiltered.map((c) => ({
+      id: `MANUAL-${c.id}`,
+      kind: 'MANUAL' as const,
+      date: c.date,
+      typeLabel: manualTypeMeta(c.type).label,
+      badgeVariant: (c.type === 'PAID' ? 'default' : 'outline') as UnifiedRow['badgeVariant'],
+      party: '-',
+      lorryOrBags: c.bags != null ? String(c.bags) : '-',
+      referenceOrNote: c.note ?? '-',
+      netWeightKg: null,
+      fullCharge: null,
+      ourShare: null,
+      lorryShare: null,
+      amount: Number(c.amount),
+      isPaidOut: c.type === 'PAID',
+      pl: null,
+      manual: c,
+    }));
+    return [...entryRows, ...manualRows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [filtered, manualFiltered, roundedValues]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(unifiedRows, 50);
 
   // --- Reconciliation checkpoints (Hamali view) ---
   // Rows dated on/before the latest checkpoint are cross-verified and locked; the
@@ -630,33 +696,22 @@ export default function HamaliLedger() {
     setPayOpen(true);
   }
 
-  const hamaliExportColumns: ExportColumn<HamaliEntry>[] = [
-    { header: 'Date', value: (e) => shortDate(e.date) },
-    { header: 'Source', value: (e) => e.label || (e.source === 'SALE' ? 'Sale Loading' : e.source === 'TRANSFER' ? 'Transfer' : 'Purchase') },
-    { header: 'Party', value: (e) => e.partyName },
-    { header: 'Lorry No', value: (e) => e.lorryNumber ?? '' },
-    { header: 'Reference', value: (e) => e.reference },
-    { header: 'Net Weight (kg)', value: (e) => e.netWeightKg, numFmt: '#,##0', align: 'right' },
-    { header: 'Full Charge', value: (e) => rupees(e.fullCharge), excel: (e) => e.fullCharge, numFmt: '#,##0.00', align: 'right' },
+  const unifiedExportColumns: ExportColumn<UnifiedRow>[] = [
+    { header: 'Date', value: (r) => shortDate(r.date) },
+    { header: 'Type', value: (r) => r.typeLabel },
+    { header: 'Party', value: (r) => r.party },
+    { header: 'Lorry No / Bags', value: (r) => r.lorryOrBags },
+    { header: 'Reference / Note', value: (r) => r.referenceOrNote },
+    { header: 'Net Weight (kg)', value: (r) => r.netWeightKg ?? '', numFmt: '#,##0', align: 'right' },
+    { header: 'Full Charge', value: (r) => (r.fullCharge != null ? rupees(r.fullCharge) : ''), excel: (r) => r.fullCharge ?? null, numFmt: '#,##0.00', align: 'right' },
     ...(view === 'company' ? [
-      { header: 'Our Share', value: (e: HamaliEntry) => rupees(e.ourShare), excel: (e: HamaliEntry) => e.ourShare, numFmt: '#,##0.00', align: 'right' as const },
-      { header: 'Lorry Share', value: (e: HamaliEntry) => rupees(e.lorryShare), excel: (e: HamaliEntry) => e.lorryShare, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Our Share', value: (r: UnifiedRow) => (r.ourShare != null ? rupees(r.ourShare) : ''), excel: (r: UnifiedRow) => r.ourShare ?? null, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Lorry Share', value: (r: UnifiedRow) => (r.lorryShare != null ? rupees(r.lorryShare) : ''), excel: (r: UnifiedRow) => r.lorryShare ?? null, numFmt: '#,##0.00', align: 'right' as const },
     ] : []),
-    { header: 'Crew Paid', value: (e) => rupees(e.crew), excel: (e) => e.crew, numFmt: '#,##0.00', align: 'right' },
-    ...(view === 'hamali'
-      ? [
-          {
-            header: 'Rounded Off',
-            value: (e: HamaliEntry) => (roundedValues[e.id] !== undefined ? rupees(roundedValues[e.id]) : rupees(e.crew)),
-            excel: (e: HamaliEntry) => (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew),
-            numFmt: '#,##0.00',
-            align: 'right' as const,
-          },
-        ]
-      : []),
+    { header: 'Crew / Amount', value: (r) => `${r.isPaidOut ? '−' : ''}${rupees(r.amount)}`, excel: (r) => (r.isPaidOut ? -r.amount : r.amount), numFmt: '#,##0.00', align: 'right' },
     ...(view === 'company'
-      ? [{ header: 'Company P/L', value: (e: HamaliEntry) => rupees(e.pl), excel: (e: HamaliEntry) => e.pl, numFmt: '#,##0.00', align: 'right' as const }]
-      : [{ header: 'Status', value: (e: HamaliEntry) => (isVerified(e.date) ? 'Verified' : 'Current') }]),
+      ? [{ header: 'Company P/L', value: (r: UnifiedRow) => (r.pl != null ? rupees(r.pl) : ''), excel: (r: UnifiedRow) => r.pl ?? null, numFmt: '#,##0.00', align: 'right' as const }]
+      : [{ header: 'Status', value: (r: UnifiedRow) => (isVerified(r.date) ? 'Verified' : 'Current') }]),
   ];
 
   // Crew dues accrued since the last checkpoint (through today) — the standing
@@ -1112,165 +1167,14 @@ export default function HamaliLedger() {
             </div>
           )}
 
-          {/* Ledger Table */}
+          {/* Hamali Disbursements & Charges — combined into one table so derived
+              entries (purchase/sale/transfer) and manually recorded charges
+              (bag cutting, pappu net, misc, paid) live in a single section. */}
           {(view === 'company' || view === 'hamali') && (
-          <>
-          <div className="rounded-lg border bg-card overflow-x-auto">
-            <div className="px-5 py-4 border-b font-semibold text-sm flex items-center justify-between gap-3">
-              <span>Hamali Disbursements</span>
-              <ExportButtons
-                filename={`Hamali_Report_${view === 'company' ? 'Company' : 'Crew'}`}
-                title={`Hamali Report (${view === 'company' ? 'Company' : 'Crew'})`}
-                subtitle={`${filtered.length} entry(s)`}
-                columns={hamaliExportColumns}
-                rows={filtered}
-              />
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Party</TableHead>
-                  <TableHead>Lorry No</TableHead>
-                  <TableHead>Reference</TableHead>
-                  <TableHead className="text-right">Net Weight (kg)</TableHead>
-                  <TableHead className="text-right">Full Charge</TableHead>
-                  {view === 'company' && <TableHead className="text-right">Our Share</TableHead>}
-                  {view === 'company' && <TableHead className="text-right">Lorry Share</TableHead>}
-                  <TableHead className="text-right">Crew Paid</TableHead>
-                  {view === 'hamali' && <TableHead className="text-right min-w-[210px]">Rounded Off</TableHead>}
-                  {view === 'company' && <TableHead className="text-right">Company P/L</TableHead>}
-                  {view === 'hamali' && <TableHead>Status</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
-                      No hamali transactions match selected filters.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  visible.map((e) => (
-                    <TableRow key={e.id} className={view === 'hamali' && isVerified(e.date) ? 'bg-muted/20' : undefined}>
-                      <TableCell>{shortDate(e.date)}</TableCell>
-                      <TableCell>
-                        <Badge variant={e.source === 'SALE' ? 'default' : e.source === 'TRANSFER' ? 'secondary' : 'outline'} className="text-[10px]">
-                          {e.label || (e.source === 'SALE' ? 'Sale Loading' : e.source === 'TRANSFER' ? 'Transfer' : 'Purchase')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-semibold">{e.partyName}</TableCell>
-                      <TableCell>{e.lorryNumber ?? '-'}</TableCell>
-                      <TableCell className="text-xs">{e.reference}</TableCell>
-                      <TableCell className="text-right font-medium">{kg(e.netWeightKg)}</TableCell>
-                      <TableCell className="text-right font-bold text-primary">{rupees(e.fullCharge)}</TableCell>
-                      {view === 'company' && <TableCell className="text-right font-semibold text-amber-600">{rupees(e.ourShare)}</TableCell>}
-                      {view === 'company' && <TableCell className="text-right text-muted-foreground">{rupees(e.lorryShare)}</TableCell>}
-                      <TableCell className="text-right">{rupees(e.crew)}</TableCell>
-                      {view === 'hamali' && (
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Input
-                              type="number"
-                              step="1"
-                              className="w-28 h-8 text-right font-semibold text-xs bg-card"
-                              placeholder={rupees(e.crew)}
-                              value={roundedValues[e.id] !== undefined ? roundedValues[e.id] : ''}
-                              onChange={(evt) => {
-                                const valStr = evt.target.value;
-                                setRoundedValues((prev) => {
-                                  const next = { ...prev };
-                                  if (valStr === '') {
-                                    delete next[e.id];
-                                  } else {
-                                    next[e.id] = Number(valStr);
-                                  }
-                                  localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                  return next;
-                                });
-                              }}
-                            />
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="outline" size="sm" className="h-8 px-2 text-xs gap-1 shrink-0">
-                                  <Calculator className="h-3.5 w-3.5 text-primary" />
-                                  Round Off
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-3" align="end">
-                                <div className="text-xs font-semibold mb-2 text-muted-foreground flex items-center justify-between border-b pb-1.5">
-                                  <span>Round Off Options</span>
-                                  <span className="font-mono text-[11px] text-primary">{rupees(e.crew)}</span>
-                                </div>
-                                <div className="space-y-1">
-                                  {getRoundOptions(e.crew).map((opt) => (
-                                    <PopoverClose asChild key={opt.label}>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="w-full justify-between h-8 text-xs font-normal hover:bg-primary/10"
-                                        onClick={() => {
-                                          setRoundedValues((prev) => {
-                                            const next = { ...prev, [e.id]: opt.value };
-                                            localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                            return next;
-                                          });
-                                        }}
-                                      >
-                                        <span className="font-semibold text-primary">{rupees(opt.value)}</span>
-                                        <span className="text-[10px] text-muted-foreground">{opt.label}</span>
-                                      </Button>
-                                    </PopoverClose>
-                                  ))}
-                                  {roundedValues[e.id] !== undefined && (
-                                    <PopoverClose asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="w-full justify-center h-7 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 border-t mt-1 pt-1"
-                                        onClick={() => {
-                                          setRoundedValues((prev) => {
-                                            const next = { ...prev };
-                                            delete next[e.id];
-                                            localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                            return next;
-                                          });
-                                        }}
-                                      >
-                                        <RotateCcw className="h-3 w-3 mr-1" /> Reset to Original ({rupees(e.crew)})
-                                      </Button>
-                                    </PopoverClose>
-                                  )}
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </TableCell>
-                      )}
-                      {view === 'company' && <TableCell className="text-right font-semibold text-emerald-600 dark:text-emerald-400">{rupees(e.pl)}</TableCell>}
-                      {view === 'hamali' && (
-                        <TableCell>
-                          {isVerified(e.date) ? (
-                            <Badge variant="secondary" className="text-[10px] gap-1"><Lock className="h-3 w-3" /> Verified</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px]">Current</Badge>
-                          )}
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
-          </div>
-
-          {/* Manually-recorded charges (bag cutting, pappu net, misc, paid) */}
           <div className="rounded-lg border bg-card overflow-x-auto">
             <div className="px-5 py-4 border-b flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-sm">Recorded Charges</span>
+                <span className="font-semibold text-sm">Hamali Disbursements &amp; Charges</span>
                 <Combobox
                   className="h-9 w-52"
                   ariaLabel="Filter by charge type"
@@ -1290,64 +1194,179 @@ export default function HamaliLedger() {
                   <Button variant="ghost" size="sm" className="h-9" onClick={() => { setChargeFilter('ALL'); setChargeSearch(''); }}>Clear</Button>
                 )}
               </div>
-              <div className="flex gap-4 text-xs">
-                <span className="text-muted-foreground">Charged: <b className="text-primary">{rupees(manualFilteredCharged)}</b></span>
-                <span className="text-muted-foreground">Paid: <b className="text-emerald-600 dark:text-emerald-400">{rupees(manualFilteredPaid)}</b></span>
-                <span className="text-muted-foreground">Outstanding: <b className={manualFilteredOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : ''}>{rupees(manualFilteredOutstanding)}</b></span>
+              <div className="flex items-center gap-4">
+                <div className="flex gap-4 text-xs">
+                  <span className="text-muted-foreground">Charged: <b className="text-primary">{rupees(manualFilteredCharged)}</b></span>
+                  <span className="text-muted-foreground">Paid: <b className="text-emerald-600 dark:text-emerald-400">{rupees(manualFilteredPaid)}</b></span>
+                  <span className="text-muted-foreground">Outstanding: <b className={manualFilteredOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : ''}>{rupees(manualFilteredOutstanding)}</b></span>
+                </div>
+                <ExportButtons
+                  filename={`Hamali_Report_${view === 'company' ? 'Company' : 'Crew'}`}
+                  title={`Hamali Report (${view === 'company' ? 'Company' : 'Crew'})`}
+                  subtitle={`${unifiedRows.length} entry(s)`}
+                  columns={unifiedExportColumns}
+                  rows={unifiedRows}
+                />
               </div>
             </div>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
-                  <TableHead>Charge</TableHead>
-                  <TableHead className="text-right">Bags</TableHead>
-                  <TableHead className="text-right">Rate/Bag</TableHead>
-                  <TableHead>Note</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Party</TableHead>
+                  <TableHead>Lorry No / Bags</TableHead>
+                  <TableHead>Reference / Note</TableHead>
+                  <TableHead className="text-right">Net Weight (kg)</TableHead>
+                  <TableHead className="text-right">Full Charge</TableHead>
+                  {view === 'company' && <TableHead className="text-right">Our Share</TableHead>}
+                  {view === 'company' && <TableHead className="text-right">Lorry Share</TableHead>}
+                  <TableHead className="text-right">Crew / Amount</TableHead>
+                  {view === 'hamali' && <TableHead className="text-right min-w-[210px]">Rounded Off</TableHead>}
+                  {view === 'company' && <TableHead className="text-right">Company P/L</TableHead>}
+                  {view === 'hamali' && <TableHead>Status</TableHead>}
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {manualFiltered.length === 0 ? (
+                {unifiedRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                      {chargeFilterActive
-                        ? 'No charges match this filter.'
-                        : 'No charges recorded. Use “Record” to add bag cutting, pappu net, or paid amounts.'}
+                    <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
+                      No hamali transactions or charges match selected filters.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  manualFiltered.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell>{shortDate(c.date)}</TableCell>
+                  visible.map((r) => (
+                    <TableRow key={r.id} className={view === 'hamali' && isVerified(r.date) ? 'bg-muted/20' : undefined}>
+                      <TableCell>{shortDate(r.date)}</TableCell>
                       <TableCell>
-                        <Badge variant={c.type === 'PAID' ? 'default' : 'outline'} className="text-[10px]">
-                          {manualTypeMeta(c.type).label}
-                        </Badge>
+                        <Badge variant={r.badgeVariant} className="text-[10px]">{r.typeLabel}</Badge>
                       </TableCell>
-                      <TableCell className="text-right">{c.bags ?? '-'}</TableCell>
-                      <TableCell className="text-right">{c.ratePerBag != null ? rupees(Number(c.ratePerBag)) : '-'}</TableCell>
-                      <TableCell className="text-muted-foreground max-w-xs truncate">{c.note ?? '-'}</TableCell>
-                      <TableCell className={`text-right font-bold ${c.type === 'PAID' ? 'text-emerald-600 dark:text-emerald-400' : 'text-primary'}`}>
-                        {c.type === 'PAID' ? '−' : ''}{rupees(Number(c.amount))}
+                      <TableCell className="font-semibold">{r.party}</TableCell>
+                      <TableCell>{r.lorryOrBags}</TableCell>
+                      <TableCell className="text-xs">{r.referenceOrNote}</TableCell>
+                      <TableCell className="text-right font-medium">{r.netWeightKg != null ? kg(r.netWeightKg) : '-'}</TableCell>
+                      <TableCell className="text-right font-bold text-primary">{r.fullCharge != null ? rupees(r.fullCharge) : '-'}</TableCell>
+                      {view === 'company' && <TableCell className="text-right font-semibold text-amber-600">{r.ourShare != null ? rupees(r.ourShare) : '-'}</TableCell>}
+                      {view === 'company' && <TableCell className="text-right text-muted-foreground">{r.lorryShare != null ? rupees(r.lorryShare) : '-'}</TableCell>}
+                      <TableCell className={`text-right font-bold ${r.isPaidOut ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
+                        {r.isPaidOut ? '−' : ''}{rupees(r.amount)}
                       </TableCell>
+                      {view === 'hamali' && (
+                        <TableCell className="text-right">
+                          {r.kind === 'ENTRY' && r.entry ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Input
+                                type="number"
+                                step="1"
+                                className="w-28 h-8 text-right font-semibold text-xs bg-card"
+                                placeholder={rupees(r.entry.crew)}
+                                value={roundedValues[r.entry.id] !== undefined ? roundedValues[r.entry.id] : ''}
+                                onChange={(evt) => {
+                                  const valStr = evt.target.value;
+                                  const entryId = r.entry!.id;
+                                  setRoundedValues((prev) => {
+                                    const next = { ...prev };
+                                    if (valStr === '') {
+                                      delete next[entryId];
+                                    } else {
+                                      next[entryId] = Number(valStr);
+                                    }
+                                    localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" size="sm" className="h-8 px-2 text-xs gap-1 shrink-0">
+                                    <Calculator className="h-3.5 w-3.5 text-primary" />
+                                    Round Off
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-64 p-3" align="end">
+                                  <div className="text-xs font-semibold mb-2 text-muted-foreground flex items-center justify-between border-b pb-1.5">
+                                    <span>Round Off Options</span>
+                                    <span className="font-mono text-[11px] text-primary">{rupees(r.entry.crew)}</span>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {getRoundOptions(r.entry.crew).map((opt) => (
+                                      <PopoverClose asChild key={opt.label}>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="w-full justify-between h-8 text-xs font-normal hover:bg-primary/10"
+                                          onClick={() => {
+                                            const entryId = r.entry!.id;
+                                            setRoundedValues((prev) => {
+                                              const next = { ...prev, [entryId]: opt.value };
+                                              localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                              return next;
+                                            });
+                                          }}
+                                        >
+                                          <span className="font-semibold text-primary">{rupees(opt.value)}</span>
+                                          <span className="text-[10px] text-muted-foreground">{opt.label}</span>
+                                        </Button>
+                                      </PopoverClose>
+                                    ))}
+                                    {roundedValues[r.entry.id] !== undefined && (
+                                      <PopoverClose asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="w-full justify-center h-7 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 border-t mt-1 pt-1"
+                                          onClick={() => {
+                                            const entryId = r.entry!.id;
+                                            setRoundedValues((prev) => {
+                                              const next = { ...prev };
+                                              delete next[entryId];
+                                              localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
+                                              return next;
+                                            });
+                                          }}
+                                        >
+                                          <RotateCcw className="h-3 w-3 mr-1" /> Reset to Original ({rupees(r.entry.crew)})
+                                        </Button>
+                                      </PopoverClose>
+                                    )}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      )}
+                      {view === 'company' && <TableCell className="text-right font-semibold text-emerald-600 dark:text-emerald-400">{r.pl != null ? rupees(r.pl) : '-'}</TableCell>}
+                      {view === 'hamali' && (
+                        <TableCell>
+                          {isVerified(r.date) ? (
+                            <Badge variant="secondary" className="text-[10px] gap-1"><Lock className="h-3 w-3" /> Verified</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">Current</Badge>
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => { if (confirm('Remove this charge and reverse its ledger posting?')) deleteManual.mutate(c.id); }}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        {r.kind === 'MANUAL' && r.manual && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => { if (confirm('Remove this charge and reverse its ledger posting?')) deleteManual.mutate(r.manual!.id); }}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
+            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
-          </>
           )}
         </div>
       )}

@@ -178,6 +178,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     interestCapitalisedAgg,
     interestPaidAgg,
     otherIncomeAgg,
+    gunnySalesAgg,
     purchaseKataAgg,
     dustPurchasesForKata,
     saleDispatchesForKata,
@@ -215,8 +216,9 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       // actually paid to the bank at repayment (see loan reconciliation).
       prisma.stockTransfer.aggregate({ _sum: { interestCharge: true } }),
       prisma.loanRepayment.aggregate({ _sum: { interest: true } }),
-      // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income) ──
+      // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income / Gunny Sales) ──
       prisma.otherIncomeEntry.aggregate({ _sum: { amount: true } }),
+      prisma.gunnySaleEntry.aggregate({ _sum: { amount: true } }),
       prisma.purchase.aggregate({ _sum: { kataFee: true } }),
       prisma.dustPurchase.findMany({ select: { weightKg: true, lorryNumber: true } }),
       prisma.saleDispatch.findMany({ select: { weightKg: true, vehicleNumber: true } }),
@@ -281,10 +283,9 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       Number(shellAgg._sum.transportCharge || 0) +
       Number(huskAgg._sum.transportCharge || 0);
 
-    // Purchases are a husk-pool cost; sales are booked separately as income
-    // (gunnySales below), not netted here — see [[expense-pages-linked-payments]].
+    // Purchases on Feroz Ledger are a husk-pool cost; standalone gunny sales in Income tab are income
     const gunnyBags = Number(gunnyByDir._sum.debit ?? 0);
-    const gunnySales = Number(gunnyByDir._sum.credit ?? 0);
+    const gunnySales = Number(gunnySalesAgg._sum.amount ?? 0);
     const electricity = Number(electricityAgg._sum.amount ?? 0);
     const maintenance = Number(maintenanceAgg._sum.amount ?? 0);
     const miscExpense = Number(miscExpenseAgg._sum.amount ?? 0);

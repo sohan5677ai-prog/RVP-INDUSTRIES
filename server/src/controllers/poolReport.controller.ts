@@ -13,6 +13,7 @@ import {
   createTermLoanPrincipalSchema,
   createStorageMaintenanceSchema,
   createOtherIncomeSchema,
+  createGunnySaleSchema,
 } from '../schemas/poolReport.schema.js';
 
 /**
@@ -424,3 +425,44 @@ export async function deleteOtherIncome(req: Request, res: Response) {
   });
   res.json({ message: 'Other income entry deleted' });
 }
+
+// ── Standalone Gunny Sales (husk-pool Income tab) ─────────────────────────────
+export async function listGunnySales(_req: Request, res: Response) {
+  res.json(await prisma.gunnySaleEntry.findMany({ orderBy: { date: 'desc' } }));
+}
+
+export async function createGunnySale(req: Request, res: Response) {
+  const data = createGunnySaleSchema.parse(req.body);
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.gunnySaleEntry.create({
+      data: {
+        date: data.date,
+        bags: data.bags,
+        price: data.price,
+        amount: data.amount,
+        note: data.note ?? null,
+      },
+    });
+    const desc = `${data.bags} bags @ ₹${data.price}/bag${data.note ? ` — ${data.note}` : ''}`;
+    await LedgerService.recordLinkedReceipt(tx, {
+      date: data.date,
+      amount: Number(data.amount),
+      type: 'GUNNY_BAGS_SALE',
+      description: desc,
+      refKey: `GUNNYSALE-${row.id}`,
+    });
+    return row;
+  });
+  res.status(201).json(created);
+}
+
+export async function deleteGunnySale(req: Request, res: Response) {
+  const row = await prisma.gunnySaleEntry.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Gunny sale entry not found');
+  await prisma.$transaction(async (tx) => {
+    await reverseLinkedEntry(tx, `GUNNYSALE-${row.id}`);
+    await tx.gunnySaleEntry.delete({ where: { id: row.id } });
+  });
+  res.json({ message: 'Gunny sale entry deleted' });
+}
+

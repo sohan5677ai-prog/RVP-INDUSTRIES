@@ -64,3 +64,12 @@ export const createOtherIncomeSchema = z.object({
   amount: z.coerce.number().positive(),
   note: z.string().trim().optional().nullable(),
 });
+
+export const createGunnySaleSchema = z.object({
+  date: z.coerce.date(),
+  bags: z.coerce.number().int().positive(),
+  price: z.coerce.number().positive(),
+  amount: z.coerce.number().positive(),
+  note: z.string().trim().optional().nullable(),
+});
+

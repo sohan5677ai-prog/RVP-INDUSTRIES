@@ -1031,6 +1031,19 @@ model GunnyBagEntry {
   createdAt DateTime           @default(now())
 }
 
+// Standalone Gunny Bag Sales recorded in the Income tab (separate from Feroz Ledger).
+// Posts a linked Receipt (type GUNNY_BAGS_SALE) to the accounting ledger.
+model GunnySaleEntry {
+  id        String   @id @default(cuid())
+  date      DateTime
+  bags      Int
+  price     Decimal  @db.Decimal(12, 2)
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+
 // Free-form "Other Income" entries (husk-pool Income tab) — anything that doesn't
 // fit Kata Income, Hamali Company Profit or Gunny Sales. Posts a linked Receipt
 // (type OTHER_INCOME) the same way the expense detail pages post linked Payments.

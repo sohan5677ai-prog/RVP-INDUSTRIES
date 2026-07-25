@@ -107,7 +107,11 @@ export class TaxproService {
 
           // GSP gateway error shape: { status_cd:'0', error:{ error_cd, message } }
           if (json?.error?.message) {
-            const err: any = new Error(`${json.error.error_cd || ''} ${json.error.message}`.trim());
+            let msg = `${json.error.error_cd || ''} ${json.error.message}`.trim();
+            if (String(json.error.error_cd) === '1017' || msg.includes('1017')) {
+              msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings?`;
+            }
+            const err: any = new Error(msg);
             err.isBusinessError = true;
             throw err;
           }
@@ -123,6 +127,9 @@ export class TaxproService {
             // message actionable rather than surfacing NIC's cryptic text verbatim.
             if (json.ErrorDetails.some((e: any) => String(e.ErrorCode) === '5001')) {
               msg = `NIC returned a temporary system error (5001). This is usually transient — please wait a moment and try again. [${msg}]`;
+            }
+            if (json.ErrorDetails.some((e: any) => String(e.ErrorCode) === '1017')) {
+              msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings? [${msg}]`;
             }
             const err: any = new Error(msg);
             err.isBusinessError = true;

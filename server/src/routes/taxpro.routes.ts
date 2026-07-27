@@ -4,6 +4,8 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { HttpError } from '../lib/httpError.js';
 import { TaxproService } from '../services/taxpro.service.js';
 import { sendInvoiceEmail, sendEwbEmail } from '../services/saleDocumentEmail.service.js';
+import { sendDispatchBundleWhatsApp } from '../services/dispatchWhatsapp.service.js';
+import { logger } from '../lib/logger.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -40,6 +42,10 @@ const ewbSchema = z.object({
   vehicleType: z.string().default('R'),
   transDocNo: z.string().optional(),  // LR/RR/Airway bill no (rail/air/ship)
   transDocDt: z.string().optional(),  // yyyy-mm-dd from the date input
+  // Set by the "Generate IRN and E-Way Bill" flow only: once the EWB exists the
+  // invoice+EWB bundle goes straight out on WhatsApp. The standalone "Gen EWB"
+  // dialog leaves this false and stays silent.
+  notifyWhatsApp: z.boolean().optional().default(false),
 });
 
 // Get list of generated IRNs and EWBs
@@ -165,7 +171,26 @@ router.post(
       include: { saleOrder: { include: { buyer: true } } },
     });
 
-    res.json({ updated, message: result.message });
+    // The EWB is generated and saved at this point — a WhatsApp failure must not
+    // fail the request or make the caller think the EWB didn't happen. Report the
+    // per-leg outcome alongside it and let the UI surface any leg that didn't land.
+    let whatsapp = null;
+    if (data.notifyWhatsApp) {
+      try {
+        whatsapp = await sendDispatchBundleWhatsApp(id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`[taxpro] EWB ${result.ewbNumber} generated but WhatsApp bundle failed: ${message}`);
+        whatsapp = {
+          ok: false,
+          party: { status: 'failed' as const, error: message },
+          broker: { status: 'na' as const, error: null },
+          driver: { status: 'failed' as const, error: message },
+        };
+      }
+    }
+
+    res.json({ updated, message: result.message, whatsapp });
   })
 );
 

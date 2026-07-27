@@ -1,6 +1,8 @@
 import { prisma } from '../lib/prisma.js';
+import { logger } from '../lib/logger.js';
 import { whatsappService } from './whatsapp.service.js';
 import { buildInvoicePdfData } from './saleDocumentEmail.service.js';
+import { TaxproService } from './taxpro.service.js';
 import { renderInvoicePdf } from '../lib/invoicePdf.js';
 import { renderEwbPdf } from '../lib/ewbPdf.js';
 import { qrPngBuffer } from '../lib/qrcode.js';
@@ -19,6 +21,50 @@ export type DispatchWhatsAppResult = {
   broker: DispatchWhatsAppLeg;
   driver: DispatchWhatsAppLeg;
 };
+
+/**
+ * Page 2 of the bundle: the **official** government-format E-Way Bill, fetched
+ * from TaxPro's ASP print service (`printdetailewb`) — the same document the EWB
+ * portal issues, which is what a checkpost officer expects to be shown. Our
+ * in-house `renderEwbPdf` replica is only the fallback.
+ *
+ * Two things make that endpoint unlike the rest of the integration: it lives on
+ * TaxPro's PRODUCTION host even while `taxproSandbox` is on (sandbox answers
+ * `GSP503: This feature is available only in Production`), and it is a pure
+ * renderer of the record we POST rather than a NIC lookup.
+ *
+ * Being a network call, it can fail — and by then the E-Way Bill already exists
+ * at NIC, so failing the send would cost the buyer their paperwork over a print
+ * hiccup. Fall back to the replica and log it rather than throwing.
+ */
+async function renderBundleEwbPdf(
+  dispatch: Awaited<ReturnType<typeof buildInvoicePdfData>>['dispatch'],
+  pdfData: Awaited<ReturnType<typeof buildInvoicePdfData>>['pdfData'],
+): Promise<Buffer> {
+  try {
+    return await TaxproService.printEWayBillDetailPdf(dispatch.id);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `[dispatch-whatsapp] official EWB print failed for ${dispatch.ewbNumber} — attaching the in-house replica instead: ${message}`,
+    );
+    return renderEwbPdf({
+      company: pdfData.company,
+      buyer: pdfData.buyer,
+      invoiceNumber: pdfData.invoiceNumber,
+      invoiceDate: pdfData.invoiceDate,
+      vehicleNumber: pdfData.vehicleNumber,
+      line: pdfData.line,
+      gstRate: pdfData.gstRate,
+      ewbNumber: dispatch.ewbNumber!,
+      ewbDate: dispatch.ewbDate!,
+      ewbValidUpto: dispatch.ewbValidUpto!,
+      ewbDistance: dispatch.ewbDistance,
+      dispatchDate: dispatch.dispatchDate,
+      qrPngBuffer: await qrPngBuffer(dispatch.ewbNumber!),
+    });
+  }
+}
 
 /**
  * The dispatch bundle for one lorry: the buyer (and the broker, when the order
@@ -53,21 +99,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   let buffer = invoiceBuffer;
   let filename = `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
   if (hasEwb) {
-    const ewbBuffer = await renderEwbPdf({
-      company: pdfData.company,
-      buyer: pdfData.buyer,
-      invoiceNumber: pdfData.invoiceNumber,
-      invoiceDate: pdfData.invoiceDate,
-      vehicleNumber: pdfData.vehicleNumber,
-      line: pdfData.line,
-      gstRate: pdfData.gstRate,
-      ewbNumber: dispatch.ewbNumber!,
-      ewbDate: dispatch.ewbDate!,
-      ewbValidUpto: dispatch.ewbValidUpto!,
-      ewbDistance: dispatch.ewbDistance,
-      dispatchDate: dispatch.dispatchDate,
-      qrPngBuffer: await qrPngBuffer(dispatch.ewbNumber!),
-    });
+    const ewbBuffer = await renderBundleEwbPdf(dispatch, pdfData);
     buffer = await mergePdfs([invoiceBuffer, ewbBuffer]);
     filename = `Invoice-EWB-${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
   }

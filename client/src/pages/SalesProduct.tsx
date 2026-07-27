@@ -74,6 +74,46 @@ const statusVariant: Record<SaleStatus, 'soft' | 'warning' | 'success' | 'outlin
 const STATUS_FILTERS: ('ALL' | SaleDisplayStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED', 'DELIVERED', 'PAID'];
 const NO_BROKER = '__none__';
 
+/**
+ * Per-recipient outcome of a dispatch WhatsApp send (buyer / broker / driver).
+ * `na` means the leg didn't apply at all — e.g. no broker on the order. `error`
+ * carries why a leg was skipped/failed (missing phone, template not approved).
+ */
+type WhatsAppLegResult = {
+  status: 'sent' | 'skipped' | 'failed' | 'na';
+  error: string | null;
+};
+
+type DispatchWhatsAppResult = {
+  ok: boolean;
+  party: WhatsAppLegResult;
+  broker: WhatsAppLegResult;
+  driver: WhatsAppLegResult;
+};
+
+/**
+ * One toast covering all three legs. Every leg is sent independently server-side,
+ * so `ok` alone would hide a driver leg that was skipped for a missing phone —
+ * name each applicable leg, with the reason for any that didn't land.
+ * Shared by the manual WhatsApp button and the auto-send after IRN + EWB.
+ */
+function notifyWhatsAppResult(r: DispatchWhatsAppResult) {
+  const legs = ([['Buyer', r.party], ['Broker', r.broker], ['Driver', r.driver]] as const)
+    .filter(([, l]) => l.status !== 'na');
+  const summary = legs.map(([name, l]) => `${name} ${l.status}`).join(' · ');
+  const reasons = legs
+    .filter(([, l]) => l.error)
+    .map(([name, l]) => `${name}: ${l.error}`)
+    .join('\n');
+  const statuses = legs.map(([, l]) => l.status);
+  const notify = !r.ok || statuses.includes('failed')
+    ? toast.error
+    : statuses.includes('skipped')
+      ? toast.warning
+      : toast.success;
+  notify(`WhatsApp - ${summary}`, reasons ? { description: reasons } : undefined);
+}
+
 const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
 
 /** Due date = deliveredDate + dueDays. Null until both are known. */
@@ -352,8 +392,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         });
       }
 
-      // Step 3: Generate E-Way Bill
-      const ewbRes = await api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
+      // Step 3: Generate the E-Way Bill, and once it exists send the combined
+      // invoice+EWB bundle out on WhatsApp (buyer, broker if any, then the driver
+      // on his own template). The send happens server-side so closing the tab
+      // mid-flow can't drop it; a send failure never fails the EWB.
+      const ewbRes = await api<{ updated: SaleDispatch; message: string; whatsapp: DispatchWhatsAppResult | null }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
         method: 'POST',
         body: {
           transporterId,
@@ -364,11 +407,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           vehicleType: vehicleType || 'R',
           transDocNo,
           transDocDt,
+          notifyWhatsApp: true,
         },
       });
 
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(ewbRes.message || `IRN & E-Way Bill generated successfully for ${savedInvoiceNumber}`);
+      if (ewbRes.whatsapp) notifyWhatsAppResult(ewbRes.whatsapp);
       setInvoiceDispatch(null);
       navigate(`/sale-dispatches/${dispatchId}/ewaybill`);
     } catch (e: any) {
@@ -596,13 +641,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // Invoice + EWB + driver details → broker (or buyer when no real broker) on
-  // WhatsApp, plus buyer name/phone/maps link → the driver.
+  // Invoice + EWB + driver details → buyer (and the broker too, when the order
+  // came through a real one), plus buyer name/phone/maps link → the driver.
   const sendWhatsAppMutation = useMutation({
     mutationFn: (id: string) =>
-      api<{ ok: boolean; sentTo: string; driverNotified: boolean }>(`/whatsapp/dispatches/${id}/send`, { method: 'POST' }),
-    onSuccess: (r) =>
-      toast.success(`WhatsApp sent to ${r.sentTo}${r.driverNotified ? ' and the driver' : ''}`),
+      api<DispatchWhatsAppResult>(`/whatsapp/dispatches/${id}/send`, { method: 'POST' }),
+    onSuccess: notifyWhatsAppResult,
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 

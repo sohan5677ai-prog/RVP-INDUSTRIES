@@ -65,22 +65,32 @@ export function renderEwbPdf(data: EwbPdfData): Promise<Buffer> {
     const sgst = isSameState ? gst / 2 : 0;
     const igst = isSameState ? 0 : gst;
 
-    // Title + QR --------------------------------------------------------------
+    // Title --------------------------------------------------------------------
     doc.font('Helvetica-Bold').fontSize(15).text('e-Way Bill', LEFT, PAGE.margin);
-    if (data.qrPngBuffer) doc.image(data.qrPngBuffer, RIGHT - 60, PAGE.margin - 4, { width: 60, height: 60 });
     let y = PAGE.margin + 24;
 
     // 1. E-Way Bill details ----------------------------------------------------
+    // The QR lives INSIDE this box, against its right edge — same treatment as the
+    // IRN block on the tax invoice. It used to sit up beside the title, where the
+    // section bar (drawn afterwards) painted a solid band straight through it and
+    // left the code unscannable. Reserve its width so the detail lines can't run
+    // under it, and its height so the box always encloses it.
     y = sectionTitle('1. E-WAY BILL Details', y);
     const boxTop1 = y;
+    const qrSize = 56;
+    const hasQr = !!data.qrPngBuffer;
+    const textW = hasQr ? W - qrSize - 16 : W - 8;
     doc.font('Helvetica').fontSize(8);
-    doc.text(`eWay Bill No: `, LEFT + 4, y + 4, { continued: true }).font('Helvetica-Bold').text(data.ewbNumber);
-    doc.font('Helvetica').text(`Generated Date: `, LEFT + 4, doc.y + 3, { continued: true }).font('Helvetica-Bold').text(fmtDate(data.ewbDate));
-    doc.font('Helvetica').text(`Valid Upto: `, LEFT + 4, doc.y + 3, { continued: true }).font('Helvetica-Bold').text(fmtDate(data.ewbValidUpto));
-    doc.font('Helvetica').text(`Mode: `, LEFT + 4, doc.y + 3, { continued: true }).font('Helvetica-Bold').text('Road', { continued: true })
+    doc.text(`eWay Bill No: `, LEFT + 4, y + 4, { width: textW, continued: true }).font('Helvetica-Bold').text(data.ewbNumber);
+    doc.font('Helvetica').text(`Generated Date: `, LEFT + 4, doc.y + 3, { width: textW, continued: true }).font('Helvetica-Bold').text(fmtDate(data.ewbDate));
+    doc.font('Helvetica').text(`Valid Upto: `, LEFT + 4, doc.y + 3, { width: textW, continued: true }).font('Helvetica-Bold').text(fmtDate(data.ewbValidUpto));
+    doc.font('Helvetica').text(`Mode: `, LEFT + 4, doc.y + 3, { width: textW, continued: true }).font('Helvetica-Bold').text('Road', { continued: true })
       .font('Helvetica').text(`     Approx Distance: `, { continued: true }).font('Helvetica-Bold').text(data.ewbDistance ? `${data.ewbDistance} KM` : '-');
-    doc.font('Helvetica').text(`Document: `, LEFT + 4, doc.y + 3, { continued: true }).font('Helvetica-Bold').text(`Tax Invoice - ${data.invoiceNumber} - ${fmtDate(data.invoiceDate)}`);
-    const boxBottom1 = doc.y + 6;
+    doc.font('Helvetica').text(`Document: `, LEFT + 4, doc.y + 3, { width: textW, continued: true }).font('Helvetica-Bold').text(`Tax Invoice - ${data.invoiceNumber} - ${fmtDate(data.invoiceDate)}`);
+    if (hasQr && data.qrPngBuffer) {
+      doc.image(data.qrPngBuffer, RIGHT - qrSize - 4, boxTop1 + 4, { width: qrSize, height: qrSize });
+    }
+    const boxBottom1 = Math.max(doc.y + 6, boxTop1 + (hasQr ? qrSize + 8 : 0));
     doc.rect(LEFT, boxTop1, W, boxBottom1 - boxTop1).stroke();
     y = boxBottom1 + 4;
 

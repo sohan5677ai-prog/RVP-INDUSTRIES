@@ -284,12 +284,24 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   /**
    * A shipment can be undone while it's DISPATCHED or DELIVERED (delivery adds no
    * postings of its own) - but not once it's paid or carries an active IRN / EWB.
+   * Returns why the undo is blocked, or null when it's allowed. The button stays
+   * visible either way (disabled + tooltip), so a mistaken dispatch never looks
+   * un-fixable - the tooltip names the one thing to reverse first.
    */
-  function canUndo(d: SaleDispatch, o: SaleOrder): boolean {
-    return (d.status === 'DISPATCHED' || d.status === 'DELIVERED')
-      && !isDispatchPaid(d, Number(o.ratePerKg), settled)
-      && (!d.irn || d.irnStatus === 'CANCELLED')
-      && (!d.ewbNumber || d.ewbStatus === 'CANCELLED');
+  function undoBlockedReason(d: SaleDispatch, o: SaleOrder): string | null {
+    if (d.status !== 'DISPATCHED' && d.status !== 'DELIVERED') {
+      return 'Only a dispatched or delivered shipment can be undone.';
+    }
+    if (d.irn && d.irnStatus !== 'CANCELLED') {
+      return 'Cancel the E-Invoice (IRN) before undoing this dispatch.';
+    }
+    if (d.ewbNumber && d.ewbStatus !== 'CANCELLED') {
+      return 'Cancel the E-Way Bill before undoing this dispatch.';
+    }
+    if (isDispatchPaid(d, Number(o.ratePerKg), settled)) {
+      return 'This shipment is paid - undo the receipt on Sale Dues before undoing this dispatch.';
+    }
+    return null;
   }
 
   const undoMutation = useMutation({
@@ -1075,11 +1087,24 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             <Pencil className="h-3.5 w-3.5" /> Edit
                                           </Button>
                                         )}
-                                        {canUndo(d, o) && (
-                                          <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => setUndoTarget({ dispatch: d, order: o })}>
-                                            <Undo2 className="h-3.5 w-3.5" /> Undo
-                                          </Button>
-                                        )}
+                                        {(() => {
+                                          const blocked = undoBlockedReason(d, o);
+                                          // The tooltip lives on the wrapper: a disabled button gets
+                                          // `pointer-events-none`, so its own title would never show.
+                                          return (
+                                            <span title={blocked ?? 'Undo this dispatch - reverses stock and the ledger'}>
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                                disabled={!!blocked}
+                                                onClick={() => setUndoTarget({ dispatch: d, order: o })}
+                                              >
+                                                <Undo2 className="h-3.5 w-3.5" /> Undo
+                                              </Button>
+                                            </span>
+                                          );
+                                        })()}
                                       </div>
                                     </div>
                                   </div>

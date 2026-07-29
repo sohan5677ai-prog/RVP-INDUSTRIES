@@ -69,8 +69,9 @@ async function renderBundleEwbPdf(
 /**
  * The dispatch bundle for one lorry: the buyer (and the broker, when the order
  * came through a real one) gets the tax-invoice PDF — with the E-Way Bill merged
- * onto it when one exists — plus the driver's details; the driver separately gets
- * the buyer's name/phone/maps link on his own template.
+ * onto it when one exists — plus the driver's details. The driver himself is
+ * messaged at dispatch time, not here; his leg in the result is read back from
+ * the log so the caller still sees all three outcomes.
  *
  * Shared by the manual "Send via WhatsApp" button and the automatic send that
  * follows a combined IRN + E-Way Bill generation. Requires the tax invoice to be
@@ -156,20 +157,43 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     brokerResult = { ok: false, skipped: true, error: `${broker!.name} has no phone number on file` };
   }
 
-  // Driver — best-effort, independent of the above; its own template, sent last.
-  const driverResult = await whatsappService.notifyDispatchDriver(
-    { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
-    { name: order.buyer.name, phone: order.buyer.phone, locationLink: order.buyer.locationLink }
-  );
+  // Driver — NOT sent from here. He already got the buyer's name, phone and maps
+  // link the moment the dispatch was created (createDispatch in sale.controller),
+  // which is when he actually needs them; the invoice bundle runs hours later,
+  // once the IRN/EWB exist. Sending again here only duplicated the message and
+  // billed a second WhatsApp conversation. Report that earlier send instead, so
+  // the toast still accounts for all three legs.
+  const driverLeg = await driverLegFromLog(dispatch.id, dispatch.driverPhone);
 
   return {
     ok: partyResult.ok || !!brokerResult?.ok,
     party: leg(partyResult),
     broker: brokerResult ? leg(brokerResult) : { status: 'na', error: null },
-    // A null driverResult means no driver phone was captured, so nothing was
-    // attempted; otherwise report what the send actually did, not just that we tried.
-    driver: driverResult
-      ? leg(driverResult)
-      : { status: 'skipped', error: 'No driver phone on this dispatch' },
+    driver: driverLeg,
   };
+}
+
+/**
+ * The driver leg's outcome, read back from WhatsAppLog rather than re-sent.
+ * Reflects delivery-status callbacks too: a message Meta later rejected has been
+ * flipped to FAILED by the webhook, so a bundle sent afterwards reports the
+ * failure rather than the optimistic "sent" from the send call.
+ */
+async function driverLegFromLog(dispatchId: string, driverPhone: string | null): Promise<DispatchWhatsAppLeg> {
+  if (!driverPhone) return { status: 'skipped', error: 'No driver phone on this dispatch' };
+  const row = await prisma.whatsAppLog.findFirst({
+    where: {
+      direction: 'OUTBOUND',
+      template: 'DISPATCH_DRIVER',
+      relatedType: 'DISPATCH',
+      relatedId: dispatchId,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { status: true, errorMessage: true },
+  });
+  if (!row) {
+    return { status: 'skipped', error: 'No driver message on record — the driver is messaged when the dispatch is created' };
+  }
+  if (row.status === 'SENT') return { status: 'sent', error: null };
+  return { status: row.status === 'SKIPPED' ? 'skipped' : 'failed', error: row.errorMessage ?? null };
 }

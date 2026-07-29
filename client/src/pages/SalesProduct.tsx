@@ -405,9 +405,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       }
 
       // Step 3: Generate the E-Way Bill, and once it exists send the combined
-      // invoice+EWB bundle out on WhatsApp (buyer, broker if any, then the driver
-      // on his own template). The send happens server-side so closing the tab
-      // mid-flow can't drop it; a send failure never fails the EWB.
+      // invoice+EWB bundle out on WhatsApp (buyer, and the broker if any). The
+      // send happens server-side so closing the tab mid-flow can't drop it; a
+      // send failure never fails the EWB.
       const ewbRes = await api<{ updated: SaleDispatch; message: string; whatsapp: DispatchWhatsAppResult | null }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
         method: 'POST',
         body: {
@@ -654,7 +654,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
 
   // Invoice + EWB + driver details → buyer (and the broker too, when the order
-  // came through a real one), plus buyer name/phone/maps link → the driver.
+  // came through a real one). The driver's own message went out at dispatch time;
+  // its outcome is reported back in the result but nothing is re-sent to him.
   const sendWhatsAppMutation = useMutation({
     mutationFn: (id: string) =>
       api<DispatchWhatsAppResult>(`/whatsapp/dispatches/${id}/send`, { method: 'POST' }),

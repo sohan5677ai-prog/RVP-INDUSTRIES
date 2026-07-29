@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
-import { whatsappService } from '../services/whatsapp.service.js';
+import { whatsappService, normalizeWhatsAppNumber } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText } from '../lib/gemini.js';
 import { sendDispatchBundleWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
@@ -91,12 +91,181 @@ async function processInboundEvent(rawBody: unknown) {
   logger.info(`[whatsapp] transport confirmation draft ${draft.id} created from ${from} (log ${logRow.id})`);
 }
 
+// ---------------------------------------------------------------------------
+// Delivery-status callbacks
+// ---------------------------------------------------------------------------
+
+/**
+ * A send is logged SENT the moment Fast2SMS's HTTP call returns OK — that only
+ * means Fast2SMS *accepted* the request. Whether WhatsApp actually delivered it
+ * is reported later, on this webhook. Without handling it, a message that Meta
+ * rejects (unapproved/paused template, undeliverable number) sits in the log as
+ * a green "sent" forever, which is how the driver leg failed silently.
+ */
+type StatusEvent = { providerId: string | null; phone: string | null; status: string; error: string | null };
+
+/** Terminal states that mean the recipient did NOT get the message. */
+const DELIVERY_FAILED = new Set(['failed', 'undelivered', 'rejected', 'error']);
+/** States that mean it's still on track — nothing to record beyond the existing SENT. */
+const DELIVERY_OK = new Set(['sent', 'accepted', 'delivered', 'read']);
+
+function asRecord(x: unknown): Record<string, unknown> | null {
+  return x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>) : null;
+}
+
+/** Flatten Meta's `errors: [{ code, title, error_data: { details } }]` into one line. */
+function describeErrors(errs: unknown[]): string | null {
+  const parts = errs.map((e) => {
+    const r = asRecord(e);
+    if (!r) return String(e);
+    const details = asRecord(r.error_data)?.details;
+    return [r.code, r.title ?? r.message, typeof details === 'string' ? details : null]
+      .filter(Boolean)
+      .join(' — ');
+  });
+  return parts.filter(Boolean).join(' | ') || null;
+}
+
+/** Read one status object, whichever field names the payload happens to use. */
+function readStatusEntry(raw: Record<string, unknown>): StatusEvent | null {
+  const status = typeof raw.status === 'string' ? raw.status.toLowerCase().trim() : null;
+  if (!status) return null;
+
+  let error: string | null = null;
+  if (Array.isArray(raw.errors) && raw.errors.length > 0) {
+    error = describeErrors(raw.errors);
+  } else {
+    // Deliberately NOT probing `message` here — on flat payloads it's the message
+    // body as often as it is the failure reason.
+    for (const key of ['error', 'error_message', 'reason', 'failure_reason', 'description']) {
+      const v = raw[key];
+      if (!error && typeof v === 'string' && v.trim()) error = v.trim();
+    }
+  }
+
+  let providerId: string | null = null;
+  for (const key of ['request_id', 'requestId', 'message_id', 'messageId', 'id']) {
+    const v = raw[key];
+    if (!providerId && (typeof v === 'string' || typeof v === 'number') && String(v).trim()) {
+      providerId = String(v).trim();
+    }
+  }
+
+  let phone: string | null = null;
+  for (const key of ['recipient_id', 'mobile', 'number', 'numbers', 'to', 'phone', 'wa_id']) {
+    const v = raw[key];
+    if (!phone && (typeof v === 'string' || typeof v === 'number') && String(v).replace(/\D/g, '').length >= 10) {
+      phone = String(v);
+    }
+  }
+
+  return { providerId, phone, status, error };
+}
+
+/**
+ * Pull status events out of a webhook payload. Like `extractInbound`, the exact
+ * Fast2SMS shape isn't documented — some accounts get Meta's envelope forwarded
+ * verbatim, others a flattened object — so probe both.
+ */
+function extractStatusEvents(body: unknown): StatusEvent[] {
+  const root = asRecord(body);
+  if (!root) return [];
+  const out: StatusEvent[] = [];
+  const push = (x: unknown) => {
+    const r = asRecord(x);
+    const ev = r && readStatusEntry(r);
+    if (ev) out.push(ev);
+  };
+
+  // Meta envelope: entry[].changes[].value.statuses[]
+  if (Array.isArray(root.entry)) {
+    for (const entry of root.entry) {
+      const changes = asRecord(entry)?.changes;
+      if (!Array.isArray(changes)) continue;
+      for (const change of changes) {
+        const statuses = asRecord(asRecord(change)?.value)?.statuses;
+        if (Array.isArray(statuses)) statuses.forEach(push);
+      }
+    }
+  }
+  if (out.length > 0) return out;
+
+  // Flattened: { statuses: [...] }, { data: {...} }, or the body itself.
+  for (const container of [root, asRecord(root.data), asRecord(root.payload)]) {
+    if (!container) continue;
+    if (Array.isArray(container.statuses)) container.statuses.forEach(push);
+    else push(container);
+    if (out.length > 0) break;
+  }
+  return out;
+}
+
+/**
+ * Find the log row a status event refers to. Fast2SMS returns its own
+ * `request_id` at send time while Meta's callback carries a `wamid`, so the id
+ * often won't match — fall back to the most recent still-SENT outbound message
+ * to that number.
+ */
+async function findLogRowForStatus(ev: StatusEvent) {
+  if (ev.providerId) {
+    const byId = await prisma.whatsAppLog.findFirst({
+      where: { direction: 'OUTBOUND', providerId: ev.providerId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, template: true, phone: true },
+    });
+    if (byId) return byId;
+  }
+  const phone = normalizeWhatsAppNumber(ev.phone);
+  if (!phone) return null;
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  return prisma.whatsAppLog.findFirst({
+    where: { direction: 'OUTBOUND', phone, status: 'SENT', createdAt: { gte: since } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, template: true, phone: true },
+  });
+}
+
+/** Record a delivery failure against the originating log row. Never throws. */
+async function applyStatusEvent(ev: StatusEvent) {
+  if (!DELIVERY_FAILED.has(ev.status)) {
+    // 'delivered'/'read' would be worth storing, but WaStatus has no state for
+    // them and adding one means a schema change; SENT already covers the happy path.
+    if (!DELIVERY_OK.has(ev.status)) logger.warn(`[whatsapp] unrecognised delivery status "${ev.status}"`);
+    return;
+  }
+  const row = await findLogRowForStatus(ev);
+  const reason = `Delivery failed (${ev.status})${ev.error ? `: ${ev.error}` : ''}`;
+  if (!row) {
+    logger.warn(`[whatsapp] ${reason} — no matching log row (id=${ev.providerId}, phone=${ev.phone})`);
+    return;
+  }
+  await prisma.whatsAppLog.update({
+    where: { id: row.id },
+    data: { status: 'FAILED', errorMessage: reason },
+  });
+  logger.error(`[whatsapp] ${row.template ?? 'message'} to ${row.phone} — ${reason}`);
+}
+
 /** Fast2SMS event receiver. Acknowledge immediately; parse in the background. */
 export async function handleWhatsAppWebhook(req: Request, res: Response) {
   res.json({ received: true });
-  processInboundEvent(req.body).catch((err) => {
-    logger.error('[whatsapp] inbound processing failed', err);
+  processWebhookEvent(req.body).catch((err) => {
+    logger.error('[whatsapp] webhook processing failed', err);
   });
+}
+
+/**
+ * Status callbacks and inbound messages arrive on the same endpoint. Statuses
+ * must be handled first and must NOT fall through to the inbound path, which
+ * would file every delivery receipt as a "received message" and send it to Gemini.
+ */
+async function processWebhookEvent(rawBody: unknown) {
+  const statuses = extractStatusEvents(rawBody);
+  if (statuses.length > 0) {
+    for (const ev of statuses) await applyStatusEvent(ev);
+    return;
+  }
+  await processInboundEvent(rawBody);
 }
 
 /**

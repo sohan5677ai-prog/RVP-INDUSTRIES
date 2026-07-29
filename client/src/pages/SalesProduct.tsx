@@ -328,6 +328,23 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   function openInvoice(dispatch: SaleDispatch, order: SaleOrder) {
     setInvoiceUnregistered(false);
     setInvoiceDispatch({ dispatch, order });
+    prefillDistance(dispatch.id);
+  }
+
+  /**
+   * The E-Way Bill's approx distance. It is NOT optional: the printed government
+   * bill renders this figure, and NIC keeps its own auto-calculated value to
+   * itself, so leaving it at 0 puts "0 KM" on the buyer's copy. Pre-filled from
+   * the last bill raised for the same buyer — same route, same distance.
+   */
+  async function prefillDistance(dispatchId: string) {
+    setTransDistance('');
+    try {
+      const hint = await api<{ distance: number | null }>(`/sale-dispatches/${dispatchId}/ewaybill/distance-hint`);
+      if (hint.distance) setTransDistance(String(hint.distance));
+    } catch {
+      /* a missing hint just means the operator types the distance in */
+    }
   }
 
   // Option 1: Normal Invoice
@@ -414,7 +431,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         body: {
           transporterId,
           transporterName,
-          transDistance: Number(transDistance) || 0,
+          transDistance: Number(transDistance),
           transMode: transMode || '1',
           vehicleNumber: invoiceDispatch.dispatch.vehicleNumber || ewbVehicleNo || '',
           vehicleType: vehicleType || 'R',
@@ -668,7 +685,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setEwbDispatch({ dispatch, order });
     setTransporterId('');
     setTransporterName('');
-    setTransDistance('0');
+    prefillDistance(dispatch.id);
     setTransMode('1');
     setEwbVehicleNo(dispatch.vehicleNumber || '');
     setVehicleType('R');
@@ -1241,6 +1258,22 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
             </div>
 
+            <div className="space-y-1.5">
+              <Label className="text-xs">Approx Distance (km) *</Label>
+              <Input
+                type="number"
+                min="1"
+                max="4000"
+                value={transDistance}
+                onChange={(e) => setTransDistance(e.target.value)}
+                placeholder="e.g. 1300"
+                disabled={!!invoiceActionLoading}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Printed on the E-Way Bill as "Approx Distance", so it can't be left blank. Pre-filled from the last bill to this buyer.
+              </p>
+            </div>
+
             <div className="space-y-2 pt-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Option</div>
               <div className="grid grid-cols-1 gap-2">
@@ -1281,7 +1314,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <Button
                   className="w-full justify-start gap-2.5 text-left h-auto py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white"
                   onClick={handleRaiseIrnAndEwb}
-                  disabled={!!invoiceActionLoading}
+                  disabled={!!invoiceActionLoading || !(Number(transDistance) > 0)}
                 >
                   {invoiceActionLoading === 'both' ? (
                     <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -1379,8 +1412,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Distance (km) *</Label>
-                <Input type="number" min="0" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder="e.g. 250" />
-                <p className="text-[11px] text-muted-foreground">Enter 0 to let the portal auto-calculate from PIN codes.</p>
+                <Input type="number" min="1" max="4000" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder="e.g. 250" />
+                <p className="text-[11px] text-muted-foreground">Printed on the bill as "Approx Distance" — it cannot be 0.</p>
               </div>
 
               {transMode === '1' ? (
@@ -1433,7 +1466,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 onClick={() => generateEwbMutation.mutate()}
                 disabled={
                   generateEwbMutation.isPending ||
-                  transDistance === '' ||
+                  !(Number(transDistance) > 0) ||
                   transporterIdInvalid ||
                   (transMode === '1' ? !ewbVehicleNo.trim() : (!transDocNo.trim() || !transDocDt))
                 }

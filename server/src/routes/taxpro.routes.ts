@@ -36,7 +36,15 @@ const cancelSchema = z.object({
 const ewbSchema = z.object({
   transporterId: z.string().optional(),
   transporterName: z.string().optional(),
-  transDistance: z.coerce.number().nonnegative().default(0),
+  // Must be a real distance. NIC accepts 0 (it then works the distance out from
+  // the two PIN codes) but never tells us what it worked out, and the official
+  // print is rendered from OUR record — so a 0 here becomes "0 KM" on the
+  // printed government bill, which makes that copy invalid.
+  transDistance: z.coerce
+    .number()
+    .int()
+    .min(1, 'Enter the approx distance in km — the E-Way Bill print shows this figure and cannot be left at 0')
+    .max(4000, 'Distance cannot exceed 4000 km'),
   transMode: z.string().default('1'), // '1' - Road
   vehicleNumber: z.string().optional(),
   vehicleType: z.string().default('R'),
@@ -166,10 +174,11 @@ router.post(
         ewbDate: result.ewbDate,
         ewbValidUpto: result.ewbValidUpto,
         ewbStatus: 'GENERATED',
-        // 0 km means "let the portal work it out from the PIN codes" — the figure
-        // it works out comes back on the response, and that is what we keep so the
-        // reprint shows a real distance instead of 0.
-        ewbDistance: result.distance && result.distance > 0 ? Math.round(result.distance) : null,
+        // The distance the bill was raised with — this is the figure the official
+        // print renders as "Approx Distance", so it must never be left empty.
+        ewbDistance: result.distance && result.distance > 0
+          ? Math.round(result.distance)
+          : data.transDistance,
         ewbTransMode: data.transMode,
         ewbVehicleType: data.vehicleType,
         ewbTransDocNo: data.transDocNo || null,
@@ -199,6 +208,62 @@ router.post(
     }
 
     res.json({ updated, message: result.message, whatsapp });
+  })
+);
+
+// Suggested approx distance for a dispatch about to be billed: the km recorded
+// on the most recent E-Way Bill raised for the SAME buyer. The lorry runs the
+// same route every time, so after the first bill to a buyer the figure is
+// already known and the operator only has to confirm it.
+router.get(
+  '/sale-dispatches/:id/ewaybill/distance-hint',
+  asyncHandler(async (req, res) => {
+    const dispatch = await prisma.saleDispatch.findUnique({
+      where: { id: req.params.id },
+      include: { saleOrder: { select: { buyerId: true } } },
+    });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+    const previous = await prisma.saleDispatch.findFirst({
+      where: {
+        id: { not: dispatch.id },
+        ewbDistance: { not: null },
+        saleOrder: { buyerId: dispatch.saleOrder.buyerId },
+      },
+      orderBy: { ewbDate: 'desc' },
+      select: { ewbDistance: true, ewbNumber: true, ewbDate: true },
+    });
+
+    res.json({
+      distance: dispatch.ewbDistance ?? previous?.ewbDistance ?? null,
+      source: dispatch.ewbDistance ? 'this-dispatch' : previous ? 'previous-ewb' : null,
+      previousEwbNumber: previous?.ewbNumber ?? null,
+    });
+  })
+);
+
+// Record (or correct) the approx distance on an E-Way Bill that already exists.
+// This is what unblocks a bill raised before the distance was captured: NIC
+// holds the real figure, the operator reads it off the portal, and saving it
+// here makes every reprint / WhatsApp copy show it instead of 0 KM.
+router.patch(
+  '/sale-dispatches/:id/ewaybill/distance',
+  asyncHandler(async (req, res) => {
+    const { distance } = z
+      .object({ distance: z.coerce.number().int().min(1).max(4000) })
+      .parse(req.body);
+
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found on this dispatch');
+
+    const updated = await prisma.saleDispatch.update({
+      where: { id: req.params.id },
+      data: { ewbDistance: distance },
+      include: { saleOrder: { include: { buyer: true } } },
+    });
+
+    res.json({ updated, message: `Approx distance saved as ${distance} KM` });
   })
 );
 

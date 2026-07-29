@@ -112,6 +112,15 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   // combined PDF (invoice pages + EWB page) for the template's document header.
   const invoiceBuffer = await renderInvoicePdf(pdfData);
   const hasEwb = !!(dispatch.ewbNumber && dispatch.ewbDate && dispatch.ewbValidUpto);
+  // Page 2 is an official E-Way Bill: without a recorded distance it would go to
+  // the buyer showing 0 KM. Stop here rather than send an invalid document — the
+  // caller surfaces this, the distance gets saved, and the bundle is re-sent.
+  if (hasEwb && !dispatch.ewbDistance) {
+    throw new Error(
+      `E-Way Bill ${dispatch.ewbNumber} has no approx distance recorded — the attached bill would show 0 KM. ` +
+      `Save the distance on the E-Way Bill page, then send the bundle again.`,
+    );
+  }
   let buffer = invoiceBuffer;
   let filename = `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
   if (hasEwb) {

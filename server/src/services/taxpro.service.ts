@@ -433,7 +433,10 @@ export class TaxproService {
 
     const payload: Record<string, any> = {
       Irn: dispatch.irn,
-      Distance: Number(transportDetails.transDistance) || 0, // 0 => NIC auto-computes from pincodes
+      // A real distance is always sent (the route layer rejects 0). Submitting 0
+      // does work — NIC then computes it from the PIN codes — but it keeps the
+      // figure to itself, and the print service can only render what we hold.
+      Distance: Number(transportDetails.transDistance) || 0,
       TransMode: transMode,
     };
 
@@ -514,6 +517,17 @@ export class TaxproService {
     });
     if (!dispatch || !dispatch.ewbNumber) throw new Error('E-Way Bill number not found on dispatch');
     if (!dispatch.ewbDate || !dispatch.ewbValidUpto) throw new Error('E-Way Bill dates missing on dispatch');
+    // The ASP print service is a pure renderer of what we POST, and the NIC
+    // e-invoice product gives us no way to read the portal's own figure back.
+    // So an unrecorded distance would print "Approx Distance: 0 KM" on a
+    // government-format bill — which makes the printed copy invalid. Refuse to
+    // render it and say exactly how to fix it instead.
+    if (!dispatch.ewbDistance) {
+      throw new Error(
+        `E-Way Bill ${dispatch.ewbNumber} has no approx distance recorded, so the government print would show 0 KM. ` +
+        `Open the E-Way Bill page and save the distance shown on the NIC portal, then print again.`,
+      );
+    }
 
     const order = dispatch.saleOrder;
     const buyer = order.buyer;
@@ -581,7 +595,7 @@ export class TaxproService {
       transporterId: '',
       transporterName: '',
       status: dispatch.ewbStatus === 'CANCELLED' ? 'CNL' : 'ACT',
-      actualDist: dispatch.ewbDistance || 0,
+      actualDist: dispatch.ewbDistance,
       noValidDays,
       validUpto: this.formatNICDateTime(dispatch.ewbValidUpto),
       extendedTimes: 0,

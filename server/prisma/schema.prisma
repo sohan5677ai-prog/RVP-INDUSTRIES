@@ -93,6 +93,9 @@ model Party {
   phone2            String?
   email             String?
   address           String?
+  // Town/city of the party's premises. The e-invoice (`Loc`) and the E-Way Bill
+  // ("Ship To" place) want the CITY, not the state — "Surat", not "Gujarat".
+  city              String?
   state             String?
   pincode           String?
   gstin             String?
@@ -518,7 +521,17 @@ model SaleDispatch {
   ewbValidUpto     DateTime?
   ewbStatus        String? // 'GENERATED', 'CANCELLED'
   ewbCancelledDate DateTime?
-  ewbDistance      Int? // approx transport distance (km) entered at EWB generation
+  // Approx transport distance (km). When 0 is submitted NIC auto-computes it from
+  // the two PIN codes and returns the figure — that returned value is what gets
+  // stored, so the printed bill never shows "0 km".
+  ewbDistance      Int?
+  // Part-A/Part-B details as actually submitted to NIC. Stored so the reprint
+  // (which is rendered from a payload we rebuild, not fetched from NIC) shows the
+  // same mode/vehicle type/document that the live bill carries.
+  ewbTransMode       String? // '1'-Road, '2'-Rail, '3'-Air, '4'-Ship
+  ewbVehicleType     String? // 'R'-Regular, 'O'-ODC
+  ewbTransDocNo      String?
+  ewbTransDocDate    DateTime?
 
   createdAt DateTime @default(now())
 
@@ -747,6 +760,16 @@ model CompanyProfile {
   bankName                String?
   bankAccountNumber       String?
   bankBranchIfsc          String?
+  // --- E-Way Bill / e-invoice "Dispatch From" block --------------------------
+  // The government print has a DISPATCH-FROM address and a *place* (town) that
+  // are distinct from the registered address above: the place is what shows in
+  // "Dispatch From" and in the vehicle-details "From" column, and NIC measures
+  // the auto-calculated distance from dispatchFromPincode. All optional — each
+  // one falls back to the registered address/pincode when left blank.
+  dispatchFromPlace       String? // town, e.g. "Punganur"
+  dispatchFromAddress1    String?
+  dispatchFromAddress2    String?
+  dispatchFromPincode     String?
   // Invoice number = invoicePrefix/seq/FY (e.g. RVP/01/2026-27).
   invoicePrefix           String  @default("RVP")
   // JSON print-layout config (paper size, margins, font, column widths).

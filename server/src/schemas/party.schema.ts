@@ -11,6 +11,7 @@ export const createPartySchema = z.object({
   phone2: z.string().optional(),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   address: z.string().optional(),
+  city: z.string().optional(),
   state: z.string().optional(),
   pincode: z.string().optional(),
   gstin: z.string().optional(),

@@ -48,8 +48,9 @@ export default function Settings() {
           <CompanySection qc={qc} />
         </TabsContent>
 
-        <TabsContent value="invoice" className="focus-visible:outline-none focus-visible:ring-0">
+        <TabsContent value="invoice" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">
           <InvoiceTaxSection qc={qc} />
+          <EwbDispatchSection qc={qc} />
         </TabsContent>
 
         <TabsContent value="freight" className="focus-visible:outline-none focus-visible:ring-0">
@@ -371,6 +372,75 @@ function InvoiceTaxSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             </>
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- E-Way Bill "Dispatch From" + default transporter ---------------------------
+// These feed the e-invoice (SellerDtls) and the E-Way Bill: the address printed
+// under "Dispatch From", the place shown in the vehicle-details "From" column,
+// and the PIN code NIC measures the auto-calculated distance from.
+
+function EwbDispatchSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
+  const { data: company, isLoading } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
+  const [form, setForm] = useState<Partial<CompanyProfile>>({});
+  useEffect(() => {
+    if (company) {
+      setForm({
+        dispatchFromPlace: company.dispatchFromPlace ?? '',
+        dispatchFromAddress1: company.dispatchFromAddress1 ?? '',
+        dispatchFromAddress2: company.dispatchFromAddress2 ?? '',
+        dispatchFromPincode: company.dispatchFromPincode ?? '',
+      });
+    }
+  }, [company]);
+
+  const save = useMutation({
+    mutationFn: () => api<CompanyProfile>('/settings/company', { method: 'PUT', body: { ...company, ...form } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company'] }); toast.success('E-Way Bill dispatch details saved'); },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const set = (k: keyof CompanyProfile) => (e: { target: { value: string } }) => setForm((p) => ({ ...p, [k]: e.target.value }));
+  const field = (label: string, k: keyof CompanyProfile, placeholder: string, hint?: string) => (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{label}</Label>
+      <Input value={(form[k] as string) ?? ''} onChange={set(k)} placeholder={placeholder} />
+      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <Truck className="h-5 w-5 text-amber-500" />
+        <CardTitle className="text-base">E-Way Bill — Dispatch From</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+          <>
+            <p className="text-[11px] text-muted-foreground">
+              Printed on every e-invoice and E-Way Bill as the goods' origin. Leave a field blank to fall back to the
+              registered company address on the Company tab. The <b>place</b> is also what appears in the E-Way Bill's
+              vehicle-details “From” column, and the <b>PIN code</b> is what the portal measures the distance from.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              {field('Dispatch place (town)', 'dispatchFromPlace', 'Punganur', 'Shown as the “From” place on the bill — a town, not the state.')}
+              {field('Dispatch PIN code', 'dispatchFromPincode', '517247')}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {field('Dispatch address line 1', 'dispatchFromAddress1', '#3-86 Survey No: 289, 290/1, 290/2, New Bypass Road')}
+              {field('Dispatch address line 2', 'dispatchFromAddress2', 'Rajuluru, BG Palli, Kummaranatham Village')}
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={() => save.mutate()} disabled={save.isPending}>
+                <Save className="h-4 w-4" /> {save.isPending ? 'Saving…' : 'Save dispatch details'}
+              </Button>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );

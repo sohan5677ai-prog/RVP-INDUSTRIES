@@ -39,6 +39,8 @@ export type DispatchWhatsAppResult = {
  */
 async function renderBundleEwbPdf(
   dispatch: Awaited<ReturnType<typeof buildInvoicePdfData>>['dispatch'],
+  order: Awaited<ReturnType<typeof buildInvoicePdfData>>['order'],
+  company: Awaited<ReturnType<typeof buildInvoicePdfData>>['company'],
   pdfData: Awaited<ReturnType<typeof buildInvoicePdfData>>['pdfData'],
 ): Promise<Buffer> {
   try {
@@ -49,8 +51,20 @@ async function renderBundleEwbPdf(
       `[dispatch-whatsapp] official EWB print failed for ${dispatch.ewbNumber} — attaching the in-house replica instead: ${message}`,
     );
     return renderEwbPdf({
-      company: pdfData.company,
-      buyer: pdfData.buyer,
+      company: { ...pdfData.company, pincode: company.pincode },
+      buyer: { ...pdfData.buyer, pincode: order.buyer.pincode },
+      dispatchFrom: {
+        place: company.dispatchFromPlace,
+        address1: company.dispatchFromAddress1,
+        address2: company.dispatchFromAddress2,
+        pincode: company.dispatchFromPincode,
+      },
+      shipToPlace: order.buyer.city,
+      transport: {
+        transMode: dispatch.ewbTransMode,
+        transDocNo: dispatch.ewbTransDocNo,
+        transDocDate: dispatch.ewbTransDocDate,
+      },
       invoiceNumber: pdfData.invoiceNumber,
       invoiceDate: pdfData.invoiceDate,
       vehicleNumber: pdfData.vehicleNumber,
@@ -81,7 +95,7 @@ async function renderBundleEwbPdf(
  * one missing phone can't suppress the others.
  */
 export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<DispatchWhatsAppResult> {
-  const { dispatch, order, pdfData } = await buildInvoicePdfData(dispatchId);
+  const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
 
   // A broker named "RVP" (or no broker) means it's our own order — the buyer is
   // messaged directly with no broker reference; otherwise the buyer's copy names
@@ -100,7 +114,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   let buffer = invoiceBuffer;
   let filename = `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
   if (hasEwb) {
-    const ewbBuffer = await renderBundleEwbPdf(dispatch, pdfData);
+    const ewbBuffer = await renderBundleEwbPdf(dispatch, order, company, pdfData);
     buffer = await mergePdfs([invoiceBuffer, ewbBuffer]);
     filename = `Invoice-EWB-${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
   }

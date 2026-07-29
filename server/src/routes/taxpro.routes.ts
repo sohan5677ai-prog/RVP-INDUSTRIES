@@ -166,7 +166,14 @@ router.post(
         ewbDate: result.ewbDate,
         ewbValidUpto: result.ewbValidUpto,
         ewbStatus: 'GENERATED',
-        ewbDistance: data.transDistance > 0 ? Math.round(data.transDistance) : null,
+        // 0 km means "let the portal work it out from the PIN codes" — the figure
+        // it works out comes back on the response, and that is what we keep so the
+        // reprint shows a real distance instead of 0.
+        ewbDistance: result.distance && result.distance > 0 ? Math.round(result.distance) : null,
+        ewbTransMode: data.transMode,
+        ewbVehicleType: data.vehicleType,
+        ewbTransDocNo: data.transDocNo || null,
+        ewbTransDocDate: data.transDocDt ? new Date(data.transDocDt) : null,
       },
       include: { saleOrder: { include: { buyer: true } } },
     });

@@ -187,6 +187,31 @@ export class TaxproService {
   }
 
   /**
+   * The seller's DISPATCH-FROM block, as configured in Settings → Invoice Setup.
+   *
+   * NIC/EWB keeps the dispatch point separate from the registered address, and
+   * `Loc`/`fromPlace` is the *town* the goods leave from (Punganur) — not the
+   * state, which is already carried by the state code. Each field falls back to
+   * the registered company address so an unconfigured profile still works.
+   */
+  private static dispatchFromDetails(company: Record<string, any>) {
+    return {
+      addr1: (company.dispatchFromAddress1 || company.address || '').trim(),
+      addr2: (company.dispatchFromAddress2 || '').trim(),
+      place: (company.dispatchFromPlace || company.stateName || '').trim(),
+      pincode: Number(company.dispatchFromPincode || company.pincode) || 0,
+    };
+  }
+
+  /** The buyer's SHIP-TO block. Same rule: `Loc` is the town, not the state. */
+  private static shipToDetails(buyer: Record<string, any>) {
+    return {
+      place: (buyer.city || buyer.state || '').trim(),
+      pincode: Number(buyer.pincode) || 0,
+    };
+  }
+
+  /**
    * Formats a dispatch into the NIC E-Invoice JSON payload (schema v1.1).
    */
   public static async prepareEInvoicePayload(dispatchId: string) {
@@ -206,6 +231,9 @@ export class TaxproService {
 
     if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
     if (!buyer.gstin) throw new Error('Buyer GSTIN is not set in Buyer profile');
+
+    const dispatchFrom = this.dispatchFromDetails(company as any);
+    const shipTo = this.shipToDetails(buyer as any);
 
     const weight = dispatch.weightKg;
     const rate = Number(order.ratePerKg);
@@ -241,9 +269,10 @@ export class TaxproService {
       SellerDtls: {
         Gstin: company.gstin,
         LglNm: company.name,
-        Addr1: company.address || 'Factory premises',
-        Loc: company.stateName || 'State',
-        Pin: Number((company as any).pincode) || 0,
+        Addr1: dispatchFrom.addr1 || 'Factory premises',
+        ...(dispatchFrom.addr2 ? { Addr2: dispatchFrom.addr2 } : {}),
+        Loc: dispatchFrom.place,
+        Pin: dispatchFrom.pincode,
         Stcd: sellerStateCode,
       },
       BuyerDtls: {
@@ -251,8 +280,8 @@ export class TaxproService {
         LglNm: buyer.name,
         Pos: buyerStateCode,
         Addr1: buyer.address || 'Buyer address',
-        Loc: buyer.state || 'State',
-        Pin: Number((buyer as any).pincode) || 0,
+        Loc: shipTo.place,
+        Pin: shipTo.pincode,
         Stcd: buyerStateCode,
       },
       ItemList: [
@@ -439,6 +468,7 @@ export class TaxproService {
         ewbNumber: ewbNo,
         ewbDate: new Date(),
         ewbValidUpto: validUpto,
+        distance: Number(transportDetails.transDistance) || null,
         message: 'Simulated E-Way Bill generated (credentials not configured)',
       };
     }
@@ -451,11 +481,19 @@ export class TaxproService {
         body: JSON.stringify(payload),
       });
       const data = this.parseData(json.Data) || {};
+      // When Distance was submitted as 0, NIC computes it from the two PIN codes
+      // and echoes the figure back. Prefer that over what we sent, so the stored
+      // (and reprinted) distance matches the live bill instead of showing 0 km.
+      const nicDistance = Number(data.Distance ?? data.distance);
+      const distance = Number.isFinite(nicDistance) && nicDistance > 0
+        ? Math.round(nicDistance)
+        : (Number(transportDetails.transDistance) || null);
       return {
         success: true,
         ewbNumber: String(data.EwbNo),
         ewbDate: new Date(data.EwbDt),
         ewbValidUpto: new Date(data.EwbValidTill),
+        distance,
         message: 'E-Way Bill generated successfully',
       };
     } catch (err: any) {
@@ -492,6 +530,9 @@ export class TaxproService {
     const buyerStateCode = buyer.gstin?.slice(0, 2) || '';
     const isSameState = sellerStateCode === buyerStateCode && sellerStateCode !== '';
 
+    const dispatchFrom = this.dispatchFromDetails(company as any);
+    const shipTo = this.shipToDetails(buyer as any);
+
     const weight = dispatch.weightKg;
     const rate = Number(order.ratePerKg);
     const baseAmount = Math.round(weight * rate * 100) / 100;
@@ -519,17 +560,17 @@ export class TaxproService {
       docDate: this.formatNICDate(dispatch.invoiceDate || dispatch.dispatchDate),
       fromGstin: company.gstin,
       fromTrdName: company.name,
-      fromAddr1: company.address || '',
-      fromAddr2: '',
-      fromPlace: company.stateName || '',
-      fromPincode: Number((company as any).pincode) || 0,
+      fromAddr1: dispatchFrom.addr1,
+      fromAddr2: dispatchFrom.addr2,
+      fromPlace: dispatchFrom.place,
+      fromPincode: dispatchFrom.pincode,
       fromStateCode: Number(sellerStateCode) || 0,
       toGstin: buyer.gstin || 'URP',
       toTrdName: buyer.name,
       toAddr1: buyer.address || '',
       toAddr2: '',
-      toPlace: buyer.state || '',
-      toPincode: Number((buyer as any).pincode) || 0,
+      toPlace: shipTo.place,
+      toPincode: shipTo.pincode,
       toStateCode: Number(buyerStateCode) || 0,
       totalValue: baseAmount,
       totInvValue: totalAmount,
@@ -545,7 +586,7 @@ export class TaxproService {
       validUpto: this.formatNICDateTime(dispatch.ewbValidUpto),
       extendedTimes: 0,
       rejectStatus: 'N',
-      vehicleType: 'R',
+      vehicleType: dispatch.ewbVehicleType || 'R',
       actFromStateCode: Number(sellerStateCode) || 0,
       actToStateCode: Number(buyerStateCode) || 0,
       transactionType: 1,
@@ -572,14 +613,16 @@ export class TaxproService {
         {
           updMode: 'API',
           vehicleNo: dispatch.vehicleNumber || '',
-          fromPlace: company.stateName || '',
+          // The vehicle-details "From" column is the town the lorry loaded at,
+          // not the state — same dispatch place as the address block above.
+          fromPlace: dispatchFrom.place,
           fromState: Number(sellerStateCode) || 0,
           tripshtNo: 0,
           userGSTINTransin: company.gstin,
           enteredDate: this.formatNICDateTime(dispatch.ewbDate),
-          transMode: '1',
-          transDocNo: '',
-          transDocDate: null,
+          transMode: dispatch.ewbTransMode || '1',
+          transDocNo: dispatch.ewbTransDocNo || '',
+          transDocDate: dispatch.ewbTransDocDate ? this.formatNICDate(dispatch.ewbTransDocDate) : null,
           groupNo: '0',
         },
       ],

@@ -26,6 +26,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -122,6 +123,7 @@ const partySchema = z.object({
   phone2: z.string().optional(),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   address: z.string().optional(),
+  city: z.string().optional(),
   state: z.string().optional(),
   pincode: z.string().optional(),
   gstin: z.string().optional(),
@@ -135,7 +137,7 @@ const partySchema = z.object({
 type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
-  name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', state: '', pincode: '', gstin: '', destination: '',
+  name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', city: '', state: '', pincode: '', gstin: '', destination: '',
   locationLink: '', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
@@ -214,6 +216,7 @@ export default function Parties() {
       phone2: p.phone2 ?? '',
       email: p.email ?? '',
       address: p.address ?? '',
+      city: p.city ?? '',
       state: p.state ?? '',
       pincode: p.pincode ?? '',
       gstin: p.gstin ?? '',
@@ -600,6 +603,20 @@ export default function Parties() {
               )}
               {!isHamaliTeam && (
               <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="city"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>City / Town</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Surat" {...field} />
+                      </FormControl>
+                      <FormDescription>Printed as the “Ship To” place on the E-Way Bill. Falls back to the state when blank.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="pincode"

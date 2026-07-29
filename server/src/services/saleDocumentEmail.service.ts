@@ -108,8 +108,20 @@ export async function sendEwbEmail(dispatchId: string) {
   if (!order.buyer.email) throw new HttpError(400, `${order.buyer.name} has no email on file — add one in Parties first`);
 
   const buffer = await renderEwbPdf({
-    company: pdfData.company,
-    buyer: pdfData.buyer,
+    company: { ...pdfData.company, pincode: company.pincode },
+    buyer: { ...pdfData.buyer, pincode: order.buyer.pincode },
+    dispatchFrom: {
+      place: company.dispatchFromPlace,
+      address1: company.dispatchFromAddress1,
+      address2: company.dispatchFromAddress2,
+      pincode: company.dispatchFromPincode,
+    },
+    shipToPlace: order.buyer.city,
+    transport: {
+      transMode: dispatch.ewbTransMode,
+      transDocNo: dispatch.ewbTransDocNo,
+      transDocDate: dispatch.ewbTransDocDate,
+    },
     invoiceNumber: pdfData.invoiceNumber,
     invoiceDate: pdfData.invoiceDate,
     vehicleNumber: pdfData.vehicleNumber,

@@ -18,6 +18,8 @@ export interface Party {
   phone2?: string | null;
   email?: string | null;
   address: string | null;
+  // Town/city — printed as the "Ship To" place on the E-Way Bill (not the state).
+  city?: string | null;
   state: string | null;
   pincode?: string | null;
   gstin: string | null;
@@ -286,6 +288,10 @@ export interface SaleDispatch {
   ewbStatus?: string | null;
   ewbCancelledDate?: string | null;
   ewbDistance?: number | null;
+  ewbTransMode?: string | null;
+  ewbVehicleType?: string | null;
+  ewbTransDocNo?: string | null;
+  ewbTransDocDate?: string | null;
 }
 
 export interface SaleOrder {
@@ -383,6 +389,11 @@ export interface CompanyProfile {
   stateCode: string | null;
   pincode?: string | null;
   contact: string | null;
+  // E-Way Bill "Dispatch From" block (Settings → Invoice Setup).
+  dispatchFromPlace?: string | null;
+  dispatchFromAddress1?: string | null;
+  dispatchFromAddress2?: string | null;
+  dispatchFromPincode?: string | null;
   bankAccountName: string | null;
   bankName: string | null;
   bankAccountNumber: string | null;

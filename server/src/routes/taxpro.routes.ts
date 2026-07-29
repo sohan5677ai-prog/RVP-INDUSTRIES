@@ -193,6 +193,7 @@ router.post(
           party: { status: 'failed' as const, error: message },
           broker: { status: 'na' as const, error: null },
           driver: { status: 'failed' as const, error: message },
+          internal: { status: 'failed' as const, error: message },
         };
       }
     }

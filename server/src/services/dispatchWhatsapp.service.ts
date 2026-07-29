@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
-import { whatsappService } from './whatsapp.service.js';
+import { whatsappService, resolveOwnerNumber, normalizeWhatsAppNumber } from './whatsapp.service.js';
 import { buildInvoicePdfData } from './saleDocumentEmail.service.js';
 import { TaxproService } from './taxpro.service.js';
 import { renderInvoicePdf } from '../lib/invoicePdf.js';
@@ -20,6 +20,7 @@ export type DispatchWhatsAppResult = {
   party: DispatchWhatsAppLeg;
   broker: DispatchWhatsAppLeg;
   driver: DispatchWhatsAppLeg;
+  internal: DispatchWhatsAppLeg;
 };
 
 /**
@@ -179,12 +180,62 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   // the toast still accounts for all three legs.
   const driverLeg = await driverLegFromLog(dispatch.id, dispatch.driverPhone);
 
+  // Internal copy — the owner/internal number from Company Settings gets the very
+  // same paperwork the buyer got: the buyer's template, the buyer's wording, the
+  // combined Invoice + EWB PDF. It's the office's own record of what went out, so
+  // it deliberately mirrors the party copy rather than reading as an alert.
+  const internalResult = await sendInternalCopy({
+    dispatchId: dispatch.id,
+    buyerName: order.buyer.name,
+    orderRef: dispatch.invoiceNumber!,
+    vehicleNumber: dispatch.vehicleNumber,
+    quantityKg: dispatch.weightKg,
+    driverName: dispatch.driverName,
+    driverPhone: dispatch.driverPhone,
+    brokerName,
+    documentUrl,
+    documentFilename: filename,
+    alreadyMessaged: [...buyerPhones, broker?.phone ?? null],
+  });
+
   return {
     ok: partyResult.ok || !!brokerResult?.ok,
     party: leg(partyResult),
     broker: brokerResult ? leg(brokerResult) : { status: 'na', error: null },
     driver: driverLeg,
+    internal: internalResult ? leg(internalResult) : { status: 'na', error: null },
   };
+}
+
+/**
+ * The internal copy of the party bundle, sent to the owner number configured in
+ * Company Settings ("Owner WhatsApp number"). Returns null — reported as `na` —
+ * when there is no internal number configured, or when that number is already on
+ * the buyer's/broker's row and has therefore had the bundle once already.
+ */
+async function sendInternalCopy(args: {
+  dispatchId: string;
+  buyerName: string;
+  orderRef: string;
+  vehicleNumber: string | null;
+  quantityKg: number | null;
+  driverName: string | null;
+  driverPhone: string | null;
+  brokerName: string | null;
+  documentUrl: string;
+  documentFilename: string;
+  alreadyMessaged: Array<string | null>;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string } | null> {
+  const internalNumber = normalizeWhatsAppNumber(await resolveOwnerNumber());
+  if (!internalNumber) return null;
+
+  const sentTo = args.alreadyMessaged
+    .map((p) => normalizeWhatsAppNumber(p))
+    .filter(Boolean) as string[];
+  if (sentTo.includes(internalNumber)) return null;
+
+  const { alreadyMessaged: _ignored, ...bundle } = args;
+  return whatsappService.sendDispatchToParty({ ...bundle, toPhone: internalNumber });
 }
 
 /**

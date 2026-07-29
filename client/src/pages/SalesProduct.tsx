@@ -89,16 +89,17 @@ type DispatchWhatsAppResult = {
   party: WhatsAppLegResult;
   broker: WhatsAppLegResult;
   driver: WhatsAppLegResult;
+  internal?: WhatsAppLegResult; // optional: a server not yet redeployed omits it
 };
 
 /**
- * One toast covering all three legs. Every leg is sent independently server-side,
- * so `ok` alone would hide a driver leg that was skipped for a missing phone —
- * name each applicable leg, with the reason for any that didn't land.
+ * One toast covering every leg. Each is sent independently server-side, so `ok`
+ * alone would hide a driver leg that was skipped for a missing phone — name each
+ * applicable leg, with the reason for any that didn't land.
  * Shared by the manual WhatsApp button and the auto-send after IRN + EWB.
  */
 function notifyWhatsAppResult(r: DispatchWhatsAppResult) {
-  const legs = ([['Buyer', r.party], ['Broker', r.broker], ['Driver', r.driver]] as const)
+  const legs = ([['Buyer', r.party], ['Broker', r.broker], ['Driver', r.driver], ['Internal', r.internal ?? { status: 'na', error: null }]] as const)
     .filter(([, l]) => l.status !== 'na');
   const summary = legs.map(([name, l]) => `${name} ${l.status}`).join(' · ');
   const reasons = legs

@@ -208,7 +208,7 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               {field('Contact', 'contact', '+91-…')}
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              {field('Owner WhatsApp number (internal alerts)', 'ownerWhatsappNumber', '9876543210')}
+              {field('Owner WhatsApp number (internal alerts + dispatch copies)', 'ownerWhatsappNumber', '9876543210')}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Address (printed as-is, multi-line)</Label>

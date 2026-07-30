@@ -236,13 +236,20 @@ export default function ReceiptsPage() {
     setSaleDispatchId(v);
     const inv = buyerInvoices.find((i) => i.id === v);
     if (inv) {
-      const shortageBase = inv.shortageBase > 0 ? round2(inv.shortageBase) : 0;
-      const shortageTotal = shortageWithGst(shortageBase, inv.gstExempt);
-      setShortage(shortageBase > 0 ? String(shortageBase) : '');
+      const shortageBase = inv.shortageBase > 0 ? String(round2(inv.shortageBase)) : '';
+      setShortage(shortageBase);
       setEnableTds(false);
       setTds(String(saleTds(inv.saleBase)));
-      setAmount(String(round2(Math.max(0, inv.remaining - shortageTotal))));
+      setAmount(expectedCash(inv, shortageBase, '', false));
     }
+  }
+
+  /** Cash still expected on an invoice = remaining − shortage(base + 5% GST) − TDS.
+   *  Both deductions come OFF the cash, never on top of it. */
+  function expectedCash(inv: BuyerInvoice, shortageStr: string, tdsStr: string, tdsOn: boolean) {
+    const shortageTotal = shortageWithGst(parseFloat(shortageStr) || 0, inv.gstExempt);
+    const tds = tdsOn ? (parseFloat(tdsStr) || 0) : 0;
+    return String(round2(Math.max(0, inv.remaining - shortageTotal - tds)));
   }
 
   /** Pre-fill the form from a receipt screenshot read by the server OCR. */
@@ -484,7 +491,17 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label htmlFor="shortage">Shortage / Kata Deduction (₹)</Label>
-                <Input id="shortage" type="number" step="0.01" value={shortage} onChange={(e) => setShortage(e.target.value)} placeholder="0" />
+                <Input
+                  id="shortage"
+                  type="number"
+                  step="0.01"
+                  value={shortage}
+                  onChange={(e) => {
+                    setShortage(e.target.value);
+                    if (selectedInvoice) setAmount(expectedCash(selectedInvoice, e.target.value, tds, enableTds));
+                  }}
+                  placeholder="0"
+                />
                 <p className="text-[10px] text-muted-foreground">
                   Goods value of the buyer's kata shortage (auto-filled from delivery). 5% GST is added on top. Adjust if needed.
                 </p>
@@ -499,15 +516,28 @@ export default function ReceiptsPage() {
                     className="h-4 w-4 accent-primary"
                     checked={enableTds}
                     onChange={(e) => {
-                      setEnableTds(e.target.checked);
-                      if (e.target.checked && !tds && selectedInvoice) setTds(String(saleTds(selectedInvoice.saleBase)));
+                      const on = e.target.checked;
+                      setEnableTds(on);
+                      let next = tds;
+                      if (on && !tds && selectedInvoice) { next = String(saleTds(selectedInvoice.saleBase)); setTds(next); }
+                      if (selectedInvoice) setAmount(expectedCash(selectedInvoice, shortage, next, on));
                     }}
                   />
                   <span className="text-sm font-medium">Deduct TDS (0.1%)</span>
                 </label>
                 {enableTds && (
                   <>
-                    <Input id="recv-tds" type="number" step="0.01" value={tds} onChange={(e) => setTds(e.target.value)} placeholder="0" />
+                    <Input
+                      id="recv-tds"
+                      type="number"
+                      step="0.01"
+                      value={tds}
+                      onChange={(e) => {
+                        setTds(e.target.value);
+                        if (selectedInvoice) setAmount(expectedCash(selectedInvoice, shortage, e.target.value, true));
+                      }}
+                      placeholder="0"
+                    />
                     <p className="text-[10px] text-muted-foreground">0.1% of sale value (excluding GST). Auto-filled when an invoice is selected.</p>
                   </>
                 )}
@@ -520,17 +550,44 @@ export default function ReceiptsPage() {
               const tdsAmt = enableTds ? (Number(tds) || 0) : 0;
               const shortageBase = Number(shortage) || 0;
               const shortageGstAmt = shortageGst(shortageBase, selectedInvoice?.gstExempt ?? false);
-              const settled = received + tdsAmt + shortageBase + shortageGstAmt;
+              // Deductions come off the invoice, never on top of the cash.
+              const outstanding = selectedInvoice?.remaining ?? 0;
+              const netDue = round2(outstanding - shortageBase - shortageGstAmt - tdsAmt);
+              const balance = round2(netDue - received);
               return (
                 <div className="rounded-md bg-muted/50 px-3 py-2 text-xs space-y-0.5">
-                  <div className="flex justify-between"><span>Cash received</span><span>{rupees(received)}</span></div>
-                  {enableTds && <div className="flex justify-between"><span>TDS</span><span>{rupees(tdsAmt)}</span></div>}
-                  {shortageBase > 0 && <div className="flex justify-between"><span>Shortage</span><span>{rupees(shortageBase)}</span></div>}
-                  {shortageGstAmt > 0 && <div className="flex justify-between"><span>GST on shortage (5%)</span><span>{rupees(shortageGstAmt)}</span></div>}
-                  <div className="flex justify-between font-semibold border-t pt-1 mt-1">
-                    <span>Total settled</span>
-                    <span>{rupees(settled)}</span>
+                  {selectedInvoice && (
+                    <div className="flex justify-between"><span>Outstanding</span><span>{rupees(outstanding)}</span></div>
+                  )}
+                  {shortageBase > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>Shortage</span><span>-{rupees(shortageBase)}</span>
+                    </div>
+                  )}
+                  {shortageGstAmt > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>GST on shortage (5%)</span><span>-{rupees(shortageGstAmt)}</span>
+                    </div>
+                  )}
+                  {tdsAmt > 0 && (
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>TDS (0.1%)</span><span>-{rupees(tdsAmt)}</span>
+                    </div>
+                  )}
+                  {selectedInvoice && (
+                    <div className="flex justify-between font-semibold border-t pt-1 mt-1">
+                      <span>Net due</span><span>{rupees(netDue)}</span>
+                    </div>
+                  )}
+                  <div className={`flex justify-between ${selectedInvoice ? '' : 'font-semibold'}`}>
+                    <span>Cash received</span><span>{rupees(received)}</span>
                   </div>
+                  {selectedInvoice && Math.abs(balance) > 0.01 && (
+                    <div className="flex justify-between font-medium">
+                      <span>{balance > 0 ? 'Still outstanding' : 'Excess received'}</span>
+                      <span className="text-amber-600 dark:text-amber-500">{rupees(Math.abs(balance))}</span>
+                    </div>
+                  )}
                 </div>
               );
             })()}

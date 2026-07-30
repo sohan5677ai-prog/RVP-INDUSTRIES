@@ -242,21 +242,28 @@ export default function SaleDuesPage() {
   });
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(dueInvoices, 50);
 
+  /** Cash still expected = outstanding − shortage(base + 5% GST) − TDS. Both
+   *  deductions come OFF the amount received (same as "Mark as Paid"). */
+  function expectedCash(inv: OutstandingInvoice, shortageStr: string, tdsStr: string, tdsOn: boolean) {
+    const shortageTotal = shortageWithGst(parseFloat(shortageStr) || 0, inv.gstExempt);
+    const tds = tdsOn ? (parseFloat(tdsStr) || 0) : 0;
+    return String(round2(Math.max(0, inv.netAmount - shortageTotal - tds)));
+  }
+
   function openReceiveDialog(inv: OutstandingInvoice) {
     const today = new Date().toISOString().slice(0, 10);
     // TDS (0.1%) is on the sale value EXCLUDING GST — not the GST-inclusive bill.
-    const tds = saleTds(inv.saleBase);
+    const tds = String(saleTds(inv.saleBase));
     // Auto-deduct the buyer-kata shortage (goods value) recorded at delivery, and
     // net it — plus its 5% GST — off the cash we expect to receive.
-    const shortageBase = inv.shortageBase > 0 ? inv.shortageBase : 0;
-    const shortageTotal = shortageWithGst(shortageBase, inv.gstExempt);
+    const shortage = inv.shortageBase > 0 ? String(round2(inv.shortageBase)) : '0';
     setEnableTds(false);
     setReceiveDialog({
       inv,
       date: today,
-      amountReceived: String(round2(Math.max(0, inv.netAmount - shortageTotal))),
-      tdsAmount: String(tds),
-      shortageAmount: shortageBase > 0 ? String(round2(shortageBase)) : '0',
+      amountReceived: expectedCash(inv, shortage, tds, false),
+      tdsAmount: tds,
+      shortageAmount: shortage,
     });
   }
 
@@ -517,7 +524,14 @@ export default function SaleDuesPage() {
                   type="checkbox"
                   id="enable-tds"
                   checked={enableTds}
-                  onChange={(e) => setEnableTds(e.target.checked)}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setEnableTds(on);
+                    setReceiveDialog((d) => d && ({
+                      ...d,
+                      amountReceived: expectedCash(d.inv, d.shortageAmount, d.tdsAmount, on),
+                    }));
+                  }}
                   className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
                 />
                 <Label htmlFor="enable-tds" className="cursor-pointer">Deduct TDS (0.1%)</Label>
@@ -536,7 +550,11 @@ export default function SaleDuesPage() {
                     type="number"
                     step="0.01"
                     value={receiveDialog.tdsAmount}
-                    onChange={(e) => setReceiveDialog((d) => d && ({ ...d, tdsAmount: e.target.value }))}
+                    onChange={(e) => setReceiveDialog((d) => d && ({
+                      ...d,
+                      tdsAmount: e.target.value,
+                      amountReceived: expectedCash(d.inv, d.shortageAmount, e.target.value, true),
+                    }))}
                   />
                 </div>
               )}
@@ -548,7 +566,11 @@ export default function SaleDuesPage() {
                   type="number"
                   step="0.01"
                   value={receiveDialog.shortageAmount}
-                  onChange={(e) => setReceiveDialog((d) => d && ({ ...d, shortageAmount: e.target.value }))}
+                  onChange={(e) => setReceiveDialog((d) => d && ({
+                    ...d,
+                    shortageAmount: e.target.value,
+                    amountReceived: expectedCash(d.inv, e.target.value, d.tdsAmount, enableTds),
+                  }))}
                 />
                 <p className="text-xs text-muted-foreground">
                   Goods value of the party-kata shortage (auto-filled from delivery). 5% GST is added on top. Leave 0 if full amount received.
@@ -561,19 +583,36 @@ export default function SaleDuesPage() {
                 const tds = enableTds ? (parseFloat(receiveDialog.tdsAmount) || 0) : 0;
                 const shortageBase = parseFloat(receiveDialog.shortageAmount) || 0;
                 const shortageGstAmt = shortageGst(shortageBase, receiveDialog.inv.gstExempt);
-                const total = received + tds + shortageBase + shortageGstAmt;
+                const netDue = round2(receiveDialog.inv.netAmount - shortageBase - shortageGstAmt - tds);
+                const balance = round2(netDue - received);
                 return (
                   <div className="rounded-md bg-muted/50 px-3 py-2 text-xs space-y-0.5">
-                    <div className="flex justify-between"><span>Cash received</span><span>{rupees(received)}</span></div>
-                    {enableTds && <div className="flex justify-between"><span>TDS</span><span>{rupees(tds)}</span></div>}
-                    {shortageBase > 0 && <div className="flex justify-between"><span>Shortage</span><span>{rupees(shortageBase)}</span></div>}
-                    {shortageGstAmt > 0 && <div className="flex justify-between"><span>GST on shortage (5%)</span><span>{rupees(shortageGstAmt)}</span></div>}
+                    <div className="flex justify-between"><span>Outstanding</span><span>{rupees(receiveDialog.inv.netAmount)}</span></div>
+                    {shortageBase > 0 && (
+                      <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                        <span>Shortage</span><span>-{rupees(shortageBase)}</span>
+                      </div>
+                    )}
+                    {shortageGstAmt > 0 && (
+                      <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                        <span>GST on shortage (5%)</span><span>-{rupees(shortageGstAmt)}</span>
+                      </div>
+                    )}
+                    {tds > 0 && (
+                      <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                        <span>TDS (0.1%)</span><span>-{rupees(tds)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between font-semibold border-t pt-1 mt-1">
-                      <span>Total settled</span>
-                      <span className={total > receiveDialog.inv.netAmount + 0.01 ? 'text-amber-600' : 'text-emerald-600'}>
-                        {rupees(total)}
-                      </span>
+                      <span>Net due</span><span>{rupees(netDue)}</span>
                     </div>
+                    <div className="flex justify-between"><span>Cash received</span><span>{rupees(received)}</span></div>
+                    {Math.abs(balance) > 0.01 && (
+                      <div className="flex justify-between font-medium">
+                        <span>{balance > 0 ? 'Still outstanding' : 'Excess received'}</span>
+                        <span className="text-amber-600 dark:text-amber-500">{rupees(Math.abs(balance))}</span>
+                      </div>
+                    )}
                   </div>
                 );
               })()}

@@ -12,6 +12,7 @@ import {
   dispatchSaleOrder,
   getSaleDispatch,
   raiseSaleInvoice,
+  previewSaleInvoiceNumber,
   deliverSaleDispatch,
   markDispatchPaid,
   undoSaleDispatch,
@@ -41,6 +42,10 @@ router.get('/sale-dispatches/:id', asyncHandler(getSaleDispatch));
 // Raise the tax invoice for a dispatched shipment (auto-assigns number). The
 // invoice itself is rendered/printed client-side.
 router.post('/sale-dispatches/:id/invoice', asyncHandler(raiseSaleInvoice));
+
+// Peek at the number the invoice would take (no side effects) - drives the
+// Tally-style preview shown before the invoice is raised.
+router.get('/sale-dispatches/:id/invoice/preview', asyncHandler(previewSaleInvoiceNumber));
 
 // Mark a dispatched shipment as delivered (DISPATCHED -> DELIVERED): records
 // deliveredDate + buyer kata weight and settles any shortage credit note.

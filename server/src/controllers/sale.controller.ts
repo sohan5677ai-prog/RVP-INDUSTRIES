@@ -622,6 +622,44 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
 }
 
 /**
+ * Peek at the invoice number this shipment WOULD get, without consuming it - used
+ * by the Tally-style preview shown before the invoice is actually raised. Nothing
+ * is written, so two people previewing at once both see the same next number; the
+ * real number is only fixed when raiseSaleInvoice runs.
+ */
+export async function previewSaleInvoiceNumber(req: Request, res: Response) {
+  const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+  // Already raised - the preview is simply the real thing.
+  if (dispatch.invoiceNumber) {
+    return res.json({
+      invoiceNumber: dispatch.invoiceNumber,
+      invoiceDate: dispatch.invoiceDate,
+      series: dispatch.invoiceSeries ?? 'RVP',
+      raised: true,
+    });
+  }
+
+  const unregistered = req.query.unregistered === 'true' || req.query.unregistered === '1';
+  const series = unregistered ? 'URS' : 'RVP';
+
+  const company = await getCompanyProfileRow();
+  const prefix = unregistered ? 'URS' : (company.invoicePrefix || 'RVP');
+  const invoiceDate = new Date();
+  const fy = indianFinancialYear(invoiceDate);
+
+  const last = await prisma.saleDispatch.aggregate({
+    where: { invoiceFy: fy, invoiceSeries: series },
+    _max: { invoiceSeq: true },
+  });
+  const seq = (last._max.invoiceSeq ?? 0) + 1;
+  const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fy.slice(2)}`;
+
+  res.json({ invoiceNumber, invoiceDate, series, raised: false });
+}
+
+/**
  * Mark a dispatched shipment as delivered (DISPATCHED -> DELIVERED). Records the
  * deliveredDate (the payment-due-date anchor), captures the buyer's kata weight to
  * settle any shortage with a credit note, releases the freight retention held at

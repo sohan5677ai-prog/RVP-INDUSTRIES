@@ -1,10 +1,10 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, MessageCircle, Pencil } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, MessageCircle, Pencil, Eye } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker } from '@/lib/types';
+import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, saleDisplayStatus, type SaleDisplayStatus } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { InvoiceDocument, InvoiceStyles, parseInvoiceLayout } from '@/components/InvoiceDocument';
 import { usePagedRows } from '@/lib/usePagedRows';
 
 const GST_RATE = 0.05;
@@ -327,9 +328,41 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   function openInvoice(dispatch: SaleDispatch, order: SaleOrder) {
     setInvoiceUnregistered(false);
+    setInvoicePreview(false);
     setInvoiceDispatch({ dispatch, order });
     prefillDistance(dispatch.id);
   }
+
+  // ── Invoice preview (Tally-style: see the bill before the number is taken) ──
+  const [invoicePreview, setInvoicePreview] = useState(false);
+
+  // The invoice page needs the letterhead + HSN/GST master, same as the printed view.
+  const { data: company } = useQuery({
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
+    enabled: invoicePreview,
+  });
+  const { data: productTax } = useQuery({
+    queryKey: ['product-tax'],
+    queryFn: () => api<ProductTaxInfo[]>('/settings/product-tax'),
+    enabled: invoicePreview,
+  });
+  // The number this shipment WOULD take - peeked, never consumed, so previewing
+  // (or abandoning a preview) leaves no gap in the series.
+  const { data: previewMeta } = useQuery({
+    queryKey: ['invoice-number-preview', invoiceDispatch?.dispatch.id, invoiceUnregistered],
+    queryFn: () => api<{ invoiceNumber: string; invoiceDate: string; raised: boolean }>(
+      `/sale-dispatches/${invoiceDispatch!.dispatch.id}/invoice/preview?unregistered=${invoiceUnregistered}`,
+    ),
+    enabled: invoicePreview && !!invoiceDispatch,
+  });
+  const previewLayout = useMemo(() => parseInvoiceLayout(company?.invoiceLayout), [company?.invoiceLayout]);
+
+  // Only the invoice sheet should reach the printer while the preview is up.
+  useEffect(() => {
+    document.body.classList.toggle('rvp-inv-preview', invoicePreview);
+    return () => document.body.classList.remove('rvp-inv-preview');
+  }, [invoicePreview]);
 
   /**
    * The E-Way Bill's approx distance. It is NOT optional: the printed government
@@ -1274,6 +1307,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </p>
             </div>
 
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2.5 text-left h-auto py-2.5 border-amber-200 bg-amber-50/50 hover:bg-amber-100/60 dark:bg-amber-950/20 dark:border-amber-900"
+              onClick={() => setInvoicePreview(true)}
+              disabled={!!invoiceActionLoading}
+            >
+              <Eye className="h-4 w-4 text-amber-600 shrink-0" />
+              <div>
+                <div className="font-medium text-xs text-amber-800 dark:text-amber-300">Preview invoice</div>
+                <div className="text-[11px] text-amber-700/80 dark:text-amber-400/80 font-normal">See the printed bill before the number is taken</div>
+              </div>
+            </Button>
+
             <div className="space-y-2 pt-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Option</div>
               <div className="grid grid-cols-1 gap-2">
@@ -1329,6 +1375,87 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invoice preview - the exact sheet that will print, before the number is assigned */}
+      <Dialog open={invoicePreview && !!invoiceDispatch} onOpenChange={(v) => !v && setInvoicePreview(false)}>
+        {/* Inline width: the dialog's default max-width would squeeze the A4 sheet. */}
+        <DialogContent
+          className="rvp-inv-preview-dialog p-0 gap-0"
+          style={{ width: 'min(96vw, 900px)', maxWidth: 'min(96vw, 900px)' }}
+          showCloseButton={false}
+        >
+          <DialogHeader className="inv-no-print border-b px-5 py-3">
+            <DialogTitle className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Invoice preview</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                {previewMeta?.invoiceNumber
+                  ? `Will be raised as ${previewMeta.invoiceNumber}`
+                  : 'Fetching the next invoice number…'}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* "Print draft" must send only the sheet to the printer - hide the app
+              behind the dialog and let the invoice flow onto the page normally. */}
+          <style>{`
+            @media print {
+              body.rvp-inv-preview * { visibility: hidden !important; }
+              body.rvp-inv-preview .rvp-inv-print-area,
+              body.rvp-inv-preview .rvp-inv-print-area * { visibility: visible !important; }
+              body.rvp-inv-preview .rvp-inv-preview-dialog {
+                position: static !important; transform: none !important; display: block !important;
+                width: auto !important; max-width: none !important; max-height: none !important;
+                overflow: visible !important; background: #fff !important;
+                box-shadow: none !important; border: 0 !important; padding: 0 !important; margin: 0 !important;
+              }
+              body.rvp-inv-preview .rvp-inv-print-area {
+                position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important;
+                max-height: none !important; overflow: visible !important; background: #fff !important;
+                padding: 0 !important; margin: 0 !important;
+              }
+              body.rvp-inv-preview .inv-no-print { display: none !important; }
+            }
+          `}</style>
+
+          <div className="rvp-inv-print-area max-h-[70vh] overflow-auto bg-muted/40 px-4 py-5">
+            {invoiceDispatch && company ? (
+              <div className="flex w-max min-w-full justify-center">
+                <InvoiceStyles paperSize={previewLayout.paperSize} />
+                <InvoiceDocument
+                  dispatch={invoiceDispatch.dispatch}
+                  order={invoiceDispatch.order}
+                  company={company}
+                  taxRows={productTax}
+                  layout={previewLayout}
+                  preview
+                  previewNumber={previewMeta?.invoiceNumber ?? ''}
+                  previewDate={previewMeta?.invoiceDate ?? null}
+                />
+              </div>
+            ) : (
+              <div className="py-16 text-center text-sm text-muted-foreground">Loading preview…</div>
+            )}
+          </div>
+
+          <DialogFooter className="inv-no-print items-center border-t px-5 py-3">
+            <span className="mr-auto text-[11px] text-muted-foreground">
+              Draft only - nothing is saved and no number is used until you raise it.
+            </span>
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <Printer className="h-4 w-4" /> Print draft
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setInvoicePreview(false)}>Back</Button>
+            <Button
+              size="sm"
+              onClick={async () => { await handleRaiseNormalInvoice(); setInvoicePreview(false); }}
+              disabled={!!invoiceActionLoading}
+            >
+              {invoiceActionLoading === 'normal' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              Raise this invoice
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

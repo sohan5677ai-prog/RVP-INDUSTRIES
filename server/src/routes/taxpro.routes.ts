@@ -5,6 +5,7 @@ import { HttpError } from '../lib/httpError.js';
 import { TaxproService } from '../services/taxpro.service.js';
 import { sendInvoiceEmail, sendEwbEmail } from '../services/saleDocumentEmail.service.js';
 import { sendDispatchBundleWhatsApp } from '../services/dispatchWhatsapp.service.js';
+import { resolveEwbDistance } from '../services/ewbDistance.service.js';
 import { logger } from '../lib/logger.js';
 import { z } from 'zod';
 
@@ -36,15 +37,12 @@ const cancelSchema = z.object({
 const ewbSchema = z.object({
   transporterId: z.string().optional(),
   transporterName: z.string().optional(),
-  // Must be a real distance. NIC accepts 0 (it then works the distance out from
-  // the two PIN codes) but never tells us what it worked out, and the official
-  // print is rendered from OUR record — so a 0 here becomes "0 KM" on the
-  // printed government bill, which makes that copy invalid.
-  transDistance: z.coerce
-    .number()
-    .int()
-    .min(1, 'Enter the approx distance in km — the E-Way Bill print shows this figure and cannot be left at 0')
-    .max(4000, 'Distance cannot exceed 4000 km'),
+  // Optional override. Left out (or 0), the server works the distance out
+  // itself — see resolveEwbDistance. It can never be filed as 0: NIC accepts a
+  // 0 and computes its own figure, but never tells us what it computed, and the
+  // official print is rendered from OUR record, so the printed bill would read
+  // "0 KM" and be invalid.
+  transDistance: z.coerce.number().int().min(0).max(4000).optional(),
   transMode: z.string().default('1'), // '1' - Road
   vehicleNumber: z.string().optional(),
   vehicleType: z.string().default('R'),
@@ -156,16 +154,44 @@ router.post(
     if (!dispatch.irn) throw new HttpError(400, 'E-Invoice IRN must be generated before E-Way Bill');
     if (dispatch.ewbNumber) throw new HttpError(400, 'E-Way Bill already generated for this dispatch');
 
-    const result = await runTaxpro(() => TaxproService.generateEWayBill(id, {
-      transporterId: data.transporterId,
-      transporterName: data.transporterName,
-      transDistance: data.transDistance,
-      transMode: data.transMode,
-      vehicleNumber: data.vehicleNumber || dispatch.vehicleNumber || '',
-      vehicleType: data.vehicleType,
-      transDocNo: data.transDocNo,
-      transDocDt: data.transDocDt,
-    }));
+    // Worked out here rather than asked for: reused from this buyer's last bill,
+    // or routed from the dispatch-from PIN code to the buyer's.
+    const distance = await resolveEwbDistance(id, data.transDistance);
+    if (!distance) {
+      throw new HttpError(
+        400,
+        'Could not work out the approx distance for this E-Way Bill. Check that the buyer has a PIN code on file ' +
+        '(Parties) and that Settings → Invoice Setup has a Dispatch-From PIN code, or enter the distance yourself ' +
+        'in the E-Way Bill dialog.',
+      );
+    }
+
+    const result = await runTaxpro(async () => {
+      try {
+        return await TaxproService.generateEWayBill(id, {
+          transporterId: data.transporterId,
+          transporterName: data.transporterName,
+          transDistance: distance.km,
+          transMode: data.transMode,
+          vehicleNumber: data.vehicleNumber || dispatch.vehicleNumber || '',
+          vehicleType: data.vehicleType,
+          transDocNo: data.transDocNo,
+          transDocDt: data.transDocDt,
+        });
+      } catch (err) {
+        // NIC rejects a distance that overshoots its own PIN-to-PIN figure by
+        // more than 10%. Ours comes from OpenStreetMap routing, so on an odd
+        // route it can land outside that band — say so plainly, with the way out.
+        const message = err instanceof Error ? err.message : String(err);
+        if (distance.source === 'calculated' && /distance/i.test(message)) {
+          throw new Error(
+            `NIC rejected the calculated distance of ${distance.km} km — ${message}. ` +
+            `Use "Gen EWB" and type the distance the portal shows instead.`,
+          );
+        }
+        throw err;
+      }
+    });
 
     const updated = await prisma.saleDispatch.update({
       where: { id },
@@ -178,7 +204,7 @@ router.post(
         // print renders as "Approx Distance", so it must never be left empty.
         ewbDistance: result.distance && result.distance > 0
           ? Math.round(result.distance)
-          : data.transDistance,
+          : distance.km,
         ewbTransMode: data.transMode,
         ewbVehicleType: data.vehicleType,
         ewbTransDocNo: data.transDocNo || null,
@@ -211,33 +237,21 @@ router.post(
   })
 );
 
-// Suggested approx distance for a dispatch about to be billed: the km recorded
-// on the most recent E-Way Bill raised for the SAME buyer. The lorry runs the
-// same route every time, so after the first bill to a buyer the figure is
-// already known and the operator only has to confirm it.
+// The approx distance this dispatch's E-Way Bill will be raised with, worked
+// out the same way the generation route works it out. Purely so the dialog can
+// show the operator what is about to be filed (and warn early on the rare route
+// that can't be resolved) — nothing here has to be answered.
 router.get(
   '/sale-dispatches/:id/ewaybill/distance-hint',
   asyncHandler(async (req, res) => {
-    const dispatch = await prisma.saleDispatch.findUnique({
-      where: { id: req.params.id },
-      include: { saleOrder: { select: { buyerId: true } } },
-    });
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
 
-    const previous = await prisma.saleDispatch.findFirst({
-      where: {
-        id: { not: dispatch.id },
-        ewbDistance: { not: null },
-        saleOrder: { buyerId: dispatch.saleOrder.buyerId },
-      },
-      orderBy: { ewbDate: 'desc' },
-      select: { ewbDistance: true, ewbNumber: true, ewbDate: true },
-    });
-
+    const resolved = await resolveEwbDistance(req.params.id);
     res.json({
-      distance: dispatch.ewbDistance ?? previous?.ewbDistance ?? null,
-      source: dispatch.ewbDistance ? 'this-dispatch' : previous ? 'previous-ewb' : null,
-      previousEwbNumber: previous?.ewbNumber ?? null,
+      distance: resolved?.km ?? null,
+      source: resolved?.source ?? null,
+      detail: resolved?.detail ?? null,
     });
   })
 );

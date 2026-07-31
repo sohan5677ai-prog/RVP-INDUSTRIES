@@ -325,6 +325,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // registered "RVP/01/26-27" series.
   const [invoiceUnregistered, setInvoiceUnregistered] = useState(false);
   const [invoiceActionLoading, setInvoiceActionLoading] = useState<'normal' | 'irn' | 'both' | null>(null);
+  // What the server says the E-Way Bill's approx distance will be: 'loading'
+  // while it works it out, 'none' when it couldn't.
+  type DistanceHint = { distance: number | null; source: string | null; detail: string | null };
+  const [distanceHint, setDistanceHint] = useState<DistanceHint | 'loading' | 'none'>('none');
 
   function openInvoice(dispatch: SaleDispatch, order: SaleOrder) {
     setInvoiceUnregistered(false);
@@ -365,18 +369,21 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   }, [invoicePreview]);
 
   /**
-   * The E-Way Bill's approx distance. It is NOT optional: the printed government
-   * bill renders this figure, and NIC keeps its own auto-calculated value to
-   * itself, so leaving it at 0 puts "0 KM" on the buyer's copy. Pre-filled from
-   * the last bill raised for the same buyer — same route, same distance.
+   * The E-Way Bill's approx distance is worked out server-side — reused from
+   * this buyer's last bill, or routed from the dispatch-from PIN code to the
+   * buyer's — so nothing is asked for here. We only fetch it to SHOW what is
+   * about to be filed, and to warn on the rare route that can't be resolved.
    */
   async function prefillDistance(dispatchId: string) {
     setTransDistance('');
+    setDistanceHint('loading');
     try {
-      const hint = await api<{ distance: number | null }>(`/sale-dispatches/${dispatchId}/ewaybill/distance-hint`);
-      if (hint.distance) setTransDistance(String(hint.distance));
+      const hint = await api<{ distance: number | null; source: string | null; detail: string | null }>(
+        `/sale-dispatches/${dispatchId}/ewaybill/distance-hint`,
+      );
+      setDistanceHint(hint.distance ? hint : 'none');
     } catch {
-      /* a missing hint just means the operator types the distance in */
+      setDistanceHint('none');
     }
   }
 
@@ -464,7 +471,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         body: {
           transporterId,
           transporterName,
-          transDistance: Number(transDistance),
+          // Omitted — the server calculates it. Only the E-Way Bill dialog sends
+          // a value, and only when the operator overrides it.
+          transDistance: undefined,
           transMode: transMode || '1',
           vehicleNumber: invoiceDispatch.dispatch.vehicleNumber || ewbVehicleNo || '',
           vehicleType: vehicleType || 'R',
@@ -662,7 +671,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         body: {
           transporterId,
           transporterName,
-          transDistance,
+          // Blank = let the server calculate it.
+          transDistance: transDistance === '' ? undefined : Number(transDistance),
           transMode,
           vehicleNumber: ewbVehicleNo,
           vehicleType,
@@ -1291,20 +1301,23 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs">Approx Distance (km) *</Label>
-              <Input
-                type="number"
-                min="1"
-                max="4000"
-                value={transDistance}
-                onChange={(e) => setTransDistance(e.target.value)}
-                placeholder="e.g. 1300"
-                disabled={!!invoiceActionLoading}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Printed on the E-Way Bill as "Approx Distance", so it can't be left blank. Pre-filled from the last bill to this buyer.
-              </p>
+            {/* The E-Way Bill's approx distance is worked out for you — reused
+                from this buyer's last bill or routed from the PIN codes — and is
+                shown here only so you can see what's about to be filed. */}
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm flex items-start justify-between gap-3">
+              <span className="text-muted-foreground">E-Way Bill distance</span>
+              {distanceHint === 'loading' ? (
+                <span className="text-muted-foreground animate-pulse">calculating…</span>
+              ) : distanceHint === 'none' ? (
+                <span className="max-w-[62%] text-right text-[11px] text-amber-600">
+                  Couldn't be calculated — add the buyer's PIN code in Parties, or enter the distance in the E-Way Bill dialog.
+                </span>
+              ) : (
+                <span className="text-right">
+                  <span className="font-semibold">{distanceHint.distance} km</span>
+                  <span className="block text-[11px] text-muted-foreground">{distanceHint.detail}</span>
+                </span>
+              )}
             </div>
 
             <Button
@@ -1360,7 +1373,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <Button
                   className="w-full justify-start gap-2.5 text-left h-auto py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white"
                   onClick={handleRaiseIrnAndEwb}
-                  disabled={!!invoiceActionLoading || !(Number(transDistance) > 0)}
+                  disabled={!!invoiceActionLoading}
                 >
                   {invoiceActionLoading === 'both' ? (
                     <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -1538,9 +1551,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Distance (km) *</Label>
-                <Input type="number" min="1" max="4000" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder="e.g. 250" />
-                <p className="text-[11px] text-muted-foreground">Printed on the bill as "Approx Distance" — it cannot be 0.</p>
+                <Label className="text-xs">Distance (km)</Label>
+                <Input type="number" min="1" max="4000" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder={distanceHint === 'loading' ? 'calculating…' : distanceHint === 'none' ? 'e.g. 250' : `auto: ${distanceHint.distance} km`} />
+                <p className="text-[11px] text-muted-foreground">
+                  {distanceHint === 'none'
+                    ? "Couldn't be calculated automatically — enter the distance in km."
+                    : 'Leave blank to use the calculated distance.'}
+                </p>
               </div>
 
               {transMode === '1' ? (
@@ -1593,7 +1610,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 onClick={() => generateEwbMutation.mutate()}
                 disabled={
                   generateEwbMutation.isPending ||
-                  !(Number(transDistance) > 0) ||
+                  // Blank is fine — the server calculates it. Only a distance
+                  // that was typed and is nonsense blocks the button.
+                  (transDistance !== '' && !(Number(transDistance) > 0)) ||
+                  (distanceHint === 'none' && transDistance === '') ||
                   transporterIdInvalid ||
                   (transMode === '1' ? !ewbVehicleNo.trim() : (!transDocNo.trim() || !transDocDt))
                 }

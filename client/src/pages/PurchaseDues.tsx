@@ -17,6 +17,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
+import { ScreenshotUpload } from '@/components/ScreenshotUpload';
 import type { ExportColumn } from '@/lib/export';
 
 // Payment-status tabs. "Unpaid" catches anything with even ₹1 still outstanding
@@ -84,6 +85,9 @@ const PURCHASE_DUES_COLUMNS: ExportColumn<OutstandingPurchase>[] = [
 export default function PurchaseDuesPage() {
   const qc = useQueryClient();
   const [payDialog, setPayDialog] = useState<PayDialogState | null>(null);
+  // Optional proof screenshot stored against the payment (no AI read here —
+  // the amount and party are already known from the bill being settled).
+  const [payProof, setPayProof] = useState<File | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
 
@@ -115,11 +119,26 @@ export default function PurchaseDuesPage() {
   });
 
   const payMutation = useMutation({
-    mutationFn: (body: { date: string; amount: number; type: string; partyId: string; purchaseId?: string; reference?: string }) =>
-      api('/payments', { method: 'POST', body }),
+    mutationFn: ({ file, ...fields }: {
+      date: string; amount: number; type: string; partyId: string;
+      purchaseId?: string; reference?: string; file: File | null;
+    }) => {
+      // With a proof screenshot the create goes multipart so the server can
+      // persist the file against the payment; otherwise plain JSON.
+      if (file) {
+        const fd = new FormData();
+        for (const [k, v] of Object.entries(fields)) {
+          if (v !== undefined && v !== null) fd.append(k, String(v));
+        }
+        fd.append('screenshot', file);
+        return api('/payments', { method: 'POST', body: fd, multipart: true });
+      }
+      return api('/payments', { method: 'POST', body: fields });
+    },
     onSuccess: () => {
       toast.success('Payment recorded');
       qc.invalidateQueries({ queryKey: ['payments'] });
+      setPayProof(null);
       setPayDialog(null);
     },
     onError: () => toast.error('Failed to record payment'),
@@ -374,6 +393,7 @@ export default function PurchaseDuesPage() {
       ...(bill.kind === 'DUST'
         ? { reference: `DUST:${bill.id}:${payDialog.mode}` }
         : { purchaseId: bill.id, reference: payDialog.mode }),
+      file: payProof,
     });
   }
 
@@ -564,7 +584,7 @@ export default function PurchaseDuesPage() {
       )}
 
       {/* Pay dialog */}
-      <Dialog open={!!payDialog} onOpenChange={(open) => { if (!open) setPayDialog(null); }}>
+      <Dialog open={!!payDialog} onOpenChange={(open) => { if (!open) { setPayProof(null); setPayDialog(null); } }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Record Payment</DialogTitle>
@@ -610,10 +630,16 @@ export default function PurchaseDuesPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <ScreenshotUpload
+                label="Payment proof (optional)"
+                hint="Drop the payment screenshot"
+                filePrefix="payment-proof"
+                onFile={setPayProof}
+              />
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPayDialog(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setPayProof(null); setPayDialog(null); }}>Cancel</Button>
             <Button onClick={submitPay} disabled={payMutation.isPending}>
               {payMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Payment'}
             </Button>

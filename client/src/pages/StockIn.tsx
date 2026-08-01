@@ -1,8 +1,9 @@
 import React, { Fragment, useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, Truck, PackageCheck, Clock } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { usePasteImage, readImageFromClipboard } from '@/lib/usePasteImage';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { PaginationBar } from '@/components/ui/pagination-bar';
@@ -73,24 +74,52 @@ function nameKey(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** A single drag-and-drop document zone that runs AI extraction on drop/select. */
+/**
+ * A single document zone that runs AI extraction on drop/select/paste. The
+ * invoice is usually a phone screenshot, so Ctrl+V (or the Paste button) is the
+ * quickest way in — see usePasteImage.
+ */
 function DropZone({
-  title, hint, accept, busy, onPick,
+  title, hint, accept, busy, onPick, onClear,
 }: {
   title: string;
   hint: string;
   accept: string;
   busy: boolean;
   onPick: (f: File) => void;
+  onClear: () => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [name, setName] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   function pick(f: File | null) {
     if (!f) return;
     setName(f.name);
+    setPreview(f.type.startsWith('image/') ? URL.createObjectURL(f) : null);
     onPick(f);
+  }
+
+  usePasteImage(true, pick, 'invoice');
+
+  async function pasteFromClipboard() {
+    try {
+      const file = await readImageFromClipboard('invoice');
+      if (file) pick(file);
+      else toast.message('No image on the clipboard. Take a screenshot first.');
+    } catch {
+      toast.error('Could not read the clipboard — press Ctrl+V instead.');
+    }
+  }
+
+  function clear() {
+    setName(null);
+    setPreview(null);
+    onClear();
+    if (inputRef.current) inputRef.current.value = '';
   }
 
   return (
@@ -115,7 +144,11 @@ function DropZone({
           </>
         ) : name ? (
           <>
-            <FileText className="h-5 w-5 text-primary" />
+            {preview ? (
+              <img src={preview} alt="" className="max-h-24 rounded border object-contain" />
+            ) : (
+              <FileText className="h-5 w-5 text-primary" />
+            )}
             <p className="max-w-[140px] truncate text-xs font-medium">{name}</p>
             <p className="text-[10px] text-muted-foreground">Click to replace</p>
           </>
@@ -123,10 +156,21 @@ function DropZone({
           <>
             <UploadCloud className="h-5 w-5 text-muted-foreground" />
             <p className="text-xs font-medium">{hint}</p>
+            <p className="text-[10px] text-muted-foreground">or press Ctrl+V to paste a screenshot</p>
             <p className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
               <Sparkles className="h-2.5 w-2.5" /> AI auto-fill
             </p>
           </>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={busy} onClick={pasteFromClipboard}>
+          <ClipboardPaste className="mr-1 h-3 w-3" /> Paste
+        </Button>
+        {name && (
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clear}>
+            <X className="mr-1 h-3 w-3" /> Remove
+          </Button>
         )}
       </div>
       <input
@@ -382,6 +426,7 @@ function StockInFormDialog({
               accept="application/pdf,image/*"
               busy={extractingKind === 'invoice'}
               onPick={(f) => { setInvoiceFile(f); extractDoc(f, 'invoice'); }}
+              onClear={() => setInvoiceFile(null)}
             />
             {invoiceFile && (
               <p className="text-xs text-muted-foreground">Invoice file to save: <span className="font-medium">{invoiceFile.name}</span></p>

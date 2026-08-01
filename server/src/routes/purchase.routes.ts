@@ -33,6 +33,7 @@ import {
   createVerification,
   deleteVerification,
 } from '../controllers/verification.controller.js';
+import { downloadPurchaseStatementPdf } from '../controllers/purchaseStatement.controller.js';
 
 const router = Router();
 
@@ -65,6 +66,7 @@ router.delete('/purchases/:id', asyncHandler(deletePurchase));
 // Weight verification (separate step from recording a purchase)
 router.get('/verifications', asyncHandler(listVerifications));
 router.get('/verifications/:id', asyncHandler(getVerification));
+router.get('/verifications/:id/statement.pdf', asyncHandler(downloadPurchaseStatementPdf));
 router.post('/verifications', asyncHandler(createVerification));
 router.delete('/verifications/:id', asyncHandler(deleteVerification));
 

@@ -1,8 +1,10 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Printer, ArrowLeft } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Printer, ArrowLeft, Download } from 'lucide-react';
+import { useState } from 'react';
+import { api, apiBlob } from '@/lib/api';
 import type { Purchase, WeightVerification, StockIn, PurchaseOrder, Party } from '@/lib/types';
+import { computeQualityAdjustments, type QualityAdjustmentMode, type QualityAdjustmentRow } from '@/lib/calc';
 import { Button } from '@/components/ui/button';
 import { shortDate } from '@/lib/format';
 
@@ -15,21 +17,82 @@ type PurchaseDetails = Purchase & {
   };
 };
 
-// Formats a number with Indian style commas
-function fmt(val: number | string | null | undefined): string {
-  if (val == null) return '-';
-  const num = typeof val === 'string' ? Number(val) : val;
-  return num.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+interface CompanyProfile {
+  name: string;
+  address?: string | null;
+  gstin?: string | null;
+  contact?: string | null;
+}
+
+interface PartyLedgerResponse {
+  summary: { balance: number; balanceType: 'DR' | 'CR' };
+}
+
+/** Free allowance on the kata difference — keep in step with EXEMPT_KG on the server. */
+const ALLOWANCE_KG = 80;
+
+/** Short note appended to a deduction row so the party knows what it is. */
+const MODE_NOTE: Record<QualityAdjustmentMode, string> = {
+  WEIGHT: 'quality weight cut',
+  PRICE: 'rate reduction',
+  AMOUNT: 'quality discount',
+  EXPENSE: 'expenses recovered',
+  FREIGHT: 'lorry freight borne by party',
+};
+
+const qtyFmt = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+const moneyFmt = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const kg = (n: number) => `${qtyFmt.format(Math.round(n * 100) / 100)} kg`;
+const money = (n: number) => moneyFmt.format(n);
+
+interface Row {
+  label: string;
+  note?: string;
+  qty?: string;
+  rate?: string;
+  amount: number;
+  negative?: boolean;
+  subtotal?: boolean;
 }
 
 export default function PurchaseStatement() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
+  const [downloading, setDownloading] = useState(false);
 
   const { data: purchase, isLoading, error } = useQuery({
     queryKey: ['purchases', purchaseId],
     queryFn: () => api<PurchaseDetails>(`/purchases/${purchaseId}`),
     enabled: !!purchaseId,
   });
+
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const partyId = purchase?.stockIn.purchaseOrder.partyId;
+  const { data: ledger } = useQuery({
+    queryKey: ['ledger', 'parties', partyId],
+    queryFn: () => api<PartyLedgerResponse>(`/ledger/parties/${partyId}`),
+    enabled: !!partyId,
+  });
+
+  async function downloadPdf(verificationId: string, partyName: string, invoiceNumber: string) {
+    setDownloading(true);
+    try {
+      const blob = await apiBlob(`/verifications/${verificationId}/statement.pdf`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Purchase-Statement-${`${partyName}-${invoiceNumber}`.replace(/[^\w]+/g, '-')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -50,29 +113,140 @@ export default function PurchaseStatement() {
     );
   }
 
-  const { verification, stockIn } = purchase;
+  const { verification: v, stockIn } = purchase;
   const party = stockIn.purchaseOrder.party;
-
-  // Invoice Math Calculations
-  const rvpKata = verification.rvpKataKg;
-  const clientKata = verification.referenceKg;
-  const ratePerKg = Number(verification.pricePerKg);
-
   const hasGst = stockIn.purchaseOrder.hasGst ?? false;
-  const baseAmount = Math.round(clientKata * ratePerKg);
-  const igstAmount = hasGst ? Math.round(baseAmount * 0.05) : 0;
-  const totalAmount = baseAmount + igstAmount;
+  const price = Number(v.pricePerKg);
 
-  const diffKg = verification.diffKg;
-  const deductKg = Math.max(0, diffKg - 80);
-  const kataDiffAmount = Math.round(deductKg * ratePerKg);
+  // --- Bill arithmetic (mirrors createVerification on the server) ------------
+  // The kata difference is already folded into the verified payable weight, so
+  // bill the reference weight and show the cut as its own line. When RVP weighed
+  // HEAVIER than the reference there is no cut — we pay on the RVP net.
+  const billedKg = Math.max(v.referenceKg, v.finalWeightKg);
+  const kataDeductKg = Math.max(0, v.referenceKg - v.finalWeightKg);
+  const grossSeed = billedKg * price;
+  const kataDeductAmount = kataDeductKg * price;
 
-  // Self-vehicle hamali recovered from the party (₹80/t on their own lorry).
-  const selfVehicleHamali = Math.round(Number(verification.selfVehicleHamali ?? 0));
-  // Self-vehicle kata (weighbridge fee) recovered from the party on their own lorry.
-  const selfVehicleKata = Math.round(Number(verification.selfVehicleKata ?? 0));
+  // Pre-feature verifications only carry the legacy single discount pair.
+  let qaRows: QualityAdjustmentRow[] = v.qualityAdjustments ?? [];
+  if (!qaRows.length && purchase.discountType && Number(purchase.discountValue) > 0) {
+    qaRows = computeQualityAdjustments(
+      [{ mode: purchase.discountType as QualityAdjustmentMode, value: Number(purchase.discountValue) }],
+      v.finalWeightKg,
+      price,
+    ).rows;
+  }
 
-  const balancePayable = Math.round(Number(verification.totalAmount));
+  const billAddables = (v.billAddables ?? []).filter((a) => a && a.label && Number(a.amount) > 0);
+  const gstAmount = hasGst ? Math.round(v.billingWeightKg * price * 0.05 * 100) / 100 : 0;
+  const selfVehicleHamali = Number(v.selfVehicleHamali ?? 0);
+  const selfVehicleKata = Number(v.selfVehicleKata ?? 0);
+  const netPayable = Number(v.totalAmount);
+
+  const deductionsTotal = kataDeductAmount + qaRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const netSeedValue = grossSeed - deductionsTotal;
+  const hasAdditions = gstAmount > 0 || billAddables.length > 0;
+  const hasRecoveries = selfVehicleHamali > 0 || selfVehicleKata > 0;
+
+  const rows: Row[] = [
+    {
+      label: 'Tamarind seed (black seed)',
+      note: stockIn.selfVehicle ? "Delivered in party's own vehicle" : undefined,
+      qty: kg(billedKg),
+      rate: money(price),
+      amount: grossSeed,
+    },
+  ];
+
+  if (kataDeductKg > 0) {
+    rows.push({
+      label: 'Less : Kata difference',
+      note: `${kg(v.diffKg)} short against ${kg(v.referenceKg)} reference, ${ALLOWANCE_KG} kg allowed free`,
+      qty: kg(kataDeductKg),
+      rate: money(price),
+      amount: kataDeductAmount,
+      negative: true,
+    });
+  }
+
+  for (const r of qaRows) {
+    const amount = Number(r.amount) || 0;
+    if (!amount) continue;
+    const note = MODE_NOTE[r.mode];
+    rows.push({
+      label: `Less : ${r.label}`,
+      note: r.label.toLowerCase() === note ? undefined : note,
+      qty: r.mode === 'WEIGHT' ? kg(r.value) : undefined,
+      rate: r.mode === 'WEIGHT' ? money(price) : r.mode === 'PRICE' ? `${money(r.value)}/kg` : undefined,
+      amount,
+      negative: true,
+    });
+  }
+
+  if (deductionsTotal > 0 && (hasAdditions || hasRecoveries)) {
+    rows.push({ label: 'Net seed value', amount: netSeedValue, subtotal: true });
+  }
+
+  if (gstAmount > 0) {
+    rows.push({
+      label: 'Add : IGST @ 5%',
+      note: `on invoice value ${kg(v.billingWeightKg)} × ${money(price)}`,
+      amount: gstAmount,
+    });
+  }
+
+  for (const a of billAddables) {
+    rows.push({ label: `Add : ${a.label}`, amount: Number(a.amount) });
+  }
+
+  if (selfVehicleHamali > 0) {
+    rows.push({
+      label: 'Less : Hamali (unloading)',
+      note: "lorry's share recovered — party's own vehicle",
+      amount: selfVehicleHamali,
+      negative: true,
+    });
+  }
+  if (selfVehicleKata > 0) {
+    rows.push({
+      label: 'Less : Kata charges (weighbridge)',
+      note: "recovered — party's own vehicle",
+      amount: selfVehicleKata,
+      negative: true,
+    });
+  }
+
+  const kataNote =
+    v.finalWeightKg >= v.referenceKg && v.diffKg === 0
+      ? 'Both weighbridges agree — payable at the full reference weight.'
+      : v.finalWeightKg > v.referenceKg
+        ? `RVP weighbridge read heavier than the party kata — paid on our higher net of ${kg(v.rvpKataKg)}.`
+        : v.exempt
+          ? `Difference of ${kg(v.diffKg)} is within the ${ALLOWANCE_KG} kg free allowance — no weight deduction.`
+          : `Difference of ${kg(v.diffKg)} exceeds the ${ALLOWANCE_KG} kg free allowance — ${kg(kataDeductKg)} deducted below.`;
+
+  // Closing balance already includes this bill; back it out for the opening figure.
+  const closingSigned = ledger
+    ? ledger.summary.balanceType === 'DR'
+      ? ledger.summary.balance
+      : -ledger.summary.balance
+    : null;
+  const previousSigned = closingSigned == null ? null : Math.round((closingSigned + netPayable) * 100) / 100;
+
+  const weightCells: [string, string][] = [
+    ['Invoice Weight', kg(v.billingWeightKg)],
+    ['Party Kata', kg(v.partyKataKg)],
+    ['RVP Kata', kg(v.rvpKataKg)],
+    ['Difference', kg(v.diffKg)],
+    ['Payable Weight', kg(v.finalWeightKg)],
+  ];
+
+  const metaPairs: [string, string][] = [
+    ['Invoice No.', stockIn.invoiceNumber || '-'],
+    ['Vehicle', `${stockIn.lorryNumber}${stockIn.selfVehicle ? '  (party vehicle)' : ''}`],
+    ['Purchase Order', stockIn.purchaseOrder.poNumber || '-'],
+    ['Unloaded At', stockIn.loadingLocation || '-'],
+  ];
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto p-4 md:p-6">
@@ -83,143 +257,150 @@ export default function PurchaseStatement() {
             <ArrowLeft className="h-4 w-4" /> Back to Purchases
           </Link>
         </Button>
-        <Button onClick={() => window.print()} className="gap-1.5 shadow-sm hover:scale-[1.02] transition-transform duration-200">
-          <Printer className="h-4 w-4" /> Print Statement
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            disabled={downloading}
+            onClick={() => downloadPdf(v.id, party.name, stockIn.invoiceNumber)}
+          >
+            <Download className="h-4 w-4" /> {downloading ? 'Preparing…' : 'Download PDF'}
+          </Button>
+          <Button onClick={() => window.print()} className="gap-1.5 shadow-sm hover:scale-[1.02] transition-transform duration-200">
+            <Printer className="h-4 w-4" /> Print Statement
+          </Button>
+        </div>
       </div>
 
-      {/* Styled Statement Sheet Container */}
-      <div className="bg-white text-black border border-neutral-300 rounded-md shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0">
-        
-        {/* Header styling to match clean paper report */}
-        <div className="text-center space-y-1 mb-6 border-b border-black pb-4">
-          <h2 className="text-xl font-bold uppercase tracking-wider text-neutral-800">RVP Industries</h2>
-          <p className="text-xs text-neutral-600 tracking-wide uppercase">Tamarind Seed Processing · Purchase Statement Sheet</p>
-        </div>
+      {/* Statement sheet — mirrors the PDF sent to the party on WhatsApp */}
+      <div className="bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0">
 
-        {/* Invoice Info Grid Table */}
-        <div className="grid grid-cols-1 md:grid-cols-2 border border-black border-collapse text-sm mb-6">
-          <div className="flex flex-col border-b md:border-b-0 md:border-r border-black">
-            <div className="flex border-b border-black">
-              <span className="w-24 font-bold border-r border-black p-2 bg-neutral-50">Name</span>
-              <span className="p-2 font-semibold flex-1">{party.name}</span>
-            </div>
-            <div className="flex border-b border-black">
-              <span className="w-24 font-bold border-r border-black p-2 bg-neutral-50">Invoice</span>
-              <span className="p-2 flex-1">{stockIn.invoiceNumber}</span>
-            </div>
-            <div className="flex">
-              <span className="w-24 font-bold border-r border-black p-2 bg-neutral-50">Dated</span>
-              <span className="p-2 flex-1">{shortDate(stockIn.arrivalDate)}</span>
-            </div>
+        {/* Letterhead */}
+        <div className="flex items-start justify-between gap-6 border-b border-neutral-400 pb-3">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold uppercase tracking-wide">{company?.name ?? 'RVP Industries'}</h2>
+            {company?.address && (
+              <p className="mt-0.5 text-[10px] leading-snug text-neutral-500">{company.address.replace(/\n/g, ', ')}</p>
+            )}
+            <p className="text-[10px] text-neutral-500">
+              {[company?.gstin && `GSTIN: ${company.gstin}`, company?.contact && `Ph: ${company.contact}`]
+                .filter(Boolean)
+                .join('    ')}
+            </p>
           </div>
-
-          <div className="flex flex-col">
-            <div className="flex border-b border-black">
-              <span className="w-32 font-bold border-r border-black p-2 bg-neutral-50">Vehicle</span>
-              <span className="p-2 font-semibold flex-1">{stockIn.lorryNumber}</span>
-            </div>
-            <div className="flex border-b border-black">
-              <span className="w-32 font-bold border-r border-black p-2 bg-neutral-50">RVP Kata</span>
-              <span className="p-2 font-semibold flex-1 text-right pr-4 bg-neutral-50/50">{fmt(rvpKata)} kg</span>
-            </div>
-            <div className="flex">
-              <span className="w-32 font-bold border-r border-black p-2 bg-neutral-50">Party Kata</span>
-              <span className="p-2 font-semibold flex-1 text-right pr-4 bg-neutral-50/50">{fmt(clientKata)} kg</span>
-            </div>
+          <div className="shrink-0 text-right">
+            <h3 className="text-base font-bold tracking-wide">PURCHASE STATEMENT</h3>
+            <p className="text-[11px] text-neutral-500">Dated {shortDate(purchase.purchaseDate ?? stockIn.arrivalDate)}</p>
+            <p className="text-[10px] text-neutral-500">Unloaded &amp; weight-verified</p>
           </div>
         </div>
 
-        {/* Particulars Table */}
-        <div className="border border-black text-sm">
-          {/* Header Row */}
-          <div className="grid grid-cols-12 font-bold bg-neutral-100 border-b border-black">
-            <div className="col-span-6 border-r border-black p-2.5">Particulars</div>
-            <div className="col-span-2 border-r border-black p-2.5 text-right">Kgs (Qty)</div>
-            <div className="col-span-2 border-r border-black p-2.5 text-right">Rate</div>
-            <div className="col-span-2 p-2.5 text-right">Amount</div>
+        {/* Party + document meta */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-[1.25fr_1fr] border border-neutral-300 rounded-sm">
+          <div className="p-3 border-b md:border-b-0 md:border-r border-neutral-300">
+            <p className="text-[9px] uppercase tracking-widest text-neutral-500">Statement for</p>
+            <p className="mt-1 text-base font-bold">{party.name}</p>
+            {[party.address, party.city, party.state].filter(Boolean).length > 0 && (
+              <p className="text-[10px] text-neutral-500">
+                {[party.address, party.city, party.state].filter(Boolean).join(', ')}
+              </p>
+            )}
+            <p className="text-[10px] text-neutral-500">
+              {[party.gstin && `GSTIN: ${party.gstin}`, party.phone && `Ph: ${party.phone}`].filter(Boolean).join('    ')}
+            </p>
           </div>
-
-          {/* Seed Row */}
-          <div className="grid grid-cols-12 border-b border-neutral-300">
-            <div className="col-span-6 border-r border-black p-2.5 font-medium">Seed</div>
-            <div className="col-span-2 border-r border-black p-2.5 text-right">{fmt(clientKata)}</div>
-            <div className="col-span-2 border-r border-black p-2.5 text-right">{fmt(ratePerKg)}</div>
-            <div className="col-span-2 p-2.5 text-right font-medium">{fmt(baseAmount)}</div>
-          </div>
-
-          {/* IGST Row - only for GST-invoice purchases */}
-          {hasGst && (
-            <div className="grid grid-cols-12 border-b border-black">
-              <div className="col-span-10 border-r border-black p-2.5 pl-6 text-neutral-700">Add : IGST (5%)</div>
-              <div className="col-span-2 p-2.5 text-right">{fmt(igstAmount)}</div>
-            </div>
-          )}
-
-          {/* Total Row */}
-          <div className="grid grid-cols-12 font-semibold border-b border-black bg-neutral-50/50">
-            <div className="col-span-10 border-r border-black p-2.5 text-right uppercase tracking-wider text-xs">Total</div>
-            <div className="col-span-2 p-2.5 text-right">{fmt(totalAmount)}</div>
-          </div>
-
-          {/* Kata Difference Row */}
-          <div className="grid grid-cols-12 border-b border-neutral-300">
-            <div className="col-span-6 border-r border-black p-2.5 pl-4 flex flex-col justify-center">
-              <span>Less : Kata difference</span>
-              {diffKg > 0 && (
-                <span className="text-[11px] text-neutral-500 font-mono">Actual diff: {fmt(diffKg)} kg (80 kg exempt)</span>
-              )}
-            </div>
-            <div className="col-span-2 border-r border-black p-2.5 text-right flex items-center justify-end">
-              {deductKg > 0 ? fmt(deductKg) : '0'}
-            </div>
-            <div className="col-span-2 border-r border-black p-2.5 text-right flex items-center justify-end">
-              {deductKg > 0 ? fmt(ratePerKg) : '-'}
-            </div>
-            <div className="col-span-2 p-2.5 text-right text-red-700 flex items-center justify-end">
-              {deductKg > 0 ? `(${fmt(kataDiffAmount)})` : '-'}
-            </div>
-          </div>
-
-          {/* Self-vehicle Hamali Row - only when the party used their own lorry */}
-          {selfVehicleHamali > 0 && (
-            <div className="grid grid-cols-12 border-b border-neutral-300">
-              <div className="col-span-10 border-r border-black p-2.5 pl-4 flex items-center">
-                Less : Self-vehicle hamali (₹80/t on party's own lorry)
+          <div className="p-3 space-y-1.5">
+            {metaPairs.map(([label, value]) => (
+              <div key={label} className="flex items-baseline gap-2 text-[11px]">
+                <span className="w-24 shrink-0 text-neutral-500">{label}</span>
+                <span className="font-semibold">{value}</span>
               </div>
-              <div className="col-span-2 p-2.5 text-right text-red-700 flex items-center justify-end">
-                ({fmt(selfVehicleHamali)})
-              </div>
-            </div>
-          )}
-
-          {/* Self-vehicle Kata Row - weighbridge fee on the party's own lorry */}
-          {selfVehicleKata > 0 && (
-            <div className="grid grid-cols-12 border-b border-neutral-300">
-              <div className="col-span-10 border-r border-black p-2.5 pl-4 flex items-center">
-                Less : Self-vehicle kata (weighbridge fee on party's own lorry)
-              </div>
-              <div className="col-span-2 p-2.5 text-right text-red-700 flex items-center justify-end">
-                ({fmt(selfVehicleKata)})
-              </div>
-            </div>
-          )}
-
-          {/* Balance Payable Row */}
-          <div className="grid grid-cols-12 font-bold bg-neutral-100 text-base">
-            <div className="col-span-10 border-r border-black p-3 text-right uppercase tracking-wider">Balance Payable</div>
-            <div className="col-span-2 p-3 text-right text-green-800">{fmt(balancePayable)}</div>
+            ))}
           </div>
         </div>
 
-        {/* Footer Signature */}
-        <div className="mt-16 flex justify-end text-xs pt-8 border-t border-dotted border-neutral-400">
-          <div className="space-y-12 text-right">
-            <p className="font-semibold text-neutral-500">For RVP Industries:</p>
-            <p className="border-t border-neutral-300 w-32 pt-1 font-medium text-neutral-700 text-center">Authorized Sign</p>
-          </div>
+        {/* Weighments */}
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 border border-neutral-300 rounded-sm bg-neutral-50 divide-x divide-neutral-200">
+          {weightCells.map(([label, value], i) => (
+            <div key={label} className="p-2 text-center">
+              <p className="text-[8px] uppercase tracking-widest text-neutral-500">{label}</p>
+              <p className={`mt-0.5 font-bold ${i === weightCells.length - 1 ? 'text-sm' : 'text-[13px]'}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[10px] text-neutral-500">{kataNote}</p>
+
+        {/* Particulars */}
+        <table className="mt-3 w-full border-collapse text-[12px]">
+          <thead>
+            <tr className="bg-neutral-900 text-white text-[9px] uppercase tracking-widest">
+              <th className="p-2 text-left font-semibold">Particulars</th>
+              <th className="p-2 text-right font-semibold w-24">Quantity</th>
+              <th className="p-2 text-right font-semibold w-24">Rate / kg</th>
+              <th className="p-2 text-right font-semibold w-28">Amount (INR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr
+                key={`${r.label}-${i}`}
+                className={`border-b border-neutral-200 align-top ${r.subtotal ? 'bg-neutral-100 font-semibold' : ''}`}
+              >
+                <td className={`p-2 ${/^(Less|Add) :/.test(r.label) ? 'pl-5' : ''}`}>
+                  {r.label}
+                  {r.note && <span className="block text-[9.5px] text-neutral-500">{r.note}</span>}
+                </td>
+                <td className="p-2 text-right tabular-nums">{r.qty ?? ''}</td>
+                <td className="p-2 text-right tabular-nums">{r.rate ?? ''}</td>
+                <td className={`p-2 text-right tabular-nums ${r.negative ? 'text-red-700' : ''}`}>
+                  {r.negative ? `(${money(r.amount)})` : money(r.amount)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Net payable */}
+        <div className="mt-0 flex items-center justify-between bg-neutral-900 text-white px-3 py-2.5">
+          <span className="text-[12px] font-bold uppercase tracking-widest">Net Balance Payable</span>
+          <span className="text-lg font-bold tabular-nums">{money(netPayable)}</span>
         </div>
 
+        {/* Account summary */}
+        {previousSigned != null && ledger && (
+          <>
+            <div className="mt-4 grid grid-cols-3 border border-neutral-300 rounded-sm bg-neutral-50 divide-x divide-neutral-200">
+              <div className="p-2.5 text-center">
+                <p className="text-[8px] uppercase tracking-widest text-neutral-500">Previous Balance</p>
+                <p className="mt-0.5 text-[13px] font-bold tabular-nums">
+                  {money(Math.abs(previousSigned))} {previousSigned >= 0 ? 'DR' : 'CR'}
+                </p>
+              </div>
+              <div className="p-2.5 text-center">
+                <p className="text-[8px] uppercase tracking-widest text-neutral-500">This Statement</p>
+                <p className="mt-0.5 text-[13px] font-bold tabular-nums">{money(netPayable)}</p>
+              </div>
+              <div className="p-2.5 text-center">
+                <p className="text-[8px] uppercase tracking-widest text-neutral-500">Total Balance Payable</p>
+                <p className="mt-0.5 text-[15px] font-bold tabular-nums">
+                  {money(ledger.summary.balance)} {ledger.summary.balanceType}
+                </p>
+              </div>
+            </div>
+            <p className="mt-1 text-[9px] text-neutral-500">CR = payable by us to you.   DR = receivable from you.</p>
+          </>
+        )}
+
+        {/* Footer */}
+        <div className="mt-10 flex items-start justify-between gap-6 border-t border-dotted border-neutral-300 pt-3">
+          <p className="max-w-[55%] text-[9.5px] text-neutral-500">
+            Computer-generated statement — no signature required. Please report any discrepancy within 7 days of receipt.
+          </p>
+          <div className="text-right">
+            <p className="text-[11px] font-semibold">For {company?.name ?? 'RVP Industries'}</p>
+            <p className="mt-10 border-t border-neutral-300 pt-1 text-[10px] text-neutral-500">Authorised Signatory</p>
+          </div>
+        </div>
       </div>
 
       {/* Embedded CSS for Print Layout */}

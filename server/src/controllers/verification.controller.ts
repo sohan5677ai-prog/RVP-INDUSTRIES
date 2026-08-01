@@ -16,15 +16,17 @@ import {
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { whatsappService, resolveInternalCopyRecipients } from '../services/whatsapp.service.js';
-import { buildPartyStatementData } from './ledger.controller.js';
-import { renderStatementPdf } from '../lib/statementPdf.js';
+import { buildPurchaseStatementData } from './purchaseStatement.controller.js';
+import { renderPurchaseStatementPdf } from '../lib/purchaseStatementPdf.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 
 /**
  * After a lorry is unloaded & weight-verified, WhatsApp the supplier the
- * "unloaded" confirmation with their up-to-date account statement attached
- * (use case #4). Fire-and-forget: rendering/upload/send never blocks or fails
- * the verification response.
+ * "unloaded" confirmation with the full purchase statement attached (use case
+ * #4) — every head of the bill (weighments, kata difference, quality/expense/
+ * freight deductions, GST, billed-on costs, self-vehicle recoveries) plus their
+ * running account balance. Fire-and-forget: rendering/upload/send never blocks
+ * or fails the verification response.
  */
 async function sendVerificationStatement(
   party: { id: string; name: string; phone: string | null; phone2?: string | null },
@@ -36,17 +38,13 @@ async function sendVerificationStatement(
     // their own copy of this statement, so a supplier with no phone on file is
     // only a dead end when there's nobody internal to copy either.
     if (!party.phone && !party.phone2 && (await resolveInternalCopyRecipients()).length === 0) return;
-    const statement = await buildPartyStatementData(party.id);
+    const statement = await buildPurchaseStatementData(verificationId);
     let url: string | undefined;
     let filename: string | undefined;
     if (statement) {
-      const { getCompanyProfileRow } = await import('./settings.controller.js');
-      const profile = await getCompanyProfileRow();
-      const buffer = await renderStatementPdf(
-        { name: profile.name, address: profile.address, gstin: profile.gstin, contact: profile.contact },
-        statement
-      );
-      filename = `Statement-${party.name.replace(/[^\w]+/g, '-')}.pdf`;
+      const buffer = await renderPurchaseStatementPdf(statement);
+      const invoiceBit = (statement.invoiceNumber || details.lorryNumber).replace(/[^\w]+/g, '-');
+      filename = `Purchase-Statement-${party.name.replace(/[^\w]+/g, '-')}-${invoiceBit}.pdf`;
       url = await uploadFileToStorage({ originalname: filename, mimetype: 'application/pdf', buffer } as Express.Multer.File);
     }
     await whatsappService.notifyVerificationStatement(party, details, url, filename, verificationId);

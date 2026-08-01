@@ -78,6 +78,21 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * Fetch a binary endpoint (PDF/image) with the auth header attached and hand
+ * back a Blob. Plain <a href> links can't carry the bearer token.
+ */
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}${path}`, { headers });
+  if (res.status === 401) clearToken();
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  return res.blob();
+}
+
 export function getErrorMessage(err: unknown): string {
   if (err instanceof ApiError && err.details) {
     const details = err.details as any;

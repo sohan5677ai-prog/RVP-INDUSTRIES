@@ -19,6 +19,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '@/lib/auth';
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Rates are entered and shown MONTHLY on this page (e.g. 0.8% / month), but the
@@ -30,6 +33,11 @@ const toMonthly = (annualPct: number) => round2(annualPct / MONTHS_PER_YEAR);
 const toAnnual = (monthlyPct: number) => round2(monthlyPct * MONTHS_PER_YEAR);
 
 export default function BankLoansPage() {
+  const { user } = useAuth();
+  if (user?.role === 'DEVELOPER') {
+    return <Navigate to="/" replace />;
+  }
+
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['loans'],

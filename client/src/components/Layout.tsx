@@ -46,8 +46,14 @@ import { preloadRoute } from '@/lib/preload';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import DispatchReminders from '@/components/DispatchReminders';
 
-type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean };
+type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
 type NavSection = { heading?: string; items: NavItem[] };
+
+function isItemVisible(it: NavItem, role?: string): boolean {
+  if (it.devOnly && role !== 'DEVELOPER') return false;
+  if (it.hideForDev && role === 'DEVELOPER') return false;
+  return true;
+}
 
 const sections: NavSection[] = [
   {
@@ -121,7 +127,7 @@ const sections: NavSection[] = [
   {
     heading: 'Banking',
     items: [
-      { to: '/loans', label: 'Storage Loans', icon: Banknote },
+      { to: '/loans', label: 'Storage Loans', icon: Banknote, hideForDev: true },
     ],
   },
   {
@@ -181,6 +187,7 @@ export default function Layout() {
   let current: { label: string; heading?: string } | undefined;
   for (const s of sections) {
     for (const it of s.items) {
+      if (!isItemVisible(it, user?.role)) continue;
       const match = it.end
         ? location.pathname === it.to
         : it.to !== '/' && location.pathname.startsWith(it.to);
@@ -224,6 +231,8 @@ export default function Layout() {
 
         <nav className="relative z-10 flex-1 overflow-y-auto px-3 pb-4 space-y-0.5">
           {sections.map((section, i) => {
+            const visibleItems = section.items.filter((it) => isItemVisible(it, user?.role));
+            if (visibleItems.length === 0) return null;
             const isOpen = section.heading ? !!openSections[section.heading] : true;
             return (
               <div key={section.heading ?? i}>
@@ -261,9 +270,7 @@ export default function Layout() {
                         'relative ml-[1.15rem] mb-1 pl-3 border-l border-sidebar-border/80'
                     )}
                   >
-                    {section.items
-                      .filter((it) => !it.devOnly || user?.role === 'DEVELOPER')
-                      .map(({ to, label, icon: Icon, end }) => (
+                    {visibleItems.map(({ to, label, icon: Icon, end }) => (
                       <NavLink
                         key={to}
                         to={to}

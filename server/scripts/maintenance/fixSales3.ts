@@ -56,7 +56,6 @@ async function main() {
         let baseAmount = 0;
         let gstAmount = 0;
         let cogsAmount = 0;
-        let productionCostAmount = 0;
 
         if (entry) {
             const baseLine = entry.lines.find(l => l.account.code === '40010');
@@ -68,8 +67,6 @@ async function main() {
             const cogsLine = entry.lines.find(l => l.account.code === '50010' && l.costCenter !== 'PAPPU');
             cogsAmount = Number(cogsLine?.debit || 0);
 
-            const prodLine = entry.lines.find(l => l.account.code === '50030');
-            productionCostAmount = Number(prodLine?.credit || 0);
         } else {
             // Re-calculate if no entry
             baseAmount = d.weightKg * Number(d.saleOrder.ratePerKg);
@@ -77,7 +74,6 @@ async function main() {
             const remainingKg = Math.round(d.weightKg / 0.6);
             cogsAmount = Math.round(remainingKg * map * 100) / 100;
             // Get production cost
-            productionCostAmount = Math.round(d.weightKg * 1.5 * 100) / 100; // rough approx 1.5/kg
         }
 
         await prisma.$transaction(async tx => {
@@ -97,7 +93,6 @@ async function main() {
                 baseAmount,
                 gstAmount,
                 cogsAmount,
-                productionCostAmount,
                 freightAmount: freightCharge,
                 freightUnloadingHamali,
                 freightKata,

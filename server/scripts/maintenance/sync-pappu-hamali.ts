@@ -34,7 +34,6 @@ async function run() {
     let baseAmount = 0;
     let gstAmount = 0;
     let cogsAmount = 0;
-    let productionCostAmount = 0;
     let freightAmount = 0;
     let freightRetention = 0;
     let freightKata = 0;
@@ -44,7 +43,6 @@ async function run() {
       if (line.account.code === '20220') gstAmount = Number(line.credit);
       if (line.account.code === '50010') {
         if (line.costCenter === 'PAPPU') {
-          productionCostAmount = Number(line.debit);
         } else {
           cogsAmount = Number(line.debit);
         }
@@ -88,7 +86,6 @@ async function run() {
         cogsAmount,
         cogsInventoryAccount: '10010',
         cogsCostCenter: 'Black Seed Pool',
-        productionCostAmount,
         freightAmount,
         freightUnloadingHamali,
         freightKata,

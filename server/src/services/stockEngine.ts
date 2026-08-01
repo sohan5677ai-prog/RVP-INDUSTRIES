@@ -339,6 +339,7 @@ async function _computeUnifiedStockEngine(
       dispatches: { select: { weightKg: true, excessOutKg: true } },
       buyer: { select: { name: true } },
     },
+    orderBy: [{ saleDate: 'asc' }, { id: 'asc' }],
   });
   // XS (excess-out) tonnage is excluded here as well as in the allocation events
   // below, so it never shows as committed, never draws seed, and never leaves a
@@ -385,7 +386,16 @@ async function _computeUnifiedStockEngine(
       demand: { orderId: so.id, saleDate: so.saleDate, buyer: so.buyer?.name ?? 'Unknown', pappuNeed: committed },
     });
   }
-  allocEvents.sort((a, z) => a.t - z.t || (a.kind === 'arrive' ? -1 : 1));
+  // Same-day orders MUST break the tie deterministically (by id), or whichever
+  // the allocator happened to reach first took the scarce seed - silently moving
+  // money between same-day orders between page loads. Must match the margin
+  // allocator in inventory.controller.ts.
+  allocEvents.sort(
+    (a, z) =>
+      a.t - z.t ||
+      (a.kind === 'arrive' ? -1 : 1) - (z.kind === 'arrive' ? -1 : 1) ||
+      (a.kind === 'sale' && z.kind === 'sale' ? a.demand.orderId.localeCompare(z.demand.orderId) : 0),
+  );
 
   const activePool: PoolRef[] = [];
   const drawFromPool = (demand: Demand): number => {

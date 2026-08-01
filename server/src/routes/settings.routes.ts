@@ -10,8 +10,6 @@ import {
   updateInvoiceLayout,
   getProductTax,
   updateProductTax,
-  listProductionCostComponents,
-  updateProductionCostComponents,
   getHamaliRates,
   updateHamaliRates,
 } from '../controllers/settings.controller.js';
@@ -32,9 +30,6 @@ router.put('/settings/invoice-layout', canEditSettings, asyncHandler(updateInvoi
 
 router.get('/settings/product-tax', asyncHandler(getProductTax));
 router.put('/settings/product-tax', canEditSettings, asyncHandler(updateProductTax));
-
-router.get('/settings/production-cost', asyncHandler(listProductionCostComponents));
-router.put('/settings/production-cost', canEditSettings, asyncHandler(updateProductionCostComponents));
 
 router.get('/settings/hamali-rates', asyncHandler(getHamaliRates));
 router.put('/settings/hamali-rates', canEditSettings, asyncHandler(updateHamaliRates));

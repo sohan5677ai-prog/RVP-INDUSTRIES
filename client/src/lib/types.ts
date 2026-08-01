@@ -421,13 +421,6 @@ export interface CompanyProfile {
   taxproSandbox?: boolean;
 }
 
-export interface ProductionCostComponent {
-  id?: string;
-  name: string;
-  ratePerKg: string | number;
-  sortOrder?: number;
-}
-
 export interface ProductTaxInfo {
   id: string;
   product: SaleProduct;

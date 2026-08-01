@@ -9,9 +9,9 @@
  * values so they stop moving too.
  *
  * What it writes:
- *   - freightRatePerTonne / prodCostPerKg  → every Pappu order (the rate the
- *     margin is currently using, so nothing changes the moment it is stamped)
- *   - seedCostSnapshot / costFrozenAt      → only orders already fully DISPATCHED;
+ *   - freightRatePerTonne              → every Pappu order (the rate the margin
+ *     is currently using, so nothing changes the moment it is stamped)
+ *   - seedCostSnapshot / costFrozenAt  → only orders already fully shipped;
  *     open and partial orders stay live and projected, and freeze themselves
  *     when their last lorry goes out.
  *
@@ -40,9 +40,6 @@ async function main() {
     orderBy: { saleDate: 'asc' },
   });
 
-  const prodRows = await prisma.productionCostComponent.findMany({ select: { ratePerKg: true } });
-  const prodCostPerKg = prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0);
-
   const freightByDest = new Map<string, number>();
   const freightRateFor = async (dest: string | null) => {
     const key = dest ?? '';
@@ -56,7 +53,7 @@ async function main() {
   let missingMargin = 0;
 
   console.log(COMMIT ? '=== COMMIT — writing changes ===' : '=== DRY RUN — nothing will be written ===');
-  console.log(`Pappu orders: ${orders.length}   production cost: ${prodCostPerKg}/kg\n`);
+  console.log(`Pappu orders: ${orders.length}\n`);
 
   for (const so of orders) {
     const dest = so.destination ?? so.buyer?.destination ?? null;
@@ -74,7 +71,7 @@ async function main() {
     const alreadyFrozen = so.costFrozenAt != null;
     const fullyShipped = so.status === 'DISPATCHED' || so.status === 'DELIVERED';
     const shouldFreeze = fullyShipped && !alreadyFrozen;
-    const needsRates = so.freightRatePerTonne == null || so.prodCostPerKg == null;
+    const needsRates = so.freightRatePerTonne == null;
     if (!needsRates && !shouldFreeze) {
       skippedAlready++;
       continue;
@@ -83,7 +80,6 @@ async function main() {
     const data: Record<string, unknown> = {};
     if (needsRates) {
       data.freightRatePerTonne = freightRatePerTonne;
-      data.prodCostPerKg = prodCostPerKg;
       stampedRates++;
     }
     if (shouldFreeze) {

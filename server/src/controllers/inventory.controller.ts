@@ -260,8 +260,9 @@ export async function getCalculatorDefaults(req: Request, res: Response) {
  * order draws the seed available at its sale date, dearest-first, so every order
  * is costed on the ACTUAL black seed that backed it (not a blended pool average).
  * The sale price is a DELIVERED price (freight-inclusive), so freight is netted
- * out of realisation. Margin = revenue − freight − brokerage − seed cost −
- * production cost. GST is a pass-through and excluded.
+ * out of realisation. Margin = revenue − freight − brokerage − seed cost.
+ * GST is a pass-through and excluded. Milling/labour is NOT costed here - it is
+ * already carried by the hamali rates.
  */
 /** Shape stored in SaleOrder.seedCostSnapshot once an order is fully dispatched. */
 type FrozenSeed = {
@@ -283,11 +284,12 @@ async function _computePappuOrderMargins() {
   const orders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
     include: { buyer: true, dispatches: { select: { weightKg: true, excessOutKg: true } } },
-    orderBy: { saleDate: 'asc' },
+    // id is the tie-break, not decoration: two orders on the SAME sale date would
+    // otherwise come back in arbitrary Postgres order, and whichever the
+    // allocator reached first took the scarce seed. That silently moved money
+    // between same-day orders on every page load.
+    orderBy: [{ saleDate: 'asc' }, { id: 'asc' }],
   });
-
-  const prodRows = await prisma.productionCostComponent.findMany();
-  const liveProdCostPerKg = prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0);
 
   // Outward freight is netted out of the (freight-inclusive) sale price.
   //
@@ -308,8 +310,6 @@ async function _computePappuOrderMargins() {
     so.freightRatePerTonne != null
       ? Number(so.freightRatePerTonne)
       : (liveFreightRateByDest.get(destOf(so) ?? '') ?? 0);
-  const prodCostPerKgOf = (so: (typeof orders)[number]) =>
-    so.prodCostPerKg != null ? Number(so.prodCostPerKg) : liveProdCostPerKg;
 
   // Per order → the price bands (and seed kg) that backed it.
   const orderSeed = new Map<string, Map<string, { price: number; seedKg: number }>>();
@@ -325,6 +325,8 @@ async function _computePappuOrderMargins() {
   type AllocEvent =
     | { t: number; kind: 'arrive'; ref: Ref }
     | { t: number; kind: 'sale'; orderId: string; seedNeed: number };
+  // Stable insertion index, so same-timestamp events keep the deterministic
+  // order they were built in rather than whatever Array.sort happens to do.
   const events: AllocEvent[] = [];
   for (const r of refs) events.push({ t: r.date.getTime(), kind: 'arrive', ref: r });
   // XS (excess-out) tonnage is dropped from demand, so it draws no seed and never
@@ -335,7 +337,12 @@ async function _computePappuOrderMargins() {
     committedOf.set(so.id, committed);
     if (committed > 0) events.push({ t: so.saleDate.getTime(), kind: 'sale', orderId: so.id, seedNeed: committed / PAPPU_OUT_TURN });
   }
-  events.sort((a, z) => a.t - z.t || (a.kind === 'arrive' ? -1 : 1));
+  events.sort(
+    (a, z) =>
+      a.t - z.t ||
+      (a.kind === 'arrive' ? -1 : 1) - (z.kind === 'arrive' ? -1 : 1) ||
+      (a.kind === 'sale' && z.kind === 'sale' ? a.orderId.localeCompare(z.orderId) : 0),
+  );
 
   const pool: Ref[] = [];
   const draw = (orderId: string, needSeed: number): number => {
@@ -386,10 +393,9 @@ async function _computePappuOrderMargins() {
     const seedKg = frozen?.seedKg ?? liveBands.reduce((s, b) => s + b.seedKg, 0);
     const seedCost = frozen?.seedCost ?? Math.round(liveBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
 
-    const prodCost = Math.round(qty * prodCostPerKgOf(so) * 100) / 100;
     const revenue = Math.round(qty * rate * 100) / 100;
     const netRealization = Math.round((revenue - freight - brokerage) * 100) / 100;
-    const margin = Math.round((netRealization - seedCost - prodCost) * 100) / 100;
+    const margin = Math.round((netRealization - seedCost) * 100) / 100;
 
     return {
       orderId: so.id,
@@ -418,11 +424,9 @@ async function _computePappuOrderMargins() {
       seedCost,
       seedWacPerKg: seedKg > 0 ? Math.round((seedCost / seedKg) * 100) / 100 : 0,
       seedCostPerPappuKg: qty > 0 ? Math.round((seedCost / qty) * 100) / 100 : 0,
-      prodCostPerKg: Math.round(prodCostPerKgOf(so) * 100) / 100,
       // Frozen = this order is fully shipped and its costs are a historical
       // record; nothing bought, verified or re-rated later can move it.
       costFrozenAt: so.costFrozenAt,
-      prodCost,
       netRealization,
       margin,
       marginPerKg: qty > 0 ? Math.round((margin / qty) * 100) / 100 : 0,

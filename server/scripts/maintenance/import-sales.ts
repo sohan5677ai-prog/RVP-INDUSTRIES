@@ -96,16 +96,12 @@ export async function importHistoricalSales() {
         }
       });
       
-      const productionCostPerKg = await InventoryService.getProductionCostPerKg();
-      const productionCostAmount = Math.round(weightKg * productionCostPerKg * 100) / 100;
-
       await LedgerService.postSale(tx, dispatch.id, {
         buyerName: order.buyer.name,
         product: 'PAPPU',
         baseAmount,
         gstAmount,
         cogsAmount,
-        productionCostAmount,
         freightAmount: 0,
         freightUnloadingHamali: 0,
         freightKata: 0,

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, ProductionCostComponent, HamaliRate } from '@/lib/types';
+import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, HamaliRate } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,7 +39,6 @@ export default function Settings() {
           <TabsTrigger value="invoice">Invoice Setup</TabsTrigger>
           <TabsTrigger value="freight">Freight Rates</TabsTrigger>
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
-          <TabsTrigger value="production">Production Cost</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
         </TabsList>
@@ -61,10 +60,6 @@ export default function Settings() {
           <HamaliRatesSection qc={qc} />
         </TabsContent>
 
-        <TabsContent value="production" className="focus-visible:outline-none focus-visible:ring-0">
-          <ProductionCostSection qc={qc} />
-        </TabsContent>
-
         <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0">
           <WhatsAppSection qc={qc} />
         </TabsContent>
@@ -74,91 +69,6 @@ export default function Settings() {
         </TabsContent>
       </Tabs>
     </div>
-  );
-}
-
-// --- Production cost components (₹/kg, summed into pappu cost) -------------------
-
-interface CostRow { name: string; ratePerKg: string }
-
-function ProductionCostSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['production-cost'],
-    queryFn: () => api<ProductionCostComponent[]>('/settings/production-cost'),
-  });
-
-  const [rows, setRows] = useState<CostRow[]>([]);
-  useEffect(() => {
-    if (data) setRows(data.map((r) => ({ name: r.name, ratePerKg: String(r.ratePerKg) })));
-  }, [data]);
-
-  const save = useMutation({
-    mutationFn: () => {
-      const components = rows
-        .filter((r) => r.name.trim())
-        .map((r) => ({ name: r.name.trim(), ratePerKg: Number(r.ratePerKg) || 0 }));
-      return api<ProductionCostComponent[]>('/settings/production-cost', { method: 'PUT', body: { components } });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['production-cost'] });
-      toast.success('Production cost saved');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  const setRow = (i: number, patch: Partial<CostRow>) => setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  const addRow = () => setRows((prev) => [...prev, { name: '', ratePerKg: '0' }]);
-  const removeRow = (i: number) => setRows((prev) => prev.filter((_, idx) => idx !== i));
-
-  const total = rows.reduce((s, r) => s + (Number(r.ratePerKg) || 0), 0);
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-2">
-        <Landmark className="h-5 w-5 text-emerald-500" />
-        <CardTitle className="text-base">Production Cost (₹ / kg)</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Add cost components (electricity, labour, packing…) each as ₹/kg. Their total is the production cost per kg, added on top of the black-seed cost for pappu - it drives the displayed cost, the 3% sale-margin check, and COGS.
-        </p>
-
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : (
-          <div className="space-y-3">
-            <div className="grid grid-cols-[1fr_180px_40px] gap-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <Label>Component</Label>
-              <Label>Rate (₹/kg)</Label>
-              <span />
-            </div>
-            {rows.map((r, i) => (
-              <div key={i} className="grid grid-cols-[1fr_180px_40px] gap-3 items-center">
-                <Input value={r.name} onChange={(e) => setRow(i, { name: e.target.value })} placeholder="e.g. Electricity" />
-                <Input type="number" step="0.0001" value={r.ratePerKg} onChange={(e) => setRow(i, { ratePerKg: e.target.value })} />
-                <Button variant="ghost" size="icon" onClick={() => removeRow(i)}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            ))}
-            {rows.length === 0 && <p className="text-sm text-muted-foreground">No components yet.</p>}
-
-            <div className="flex items-center justify-between border-t pt-2">
-              <span className="text-sm font-semibold">Total production cost: ₹{total.toFixed(2)}/kg</span>
-            </div>
-
-            <div className="flex items-center justify-between pt-1">
-              <Button variant="outline" size="sm" onClick={addRow}>
-                <Plus className="h-4 w-4" /> Add component
-              </Button>
-              <Button onClick={() => save.mutate()} disabled={save.isPending}>
-                <Save className="h-4 w-4" /> {save.isPending ? 'Saving…' : 'Save production cost'}
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 

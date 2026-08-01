@@ -57,8 +57,6 @@ async function main() {
         const cogsLine = entry.lines.find(l => l.account.code === '50010' && l.costCenter !== 'PAPPU');
         const cogsAmount = Number(cogsLine?.debit || 0);
 
-        const prodLine = entry.lines.find(l => l.account.code === '50030');
-        const productionCostAmount = Number(prodLine?.credit || 0);
 
         await prisma.$transaction(async tx => {
             await tx.saleDispatch.update({
@@ -75,7 +73,6 @@ async function main() {
                 baseAmount,
                 gstAmount,
                 cogsAmount,
-                productionCostAmount,
                 freightAmount: freightCharge,
                 freightUnloadingHamali,
                 freightKata,

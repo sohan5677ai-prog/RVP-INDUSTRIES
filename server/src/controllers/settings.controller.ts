@@ -345,39 +345,5 @@ export async function updateProductTax(req: Request, res: Response) {
   res.json(await prisma.productTaxInfo.findMany({ orderBy: { product: 'asc' } }));
 }
 
-// --- Production cost components (per-kg, summed into the pappu cost) -------------
-
-export async function listProductionCostComponents(_req: Request, res: Response) {
-  res.json(await prisma.productionCostComponent.findMany({ orderBy: { sortOrder: 'asc' } }));
-}
-
-const productionCostSchema = z.object({
-  components: z
-    .array(
-      z.object({
-        name: z.string().trim().min(1),
-        ratePerKg: z.coerce.number().nonnegative(),
-      })
-    )
-    .default([]),
-});
-
-/** Replace-all: the submitted list becomes the full set of components. */
-export async function updateProductionCostComponents(req: Request, res: Response) {
-  const { components } = productionCostSchema.parse(req.body);
-  await prisma.$transaction([
-    prisma.productionCostComponent.deleteMany({}),
-    ...components.map((c, i) =>
-      prisma.productionCostComponent.create({
-        data: { name: c.name.trim(), ratePerKg: c.ratePerKg, sortOrder: i },
-      })
-    ),
-  ]);
-  res.json(await prisma.productionCostComponent.findMany({ orderBy: { sortOrder: 'asc' } }));
-}
-
-/** Total production cost per kg = sum of all component rates. */
-export async function getProductionCostPerKg(): Promise<number> {
-  const rows = await prisma.productionCostComponent.findMany();
-  return Math.round(rows.reduce((sum, r) => sum + Number(r.ratePerKg), 0) * 10000) / 10000;
-}
+// Production cost components were removed: milling/labour is already carried by
+// the hamali rates above, so costing it again double-counted it.

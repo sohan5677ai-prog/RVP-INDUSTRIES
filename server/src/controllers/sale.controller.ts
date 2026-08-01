@@ -123,21 +123,14 @@ async function assertPappuMargin(product: string, ratePerKg: number, marginOverr
 /**
  * The cost rates as they stand RIGHT NOW, pinned onto a new sale order.
  *
- * Freight and production cost used to be read live on every margin calculation,
- * so editing a destination's rate in Settings silently re-costed every order
- * ever sold to that destination. Stamping at creation makes a rate change apply
- * only from that order onwards - Surat 2800 -> 3000 leaves earlier orders at
- * 2800, which is the rate the delivered sale price was quoted against.
+ * Freight used to be read live on every margin calculation, so editing a
+ * destination's rate in Settings silently re-costed every order ever sold to
+ * that destination. Stamping at creation makes a rate change apply only from
+ * that order onwards - Surat 2800 -> 3000 leaves earlier orders at 2800, which
+ * is the rate the delivered sale price was quoted against.
  */
 async function currentCostStamps(destination: string | null) {
-  const [freightRatePerTonne, prodRows] = await Promise.all([
-    getFreightRateForDestination(destination),
-    prisma.productionCostComponent.findMany({ select: { ratePerKg: true } }),
-  ]);
-  return {
-    freightRatePerTonne,
-    prodCostPerKg: prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0),
-  };
+  return { freightRatePerTonne: await getFreightRateForDestination(destination) };
 }
 
 /**
@@ -517,11 +510,6 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       hamaliCrewPayable = freightUnloadingHamali;
   }
 
-  // Production cost (₹/kg components) is added to pappu COGS.
-  const productionCostPerKg = await InventoryService.getProductionCostPerKg();
-  const productionCostAmount =
-    order.product === 'PAPPU' ? Math.round(weightKg * productionCostPerKg * 100) / 100 : 0;
-
   // Fully dispatched once this lorry takes the remaining balance to (or below) zero.
   const fullyDispatched = alreadyDispatchedKg + weightKg >= order.tonnageKg;
 
@@ -573,7 +561,6 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       cogsAmount,
       cogsInventoryAccount,
       cogsCostCenter,
-      productionCostAmount,
       freightAmount: freightCharge,
       freightUnloadingHamali,
       freightKata,

@@ -188,15 +188,10 @@ export class InventoryService {
     }
   }
 
-  /** Sum of the user-defined per-kg production cost components. */
-  static async getProductionCostPerKg(): Promise<number> {
-    const rows = await prisma.productionCostComponent.findMany();
-    return rows.reduce((sum, r) => sum + Number(r.ratePerKg), 0);
-  }
-
   /**
-   * Live cost per kg of pappu: black-seed pool's blended MAP ÷ 0.60, plus the
-   * configured production cost per kg. Used for the sales margin check.
+   * Live cost per kg of pappu: the black-seed pool's blended MAP ÷ 0.60. Used
+   * for the sales margin check. Milling/labour is not added on top - that cost
+   * is already carried by the hamali rates.
    */
   static async getBlackSeedPappuCostPerKg(): Promise<number> {
     const silos = await prisma.siloInventory.findMany({
@@ -204,9 +199,8 @@ export class InventoryService {
     });
     const totalWeight = silos.reduce((s, x) => s + x.weightKg, 0);
     const totalValue = silos.reduce((s, x) => s + Number(x.totalValue), 0);
-    const productionCost = await this.getProductionCostPerKg();
-    if (totalWeight <= 0) return productionCost;
-    return (totalValue / totalWeight) / this.PAPPU_OUTTURN + productionCost;
+    if (totalWeight <= 0) return 0;
+    return (totalValue / totalWeight) / this.PAPPU_OUTTURN;
   }
 
   /**

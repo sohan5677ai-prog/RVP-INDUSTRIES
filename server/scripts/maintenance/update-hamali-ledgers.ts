@@ -81,7 +81,6 @@ async function run() {
         cogsAmount: 0,
         cogsInventoryAccount: '10010',
         cogsCostCenter: 'Black Seed Pool',
-        productionCostAmount: 0,
         freightAmount,
         freightUnloadingHamali,
         freightKata: calcKataFee(weightKg),

@@ -35,8 +35,6 @@ interface PappuMargin {
   seedCost: number;
   seedWacPerKg: number;
   seedCostPerPappuKg: number;
-  prodCostPerKg: number;
-  prodCost: number;
   netRealization: number;
   margin: number;
   marginPerKg: number;
@@ -142,7 +140,6 @@ export default function PappuProfitLoss() {
     const freight = sum((m) => m.freight);
     const brokerage = sum((m) => m.brokerage);
     const seedCost = sum((m) => m.seedCost);
-    const prodCost = sum((m) => m.prodCost);
     const margin = sum((m) => m.margin);
     const profitOrders = visible.filter((m) => m.margin >= 0);
     const lossOrders = visible.filter((m) => m.margin < 0);
@@ -160,9 +157,9 @@ export default function PappuProfitLoss() {
 
     return {
       xsKg, impliedOutTurnPct,
-      soldKg, revenue, freight, brokerage, seedCost, prodCost, margin,
+      soldKg, revenue, freight, brokerage, seedCost, margin,
       netRealization: sum((m) => m.netRealization),
-      totalCost: freight + brokerage + seedCost + prodCost,
+      totalCost: freight + brokerage + seedCost,
       marginPct: revenue > 0 ? (margin / revenue) * 100 : 0,
       marginPerKg: soldKg > 0 ? margin / soldKg : 0,
       avgSalePerKg: soldKg > 0 ? revenue / soldKg : 0,
@@ -308,16 +305,15 @@ export default function PappuProfitLoss() {
               <TableHead className="text-right">Freight</TableHead>
               <TableHead className="text-right">Brokerage</TableHead>
               <TableHead className="text-right">Seed cost</TableHead>
-              <TableHead className="text-right">Production</TableHead>
               <TableHead className="text-right">Net P/L</TableHead>
               <TableHead className="text-right">₹/kg</TableHead>
               <TableHead className="text-right">Margin %</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={13} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+            {isLoading && <TableRow><TableCell colSpan={12} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
             {!isLoading && visible.length === 0 && (
-              <TableRow><TableCell colSpan={13} className="h-28 text-center text-muted-foreground">No Pappu orders matching filters.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={12} className="h-28 text-center text-muted-foreground">No Pappu orders matching filters.</TableCell></TableRow>
             )}
             {visible.map((m) => {
               const isOpen = expanded.has(m.orderId);
@@ -360,7 +356,7 @@ export default function PappuProfitLoss() {
                     <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{rupees(m.freight)}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{m.brokerage > 0 ? rupees(m.brokerage) : '-'}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{rupees(m.seedCost)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{m.prodCost > 0 ? rupees(m.prodCost) : '-'}</TableCell>
+                    
                     <TableCell className={cn('text-right font-mono tabular-nums font-semibold', pnlClass(m.margin))}>{rupees(m.margin)}</TableCell>
                     <TableCell className={cn('text-right font-mono tabular-nums', pnlClass(m.margin))}>{rupees(m.marginPerKg)}</TableCell>
                     <TableCell className="text-right">
@@ -373,7 +369,7 @@ export default function PappuProfitLoss() {
                   {/* Expanded breakdown */}
                   {isOpen && (
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={13} className="p-0">
+                      <TableCell colSpan={12} className="p-0">
                         <div className="border-t border-border/60 bg-muted/25 px-5 py-4">
                           <PappuMarginPanel m={m} />
                         </div>
@@ -394,7 +390,7 @@ export default function PappuProfitLoss() {
                 <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{rupees(t.freight)}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{rupees(t.brokerage)}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{rupees(t.seedCost)}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums text-muted-foreground">{rupees(t.prodCost)}</TableCell>
+                
                 <TableCell className={cn('text-right font-mono tabular-nums font-bold', pnlClass(t.margin))}>{rupees(t.margin)}</TableCell>
                 <TableCell className={cn('text-right font-mono tabular-nums', pnlClass(t.margin))}>{rupees(t.marginPerKg)}</TableCell>
                 <TableCell className={cn('text-right font-mono tabular-nums font-bold', pnlClass(t.margin))}>{t.marginPct.toFixed(1)}%</TableCell>
@@ -431,13 +427,12 @@ function PappuMarginPanel({ m }: { m: PappuMargin }) {
   const pnlText = isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
 
   // Bar denominator = whichever is larger, so both profit and loss orders fill it.
-  const costs = m.freight + m.brokerage + m.seedCost + m.prodCost;
+  const costs = m.freight + m.brokerage + m.seedCost;
   const denom = Math.max(m.revenue, costs, 1);
   const width = (v: number) => `${(v / denom) * 100}%`;
 
   const segments = [
     { key: 'seed', label: 'Black seed', value: m.seedCost, color: 'bg-amber-500' },
-    { key: 'prod', label: 'Production', value: m.prodCost, color: 'bg-orange-400' },
     { key: 'freight', label: 'Freight', value: m.freight, color: 'bg-slate-400' },
     { key: 'brokerage', label: 'Brokerage', value: m.brokerage, color: 'bg-violet-400' },
     ...(isProfit ? [{ key: 'margin', label: 'Margin', value: m.margin, color: 'bg-emerald-500' }] : []),
@@ -497,7 +492,6 @@ function PappuMarginPanel({ m }: { m: PappuMargin }) {
         {m.brokerage > 0 && <PnlTile accent="bg-violet-400" label="− Brokerage" value={rupees(m.brokerage)} />}
         <PnlTile accent="bg-indigo-500" label="= Net realisation" value={rupees(m.netRealization)} emphasis />
         <PnlTile accent="bg-amber-500" label="− Black seed cost" value={`${rupees(m.seedCostPerPappuKg)}/kg`} sub={`${rupees(m.seedCost)} · WAC ${rupees(m.seedWacPerKg)}/kg`} />
-        {m.prodCost > 0 && <PnlTile accent="bg-orange-400" label="− Production" value={`${rupees(m.prodCostPerKg)}/kg`} sub={rupees(m.prodCost)} />}
         <PnlTile accent={isProfit ? 'bg-emerald-500' : 'bg-rose-500'} label={isProfit ? 'Net margin' : 'Net loss'} value={rupees(m.margin)} sub={`${m.marginPct.toFixed(1)}% · ${rupees(m.marginPerKg)}/kg`} emphasis valueClass={pnlText} />
       </div>
 

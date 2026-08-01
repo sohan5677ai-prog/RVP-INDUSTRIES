@@ -46,8 +46,6 @@ interface PappuMargin {
   seedCost: number;
   seedWacPerKg: number;
   seedCostPerPappuKg: number;
-  prodCostPerKg: number;
-  prodCost: number;
   netRealization: number;
   margin: number;
   marginPerKg: number;
@@ -1885,13 +1883,12 @@ export function PappuMarginPanel({ margin }: { margin: PappuMargin }) {
   const pnlText = isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
 
   // Bar denominator = whichever is larger, so both profit and loss orders fill it.
-  const costs = margin.freight + margin.brokerage + margin.seedCost + margin.prodCost;
+  const costs = margin.freight + margin.brokerage + margin.seedCost;
   const denom = Math.max(margin.revenue, costs, 1);
   const width = (v: number) => `${(v / denom) * 100}%`;
 
   const segments = [
     { key: 'seed', label: 'Black seed', value: margin.seedCost, color: 'bg-amber-500' },
-    { key: 'prod', label: 'Production', value: margin.prodCost, color: 'bg-orange-400' },
     { key: 'freight', label: 'Freight', value: margin.freight, color: 'bg-slate-400' },
     { key: 'brokerage', label: 'Brokerage', value: margin.brokerage, color: 'bg-violet-400' },
     ...(isProfit ? [{ key: 'margin', label: 'Margin', value: margin.margin, color: 'bg-emerald-500' }] : []),
@@ -1951,7 +1948,6 @@ export function PappuMarginPanel({ margin }: { margin: PappuMargin }) {
         {margin.brokerage > 0 && <PnlTile accent="bg-violet-400" label="− Brokerage" value={rupees(margin.brokerage)} />}
         <PnlTile accent="bg-indigo-500" label="= Net realisation" value={rupees(margin.netRealization)} emphasis />
         <PnlTile accent="bg-amber-500" label="− Black seed cost" value={`${rupees(margin.seedCostPerPappuKg)}/kg`} sub={`${rupees(margin.seedCost)} · WAC ${rupees(margin.seedWacPerKg)}/kg`} />
-        {margin.prodCost > 0 && <PnlTile accent="bg-orange-400" label="− Production" value={`${rupees(margin.prodCostPerKg)}/kg`} sub={rupees(margin.prodCost)} />}
         <PnlTile accent={isProfit ? 'bg-emerald-500' : 'bg-rose-500'} label={isProfit ? 'Net margin' : 'Net loss'} value={rupees(margin.margin)} sub={`${margin.marginPct}% · ${rupees(margin.marginPerKg)}/kg`} emphasis valueClass={pnlText} />
       </div>
 

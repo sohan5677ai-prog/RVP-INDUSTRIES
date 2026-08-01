@@ -446,10 +446,8 @@ model SaleOrder {
   // Stamped at CREATION, so changing a destination's rate in Settings applies
   // only to orders taken after the change (Surat 2800 -> 3000 leaves every
   // earlier order at 2800). Null on legacy rows = fall back to the live rate.
-  // NB: freight is rated PER TONNE (calcSaleFreight takes tonnes), production
-  // cost PER KG. Keep the units in the names - they are easy to transpose.
+  // NB: rated PER TONNE (calcSaleFreight takes tonnes), not per kg.
   freightRatePerTonne Decimal? @db.Decimal(12, 4)
-  prodCostPerKg       Decimal? @db.Decimal(12, 4)
   // Written once the order is FULLY dispatched: the price bands (and seed kg)
   // that actually backed it. From then on the margin reads this instead of
   // re-running the allocator, so nothing bought or repriced later can move it.
@@ -853,14 +851,6 @@ model CompanyProfile {
 // User-defined per-kg production cost components (electricity, labour, etc.).
 // Their sum is the production cost per kg added on top of the black-seed cost
 // for pappu (drives the displayed cost, the 3% margin check, and COGS).
-model ProductionCostComponent {
-  id        String   @id @default(cuid())
-  name      String
-  ratePerKg Decimal  @default(0) @db.Decimal(12, 4)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-}
-
 // Per-product HSN/SAC code and invoice description, managed in Settings.
 model ProductTaxInfo {
   id          String      @id @default(cuid())

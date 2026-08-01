@@ -550,8 +550,6 @@ export class LedgerService {
       // pool (pappu); shell sales relieve the shell inventory instead.
       cogsInventoryAccount?: string;
       cogsCostCenter?: string;
-      // Production cost (₹/kg components) added to COGS, absorbed from overhead.
-      productionCostAmount?: number;
       // Lorry-freight split: from the total freight we hold a retention (paid to
       // Surya Roadlines at delivery) and deduct loading hamali + kata; the
       // remainder is the lorry owner's payable.
@@ -601,24 +599,6 @@ export class LedgerService {
         debit: 0,
         credit: data.cogsAmount,
         costCenter: data.cogsCostCenter ?? 'Black Seed Pool',
-      });
-    }
-
-    // Production cost (electricity/labour/etc.) added to COGS, absorbed from the
-    // factory-overhead pool.
-    const productionCost = data.productionCostAmount ?? 0;
-    if (productionCost > 0) {
-      lines.push({
-        accountCode: '50010', // Cost of Goods Sold
-        debit: productionCost,
-        credit: 0,
-        costCenter: data.product,
-      });
-      lines.push({
-        accountCode: '50030', // Factory Overhead Expense (absorption credit)
-        debit: 0,
-        credit: productionCost,
-        costCenter: 'Mill Line 1',
       });
     }
 

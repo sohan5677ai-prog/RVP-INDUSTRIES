@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, MessageCircle, Pencil, Eye } from 'lucide-react';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -1171,14 +1172,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             {/* WhatsApp bundle: invoice PDF + EWB + driver → broker/buyer, buyer details → driver */}
                                             <Button
                                               size="sm"
-                                              variant="outline"
-                                              className="border-green-200 text-green-700 hover:bg-green-50"
+                                              className="bg-[#00a884] hover:bg-[#008f70] text-white border-none rounded-full px-3.5 font-medium shadow-xs"
                                               disabled={sendWhatsAppMutation.isPending}
                                               onClick={() => sendWhatsAppMutation.mutate(d.id)}
                                             >
                                               {sendWhatsAppMutation.isPending
-                                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                : <MessageCircle className="h-3.5 w-3.5" />} WhatsApp
+                                                ? <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                                                : <WhatsAppIcon className="h-3.5 w-3.5 text-white fill-current" />} WhatsApp
                                             </Button>
                                           </>
                                         ) : (

@@ -158,13 +158,36 @@ interface Props {
 }
 
 export default function DashboardCharts({ data, accounts, purchases, poAll, saleAll, huskPnl }: Props) {
-  // ── Monthly procurement spend + volume (last 8 months) ────────────
+  // ── Monthly procurement spend + volume (from March) ────────────
   const trend = useMemo(() => {
     const now = new Date();
-    const months = Array.from({ length: 8 }, (_, k) => {
-      const d = new Date(now.getFullYear(), now.getMonth() - (7 - k), 1);
-      return { key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleString('en-IN', { month: 'short' }), spend: 0, weight: 0, trips: 0 };
-    });
+    // Operations started March 2026 (31st March). Generate months starting from March 2026 up to current month.
+    const startYear = 2026;
+    const startMonth = 2; // March is month 2 (0-indexed)
+
+    const months: { key: string; label: string; spend: number; weight: number; trips: number }[] = [];
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth();
+
+    let y = startYear;
+    let m = startMonth;
+
+    while (y < curYear || (y === curYear && m <= curMonth)) {
+      const d = new Date(y, m, 1);
+      months.push({
+        key: `${y}-${m}`,
+        label: d.toLocaleString('en-IN', { month: 'short' }),
+        spend: 0,
+        weight: 0,
+        trips: 0,
+      });
+      m++;
+      if (m > 11) {
+        m = 0;
+        y++;
+      }
+    }
+
     const idx = Object.fromEntries(months.map((m, i) => [m.key, i]));
     for (const p of purchases ?? []) {
       const d = new Date(p.stockIn?.arrivalDate || p.createdAt);
@@ -260,7 +283,7 @@ export default function DashboardCharts({ data, accounts, purchases, poAll, sale
     <div className="space-y-7">
       {/* Row: procurement trend + stock composition */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <ChartCard className="lg:col-span-2" title="Procurement spend" subtitle="Verified payable by month (last 8)" icon={LineChartIcon}
+        <ChartCard className="lg:col-span-2" title="Procurement spend" subtitle="Verified payable by month (from March)" icon={LineChartIcon}
           right={<span className="font-mono text-xs text-muted-foreground">{inrCompact(trend.reduce((s, m) => s + m.spend, 0))} total</span>}>
           <ResponsiveContainer width="100%" height={250}>
             <AreaChart data={trend} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>

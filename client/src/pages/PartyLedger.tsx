@@ -13,8 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
+import { openPartyStatement, type StatementCompany } from '@/lib/partyStatement';
 import {
-  Search, Loader2, ArrowLeft, Printer, Phone, MapPin, Landmark,
+  Search, Loader2, ArrowLeft, FileText, Phone, MapPin, Landmark,
   Hash, Wallet, TrendingUp, TrendingDown, Scale, Building2,
   ArrowDownRight, ArrowUpRight, ReceiptText, Copy, Check, Users, IndianRupee,
   BellRing,
@@ -215,6 +216,13 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
     queryFn: () => api<PartyLedgerDetail>(`/ledger/parties/${partyId}`),
   });
 
+  // Letterhead + "remit to" bank block on the printed statement.
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api<StatementCompany>('/settings/company'),
+    staleTime: 5 * 60 * 1000,
+  });
+
   // WhatsApp "remind about pending loads" — server computes the pending lorries
   // and throttles repeat sends.
   const remindMutation = useMutation({
@@ -293,9 +301,30 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
             subtitle={periodText}
             columns={LEDGER_COLUMNS}
             rows={filtered}
+            showPdf={false}
             showPrint={false}
           />
-          <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-1.5"><Printer className="h-4 w-4" /> Print</Button>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => {
+              try {
+                openPartyStatement({
+                  company,
+                  party,
+                  summary,
+                  transactions: filtered,
+                  filterNote: kind === 'ALL' ? undefined : KIND_FILTERS.find((f) => f.value === kind)?.label,
+                  fromDate: from || undefined,
+                  toDate: to || undefined,
+                });
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : 'Could not open the statement.');
+              }
+            }}
+          >
+            <FileText className="h-4 w-4" /> Statement (PDF)
+          </Button>
         </div>
       </div>
 

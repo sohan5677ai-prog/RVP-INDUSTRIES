@@ -26,6 +26,8 @@ type ExportButtonsProps<T> = {
   size?: 'sm' | 'xs' | 'default';
   /** Show the Print button. Defaults to true. Set false when the page has its own print view. */
   showPrint?: boolean;
+  /** Show the PDF button. Defaults to true. Set false when the page has a purpose-built PDF. */
+  showPdf?: boolean;
   className?: string;
 };
 
@@ -35,7 +37,7 @@ type ExportButtonsProps<T> = {
  * cheap to mount on every page. See lib/export.ts for the column spec.
  */
 export function ExportButtons<T>({
-  filename, title, subtitle, columns, rows, size = 'sm', showPrint = true, className,
+  filename, title, subtitle, columns, rows, size = 'sm', showPrint = true, showPdf = true, className,
 }: ExportButtonsProps<T>) {
   const [busy, setBusy] = useState<null | 'excel' | 'pdf' | 'print'>(null);
 
@@ -83,15 +85,17 @@ export function ExportButtons<T>({
           : <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
         <span className="hidden sm:inline">Excel</span>
       </Button>
-      <Button
-        variant="outline" size={size} onClick={() => run('pdf')}
-        disabled={busy !== null} title="Export to PDF"
-      >
-        {busy === 'pdf'
-          ? <Loader2 className="h-4 w-4 animate-spin" />
-          : <FileText className="h-4 w-4 text-rose-600 dark:text-rose-400" />}
-        <span className="hidden sm:inline">PDF</span>
-      </Button>
+      {showPdf && (
+        <Button
+          variant="outline" size={size} onClick={() => run('pdf')}
+          disabled={busy !== null} title="Export to PDF"
+        >
+          {busy === 'pdf'
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <FileText className="h-4 w-4 text-rose-600 dark:text-rose-400" />}
+          <span className="hidden sm:inline">PDF</span>
+        </Button>
+      )}
       {showPrint && (
         <Button
           variant="outline" size={size} onClick={doPrint}

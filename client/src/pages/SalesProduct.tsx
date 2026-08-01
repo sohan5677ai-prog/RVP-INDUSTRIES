@@ -793,11 +793,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // ₹/kg rate.
   const gstFactor = (o: SaleOrder) => (o.gstExempt ? 1 : 1 + GST_RATE);
   const totalSoldKg = visible.reduce((sum, o) => sum + o.tonnageKg, 0);
+  const totalDispatchedKg = visible.reduce((sum, o) => sum + dispatchedKgOf(o), 0);
   const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg) * gstFactor(o)), 0);
   const baseRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
   const wacPrice = totalSoldKg > 0 ? baseRevenue / totalSoldKg : 0;
   const dispatchedRevenue = visible.reduce((sum, o) => sum + (dispatchedKgOf(o) * Number(o.ratePerKg) * gstFactor(o)), 0);
   const pendingRevenue = totalRevenue - dispatchedRevenue;
+  const dispatchedPct = totalSoldKg > 0 ? (totalDispatchedKg / totalSoldKg) * 100 : 0;
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visible, 50);
   const realizationPct = totalRevenue > 0 ? (dispatchedRevenue / totalRevenue) * 100 : 0;
 
@@ -825,7 +827,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       )}
 
       {/* Metrics Dashboard */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total {meta.noun} Sold</CardTitle>
@@ -834,6 +836,16 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           <CardContent>
             <div className="text-2xl font-bold text-emerald-600">{toTonnes(totalSoldKg).toFixed(2)} MT</div>
             <p className="text-[10px] text-muted-foreground mt-1">Total ordered tonnage</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Dispatched</CardTitle>
+            <Truck className="h-4 w-4 text-indigo-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-indigo-600">{toTonnes(totalDispatchedKg).toFixed(2)} MT</div>
+            <p className="text-[10px] text-muted-foreground mt-1">{dispatchedPct.toFixed(0)}% of ordered tonnage</p>
           </CardContent>
         </Card>
         <Card>
@@ -860,7 +872,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pending Value</CardTitle>
-              <Truck className="h-4 w-4 text-rose-500" />
+              <TrendingUp className="h-4 w-4 text-rose-500" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-rose-600">{rupees(pendingRevenue)}</div>

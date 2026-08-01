@@ -157,6 +157,27 @@ export async function resolveAlertRecipients(): Promise<string[]> {
   return numbers;
 }
 
+/**
+ * Who gets an *internal copy* of a message that just went to a party: the same
+ * alert members as above, minus anyone already on the outgoing message (a member
+ * whose number is also the party's shouldn't be told twice).
+ *
+ * `alreadyMessaged` is the raw phone list the party copy went to.
+ *
+ * In test mode every send is rerouted to the single test number, so N members
+ * would land as N identical messages on top of the party's own rerouted copy —
+ * one is enough to prove the copy fired, and each extra costs a billed
+ * conversation. Never throws.
+ */
+export async function resolveInternalCopyRecipients(
+  alreadyMessaged: Array<string | null | undefined> = []
+): Promise<string[]> {
+  const sentTo = alreadyMessaged.map(normalizeWhatsAppNumber).filter(Boolean) as string[];
+  const targets = (await resolveAlertRecipients()).filter((n) => !sentTo.includes(n));
+  const { testMode } = await resolveWhatsAppMode();
+  return testMode ? targets.slice(0, 1) : targets;
+}
+
 /** Variable values are pipe-joined on the wire — strip pipes (the delimiter) from each while preserving newlines. */
 function cleanVar(v: string | number | null | undefined): string {
   const s = (v ?? '')
@@ -327,6 +348,31 @@ async function fanOutToAlertRecipients(
   return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error };
 }
 
+/** A prepared message minus its recipient — the party and the office get the identical body. */
+type MessageBody = Omit<SendArgs, 'to'>;
+
+/**
+ * Send a party message and give the office its own copy of it.
+ *
+ * The internal members configured in Settings ("Dispatch & alert recipients")
+ * receive the very same approved template with the very same wording, media and
+ * variables the party got — deliberately a carbon copy rather than a re-worded
+ * alert, so the office sees exactly what landed on the party's phone.
+ *
+ * The returned result is the *party* leg only: the internal copies are a record,
+ * never a reason to report the business message as failed. Never throws.
+ */
+async function sendToPartyAndInternal(
+  message: MessageBody,
+  partyPhones: Array<string | null | undefined>
+): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const to = partyPhones.filter(Boolean) as string[];
+  const result = await sendWhatsAppTemplate({ ...message, to });
+  const internal = await resolveInternalCopyRecipients(to);
+  await Promise.all(internal.map((number) => sendWhatsAppTemplate({ ...message, to: number })));
+  return result;
+}
+
 export const whatsappService = {
   send: sendWhatsAppTemplate,
 
@@ -339,24 +385,28 @@ export const whatsappService = {
     const first = pos[0].poNumber ?? '';
     const last = pos[pos.length - 1].poNumber ?? '';
     const poLabel = pos.length === 1 ? first : `${first} to ${last}`;
-    await sendWhatsAppTemplate({
-      templateKey: 'PO_CREATED',
-      to: [party.phone, party.phone2].filter(Boolean) as string[],
-      variables: [party.name, poLabel, pos.length, pricePerKg],
-      relatedType: 'PO',
-      relatedId: pos[0].id,
-    });
+    await sendToPartyAndInternal(
+      {
+        templateKey: 'PO_CREATED',
+        variables: [party.name, poLabel, pos.length, pricePerKg],
+        relatedType: 'PO',
+        relatedId: pos[0].id,
+      },
+      [party.phone, party.phone2]
+    );
   },
 
   /** Lorry stocked in → party. */
   async notifyStockIn(stockIn: { id: string; lorryNumber: string; arrivalDate: Date }, po: { poNumber: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
-    await sendWhatsAppTemplate({
-      templateKey: 'STOCKIN_CONFIRMED',
-      to: [party.phone, party.phone2].filter(Boolean) as string[],
-      variables: [party.name, stockIn.lorryNumber, po.poNumber ?? '-', fmtDate(stockIn.arrivalDate)],
-      relatedType: 'STOCKIN',
-      relatedId: stockIn.id,
-    });
+    await sendToPartyAndInternal(
+      {
+        templateKey: 'STOCKIN_CONFIRMED',
+        variables: [party.name, stockIn.lorryNumber, po.poNumber ?? '-', fmtDate(stockIn.arrivalDate)],
+        relatedType: 'STOCKIN',
+        relatedId: stockIn.id,
+      },
+      [party.phone, party.phone2]
+    );
   },
 
   /**
@@ -366,14 +416,16 @@ export const whatsappService = {
    */
   async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
     const hasImage = !!payment.screenshotUrl;
-    await sendWhatsAppTemplate({
-      templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
-      to: [party.phone, party.phone2].filter(Boolean) as string[],
-      variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
-      mediaUrl: payment.screenshotUrl ?? undefined,
-      relatedType: 'PAYMENT',
-      relatedId: payment.id,
-    });
+    await sendToPartyAndInternal(
+      {
+        templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
+        variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
+        mediaUrl: payment.screenshotUrl ?? undefined,
+        relatedType: 'PAYMENT',
+        relatedId: payment.id,
+      },
+      [party.phone, party.phone2]
+    );
   },
 
   /**
@@ -387,15 +439,17 @@ export const whatsappService = {
     statementFilename: string | undefined,
     relatedId: string
   ) {
-    await sendWhatsAppTemplate({
-      templateKey: 'VERIFICATION_STATEMENT',
-      to: [party.phone, party.phone2].filter(Boolean) as string[],
-      variables: [party.name, details.lorryNumber, fmtWeight(details.netWeightKg), fmtInr(details.amount)],
-      mediaUrl: statementPdfUrl,
-      documentFilename: statementFilename,
-      relatedType: 'VERIFICATION',
-      relatedId,
-    });
+    await sendToPartyAndInternal(
+      {
+        templateKey: 'VERIFICATION_STATEMENT',
+        variables: [party.name, details.lorryNumber, fmtWeight(details.netWeightKg), fmtInr(details.amount)],
+        mediaUrl: statementPdfUrl,
+        documentFilename: statementFilename,
+        relatedType: 'VERIFICATION',
+        relatedId,
+      },
+      [party.phone, party.phone2]
+    );
   },
 
   /** Dispatch → driver gets the buyer's name, phone and maps link. Returns null when no driver phone. */

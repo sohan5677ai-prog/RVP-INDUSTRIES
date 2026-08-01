@@ -746,7 +746,7 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               <div className="space-y-0.5">
                 <div className="text-sm font-semibold">Dispatch &amp; alert recipients</div>
                 <p className="text-xs text-muted-foreground max-w-md">
-                  Up to 3 members who receive internal WhatsApp alerts — dispatch reminders, the weekly summary and the daily dues digest.
+                  Up to 3 members who receive internal WhatsApp updates — dispatch reminders, the weekly summary and the daily dues digest, plus their own copy of every message sent to a party: purchase orders, stock-ins, unloading statements, payments and the dispatch invoice bundle.
                 </p>
               </div>
               <div className="space-y-2">

@@ -6,7 +6,7 @@ import { createVerificationSchema } from '../schemas/purchase.schema.js';
 import { crossVerify, companyHamaliShare, hamaliSplit } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { whatsappService } from '../services/whatsapp.service.js';
+import { whatsappService, resolveInternalCopyRecipients } from '../services/whatsapp.service.js';
 import { buildPartyStatementData } from './ledger.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
 import { uploadFileToStorage } from '../lib/upload.js';
@@ -23,7 +23,10 @@ async function sendVerificationStatement(
   verificationId: string
 ) {
   try {
-    if (!party.phone && !party.phone2) return; // nothing to send to — skip the PDF work entirely
+    // Nothing to send to — skip the PDF work entirely. The internal members get
+    // their own copy of this statement, so a supplier with no phone on file is
+    // only a dead end when there's nobody internal to copy either.
+    if (!party.phone && !party.phone2 && (await resolveInternalCopyRecipients()).length === 0) return;
     const statement = await buildPartyStatementData(party.id);
     let url: string | undefined;
     let filename: string | undefined;

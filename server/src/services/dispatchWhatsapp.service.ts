@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
-import { whatsappService, resolveOwnerNumber, normalizeWhatsAppNumber } from './whatsapp.service.js';
+import { whatsappService, resolveInternalCopyRecipients } from './whatsapp.service.js';
 import { buildInvoicePdfData } from './saleDocumentEmail.service.js';
 import { TaxproService } from './taxpro.service.js';
 import { renderInvoicePdf } from '../lib/invoicePdf.js';
@@ -189,10 +189,10 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   // the toast still accounts for all three legs.
   const driverLeg = await driverLegFromLog(dispatch.id, dispatch.driverPhone);
 
-  // Internal copy — the owner/internal number from Company Settings gets the very
-  // same paperwork the buyer got: the buyer's template, the buyer's wording, the
-  // combined Invoice + EWB PDF. It's the office's own record of what went out, so
-  // it deliberately mirrors the party copy rather than reading as an alert.
+  // Internal copy — every member in Settings → "Dispatch & alert recipients" gets
+  // the very same paperwork the buyer got: the buyer's template, the buyer's
+  // wording, the combined Invoice + EWB PDF. It's the office's own record of what
+  // went out, so it deliberately mirrors the party copy rather than reading as an alert.
   const internalResult = await sendInternalCopy({
     dispatchId: dispatch.id,
     buyerName: order.buyer.name,
@@ -217,10 +217,12 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
 }
 
 /**
- * The internal copy of the party bundle, sent to the owner number configured in
- * Company Settings ("Owner WhatsApp number"). Returns null — reported as `na` —
- * when there is no internal number configured, or when that number is already on
- * the buyer's/broker's row and has therefore had the bundle once already.
+ * The internal copy of the party bundle, sent to every member configured in
+ * Company Settings → "Dispatch & alert recipients" (falling back to the single
+ * owner number when that list is empty). Members already on the buyer's or
+ * broker's row are dropped — they've had the bundle once already. Returns null —
+ * reported as `na` — when that leaves nobody to copy. One aggregate leg is
+ * reported for the whole list: `sent` if it reached at least one member.
  */
 async function sendInternalCopy(args: {
   dispatchId: string;
@@ -235,16 +237,20 @@ async function sendInternalCopy(args: {
   documentFilename: string;
   alreadyMessaged: Array<string | null>;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string } | null> {
-  const internalNumber = normalizeWhatsAppNumber(await resolveOwnerNumber());
-  if (!internalNumber) return null;
-
-  const sentTo = args.alreadyMessaged
-    .map((p) => normalizeWhatsAppNumber(p))
-    .filter(Boolean) as string[];
-  if (sentTo.includes(internalNumber)) return null;
+  const targets = await resolveInternalCopyRecipients(args.alreadyMessaged);
+  if (targets.length === 0) return null;
 
   const { alreadyMessaged: _ignored, ...bundle } = args;
-  return whatsappService.sendDispatchToParty({ ...bundle, toPhone: internalNumber });
+  const results = await Promise.all(
+    targets.map((toPhone) => whatsappService.sendDispatchToParty({ ...bundle, toPhone })),
+  );
+  const anyOk = results.some((r) => r.ok);
+  if (anyOk) return { ok: true };
+  return {
+    ok: false,
+    skipped: results.every((r) => r.skipped),
+    error: results.find((r) => r.error)?.error,
+  };
 }
 
 /**

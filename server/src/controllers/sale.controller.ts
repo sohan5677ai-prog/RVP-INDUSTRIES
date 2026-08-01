@@ -8,6 +8,7 @@ import {
   deliverSaleDispatchSchema,
   dispatchSaleOrderSchema,
   markPaidSchema,
+  lorryReceiptSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
@@ -102,6 +103,33 @@ export async function getSaleDispatch(req: Request, res: Response) {
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
   res.json(dispatch);
+}
+
+/**
+ * Save the Surya Road Lines lorry receipt (GC) details typed on the printable
+ * copy. The GC number is read off the transporter's physical book, so it can
+ * only be captured by hand - persisting it here keeps every reprint identical
+ * to the copy that travelled with the lorry.
+ */
+export async function saveLorryReceipt(req: Request, res: Response) {
+  const body = lorryReceiptSchema.parse(req.body);
+
+  const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+  const updated = await prisma.saleDispatch.update({
+    where: { id: req.params.id },
+    data: {
+      lrNumber: body.lrNumber?.trim() || null,
+      lrDate: body.lrDate ? new Date(body.lrDate) : null,
+      lrBags: body.lrBags ?? null,
+      lrKgPerBag: body.lrKgPerBag ?? null,
+    },
+    include: { saleOrder: { include: { buyer: true, broker: true } } },
+  });
+
+  clearCache('sale-orders');
+  res.json(updated);
 }
 
 /**

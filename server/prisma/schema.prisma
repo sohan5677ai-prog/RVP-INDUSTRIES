@@ -552,6 +552,14 @@ model SaleDispatch {
   invoiceSeries String    @default("RVP")
   invoiceDate   DateTime?
 
+  // Surya Road Lines lorry receipt (goods consignment note). The GC number comes
+  // off the transporter's physical book, so it is typed in rather than derived;
+  // the rest lets the printed copy state the packing the way the book does.
+  lrNumber   String?
+  lrDate     DateTime?
+  lrBags     Int?
+  lrKgPerBag Int?
+
   // E-Invoice (IRN) details
   irn              String?
   irnAckNo         String?

@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
 import { inr, rupeesInWords } from './invoice.js';
 import { IST_TZ } from './istDate.js';
+import { logger } from './logger.js';
 import type { QualityAdjustmentRow, QualityAdjustmentMode } from './calc.js';
 
 /**
@@ -29,15 +32,6 @@ export interface PurchaseStatementParty {
   phone?: string | null;
 }
 
-export interface PurchaseStatementAccount {
-  /** Party balance before this bill was posted (absolute value + side). */
-  previousBalance: number;
-  previousType: 'DR' | 'CR';
-  /** Party balance after this bill (absolute value + side). */
-  closingBalance: number;
-  closingType: 'DR' | 'CR';
-}
-
 export interface PurchaseStatementData {
   company: PurchaseStatementCompany;
   party: PurchaseStatementParty;
@@ -45,7 +39,6 @@ export interface PurchaseStatementData {
   statementDate: Date;
   lorryNumber: string;
   poNumber?: string | null;
-  location?: string | null;
   selfVehicle: boolean;
   /** Weighments, all in kg. `payableKg` is post kata-difference, pre quality rows. */
   weights: {
@@ -70,7 +63,6 @@ export interface PurchaseStatementData {
   selfVehicleKata: number;
   /** Net balance payable — the ledger's figure, printed as-is. */
   netPayable: number;
-  account?: PurchaseStatementAccount | null;
 }
 
 const PAGE = { margin: 36, width: 595.28, height: 841.89 };
@@ -85,6 +77,45 @@ const HAIR = '#d7dee8';
 const RULE = '#94a3b8';
 const NEG = '#b91c1c';
 const BAND = '#f1f5f9';
+
+// The app's own typefaces — Fraunces for display headings, Hanken Grotesk for
+// everything else — so the WhatsApp PDF reads as the same document as the page.
+// `assets/` sits beside `src/` and `dist/`, so the relative hop is the same in
+// dev (tsx) and in the built server. Falls back to the PDF base-14 fonts if a
+// file is ever missing, since a statement that prints is worth more than one
+// that matches.
+const FONT_DIR = new URL('../../assets/fonts/', import.meta.url);
+const FONT_FILES = {
+  body: 'HankenGrotesk-Regular.ttf',
+  semi: 'HankenGrotesk-SemiBold.ttf',
+  bold: 'HankenGrotesk-Bold.ttf',
+  display: 'Fraunces-Bold.ttf',
+} as const;
+const FALLBACK = { body: 'Helvetica', semi: 'Helvetica-Bold', bold: 'Helvetica-Bold', display: 'Times-Bold' } as const;
+
+type FontKey = keyof typeof FONT_FILES;
+type FontMap = Record<FontKey, string>;
+
+let warnedMissingFonts = false;
+
+/** Register the bundled faces on a document; returns the names to draw with. */
+function useFonts(doc: PDFKit.PDFDocument): FontMap {
+  const names = {} as FontMap;
+  for (const key of Object.keys(FONT_FILES) as FontKey[]) {
+    const path = fileURLToPath(new URL(FONT_FILES[key], FONT_DIR));
+    if (existsSync(path)) {
+      doc.registerFont(key, path);
+      names[key] = key;
+    } else {
+      names[key] = FALLBACK[key];
+      if (!warnedMissingFonts) {
+        warnedMissingFonts = true;
+        logger.warn(`[pdf] statement font missing at ${path} — falling back to base fonts`);
+      }
+    }
+  }
+  return names;
+}
 
 // Particulars / Qty / Rate / Amount
 const COL_W = { particulars: W * 0.5, qty: W * 0.16, rate: W * 0.14, amount: 0 };
@@ -127,6 +158,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
+    const F = useFonts(doc);
     const { company, party, weights } = data;
     const price = data.pricePerKg;
 
@@ -142,11 +174,12 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       doc.lineWidth(width).strokeColor(color).moveTo(LEFT, y).lineTo(RIGHT, y).stroke();
 
     // --- Letterhead ---------------------------------------------------------
-    doc.font('Helvetica-Bold').fontSize(16).fillColor(INK).text(company.name.toUpperCase(), LEFT, PAGE.margin, {
+    doc.font(F.display).fontSize(17).fillColor(INK).text(company.name.toUpperCase(), LEFT, PAGE.margin - 2, {
       width: W * 0.62,
+      characterSpacing: 0.2,
     });
-    let y = doc.y + 2;
-    doc.font('Helvetica').fontSize(7.5).fillColor(MUTED);
+    let y = doc.y + 3;
+    doc.font(F.body).fontSize(7.5).fillColor(MUTED);
     if (company.address) {
       doc.text(company.address.replace(/\n/g, ', '), LEFT, y, { width: W * 0.62 });
       y = doc.y;
@@ -159,20 +192,21 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       y = doc.y;
     }
 
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(INK).text('PURCHASE STATEMENT', LEFT, PAGE.margin + 1, {
+    doc.font(F.display).fontSize(14).fillColor(INK).text('PURCHASE STATEMENT', LEFT, PAGE.margin, {
       width: W,
       align: 'right',
+      characterSpacing: 0.2,
     });
     doc
-      .font('Helvetica')
+      .font(F.body)
       .fontSize(8)
       .fillColor(MUTED)
-      .text(`Dated ${fmtDate(data.statementDate)}`, LEFT, PAGE.margin + 18, { width: W, align: 'right' });
+      .text(`Dated ${fmtDate(data.statementDate)}`, LEFT, PAGE.margin + 19, { width: W, align: 'right' });
     doc
-      .font('Helvetica')
+      .font(F.body)
       .fontSize(7.5)
       .fillColor(MUTED)
-      .text('Unloaded & weight-verified', LEFT, PAGE.margin + 30, { width: W, align: 'right' });
+      .text('Unloaded & weight-verified', LEFT, PAGE.margin + 31, { width: W, align: 'right' });
 
     y = Math.max(y, PAGE.margin + 44) + 6;
     hline(y, RULE, 1);
@@ -183,12 +217,16 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     const metaSplit = LEFT + W * 0.56;
     const metaRow = 15;
 
-    doc.font('Helvetica').fontSize(7).fillColor(MUTED).text('STATEMENT FOR', LEFT + 6, metaTop + 5);
-    doc.font('Helvetica-Bold').fontSize(11).fillColor(INK).text(party.name, LEFT + 6, metaTop + 15, {
+    doc
+      .font(F.body)
+      .fontSize(7)
+      .fillColor(MUTED)
+      .text('STATEMENT FOR', LEFT + 6, metaTop + 5, { characterSpacing: 1 });
+    doc.font(F.bold).fontSize(11.5).fillColor(INK).text(party.name, LEFT + 6, metaTop + 16, {
       width: metaSplit - LEFT - 12,
     });
     let py = doc.y + 1;
-    doc.font('Helvetica').fontSize(7.5).fillColor(MUTED);
+    doc.font(F.body).fontSize(7.5).fillColor(MUTED);
     if (party.address) {
       doc.text(party.address.replace(/\n/g, ', '), LEFT + 6, py, { width: metaSplit - LEFT - 12 });
       py = doc.y;
@@ -205,16 +243,15 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       ['Invoice No.', data.invoiceNumber || '-'],
       ['Vehicle', `${data.lorryNumber}${data.selfVehicle ? '  (party vehicle)' : ''}`],
       ['Purchase Order', data.poNumber || '-'],
-      ['Unloaded At', data.location || '-'],
     ];
     let my = metaTop + 5;
     for (const [k, v] of metaPairs) {
-      doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text(k, metaSplit + 8, my, {
+      doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(k, metaSplit + 8, my, {
         width: (RIGHT - metaSplit) * 0.42,
         lineBreak: false,
       });
       doc
-        .font('Helvetica-Bold')
+        .font(F.semi)
         .fontSize(8)
         .fillColor(INK)
         .text(v, metaSplit + 8 + (RIGHT - metaSplit) * 0.42, my - 0.5, {
@@ -243,13 +280,14 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     cells.forEach(([label, value], i) => {
       const cx = LEFT + i * cellW;
       if (i > 0) doc.lineWidth(0.6).strokeColor(HAIR).moveTo(cx, y + 5).lineTo(cx, y + stripH - 5).stroke();
-      doc.font('Helvetica').fontSize(6.5).fillColor(MUTED).text(label.toUpperCase(), cx, y + 7, {
+      doc.font(F.body).fontSize(6.5).fillColor(MUTED).text(label.toUpperCase(), cx, y + 7, {
         width: cellW,
         align: 'center',
+        characterSpacing: 0.9,
       });
       doc
-        .font('Helvetica-Bold')
-        .fontSize(i === cells.length - 1 ? 10 : 9)
+        .font(F.bold)
+        .fontSize(i === cells.length - 1 ? 10 : 9.5)
         .fillColor(INK)
         .text(value, cx, y + 17.5, { width: cellW, align: 'center' });
     });
@@ -264,18 +302,19 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
           : weights.exempt
             ? `Difference of ${kg(weights.diffKg)} is within the ${data.allowanceKg} kg free allowance — no weight deduction.`
             : `Difference of ${kg(weights.diffKg)} exceeds the ${data.allowanceKg} kg free allowance — ${kg(kataDeductKg)} deducted below.`;
-    doc.font('Helvetica').fontSize(7).fillColor(MUTED).text(kataNote, LEFT + 2, y, { width: W - 4 });
+    doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(kataNote, LEFT + 2, y, { width: W - 4 });
     y = doc.y + 8;
 
     // --- Particulars table --------------------------------------------------
     const drawTableHead = (yy: number): number => {
-      doc.rect(LEFT, yy, W, 18).fill(INK);
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#ffffff');
-      doc.text('PARTICULARS', COL_X.particulars + 6, yy + 5.5, { width: COL_W.particulars - 12 });
-      doc.text('QUANTITY', COL_X.qty, yy + 5.5, { width: COL_W.qty - 6, align: 'right' });
-      doc.text('RATE / KG', COL_X.rate, yy + 5.5, { width: COL_W.rate - 6, align: 'right' });
-      doc.text('AMOUNT (INR)', COL_X.amount, yy + 5.5, { width: COL_W.amount - 8, align: 'right' });
-      return yy + 18;
+      doc.rect(LEFT, yy, W, 19).fill(INK);
+      doc.font(F.semi).fontSize(7.5).fillColor('#ffffff');
+      const head = { characterSpacing: 0.9 } as const;
+      doc.text('PARTICULARS', COL_X.particulars + 6, yy + 6, { width: COL_W.particulars - 12, ...head });
+      doc.text('QUANTITY', COL_X.qty, yy + 6, { width: COL_W.qty - 6, align: 'right', ...head });
+      doc.text('RATE / KG', COL_X.rate, yy + 6, { width: COL_W.rate - 6, align: 'right', ...head });
+      doc.text('AMOUNT (INR)', COL_X.amount, yy + 6, { width: COL_W.amount - 8, align: 'right', ...head });
+      return yy + 19;
     };
     y = drawTableHead(y);
 
@@ -366,7 +405,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       });
     }
 
-    doc.font('Helvetica').fontSize(8.5);
+    doc.font(F.body).fontSize(8.5);
     for (const r of rows) {
       const rowH = r.note ? 26 : 18;
       if (y + rowH > BOTTOM - 150) {
@@ -375,7 +414,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       }
       if (r.emphasis === 'subtotal') doc.rect(LEFT, y, W, rowH).fill(BAND);
 
-      const labelFont = r.emphasis === 'subtotal' ? 'Helvetica-Bold' : 'Helvetica';
+      const labelFont = r.emphasis === 'subtotal' ? F.semi : F.body;
       // Adjustment rows sit one notch in from the goods line they act on.
       const indent = /^(Less|Add) :/.test(r.label) ? 14 : 6;
       doc.font(labelFont).fontSize(8.5).fillColor(INK).text(r.label, COL_X.particulars + indent, y + 5, {
@@ -384,19 +423,19 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
         ellipsis: true,
       });
       if (r.note) {
-        doc.font('Helvetica').fontSize(6.5).fillColor(MUTED).text(r.note, COL_X.particulars + indent + 6, y + 15.5, {
+        doc.font(F.body).fontSize(6.5).fillColor(MUTED).text(r.note, COL_X.particulars + indent + 6, y + 15.5, {
           width: COL_W.particulars + COL_W.qty - indent - 12,
           lineBreak: false,
           ellipsis: true,
         });
       }
-      doc.font('Helvetica').fontSize(8.5).fillColor(INK);
+      doc.font(F.body).fontSize(8.5).fillColor(INK);
       if (r.qty) doc.text(r.qty, COL_X.qty, y + 5, { width: COL_W.qty - 6, align: 'right', lineBreak: false });
       if (r.rate) doc.text(r.rate, COL_X.rate, y + 5, { width: COL_W.rate - 6, align: 'right', lineBreak: false });
       if (r.amount != null) {
         const text = r.negative ? `(${inr(r.amount)})` : inr(r.amount);
         doc
-          .font(r.emphasis === 'subtotal' ? 'Helvetica-Bold' : 'Helvetica')
+          .font(r.emphasis === 'subtotal' ? F.semi : F.body)
           .fontSize(8.5)
           .fillColor(r.negative ? NEG : INK)
           .text(text, COL_X.amount, y + 5, { width: COL_W.amount - 8, align: 'right', lineBreak: false });
@@ -412,63 +451,32 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       y = PAGE.margin;
     }
     doc.rect(LEFT, y, W, bandH).fill(INK);
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#ffffff');
-    doc.text('NET BALANCE PAYABLE', COL_X.particulars + 6, y + 10, { width: COL_W.particulars + COL_W.qty });
-    doc.fontSize(12).text(`${inr(data.netPayable)}`, COL_X.rate, y + 8.5, {
+    doc.font(F.bold).fontSize(10).fillColor('#ffffff');
+    doc.text('NET BALANCE PAYABLE', COL_X.particulars + 6, y + 10, {
+      width: COL_W.particulars + COL_W.qty,
+      characterSpacing: 0.9,
+    });
+    doc.fontSize(13).text(`${inr(data.netPayable)}`, COL_X.rate, y + 8, {
       width: COL_W.rate + COL_W.amount - 8,
       align: 'right',
     });
     y += bandH + 8;
 
-    doc.font('Helvetica').fontSize(7).fillColor(MUTED).text('Amount in words', LEFT + 2, y);
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(INK).text(rupeesInWords(data.netPayable), LEFT + 2, y + 10, {
+    doc.font(F.body).fontSize(7).fillColor(MUTED).text('Amount in words', LEFT + 2, y);
+    doc.font(F.semi).fontSize(8.5).fillColor(INK).text(rupeesInWords(data.netPayable), LEFT + 2, y + 10, {
       width: W - 4,
     });
     y = doc.y + 12;
-
-    // --- Account summary ----------------------------------------------------
-    if (data.account) {
-      const a = data.account;
-      const sumH = 40;
-      const sumCells: [string, string][] = [
-        ['Previous Balance', `${inr(a.previousBalance)} ${a.previousType}`],
-        ['This Statement', inr(data.netPayable)],
-        ['Total Balance Payable', `${inr(a.closingBalance)} ${a.closingType}`],
-      ];
-      const sw = W / sumCells.length;
-      doc.rect(LEFT, y, W, sumH).fill(BAND);
-      sumCells.forEach(([label, value], i) => {
-        const cx = LEFT + i * sw;
-        if (i > 0) doc.lineWidth(0.6).strokeColor(HAIR).moveTo(cx, y + 6).lineTo(cx, y + sumH - 6).stroke();
-        doc.font('Helvetica').fontSize(6.5).fillColor(MUTED).text(label.toUpperCase(), cx, y + 9, {
-          width: sw,
-          align: 'center',
-        });
-        doc
-          .font('Helvetica-Bold')
-          .fontSize(i === sumCells.length - 1 ? 11 : 9.5)
-          .fillColor(INK)
-          .text(value, cx, y + 21, { width: sw, align: 'center' });
-      });
-      doc.lineWidth(0.6).strokeColor(HAIR).rect(LEFT, y, W, sumH).stroke();
-      y += sumH + 6;
-      doc
-        .font('Helvetica')
-        .fontSize(6.5)
-        .fillColor(MUTED)
-        .text('CR = payable by us to you.   DR = receivable from you.', LEFT + 2, y, { width: W - 4 });
-      y = doc.y + 10;
-    }
 
     // --- Footer -------------------------------------------------------------
     const footerY = Math.max(y, BOTTOM - 74);
     doc.lineWidth(0.6).strokeColor(HAIR).dash(2, { space: 2 }).moveTo(LEFT, footerY).lineTo(RIGHT, footerY).stroke();
     doc.undash();
-    doc.font('Helvetica').fontSize(7).fillColor(MUTED).text(
+    doc.font(F.body).fontSize(7).fillColor(MUTED).text(
       'Computer-generated statement — no signature required. Please report any discrepancy within 7 days of receipt.',
       LEFT, footerY + 8, { width: W * 0.55 }
     );
-    doc.font('Helvetica-Bold').fontSize(8).fillColor(INK).text(`For ${company.name}`, LEFT + W * 0.6, footerY + 8, {
+    doc.font(F.semi).fontSize(8.5).fillColor(INK).text(`For ${company.name}`, LEFT + W * 0.6, footerY + 8, {
       width: W * 0.4,
       align: 'right',
     });
@@ -478,7 +486,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       .moveTo(RIGHT - 110, footerY + 44)
       .lineTo(RIGHT, footerY + 44)
       .stroke();
-    doc.font('Helvetica').fontSize(7.5).fillColor(MUTED).text('Authorised Signatory', LEFT + W * 0.6, footerY + 48, {
+    doc.font(F.body).fontSize(7.5).fillColor(MUTED).text('Authorised Signatory', LEFT + W * 0.6, footerY + 48, {
       width: W * 0.4,
       align: 'right',
     });

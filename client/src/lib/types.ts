@@ -255,6 +255,8 @@ export interface SaleDispatch {
   freightCharge: string;
   status: SaleStatus; // DISPATCHED | DELIVERED
   vehicleNumber: string | null;
+  driverName?: string | null;
+  driverPhone?: string | null;
   kataFileUrl?: string | null;
   transportProvider?: string | null; // 'SURYA' | 'KNM' | 'OTHER'
   customRetention?: string | number | null;
@@ -276,6 +278,11 @@ export interface SaleDispatch {
   invoiceSeq?: number | null;
   invoiceFy?: string | null;
   invoiceDate?: string | null;
+  // Surya Road Lines lorry receipt (GC note) printed at dispatch.
+  lrNumber?: string | null;
+  lrDate?: string | null;
+  lrBags?: number | null;
+  lrKgPerBag?: number | null;
   createdAt: string;
   // Buyer receipts linked to this shipment (embedded by the sales list so the
   // page can show it as Paid once cleared).

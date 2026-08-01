@@ -24,10 +24,6 @@ interface CompanyProfile {
   contact?: string | null;
 }
 
-interface PartyLedgerResponse {
-  summary: { balance: number; balanceType: 'DR' | 'CR' };
-}
-
 /** Free allowance on the kata difference — keep in step with EXEMPT_KG on the server. */
 const ALLOWANCE_KG = 80;
 
@@ -70,13 +66,6 @@ export default function PurchaseStatement() {
     queryKey: ['settings', 'company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
     staleTime: 5 * 60 * 1000,
-  });
-
-  const partyId = purchase?.stockIn.purchaseOrder.partyId;
-  const { data: ledger } = useQuery({
-    queryKey: ['ledger', 'parties', partyId],
-    queryFn: () => api<PartyLedgerResponse>(`/ledger/parties/${partyId}`),
-    enabled: !!partyId,
   });
 
   async function downloadPdf(verificationId: string, partyName: string, invoiceNumber: string) {
@@ -225,14 +214,6 @@ export default function PurchaseStatement() {
           ? `Difference of ${kg(v.diffKg)} is within the ${ALLOWANCE_KG} kg free allowance — no weight deduction.`
           : `Difference of ${kg(v.diffKg)} exceeds the ${ALLOWANCE_KG} kg free allowance — ${kg(kataDeductKg)} deducted below.`;
 
-  // Closing balance already includes this bill; back it out for the opening figure.
-  const closingSigned = ledger
-    ? ledger.summary.balanceType === 'DR'
-      ? ledger.summary.balance
-      : -ledger.summary.balance
-    : null;
-  const previousSigned = closingSigned == null ? null : Math.round((closingSigned + netPayable) * 100) / 100;
-
   const weightCells: [string, string][] = [
     ['Invoice Weight', kg(v.billingWeightKg)],
     ['Party Kata', kg(v.partyKataKg)],
@@ -245,7 +226,6 @@ export default function PurchaseStatement() {
     ['Invoice No.', stockIn.invoiceNumber || '-'],
     ['Vehicle', `${stockIn.lorryNumber}${stockIn.selfVehicle ? '  (party vehicle)' : ''}`],
     ['Purchase Order', stockIn.purchaseOrder.poNumber || '-'],
-    ['Unloaded At', stockIn.loadingLocation || '-'],
   ];
 
   return (
@@ -365,31 +345,6 @@ export default function PurchaseStatement() {
           <span className="text-[12px] font-bold uppercase tracking-widest">Net Balance Payable</span>
           <span className="text-lg font-bold tabular-nums">{money(netPayable)}</span>
         </div>
-
-        {/* Account summary */}
-        {previousSigned != null && ledger && (
-          <>
-            <div className="mt-4 grid grid-cols-3 border border-neutral-300 rounded-sm bg-neutral-50 divide-x divide-neutral-200">
-              <div className="p-2.5 text-center">
-                <p className="text-[8px] uppercase tracking-widest text-neutral-500">Previous Balance</p>
-                <p className="mt-0.5 text-[13px] font-bold tabular-nums">
-                  {money(Math.abs(previousSigned))} {previousSigned >= 0 ? 'DR' : 'CR'}
-                </p>
-              </div>
-              <div className="p-2.5 text-center">
-                <p className="text-[8px] uppercase tracking-widest text-neutral-500">This Statement</p>
-                <p className="mt-0.5 text-[13px] font-bold tabular-nums">{money(netPayable)}</p>
-              </div>
-              <div className="p-2.5 text-center">
-                <p className="text-[8px] uppercase tracking-widest text-neutral-500">Total Balance Payable</p>
-                <p className="mt-0.5 text-[15px] font-bold tabular-nums">
-                  {money(ledger.summary.balance)} {ledger.summary.balanceType}
-                </p>
-              </div>
-            </div>
-            <p className="mt-1 text-[9px] text-neutral-500">CR = payable by us to you.   DR = receivable from you.</p>
-          </>
-        )}
 
         {/* Footer */}
         <div className="mt-10 flex items-start justify-between gap-6 border-t border-dotted border-neutral-300 pt-3">

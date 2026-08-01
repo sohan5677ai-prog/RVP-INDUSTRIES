@@ -16,6 +16,7 @@ import {
   deliverSaleDispatch,
   markDispatchPaid,
   undoSaleDispatch,
+  saveLorryReceipt,
 } from '../controllers/sale.controller.js';
 
 const router = Router();
@@ -54,6 +55,10 @@ router.post(
   upload.fields([{ name: 'kata', maxCount: 1 }]),
   asyncHandler(deliverSaleDispatch)
 );
+
+// Surya Road Lines lorry receipt (GC): the book number, its date and the packing
+// lines typed on the printable copy. Rendered client-side like the invoice.
+router.patch('/sale-dispatches/:id/lorry-receipt', asyncHandler(saveLorryReceipt));
 
 // Mark a dispatched shipment as paid and record receipt/TDS
 router.post('/sale-dispatches/:id/mark-paid', asyncHandler(markDispatchPaid));

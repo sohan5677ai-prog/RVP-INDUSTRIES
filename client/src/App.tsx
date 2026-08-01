@@ -64,6 +64,7 @@ const SaleOrders = lazyWithPreload('/sale-orders', () => import('@/pages/SaleOrd
 const InvoiceView = lazyWithPreload('/sale-dispatches/:id/invoice', () => import('@/pages/InvoiceView'));
 const EWayBillView = lazyWithPreload('/sale-dispatches/:id/ewaybill', () => import('@/pages/EWayBillView'));
 const EInvoiceView = lazyWithPreload('/sale-dispatches/:id/einvoice-print', () => import('@/pages/EInvoiceView'));
+const LorryReceiptView = lazyWithPreload('/sale-dispatches/:id/lorry-receipt', () => import('@/pages/LorryReceiptView'));
 const SalesProduct = lazyWithPreload(
   ['/sales/pappu', '/sales/tps'],
   () => import('@/pages/SalesProduct')
@@ -131,6 +132,7 @@ export default function App() {
             <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
             <Route path="/sale-dispatches/:id/ewaybill" element={<EWayBillView />} />
             <Route path="/sale-dispatches/:id/einvoice-print" element={<EInvoiceView />} />
+            <Route path="/sale-dispatches/:id/lorry-receipt" element={<LorryReceiptView />} />
             <Route element={<Layout />}>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<Dashboard />} />

@@ -7,7 +7,6 @@ import {
   parseQualityAdjustments,
   type QualityAdjustmentMode,
 } from '../lib/calc.js';
-import { buildPartyStatementData } from './ledger.controller.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderPurchaseStatementPdf, type PurchaseStatementData } from '../lib/purchaseStatementPdf.js';
 
@@ -34,10 +33,7 @@ export async function buildPurchaseStatementData(
   const po = stockIn.purchaseOrder;
   const party = po.party;
 
-  const [profile, ledger] = await Promise.all([
-    getCompanyProfileRow(),
-    buildPartyStatementData(party.id).catch(() => null),
-  ]);
+  const profile = await getCompanyProfileRow();
 
   const netPayable = Number(verification.totalAmount);
   const pricePerKg = Number(verification.pricePerKg);
@@ -67,20 +63,6 @@ export async function buildPurchaseStatementData(
       )
     : [];
 
-  // The closing balance already includes this bill; back it out for the
-  // "previous balance" cell so the three summary figures reconcile.
-  let account: PurchaseStatementData['account'] = null;
-  if (ledger) {
-    const closingSigned = ledger.summary.balanceType === 'DR' ? ledger.summary.balance : -ledger.summary.balance;
-    const previousSigned = Math.round((closingSigned + netPayable) * 100) / 100;
-    account = {
-      previousBalance: Math.abs(previousSigned),
-      previousType: previousSigned >= 0 ? 'DR' : 'CR',
-      closingBalance: ledger.summary.balance,
-      closingType: ledger.summary.balanceType as 'DR' | 'CR',
-    };
-  }
-
   return {
     company: {
       name: profile.name,
@@ -98,7 +80,6 @@ export async function buildPurchaseStatementData(
     statementDate: purchase.purchaseDate ?? stockIn.arrivalDate,
     lorryNumber: stockIn.lorryNumber,
     poNumber: po.poNumber,
-    location: stockIn.loadingLocation,
     selfVehicle: stockIn.selfVehicle,
     weights: {
       billingKg: verification.billingWeightKg,
@@ -119,7 +100,6 @@ export async function buildPurchaseStatementData(
     selfVehicleHamali: Number(verification.selfVehicleHamali ?? 0),
     selfVehicleKata: Number(verification.selfVehicleKata ?? 0),
     netPayable,
-    account,
   };
 }
 

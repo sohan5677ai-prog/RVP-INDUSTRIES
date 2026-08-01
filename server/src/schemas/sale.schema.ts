@@ -68,6 +68,16 @@ export const markPaidSchema = z.object({
   shortageAmount: z.coerce.number().nonnegative().optional().default(0),
 });
 
+// Surya Road Lines lorry receipt (GC) details typed on the printable copy.
+// Every field is optional: the GC book number often arrives after the lorry has
+// already left, and the packing lines are blank on plenty of consignments.
+export const lorryReceiptSchema = z.object({
+  lrNumber: z.string().max(40).optional().nullable(),
+  lrDate: z.coerce.date().optional().nullable(),
+  lrBags: z.coerce.number().int().nonnegative().optional().nullable(),
+  lrKgPerBag: z.coerce.number().int().nonnegative().optional().nullable(),
+});
+
 export type CreateSaleOrderInput = z.infer<typeof createSaleOrderSchema>;
 export type DeliverSaleDispatchInput = z.infer<typeof deliverSaleDispatchSchema>;
 export type DispatchSaleOrderInput = z.infer<typeof dispatchSaleOrderSchema>;

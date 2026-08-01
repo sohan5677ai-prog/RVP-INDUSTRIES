@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, CompanyProfile, ProductTaxInfo } from '@/lib/types';
@@ -1186,6 +1186,17 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             <FileText className="h-3.5 w-3.5" /> Raise invoice
                                           </Button>
                                         )}
+                                        {/* Transporter's lorry receipt (GC). Raised when the lorry
+                                            leaves, so it does not wait on the invoice. */}
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                          title="Print the Surya Road Lines lorry receipt (GC) for this lorry"
+                                          onClick={() => navigate(`/sale-dispatches/${d.id}/lorry-receipt`)}
+                                        >
+                                          <ScrollText className="h-3.5 w-3.5 mr-1" /> Lorry Receipt
+                                        </Button>
                                         {d.status === 'DISPATCHED' && d.invoiceNumber && (
                                           <Button size="sm" variant="forest" onClick={() => openDeliver(d, o)}>
                                             <PackageCheck className="h-3.5 w-3.5" /> Mark delivered

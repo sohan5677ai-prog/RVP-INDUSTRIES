@@ -381,3 +381,53 @@
 .rdp-premium .rdp-button_next { border-radius: 0.5rem; }
 .rdp-premium .rdp-button_previous:hover,
 .rdp-premium .rdp-button_next:hover { background: var(--accent); }
+
+/* ──────────────────────────────────────────────────────────────
+   Print Stylesheet - Clean print layout for statements & reports
+────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide application shell (sidebars, topbars, navigation, action bars) */
+  aside,
+  header,
+  nav,
+  .print\:hidden,
+  [aria-label="Close sidebar"],
+  [aria-label="Open sidebar"] {
+    display: none !important;
+  }
+
+  /* Reset layout constraints so document fills page cleanly */
+  html,
+  body,
+  #root,
+  .h-screen,
+  .overflow-hidden,
+  .overflow-auto,
+  main {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    width: 100% !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  main > div {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm 12mm;
+  }
+}
+

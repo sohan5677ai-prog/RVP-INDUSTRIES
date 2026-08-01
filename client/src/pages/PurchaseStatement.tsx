@@ -229,7 +229,7 @@ export default function PurchaseStatement() {
   ];
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto p-4 md:p-6">
+    <div className="space-y-6 max-w-4xl mx-auto p-4 md:p-6 print:max-w-none print:p-0 print:m-0 print:space-y-0">
       {/* Action Bar (hidden when printing) */}
       <div className="flex items-center justify-between print:hidden">
         <Button asChild variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground">
@@ -253,7 +253,7 @@ export default function PurchaseStatement() {
       </div>
 
       {/* Statement sheet — mirrors the PDF sent to the party on WhatsApp */}
-      <div className="bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0">
+      <div className="bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0 print:rounded-none">
 
         {/* Letterhead */}
         <div className="flex items-start justify-between gap-6 border-b border-neutral-400 pb-3">
@@ -361,30 +361,27 @@ export default function PurchaseStatement() {
       {/* Embedded CSS for Print Layout */}
       <style>{`
         @media print {
-          body {
+          aside, header, nav, .print\\:hidden, [aria-label="Close sidebar"], [aria-label="Open sidebar"] {
+            display: none !important;
+          }
+          html, body, #root, main {
             background-color: white !important;
             color: black !important;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          .print\\:shadow-none {
-            box-shadow: none !important;
-          }
-          .print\\:border-none {
-            border: none !important;
-          }
-          .print\\:p-0 {
-            padding: 0 !important;
-          }
-          /* Hide main layout sidebars and headers */
-          header, sidebar, nav, [data-sidebar], .sidebar, .layout-header, #sidebar-container {
-            display: none !important;
-          }
-          main {
             padding: 0 !important;
             margin: 0 !important;
-            border: none !important;
+            height: auto !important;
+            overflow: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          main > div {
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          @page {
+            size: A4 portrait;
+            margin: 10mm 12mm;
           }
         }
       `}</style>

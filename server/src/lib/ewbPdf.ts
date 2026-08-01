@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { IST_TZ } from './istDate.js';
 
 export interface EwbPdfData {
   company: {
@@ -64,13 +65,19 @@ const SUBBAR = '#a8a8cf';
 
 const TRANS_MODES: Record<string, string> = { '1': 'Road', '2': 'Rail', '3': 'Air', '4': 'Ship' };
 
+/**
+ * Every stamp on this document is a government-facing IST time. Without an
+ * explicit zone these formatters follow the process clock, which is UTC on
+ * Render — printing an EWB generated at 12:37 IST as 07:07 AM.
+ */
 function fmtDate(d: Date): string {
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-GB', { timeZone: IST_TZ, day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 /** "29 Jul 2026 10:35 AM" — the generated/valid-upto stamps carry a time. */
 function fmtDateTime(d: Date): string {
   return d.toLocaleString('en-GB', {
+    timeZone: IST_TZ,
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
   }).replace(',', '').replace(/\b(am|pm)\b/, (s) => s.toUpperCase());
 }

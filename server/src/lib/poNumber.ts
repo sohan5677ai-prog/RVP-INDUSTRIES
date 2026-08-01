@@ -1,12 +1,14 @@
 import { Prisma } from '@prisma/client';
+import { istFinancialYearStart } from './istDate.js';
 
 /**
  * Financial year label for a date, e.g. 2026-07-15 -> "26-27" (FY runs Apr-Mar).
+ *
+ * Derived in IST so a UTC server can't roll a 1-April PO back into the
+ * previous FY's series.
  */
 export function computeFY(date: Date): string {
-  const year = date.getFullYear();
-  const month = date.getMonth(); // 0-indexed; April = 3
-  const startYear = month >= 3 ? year : year - 1;
+  const startYear = istFinancialYearStart(date);
   const yy = (n: number) => String(n % 100).padStart(2, '0');
   return `${yy(startYear)}-${yy(startYear + 1)}`;
 }

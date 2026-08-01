@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
+import { istCalendar } from '../lib/istDate.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -70,7 +71,8 @@ export function normalizeWhatsAppNumber(raw: string | null | undefined): string 
 /** dd-MMM-yyyy, e.g. "17-Jul-2026" — unambiguous for Indian recipients. */
 function fmtDate(d: Date): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${String(d.getDate()).padStart(2, '0')}-${months[d.getMonth()]}-${d.getFullYear()}`;
+  const { day, month, year } = istCalendar(d);
+  return `${String(day).padStart(2, '0')}-${months[month - 1]}-${year}`;
 }
 
 /** Indian-grouped amount, e.g. 450000 → "4,50,000". */

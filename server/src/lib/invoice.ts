@@ -1,7 +1,14 @@
-/** Indian financial year (Apr–Mar) for a date, e.g. 2026-06 -> "2026-27". */
+import { istFinancialYearStart } from './istDate.js';
+
+/**
+ * Indian financial year (Apr–Mar) for a date, e.g. 2026-06 -> "2026-27".
+ *
+ * Derived in IST, not process-local time — on a UTC server an invoice raised
+ * just after midnight IST on 1 April read as 31 March, i.e. the *previous* FY,
+ * which would stamp the wrong year onto the invoice number.
+ */
 export function indianFinancialYear(date: Date): string {
-  const y = date.getFullYear();
-  const startYear = date.getMonth() >= 3 ? y : y - 1; // months are 0-based; Apr = 3
+  const startYear = istFinancialYearStart(date);
   const endShort = String((startYear + 1) % 100).padStart(2, '0');
   return `${startYear}-${endShort}`;
 }

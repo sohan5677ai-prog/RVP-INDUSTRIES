@@ -1,5 +1,7 @@
 /** Small helpers shared by the Slack flows (unit conversion, formatting). */
 
+import { IST_TZ } from '../lib/istDate.js';
+
 /** Tonnes → whole kilograms (the ERP stores weights in kg). */
 export function tonnesToKg(tonnes: number): number {
   return Math.round(tonnes * 1000);
@@ -19,5 +21,5 @@ export function rupees(n: number): string {
 export function fmtDate(d: string | Date): string {
   const date = typeof d === 'string' ? new Date(d) : d;
   if (isNaN(date.getTime())) return String(d);
-  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString('en-GB', { timeZone: IST_TZ, day: '2-digit', month: 'short', year: 'numeric' });
 }

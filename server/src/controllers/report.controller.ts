@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { computeFY } from '../lib/poNumber.js';
+import { istFinancialYearStart } from '../lib/istDate.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Statutory reports: GST (input/output for GSTR filing) and TDS (194Q credit
@@ -17,8 +18,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /** Resolve the ?from&to window, defaulting to the running financial year. */
 function resolvePeriod(req: Request): { from: Date; to: Date } {
   const now = new Date();
-  const y = now.getFullYear();
-  const fyStartYear = now.getMonth() >= 3 ? y : y - 1; // FY starts 1 Apr
+  const fyStartYear = istFinancialYearStart(now); // FY starts 1 Apr, IST
   const defaultFrom = new Date(Date.UTC(fyStartYear, 3, 1, 0, 0, 0));
   const defaultTo = new Date(Date.UTC(fyStartYear + 1, 2, 31, 23, 59, 59));
 

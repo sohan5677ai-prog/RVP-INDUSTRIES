@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { inr } from './invoice.js';
+import { IST_TZ } from './istDate.js';
 import type { PartyStatementData } from '../controllers/ledger.controller.js';
 
 /**
@@ -36,7 +37,7 @@ const w = {
 
 function fmtDate(iso: string | Date): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso;
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
+  return d.toLocaleDateString('en-GB', { timeZone: IST_TZ, day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
 }
 
 function money(n: number): string {

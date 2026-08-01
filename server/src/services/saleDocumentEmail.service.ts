@@ -136,7 +136,7 @@ export async function sendEwbEmail(dispatchId: string) {
   });
   const html = `<p>Dear ${order.buyer.name},</p>` +
     `<p>Please find attached the e-way bill <strong>${dispatch.ewbNumber}</strong> for invoice ${dispatch.invoiceNumber}.</p>` +
-    `<p>Valid up to: ${dispatch.ewbValidUpto ? dispatch.ewbValidUpto.toLocaleDateString('en-GB') : ''}</p>` +
+    `<p>Valid up to: ${dispatch.ewbValidUpto ? dispatch.ewbValidUpto.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }) : ''}</p>` +
     `<p>Regards,<br/>${company.name}</p>`;
 
   return emailService.sendDocumentEmail({

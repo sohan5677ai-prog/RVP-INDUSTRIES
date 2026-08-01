@@ -1,6 +1,7 @@
 import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
+import { istParts } from '../lib/istDate.js';
 
 interface TaxproConfig {
   taxproGspId?: string | null;      // ASP id (aspid)           e.g. 1806883726
@@ -209,20 +210,29 @@ export class TaxproService {
     return token;
   }
 
-  /** Format Date -> DD/MM/YYYY as required by NIC. */
+  /**
+   * Format Date -> DD/MM/YYYY (IST) as required by NIC.
+   *
+   * Formatted in IST explicitly, not process-local time: Render runs the API in
+   * UTC, so `getDate()` printed a midnight-IST invoice date as the previous
+   * day. `parseNicDate` already pins the inbound side to +05:30; this is the
+   * matching outbound half.
+   */
   private static formatNICDate(date: Date): string {
-    const d = new Date(date);
-    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    const p = istParts(date);
+    return `${p.day}/${p.month}/${p.year}`;
   }
 
-  /** Format Date -> "DD/MM/YYYY hh:mm:ss AM/PM" as required by the printewb payload. */
+  /**
+   * Format Date -> "DD/MM/YYYY hh:mm:ss AM/PM" (IST) for the printewb payload.
+   *
+   * The TaxPro print service renders back exactly what we POST, so a
+   * process-local time here put the "official" e-way bill copy 5:30 behind
+   * reality — an EWB generated 12:37 IST printed as 07:07 AM.
+   */
   private static formatNICDateTime(date: Date): string {
-    const d = new Date(date);
-    let hours = d.getHours();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    const time = `${String(hours).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')} ${ampm}`;
-    return `${this.formatNICDate(d)} ${time}`;
+    const p = istParts(date);
+    return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}:${p.second} ${p.ampm}`;
   }
 
   /**

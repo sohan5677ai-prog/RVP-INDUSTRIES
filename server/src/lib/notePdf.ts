@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { inr, rupeesInWords } from './invoice.js';
+import { IST_TZ } from './istDate.js';
 
 export interface NotePdfData {
   kind: 'CREDIT' | 'DEBIT';
@@ -38,7 +39,7 @@ const RIGHT = PAGE.width - PAGE.margin;
 const W = RIGHT - LEFT;
 
 function fmtDate(d: Date): string {
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
+  return d.toLocaleDateString('en-GB', { timeZone: IST_TZ, day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
 }
 
 /** Render a credit/debit note as a PDF and resolve with the full Buffer. */

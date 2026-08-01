@@ -50,7 +50,6 @@ export default function ProfitLoss() {
   });
 
   const isProfit = (data?.totals.estimatedNetProfit ?? data?.totals.netProfit ?? 0) >= 0;
-  const isLockedProfit = (data?.totals.lockedNetProfit ?? data?.totals.netProfit ?? 0) >= 0;
 
   return (
     <div className="space-y-6">

@@ -222,8 +222,11 @@ export async function getProfitLoss(_req: Request, res: Response) {
     computePappuOrderMargins(),
   ]);
 
-  // Pappu P/L = Σ per-order margin (seed + production + freight + brokerage netted).
-  const pappuProfitLoss = r2(pappuMargins.reduce((s, m) => s + m.margin, 0));
+  // Estimated Pappu P/L = Σ per-order margin (all orders).
+  const pappuEstimatedProfit = r2(pappuMargins.reduce((s, m) => s + m.margin, 0));
+  // Locked Pappu P/L = Σ per-order margin (only orders whose costs are frozen/fully dispatched).
+  const lockedMargins = pappuMargins.filter((m) => m.costFrozenAt != null);
+  const pappuLockedProfit = r2(lockedMargins.reduce((s, m) => s + m.margin, 0));
 
   // Byproduct income = actually dispatched non-Pappu sales (GST is pass-through, excluded).
   const incomeByProduct = new Map<string, number>();
@@ -256,11 +259,18 @@ export async function getProfitLoss(_req: Request, res: Response) {
   const otherIncomeTotal = r2(incomeLines.reduce((s, l) => s + l.amount, 0));
 
   const huskPoolNet = r2(byproductIncome + otherIncomeTotal - overheadExpenses); // surplus + / deficit −
-  const netProfit = r2(pappuProfitLoss + huskPoolNet);
+  const estimatedNetProfit = r2(pappuEstimatedProfit + huskPoolNet);
+  const lockedNetProfit = r2(pappuLockedProfit + huskPoolNet);
 
   res.json({
     period: new Date().toISOString(),
-    pappu: { profitLoss: pappuProfitLoss, orders: pappuMargins.length },
+    pappu: {
+      profitLoss: pappuEstimatedProfit,
+      estimatedProfit: pappuEstimatedProfit,
+      lockedProfit: pappuLockedProfit,
+      orders: pappuMargins.length,
+      lockedOrders: lockedMargins.length,
+    },
     huskPool: {
       byproductIncome,
       byproducts,
@@ -272,8 +282,11 @@ export async function getProfitLoss(_req: Request, res: Response) {
       isDeficit: huskPoolNet < 0,
     },
     totals: {
-      netProfit,
-      isProfit: netProfit >= 0,
+      netProfit: estimatedNetProfit,
+      estimatedNetProfit,
+      lockedNetProfit,
+      isProfit: estimatedNetProfit >= 0,
+      isLockedProfit: lockedNetProfit >= 0,
     },
   });
 }

@@ -141,6 +141,11 @@ export default function PappuProfitLoss() {
     const brokerage = sum((m) => m.brokerage);
     const seedCost = sum((m) => m.seedCost);
     const margin = sum((m) => m.margin);
+    const lockedOrders = visible.filter((m) => m.costFrozenAt != null);
+    const lockedMargin = lockedOrders.reduce((s, m) => s + m.margin, 0);
+    const lockedRevenue = lockedOrders.reduce((s, m) => s + m.revenue, 0);
+    const lockedMarginPct = lockedRevenue > 0 ? (lockedMargin / lockedRevenue) * 100 : 0;
+
     const profitOrders = visible.filter((m) => m.margin >= 0);
     const lossOrders = visible.filter((m) => m.margin < 0);
     const best = visible.reduce<PappuMargin | null>((b, m) => (!b || m.margin > b.margin ? m : b), null);
@@ -158,6 +163,7 @@ export default function PappuProfitLoss() {
     return {
       xsKg, impliedOutTurnPct,
       soldKg, revenue, freight, brokerage, seedCost, margin,
+      lockedMargin, lockedCount: lockedOrders.length, lockedMarginPct,
       netRealization: sum((m) => m.netRealization),
       totalCost: freight + brokerage + seedCost,
       marginPct: revenue > 0 ? (margin / revenue) * 100 : 0,
@@ -184,15 +190,27 @@ export default function PappuProfitLoss() {
       />
 
       {/* Headline metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Net Profit / Loss</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estimated Profit</CardTitle>
             {t.margin >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}
           </CardHeader>
           <CardContent>
             <div className={cn('text-2xl font-bold', pnlClass(t.margin))}>{rupees(t.margin)}</div>
             <p className="text-[10px] text-muted-foreground mt-1">{t.marginPct.toFixed(2)}% margin · {rupees(t.marginPerKg)}/kg</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+              <Lock className="h-3.5 w-3.5 text-indigo-500" /> Locked Profit
+            </CardTitle>
+            {t.lockedMargin >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}
+          </CardHeader>
+          <CardContent>
+            <div className={cn('text-2xl font-bold', pnlClass(t.lockedMargin))}>{rupees(t.lockedMargin)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">{t.lockedCount} locked order{t.lockedCount === 1 ? '' : 's'} · {t.lockedMarginPct.toFixed(2)}% margin</p>
           </CardContent>
         </Card>
         <Card>

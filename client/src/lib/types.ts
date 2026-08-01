@@ -510,7 +510,13 @@ export interface BalanceSheet {
 }
 export interface ProfitLoss {
   period: string;
-  pappu: { profitLoss: number; orders: number };
+  pappu: {
+    profitLoss: number;
+    estimatedProfit?: number;
+    lockedProfit?: number;
+    orders: number;
+    lockedOrders?: number;
+  };
   huskPool: {
     byproductIncome: number;
     byproducts: { product: string; amount: number }[];
@@ -521,7 +527,13 @@ export interface ProfitLoss {
     net: number;
     isDeficit: boolean;
   };
-  totals: { netProfit: number; isProfit: boolean };
+  totals: {
+    netProfit: number;
+    estimatedNetProfit?: number;
+    lockedNetProfit?: number;
+    isProfit: boolean;
+    isLockedProfit?: boolean;
+  };
 }
 
 export interface OtherIncomeEntry {

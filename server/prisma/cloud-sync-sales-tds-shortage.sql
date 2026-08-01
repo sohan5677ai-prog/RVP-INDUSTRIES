@@ -1,5 +1,5 @@
 -- Cloud DB sync for the TDS / shortage / receipt-against-invoice features
--- (commits 2809941, 127b6ec, 95d35d0 — dispatch date, delivered date, receipt
+-- (commits 2809941, 127b6ec, 95d35d0 - dispatch date, delivered date, receipt
 -- shortage picker, TDS toggle, and TDS/shortage on the party ledger).
 --
 -- Background: the cloud Supabase DB is a pg_restore mirror and Render boots

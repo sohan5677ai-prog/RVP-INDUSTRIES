@@ -20,7 +20,7 @@ export function saleStatusLabel(s: SaleDisplayStatus): string {
 
 /** Full invoice value for a shipment. Must match the Sale Dues page exactly, since
  *  that page is where buyer receipts are recorded and allocated: it treats the
- *  invoice as `base + (gstAmount || 0)` — i.e. no GST is assumed when the dispatch
+ *  invoice as `base + (gstAmount || 0)` - i.e. no GST is assumed when the dispatch
  *  has no gstAmount. Adding a 5% GST fallback here (as before) made a dispatch that
  *  Sale Dues already settled at base look 5% short, so it wrongly kept showing an
  *  unpaid "Mark Paid" action on the product sales pages. */
@@ -49,7 +49,7 @@ export function settledByDispatch(receipts: SettleReceipt[] | undefined): Map<st
 
 /** A shipment is Paid once its receipts cover its full invoice value.
  *  Whole-rupee tolerance: bills round to whole rupees while receipt TDS/shortage
- *  can carry paise, so a sub-₹1 remainder is rounding noise — treat as settled.
+ *  can carry paise, so a sub-₹1 remainder is rounding noise - treat as settled.
  *  Shared by the Pappu/Husk sales pages AND the Sale Dues page so both agree. */
 export function isDispatchPaid(d: SaleDispatch, ratePerKg: number, settled: Map<string, number>): boolean {
   const got = settled.get(d.id) ?? 0;

@@ -11,7 +11,7 @@ import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
-// One flattened row per journal line, carrying the voucher context — the export
+// One flattened row per journal line, carrying the voucher context - the export
 // is a flat ledger, not the nested voucher cards shown on screen.
 type JournalRow = {
   date: string; voucher: string; reference: string;

@@ -1,4 +1,4 @@
-// Cached formatters — avoids re-constructing Intl.NumberFormat on every call
+// Cached formatters - avoids re-constructing Intl.NumberFormat on every call
 // (significant in tables with 100+ rows × multiple columns).
 const inFmt = new Intl.NumberFormat('en-IN');
 const inrFmt = new Intl.NumberFormat('en-IN', {

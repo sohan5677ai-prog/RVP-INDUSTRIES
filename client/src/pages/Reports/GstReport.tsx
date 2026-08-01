@@ -74,7 +74,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
         <PageHeader
           icon={Receipt}
           title="GST Report"
-          description="Output tax on sales and input tax credit on purchases — reconciled for your GSTR filing."
+          description="Output tax on sales and input tax credit on purchases - reconciled for your GSTR filing."
           actions={
             data && (
               <div className="flex flex-wrap items-center gap-2">
@@ -85,7 +85,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
         />
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Output tax on sales and input tax credit on purchases — reconciled for your GSTR filing.</p>
+          <p className="text-sm text-muted-foreground">Output tax on sales and input tax credit on purchases - reconciled for your GSTR filing.</p>
           <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
         </div>
       )}
@@ -106,7 +106,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
                 <div className="font-semibold text-foreground truncate">{data.company?.name ?? 'RVP Industries'}</div>
                 <div className="text-xs text-muted-foreground">
                   {data.company?.gstin ? <>GSTIN <span className="font-mono">{data.company.gstin}</span></> : 'GSTIN not set'}
-                  {data.company?.stateName ? ` · ${data.company.stateName} (${data.company.stateCode ?? '—'})` : ''}
+                  {data.company?.stateName ? ` · ${data.company.stateName} (${data.company.stateCode ?? '-'})` : ''}
                 </div>
               </div>
             </div>
@@ -164,7 +164,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
             {/* ── OUTPUT ── */}
             <TabsContent value="output" className="space-y-3">
               <div className="flex justify-end">
-                <ExportButtons filename={`GST-Output-${fyLabel(fy)}`} title="GST Output Tax — Sales" subtitle={period.label} columns={salesCols} rows={out.sales} />
+                <ExportButtons filename={`GST-Output-${fyLabel(fy)}`} title="GST Output Tax - Sales" subtitle={period.label} columns={salesCols} rows={out.sales} />
               </div>
               <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
                 <Table>
@@ -222,7 +222,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
             {/* ── INPUT ── */}
             <TabsContent value="input" className="space-y-3">
               <div className="flex justify-end">
-                <ExportButtons filename={`GST-Input-${fyLabel(fy)}`} title="GST Input Tax Credit — Purchases" subtitle={period.label} columns={purchaseCols} rows={inp.purchases} />
+                <ExportButtons filename={`GST-Input-${fyLabel(fy)}`} title="GST Input Tax Credit - Purchases" subtitle={period.label} columns={purchaseCols} rows={inp.purchases} />
               </div>
               <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
                 <Table>

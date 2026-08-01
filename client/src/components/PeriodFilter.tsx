@@ -11,7 +11,7 @@ const MONTHS = [
   'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar',
 ];
 
-/** The FY (start calendar year) that a date falls in — FY runs Apr–Mar. */
+/** The FY (start calendar year) that a date falls in - FY runs Apr–Mar. */
 function fyStartYear(d: Date): number {
   return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
 }

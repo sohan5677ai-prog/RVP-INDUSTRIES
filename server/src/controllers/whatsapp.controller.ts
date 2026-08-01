@@ -8,7 +8,7 @@ import { sendDispatchBundleWhatsApp } from '../services/dispatchWhatsapp.service
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 
 // ---------------------------------------------------------------------------
-// Inbound webhook (public — Fast2SMS calls this, no JWT)
+// Inbound webhook (public - Fast2SMS calls this, no JWT)
 // ---------------------------------------------------------------------------
 
 /** URL validation: some panels probe with GET; Meta-style probes send hub.challenge. */
@@ -96,7 +96,7 @@ async function processInboundEvent(rawBody: unknown) {
 // ---------------------------------------------------------------------------
 
 /**
- * A send is logged SENT the moment Fast2SMS's HTTP call returns OK — that only
+ * A send is logged SENT the moment Fast2SMS's HTTP call returns OK - that only
  * means Fast2SMS *accepted* the request. Whether WhatsApp actually delivered it
  * is reported later, on this webhook. Without handling it, a message that Meta
  * rejects (unapproved/paused template, undeliverable number) sits in the log as
@@ -106,7 +106,7 @@ type StatusEvent = { providerId: string | null; phone: string | null; status: st
 
 /** Terminal states that mean the recipient did NOT get the message. */
 const DELIVERY_FAILED = new Set(['failed', 'undelivered', 'rejected', 'error']);
-/** States that mean it's still on track — nothing to record beyond the existing SENT. */
+/** States that mean it's still on track - nothing to record beyond the existing SENT. */
 const DELIVERY_OK = new Set(['sent', 'accepted', 'delivered', 'read']);
 
 function asRecord(x: unknown): Record<string, unknown> | null {
@@ -121,7 +121,7 @@ function describeErrors(errs: unknown[]): string | null {
     const details = asRecord(r.error_data)?.details;
     return [r.code, r.title ?? r.message, typeof details === 'string' ? details : null]
       .filter(Boolean)
-      .join(' — ');
+      .join(' - ');
   });
   return parts.filter(Boolean).join(' | ') || null;
 }
@@ -135,7 +135,7 @@ function readStatusEntry(raw: Record<string, unknown>): StatusEvent | null {
   if (Array.isArray(raw.errors) && raw.errors.length > 0) {
     error = describeErrors(raw.errors);
   } else {
-    // Deliberately NOT probing `message` here — on flat payloads it's the message
+    // Deliberately NOT probing `message` here - on flat payloads it's the message
     // body as often as it is the failure reason.
     for (const key of ['error', 'error_message', 'reason', 'failure_reason', 'description']) {
       const v = raw[key];
@@ -164,8 +164,8 @@ function readStatusEntry(raw: Record<string, unknown>): StatusEvent | null {
 
 /**
  * Pull status events out of a webhook payload. Like `extractInbound`, the exact
- * Fast2SMS shape isn't documented — some accounts get Meta's envelope forwarded
- * verbatim, others a flattened object — so probe both.
+ * Fast2SMS shape isn't documented - some accounts get Meta's envelope forwarded
+ * verbatim, others a flattened object - so probe both.
  */
 function extractStatusEvents(body: unknown): StatusEvent[] {
   const root = asRecord(body);
@@ -203,7 +203,7 @@ function extractStatusEvents(body: unknown): StatusEvent[] {
 /**
  * Find the log row a status event refers to. Fast2SMS returns its own
  * `request_id` at send time while Meta's callback carries a `wamid`, so the id
- * often won't match — fall back to the most recent still-SENT outbound message
+ * often won't match - fall back to the most recent still-SENT outbound message
  * to that number.
  */
 async function findLogRowForStatus(ev: StatusEvent) {
@@ -236,14 +236,14 @@ async function applyStatusEvent(ev: StatusEvent) {
   const row = await findLogRowForStatus(ev);
   const reason = `Delivery failed (${ev.status})${ev.error ? `: ${ev.error}` : ''}`;
   if (!row) {
-    logger.warn(`[whatsapp] ${reason} — no matching log row (id=${ev.providerId}, phone=${ev.phone})`);
+    logger.warn(`[whatsapp] ${reason} - no matching log row (id=${ev.providerId}, phone=${ev.phone})`);
     return;
   }
   await prisma.whatsAppLog.update({
     where: { id: row.id },
     data: { status: 'FAILED', errorMessage: reason },
   });
-  logger.error(`[whatsapp] ${row.template ?? 'message'} to ${row.phone} — ${reason}`);
+  logger.error(`[whatsapp] ${row.template ?? 'message'} to ${row.phone} - ${reason}`);
 }
 
 /** Fast2SMS event receiver. Acknowledge immediately; parse in the background. */
@@ -269,7 +269,7 @@ async function processWebhookEvent(rawBody: unknown) {
 }
 
 /**
- * Run a scheduled WhatsApp job on demand (public, secret-guarded — so an external
+ * Run a scheduled WhatsApp job on demand (public, secret-guarded - so an external
  * cron can drive it despite Render's free-tier spin-down). Job name in the path:
  * `daily`, `weekly` or `dispatch-reminders`. Auth via CRON_SECRET (X-Cron-Secret
  * header or ?secret= query).
@@ -297,7 +297,7 @@ export async function listWhatsAppLogs(req: Request, res: Response) {
   res.json(logs);
 }
 
-const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h — a double-click must not spam the party
+const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h - a double-click must not spam the party
 
 /**
  * "Remind about pending loads" button on the Party Ledger: counts the lorries
@@ -306,7 +306,7 @@ const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h — a double-click must n
 export async function sendPartyReminder(req: Request, res: Response) {
   const party = await prisma.party.findUnique({ where: { id: req.params.partyId } });
   if (!party) throw new HttpError(404, 'Party not found');
-  if (!party.phone && !party.phone2) throw new HttpError(400, `${party.name} has no phone number on file — add one in Parties first`);
+  if (!party.phone && !party.phone2) throw new HttpError(400, `${party.name} has no phone number on file - add one in Parties first`);
 
   const lastAt = await whatsappService.lastReminderAt(party.id);
   if (lastAt && Date.now() - lastAt.getTime() < REMINDER_THROTTLE_MS) {
@@ -328,12 +328,12 @@ export async function sendPartyReminder(req: Request, res: Response) {
     .filter((p) => p.remaining > 0);
   const pendingLorries = pending.reduce((s, p) => s + p.remaining, 0);
   if (pendingLorries === 0) {
-    throw new HttpError(400, 'No pending lorries against this party — nothing to remind about');
+    throw new HttpError(400, 'No pending lorries against this party - nothing to remind about');
   }
   // Priced per-PO breakdown, price → lorries → (PO), e.g.
-  // "• ₹95/kg — 3 lorries (RVP/01)\n• ₹96/kg — 2 lorries (RVP/02)".
+  // "• ₹95/kg - 3 lorries (RVP/01)\n• ₹96/kg - 2 lorries (RVP/02)".
   const breakdown = pending
-    .map((p) => `• ₹${p.pricePerKg}/kg — ${p.remaining} lorr${p.remaining === 1 ? 'y' : 'ies'} (${p.poNumber ?? '-'})`)
+    .map((p) => `• ₹${p.pricePerKg}/kg - ${p.remaining} lorr${p.remaining === 1 ? 'y' : 'ies'} (${p.poNumber ?? '-'})`)
     .join('\n');
 
   const result = await whatsappService.sendReminder(

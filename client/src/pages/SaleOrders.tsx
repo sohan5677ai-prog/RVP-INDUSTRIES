@@ -465,7 +465,7 @@ export default function SaleOrders() {
 
               <FormField control={form.control} name="reminderDate" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Reminder — dispatch date (optional)</FormLabel>
+                  <FormLabel>Reminder - dispatch date (optional)</FormLabel>
                   <FormControl><Input type="date" {...field} /></FormControl>
                   <p className="text-[11px] text-muted-foreground">For advance orders. You'll be reminded to dispatch from 3 days before this date, every time you log in.</p>
                   <FormMessage />
@@ -474,7 +474,7 @@ export default function SaleOrders() {
 
               <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
                 <div className="flex justify-between"><span className="text-muted-foreground">Base ({toTonnes(weightKg).toFixed(2)} t × {rupees(rate)})</span><span className="font-medium">{base > 0 ? rupees(base) : '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST){gstExempt && <span className="ml-1 text-amber-600">— exempt</span>}</span><span className="font-medium">{gstExempt ? '-' : (gst > 0 ? rupees(gst) : '-')}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST){gstExempt && <span className="ml-1 text-amber-600">- exempt</span>}</span><span className="font-medium">{gstExempt ? '-' : (gst > 0 ? rupees(gst) : '-')}</span></div>
                 <div className="flex justify-between border-t pt-1.5"><span className="text-muted-foreground font-semibold">Value{gstExempt ? '' : ' (incl. GST)'}</span><span className="font-bold text-emerald-600">{value > 0 ? rupees(value) : '-'}</span></div>
               </div>
 

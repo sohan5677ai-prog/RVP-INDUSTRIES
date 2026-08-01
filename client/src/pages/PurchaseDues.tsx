@@ -45,7 +45,7 @@ interface OutstandingPurchase {
   id: string;
   // GRAIN = a verified stock-in purchase (FIFO-matched to payments).
   // DUST  = a pre-cleaner dust / tamarind byproduct purchase (matched to
-  //         payments only by a direct DUST:<id>:<mode> reference — never FIFO).
+  //         payments only by a direct DUST:<id>:<mode> reference - never FIFO).
   kind: 'GRAIN' | 'DUST';
   partyId: string;
   purchaseDate: Date;
@@ -85,7 +85,7 @@ const PURCHASE_DUES_COLUMNS: ExportColumn<OutstandingPurchase>[] = [
 export default function PurchaseDuesPage() {
   const qc = useQueryClient();
   const [payDialog, setPayDialog] = useState<PayDialogState | null>(null);
-  // Optional proof screenshot stored against the payment (no AI read here —
+  // Optional proof screenshot stored against the payment (no AI read here -
   // the amount and party are already known from the bill being settled).
   const [payProof, setPayProof] = useState<File | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -159,7 +159,7 @@ export default function PurchaseDuesPage() {
 
   const isLoading = loadingParties || loadingPurchases || loadingPayments || loadingDust;
 
-  // FIFO allocation across every supplier/purchase/payment — O(n²)-ish and must
+  // FIFO allocation across every supplier/purchase/payment - O(n²)-ish and must
   // be memoized so it doesn't recompute on every render (e.g. each keystroke in
   // the payment dialog, which only touches unrelated state).
   const { outstandingPurchases, totalBillingAll, totalPaymentsAll } = useMemo(() => {

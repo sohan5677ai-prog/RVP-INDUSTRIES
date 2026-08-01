@@ -133,7 +133,7 @@ export class TaxproService {
 
     for (const base of this.baseUrls(isSandbox)) {
       // Retry transient transport failures against the same host before moving
-      // on — important for sandbox, which has only a single base URL.
+      // on - important for sandbox, which has only a single base URL.
       for (let attempt = 0; attempt <= this.TRANSPORT_RETRIES; attempt++) {
         try {
           const res = await fetch(`${base}${path}`, {
@@ -166,7 +166,7 @@ export class TaxproService {
             // usually-transient server-side fault (not a payload problem). Make the
             // message actionable rather than surfacing NIC's cryptic text verbatim.
             if (json.ErrorDetails.some((e: any) => String(e.ErrorCode) === '5001')) {
-              msg = `NIC returned a temporary system error (5001). This is usually transient — please wait a moment and try again. [${msg}]`;
+              msg = `NIC returned a temporary system error (5001). This is usually transient - please wait a moment and try again. [${msg}]`;
             }
             if (json.ErrorDetails.some((e: any) => String(e.ErrorCode) === '1017')) {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings? [${msg}]`;
@@ -228,7 +228,7 @@ export class TaxproService {
    *
    * The TaxPro print service renders back exactly what we POST, so a
    * process-local time here put the "official" e-way bill copy 5:30 behind
-   * reality — an EWB generated 12:37 IST printed as 07:07 AM.
+   * reality - an EWB generated 12:37 IST printed as 07:07 AM.
    */
   private static formatNICDateTime(date: Date): string {
     const p = istParts(date);
@@ -239,7 +239,7 @@ export class TaxproService {
    * The seller's DISPATCH-FROM block, as configured in Settings → Invoice Setup.
    *
    * NIC/EWB keeps the dispatch point separate from the registered address, and
-   * `Loc`/`fromPlace` is the *town* the goods leave from (Punganur) — not the
+   * `Loc`/`fromPlace` is the *town* the goods leave from (Punganur) - not the
    * state, which is already carried by the state code. Each field falls back to
    * the registered company address so an unconfigured profile still works.
    */
@@ -295,9 +295,9 @@ export class TaxproService {
     // GST rate is configured per commodity in Settings (ProductTaxInfo.gstRate),
     // defaulting to 5%. NIC recomputes the tax as (AssVal * GstRt) and rejects any
     // mismatch (error 2235), so we compute the tax from the assessable value at
-    // that rate here — this is the source of truth and stays correct even when a
+    // that rate here - this is the source of truth and stays correct even when a
     // legacy dispatch row stored gstAmount as 0.
-    // A GST-exempt order is billed WITHOUT tax — force 0% so NIC generates the IRN
+    // A GST-exempt order is billed WITHOUT tax - force 0% so NIC generates the IRN
     // GST-free (and it matches the invoice/EWB PDFs, which also honor gstExempt).
     const gstRate = order.gstExempt ? 0 : (taxInfo?.gstRate != null ? Number(taxInfo.gstRate) : 5);
     const gstAmount = Math.round(baseAmount * gstRate) / 100; // = AssVal * GstRt%
@@ -483,13 +483,13 @@ export class TaxproService {
     const payload: Record<string, any> = {
       Irn: dispatch.irn,
       // A real distance is always sent (the route layer rejects 0). Submitting 0
-      // does work — NIC then computes it from the PIN codes — but it keeps the
+      // does work - NIC then computes it from the PIN codes - but it keeps the
       // figure to itself, and the print service can only render what we hold.
       Distance: Number(transportDetails.transDistance) || 0,
       TransMode: transMode,
     };
 
-    // Part-B (vehicle) — road movement only. For rail/air/ship the transport
+    // Part-B (vehicle) - road movement only. For rail/air/ship the transport
     // document (below) is the Part-B, and sending a vehicle number conflicts.
     if (isRoad && vehNo) {
       payload.VehNo = vehNo;
@@ -504,7 +504,7 @@ export class TaxproService {
     const transName = (transportDetails.transporterName || '').trim();
     if (transName.length >= 3) payload.TransName = transName;
 
-    // Transport document (Part-A) — required for rail/air/ship, optional for road.
+    // Transport document (Part-A) - required for rail/air/ship, optional for road.
     const transDocNo = (transportDetails.transDocNo || '').trim();
     if (transDocNo) payload.TransDocNo = transDocNo;
     const transDocDt = (transportDetails.transDocDt || '').trim();
@@ -556,7 +556,7 @@ export class TaxproService {
 
   /**
    * Builds the `printewb`/`printdetailewb` request body for a dispatch.
-   * This is the flat EWB-portal record shape (NOT the NIC e-invoice schema) —
+   * This is the flat EWB-portal record shape (NOT the NIC e-invoice schema) -
    * the ASP print service re-renders the government layout from these fields.
    */
   private static async buildEwbPrintPayload(dispatchId: string) {
@@ -569,7 +569,7 @@ export class TaxproService {
     // The ASP print service is a pure renderer of what we POST, and the NIC
     // e-invoice product gives us no way to read the portal's own figure back.
     // So an unrecorded distance would print "Approx Distance: 0 KM" on a
-    // government-format bill — which makes the printed copy invalid. Refuse to
+    // government-format bill - which makes the printed copy invalid. Refuse to
     // render it and say exactly how to fix it instead.
     if (!dispatch.ewbDistance) {
       throw new Error(
@@ -582,7 +582,7 @@ export class TaxproService {
     const buyer = order.buyer;
     const company = await getCompanyProfileRow();
     if (this.credsMissing(company)) {
-      throw new Error('TaxPro credentials are not configured — cannot fetch the official EWB PDF');
+      throw new Error('TaxPro credentials are not configured - cannot fetch the official EWB PDF');
     }
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
@@ -677,7 +677,7 @@ export class TaxproService {
           updMode: 'API',
           vehicleNo: dispatch.vehicleNumber || '',
           // The vehicle-details "From" column is the town the lorry loaded at,
-          // not the state — same dispatch place as the address block above.
+          // not the state - same dispatch place as the address block above.
           fromPlace: dispatchFrom.place,
           fromState: Number(sellerStateCode) || 0,
           tripshtNo: 0,
@@ -754,7 +754,7 @@ export class TaxproService {
 
   /**
    * Cancels E-Way Bill.
-   * NOTE: EWB *cancellation* is NOT part of the /eicore e-invoice pass-through —
+   * NOTE: EWB *cancellation* is NOT part of the /eicore e-invoice pass-through -
    * it lives under the separate `/ewaybillapi` path. Endpoint + payload shape
    * confirmed against TaxPro's official sandbox Postman collection (2026-07-25):
    * POST /ewaybillapi/dec/v1.03/ewayapi?action=CANEWB, body {ewbNo, cancelRsnCode, cancelRmrk}.

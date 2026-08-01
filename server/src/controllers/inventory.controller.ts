@@ -394,7 +394,7 @@ async function _computePappuOrderMargins() {
     const seedCost = frozen?.seedCost ?? Math.round(liveBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
 
     const revenue = Math.round(qty * rate * 100) / 100;
-    // Brokerage is deliberately NOT netted here — it is booked once, dispatch-
+    // Brokerage is deliberately NOT netted here - it is booked once, dispatch-
     // gated, as a Husk Pool overhead (flat ₹2000/dispatch, mirroring the
     // Brokerage Ledger/Dues reports). Netting it again per-order here would
     // double-count it against the same shipment.
@@ -442,7 +442,7 @@ async function _computePappuOrderMargins() {
 }
 
 export async function computePappuOrderMargins() {
-  // TTL is a safety net only — a successful mutation clears this cache (see the
+  // TTL is a safety net only - a successful mutation clears this cache (see the
   // invalidation middleware in routes/index.ts), so the longer window only speeds
   // up read-only navigation and never serves post-write stale margins.
   return withCache('pappu_order_margins', 120, _computePappuOrderMargins);

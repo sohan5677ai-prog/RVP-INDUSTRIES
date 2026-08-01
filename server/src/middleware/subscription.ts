@@ -7,7 +7,7 @@
 // - The DEVELOPER role (the vendor) always bypasses, so they can still get in
 //   to manage settings even while the deployment is locked.
 // - /auth, /subscription and /health are mounted BEFORE this gate, so the login
-//   and pay screens keep working while locked — they never reach here.
+//   and pay screens keep working while locked - they never reach here.
 
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from '../lib/logger.js';
@@ -26,7 +26,7 @@ export async function subscriptionGate(req: Request, res: Response, next: NextFu
       });
     }
   } catch (err) {
-    // Never hard-fail the whole API because the gate check errored — fall
+    // Never hard-fail the whole API because the gate check errored - fall
     // through and let the request proceed (fail open). The gate is a business
     // lock, not a security boundary.
     logger.error('subscriptionGate error:', err);

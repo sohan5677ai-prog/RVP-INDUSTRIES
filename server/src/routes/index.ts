@@ -36,7 +36,7 @@ const router = Router();
 
 // Public
 router.use('/auth', authRoutes);
-// Fast2SMS calls this from outside — no JWT. GET answers URL-validation probes.
+// Fast2SMS calls this from outside - no JWT. GET answers URL-validation probes.
 // No secret in the URL, so it needs its own limiter (the global apiLimiter is
 // per-route via router.use('/api', apiLimiter, ...) but generous 1000/15min
 // buckets are shared across all public+authed traffic).
@@ -63,7 +63,7 @@ router.use(subscriptionGate);
 // The heavy read aggregates (unified stock engine, pappu-order margins) are memoized
 // in-process. Any successful mutation can invalidate those figures, so bust the whole
 // compute cache after every non-GET that returns a 2xx. Centralizing it here means a
-// new write route can never forget to invalidate — and lets the TTL be longer (fast
+// new write route can never forget to invalidate - and lets the TTL be longer (fast
 // read-only navigation) without ever serving data a write just changed.
 router.use((req, res, next) => {
   const method = req.method;
@@ -75,7 +75,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// Buffered fully into memory before parsing, so cap both the size (was 20MB —
+// Buffered fully into memory before parsing, so cap both the size (was 20MB -
 // spreadsheets this route parses are never anywhere near that) and how often
 // one client can trigger it, to bound worst-case concurrent memory pressure.
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });

@@ -67,7 +67,7 @@ const WASTE_LOADING_PRODUCTS = new Set([
   'WASTE', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
 ]);
 
-// Flat ₹2,000 brokerage per dispatched shipment — same constant as the
+// Flat ₹2,000 brokerage per dispatched shipment - same constant as the
 // Brokerage Ledger/Dues reports (client/src/pages/BrokerageLedger.tsx).
 const FLAT_BROKERAGE = 2000;
 // "RVP" is the company's own-orders marker (not a real commission agent).
@@ -228,7 +228,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income / Gunny Sales) ──
       prisma.otherIncomeEntry.aggregate({ _sum: { amount: true } }),
       prisma.gunnySaleEntry.aggregate({ _sum: { amount: true } }),
-      // Flat ₹2000-per-dispatch brokerage, RVP (own orders) excluded — mirrors
+      // Flat ₹2000-per-dispatch brokerage, RVP (own orders) excluded - mirrors
       // the Brokerage Ledger/Dues reports exactly, so it only lands here once a
       // shipment actually dispatches (not at order-booking time).
       prisma.saleDispatch.findMany({
@@ -281,7 +281,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     const tpsBrokensPacking = manual['TPS_BROKENS_PACKING'] ?? 0;
     const tamarindByproductsPacking = manual['TAMARIND_BYPRODUCTS_PACKING'] ?? 0;
     const misc = manual['MISC'] ?? 0;
-    // NOTE: PAID entries settle the 20200 hamali payable (Dr payable / Cr cash) —
+    // NOTE: PAID entries settle the 20200 hamali payable (Dr payable / Cr cash) -
     // they are not an operating expense, so they are deliberately not summed here.
 
     // ── Static/Standalone Expenses ──────────
@@ -330,7 +330,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     const loanInterestUnabsorbed = Math.round((interestCapitalised - interestPaidToBank) * 100) / 100;
 
     // Brokerage: one flat ₹2000 per dispatched shipment whose order has a real
-    // (non-RVP) broker — mirrors the Brokerage Ledger/Dues reports exactly.
+    // (non-RVP) broker - mirrors the Brokerage Ledger/Dues reports exactly.
     const brokerage = brokerageDispatches.filter((d) => !isOwnBroker(d.saleOrder.broker?.name)).length * FLAT_BROKERAGE;
 
     const expenses = {
@@ -376,7 +376,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     }
 
     // ── Kata Income: the weighbridge fee collected across every lorry (purchase,
-    // dust buy, sale freight, byproduct transfer) — mirrors the Kata Report ledger.
+    // dust buy, sale freight, byproduct transfer) - mirrors the Kata Report ledger.
     // Purchase.kataFee is already exemption-aware (computed at StockIn time); the
     // rest are recomputed the same way the Kata Report does client-side.
     const companyVehicles = companyProfile?.companyVehicles;

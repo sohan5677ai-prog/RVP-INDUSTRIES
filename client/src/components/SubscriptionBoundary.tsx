@@ -1,6 +1,6 @@
 // Layout route that wraps the authenticated app. When the logged-in
 // (non-developer) user's subscription is expired it renders the full-screen
-// Paywall instead of the app. This is the *visible* half of the gate — the
+// Paywall instead of the app. This is the *visible* half of the gate - the
 // backend 402 is the real enforcement.
 //
 // It reacts to a "subscription:locked" window event too, so if access expires
@@ -56,7 +56,7 @@ export default function SubscriptionBoundary() {
         setAmount(s.amount || 0);
       })
       .catch(() => {
-        /* network / server error — fail open, don't lock on a hiccup */
+        /* network / server error - fail open, don't lock on a hiccup */
       })
       .finally(() => {
         if (alive) setChecked(true);
@@ -80,7 +80,7 @@ export default function SubscriptionBoundary() {
   // Avoid flashing the app before the status resolves.
   if (mustCheck && !checked) return null;
 
-  // Hard lock — no bypass allowed (expired or services stopped).
+  // Hard lock - no bypass allowed (expired or services stopped).
   if (locked) return <Paywall />;
 
   const showReminder =

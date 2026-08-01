@@ -242,7 +242,7 @@ export async function getProfitLoss(_req: Request, res: Response) {
   const byproductIncome = r2(byproducts.reduce((s, b) => s + b.amount, 0));
 
   // Overhead = the FULL itemized husk-pool operating costs, matching the dashboard
-  // recovery card line-for-line — including the pappu-flagged lines (Pappu Loading /
+  // recovery card line-for-line - including the pappu-flagged lines (Pappu Loading /
   // Roasting / Net), which per business instruction are deducted here as well.
   const overheadLedgers = HUSK_EXPENSE_META
     .map((m) => ({ code: m.key, name: m.label, amount: r2(huskPool.expenses[m.key]) }))
@@ -251,7 +251,7 @@ export async function getProfitLoss(_req: Request, res: Response) {
   const overheadExpenses = r2(overheadLedgers.reduce((s, l) => s + l.amount, 0));
 
   // Income tab streams (Kata Income, Hamali Company Profit, Gunny Sales, Other
-  // Income) — added to the husk pool as income, same as the byproduct sales.
+  // Income) - added to the husk pool as income, same as the byproduct sales.
   const incomeLines = HUSK_INCOME_META
     .map((m) => ({ code: m.key, name: m.label, amount: r2(huskPool.income[m.key]) }))
     .filter((l) => Math.abs(l.amount) >= 0.005)

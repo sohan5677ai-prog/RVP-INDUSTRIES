@@ -1,4 +1,4 @@
-// Thin wrapper over the Razorpay REST API. Deliberately no SDK — the rest of
+// Thin wrapper over the Razorpay REST API. Deliberately no SDK - the rest of
 // the subscription code uses built-in `fetch` + `crypto`, and we keep that
 // convention so there's one less dependency to audit/update.
 //
@@ -78,7 +78,7 @@ export async function createMonthlyPlan(amountPaise: number) {
       period: 'monthly',
       interval: 1,
       item: {
-        name: 'RVP Industries ERP — monthly licence',
+        name: 'RVP Industries ERP - monthly licence',
         amount: amountPaise, // paise
         currency: 'INR',
       },

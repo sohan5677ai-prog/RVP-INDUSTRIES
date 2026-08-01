@@ -40,7 +40,7 @@ export const chatLimiter = rateLimit({
 
 /**
  * Limiter for the public (unauthenticated) WhatsApp webhook. Fast2SMS is the
- * only expected caller, but the URL has no secret in it — each POST also
+ * only expected caller, but the URL has no secret in it - each POST also
  * triggers a DB write and, for text-shaped payloads, a Gemini call, so an
  * anonymous flood could both rack up LLM cost and fill WhatsAppLog. Capped
  * well above real traffic (a burst of inbound replies) but far below abuse

@@ -38,7 +38,7 @@ const ewbSchema = z.object({
   transporterId: z.string().optional(),
   transporterName: z.string().optional(),
   // Optional override. Left out (or 0), the server works the distance out
-  // itself — see resolveEwbDistance. It can never be filed as 0: NIC accepts a
+  // itself - see resolveEwbDistance. It can never be filed as 0: NIC accepts a
   // 0 and computes its own figure, but never tells us what it computed, and the
   // official print is rendered from OUR record, so the printed bill would read
   // "0 KM" and be invalid.
@@ -181,11 +181,11 @@ router.post(
       } catch (err) {
         // NIC rejects a distance that overshoots its own PIN-to-PIN figure by
         // more than 10%. Ours comes from OpenStreetMap routing, so on an odd
-        // route it can land outside that band — say so plainly, with the way out.
+        // route it can land outside that band - say so plainly, with the way out.
         const message = err instanceof Error ? err.message : String(err);
         if (distance.source === 'calculated' && /distance/i.test(message)) {
           throw new Error(
-            `NIC rejected the calculated distance of ${distance.km} km — ${message}. ` +
+            `NIC rejected the calculated distance of ${distance.km} km - ${message}. ` +
             `Use "Gen EWB" and type the distance the portal shows instead.`,
           );
         }
@@ -200,7 +200,7 @@ router.post(
         ewbDate: result.ewbDate,
         ewbValidUpto: result.ewbValidUpto,
         ewbStatus: 'GENERATED',
-        // The distance the bill was raised with — this is the figure the official
+        // The distance the bill was raised with - this is the figure the official
         // print renders as "Approx Distance", so it must never be left empty.
         ewbDistance: result.distance && result.distance > 0
           ? Math.round(result.distance)
@@ -213,7 +213,7 @@ router.post(
       include: { saleOrder: { include: { buyer: true } } },
     });
 
-    // The EWB is generated and saved at this point — a WhatsApp failure must not
+    // The EWB is generated and saved at this point - a WhatsApp failure must not
     // fail the request or make the caller think the EWB didn't happen. Report the
     // per-leg outcome alongside it and let the UI surface any leg that didn't land.
     let whatsapp = null;
@@ -240,7 +240,7 @@ router.post(
 // The approx distance this dispatch's E-Way Bill will be raised with, worked
 // out the same way the generation route works it out. Purely so the dialog can
 // show the operator what is about to be filed (and warn early on the rare route
-// that can't be resolved) — nothing here has to be answered.
+// that can't be resolved) - nothing here has to be answered.
 router.get(
   '/sale-dispatches/:id/ewaybill/distance-hint',
   asyncHandler(async (req, res) => {

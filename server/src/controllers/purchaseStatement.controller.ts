@@ -39,14 +39,14 @@ export async function buildPurchaseStatementData(
   const pricePerKg = Number(verification.pricePerKg);
 
   // GST is charged on the invoice billing amount, not on our recalculated
-  // payable — mirrors createVerification.
+  // payable - mirrors createVerification.
   const gstRate = 5;
   const gstAmount = po.hasGst
     ? Math.round(verification.billingWeightKg * pricePerKg * (gstRate / 100) * 100) / 100
     : 0;
 
   // Verifications recorded before the multi-row feature only carry the legacy
-  // single discountType/discountValue pair — rebuild the equivalent row so the
+  // single discountType/discountValue pair - rebuild the equivalent row so the
   // printed breakdown still adds up to the stored payable.
   let qualityAdjustments = parseQualityAdjustments(verification.qualityAdjustments);
   if (!qualityAdjustments.length && purchase.discountType && Number(purchase.discountValue) > 0) {
@@ -103,7 +103,7 @@ export async function buildPurchaseStatementData(
   };
 }
 
-/** GET /verifications/:id/statement.pdf — the same sheet the party gets on WhatsApp. */
+/** GET /verifications/:id/statement.pdf - the same sheet the party gets on WhatsApp. */
 export async function downloadPurchaseStatementPdf(req: Request, res: Response) {
   const data = await buildPurchaseStatementData(req.params.id);
   if (!data) throw new HttpError(404, 'Verification not found');

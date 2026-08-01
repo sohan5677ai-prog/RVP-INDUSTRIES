@@ -152,7 +152,7 @@ export default function LorryReceiptView() {
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
           <span className="ml-2 flex items-center gap-1 text-sm font-semibold text-[#1a4a99]">
-            <FileText className="h-4 w-4" /> Surya Road Lines — Lorry Receipt (GC)
+            <FileText className="h-4 w-4" /> Surya Road Lines - Lorry Receipt (GC)
           </span>
         </div>
         <Button size="sm" className="bg-[#1a4a99] hover:bg-[#153c80] text-white" onClick={() => window.print()}>

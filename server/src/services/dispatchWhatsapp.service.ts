@@ -25,7 +25,7 @@ export type DispatchWhatsAppResult = {
 
 /**
  * Page 2 of the bundle: the **official** government-format E-Way Bill, fetched
- * from TaxPro's ASP print service (`printdetailewb`) — the same document the EWB
+ * from TaxPro's ASP print service (`printdetailewb`) - the same document the EWB
  * portal issues, which is what a checkpost officer expects to be shown. Our
  * in-house `renderEwbPdf` replica is only the fallback.
  *
@@ -34,7 +34,7 @@ export type DispatchWhatsAppResult = {
  * `GSP503: This feature is available only in Production`), and it is a pure
  * renderer of the record we POST rather than a NIC lookup.
  *
- * Being a network call, it can fail — and by then the E-Way Bill already exists
+ * Being a network call, it can fail - and by then the E-Way Bill already exists
  * at NIC, so failing the send would cost the buyer their paperwork over a print
  * hiccup. Fall back to the replica and log it rather than throwing.
  */
@@ -49,7 +49,7 @@ async function renderBundleEwbPdf(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(
-      `[dispatch-whatsapp] official EWB print failed for ${dispatch.ewbNumber} — attaching the in-house replica instead: ${message}`,
+      `[dispatch-whatsapp] official EWB print failed for ${dispatch.ewbNumber} - attaching the in-house replica instead: ${message}`,
     );
     return renderEwbPdf({
       company: { ...pdfData.company, pincode: company.pincode },
@@ -83,8 +83,8 @@ async function renderBundleEwbPdf(
 
 /**
  * The dispatch bundle for one lorry: the buyer (and the broker, when the order
- * came through a real one) gets the tax-invoice PDF — with the E-Way Bill merged
- * onto it when one exists — plus the driver's details. The driver himself is
+ * came through a real one) gets the tax-invoice PDF - with the E-Way Bill merged
+ * onto it when one exists - plus the driver's details. The driver himself is
  * messaged at dispatch time, not here; his leg in the result is read back from
  * the log so the caller still sees all three outcomes.
  *
@@ -98,7 +98,7 @@ async function renderBundleEwbPdf(
 export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<DispatchWhatsAppResult> {
   const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
 
-  // A broker named "RVP" (or no broker) means it's our own order — the buyer is
+  // A broker named "RVP" (or no broker) means it's our own order - the buyer is
   // messaged directly with no broker reference; otherwise the buyer's copy names
   // the broker and the broker gets their own greeting copy.
   const broker = order.brokerId
@@ -113,11 +113,11 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   const invoiceBuffer = await renderInvoicePdf(pdfData);
   const hasEwb = !!(dispatch.ewbNumber && dispatch.ewbDate && dispatch.ewbValidUpto);
   // Page 2 is an official E-Way Bill: without a recorded distance it would go to
-  // the buyer showing 0 KM. Stop here rather than send an invalid document — the
+  // the buyer showing 0 KM. Stop here rather than send an invalid document - the
   // caller surfaces this, the distance gets saved, and the bundle is re-sent.
   if (hasEwb && !dispatch.ewbDistance) {
     throw new Error(
-      `E-Way Bill ${dispatch.ewbNumber} has no approx distance recorded — the attached bill would show 0 KM. ` +
+      `E-Way Bill ${dispatch.ewbNumber} has no approx distance recorded - the attached bill would show 0 KM. ` +
       `Save the distance on the E-Way Bill page, then send the bundle again.`,
     );
   }
@@ -143,7 +143,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     error: r.ok ? null : r.error ?? null,
   });
 
-  // Party (buyer) — always. Includes the broker reference when there's a real broker.
+  // Party (buyer) - always. Includes the broker reference when there's a real broker.
   const buyerPhones = [order.buyer.phone, order.buyer.phone2].filter(Boolean) as string[];
   const partyResult = buyerPhones.length > 0
     ? await whatsappService.sendDispatchToParty({
@@ -161,7 +161,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
       })
     : { ok: false, skipped: true, error: `${order.buyer.name} has no phone number on file` };
 
-  // Broker — only when the order came through a real broker with a phone on file.
+  // Broker - only when the order came through a real broker with a phone on file.
   let brokerResult: { ok: boolean; skipped?: boolean; error?: string } | null = null;
   if (brokerName && broker?.phone) {
     brokerResult = await whatsappService.sendDispatchBundle({
@@ -181,7 +181,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     brokerResult = { ok: false, skipped: true, error: `${broker!.name} has no phone number on file` };
   }
 
-  // Driver — NOT sent from here. He already got the buyer's name, phone and maps
+  // Driver - NOT sent from here. He already got the buyer's name, phone and maps
   // link the moment the dispatch was created (createDispatch in sale.controller),
   // which is when he actually needs them; the invoice bundle runs hours later,
   // once the IRN/EWB exist. Sending again here only duplicated the message and
@@ -189,7 +189,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   // the toast still accounts for all three legs.
   const driverLeg = await driverLegFromLog(dispatch.id, dispatch.driverPhone);
 
-  // Internal copy — every member in Settings → "Dispatch & alert recipients" gets
+  // Internal copy - every member in Settings → "Dispatch & alert recipients" gets
   // the very same paperwork the buyer got: the buyer's template, the buyer's
   // wording, the combined Invoice + EWB PDF. It's the office's own record of what
   // went out, so it deliberately mirrors the party copy rather than reading as an alert.
@@ -220,8 +220,8 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
  * The internal copy of the party bundle, sent to every member configured in
  * Company Settings → "Dispatch & alert recipients" (falling back to the single
  * owner number when that list is empty). Members already on the buyer's or
- * broker's row are dropped — they've had the bundle once already. Returns null —
- * reported as `na` — when that leaves nobody to copy. One aggregate leg is
+ * broker's row are dropped - they've had the bundle once already. Returns null -
+ * reported as `na` - when that leaves nobody to copy. One aggregate leg is
  * reported for the whole list: `sent` if it reached at least one member.
  */
 async function sendInternalCopy(args: {
@@ -272,7 +272,7 @@ async function driverLegFromLog(dispatchId: string, driverPhone: string | null):
     select: { status: true, errorMessage: true },
   });
   if (!row) {
-    return { status: 'skipped', error: 'No driver message on record — the driver is messaged when the dispatch is created' };
+    return { status: 'skipped', error: 'No driver message on record - the driver is messaged when the dispatch is created' };
   }
   if (row.status === 'SENT') return { status: 'sent', error: null };
   return { status: row.status === 'SKIPPED' ? 'skipped' : 'failed', error: row.errorMessage ?? null };

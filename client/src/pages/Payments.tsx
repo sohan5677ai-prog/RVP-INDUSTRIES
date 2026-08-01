@@ -61,7 +61,7 @@ const PAYMENT_TYPES: { value: PaymentType; label: string }[] = [
 const COUNTERPARTY_TYPES: PaymentType[] = ['SUPPLIER', 'TRANSPORTER_INWARD', 'TRANSPORTER_OUTWARD', 'BROKER', 'HAMALI'];
 
 // Payments created from a detail page (Gunny Bags / Electricity / Maintenance /
-// Drawings). They're read-only here — edit or delete them on their own page so
+// Drawings). They're read-only here - edit or delete them on their own page so
 // both sides stay in sync.
 const MANAGED_ELSEWHERE: Partial<Record<PaymentType, string>> = {
   GUNNY_BAGS: 'Gunny Bags page',
@@ -313,7 +313,7 @@ export default function PaymentsPage() {
                   <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">{rupees(p.amount)}</TableCell>
                   <TableCell className="text-right">
                     {managedIn ? (
-                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>—</span>
+                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>-</span>
                     ) : (
                       <Button
                         variant="ghost"
@@ -417,7 +417,7 @@ export default function PaymentsPage() {
               <div className="space-y-2">
                 <Label htmlFor="payee">Paid To / Payee</Label>
                 <Input id="payee" value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="e.g. Shabri Reddy, APSPDCL, labour contractor" />
-                <p className="text-[10px] text-muted-foreground">Optional — the person or party who received this payment.</p>
+                <p className="text-[10px] text-muted-foreground">Optional - the person or party who received this payment.</p>
               </div>
             )}
 

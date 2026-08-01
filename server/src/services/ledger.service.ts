@@ -11,7 +11,7 @@ export interface JournalLineInput {
 
 /**
  * Direct-cash expense (and drawings) payment categories. Each debits its own
- * ledger head — so the Profit & Loss report shows a separate line per category —
+ * ledger head - so the Profit & Loss report shows a separate line per category -
  * and credits Bank/Cash. Unlike SUPPLIER/TRANSPORTER/BROKER (which settle an
  * existing payable), these book the expense at the moment cash goes out.
  * The account is upserted on first use, so no reseed is required.
@@ -46,8 +46,8 @@ export const PAYMENT_TYPES = [
 ] as [string, ...string[]];
 
 /**
- * Direct-cash income receipt categories. Each credits its own revenue head — so
- * the Profit & Loss report shows a separate line per income stream — and debits
+ * Direct-cash income receipt categories. Each credits its own revenue head - so
+ * the Profit & Loss report shows a separate line per income stream - and debits
  * Bank/Cash. Unlike BUYER (which settles an outstanding receivable), these book
  * the income at the moment cash comes in. Accounts upsert on first use.
  */
@@ -956,7 +956,7 @@ export class LedgerService {
    * Create a Payment row + its ledger posting for an entry that originates on a
    * detail page (Gunny Bags, Electricity, Maintenance, Drawings). The journal
    * `reference` is a caller-supplied key (e.g. `GUNNYBAG-<id>`) so the owning
-   * page can reverse it on delete — deleting that journal entry cascades the
+   * page can reverse it on delete - deleting that journal entry cascades the
    * Payment away, so no extra link column is needed. The Payment then shows up
    * on the Payments page and in the main P&L automatically.
    */

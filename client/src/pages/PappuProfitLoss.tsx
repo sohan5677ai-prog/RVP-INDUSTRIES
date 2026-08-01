@@ -330,11 +330,11 @@ export default function PappuProfitLoss() {
                         <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
                         <span className="text-muted-foreground whitespace-nowrap">{shortDate(m.saleDate)}</span>
                         {m.costFrozenAt ? (
-                          <span title="Fully shipped — seed, freight and production cost are pinned to what backed this order. Later purchases, verifications or rate changes cannot move it.">
+                          <span title="Fully shipped - seed, freight and production cost are pinned to what backed this order. Later purchases, verifications or rate changes cannot move it.">
                             <Lock className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-label="Costs frozen" />
                           </span>
                         ) : (
-                          <span title="Still open — this margin is a projection and will move as stock arrives. It freezes when the order is fully dispatched.">
+                          <span title="Still open - this margin is a projection and will move as stock arrives. It freezes when the order is fully dispatched.">
                             <LockOpen className="h-3 w-3 shrink-0 text-amber-500/70" aria-label="Costs still live" />
                           </span>
                         )}

@@ -30,7 +30,7 @@ async function main() {
     for (const d of so.dispatches) {
       const ref = `SALE-${d.id}`;
       const existing = await prisma.journalEntry.findFirst({ where: { reference: ref } });
-      if (existing) { console.log(`SKIP ${d.invoiceNumber} — ${ref} already posted`); continue; }
+      if (existing) { console.log(`SKIP ${d.invoiceNumber} - ${ref} already posted`); continue; }
 
       const base = Math.round(d.weightKg * Number(so.ratePerKg) * 100) / 100;
       await prisma.$transaction(async (tx) => {

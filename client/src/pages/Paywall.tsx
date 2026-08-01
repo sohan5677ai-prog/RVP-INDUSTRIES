@@ -1,5 +1,5 @@
 // Full-screen lock shown when the monthly subscription is expired. This is
-// only the visible layer — the backend already rejects every protected API
+// only the visible layer - the backend already rejects every protected API
 // call with 402, so the app is genuinely unusable until a verified Razorpay
 // payment (or a developer override) extends access.
 
@@ -63,7 +63,7 @@ export default function Paywall() {
       handler: async (response: unknown) => {
         try {
           await api('/subscription/verify', { method: 'POST', body: response });
-          // Verified server-side — reload straight into the app.
+          // Verified server-side - reload straight into the app.
           window.location.reload();
         } catch (e) {
           setError(getErrorMessage(e) || 'Payment could not be verified. Contact the vendor.');

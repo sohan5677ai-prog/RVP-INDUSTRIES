@@ -1,4 +1,4 @@
-// Party "Statement of Account" — a proper printed accounting document.
+// Party "Statement of Account" - a proper printed accounting document.
 //
 // The generic table exporters in lib/export.ts dump a grid; a statement that a
 // supplier or buyer actually receives needs a letterhead, both parties' details,
@@ -7,7 +7,7 @@
 // contained A4 HTML document and opens it in a new tab, where the browser's
 // print dialog turns it into a PDF (same route as the Purchase Statement page).
 //
-// Rendering in the browser — instead of jsPDF — also fixes the ₹ glyph: jsPDF's
+// Rendering in the browser - instead of jsPDF - also fixes the ₹ glyph: jsPDF's
 // built-in Helvetica is WinAnsi-only and prints U+20B9 as garbage.
 
 import type { Party, PartyLedgerSummary, PartyLedgerTxn, LedgerKind } from './types';
@@ -47,7 +47,7 @@ const numFmt = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
 /** Amount with Indian grouping and two decimals; blank for zero. */
 const amt = (n: number | null | undefined): string => (n ? inr(n) : '');
 const amt0 = (n: number): string => inr(n);
-/** "Rupees Four Lakh …" — the invoice helper's "INR" prefix reads oddly on a statement. */
+/** "Rupees Four Lakh …" - the invoice helper's "INR" prefix reads oddly on a statement. */
 const words = (n: number): string => rupeesInWords(Math.abs(n)).replace(/^INR /, 'Rupees ');
 
 function longDate(iso: string | Date): string {
@@ -85,7 +85,7 @@ const KIND_TONE: Record<LedgerKind, string> = {
 
 /**
  * Tally-style narration line ("Being …") assembled from whatever the voucher
- * carries — invoice, lorry, weight, rate, UTR. Kept as one sentence so it reads
+ * carries - invoice, lorry, weight, rate, UTR. Kept as one sentence so it reads
  * naturally under the particulars.
  */
 function narration(t: PartyLedgerTxn): string {
@@ -124,7 +124,7 @@ function narration(t: PartyLedgerTxn): string {
     case 'CREDIT_NOTE':
       bits.push('Being credit note issued');
       if (t.invoiceNumber) bits.push(`against invoice no. ${t.invoiceNumber}`);
-      if (t.reference) bits.push(`— ${t.reference}`);
+      if (t.reference) bits.push(`- ${t.reference}`);
       break;
     case 'TDS':
       bits.push('Being TDS deducted at source');
@@ -183,8 +183,8 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
   const periodDebit = txns.reduce((s, t) => s + t.debit, 0);
   const periodCredit = txns.reduce((s, t) => s + t.credit, 0);
 
-  const fromLabel = o.fromDate ? longDate(o.fromDate) : txns.length ? longDate(txns[0].date) : '—';
-  const toLabel = o.toDate ? longDate(o.toDate) : txns.length ? longDate(txns[txns.length - 1].date) : '—';
+  const fromLabel = o.fromDate ? longDate(o.fromDate) : txns.length ? longDate(txns[0].date) : '-';
+  const toLabel = o.toDate ? longDate(o.toDate) : txns.length ? longDate(txns[txns.length - 1].date) : '-';
 
   const companyName = company?.name ?? 'RVP INDUSTRIES';
   const companyAddr = [company?.address?.replace(/\n/g, ', '), company?.pincode].filter(Boolean).join(' - ');
@@ -194,7 +194,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
   const partyPhones = [party.phone, party.phone2].filter(Boolean).join(' / ');
 
   const closingLabel = closing === 0
-    ? 'Account settled — nil balance'
+    ? 'Account settled - nil balance'
     : closing > 0
       ? (party.type === 'BUYER' ? 'Balance receivable from party' : 'Balance recoverable from party')
       : 'Balance payable to party';
@@ -241,7 +241,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Statement of Account — ${esc(party.name)}</title>
+<title>Statement of Account - ${esc(party.name)}</title>
 <style>
   :root{
     --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --hair:#d1d5db;
@@ -415,7 +415,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
       <div class="panel-h" style="margin-top:8px">Account Status</div>
       ${kv('Ledger A/C', party.name)}
       ${kv('Vouchers', String(txns.length))}
-      ${kv('Last Entry', summary.lastTxnDate ? longDate(summary.lastTxnDate) : '—')}
+      ${kv('Last Entry', summary.lastTxnDate ? longDate(summary.lastTxnDate) : '-')}
     </div>
     <div class="panel">
       <div class="panel-h">Remit Payments To</div>
@@ -470,7 +470,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="5">Total for the period — ${txns.length} voucher(s)</td>
+        <td colspan="5">Total for the period - ${txns.length} voucher(s)</td>
         <td class="c-num">${amt0(periodDebit)}</td>
         <td class="c-num">${amt0(periodCredit)}</td>
         <td class="c-num">${balText(closing)}</td>
@@ -517,7 +517,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
 
   <div class="foot">
     <span>${esc(companyName)} &nbsp;·&nbsp; Statement of Account &nbsp;·&nbsp; ${esc(party.name)}</span>
-    <span>Computer-generated — no signature required &nbsp;·&nbsp; ${esc(stamp())}</span>
+    <span>Computer-generated - no signature required &nbsp;·&nbsp; ${esc(stamp())}</span>
   </div>
 </div>
 <script>
@@ -530,7 +530,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
 /**
  * Opens the statement in a new tab and fires the print dialog (Save as PDF).
  * Served from a Blob URL rather than document.write so the UTF-8 charset is
- * honoured — otherwise ₹ arrives as mojibake.
+ * honoured - otherwise ₹ arrives as mojibake.
  */
 export function openPartyStatement(o: PartyStatementOptions): void {
   const html = buildPartyStatementHtml(o);
@@ -538,7 +538,7 @@ export function openPartyStatement(o: PartyStatementOptions): void {
   const win = window.open(url, '_blank');
   if (!win) {
     URL.revokeObjectURL(url);
-    throw new Error('Pop-up blocked — allow pop-ups for this site to download the statement.');
+    throw new Error('Pop-up blocked - allow pop-ups for this site to download the statement.');
   }
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

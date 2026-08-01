@@ -589,7 +589,7 @@ export default function StockByPrice() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Weighted Average Cost — the blended average purchase price of black seed across all (or eligible) price bands">Weighted Avg</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Weighted Average Cost - the blended average purchase price of black seed across all (or eligible) price bands">Weighted Avg</CardTitle>
             <Tag className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
@@ -624,7 +624,7 @@ export default function StockByPrice() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Pappu (in MT) already promised/allocated to sale orders — this is how much pappu has been committed to buyers">Committed Orders</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" title="Pappu (in MT) already promised/allocated to sale orders - this is how much pappu has been committed to buyers">Committed Orders</CardTitle>
             <Factory className="h-4 w-4 text-rose-500" />
           </CardHeader>
           <CardContent>

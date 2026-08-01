@@ -1,8 +1,8 @@
 /**
  * India-fixed date handling.
  *
- * Every date this ERP derives or prints — invoice and PO numbers, e-way bills,
- * statements, WhatsApp and Slack messages — is an IST business date. But
+ * Every date this ERP derives or prints - invoice and PO numbers, e-way bills,
+ * statements, WhatsApp and Slack messages - is an IST business date. But
  * `getDate()`/`getHours()` and a bare `toLocaleDateString()` read the *process*
  * clock, which is IST on the office machines and UTC on Render. That 5:30 gap
  * printed e-way bills 5½ hours early, and can push any midnight-IST timestamp

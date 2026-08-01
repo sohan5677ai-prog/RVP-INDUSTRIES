@@ -207,7 +207,7 @@ export async function createStockIn(req: Request, res: Response) {
   const rvpSecondWeightKg = data.rvpSecondWeightKg ?? 0;
   const rvpKataKg = rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0;
 
-  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // Upload before the transaction starts - network I/O shouldn't hold a DB
   // transaction open.
   const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : "";
 
@@ -244,7 +244,7 @@ export async function createStockIn(req: Request, res: Response) {
     return created;
   });
 
-  // WhatsApp the party that their lorry has been received — fire-and-forget.
+  // WhatsApp the party that their lorry has been received - fire-and-forget.
   void whatsappService.notifyStockIn(
     { id: stockIn.id, lorryNumber: stockIn.lorryNumber, arrivalDate: stockIn.arrivalDate },
     { poNumber: po.poNumber },
@@ -281,7 +281,7 @@ export async function createUrpStockIn(req: Request, res: Response) {
   // With no net it stays at stock-in.
   const willRecordPurchase = rvpKataKg > 0;
 
-  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // Upload before the transaction starts - network I/O shouldn't hold a DB
   // transaction open.
   const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : "";
 

@@ -8,7 +8,7 @@ import { computeBuyerDues, invoiceListText, topPendingText } from '../services/s
  * Scheduled WhatsApp jobs (use cases 7, 8, 9, 10). Runs in-process via node-cron
  * in Asia/Kolkata time. Every job is also callable on demand (see runDailyJobs /
  * runWeeklyJobs, exposed as secret-guarded endpoints) so it can be triggered
- * manually or by an external cron — a useful fallback since Render free-tier
+ * manually or by an external cron - a useful fallback since Render free-tier
  * spins down when idle and an in-process timer can miss its window.
  *
  * Idempotency: each owner digest is keyed by day/week in WhatsAppLog, and buyer
@@ -35,7 +35,7 @@ function fmtShort(d: Date): string {
 }
 
 // ---------------------------------------------------------------------------
-// #10 — Owner daily outstanding-dues digest
+// #10 - Owner daily outstanding-dues digest
 // ---------------------------------------------------------------------------
 async function runOwnerDuesDigest() {
   const dayKey = istDayKey();
@@ -53,7 +53,7 @@ async function runOwnerDuesDigest() {
 }
 
 // ---------------------------------------------------------------------------
-// #7 — Buyer sales-dues reminders (only overdue buyers, throttled)
+// #7 - Buyer sales-dues reminders (only overdue buyers, throttled)
 // ---------------------------------------------------------------------------
 async function runBuyerDuesReminders() {
   const portfolio = await computeBuyerDues();
@@ -70,7 +70,7 @@ async function runBuyerDuesReminders() {
 }
 
 // ---------------------------------------------------------------------------
-// #8 — Owner deferred-dispatch reminders
+// #8 - Owner deferred-dispatch reminders
 // ---------------------------------------------------------------------------
 async function runDeferredDispatchReminders() {
   const todayKey = istDayKey();
@@ -95,7 +95,7 @@ async function runDeferredDispatchReminders() {
 }
 
 // ---------------------------------------------------------------------------
-// #9 — Owner weekly summary
+// #9 - Owner weekly summary
 // ---------------------------------------------------------------------------
 async function runWeeklySummary() {
   const start = daysAgo(7);
@@ -144,7 +144,7 @@ export async function runWeeklyJobs() {
   }
 }
 
-/** Just the deferred-dispatch reminders (#8) — exposed separately for testing. */
+/** Just the deferred-dispatch reminders (#8) - exposed separately for testing. */
 export async function runDispatchReminderJob() {
   try {
     await runDeferredDispatchReminders();
@@ -171,9 +171,9 @@ export function registerWhatsappCron() {
     logger.info('[whatsapp-cron] disabled (set WHATSAPP_CRON_ENABLED=true to enable)');
     return;
   }
-  // Daily at 09:00 IST — dues digest, buyer reminders, deferred-dispatch reminders.
+  // Daily at 09:00 IST - dues digest, buyer reminders, deferred-dispatch reminders.
   cron.schedule('0 9 * * *', () => { void runDailyJobs(); }, { timezone: TZ });
-  // Weekly on Monday at 08:00 IST — owner business summary.
+  // Weekly on Monday at 08:00 IST - owner business summary.
   cron.schedule('0 8 * * 1', () => { void runWeeklyJobs(); }, { timezone: TZ });
   logger.info('[whatsapp-cron] scheduled (daily 09:00, weekly Mon 08:00, IST)');
 }

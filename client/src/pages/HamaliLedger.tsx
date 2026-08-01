@@ -100,7 +100,7 @@ interface HamaliEntry {
   pl: number;
 }
 
-// A single row of the combined "Hamali Disbursements & Charges" table — either a
+// A single row of the combined "Hamali Disbursements & Charges" table - either a
 // derived HamaliEntry (purchase/sale/transfer) or a manually recorded charge,
 // normalized to one shape so both kinds can share one sorted, paginated table.
 interface UnifiedRow {
@@ -198,7 +198,7 @@ export default function HamaliLedger() {
     queryFn: () => api<HamaliVerification[]>('/hamali-verifications'),
   });
 
-  // Crew-settlement payments (type HAMALI) — drive the Payables status and the
+  // Crew-settlement payments (type HAMALI) - drive the Payables status and the
   // debit side of the crew ledger. Fetch the full history (?all=true) so older
   // settlements aren't dropped by the server's default 100-row cap.
   const { data: payments } = useQuery({
@@ -290,7 +290,7 @@ export default function HamaliLedger() {
       api<HamaliVerification>('/hamali-verifications', { method: 'POST', body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hamali-verifications'] });
-      toast.success('Squared off — data cross-verified with crew');
+      toast.success('Squared off - data cross-verified with crew');
       setSquareNote('');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -518,7 +518,7 @@ export default function HamaliLedger() {
   const manualFilteredOutstanding = manualFilteredCharged - manualFilteredPaid;
   const chargeFilterActive = chargeFilter !== 'ALL' || chargeSearch.trim() !== '';
 
-  // Combined "Hamali Disbursements & Charges" table — derived entries and
+  // Combined "Hamali Disbursements & Charges" table - derived entries and
   // manually recorded charges merged into one list, sorted by date, so the
   // page shows a single section instead of two separate tables.
   const unifiedRows: UnifiedRow[] = useMemo(() => {
@@ -591,7 +591,7 @@ export default function HamaliLedger() {
 
   // Crew payable across the currently filtered rows (Hamali view metric). This
   // now also folds in the Recorded Charges (bag cutting, pappu net, misc)
-  // net of amounts already paid to the crew — so the tile reflects the FULL crew
+  // net of amounts already paid to the crew - so the tile reflects the FULL crew
   // dues, not just the derived purchase/sale/transfer shares. Manual charges carry
   // no party, so they're only added when no party filter/search is narrowing the
   // view (otherwise the derived-only figure stays consistent with the filter).
@@ -650,9 +650,9 @@ export default function HamaliLedger() {
   // the earliest crew due (so the first period spans from the very beginning).
   const nextPeriodStart = verifiedThroughDay ? addDay(verifiedThroughDay) : earliestCrewDay;
 
-  // ── Crew ledger (Ledger tab) — a party-ledger-style account statement for the
+  // ── Crew ledger (Ledger tab) - a party-ledger-style account statement for the
   // hamali crew. Credits are the SQUARED-OFF periods (one line per checkpoint, with
-  // its date range) — NOT the individual loading/unloading rows. Debits are the
+  // its date range) - NOT the individual loading/unloading rows. Debits are the
   // settlement payments. Running balance is what we still owe the crew (CR).
   interface LedgerLine { id: string; date: string; particulars: string; period: string | null; debit: number; credit: number; }
   const ledgerLines: (LedgerLine & { balance: number })[] = (() => {
@@ -714,7 +714,7 @@ export default function HamaliLedger() {
       : [{ header: 'Status', value: (r: UnifiedRow) => (isVerified(r.date) ? 'Verified' : 'Current') }]),
   ];
 
-  // Crew dues accrued since the last checkpoint (through today) — the standing
+  // Crew dues accrued since the last checkpoint (through today) - the standing
   // "not yet verified" figure, independent of the square-off date picker.
   const todayDay = new Date().toISOString().slice(0, 10);
   const sinceCheckpoint = (dateIso: string) => {
@@ -742,10 +742,10 @@ export default function HamaliLedger() {
             {view === 'company'
               ? 'Unloading & loading labor charges from purchases and outward sale freight'
               : view === 'payables'
-                ? 'Squared-off crew dues — pay each verified period and track what is settled'
+                ? 'Squared-off crew dues - pay each verified period and track what is settled'
                 : view === 'ledger'
-                  ? 'Account statement for the hamali crew — squared-off dues vs settlements'
-                  : 'Crew-facing view — what the hamali crew is owed, cross-verified and squared off periodically'}
+                  ? 'Account statement for the hamali crew - squared-off dues vs settlements'
+                  : 'Crew-facing view - what the hamali crew is owed, cross-verified and squared off periodically'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -951,7 +951,7 @@ export default function HamaliLedger() {
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
                           <span>Verified through <b>{shortDate(v.asOfDate)}</b></span>
                           <span className="text-muted-foreground">· {rupees(Number(v.crewTotal))}</span>
-                          {v.note && <span className="text-muted-foreground truncate max-w-xs">— {v.note}</span>}
+                          {v.note && <span className="text-muted-foreground truncate max-w-xs">- {v.note}</span>}
                         </div>
                         <Button
                           variant="ghost"
@@ -972,7 +972,7 @@ export default function HamaliLedger() {
           {view === 'payables' && (
             <div className="rounded-lg border bg-card overflow-x-auto">
               <div className="px-5 py-4 border-b">
-                <span className="font-semibold text-sm">Crew Payables — Squared-off Periods</span>
+                <span className="font-semibold text-sm">Crew Payables - Squared-off Periods</span>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
                   {teamParty ? <>Settled against <b>{teamParty.name}</b></> : 'Loading crew party…'}
                 </p>
@@ -1041,10 +1041,10 @@ export default function HamaliLedger() {
             </div>
           )}
 
-          {/* Ledger tab — party-ledger-style account statement for the crew */}
+          {/* Ledger tab - party-ledger-style account statement for the crew */}
           {view === 'ledger' && (
             <div className="space-y-6">
-              {/* Profile header (name / contact / bank) — mirrors the Party Ledger */}
+              {/* Profile header (name / contact / bank) - mirrors the Party Ledger */}
               <div className="rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card overflow-hidden">
                 <div className="p-6 flex flex-col lg:flex-row lg:items-start gap-6">
                   <div className="flex items-start gap-4 flex-1">
@@ -1167,7 +1167,7 @@ export default function HamaliLedger() {
             </div>
           )}
 
-          {/* Hamali Disbursements & Charges — combined into one table so derived
+          {/* Hamali Disbursements & Charges - combined into one table so derived
               entries (purchase/sale/transfer) and manually recorded charges
               (bag cutting, pappu net, misc, paid) live in a single section. */}
           {(view === 'company' || view === 'hamali') && (

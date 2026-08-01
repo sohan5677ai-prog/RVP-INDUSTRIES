@@ -4,7 +4,7 @@ import { istCalendar } from '../lib/istDate.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
- * Multi ERP business number. Every send — success, failure or skip — is
+ * Multi ERP business number. Every send - success, failure or skip - is
  * recorded in WhatsAppLog so the UI can show delivery state and offer resends.
  *
  * Design rules:
@@ -19,7 +19,7 @@ import { istCalendar } from '../lib/istDate.js';
  *  - FAST2SMS_API_KEY          Fast2SMS Dev API key (Authorization header)
  *  - FAST2SMS_PHONE_NUMBER_ID  (optional) Fast2SMS phone-number id; omit to use the
  *                              account's connected number. Do NOT put a Meta
- *                              phone-number-id here — Fast2SMS rejects it.
+ *                              phone-number-id here - Fast2SMS rejects it.
  *  - WHATSAPP_ENABLED          'true' to send at all (default off, like SLACK_ENABLED)
  *  - WHATSAPP_TEST_MODE        anything but 'false' reroutes to the test number
  *  - WHATSAPP_TEST_NUMBER      where test-mode messages land (owner's phone)
@@ -28,16 +28,16 @@ import { istCalendar } from '../lib/istDate.js';
 
 const FAST2SMS_URL = 'https://www.fast2sms.com/dev/whatsapp';
 
-/** Template keys — each maps to an approved template's Fast2SMS message_id. */
+/** Template keys - each maps to an approved template's Fast2SMS message_id. */
 export type WaTemplateKey =
   | 'PO_CREATED' // rvp_po_created: party, po number(s), lorries, price/kg
   | 'STOCKIN_CONFIRMED' // rvp_stockin_confirmed: party, lorry, po number, date
   | 'VERIFICATION_STATEMENT' // rvp_verification_statement (document header): party, lorry, net weight, amount
   | 'PAYMENT_SENT' // rvp_payment_sent (image header): party, amount, date, reference
-  | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header — used when no screenshot): party, amount, date, reference
-  | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone — self-taken orders (no broker)
-  | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker — buyer copy when a broker exists
-  | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone — broker copy
+  | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header - used when no screenshot): party, amount, date, reference
+  | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
+  | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
+  | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
   | 'DISPATCH_DRIVER' // rvp_dispatch_driver: lorry, party, phone, maps link
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // rvp_payment_reminder: buyer, amount, overdue invoice list
@@ -68,7 +68,7 @@ export function normalizeWhatsAppNumber(raw: string | null | undefined): string 
   return null;
 }
 
-/** dd-MMM-yyyy, e.g. "17-Jul-2026" — unambiguous for Indian recipients. */
+/** dd-MMM-yyyy, e.g. "17-Jul-2026" - unambiguous for Indian recipients. */
 function fmtDate(d: Date): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const { day, month, year } = istCalendar(d);
@@ -148,12 +148,12 @@ export async function resolveAlertRecipients(): Promise<string[]> {
         const parsed = JSON.parse(profile.alertRecipients) as Array<{ name?: string; phone?: string }>;
         if (Array.isArray(parsed)) for (const r of parsed) push(r?.phone);
       } catch {
-        /* malformed JSON — fall through to fallbacks */
+        /* malformed JSON - fall through to fallbacks */
       }
     }
     if (numbers.length === 0) push(profile?.ownerWhatsappNumber);
   } catch {
-    /* DB unreachable — env fallback below */
+    /* DB unreachable - env fallback below */
   }
   if (numbers.length === 0) push(process.env.WHATSAPP_TEST_NUMBER);
   return numbers;
@@ -167,7 +167,7 @@ export async function resolveAlertRecipients(): Promise<string[]> {
  * `alreadyMessaged` is the raw phone list the party copy went to.
  *
  * In test mode every send is rerouted to the single test number, so N members
- * would land as N identical messages on top of the party's own rerouted copy —
+ * would land as N identical messages on top of the party's own rerouted copy -
  * one is enough to prove the copy fired, and each extra costs a billed
  * conversation. Never throws.
  */
@@ -180,7 +180,7 @@ export async function resolveInternalCopyRecipients(
   return testMode ? targets.slice(0, 1) : targets;
 }
 
-/** Variable values are pipe-joined on the wire — strip pipes (the delimiter) from each while preserving newlines. */
+/** Variable values are pipe-joined on the wire - strip pipes (the delimiter) from each while preserving newlines. */
 function cleanVar(v: string | number | null | undefined): string {
   const s = (v ?? '')
     .toString()
@@ -223,7 +223,7 @@ async function log(args: SendArgs, status: 'SENT' | 'FAILED' | 'SKIPPED', extra:
 }
 
 /**
- * Send one approved template. Never throws — the outcome (SENT/FAILED/SKIPPED)
+ * Send one approved template. Never throws - the outcome (SENT/FAILED/SKIPPED)
  * is recorded in WhatsAppLog and mirrored in the return value.
  * Supports passing a single phone number or array of phone numbers (e.g. party phone 1 & 2).
  */
@@ -286,7 +286,7 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
     });
     // phone_number_id is optional on Fast2SMS: when omitted it uses the number
     // connected to the account. Only send it when explicitly configured (a wrong
-    // value — e.g. a Meta phone-number-id — is rejected with "not connected").
+    // value - e.g. a Meta phone-number-id - is rejected with "not connected").
     if (phoneNumberId) params.set('phone_number_id', phoneNumberId);
     const variablesValues = args.variables.map(cleanVar).join('|');
     if (variablesValues) params.set('variables_values', variablesValues);
@@ -303,7 +303,7 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
         results.push({ ok: false, error: `Fast2SMS error ${res.status}` });
         continue;
       }
-      // Response may be JSON ({return: true, request_id}) or plain text — keep whatever id we can find.
+      // Response may be JSON ({return: true, request_id}) or plain text - keep whatever id we can find.
       let providerId: string | undefined;
       try {
         const parsed = JSON.parse(text);
@@ -332,7 +332,7 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
 }
 
 // ---------------------------------------------------------------------------
-// Trigger helpers — one per business event. All fire-and-forget safe.
+// Trigger helpers - one per business event. All fire-and-forget safe.
 // ---------------------------------------------------------------------------
 
 /**
@@ -350,7 +350,7 @@ async function fanOutToAlertRecipients(
   return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error };
 }
 
-/** A prepared message minus its recipient — the party and the office get the identical body. */
+/** A prepared message minus its recipient - the party and the office get the identical body. */
 type MessageBody = Omit<SendArgs, 'to'>;
 
 /**
@@ -358,7 +358,7 @@ type MessageBody = Omit<SendArgs, 'to'>;
  *
  * The internal members configured in Settings ("Dispatch & alert recipients")
  * receive the very same approved template with the very same wording, media and
- * variables the party got — deliberately a carbon copy rather than a re-worded
+ * variables the party got - deliberately a carbon copy rather than a re-worded
  * alert, so the office sees exactly what landed on the party's phone.
  *
  * The returned result is the *party* leg only: the internal copies are a record,
@@ -456,7 +456,7 @@ export const whatsappService = {
 
   /** Dispatch → driver gets the buyer's name, phone and maps link. Returns null when no driver phone. */
   async notifyDispatchDriver(dispatch: { id: string; vehicleNumber: string | null; driverPhone: string | null }, buyer: { name: string; phone: string | null; locationLink: string | null }) {
-    if (!dispatch.driverPhone) return null; // no driver captured — nothing to send
+    if (!dispatch.driverPhone) return null; // no driver captured - nothing to send
     return sendWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,

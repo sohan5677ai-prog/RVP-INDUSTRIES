@@ -60,7 +60,7 @@ interface OutstandingInvoice {
   invoiceNumber: string | null;
   billDate: Date;
   billAmount: number;   // billed total (base + GST), whole rupees
-  saleBase: number;     // sale value EXCLUDING GST — the TDS calc base
+  saleBase: number;     // sale value EXCLUDING GST - the TDS calc base
   shortageBase: number; // buyer-kata shortage goods value (GST-excluded) recorded at delivery
   gstExempt: boolean;   // whether 5% GST applies to the shortage deduction
   discount: number;
@@ -114,7 +114,7 @@ export default function SaleDuesPage() {
   });
 
   const { data: receipts, isLoading: loadingReceipts } = useQuery({
-    // Full history — dues are matched against every receipt, not just latest 100.
+    // Full history - dues are matched against every receipt, not just latest 100.
     queryKey: ['receipts', { all: true }],
     queryFn: () => api<Receipt[]>('/receipts?all=true'),
   });
@@ -147,7 +147,7 @@ export default function SaleDuesPage() {
 
   const isLoading = loadingParties || loadingSales || loadingReceipts;
 
-  // Settlement is invoice-based ONLY — no FIFO, no on-account spillover. Each
+  // Settlement is invoice-based ONLY - no FIFO, no on-account spillover. Each
   // shipment is cleared solely by the buyer receipts stamped with its own
   // saleDispatchId, and the Paid decision runs through the SAME shared helpers
   // (settledByDispatch / isDispatchPaid) the Pappu/Husk sales pages use, so the
@@ -252,10 +252,10 @@ export default function SaleDuesPage() {
 
   function openReceiveDialog(inv: OutstandingInvoice) {
     const today = new Date().toISOString().slice(0, 10);
-    // TDS (0.1%) is on the sale value EXCLUDING GST — not the GST-inclusive bill.
+    // TDS (0.1%) is on the sale value EXCLUDING GST - not the GST-inclusive bill.
     const tds = String(saleTds(inv.saleBase));
     // Auto-deduct the buyer-kata shortage (goods value) recorded at delivery, and
-    // net it — plus its 5% GST — off the cash we expect to receive.
+    // net it - plus its 5% GST - off the cash we expect to receive.
     const shortage = inv.shortageBase > 0 ? String(round2(inv.shortageBase)) : '0';
     setEnableTds(false);
     setReceiveDialog({
@@ -577,7 +577,7 @@ export default function SaleDuesPage() {
                 </p>
               </div>
 
-              {/* Settlement summary — mirrors the "Mark as Paid" breakdown so both agree */}
+              {/* Settlement summary - mirrors the "Mark as Paid" breakdown so both agree */}
               {(() => {
                 const received = parseFloat(receiveDialog.amountReceived) || 0;
                 const tds = enableTds ? (parseFloat(receiveDialog.tdsAmount) || 0) : 0;

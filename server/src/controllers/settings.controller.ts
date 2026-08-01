@@ -258,7 +258,7 @@ export async function updateCompanyProfile(req: Request, res: Response) {
 
   // Secrets are redacted on read, so the form submits them blank unless the
   // admin typed a new value. Drop blank/undefined secret fields so a normal save
-  // never wipes the stored credential — only a non-empty value overwrites it.
+  // never wipes the stored credential - only a non-empty value overwrites it.
   for (const f of SECRET_FIELDS) {
     if (data[f] == null || data[f] === '') delete (data as Record<string, unknown>)[f];
   }

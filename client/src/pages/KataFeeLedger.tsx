@@ -140,7 +140,7 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
     ...suppliers.map((s) => ({ value: s.id, label: s.name })),
   ];
 
-  // Company (KNM) vehicles are exempt from the weighbridge fee — kata is never
+  // Company (KNM) vehicles are exempt from the weighbridge fee - kata is never
   // charged on them, so they compute to ₹0 everywhere below.
   const companyVehicles = company?.companyVehicles;
   const exempt = (lorry: string | null | undefined) => isVehicleExempt(lorry, companyVehicles);
@@ -160,7 +160,7 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
       kataFee: Number(p.kataFee),
     }));
 
-  // Pre-cleaner dust bought in from outside parties — the lorry is weighed on the
+  // Pre-cleaner dust bought in from outside parties - the lorry is weighed on the
   // RVP kata just like a seed purchase, so it carries the same weighbridge fee.
   const dustEntries: KataEntry[] = (dustPurchases ?? [])
     .map((d) => ({
@@ -268,7 +268,7 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         {embedded ? (
-          <p className="text-sm text-muted-foreground">Weighbridge fees collected across purchases, dust buys, sale freight and byproduct transfers — booked as Kata Income (KNM vehicles exempt).</p>
+          <p className="text-sm text-muted-foreground">Weighbridge fees collected across purchases, dust buys, sale freight and byproduct transfers - booked as Kata Income (KNM vehicles exempt).</p>
         ) : (
           <div>
             <h1 className="text-2xl font-bold">Kata Report</h1>

@@ -47,7 +47,7 @@ enum AllocationStatus {
 // pre-cleaner byproducts (Pre Cleaner Dust, Nalla Pokkulu, Nalla Chintapandu)
 // all deplete the single shared 10% "Pre Cleaner Husk & Tamarind" pool. Shell is
 // physically transferred to another location before sale, but that transfer is
-// only a movement/cost record — it is NOT held as a separate valued silo.
+// only a movement/cost record - it is NOT held as a separate valued silo.
 enum SaleProduct {
   PAPPU
   HUSK
@@ -94,14 +94,14 @@ model Party {
   email             String?
   address           String?
   // Town/city of the party's premises. The e-invoice (`Loc`) and the E-Way Bill
-  // ("Ship To" place) want the CITY, not the state — "Surat", not "Gujarat".
+  // ("Ship To" place) want the CITY, not the state - "Surat", not "Gujarat".
   city              String?
   state             String?
   pincode           String?
   gstin             String?
   // Default delivery destination for this buyer (maps to a freight rate).
   destination       String?
-  // Google Maps link to the party's delivery point — sent to the lorry driver
+  // Google Maps link to the party's delivery point - sent to the lorry driver
   // on dispatch via WhatsApp.
   locationLink      String?
   bankAccountNumber String?
@@ -207,7 +207,7 @@ model CreditNote {
   noteDate       DateTime      @default(now())
   party          Party         @relation(fields: [partyId], references: [id])
   partyId        String
-  // Optional — a note might be raised without tying to one specific shipment.
+  // Optional - a note might be raised without tying to one specific shipment.
   saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
   saleDispatchId String?
   reason         String
@@ -315,8 +315,8 @@ model StockIn {
   // falls back to this arrival's net weight (freight/kg = freightCharge / netWeightKg).
   freightTonnageKg  Int?
   // Ticked when the party arrived in their OWN vehicle (no third-party lorry).
-  // At verification the lorry's ₹80/t hamali share — normally recovered from the
-  // transporter — is instead deducted from the party's net payable.
+  // At verification the lorry's ₹80/t hamali share - normally recovered from the
+  // transporter - is instead deducted from the party's net payable.
   selfVehicle       Boolean       @default(false)
   createdAt         DateTime      @default(now())
   purchase          Purchase?
@@ -422,10 +422,10 @@ model SaleOrder {
   buyerId            String
   broker             Broker?     @relation(fields: [brokerId], references: [id])
   brokerId           String?
-  tonnageKg          Int // total weight ORDERED, per RVP kata (kg) — never overwritten
+  tonnageKg          Int // total weight ORDERED, per RVP kata (kg) - never overwritten
   ratePerKg          Decimal     @db.Decimal(12, 2)
   gstAmount          Decimal     @default(0) @db.Decimal(14, 2) // 5% IGST on weight × rate (0 when gstExempt)
-  // When true, this order (and its dispatches) is billed WITHOUT GST — set per
+  // When true, this order (and its dispatches) is billed WITHOUT GST - set per
   // order in the dialog for parties billed on a non-GST basis.
   gstExempt          Boolean     @default(false)
   brokerageRatePerKg Decimal     @default(0) @db.Decimal(12, 2)
@@ -506,7 +506,7 @@ model SaleDispatch {
   // DISPATCHED → DELIVERED.
   status            SaleStatus @default(DISPATCHED)
   vehicleNumber     String?
-  // Driver of the hired lorry — captured at dispatch (or filled from a confirmed
+  // Driver of the hired lorry - captured at dispatch (or filled from a confirmed
   // WhatsApp transport confirmation) and sent to the broker/buyer via WhatsApp.
   driverName        String?
   driverPhone       String?
@@ -575,7 +575,7 @@ model SaleDispatch {
   ewbStatus        String? // 'GENERATED', 'CANCELLED'
   ewbCancelledDate DateTime?
   // Approx transport distance (km). When 0 is submitted NIC auto-computes it from
-  // the two PIN codes and returns the figure — that returned value is what gets
+  // the two PIN codes and returns the figure - that returned value is what gets
   // stored, so the printed bill never shows "0 km".
   ewbDistance      Int?
   // Part-A/Part-B details as actually submitted to NIC. Stored so the reprint
@@ -728,7 +728,7 @@ model FreightRate {
 
 // Editable per-operation hamali (labour) rates (₹/tonne), managed in Settings.
 // One row per operation key (BLACK_SEED_UNLOAD, PAPPU_LOADING, TRANSFER_FROM_STORAGE,
-// HUSK_LOADING, TPS_LOADING, SHELL_TRANSFER). These drive the live costing — each
+// HUSK_LOADING, TPS_LOADING, SHELL_TRANSFER). These drive the live costing - each
 // controller fetches its headline rate and passes it into the calc functions.
 model HamaliRate {
   id             String   @id @default(cuid())
@@ -745,13 +745,13 @@ model HamaliRate {
 // Manually-entered hamali costs that can't be derived from purchases or sales.
 // Two kinds:
 //   Per-bag charges (amount = bags × ratePerBag):
-//     - BAG_CUTTING_NORMAL    — bag cutting at Place A (≈₹3/bag)
-//     - BAG_CUTTING_DISTANCE  — bag cutting at Place B (≈₹6/bag)
-//     - PAPPU_NET             — pappu netting/bagging (≈₹6/bag)
+//     - BAG_CUTTING_NORMAL    - bag cutting at Place A (≈₹3/bag)
+//     - BAG_CUTTING_DISTANCE  - bag cutting at Place B (≈₹6/bag)
+//     - PAPPU_NET             - pappu netting/bagging (≈₹6/bag)
 //   Flat amounts (amount entered directly, bags/ratePerBag null):
-//     - DIESEL                — diesel/fuel cost borne for the crew
-//     - MISC                  — any other charge given to the hamali crew
-//     - PAID                  — cash actually disbursed to the crew (settles the payable)
+//     - DIESEL                - diesel/fuel cost borne for the crew
+//     - MISC                  - any other charge given to the hamali crew
+//     - PAID                  - cash actually disbursed to the crew (settles the payable)
 // Charge entries post Dr Factory Labor 50020 / Cr Hamali payable 20200; PAID
 // posts Dr Hamali payable 20200 / Cr Cash-in-Hand 10410.
 enum ManualHamaliType {
@@ -817,7 +817,7 @@ model CompanyProfile {
   // The government print has a DISPATCH-FROM address and a *place* (town) that
   // are distinct from the registered address above: the place is what shows in
   // "Dispatch From" and in the vehicle-details "From" column, and NIC measures
-  // the auto-calculated distance from dispatchFromPincode. All optional — each
+  // the auto-calculated distance from dispatchFromPincode. All optional - each
   // one falls back to the registered address/pincode when left blank.
   dispatchFromPlace       String? // town, e.g. "Punganur"
   dispatchFromAddress1    String?
@@ -841,7 +841,7 @@ model CompanyProfile {
   // daily dues digest, deferred-dispatch reminders). Falls back to
   // WHATSAPP_TEST_NUMBER when blank. Not printed on invoices.
   ownerWhatsappNumber     String?
-  // Internal-alert distribution list — up to 3 members (name + number), stored as
+  // Internal-alert distribution list - up to 3 members (name + number), stored as
   // a JSON string [{ "name": "...", "phone": "..." }]. These members receive the
   // dispatch reminders, weekly summary and daily dues digest. Falls back to
   // ownerWhatsappNumber, then WHATSAPP_TEST_NUMBER, when empty.
@@ -889,7 +889,7 @@ model SiloInventory {
 
 // Movement of black seed from a storage location (Rampalli/Murugan/Multi) to the
 // process. Each transfer incurs two hamali legs (storage loading + process
-// unloading), and transfer transport at the destination bunker —
+// unloading), and transfer transport at the destination bunker -
 // all 100% company-borne and capitalised into the seed's value at the process.
 model StockTransfer {
   id              String       @id @default(cuid())
@@ -898,11 +898,11 @@ model StockTransfer {
   weightKg        Int
   lorryNumber     String?
   transportCharge Decimal      @default(0) @db.Decimal(12, 2)
-  loadingHamali   Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg — no longer charged, always 0
+  loadingHamali   Decimal      @default(0) @db.Decimal(12, 2) // storage-unload leg - no longer charged, always 0
   unloadingHamali Decimal      @default(0) @db.Decimal(12, 2) // load + unload combined
   bunkerPlace     BunkerPlace?
 
-  hamaliMargin    Decimal  @default(0) @db.Decimal(12, 2) // company profit — no longer applicable, always 0
+  hamaliMargin    Decimal  @default(0) @db.Decimal(12, 2) // company profit - no longer applicable, always 0
   // Bank-loan carrying interest capitalised into the seed at the process:
   // seedCostMoved × rate% × interestDays/365, where interestDays runs from the
   // earliest open loan's drawdown date to the transfer date.
@@ -945,8 +945,8 @@ model LoanRepayment {
   id        String   @id @default(cuid())
   loan      BankLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
   loanId    String
-  amount    Decimal  @db.Decimal(14, 2) // principal portion — reduces the loan's outstanding
-  interest  Decimal  @default(0) @db.Decimal(14, 2) // interest portion — settles the 20280 accrual (Dr 20280 / Cr Bank)
+  amount    Decimal  @db.Decimal(14, 2) // principal portion - reduces the loan's outstanding
+  interest  Decimal  @default(0) @db.Decimal(14, 2) // interest portion - settles the 20280 accrual (Dr 20280 / Cr Bank)
   date      DateTime
   reference String?
   createdAt DateTime @default(now())
@@ -954,7 +954,7 @@ model LoanRepayment {
 
 // Movement of tamarind shell (a production byproduct) from the factory/process
 // to the Rampalli storage, where it is later sold. Each transfer bears packing +
-// loading + unloading hamali (₹333/tonne) and a fixed ₹500 transport — both
+// loading + unloading hamali (₹333/tonne) and a fixed ₹500 transport - both
 // capitalised into the shell's value at Rampalli.
 model ShellTransfer {
   id              String   @id @default(cuid())
@@ -1025,7 +1025,7 @@ model Payment {
   // so the Payables tab can derive Paid / Partial / Unpaid status.
   hamaliVerificationId String?
   hamaliVerification   HamaliVerification? @relation(fields: [hamaliVerificationId], references: [id])
-  // Uploaded proof-of-payment screenshot (Supabase Storage URL) — attached to the
+  // Uploaded proof-of-payment screenshot (Supabase Storage URL) - attached to the
   // WhatsApp payment notification sent to the party.
   screenshotUrl        String?
   journalEntryId       String?             @unique
@@ -1079,7 +1079,7 @@ enum GunnyBagEntryType {
   PAYMENT   // Cash paid (separate payment line, reduces payable)
 }
 
-// Gunny (bardana) bags bought or sold — the "Feroz Ledger". PURCHASE is a husk-pool
+// Gunny (bardana) bags bought or sold - the "Feroz Ledger". PURCHASE is a husk-pool
 // cost; SALE is booked separately as husk-pool income (Gunny Sales), not netted
 // against the purchase cost (see computeHuskPool / getProfitLoss income section).
 // PAYMENT tracks cash paid out to Feroz (reduces the payable balance).
@@ -1112,7 +1112,7 @@ model GunnySaleEntry {
 }
 
 
-// Free-form "Other Income" entries (husk-pool Income tab) — anything that doesn't
+// Free-form "Other Income" entries (husk-pool Income tab) - anything that doesn't
 // fit Kata Income, Hamali Company Profit or Gunny Sales. Posts a linked Receipt
 // (type OTHER_INCOME) the same way the expense detail pages post linked Payments.
 model OtherIncomeEntry {
@@ -1180,7 +1180,7 @@ model InterestCharge {
 }
 
 // Term-loan principal repayments, tracked as a simple informational list under the
-// Interest report's Term Loan tab. Deliberately NOT posted to the ledger — the GL
+// Interest report's Term Loan tab. Deliberately NOT posted to the ledger - the GL
 // loan principal lives in BankLoan/LoanRepayment; this is a lightweight running log.
 model TermLoanPrincipal {
   id        String   @id @default(cuid())
@@ -1255,7 +1255,7 @@ enum WaDirection {
 enum WaStatus {
   SENT // handed to Fast2SMS successfully
   FAILED // send attempt errored
-  SKIPPED // not sent (disabled / unconfigured / no phone) — recorded for visibility
+  SKIPPED // not sent (disabled / unconfigured / no phone) - recorded for visibility
   RECEIVED // inbound event captured by the webhook
 }
 
@@ -1270,7 +1270,7 @@ model WhatsAppLog {
   body         String? // rendered variable values (outbound) / raw text (inbound)
   mediaUrl     String?
   // Loose link back to the record that triggered the message, e.g.
-  // ('PO', purchaseOrderId) or ('REMINDER', partyId). No FK — logs outlive edits.
+  // ('PO', purchaseOrderId) or ('REMINDER', partyId). No FK - logs outlive edits.
   relatedType  String?
   relatedId    String?
   status       WaStatus
@@ -1352,7 +1352,7 @@ model Subscription {
   updatedAt       DateTime  @updatedAt
 }
 
-// One row per payment attempt — a manual one-time order OR a recurring charge.
+// One row per payment attempt - a manual one-time order OR a recurring charge.
 // Lets us verify the payment server-side and keep an audit trail of what each
 // payment bought.
 model SubscriptionPayment {
@@ -1362,7 +1362,7 @@ model SubscriptionPayment {
   razorpayOrderId   String?   @unique
   razorpayPaymentId String?
   razorpaySubId     String? // set for recurring charges
-  invoiceId         String?   @unique // recurring charge id — the webhook idempotency key
+  invoiceId         String?   @unique // recurring charge id - the webhook idempotency key
   source            String    @default("manual") // manual | recurring
   amount            Int // paise
   status            String    @default("created") // created | paid | failed

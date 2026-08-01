@@ -487,7 +487,7 @@ export default function StockLocation() {
         </div>
         <ExportButtons
           filename={`Stock_By_Location_${String(selectedLoc).replace(/\s+/g, '_')}`}
-          title={`Stock by Location — ${selectedLoc}`}
+          title={`Stock by Location - ${selectedLoc}`}
           subtitle={`${visibleBands.length} band(s)`}
           columns={exportColumns}
           rows={visibleBands}

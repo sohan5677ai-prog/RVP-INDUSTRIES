@@ -80,7 +80,7 @@ const NO_BROKER = '__none__';
 
 /**
  * Per-recipient outcome of a dispatch WhatsApp send (buyer / broker / driver).
- * `na` means the leg didn't apply at all — e.g. no broker on the order. `error`
+ * `na` means the leg didn't apply at all - e.g. no broker on the order. `error`
  * carries why a leg was skipped/failed (missing phone, template not approved).
  */
 type WhatsAppLegResult = {
@@ -98,7 +98,7 @@ type DispatchWhatsAppResult = {
 
 /**
  * One toast covering every leg. Each is sent independently server-side, so `ok`
- * alone would hide a driver leg that was skipped for a missing phone — name each
+ * alone would hide a driver leg that was skipped for a missing phone - name each
  * applicable leg, with the reason for any that didn't land.
  * Shared by the manual WhatsApp button and the auto-send after IRN + EWB.
  */
@@ -404,9 +404,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   }, [invoicePreview]);
 
   /**
-   * The E-Way Bill's approx distance is worked out server-side — reused from
+   * The E-Way Bill's approx distance is worked out server-side - reused from
    * this buyer's last bill, or routed from the dispatch-from PIN code to the
-   * buyer's — so nothing is asked for here. We only fetch it to SHOW what is
+   * buyer's - so nothing is asked for here. We only fetch it to SHOW what is
    * about to be filed, and to warn on the rare route that can't be resolved.
    */
   async function prefillDistance(dispatchId: string) {
@@ -506,7 +506,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         body: {
           transporterId,
           transporterName,
-          // Omitted — the server calculates it. Only the E-Way Bill dialog sends
+          // Omitted - the server calculates it. Only the E-Way Bill dialog sends
           // a value, and only when the operator overrides it.
           transDistance: undefined,
           transMode: transMode || '1',
@@ -633,7 +633,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     recomputePayAmount(v, payTdsEnabled);
   }
 
-  // Toggle TDS on/off — auto-fills 0.1% of the GST-excluded sale value.
+  // Toggle TDS on/off - auto-fills 0.1% of the GST-excluded sale value.
   function handleTdsToggle(enabled: boolean) {
     setPayTdsEnabled(enabled);
     recomputePayAmount(payShortage, enabled);
@@ -788,7 +788,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || !!fromDate || !!toDate;
 
   // ── Metrics (for Husk) ──────────────────────────────────────────────────
-  // Revenue figures are shown GST-inclusive — the amount the buyer actually
+  // Revenue figures are shown GST-inclusive - the amount the buyer actually
   // pays. GST-exempt orders carry no GST. Weighted-avg price stays the ex-GST
   // ₹/kg rate.
   const gstFactor = (o: SaleOrder) => (o.gstExempt ? 1 : 1 + GST_RATE);
@@ -1304,7 +1304,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">This actual weight bills the sale and depletes the black-seed pool.</p>
               {dispatchOverflow && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining — dispatching the extra is allowed and will bill the full weight.</p>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining - dispatching the extra is allowed and will bill the full weight.</p>
               )}
             </div>
             {needsExcessOut && (
@@ -1316,7 +1316,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   Only {toTonnes(dispatchBackedHeadroomKg).toFixed(2)} t of this order has seed behind
                   it. Available pappu is worked out as remaining black seed × 60%, so if the mill
                   out-turned better than that, the surplus is real but invisible here. Declare the
-                  surplus portion below — the rest of the lorry still draws seed normally.
+                  surplus portion below - the rest of the lorry still draws seed normally.
                 </p>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -1412,8 +1412,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
             </div>
 
-            {/* The E-Way Bill's approx distance is worked out for you — reused
-                from this buyer's last bill or routed from the PIN codes — and is
+            {/* The E-Way Bill's approx distance is worked out for you - reused
+                from this buyer's last bill or routed from the PIN codes - and is
                 shown here only so you can see what's about to be filed. */}
             <div className="rounded-lg border bg-muted/40 p-3 text-sm flex items-start justify-between gap-3">
               <span className="text-muted-foreground">E-Way Bill distance</span>
@@ -1421,7 +1421,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <span className="text-muted-foreground animate-pulse">calculating…</span>
               ) : distanceHint === 'none' ? (
                 <span className="max-w-[62%] text-right text-[11px] text-amber-600">
-                  Couldn't be calculated — add the buyer's PIN code in Parties, or enter the distance in the E-Way Bill dialog.
+                  Couldn't be calculated - add the buyer's PIN code in Parties, or enter the distance in the E-Way Bill dialog.
                 </span>
               ) : (
                 <span className="text-right">
@@ -1666,7 +1666,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <Input type="number" min="1" max="4000" value={transDistance} onChange={(e) => setTransDistance(e.target.value)} placeholder={distanceHint === 'loading' ? 'calculating…' : distanceHint === 'none' ? 'e.g. 250' : `auto: ${distanceHint.distance} km`} />
                 <p className="text-[11px] text-muted-foreground">
                   {distanceHint === 'none'
-                    ? "Couldn't be calculated automatically — enter the distance in km."
+                    ? "Couldn't be calculated automatically - enter the distance in km."
                     : 'Leave blank to use the calculated distance.'}
                 </p>
               </div>
@@ -1721,7 +1721,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 onClick={() => generateEwbMutation.mutate()}
                 disabled={
                   generateEwbMutation.isPending ||
-                  // Blank is fine — the server calculates it. Only a distance
+                  // Blank is fine - the server calculates it. Only a distance
                   // that was typed and is nonsense blocks the button.
                   (transDistance !== '' && !(Number(transDistance) > 0)) ||
                   (distanceHint === 'none' && transDistance === '') ||

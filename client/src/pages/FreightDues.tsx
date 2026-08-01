@@ -439,7 +439,7 @@ export default function FreightDuesPage() {
     queryFn: () => api<SaleOrder[]>('/sale-orders'),
   });
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    // Full history — dues are matched against every payment, not just latest 100.
+    // Full history - dues are matched against every payment, not just latest 100.
     queryKey: ['payments', { all: true }],
     queryFn: () => api<Payment[]>('/payments?all=true'),
   });

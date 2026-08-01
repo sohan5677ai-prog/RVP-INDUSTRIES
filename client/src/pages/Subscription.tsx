@@ -81,7 +81,7 @@ export default function Subscription() {
       const data = await api<Payment[]>('/subscription/payments');
       setPayments(data || []);
     } catch {
-      /* silent — payment history is non-critical */
+      /* silent - payment history is non-critical */
     }
     setPaymentsLoading(false);
   }, []);
@@ -151,7 +151,7 @@ export default function Subscription() {
       applyCfg(data);
       setMsg({
         type: 'ok',
-        text: next ? 'Services stopped — users are locked out.' : 'Services resumed.',
+        text: next ? 'Services stopped - users are locked out.' : 'Services resumed.',
       });
     } catch (e) {
       setMsg({ type: 'err', text: getErrorMessage(e) || 'Action failed' });
@@ -174,7 +174,7 @@ export default function Subscription() {
   };
 
   const fmtDate = (d: string | null) =>
-    d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+    d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
 
   const expired = !!cfg && (!cfg.paidUntil || new Date(cfg.paidUntil) <= new Date());
 
@@ -480,7 +480,7 @@ export default function Subscription() {
                     </td>
                     <td className="py-2.5 pr-3 text-muted-foreground capitalize">{p.source}</td>
                     <td className="py-2.5 pr-3 font-mono text-xs text-muted-foreground">
-                      {p.razorpayPaymentId || p.razorpayOrderId || '—'}
+                      {p.razorpayPaymentId || p.razorpayOrderId || '-'}
                     </td>
                     <td className="py-2.5 whitespace-nowrap">{fmtDate(p.periodEnd)}</td>
                   </tr>

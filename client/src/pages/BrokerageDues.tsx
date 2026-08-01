@@ -45,7 +45,7 @@ export default function BrokerageDuesPage() {
   });
 
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    // Full history — dues are matched against every payment, not just latest 100.
+    // Full history - dues are matched against every payment, not just latest 100.
     queryKey: ['payments', { all: true }],
     queryFn: () => api<Payment[]>('/payments?all=true'),
   });

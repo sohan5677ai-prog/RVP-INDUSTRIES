@@ -101,12 +101,12 @@ export async function deleteReceipt(req: Request, res: Response) {
 
   await prisma.$transaction(async (tx) => {
     // A receipt raised from "Mark Paid" against a shipment also spins off SEPARATE
-    // ledger postings — TDS-<dispatchId> / SHORTAGE-<dispatchId> — and stamps the
+    // ledger postings - TDS-<dispatchId> / SHORTAGE-<dispatchId> - and stamps the
     // TDS onto the dispatch itself. None of those are children of the receipt's own
     // journal entry, so deleting the receipt alone used to strand a phantom TDS /
     // shortage on the dispatch and in the party ledger (and, now, the TDS report).
     // Reverse them here. Sale-Dues receipts carry no such postings, so these are
-    // harmless no-ops there — the reference-scoped deletes match nothing.
+    // harmless no-ops there - the reference-scoped deletes match nothing.
     if (receipt.saleDispatchId) {
       if (Number(receipt.tdsAmount ?? 0) > 0) {
         await tx.journalEntry.deleteMany({ where: { reference: `TDS-${receipt.saleDispatchId}` } });

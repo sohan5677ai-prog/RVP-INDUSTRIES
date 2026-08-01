@@ -24,7 +24,7 @@ interface CompanyProfile {
   contact?: string | null;
 }
 
-/** Free allowance on the kata difference — keep in step with EXEMPT_KG on the server. */
+/** Free allowance on the kata difference - keep in step with EXEMPT_KG on the server. */
 const ALLOWANCE_KG = 80;
 
 /** Short note appended to a deduction row so the party knows what it is. */
@@ -110,7 +110,7 @@ export default function PurchaseStatement() {
   // --- Bill arithmetic (mirrors createVerification on the server) ------------
   // The kata difference is already folded into the verified payable weight, so
   // bill the reference weight and show the cut as its own line. When RVP weighed
-  // HEAVIER than the reference there is no cut — we pay on the RVP net.
+  // HEAVIER than the reference there is no cut - we pay on the RVP net.
   const billedKg = Math.max(v.referenceKg, v.finalWeightKg);
   const kataDeductKg = Math.max(0, v.referenceKg - v.finalWeightKg);
   const grossSeed = billedKg * price;
@@ -191,7 +191,7 @@ export default function PurchaseStatement() {
   if (selfVehicleHamali > 0) {
     rows.push({
       label: 'Less : Hamali (unloading)',
-      note: "lorry's share recovered — party's own vehicle",
+      note: "lorry's share recovered - party's own vehicle",
       amount: selfVehicleHamali,
       negative: true,
     });
@@ -199,7 +199,7 @@ export default function PurchaseStatement() {
   if (selfVehicleKata > 0) {
     rows.push({
       label: 'Less : Kata charges (weighbridge)',
-      note: "recovered — party's own vehicle",
+      note: "recovered - party's own vehicle",
       amount: selfVehicleKata,
       negative: true,
     });
@@ -207,12 +207,12 @@ export default function PurchaseStatement() {
 
   const kataNote =
     v.finalWeightKg >= v.referenceKg && v.diffKg === 0
-      ? 'Both weighbridges agree — payable at the full reference weight.'
+      ? 'Both weighbridges agree - payable at the full reference weight.'
       : v.finalWeightKg > v.referenceKg
-        ? `RVP weighbridge read heavier than the party kata — paid on our higher net of ${kg(v.rvpKataKg)}.`
+        ? `RVP weighbridge read heavier than the party kata - paid on our higher net of ${kg(v.rvpKataKg)}.`
         : v.exempt
-          ? `Difference of ${kg(v.diffKg)} is within the ${ALLOWANCE_KG} kg free allowance — no weight deduction.`
-          : `Difference of ${kg(v.diffKg)} exceeds the ${ALLOWANCE_KG} kg free allowance — ${kg(kataDeductKg)} deducted below.`;
+          ? `Difference of ${kg(v.diffKg)} is within the ${ALLOWANCE_KG} kg free allowance - no weight deduction.`
+          : `Difference of ${kg(v.diffKg)} exceeds the ${ALLOWANCE_KG} kg free allowance - ${kg(kataDeductKg)} deducted below.`;
 
   const weightCells: [string, string][] = [
     ['Invoice Weight', kg(v.billingWeightKg)],
@@ -252,7 +252,7 @@ export default function PurchaseStatement() {
         </div>
       </div>
 
-      {/* Statement sheet — mirrors the PDF sent to the party on WhatsApp */}
+      {/* Statement sheet - mirrors the PDF sent to the party on WhatsApp */}
       <div className="bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0 print:rounded-none">
 
         {/* Letterhead */}
@@ -349,7 +349,7 @@ export default function PurchaseStatement() {
         {/* Footer */}
         <div className="mt-10 flex items-start justify-between gap-6 border-t border-dotted border-neutral-300 pt-3">
           <p className="max-w-[55%] text-[9.5px] text-neutral-500">
-            Computer-generated statement — no signature required. Please report any discrepancy within 7 days of receipt.
+            Computer-generated statement - no signature required. Please report any discrepancy within 7 days of receipt.
           </p>
           <div className="text-right">
             <p className="text-[11px] font-semibold">For {company?.name ?? 'RVP Industries'}</p>

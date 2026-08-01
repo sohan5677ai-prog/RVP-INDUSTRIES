@@ -61,12 +61,12 @@ export default function TdsReport({ embedded = false }: { embedded?: boolean } =
         <PageHeader
           icon={Landmark}
           title="TDS Report"
-          description="TDS deducted by buyers on your sales under Section 194Q — your credit in Form 26AS at income-tax filing."
+          description="TDS deducted by buyers on your sales under Section 194Q - your credit in Form 26AS at income-tax filing."
           actions={data && <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />}
         />
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">TDS deducted by buyers on your sales under Section 194Q — your credit in Form 26AS at income-tax filing.</p>
+          <p className="text-sm text-muted-foreground">TDS deducted by buyers on your sales under Section 194Q - your credit in Form 26AS at income-tax filing.</p>
           <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
         </div>
       )}
@@ -84,7 +84,7 @@ export default function TdsReport({ embedded = false }: { embedded?: boolean } =
                 <FileCheck2 className="h-5 w-5" />
               </div>
               <div>
-                <div className="font-semibold text-foreground">TDS Receivable — Section 194Q</div>
+                <div className="font-semibold text-foreground">TDS Receivable - Section 194Q</div>
                 <div className="text-xs text-muted-foreground">Deducted by buyers @ 0.1% of the taxable sale value. Reconcile against Form 26AS.</div>
               </div>
             </div>
@@ -111,7 +111,7 @@ export default function TdsReport({ embedded = false }: { embedded?: boolean } =
             {/* ── BY DEDUCTOR (26AS-style) ── */}
             <TabsContent value="deductor" className="space-y-3">
               <div className="flex justify-end">
-                <ExportButtons filename={`TDS-by-Deductor-${fyLabel(fy)}`} title="TDS 194Q — Summary by Deductor" subtitle={period.label} columns={deductorCols} rows={data.byDeductor} />
+                <ExportButtons filename={`TDS-by-Deductor-${fyLabel(fy)}`} title="TDS 194Q - Summary by Deductor" subtitle={period.label} columns={deductorCols} rows={data.byDeductor} />
               </div>
               <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
                 <Table>
@@ -155,7 +155,7 @@ export default function TdsReport({ embedded = false }: { embedded?: boolean } =
             {/* ── TRANSACTION-WISE ── */}
             <TabsContent value="entries" className="space-y-3">
               <div className="flex justify-end">
-                <ExportButtons filename={`TDS-Transactions-${fyLabel(fy)}`} title="TDS 194Q — Transaction Detail" subtitle={period.label} columns={entryCols} rows={data.entries} />
+                <ExportButtons filename={`TDS-Transactions-${fyLabel(fy)}`} title="TDS 194Q - Transaction Detail" subtitle={period.label} columns={entryCols} rows={data.entries} />
               </div>
               <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
                 <Table>

@@ -138,7 +138,7 @@ export function getNotePdf(kind: Kind) {
 
 export async function sendNoteEmailById(kind: Kind, id: string) {
   const { row, company, pdfData } = await buildNotePdfData(kind, id);
-  if (!row.party.email) throw new HttpError(400, `${row.party.name} has no email on file — add one in Parties first`);
+  if (!row.party.email) throw new HttpError(400, `${row.party.name} has no email on file - add one in Parties first`);
 
   const buffer = await renderNotePdf(pdfData);
   const title = kind === 'CREDIT' ? 'Credit Note' : 'Debit Note';

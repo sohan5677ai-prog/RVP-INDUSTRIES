@@ -30,7 +30,7 @@ export interface EwbPdfData {
   /** Buyer's ship-to town (Party → City). Falls back to the buyer's state. */
   shipToPlace?: string | null;
   /**
-   * Transport block for sections 4 and 5 — the mode and transport document as
+   * Transport block for sections 4 and 5 - the mode and transport document as
    * submitted with this particular bill. Absent on legacy dispatches recorded
    * before these were stored. No transporter is carried: RVP moves goods on its
    * own arrangement, so the portal's transporter fields stay blank.
@@ -68,13 +68,13 @@ const TRANS_MODES: Record<string, string> = { '1': 'Road', '2': 'Rail', '3': 'Ai
 /**
  * Every stamp on this document is a government-facing IST time. Without an
  * explicit zone these formatters follow the process clock, which is UTC on
- * Render — printing an EWB generated at 12:37 IST as 07:07 AM.
+ * Render - printing an EWB generated at 12:37 IST as 07:07 AM.
  */
 function fmtDate(d: Date): string {
   return d.toLocaleDateString('en-GB', { timeZone: IST_TZ, day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-/** "29 Jul 2026 10:35 AM" — the generated/valid-upto stamps carry a time. */
+/** "29 Jul 2026 10:35 AM" - the generated/valid-upto stamps carry a time. */
 function fmtDateTime(d: Date): string {
   return d.toLocaleString('en-GB', {
     timeZone: IST_TZ,
@@ -89,7 +89,7 @@ function fmtDateTime(d: Date): string {
  *
  * This is the in-house replica: the real ASP-rendered print from TaxPro is
  * always preferred (see TaxproService.printEWayBillDetailPdf). It only renders
- * when that network call can't be made — so it has to carry the same detail a
+ * when that network call can't be made - so it has to carry the same detail a
  * checkpost officer expects, not a summary.
  */
 export function renderEwbPdf(data: EwbPdfData): Promise<Buffer> {
@@ -177,7 +177,7 @@ export function renderEwbPdf(data: EwbPdfData): Promise<Buffer> {
       ? `${(gstPct / 2).toFixed(2)}+${(gstPct / 2).toFixed(2)}+0.00+0.000+0.00`
       : `0.00+0.00+${gstPct.toFixed(2)}+0.000+0.00`;
 
-    /** "Punganur, Andhra Pradesh, 517247" — minus any part that repeats the one
+    /** "Punganur, Andhra Pradesh, 517247" - minus any part that repeats the one
      *  before it, since an unconfigured place falls back to the state name. */
     const placeLine = (...parts: (string | null | undefined)[]) => {
       const seen: string[] = [];
@@ -197,7 +197,7 @@ export function renderEwbPdf(data: EwbPdfData): Promise<Buffer> {
 
     // Title + QR ---------------------------------------------------------------
     // The QR sits beside the title, where the portal puts it. It has to be laid
-    // out BEFORE the first section bar and the body pushed below it — a bar drawn
+    // out BEFORE the first section bar and the body pushed below it - a bar drawn
     // over the code paints a solid band through it and leaves it unscannable.
     const qrSize = 68;
     doc.font('Helvetica-Bold').fontSize(15).text('e-Way Bill', LEFT, PAGE.margin);

@@ -126,7 +126,7 @@ export default function GunnySales() {
     <div className="space-y-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Record separate Gunny Bag sales income — each entry posts a linked Receipt to accounting. (For Feroz's account, see{' '}
+          Record separate Gunny Bag sales income - each entry posts a linked Receipt to accounting. (For Feroz's account, see{' '}
           <Link to="/reports/gunny-bags" className="underline underline-offset-2 hover:text-foreground">Feroz Ledger</Link> in Expenses).
         </p>
         <div className="flex flex-wrap items-center gap-2">

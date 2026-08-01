@@ -54,7 +54,7 @@ function safeEqual(a: string, b: string): boolean {
 // Razorpay POSTs here directly, so there is no Bearer token; trust comes solely
 // from the x-razorpay-signature HMAC over the RAW request body, verified with
 // the webhook's own signing secret (distinct from the API key secret). This is
-// the source of truth for recurring charges — the browser handler is only a
+// the source of truth for recurring charges - the browser handler is only a
 // nicety for instant feedback. Declared first so it stays outside requireAuth.
 router.post(
   '/webhook',
@@ -452,7 +452,7 @@ router.post(
         logger.error('razorpay cancel failed:', e);
       }
     }
-    // paidUntil is left intact — they keep the access already paid for.
+    // paidUntil is left intact - they keep the access already paid for.
     await prisma.subscription.update({
       where: { id: sub.id },
       data: { subStatus: 'cancelled', razorpaySubId: null },
@@ -465,8 +465,8 @@ router.post(
 // -- Webhook handlers --------------------------------------------------------
 
 // A recurring cycle was charged: advance access one billing cycle. Idempotent
-// by invoice id AND payment id so a retried webhook — or the browser's
-// auth-time /verify — never advances twice.
+// by invoice id AND payment id so a retried webhook - or the browser's
+// auth-time /verify - never advances twice.
 async function handleSubscriptionCharged(payload: any) {
   const subEntity = payload.subscription?.entity;
   const paymentEntity = payload.payment?.entity;
@@ -550,7 +550,7 @@ async function handlePaymentCaptured(payload: any) {
   const paymentEntity = payload.payment?.entity;
   const orderId = paymentEntity?.order_id;
   const paymentId = paymentEntity?.id;
-  if (!orderId) return; // recurring charge — handled elsewhere
+  if (!orderId) return; // recurring charge - handled elsewhere
 
   const payment = await prisma.subscriptionPayment.findUnique({
     where: { razorpayOrderId: orderId },

@@ -18,7 +18,7 @@ type ExportButtonsProps<T> = {
   /**
    * Full, already-filtered row set to export (not just the visible page). Pass an
    * array when the page already holds every row, or a function (sync or async)
-   * that fetches them on demand — used by server-paginated pages so the export
+   * that fetches them on demand - used by server-paginated pages so the export
    * still covers the whole dataset without the page loading it all upfront.
    */
   rows: T[] | (() => T[] | Promise<T[]>);

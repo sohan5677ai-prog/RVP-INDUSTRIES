@@ -301,7 +301,7 @@ export default function StockTransferPage() {
                   {preview && preview.interestDays > 0 ? ` · ${preview.interestDays} day${preview.interestDays === 1 ? '' : 's'} since loan` : ''})
                 </span>
                 <span className="font-medium">
-                  {!weightValid ? '—' : previewLoading && !preview ? 'Calculating…' : preview ? rupees(preview.interestCharge) : '—'}
+                  {!weightValid ? '-' : previewLoading && !preview ? 'Calculating…' : preview ? rupees(preview.interestCharge) : '-'}
                 </span>
               </div>
               {preview && weightValid && (
@@ -316,7 +316,7 @@ export default function StockTransferPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground font-medium">Final landed cost / kg</span>
-                    <span className="font-semibold">{weightKg > 0 ? rupees(preview.movedValue / weightKg) : '—'}</span>
+                    <span className="font-semibold">{weightKg > 0 ? rupees(preview.movedValue / weightKg) : '-'}</span>
                   </div>
                 </>
               )}

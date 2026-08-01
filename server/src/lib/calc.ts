@@ -428,8 +428,8 @@ export interface DrawnSeedSlice {
 //   perKg    = (totalLoan / totalKg) × (days / 30) × 0.85%
 //   interest = perKg × weightKg
 // The per-kg carrying value is a fixed business constant and is deliberately NOT
-// rounded before the interest maths — that ratio precision matters.
-export const TRANSFER_LOAN_TOTAL = 61_300_000; // ₹6.13 Cr — total bank loan
+// rounded before the interest maths - that ratio precision matters.
+export const TRANSFER_LOAN_TOTAL = 61_300_000; // ₹6.13 Cr - total bank loan
 export const TRANSFER_LOAN_TOTAL_KG = 2_548_960; // total black-seed stock (kg)
 /** Loan carrying value spread per kg of seed (₹/kg, intentionally unrounded). */
 export const TRANSFER_LOAN_PER_KG = TRANSFER_LOAN_TOTAL / TRANSFER_LOAN_TOTAL_KG;

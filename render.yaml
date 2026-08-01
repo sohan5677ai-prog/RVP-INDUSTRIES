@@ -9,7 +9,7 @@ services:
     buildCommand: npm install && npm run build
     # The Supabase DB is provisioned directly from a full `prisma db push` +
     # data load (not the stale migration history), so we do NOT run migrations
-    # on boot — that would conflict with the live schema. Apply future schema
+    # on boot - that would conflict with the live schema. Apply future schema
     # changes with `prisma db push` against Supabase, matching the dev workflow.
     startCommand: npm start
     healthCheckPath: /api/health
@@ -39,7 +39,7 @@ services:
       - key: SLACK_ENABLED
         value: "false"
       # WhatsApp via Fast2SMS (shared KNM Multi ERP business number).
-      # Test mode defaults ON in code — set WHATSAPP_TEST_MODE=false only after
+      # Test mode defaults ON in code - set WHATSAPP_TEST_MODE=false only after
       # the whole pipeline has been verified against WHATSAPP_TEST_NUMBER.
       - key: WHATSAPP_ENABLED
         value: "false"

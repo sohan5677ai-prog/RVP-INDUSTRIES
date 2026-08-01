@@ -7,7 +7,7 @@ import { istFinancialYearStart } from '../lib/istDate.js';
 // Statutory reports: GST (input/output for GSTR filing) and TDS (194Q credit
 // deducted by buyers on our sales, for the income-tax return / Form 26AS match).
 //
-// Both are read-only aggregates over the existing sale/purchase/receipt data —
+// Both are read-only aggregates over the existing sale/purchase/receipt data -
 // nothing is persisted. They accept a ?from&to ISO date window (default: the
 // current Indian financial year, Apr–Mar) and are reported on the tax-point
 // date: invoice date for GST, deduction date for TDS.
@@ -136,7 +136,7 @@ export async function getGstReport(req: Request, res: Response) {
   const cnLines = creditNotes.map(mapNote);
   const dnLines = debitNotes.map(mapNote);
 
-  // ── Input tax: GST paid on purchase (supplier) invoices — the ITC we can
+  // ── Input tax: GST paid on purchase (supplier) invoices - the ITC we can
   //    claim. Computed on the actual stocked-in billing weight × PO price, the
   //    same basis the purchase statement / verification uses. ─────────────────
   const stockIns = await prisma.stockIn.findMany({
@@ -220,7 +220,7 @@ export async function getGstReport(req: Request, res: Response) {
 // TDS deducted BY buyers on our sales under Section 194Q (0.1% of the taxable
 // sale value). This is a credit in our Form 26AS, claimed against income tax.
 // A deduction is captured either on the collection receipt or, when a shipment
-// was marked paid directly, on the dispatch — we count each exactly once, with
+// was marked paid directly, on the dispatch - we count each exactly once, with
 // the receipt taking precedence (mirrors the party-ledger dedup).
 export async function getTdsReport(req: Request, res: Response) {
   const { from, to } = resolvePeriod(req);
@@ -234,7 +234,7 @@ export async function getTdsReport(req: Request, res: Response) {
     orderBy: { date: 'asc' },
   });
 
-  // Dispatches whose TDS is already represented by a receipt row — suppress the
+  // Dispatches whose TDS is already represented by a receipt row - suppress the
   // dispatch-level line so the same rupees aren't counted twice.
   const receiptCoveredDispatchIds = new Set(
     receipts.map((r) => r.saleDispatchId).filter((id): id is string => !!id)

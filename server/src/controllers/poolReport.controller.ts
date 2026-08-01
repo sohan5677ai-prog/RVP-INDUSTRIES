@@ -19,7 +19,7 @@ import {
 /**
  * Delete the ledger posting (and, via cascade, the linked Payment/Receipt) that a
  * detail-page entry created. The journal `reference` is the entry's deterministic
- * key, e.g. `GUNNYBAG-<id>` — see LedgerService.recordLinkedPayment.
+ * key, e.g. `GUNNYBAG-<id>` - see LedgerService.recordLinkedPayment.
  */
 async function reverseLinkedEntry(tx: Prisma.TransactionClient, refKey: string) {
   await tx.journalEntry.deleteMany({ where: { reference: refKey } });
@@ -76,7 +76,7 @@ export async function createGunnyBag(req: Request, res: Response) {
     });
     const refKey = `GUNNYBAG-${row.id}`;
     const bagDesc = data.quantity ? `${data.quantity} bags` : 'Payment';
-    const desc = `${bagDesc}${data.note ? ` — ${data.note}` : ''}`;
+    const desc = `${bagDesc}${data.note ? ` - ${data.note}` : ''}`;
 
     // Purchase is on credit (no auto payment).
     // Sale -> linked Receipt (gunny bag sales income)
@@ -123,7 +123,7 @@ export async function createElectricityBill(req: Request, res: Response) {
       amount: Number(data.amount),
       type: 'ELECTRICITY',
       payee: `${data.month} bill`,
-      description: `${data.units} units${data.note ? ` — ${data.note}` : ''}`,
+      description: `${data.units} units${data.note ? ` - ${data.note}` : ''}`,
       refKey: `ELECTRICITY-${row.id}`,
     });
     return row;
@@ -443,7 +443,7 @@ export async function createGunnySale(req: Request, res: Response) {
         note: data.note ?? null,
       },
     });
-    const desc = `${data.bags} bags @ ₹${data.price}/bag${data.note ? ` — ${data.note}` : ''}`;
+    const desc = `${data.bags} bags @ ₹${data.price}/bag${data.note ? ` - ${data.note}` : ''}`;
     await LedgerService.recordLinkedReceipt(tx, {
       date: data.date,
       amount: Number(data.amount),

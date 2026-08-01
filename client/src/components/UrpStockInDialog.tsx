@@ -203,7 +203,7 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
               className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
             />
             <Label htmlFor="useNetWeight" className="cursor-pointer">
-              Enter RVP Net Weight directly <span className="text-xs font-normal text-muted-foreground">(spot purchase — no 2nd weighment)</span>
+              Enter RVP Net Weight directly <span className="text-xs font-normal text-muted-foreground">(spot purchase - no 2nd weighment)</span>
             </Label>
           </div>
 
@@ -243,7 +243,7 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
 
           {useNetWeight && sameWeight ? (
             <p className="text-xs text-muted-foreground">
-              Billing weight and party kata will both be set to the RVP net ({rvpNetWeightKg || '—'} kg).
+              Billing weight and party kata will both be set to the RVP net ({rvpNetWeightKg || '-'} kg).
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-4">
@@ -305,7 +305,7 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
                   className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                 />
                 <Label htmlFor="sharedVehicle" className="cursor-pointer">
-                  Shared vehicle? <span className="text-xs font-normal text-muted-foreground">(freight covers other parties too — spread over total lorry tonnage)</span>
+                  Shared vehicle? <span className="text-xs font-normal text-muted-foreground">(freight covers other parties too - spread over total lorry tonnage)</span>
                 </Label>
               </div>
 

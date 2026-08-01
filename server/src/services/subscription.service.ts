@@ -2,7 +2,7 @@
 // subscription middleware (the real server-side lock) and the subscription
 // routes (status / pay / developer config).
 //
-// The Subscription table is a singleton — there is only ever one row.
+// The Subscription table is a singleton - there is only ever one row.
 // Amounts are stored in paise (INR * 100) to match Razorpay.
 
 import type { Subscription } from '@prisma/client';
@@ -71,7 +71,7 @@ export function statusPayload(sub: Subscription) {
     billingDay: sub.billingDay,
     currency: 'INR',
     subStatus: sub.subStatus || null,
-    // A healthy recurring mandate is set up — the UI hides "Set up auto-pay"
+    // A healthy recurring mandate is set up - the UI hides "Set up auto-pay"
     // and shows the recurring status instead. Halted/cancelled → false so the
     // button reappears.
     autopay: !!sub.razorpaySubId && HEALTHY_SUB_STATUSES.includes(sub.subStatus || ''),

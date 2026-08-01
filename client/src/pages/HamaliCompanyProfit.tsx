@@ -23,7 +23,7 @@ export default function HamaliCompanyProfit() {
     <div className="space-y-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Company margin retained on every hamali charge — unloading at purchase, loading at sale dispatch, and stock-transfer legs.
+          Company margin retained on every hamali charge - unloading at purchase, loading at sale dispatch, and stock-transfer legs.
           Added to the husk recovery pool and the Profit &amp; Loss as income.
         </p>
         <Button variant="outline" asChild>
@@ -40,7 +40,7 @@ export default function HamaliCompanyProfit() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard label="Hamali company profit" value={rupees(profit)} icon={HandCoins} tone="forest" hint="all-time margin, GL 40030" />
-          <StatCard label="See the breakdown" value="Hamali Ledger" icon={HandCoins} tone="amber" hint="Company view — Accounts section" />
+          <StatCard label="See the breakdown" value="Hamali Ledger" icon={HandCoins} tone="amber" hint="Company view - Accounts section" />
         </div>
       )}
     </div>

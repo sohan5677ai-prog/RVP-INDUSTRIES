@@ -3,8 +3,8 @@ import { useEffect, useRef } from 'react';
 /**
  * Clipboard-image support for the upload zones.
  *
- * Screenshots are the common case here — a UPI/bank app screenshot or a snip of
- * a lorry invoice — and going through Save-as then a file picker for something
+ * Screenshots are the common case here - a UPI/bank app screenshot or a snip of
+ * a lorry invoice - and going through Save-as then a file picker for something
  * that is already on the clipboard is pure friction. Two ways in: Ctrl+V while
  * the dialog is open, or the explicit "Paste" button for mouse-only users.
  */
@@ -60,7 +60,7 @@ export function usePasteImage(enabled: boolean, onFile: (file: File) => void, pr
 /**
  * Read an image straight off the system clipboard for the "Paste" button.
  * Returns null when the clipboard holds no image; throws when the browser
- * refuses the read (permission denied, or Firefox, which has no image read) —
+ * refuses the read (permission denied, or Firefox, which has no image read) -
  * callers fall back to telling the user to press Ctrl+V.
  */
 export async function readImageFromClipboard(prefix = 'pasted'): Promise<File | null> {

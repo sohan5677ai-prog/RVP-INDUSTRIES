@@ -123,14 +123,14 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         {!embedded ? (
           <div>
             <h1 className="text-2xl font-bold">Transport Report</h1>
-            <p className="text-muted-foreground">Per-trip freight retention by transport provider — bifurcated view</p>
+            <p className="text-muted-foreground">Per-trip freight retention by transport provider - bifurcated view</p>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Per-trip freight retention by transport provider — bifurcated view</p>
+          <p className="text-sm text-muted-foreground">Per-trip freight retention by transport provider - bifurcated view</p>
         )}
         <ExportButtons
           filename={`Transport_${tab}`}
-          title={`Transport Report — ${tabLabels[tab]}`}
+          title={`Transport Report - ${tabLabels[tab]}`}
           subtitle={`${rows.length} trip(s)`}
           columns={exportColumns}
           rows={rows}

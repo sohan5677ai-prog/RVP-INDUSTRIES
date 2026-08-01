@@ -277,7 +277,7 @@ export default function Parties() {
   });
 
   // The Hamali crew ("Bikash and Team") is a labour counterparty, not a trading
-  // party — it only needs name, phone and bank details, so the trade-specific
+  // party - it only needs name, phone and bank details, so the trade-specific
   // fields (nickname, commodities, GST, address, destination) are hidden for it.
   const isHamaliTeam = form.watch('type') === 'HAMALI_TEAM';
 

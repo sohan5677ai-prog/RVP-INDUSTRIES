@@ -798,7 +798,7 @@ const TRANSPORT_SCHEMA = {
 
 /**
  * Parse a raw WhatsApp text into transport-confirmation fields. Returns null on
- * any failure or when the text is not a lorry confirmation — the webhook must
+ * any failure or when the text is not a lorry confirmation - the webhook must
  * never throw because of a parse problem.
  */
 export async function parseTransportConfirmationText(

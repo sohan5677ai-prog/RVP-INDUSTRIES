@@ -18,7 +18,7 @@ const APPLY = process.argv.includes('--apply');
 const SHIFT_MS = 5.5 * 60 * 60 * 1000;
 
 const ist = (d: Date | null) =>
-  d ? d.toLocaleString('en-GB', { timeZone: IST_TZ, dateStyle: 'medium', timeStyle: 'short' }) : '—';
+  d ? d.toLocaleString('en-GB', { timeZone: IST_TZ, dateStyle: 'medium', timeStyle: 'short' }) : '-';
 
 /** "HH:MM" of an instant in IST. */
 const istHhMm = (d: Date) => {
@@ -53,7 +53,7 @@ async function main() {
   }
 
   const line = (r: (typeof rows)[number], note = '') =>
-    `  ${String(r.ewbNumber).padEnd(14)} ${String(r.invoiceNumber ?? '—').padEnd(18)}` +
+    `  ${String(r.ewbNumber).padEnd(14)} ${String(r.invoiceNumber ?? '-').padEnd(18)}` +
     ` gen ${ist(r.ewbDate).padEnd(22)} valid ${ist(r.ewbValidUpto).padEnd(22)} ${note}`;
 
   console.log(`=== ALREADY CORRECT (valid-upto 23:59 IST): ${okRows.length} ===`);
@@ -73,7 +73,7 @@ async function main() {
   }
 
   if (!APPLY) {
-    console.log(`\nDRY RUN — nothing written. Re-run with --apply to repair ${shifted.length} row(s).`);
+    console.log(`\nDRY RUN - nothing written. Re-run with --apply to repair ${shifted.length} row(s).`);
     return;
   }
 

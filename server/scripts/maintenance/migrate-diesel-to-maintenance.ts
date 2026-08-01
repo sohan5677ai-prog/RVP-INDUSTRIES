@@ -1,5 +1,5 @@
 // One-time migration: Diesel is being moved out of the Hamali Ledger (where it
-// was mis-booked as a crew labor charge — Dr Factory Labor 50020 / Cr Hamali
+// was mis-booked as a crew labor charge - Dr Factory Labor 50020 / Cr Hamali
 // payable 20200) and into the Expenses → Maintenance tab as a real paid expense.
 //
 // For every `manualHamaliCost` of type DIESEL this script:
@@ -11,7 +11,7 @@
 //   3. deletes the old manualHamaliCost row.
 //
 // NOTE ON HAMALI PAYABLE: removing the old Cr to 20200 reduces the Hamali payable
-// by the diesel total — correct, since diesel was never actually owed to the crew.
+// by the diesel total - correct, since diesel was never actually owed to the crew.
 // Re-verify the Hamali Ledger crew-outstanding tile after running.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';

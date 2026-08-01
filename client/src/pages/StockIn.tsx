@@ -77,7 +77,7 @@ function nameKey(s: string) {
 /**
  * A single document zone that runs AI extraction on drop/select/paste. The
  * invoice is usually a phone screenshot, so Ctrl+V (or the Paste button) is the
- * quickest way in — see usePasteImage.
+ * quickest way in - see usePasteImage.
  */
 function DropZone({
   title, hint, accept, busy, onPick, onClear,
@@ -111,7 +111,7 @@ function DropZone({
       if (file) pick(file);
       else toast.message('No image on the clipboard. Take a screenshot first.');
     } catch {
-      toast.error('Could not read the clipboard — press Ctrl+V instead.');
+      toast.error('Could not read the clipboard - press Ctrl+V instead.');
     }
   }
 

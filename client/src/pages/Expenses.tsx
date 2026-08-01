@@ -18,10 +18,10 @@ import OtherIncome from '@/pages/OtherIncome';
  *
  * Expenses tab: the standalone operating-expense reports (Feroz Ledger/Gunny Bags,
  * Electricity, Maintenance, Miscellaneous, Drawings, Interest) plus Storage
- * Maintenance — unchanged from before. Every tab feeds the husk recovery pool
+ * Maintenance - unchanged from before. Every tab feeds the husk recovery pool
  * and the Profit & Loss.
  *
- * Income tab: Kata Income, Hamali Company Profit, Gunny Sales and Other Income —
+ * Income tab: Kata Income, Hamali Company Profit, Gunny Sales and Other Income -
  * all four are added to the husk recovery pool as income and to the Profit &
  * Loss (Accounts section) as profit, alongside byproduct sales.
  */
@@ -31,7 +31,7 @@ export default function Expenses() {
       <PageHeader
         icon={Wallet}
         title="Income & Expenses"
-        description="Every operating expense and every income stream in one place — both feed the husk recovery pool and the Profit & Loss."
+        description="Every operating expense and every income stream in one place - both feed the husk recovery pool and the Profit & Loss."
       />
       <Tabs defaultValue="expenses" className="gap-5">
         <TabsList>

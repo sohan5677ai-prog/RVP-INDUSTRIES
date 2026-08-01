@@ -49,7 +49,7 @@ app.use(
 app.get("/api/health", (_req, res) => {
   // Keep-alive ping. Render sleeps after 15 min idle AND Supabase free tier
   // pauses a project after 7 days of no DB activity, so we fire a trivial
-  // `SELECT 1` to touch Postgres — but fire-and-forget, never awaited. If we
+  // `SELECT 1` to touch Postgres - but fire-and-forget, never awaited. If we
   // awaited it and Supabase were slow/paused, the request would stall until
   // Render returned a multi-KB HTML 502/504 page, which the uptime monitor
   // (cron-job.org) rejects as "output too large". Responding immediately with

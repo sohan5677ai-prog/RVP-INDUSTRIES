@@ -6,7 +6,7 @@
 -- "Mark Paid" and the Sale Orders "Paid" badge stays dark. This copies the same
 -- shape the new markDispatchPaid writes onto the old receipts.
 --
--- PREREQUISITE: run cloud-sync-sales-tds-shortage.sql first — this needs the
+-- PREREQUISITE: run cloud-sync-sales-tds-shortage.sql first - this needs the
 -- Receipt.saleDispatchId / tdsAmount / shortageAmount columns to exist.
 --
 -- A Mark-Paid receipt is: type BUYER, saleDispatchId IS NULL, description
@@ -17,7 +17,7 @@
 -- skipped on re-run. Only receipts/dispatches that match 1:1 and whose dispatch
 -- isn't already linked are touched. Run in the Supabase SQL Editor.
 
--- ── STEP 1: PREVIEW (read-only) — run this first and eyeball the matches ──────
+-- ── STEP 1: PREVIEW (read-only) - run this first and eyeball the matches ──────
 WITH candidate AS (
   SELECT r.id AS receipt_id,
          trim(substring(r.description FROM length('Payment for Invoice ') + 1)) AS token,
@@ -49,7 +49,7 @@ JOIN uniq_dispatch ud ON ud.dispatch_id = m.dispatch_id
 JOIN uniq_receipt  ur ON ur.receipt_id  = m.receipt_id
 ORDER BY m."invoiceNumber";
 
--- ── STEP 2: APPLY — run this once the preview looks right ─────────────────────
+-- ── STEP 2: APPLY - run this once the preview looks right ─────────────────────
 WITH candidate AS (
   SELECT r.id AS receipt_id,
          trim(substring(r.description FROM length('Payment for Invoice ') + 1)) AS token,

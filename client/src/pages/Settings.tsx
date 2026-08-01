@@ -325,7 +325,7 @@ function EwbDispatchSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
     <Card>
       <CardHeader className="flex flex-row items-center gap-2">
         <Truck className="h-5 w-5 text-amber-500" />
-        <CardTitle className="text-base">E-Way Bill — Dispatch From</CardTitle>
+        <CardTitle className="text-base">E-Way Bill - Dispatch From</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
@@ -336,7 +336,7 @@ function EwbDispatchSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               vehicle-details “From” column, and the <b>PIN code</b> is what the portal measures the distance from.
             </p>
             <div className="grid gap-4 md:grid-cols-2">
-              {field('Dispatch place (town)', 'dispatchFromPlace', 'Punganur', 'Shown as the “From” place on the bill — a town, not the state.')}
+              {field('Dispatch place (town)', 'dispatchFromPlace', 'Punganur', 'Shown as the “From” place on the bill - a town, not the state.')}
               {field('Dispatch PIN code', 'dispatchFromPincode', '517247')}
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -579,7 +579,7 @@ function parseAlertMembers(raw?: string | null): AlertMember[] {
   try {
     const arr = raw ? JSON.parse(raw) : [];
     if (Array.isArray(arr)) return arr.map((m) => ({ name: m?.name ?? '', phone: m?.phone ?? '' }));
-  } catch { /* malformed — treat as empty */ }
+  } catch { /* malformed - treat as empty */ }
   return [];
 }
 
@@ -624,8 +624,8 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                 <div className="text-sm font-semibold">Test mode</div>
                 <p className="text-xs text-muted-foreground max-w-md">
                   {testMode
-                    ? 'ON — every WhatsApp message is sent ONLY to the test number below. Real parties are never messaged.'
-                    : 'OFF — messages are sent to the actual parties (using the phone number in their Parties record).'}
+                    ? 'ON - every WhatsApp message is sent ONLY to the test number below. Real parties are never messaged.'
+                    : 'OFF - messages are sent to the actual parties (using the phone number in their Parties record).'}
                 </p>
               </div>
               <button
@@ -656,7 +656,7 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               <div className="space-y-0.5">
                 <div className="text-sm font-semibold">Dispatch &amp; alert recipients</div>
                 <p className="text-xs text-muted-foreground max-w-md">
-                  Up to 3 members who receive internal WhatsApp updates — dispatch reminders, the weekly summary and the daily dues digest, plus their own copy of every message sent to a party: purchase orders, stock-ins, unloading statements, payments and the dispatch invoice bundle.
+                  Up to 3 members who receive internal WhatsApp updates - dispatch reminders, the weekly summary and the daily dues digest, plus their own copy of every message sent to a party: purchase orders, stock-ins, unloading statements, payments and the dispatch invoice bundle.
                 </p>
               </div>
               <div className="space-y-2">
@@ -758,7 +758,7 @@ function TaxproGspSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               </label>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              When Sandbox Mode is enabled, calls go to the TaxPro sandbox (test) environment — no real e-invoice is created. Turn it off for production (which requires purchased API credits). If any of the four credentials above are missing, the system safely returns simulated (mock) IRNs and E-Way Bills for UI testing.
+              When Sandbox Mode is enabled, calls go to the TaxPro sandbox (test) environment - no real e-invoice is created. Turn it off for production (which requires purchased API credits). If any of the four credentials above are missing, the system safely returns simulated (mock) IRNs and E-Way Bills for UI testing.
             </p>
 
             <div className="flex justify-end pt-2">

@@ -20,7 +20,7 @@ export interface Party {
   phone2?: string | null;
   email?: string | null;
   address: string | null;
-  // Town/city — printed as the "Ship To" place on the E-Way Bill (not the state).
+  // Town/city - printed as the "Ship To" place on the E-Way Bill (not the state).
   city?: string | null;
   state: string | null;
   pincode?: string | null;
@@ -360,7 +360,7 @@ export type CreditNote = NoteBase;
 export type DebitNote = NoteBase;
 
 // A shortage already posted to the party ledger (dispatch or receipt level) with
-// no formal CreditNote raised yet — surfaced on the Credit/Debit Notes page so it
+// no formal CreditNote raised yet - surfaced on the Credit/Debit Notes page so it
 // can be turned into an actual document.
 export interface PendingCreditNote {
   saleDispatchId: string;
@@ -416,7 +416,7 @@ export interface CompanyProfile {
   invoicePrefix: string;
   companyVehicles?: string | null;
   ownerWhatsappNumber?: string | null;
-  // JSON string: [{ name, phone }] — up to 3 internal-alert recipients.
+  // JSON string: [{ name, phone }] - up to 3 internal-alert recipients.
   alertRecipients?: string | null;
   whatsappTestMode?: boolean;
   whatsappTestNumber?: string | null;

@@ -39,7 +39,7 @@ export const memoryUpload = multer({
 /**
  * Uploads a parsed multer file to Supabase Storage and returns its public URL.
  * Invoice files hold customer PII and are served as capability URLs, so the
- * object name must be unguessable — a 16-byte random token, not a timestamp.
+ * object name must be unguessable - a 16-byte random token, not a timestamp.
  */
 export async function uploadFileToStorage(file: Express.Multer.File): Promise<string> {
   const ext = path.extname(file.originalname).toLowerCase();

@@ -63,7 +63,7 @@ export async function createPayment(req: Request, res: Response) {
   // "Record Payment" fires two requests before the button disables; this stops
   // the second from becoming a phantom duplicate. Keyed on the full identity
   // (party/broker/lorry) so genuinely distinct payments that merely share an
-  // amount — e.g. two lorries with the same freight — are never blocked.
+  // amount - e.g. two lorries with the same freight - are never blocked.
   const recentDuplicate = await prisma.payment.findFirst({
     where: {
       type: data.type,
@@ -139,7 +139,7 @@ export async function createPayment(req: Request, res: Response) {
     return created;
   });
 
-  // WhatsApp the party (amount + screenshot) — only for payments tied to a
+  // WhatsApp the party (amount + screenshot) - only for payments tied to a
   // party (supplier settlements etc.), never internal expense heads. Fire-and-forget.
   if (data.partyId) {
     void (async () => {

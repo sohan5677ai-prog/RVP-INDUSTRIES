@@ -72,13 +72,13 @@ interface BuyerInvoice {
   invoiceNumber: string | null;
   billAmount: number;    // billed total (base + GST), whole rupees
   remaining: number;     // still due after prior receipts (FIFO), whole rupees
-  saleBase: number;      // sale value EXCLUDING GST — the TDS calc base
+  saleBase: number;      // sale value EXCLUDING GST - the TDS calc base
   shortageBase: number;  // buyer-kata shortage goods value (GST-excluded) at delivery
   gstExempt: boolean;    // whether 5% GST applies to the shortage deduction
 }
 
 // Receipts created from a detail page (Gunny Bag sales, Other Income).
-// Read-only here — delete them on their own page so both sides stay in sync.
+// Read-only here - delete them on their own page so both sides stay in sync.
 const MANAGED_ELSEWHERE: Partial<Record<ReceiptType, string>> = {
   GUNNY_BAGS_SALE: 'Gunny Bags page',
   OTHER_INCOME: 'Other Income page',
@@ -145,7 +145,7 @@ export default function ReceiptsPage() {
   const [enableTds, setEnableTds] = useState(false);
   const [tds, setTds] = useState('');
 
-  // Outstanding-invoice data — only pulled while the dialog is open, so the
+  // Outstanding-invoice data - only pulled while the dialog is open, so the
   // register itself stays fast. Sale orders carry the buyer-kata shortage
   // (creditNoteAmount) recorded at delivery; receipts let us net off prior
   // collections so fully-paid invoices drop out of the picker.
@@ -390,7 +390,7 @@ export default function ReceiptsPage() {
                   <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">{rupees(r.amount)}</TableCell>
                   <TableCell className="text-right">
                     {managedIn ? (
-                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>—</span>
+                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>-</span>
                     ) : (
                       <Button
                         variant="ghost"
@@ -544,7 +544,7 @@ export default function ReceiptsPage() {
               </div>
             )}
 
-            {/* Settlement summary — mirrors the "Mark as Paid" / Sale Dues breakdown */}
+            {/* Settlement summary - mirrors the "Mark as Paid" / Sale Dues breakdown */}
             {type === 'BUYER' && (Number(amount) > 0 || Number(shortage) > 0 || (enableTds && Number(tds) > 0)) && (() => {
               const received = Number(amount) || 0;
               const tdsAmt = enableTds ? (Number(tds) || 0) : 0;
@@ -596,7 +596,7 @@ export default function ReceiptsPage() {
               <div className="space-y-2">
                 <Label htmlFor="payer">Received From / Payer</Label>
                 <Input id="payer" value={payer} onChange={(e) => setPayer(e.target.value)} placeholder="e.g. gunny bag buyer, scrap dealer" />
-                <p className="text-[10px] text-muted-foreground">Optional — the person or party this money came from.</p>
+                <p className="text-[10px] text-muted-foreground">Optional - the person or party this money came from.</p>
               </div>
             )}
 

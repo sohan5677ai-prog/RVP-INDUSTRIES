@@ -114,7 +114,7 @@ function OwnerPanel({ owner }: { owner: Owner }) {
       <div className="flex items-center justify-between gap-4">
         <StatCard label={`${label} - total drawings`} value={rupees(total)} icon={HandCoins} tone="amber" hint="to husk pool" className="flex-1 max-w-xs" />
         <div className="flex items-center gap-2">
-          <ExportButtons filename={`Drawings_${label}`} title={`Drawings — ${label}`} columns={DRAWING_COLUMNS} rows={rows} />
+          <ExportButtons filename={`Drawings_${label}`} title={`Drawings - ${label}`} columns={DRAWING_COLUMNS} rows={rows} />
           <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
         </div>
       </div>

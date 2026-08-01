@@ -23,7 +23,7 @@ import { uploadFileToStorage } from '../lib/upload.js';
 /**
  * After a lorry is unloaded & weight-verified, WhatsApp the supplier the
  * "unloaded" confirmation with the full purchase statement attached (use case
- * #4) — every head of the bill (weighments, kata difference, quality/expense/
+ * #4) - every head of the bill (weighments, kata difference, quality/expense/
  * freight deductions, GST, billed-on costs, self-vehicle recoveries) plus their
  * running account balance. Fire-and-forget: rendering/upload/send never blocks
  * or fails the verification response.
@@ -34,7 +34,7 @@ async function sendVerificationStatement(
   verificationId: string
 ) {
   try {
-    // Nothing to send to — skip the PDF work entirely. The internal members get
+    // Nothing to send to - skip the PDF work entirely. The internal members get
     // their own copy of this statement, so a supplier with no phone on file is
     // only a dead end when there's nobody internal to copy either.
     if (!party.phone && !party.phone2 && (await resolveInternalCopyRecipients()).length === 0) return;

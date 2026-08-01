@@ -308,7 +308,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     for (const [k, v] of bankRows) {
       doc.font('Helvetica').fontSize(8).text(`${k} :`, bankX + 4, by, { width: bankW * 0.45, lineBreak: false });
       doc.font('Helvetica-Bold').fontSize(8).text(v || '-', bankX + bankW * 0.45, by, { width: bankW * 0.55 - 6, lineBreak: false });
-      by += 11; // fixed row height — doc.y after an empty-string .text() doesn't reliably advance
+      by += 11; // fixed row height - doc.y after an empty-string .text() doesn't reliably advance
     }
     doc.font('Helvetica-Bold').fontSize(8).text(`for ${data.company.name}`, bankX + 4, by + 8, { width: bankW - 8, align: 'right' });
     doc.font('Helvetica').fontSize(8).text('Authorised Signatory', bankX + 4, by + 40, { width: bankW - 8, align: 'right' });

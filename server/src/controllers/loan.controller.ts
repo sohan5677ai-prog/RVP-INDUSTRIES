@@ -86,11 +86,11 @@ export async function listLoans(_req: Request, res: Response) {
   const totalAccruedInterest = rows.reduce((s, r) => s + r.accruedInterestToDate, 0);
   const earliestOpenLoanDate = await getEarliestOpenLoanDate();
 
-  // Interest reconciliation (portfolio-level — capitalised interest is accrued on
+  // Interest reconciliation (portfolio-level - capitalised interest is accrued on
   // SEED, not attributable to one loan): interest capitalised into transferred
   // stock (credits to 20280) vs interest actually paid to the bank (debits to
   // 20280). The difference is the outstanding capitalised-interest accrual still
-  // sitting in 20280 — a positive number means we've capitalised more onto stock
+  // sitting in 20280 - a positive number means we've capitalised more onto stock
   // than we've yet paid the bank.
   const interestCapitalised = Number(capitalisedAgg._sum.interestCharge ?? 0);
   const interestPaidToBank = rows.reduce((s, r) => s + r.interestPaid, 0);

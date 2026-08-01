@@ -15,7 +15,7 @@ export type EwbDistance = {
  * Where a dispatch's E-Way Bill distance comes from, in order of authority:
  *
  *  1. what the operator typed, if they typed anything;
- *  2. the distance already filed for the SAME buyer — the lorry runs the same
+ *  2. the distance already filed for the SAME buyer - the lorry runs the same
  *     route every time, and if that earlier figure was corrected to match the
  *     NIC portal, reusing it keeps every bill for that buyer consistent;
  *  3. a road-routing calculation from the dispatch-from PIN code to the buyer's.
@@ -39,7 +39,7 @@ export async function resolveEwbDistance(
   });
   if (!dispatch) return null;
 
-  // A distance already recorded on THIS dispatch wins over a recalculation —
+  // A distance already recorded on THIS dispatch wins over a recalculation -
   // it may have been corrected by hand to the portal's figure.
   if (dispatch.ewbDistance) {
     return { km: dispatch.ewbDistance, source: 'previous-ewb', detail: 'already recorded on this dispatch' };

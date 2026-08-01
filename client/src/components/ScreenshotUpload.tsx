@@ -18,7 +18,7 @@ export interface ExtractedTransaction {
 
 /**
  * A compact drop zone for a transaction screenshot. The file can be clicked in,
- * dragged in, or pasted (Ctrl+V / the Paste button) — pasting is the common
+ * dragged in, or pasted (Ctrl+V / the Paste button) - pasting is the common
  * path, since these are almost always fresh screenshots.
  *
  * With an `endpoint` the file is uploaded to an extract endpoint (e.g.
@@ -83,7 +83,7 @@ export function ScreenshotUpload({
       if (file) void handle(file);
       else toast.message('No image on the clipboard. Take a screenshot first.');
     } catch {
-      toast.error('Could not read the clipboard — press Ctrl+V instead.');
+      toast.error('Could not read the clipboard - press Ctrl+V instead.');
     }
   }
 

@@ -15,7 +15,7 @@ import { prisma } from '../lib/prisma.js';
  * dispatchDate) + order.dueDays. An invoice is overdue once that date has passed.
  */
 
-const TOLERANCE = 1; // sub-₹1 remainder is rounding noise — treat as settled
+const TOLERANCE = 1; // sub-₹1 remainder is rounding noise - treat as settled
 
 export interface InvoiceDue {
   dispatchId: string;
@@ -120,7 +120,7 @@ export function compactInr(n: number): string {
   return `₹${inr(n)}`;
 }
 
-/** "RVP/12 (₹1,20,000) · RVP/15 (₹80,000)" — capped so the message stays short. */
+/** "RVP/12 (₹1,20,000) · RVP/15 (₹80,000)" - capped so the message stays short. */
 export function invoiceListText(invoices: InvoiceDue[], max = 6): string {
   if (invoices.length === 0) return '-';
   const shown = invoices.slice(0, max).map((i) => `${i.invoiceNumber} (₹${inr(i.outstanding)})`);

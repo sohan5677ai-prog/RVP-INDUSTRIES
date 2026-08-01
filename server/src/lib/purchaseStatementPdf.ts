@@ -9,7 +9,7 @@ import type { QualityAdjustmentRow, QualityAdjustmentMode } from './calc.js';
 /**
  * Renders the per-lorry PURCHASE STATEMENT (the bill we settle a supplier on)
  * as a PDF Buffer. This is what goes to the party on WhatsApp once a lorry is
- * unloaded & weight-verified — it shows the full arithmetic (weighments, kata
+ * unloaded & weight-verified - it shows the full arithmetic (weighments, kata
  * difference, every quality/expense/freight deduction, GST, billed-on addables,
  * self-vehicle recoveries) instead of a single bare amount, and closes with the
  * party's running account balance.
@@ -61,7 +61,7 @@ export interface PurchaseStatementData {
   gstBasisKg: number;
   selfVehicleHamali: number;
   selfVehicleKata: number;
-  /** Net balance payable — the ledger's figure, printed as-is. */
+  /** Net balance payable - the ledger's figure, printed as-is. */
   netPayable: number;
 }
 
@@ -78,8 +78,8 @@ const RULE = '#94a3b8';
 const NEG = '#b91c1c';
 const BAND = '#f1f5f9';
 
-// The app's own typefaces — Fraunces for display headings, Hanken Grotesk for
-// everything else — so the WhatsApp PDF reads as the same document as the page.
+// The app's own typefaces - Fraunces for display headings, Hanken Grotesk for
+// everything else - so the WhatsApp PDF reads as the same document as the page.
 // `assets/` sits beside `src/` and `dist/`, so the relative hop is the same in
 // dev (tsx) and in the built server. Falls back to the PDF base-14 fonts if a
 // file is ever missing, since a statement that prints is worth more than one
@@ -110,7 +110,7 @@ function useFonts(doc: PDFKit.PDFDocument): FontMap {
       names[key] = FALLBACK[key];
       if (!warnedMissingFonts) {
         warnedMissingFonts = true;
-        logger.warn(`[pdf] statement font missing at ${path} — falling back to base fonts`);
+        logger.warn(`[pdf] statement font missing at ${path} - falling back to base fonts`);
       }
     }
   }
@@ -164,7 +164,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     // The kata difference is already folded into the verified payable weight, so
     // bill the reference weight and show the cut as its own line. When RVP
-    // weighed HEAVIER than the reference there is no cut — we pay the RVP net.
+    // weighed HEAVIER than the reference there is no cut - we pay the RVP net.
     const billedKg = Math.max(weights.referenceKg, weights.payableKg);
     const kataDeductKg = Math.max(0, weights.referenceKg - weights.payableKg);
     const grossSeed = billedKg * price;
@@ -296,12 +296,12 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     const kataNote =
       weights.payableKg >= weights.referenceKg && weights.diffKg === 0
-        ? 'Both weighbridges agree — payable at the full reference weight.'
+        ? 'Both weighbridges agree - payable at the full reference weight.'
         : weights.payableKg > weights.referenceKg
-          ? `RVP weighbridge read heavier than the party kata — paid on our higher net of ${kg(weights.rvpKataKg)}.`
+          ? `RVP weighbridge read heavier than the party kata - paid on our higher net of ${kg(weights.rvpKataKg)}.`
           : weights.exempt
-            ? `Difference of ${kg(weights.diffKg)} is within the ${data.allowanceKg} kg free allowance — no weight deduction.`
-            : `Difference of ${kg(weights.diffKg)} exceeds the ${data.allowanceKg} kg free allowance — ${kg(kataDeductKg)} deducted below.`;
+            ? `Difference of ${kg(weights.diffKg)} is within the ${data.allowanceKg} kg free allowance - no weight deduction.`
+            : `Difference of ${kg(weights.diffKg)} exceeds the ${data.allowanceKg} kg free allowance - ${kg(kataDeductKg)} deducted below.`;
     doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(kataNote, LEFT + 2, y, { width: W - 4 });
     y = doc.y + 8;
 
@@ -324,7 +324,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       qty?: string;
       rate?: string;
       amount?: number;
-      /** Deduction — printed in brackets and red. */
+      /** Deduction - printed in brackets and red. */
       negative?: boolean;
       /** Subtotal / total styling. */
       emphasis?: 'none' | 'subtotal';
@@ -391,7 +391,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     if (data.selfVehicleHamali > 0) {
       rows.push({
         label: 'Less : Hamali (unloading)',
-        note: "lorry's share recovered — party's own vehicle",
+        note: "lorry's share recovered - party's own vehicle",
         amount: data.selfVehicleHamali,
         negative: true,
       });
@@ -399,7 +399,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     if (data.selfVehicleKata > 0) {
       rows.push({
         label: 'Less : Kata charges (weighbridge)',
-        note: "recovered — party's own vehicle",
+        note: "recovered - party's own vehicle",
         amount: data.selfVehicleKata,
         negative: true,
       });
@@ -473,7 +473,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     doc.lineWidth(0.6).strokeColor(HAIR).dash(2, { space: 2 }).moveTo(LEFT, footerY).lineTo(RIGHT, footerY).stroke();
     doc.undash();
     doc.font(F.body).fontSize(7).fillColor(MUTED).text(
-      'Computer-generated statement — no signature required. Please report any discrepancy within 7 days of receipt.',
+      'Computer-generated statement - no signature required. Please report any discrepancy within 7 days of receipt.',
       LEFT, footerY + 8, { width: W * 0.55 }
     );
     doc.font(F.semi).fontSize(8.5).fillColor(INK).text(`For ${company.name}`, LEFT + W * 0.6, footerY + 8, {

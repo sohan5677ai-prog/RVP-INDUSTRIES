@@ -29,7 +29,7 @@ export async function buildInvoicePdfData(dispatchId: string) {
 
   const buyerGstin = order.buyer.gstin ?? null;
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
-  // A GST-exempt order (and every dispatch under it) is billed WITHOUT GST — the
+  // A GST-exempt order (and every dispatch under it) is billed WITHOUT GST - the
   // invoice/EWB must show a 0% rate regardless of the product's default tax row.
   const gstFraction = order.gstExempt ? 0 : (taxRow?.gstRate != null ? Number(taxRow.gstRate) : 5) / 100;
 
@@ -84,7 +84,7 @@ export async function buildInvoicePdfData(dispatchId: string) {
 export async function sendInvoiceEmail(dispatchId: string) {
   const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
   if (!dispatch.irn) throw new HttpError(400, 'Generate the E-Invoice (IRN) before emailing it');
-  if (!order.buyer.email) throw new HttpError(400, `${order.buyer.name} has no email on file — add one in Parties first`);
+  if (!order.buyer.email) throw new HttpError(400, `${order.buyer.name} has no email on file - add one in Parties first`);
 
   const buffer = await renderInvoicePdf(pdfData);
   const html = `<p>Dear ${order.buyer.name},</p>` +
@@ -105,7 +105,7 @@ export async function sendInvoiceEmail(dispatchId: string) {
 export async function sendEwbEmail(dispatchId: string) {
   const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
   if (!dispatch.ewbNumber) throw new HttpError(400, 'Generate the E-Way Bill before emailing it');
-  if (!order.buyer.email) throw new HttpError(400, `${order.buyer.name} has no email on file — add one in Parties first`);
+  if (!order.buyer.email) throw new HttpError(400, `${order.buyer.name} has no email on file - add one in Parties first`);
 
   const buffer = await renderEwbPdf({
     company: { ...pdfData.company, pincode: company.pincode },

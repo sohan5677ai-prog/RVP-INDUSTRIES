@@ -52,7 +52,7 @@ async function main() {
   let skippedAlready = 0;
   let missingMargin = 0;
 
-  console.log(COMMIT ? '=== COMMIT — writing changes ===' : '=== DRY RUN — nothing will be written ===');
+  console.log(COMMIT ? '=== COMMIT - writing changes ===' : '=== DRY RUN - nothing will be written ===');
   console.log(`Pappu orders: ${orders.length}\n`);
 
   for (const so of orders) {
@@ -61,7 +61,7 @@ async function main() {
     const m = marginById.get(so.id);
     if (!m) {
       missingMargin++;
-      console.log(`  ! ${so.id}  no margin row — skipped`);
+      console.log(`  ! ${so.id}  no margin row - skipped`);
       continue;
     }
 

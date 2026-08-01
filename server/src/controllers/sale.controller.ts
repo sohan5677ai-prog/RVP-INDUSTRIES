@@ -429,7 +429,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       if (shortfallKg > 0 && data.excessOutKg < shortfallKg) {
         throw new HttpError(
           400,
-          `Only ${(headroomKg / 1000).toFixed(2)} t of this order has black seed behind it — ` +
+          `Only ${(headroomKg / 1000).toFixed(2)} t of this order has black seed behind it - ` +
             `this lorry is ${(weightKg / 1000).toFixed(2)} t. If the balance is going out of yield ` +
             `surplus, declare at least ${(shortfallKg / 1000).toFixed(2)} t as XS Pappu (excess out).`,
         );
@@ -541,7 +541,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // Fully dispatched once this lorry takes the remaining balance to (or below) zero.
   const fullyDispatched = alreadyDispatchedKg + weightKg >= order.tonnageKg;
 
-  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // Upload before the transaction starts - network I/O shouldn't hold a DB
   // transaction open.
   const kataFileUrl = kataFile ? await uploadFileToStorage(kataFile) : null;
 
@@ -610,7 +610,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   if (order.product === 'PAPPU' && fullyDispatched) await freezeOrderCost(order.id);
 
-  // WhatsApp the driver the buyer's name/phone/maps link — fire-and-forget,
+  // WhatsApp the driver the buyer's name/phone/maps link - fire-and-forget,
   // only when a driver phone was captured on this dispatch. The broker/buyer
   // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
   // (the invoice/EWB don't exist yet at dispatch time).
@@ -814,7 +814,7 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
   if (dispatch.status === 'DELIVERED') {
     const receiptCount = await prisma.receipt.count({ where: { saleDispatchId: dispatch.id } });
     if (receiptCount > 0) {
-      throw new HttpError(400, 'Cannot edit delivery — payment has already been recorded against this shipment.');
+      throw new HttpError(400, 'Cannot edit delivery - payment has already been recorded against this shipment.');
     }
   }
 
@@ -842,7 +842,7 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     }
   }
 
-  // Upload before the transaction starts — network I/O shouldn't hold a DB
+  // Upload before the transaction starts - network I/O shouldn't hold a DB
   // transaction open.
   const buyerKataFileUrl = kataFile ? await uploadFileToStorage(kataFile) : null;
 

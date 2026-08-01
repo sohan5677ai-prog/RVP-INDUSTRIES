@@ -63,7 +63,7 @@ export default function PaymentPlannerPage() {
   });
 
   const { data: payments, isLoading: loadingPayments } = useQuery({
-    // Full history — dues are matched against every payment, not just latest 100.
+    // Full history - dues are matched against every payment, not just latest 100.
     queryKey: ['payments', { all: true }],
     queryFn: () => api<Payment[]>('/payments?all=true'),
   });
@@ -164,7 +164,7 @@ export default function PaymentPlannerPage() {
     });
   });
 
-  // Oldest dues first — pay these before the newer ones.
+  // Oldest dues first - pay these before the newer ones.
   rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
   return rows;
   }, [parties, purchases, payments]);
@@ -216,7 +216,7 @@ export default function PaymentPlannerPage() {
     setPlans((prev) => ({ ...prev, [id]: value }));
   }
 
-  // Bulk "pay this much for this party" — distributes the entered amount across
+  // Bulk "pay this much for this party" - distributes the entered amount across
   // that party's own dues, oldest invoice first, so a lump sum clears the oldest
   // bills before touching newer ones.
   function setPartyBulkPay(group: PartyGroup, value: string) {
@@ -275,7 +275,7 @@ export default function PaymentPlannerPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Payment Planner</h1>
-        <p className="text-muted-foreground font-medium">Plan supplier payments against your available bank balance. Nothing here is recorded — it is a what-if worksheet.</p>
+        <p className="text-muted-foreground font-medium">Plan supplier payments against your available bank balance. Nothing here is recorded - it is a what-if worksheet.</p>
       </div>
 
       {isLoading ? (

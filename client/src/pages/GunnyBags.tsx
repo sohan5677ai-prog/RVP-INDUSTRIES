@@ -187,7 +187,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
 
   const actions = (
     <>
-      <ExportButtons filename="Feroz_Ledger" title="Feroz Ledger — Gunny Bags" subtitle={`${rows.length} entry(s)`} columns={FEROZ_LEDGER_COLUMNS} rows={ledgerRows} showPrint={false} />
+      <ExportButtons filename="Feroz_Ledger" title="Feroz Ledger - Gunny Bags" subtitle={`${rows.length} entry(s)`} columns={FEROZ_LEDGER_COLUMNS} rows={ledgerRows} showPrint={false} />
       <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-1.5"><Printer className="h-4 w-4" /> Print</Button>
       <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
     </>
@@ -197,14 +197,14 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
     <div className="space-y-7">
       {embedded ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Bardana bag purchases &amp; sales — Feroz's account. Net cost (purchases − sales) is deducted from the husk recovery pool; sales are booked as Gunny Bag Sales income.</p>
+          <p className="text-sm text-muted-foreground">Bardana bag purchases &amp; sales - Feroz's account. Net cost (purchases − sales) is deducted from the husk recovery pool; sales are booked as Gunny Bag Sales income.</p>
           <div className="flex items-center gap-2">{actions}</div>
         </div>
       ) : (
         <PageHeader
           icon={ReceiptText}
           title="Feroz Ledger"
-          description="Bardana bag purchases & sales — Feroz's account. Net cost (purchases − sales) is deducted from the husk recovery pool; sales are booked as Gunny Bag Sales income."
+          description="Bardana bag purchases & sales - Feroz's account. Net cost (purchases − sales) is deducted from the husk recovery pool; sales are booked as Gunny Bag Sales income."
           actions={actions}
         />
       )}
@@ -231,7 +231,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
               <ReceiptText className="h-4 w-4 text-primary" />
               <span className="font-semibold tracking-tight">Account Statement</span>
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5">Account Statement — Feroz (Gunny Bags)</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Account Statement - Feroz (Gunny Bags)</p>
           </div>
           <div className="text-right">
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Closing Balance</div>

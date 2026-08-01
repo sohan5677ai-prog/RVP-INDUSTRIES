@@ -7,7 +7,7 @@ const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KE
 
 // The verified sender address. Falls back to Resend's test address (which can
 // only deliver to the Resend account owner's own login email) until a real
-// domain is verified — set RESEND_FROM_EMAIL once it is.
+// domain is verified - set RESEND_FROM_EMAIL once it is.
 const DEFAULT_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Acme <onboarding@resend.dev>';
 
 export interface EmailAttachment {
@@ -81,9 +81,9 @@ export const emailService = {
       if (result) {
         messageId = result.data?.id;
       } else {
-        // RESEND_API_KEY isn't configured — sendEmail no-op'd, nothing left the
+        // RESEND_API_KEY isn't configured - sendEmail no-op'd, nothing left the
         // building. Record that honestly rather than logging a false SENT.
-        errorMessage = 'RESEND_API_KEY is not configured — email was not actually sent (dev/test mode)';
+        errorMessage = 'RESEND_API_KEY is not configured - email was not actually sent (dev/test mode)';
       }
     } catch (err) {
       errorMessage = err instanceof Error ? err.message : String(err);

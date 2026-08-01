@@ -3,7 +3,7 @@ import { istFinancialYearStart } from './istDate.js';
 /**
  * Indian financial year (Apr–Mar) for a date, e.g. 2026-06 -> "2026-27".
  *
- * Derived in IST, not process-local time — on a UTC server an invoice raised
+ * Derived in IST, not process-local time - on a UTC server an invoice raised
  * just after midnight IST on 1 April read as 31 March, i.e. the *previous* FY,
  * which would stamp the wrong year onto the invoice number.
  */

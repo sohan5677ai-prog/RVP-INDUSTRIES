@@ -121,7 +121,7 @@ function PendingShortagesCard({
     <div className="rounded-lg border bg-card overflow-x-auto">
       <div className="px-4 py-3 border-b">
         <h3 className="text-sm font-semibold flex items-center gap-1.5"><ReceiptText className="h-4 w-4" /> Recorded Shortages Awaiting a Credit Note</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">Already posted to the party ledger — raise a formal note to send to the buyer.</p>
+        <p className="text-xs text-muted-foreground mt-0.5">Already posted to the party ledger - raise a formal note to send to the buyer.</p>
       </div>
       <Table>
         <TableHeader>

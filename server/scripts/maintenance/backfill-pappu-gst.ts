@@ -3,7 +3,7 @@
 // backfills the dispatch's gstAmount so Sale Dues/reports show GST-inclusive
 // totals, and posts a correcting journal entry (Dr AR, Cr IGST Payable) so the
 // GL isn't left short the GST liability that was never booked at dispatch time.
-// The e-invoice/IRN filings for these are unaffected — taxpro.service.ts always
+// The e-invoice/IRN filings for these are unaffected - taxpro.service.ts always
 // recomputes GST from the configured rate rather than trusting this field.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';

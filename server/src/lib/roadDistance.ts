@@ -5,7 +5,7 @@ import { logger } from './logger.js';
  * "Approx Distance".
  *
  * NIC works this out itself from the two PIN codes when a bill is raised with
- * Distance 0 — but it never hands the figure back, and the official print is
+ * Distance 0 - but it never hands the figure back, and the official print is
  * rendered from OUR record, so a bill raised that way prints "0 KM". We
  * therefore have to arrive at the number ourselves and file it, which makes the
  * printed copy and the NIC record agree by construction.
@@ -114,7 +114,7 @@ async function googleMetres(fromPin: string, toPin: string, key: string): Promis
 /**
  * Road distance in whole km between two Indian PIN codes, or null when it
  * can't be worked out (unknown PIN code, or the routing service is down).
- * Never throws — the caller decides what an unknown distance means.
+ * Never throws - the caller decides what an unknown distance means.
  */
 export async function roadDistanceKm(
   fromPincode: string | null | undefined,
@@ -139,7 +139,7 @@ export async function roadDistanceKm(
     if (metres == null) {
       const [a, b] = [await geocodePincode(from), await geocodePincode(to)];
       if (!a || !b) {
-        logger.warn(`[distance] no OSM point for PIN ${!a ? from : to} — cannot calculate the E-Way Bill distance`);
+        logger.warn(`[distance] no OSM point for PIN ${!a ? from : to} - cannot calculate the E-Way Bill distance`);
         return null;
       }
       metres = await osrmMetres(a, b);

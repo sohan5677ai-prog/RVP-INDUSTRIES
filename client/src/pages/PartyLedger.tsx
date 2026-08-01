@@ -223,7 +223,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
     staleTime: 5 * 60 * 1000,
   });
 
-  // WhatsApp "remind about pending loads" — server computes the pending lorries
+  // WhatsApp "remind about pending loads" - server computes the pending lorries
   // and throttles repeat sends.
   const remindMutation = useMutation({
     mutationFn: () =>
@@ -232,7 +232,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
         { method: 'POST' }
       ),
     onSuccess: (r) =>
-      toast.success(`Reminder sent — ${r.pendingLorries} pending lorries (${r.poLabel})`),
+      toast.success(`Reminder sent - ${r.pendingLorries} pending lorries (${r.poLabel})`),
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -297,7 +297,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           )}
           <ExportButtons
             filename={`${party.name.replace(/\s+/g, '_')}_Ledger`}
-            title={`Party Ledger — ${party.name}`}
+            title={`Party Ledger - ${party.name}`}
             subtitle={periodText}
             columns={LEDGER_COLUMNS}
             rows={filtered}

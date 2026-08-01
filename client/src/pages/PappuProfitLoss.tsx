@@ -190,17 +190,7 @@ export default function PappuProfitLoss() {
       />
 
       {/* Headline metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estimated Profit</CardTitle>
-            {t.margin >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}
-          </CardHeader>
-          <CardContent>
-            <div className={cn('text-2xl font-bold', pnlClass(t.margin))}>{rupees(t.margin)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">{t.marginPct.toFixed(2)}% margin · {rupees(t.marginPerKg)}/kg</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">

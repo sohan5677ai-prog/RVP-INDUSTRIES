@@ -265,11 +265,11 @@ export async function getProfitLoss(_req: Request, res: Response) {
   res.json({
     period: new Date().toISOString(),
     pappu: {
-      profitLoss: pappuEstimatedProfit,
-      estimatedProfit: pappuEstimatedProfit,
+      profitLoss: pappuLockedProfit,
       lockedProfit: pappuLockedProfit,
-      orders: pappuMargins.length,
-      lockedOrders: lockedMargins.length,
+      estimatedProfit: pappuEstimatedProfit,
+      orders: lockedMargins.length,
+      totalOrders: pappuMargins.length,
     },
     huskPool: {
       byproductIncome,
@@ -282,11 +282,10 @@ export async function getProfitLoss(_req: Request, res: Response) {
       isDeficit: huskPoolNet < 0,
     },
     totals: {
-      netProfit: estimatedNetProfit,
-      estimatedNetProfit,
+      netProfit: lockedNetProfit,
       lockedNetProfit,
-      isProfit: estimatedNetProfit >= 0,
-      isLockedProfit: lockedNetProfit >= 0,
+      estimatedNetProfit,
+      isProfit: lockedNetProfit >= 0,
     },
   });
 }

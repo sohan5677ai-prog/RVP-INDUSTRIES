@@ -70,15 +70,9 @@ export default function ProfitLoss() {
         <>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <p className="text-sm text-muted-foreground">For the period ending {shortDate(data.period)}</p>
-            <div className="flex items-center gap-4 text-sm font-bold">
-              <span className={cn('inline-flex items-center gap-1.5', isLockedProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
-                <Lock className="h-3.5 w-3.5" /> Locked Net Profit: {rupees(data.totals.lockedNetProfit ?? data.totals.netProfit)}
-              </span>
-              <span className="text-muted-foreground">•</span>
-              <span className={cn('inline-flex items-center gap-1.5', isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
-                Estimated Net Profit: {rupees(data.totals.estimatedNetProfit ?? data.totals.netProfit)}
-              </span>
-            </div>
+            <span className={cn('inline-flex items-center gap-1.5 text-sm font-bold', isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+              {isProfit ? 'Net Profit' : 'Net Loss'}: {rupees(Math.abs(data.totals.netProfit))}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -89,32 +83,25 @@ export default function ProfitLoss() {
                   <Wheat className="h-4 w-4 text-amber-500" />
                   <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Pappu Profit &amp; Loss</h2>
                 </div>
-                {data.pappu.lockedOrders != null && (
+                {data.pappu.orders != null && (
                   <Badge variant="outline" className="text-[11px] font-mono gap-1 border-indigo-200 text-indigo-700 dark:border-indigo-900 dark:text-indigo-400">
-                    <Lock className="h-3 w-3" /> {data.pappu.lockedOrders} of {data.pappu.orders} Locked
+                    <Lock className="h-3 w-3" /> {data.pappu.orders} Locked Orders
                   </Badge>
                 )}
               </div>
-              <div className="px-5 py-4 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Core-product result across {data.pappu.orders} order{data.pappu.orders === 1 ? '' : 's'} — revenue net of
+              <div className="px-5 py-4">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Core-product result across {data.pappu.orders} fully dispatched order{data.pappu.orders === 1 ? '' : 's'} — revenue net of
                   seed cost, milling, freight &amp; brokerage.
                 </p>
-                <div className="space-y-2 border-t pt-3">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                      <Lock className="h-3.5 w-3.5 text-indigo-500" /> Pappu Locked Profit
-                    </span>
-                    <span className={cn('font-mono font-bold tabular-nums text-lg', (data.pappu.lockedProfit ?? data.pappu.profitLoss) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
-                      {rupees(data.pappu.lockedProfit ?? data.pappu.profitLoss)}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between text-xs text-muted-foreground pt-1">
-                    <span>Pappu Estimated Profit (total pipeline)</span>
-                    <span className="font-mono font-semibold tabular-nums text-foreground">
-                      {rupees(data.pappu.estimatedProfit ?? data.pappu.profitLoss)}
-                    </span>
-                  </div>
+                <div className="flex items-baseline justify-between border-t pt-3">
+                  <span className="font-bold text-foreground flex items-center gap-1.5">
+                    <Lock className="h-3.5 w-3.5 text-indigo-500" />
+                    Pappu Locked Profit
+                  </span>
+                  <span className={cn('font-mono font-bold tabular-nums text-lg', data.pappu.profitLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+                    {rupees(Math.abs(data.pappu.profitLoss))}
+                  </span>
                 </div>
               </div>
             </Card>
@@ -177,31 +164,19 @@ export default function ProfitLoss() {
               <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Net Profit &amp; Loss</h2>
             </div>
             <div className="px-5 py-3 divide-y divide-border/60">
-              <Row label="Pappu Locked Profit" amount={data.pappu.lockedProfit ?? data.pappu.profitLoss} strong />
-              <Row label="Pappu Estimated Profit (total pipeline)" amount={data.pappu.estimatedProfit ?? data.pappu.profitLoss} muted indent />
+              <Row label="Pappu Locked Profit" amount={data.pappu.profitLoss} strong />
               <Row
                 label={data.huskPool.isDeficit ? 'Less: Husk pool deficit' : 'Add: Husk pool surplus'}
                 amount={data.huskPool.net}
               />
-              <div className="pt-3 space-y-2">
-                <div className="flex items-baseline justify-between">
-                  <span className="inline-flex items-center gap-1.5 font-bold text-foreground">
-                    <Lock className="h-4 w-4 text-indigo-500" />
-                    Locked Net Profit
-                  </span>
-                  <span className={cn('font-mono font-bold tabular-nums text-xl', isLockedProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
-                    {rupees(data.totals.lockedNetProfit ?? data.totals.netProfit)}
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1.5">
-                    {isProfit ? <TrendingUp className="h-3.5 w-3.5 text-emerald-500" /> : <TrendingDown className="h-3.5 w-3.5 text-rose-500" />}
-                    Estimated Net Profit (pipeline)
-                  </span>
-                  <span className={cn('font-mono font-semibold tabular-nums', isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
-                    {rupees(data.totals.estimatedNetProfit ?? data.totals.netProfit)}
-                  </span>
-                </div>
+              <div className="flex items-baseline justify-between pt-3">
+                <span className="inline-flex items-center gap-1.5 font-bold text-foreground">
+                  {isProfit ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}
+                  Net {isProfit ? 'Profit' : 'Loss'}
+                </span>
+                <span className={cn('font-mono font-bold tabular-nums text-xl', isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+                  {rupees(Math.abs(data.totals.netProfit))}
+                </span>
               </div>
             </div>
           </Card>

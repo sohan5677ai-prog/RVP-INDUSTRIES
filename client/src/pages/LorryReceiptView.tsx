@@ -10,8 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 /* -------------------------------------------------------------------------- */
-/* Surya Road Lines' own printed stationery. These are the transporter's fixed
-/* details, not ours — they belong to the form, not to Settings.               */
+/* Surya Road Lines' printed stationery fixed details                       */
 /* -------------------------------------------------------------------------- */
 const SRL = {
   name: 'SURYA ROAD LINES',
@@ -23,7 +22,6 @@ const SRL = {
   udyam: 'UDAYAM AP-02-0002343',
 };
 
-/** What the pre-printed "said to contain" line should read for each commodity. */
 const PRODUCT_DESCRIPTION: Record<string, string> = {
   PAPPU: 'Tamarind Seed Pappu',
   HUSK: 'Tamarind Husk',
@@ -35,7 +33,6 @@ const PRODUCT_DESCRIPTION: Record<string, string> = {
   NALLA_CHINTAPANDU: 'Nalla Chintapandu',
 };
 
-/** The book writes dates as 30/5/26 — day/month/2-digit year, no padding. */
 function dmy(d?: string | null): string {
   if (!d) return '';
   const date = new Date(d);
@@ -50,70 +47,93 @@ function isoDay(d?: string | null): string {
   return date.toISOString().slice(0, 10);
 }
 
-/* ── Emblems printed across the top of the book ──────────────────────────── */
+/* ── Vector Illustrations matching original receipt pictures ────────────── */
 
-/** Seated Ganesha line-art, top-left of the form. */
+/** Seated Ganesha line-art matching the original receipt (Image 5). */
 function Ganesha({ className = '' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 100 118" className={className} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      {/* crown */}
-      <circle cx="50" cy="6" r="2.6" fill="currentColor" stroke="none" />
-      <path d="M50 9 L44 21 M50 9 L56 21" />
-      <path d="M37 24 Q50 13 63 24" />
-      {/* ears */}
-      <path d="M34 31 Q20 28 18 42 Q17 56 33 51" />
-      <path d="M66 31 Q80 28 82 42 Q83 56 67 51" />
-      {/* head */}
-      <path d="M34 30 Q50 21 66 30 Q69 44 62 52 Q50 60 38 52 Q31 44 34 30 Z" />
-      {/* eyes + tilak */}
-      <circle cx="43" cy="37" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="57" cy="37" r="1.5" fill="currentColor" stroke="none" />
-      <path d="M50 26 L50 32" />
-      {/* tusks */}
-      <path d="M42 47 L37 55" />
-      <path d="M58 47 L63 55" />
-      {/* trunk */}
-      <path d="M50 45 Q53 59 45 65 Q36 71 38 79 Q40 86 48 84" />
-      {/* body + belly */}
-      <path d="M33 60 Q29 82 33 97" />
-      <path d="M67 60 Q71 82 67 97" />
-      <path d="M38 82 Q50 74 62 82 Q62 93 50 95 Q38 93 38 82 Z" />
-      {/* arms */}
-      <path d="M34 63 Q21 70 23 84" />
-      <path d="M66 63 Q79 70 77 84" />
-      {/* seated base / lotus */}
-      <path d="M26 97 Q50 110 74 97" />
-      <path d="M22 101 Q50 116 78 101" />
+    <svg viewBox="0 0 100 120" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      {/* Mukut / Crown */}
+      <path d="M50 4 L44 18 H56 Z" fill="currentColor" fillOpacity="0.1" />
+      <path d="M41 18 C41 18 50 12 59 18 M42 22 C42 22 50 16 58 22" />
+      <path d="M36 26 C43 21 57 21 64 26 L66 32 C55 27 45 27 34 32 Z" />
+      <line x1="50" y1="4" x2="50" y2="18" />
+      
+      {/* Ears */}
+      <path d="M35 32 C18 28 14 44 17 56 C20 66 32 60 34 52" />
+      <path d="M65 32 C82 28 86 44 83 56 C80 66 68 60 66 52" />
+      
+      {/* Face & Tilak */}
+      <path d="M35 32 C45 28 55 28 65 32 C68 46 62 54 50 56 C38 54 32 46 35 32 Z" />
+      <path d="M47 34 C47 31 53 31 53 34 C53 40 50 44 50 44 C50 44 47 40 47 34 Z" fill="currentColor" />
+      <circle cx="43" cy="40" r="1.5" fill="currentColor" />
+      <circle cx="57" cy="40" r="1.5" fill="currentColor" />
+      
+      {/* Tusks & Trunk */}
+      <path d="M42 50 L36 53" />
+      <path d="M58 50 L64 53" />
+      <path d="M50 54 C54 66 42 70 42 78 C42 85 52 86 56 82 C59 79 57 74 52 75 C48 76 48 80 52 80" strokeWidth="1.8" />
+      <path d="M63 76 C65 74 68 76 66 79 C64 81 61 79 63 76 Z" fill="currentColor" /> {/* Laddu */}
+
+      {/* Body, Belly & Arms */}
+      <path d="M31 54 C22 62 20 76 25 86 C30 92 38 88 38 84" />
+      <path d="M69 54 C78 62 80 76 75 86 C70 92 62 88 62 84" />
+      <path d="M36 68 C28 78 35 96 50 96 C65 96 72 78 64 68" />
+      <path d="M44 72 C44 72 50 75 56 72" />
+      
+      {/* Seated Base / Lotus */}
+      <path d="M22 96 C35 106 65 106 78 96" />
+      <path d="M18 102 C35 116 65 116 82 102" />
+      <path d="M26 108 C40 118 60 118 74 108" />
     </svg>
   );
 }
 
-/** Deity in a temple arch, top-right of the form. */
+/** Lord Venkateswara (Tirumala Balaji) Deity line-art matching original receipt. */
 function DeityArch({ className = '' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 80 118" className={className} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      {/* arch */}
-      <path d="M40 4 Q8 26 8 114 L72 114 Q72 26 40 4 Z" />
-      <path d="M40 12 Q15 31 15 108 L65 108 Q65 31 40 12" />
-      {/* crown */}
-      <path d="M31 40 Q40 26 49 40 Z" />
-      {/* face + namam */}
-      <path d="M31 42 Q40 36 49 42 Q51 56 40 62 Q29 56 31 42 Z" />
-      <path d="M37 45 L35 57 M43 45 L45 57 M40 47 L40 57" />
-      {/* arms + body */}
-      <path d="M31 64 Q24 72 26 92" />
-      <path d="M49 64 Q56 72 54 92" />
-      <path d="M32 63 Q40 60 48 63 Q52 82 50 100 L30 100 Q28 82 32 63 Z" />
-      {/* lamps either side */}
-      <path d="M18 100 L18 92 M62 100 L62 92" />
+    <svg viewBox="0 0 90 120" className={className} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      {/* Outer Temple Arch (Prabhavavali) */}
+      <path d="M45 4 C12 22 10 98 10 114 H80 C80 98 78 22 45 4 Z" strokeWidth="1.8" />
+      <path d="M45 10 C18 27 16 94 16 110 H74 C74 94 72 27 45 10 Z" />
+      
+      {/* Arch Flame Top Decorative Finial (Kirtimukha) */}
+      <circle cx="45" cy="14" r="3" fill="currentColor" />
+      
+      {/* Crown (Kiritam) */}
+      <path d="M34 40 L45 22 L56 40 Z" fill="currentColor" fillOpacity="0.1" />
+      <path d="M32 40 H58 M35 34 H55 M38 28 H52" />
+      
+      {/* Face & Sacred Namam */}
+      <path d="M35 40 C35 40 45 36 55 40 C57 54 53 62 45 64 C37 62 33 54 35 40 Z" />
+      {/* U-Shaped Tiruman & Kasturi Tilak */}
+      <path d="M40 42 L38 56 M50 42 L52 56 M45 46 L45 57" strokeWidth="2" />
+      
+      {/* Shankh (Conch) & Chakra (Discus) on Upper Hands */}
+      <path d="M22 46 C20 40 28 38 28 46 C28 50 22 52 22 46 Z" /> {/* Chakra left */}
+      <path d="M68 46 C66 40 74 38 74 46 C74 50 68 52 68 46 Z" /> {/* Shankh right */}
+      <path d="M26 50 L34 56 M64 56 L70 50" strokeWidth="1.8" />
+      
+      {/* Main Body, Garlands & Lower Hands */}
+      <path d="M33 64 C26 72 26 94 30 106 H60 C64 94 64 72 57 64 Z" />
+      {/* Heavy Flower Garland (Vanamali) */}
+      <path d="M30 60 C24 74 24 100 45 104 C66 100 66 74 60 60" strokeWidth="2" />
+      <path d="M35 64 C30 76 30 94 45 98 C60 94 60 76 55 64" />
+      
+      {/* Lower Hand gestures (Varada & Kati Hasta) */}
+      <path d="M34 68 C38 74 42 78 45 80" />
+      <path d="M56 68 C52 74 48 78 45 80" />
+      
+      {/* Base / Lotus pedestal */}
+      <path d="M20 106 H70 M16 110 H74" strokeWidth="1.8" />
     </svg>
   );
 }
 
-/** The small blue devotional roundels stamped along the top of the book. */
+/** Devotional Roundels stamped along the top of the header. */
 function Roundel({ glyph }: { glyph: string }) {
   return (
-    <span className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 border-current text-[12px] leading-none">
+    <span className="inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-current text-[11px] font-bold leading-none">
       {glyph}
     </span>
   );
@@ -135,8 +155,6 @@ export default function LorryReceiptView() {
     queryFn: () => api<CompanyProfile>('/settings/company'),
   });
 
-  // GC book details. The number is only on the transporter's paper book, so it
-  // has to be typed once here; everything else pre-fills off the dispatch.
   const [gcNo, setGcNo] = useState('');
   const [lrDate, setLrDate] = useState('');
   const [bags, setBags] = useState('');
@@ -177,9 +195,7 @@ export default function LorryReceiptView() {
   const buyer = order?.buyer;
 
   const description = PRODUCT_DESCRIPTION[order?.product ?? 'PAPPU'] ?? 'Tamarind Seed Pappu';
-  // "From" is the town the lorry leaves (Settings → Invoice Setup), "To" is the
-  // order's delivery destination, falling back to the buyer's town/state.
-  const fromPlace = (company.dispatchFromPlace || company.stateName || '').toUpperCase();
+  const fromPlace = (company.dispatchFromPlace || company.stateName || 'PUNGANUR').toUpperCase();
   const toPlace = (order?.destination || buyer?.city || buyer?.state || '').toUpperCase();
   const truckNo = dispatch.vehicleNumber ?? '';
   const gcDate = dmy(lrDate || dispatch.invoiceDate || dispatch.dispatchDate);
@@ -190,250 +206,321 @@ export default function LorryReceiptView() {
     .join('\n');
 
   return (
-    <div className="min-h-screen bg-neutral-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#f4f2eb] flex flex-col font-sans">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; }
           .lr-no-print { display: none !important; }
-          .lr-print-area { margin: 0; padding: 0; box-shadow: none !important; width: 100% !important; max-width: none !important; }
-          @page { size: A4 portrait; margin: 8mm; }
+          .lr-print-area { margin: 0 !important; padding: 0 !important; box-shadow: none !important; width: 100% !important; max-width: none !important; }
+          @page { size: A4 landscape; margin: 5mm; }
         }
       `}} />
 
-      {/* Toolbar (not printed) */}
+      {/* Toolbar (Screen only) */}
       <div className="lr-no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b bg-background px-4 py-2 shadow-sm">
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
-          <span className="ml-2 flex items-center gap-1 text-sm font-medium text-muted-foreground">
+          <span className="ml-2 flex items-center gap-1 text-sm font-semibold text-[#0b2b5a]">
             <FileText className="h-4 w-4" /> Surya Road Lines — Lorry Receipt (GC)
           </span>
         </div>
-        <Button size="sm" onClick={() => window.print()}>
-          <Printer className="h-4 w-4 mr-1" /> Print
+        <Button size="sm" className="bg-[#0b2b5a] hover:bg-[#081e40] text-white" onClick={() => window.print()}>
+          <Printer className="h-4 w-4 mr-1" /> Print Lorry Receipt
         </Button>
       </div>
 
-      {/* The handful of fields the book carries but the ERP cannot know. */}
+      {/* Transporter Details Form Bar */}
       <div className="lr-no-print grid grid-cols-2 gap-3 border-b bg-background px-4 py-3 sm:grid-cols-5 sm:items-end">
         <div className="space-y-1.5">
-          <Label className="text-xs">G.C. No.</Label>
-          <Input value={gcNo} onChange={(e) => setGcNo(e.target.value)} placeholder="from the GC book" className="h-8" />
+          <Label className="text-xs font-semibold text-[#0b2b5a]">G.C. No.</Label>
+          <Input value={gcNo} onChange={(e) => setGcNo(e.target.value)} placeholder="e.g. 51" className="h-8 border-[#0b2b5a]/30 focus:border-[#0b2b5a]" />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">GC Date</Label>
-          <Input type="date" value={lrDate} onChange={(e) => setLrDate(e.target.value)} className="h-8" />
+          <Label className="text-xs font-semibold text-[#0b2b5a]">GC Date</Label>
+          <Input type="date" value={lrDate} onChange={(e) => setLrDate(e.target.value)} className="h-8 border-[#0b2b5a]/30 focus:border-[#0b2b5a]" />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Bags</Label>
-          <Input type="number" min="0" value={bags} onChange={(e) => setBags(e.target.value)} placeholder="e.g. 600" className="h-8" />
+          <Label className="text-xs font-semibold text-[#0b2b5a]">Bags</Label>
+          <Input type="number" min="0" value={bags} onChange={(e) => setBags(e.target.value)} placeholder="e.g. 600" className="h-8 border-[#0b2b5a]/30 focus:border-[#0b2b5a]" />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Each Bag (Kgs)</Label>
-          <Input type="number" min="0" value={kgPerBag} onChange={(e) => setKgPerBag(e.target.value)} placeholder="e.g. 50" className="h-8" />
+          <Label className="text-xs font-semibold text-[#0b2b5a]">Each Bag (Kgs)</Label>
+          <Input type="number" min="0" value={kgPerBag} onChange={(e) => setKgPerBag(e.target.value)} placeholder="e.g. 50" className="h-8 border-[#0b2b5a]/30 focus:border-[#0b2b5a]" />
         </div>
-        <Button size="sm" variant="outline" className="h-8" disabled={save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? 'Saving…' : 'Save details'}
+        <Button size="sm" variant="outline" className="h-8 border-[#0b2b5a] text-[#0b2b5a] hover:bg-[#0b2b5a]/5" disabled={save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? 'Saving…' : 'Save Details'}
         </Button>
       </div>
 
-      <div className="flex justify-center bg-neutral-100 py-8 lr-print-area">
-        <div className="lr-print-area relative w-[210mm] bg-white p-[8mm] font-serif text-[11px] leading-tight text-black shadow-sm ring-1 ring-neutral-300">
-          <div className="border-2 border-black">
+      {/* Main Print Container matching physical stationery format */}
+      <div className="flex justify-center bg-[#f4f2eb] py-6 lr-print-area">
+        <div className="lr-print-area relative w-[275mm] min-h-[190mm] bg-[#fbf9f4] p-[5mm] text-[#0b2b5a] shadow-md ring-1 ring-neutral-300 font-serif text-[11px] leading-tight">
+          
+          {/* Outer Deep Navy Blue Border */}
+          <div className="border-[2.5px] border-[#0b2b5a] flex flex-col h-full bg-[#fbf9f4]">
 
-            {/* ── Masthead ──────────────────────────────────────────────── */}
-            <div className="flex items-stretch gap-2 px-2 pt-1.5">
-              <Ganesha className="h-[74px] w-[62px] shrink-0 text-black" />
-              <div className="flex-1 text-center">
-                <div className="flex items-center justify-center gap-2 text-[#1d3f8f]">
-                  <Roundel glyph="ॐ" />
-                  <Roundel glyph="श्री" />
-                  <Roundel glyph="ॐ" />
-                </div>
-                <div className="mt-0.5 flex items-center justify-center gap-2">
-                  <span className="inline-flex h-[18px] w-[26px] items-center justify-center rounded-full border border-black text-[9px] font-bold tracking-tight">
-                    SRL
-                  </span>
-                  <span className="text-[10px] italic">Subject to Punganur Jurisdiction</span>
-                </div>
-                <div className="font-sans text-[26px] font-extrabold leading-none tracking-tight">{SRL.name}</div>
-                <div className="mx-auto mt-0.5 inline-block border border-black px-2 py-[1px] text-[10.5px] font-semibold">
-                  {SRL.tagline}
-                </div>
-                <div className="mt-0.5 text-[10.5px] font-semibold">{SRL.address}</div>
-              </div>
-              <DeityArch className="h-[74px] w-[52px] shrink-0 text-black" />
-            </div>
-            <div className="border-b-2 border-black px-2 pb-1 text-center text-[11.5px] font-bold">{SRL.phones}</div>
+            {/* Top Container: Sidebar on Left, Content Grid on Right */}
+            <div className="flex flex-1 border-b-[2.5px] border-[#0b2b5a]">
 
-            {/* ── Registrations / consignor's copy / carrier note ───────── */}
-            <div className="flex border-b-2 border-black text-[8.5px] leading-[1.25]">
-              <div className="w-[36%] border-r-2 border-black p-1">
-                <div>PAN CARD : {SRL.pan}</div>
-                <div>LABOUR Reg. No. : {SRL.labourReg}</div>
-                <div>msme UDAYAM Reg. No.: {SRL.udyam}</div>
-                <div className="mt-1.5 font-bold">Caution</div>
-                <div>This Consignment will not detained</div>
-                <div>Re routed or booked without consignee</div>
-                <div>Banks written promission will be</div>
-                <div>delivered at the destinaltion</div>
-              </div>
-              <div className="w-[30%] border-r-2 border-black p-1">
-                <div className="text-center font-bold leading-[1.3]">
-                  CONSIGNOR&apos;S COPY<br />
-                  AT OWNERS RISK<br />
-                  INSURANCE
-                </div>
-                <div className="mt-1 border-t border-black pt-1 text-justify">
-                  The Customer has stated that the has not insurance the consignment or he has insured the consignment.
-                </div>
-                <div className="mt-1">Company:.........................</div>
-                <div>Policy No.:......................</div>
-                <div>Amount:..........................</div>
-                <div>Risk:............................</div>
-              </div>
-              <div className="w-[34%] p-1 text-justify">
-                <span className="font-bold">NOTE :</span> This Consignment covered by this of special lorry receipt from shall be
-                stored at the destination under control of the Transport order and shall be delivered to order of then consignee
-                bank whose name mentioned in the lorry receipt it will under no circumstance be delivered to any one without the
-                written authority from the consignee copy or on a separate letter of Authority.
-              </div>
-            </div>
+              {/* ── LEFT SIDEBAR (Transporter Header, Info & Deities) ──────── */}
+              <div className="w-[23%] border-r-[2.5px] border-[#0b2b5a] flex flex-col justify-between p-1.5 bg-[#fcfbf7]">
+                
+                <div className="space-y-1.5 text-center">
+                  {/* Devotional Roundels */}
+                  <div className="flex items-center justify-center gap-1.5 text-[#0b2b5a]">
+                    <Roundel glyph="ॐ" />
+                    <Roundel glyph="श्री" />
+                    <Roundel glyph="ॐ" />
+                  </div>
 
-            {/* ── Consignor / consignee vs. GC + invoice + route ────────── */}
-            <div className="flex border-b-2 border-black">
-              <div className="w-[62%] border-r-2 border-black">
-                <div className="min-h-[74px] border-b border-black p-1">
-                  <div className="text-[9.5px]">Consignors Name &amp; Address :</div>
-                  <div className="mt-0.5 whitespace-pre-line pl-1 font-sans text-[11px] font-semibold uppercase leading-snug">
-                    {company.name}
-                    {consignorAddress ? `\n${consignorAddress}` : ''}
+                  {/* SRL Jurisdiction Badge */}
+                  <div className="flex items-center justify-center gap-1 pt-0.5">
+                    <span className="inline-flex h-[16px] w-[24px] items-center justify-center rounded-full border border-[#0b2b5a] text-[8.5px] font-extrabold tracking-tight font-sans">
+                      SRL
+                    </span>
+                    <span className="text-[8.5px] italic font-semibold">Subject to Punganur Jurisdiction</span>
+                  </div>
+
+                  {/* Big Transporter Brand Title */}
+                  <div className="font-sans text-[20px] font-black tracking-tight leading-none text-[#0b2b5a] uppercase pt-1">
+                    {SRL.name}
+                  </div>
+                  
+                  {/* Tagline */}
+                  <div className="border border-[#0b2b5a] px-1 py-[1px] text-[8.5px] font-bold tracking-tight inline-block">
+                    {SRL.tagline}
+                  </div>
+
+                  {/* Address & Phone */}
+                  <div className="text-[8.5px] font-bold leading-tight pt-0.5">
+                    {SRL.address}
+                  </div>
+                  <div className="text-[8px] font-bold leading-tight border-b border-[#0b2b5a]/40 pb-1">
+                    {SRL.phones}
+                  </div>
+
+                  {/* Registrations Block */}
+                  <div className="text-[8px] leading-tight space-y-0.5 text-left font-sans pt-0.5 font-semibold">
+                    <div>PAN CARD : <span className="font-bold">{SRL.pan}</span></div>
+                    <div>LABOUR Reg. No. : <span className="font-bold">{SRL.labourReg}</span></div>
+                    <div>msme UDAYAM Reg. No.: <span className="font-bold">{SRL.udyam}</span></div>
+                  </div>
+
+                  {/* Caution Block */}
+                  <div className="border border-[#0b2b5a] p-1 text-[7.5px] leading-tight text-left mt-1 bg-[#f7f5ed]">
+                    <div className="font-bold text-center uppercase tracking-wider text-[8.5px] mb-0.5">Caution</div>
+                    <div>This Consignment will not detained</div>
+                    <div>Re routed or booked without consignee</div>
+                    <div>Banks written promission will be</div>
+                    <div>delivered at the destinaltion</div>
                   </div>
                 </div>
-                <div className="min-h-[74px] p-1">
-                  <div className="text-[9.5px]">Consignee Name &amp; Address :</div>
-                  <div className="mt-0.5 whitespace-pre-line pl-1 font-sans text-[11px] font-semibold uppercase leading-snug">
-                    {buyer?.name ?? ''}
-                    {consigneeAddress ? `\n${consigneeAddress}` : ''}
-                  </div>
-                </div>
-              </div>
-              <div className="w-[38%] text-[10px]">
-                <div className="border-b border-black px-1 py-[3px]">
-                  G.C. No. <span className="ml-1 font-sans text-[13px] font-bold text-[#c0392b]">{gcNo}</span>
-                </div>
-                <div className="border-b border-black px-1 py-[3px]">
-                  Invoice No.: <span className="font-sans font-semibold">{dispatch.invoiceNumber ?? ''}</span>
-                </div>
-                <div className="border-b border-black px-1 py-[3px]">
-                  DATE: <span className="font-sans font-semibold">{gcDate}</span>
-                </div>
-                <div className="border-b border-black px-1 py-[3px]">
-                  TRUCK NO. <span className="font-sans font-semibold">{truckNo}</span>
-                </div>
-                <div className="border-b border-black px-1 py-[3px]">
-                  FROM <span className="font-sans font-semibold">{fromPlace}</span>
-                </div>
-                <div className="border-b border-black px-1 py-[3px]">
-                  TO <span className="font-sans font-semibold">{toPlace}</span>
-                </div>
-                <div className="border-b border-black py-[2px] text-center text-[11px] font-bold">FREIGHT</div>
-                <div className="flex text-[9.5px] font-semibold">
-                  <div className="w-1/2 border-r border-black text-center">Paid</div>
-                  <div className="w-1/2 text-center">To Pay</div>
-                </div>
-              </div>
-            </div>
 
-            {/* ── Goods / freight grid ──────────────────────────────────── */}
-            <div className="flex border-b-2 border-black text-[10px]">
-              <div className="w-[17%] border-r border-black">
-                <div className="border-b border-black py-[2px] text-center font-bold">Package</div>
-                <div className="space-y-1 p-1 leading-snug">
-                  <div><span className="font-sans font-semibold">{bags || '------------'}</span> Bags</div>
-                  <div>Each Bag</div>
-                  <div><span className="font-sans font-semibold">{kgPerBag || '------------'}</span> Kgs.</div>
+                {/* Bottom Deity Illustrations (Venkateswara Balaji & Ganesha) */}
+                <div className="flex items-end justify-between pt-2 border-t border-[#0b2b5a]/30 mt-2 px-1">
+                  <DeityArch className="h-[68px] w-[46px] text-[#0b2b5a]" />
+                  <Ganesha className="h-[68px] w-[50px] text-[#0b2b5a]" />
                 </div>
               </div>
-              <div className="w-[27%] border-r border-black">
-                <div className="border-b border-black py-[2px] text-center font-bold leading-tight">Descriptions<br />said to contain</div>
-                <div className="p-1 leading-snug">
-                  <div className="line-through">FEED</div>
-                  <div className="font-sans text-[11px] font-semibold">{description}</div>
-                </div>
-              </div>
-              <div className="w-[18%] border-r border-black">
-                <div className="border-b border-black py-[2px] text-center font-bold">Freight</div>
-                <div className="space-y-1 p-1 leading-snug">
-                  <div>Per Bag</div>
-                  <div>Lorry Freight</div>
-                  <div>Rs. ________</div>
-                </div>
-              </div>
-              {/* Paid / To Pay money columns, split Rs | Ps like the book */}
-              <div className="flex w-[38%]">
-                {['Paid', 'To Pay'].map((col) => (
-                  <div key={col} className="flex w-1/2 flex-col border-r border-black last:border-r-0">
-                    <div className="flex border-b border-black">
-                      <div className="w-2/3 border-r border-black py-[2px] text-center text-[9px]">Rs.</div>
-                      <div className="w-1/3 py-[2px] text-center text-[9px]">Ps.</div>
+
+              {/* ── RIGHT MAIN SECTION ───────────────────────────────────── */}
+              <div className="w-[77%] flex flex-col">
+
+                {/* Row 1: Consignor Copy / Insurance & Note Paragraph */}
+                <div className="flex border-b-[2px] border-[#0b2b5a] text-[8.5px] leading-[1.25]">
+                  {/* Left: Consignor Risk Box */}
+                  <div className="w-[45%] border-r-[2px] border-[#0b2b5a] p-1.5">
+                    <div className="text-center font-bold leading-[1.2]">
+                      CONSIGNOR&apos;S COPY<br />
+                      AT OWNERS RISK<br />
+                      INSURANCE
                     </div>
-                    <div className="flex flex-1">
-                      <div className="w-2/3 border-r border-black" />
-                      <div className="w-1/3" />
+                    <div className="mt-1 border-t border-[#0b2b5a]/40 pt-1 text-justify text-[8px]">
+                      The Customer has stated that the has not insurance the consignment or he has insured the consignment.
+                    </div>
+                    <div className="mt-1 space-y-0.5 text-[8px]">
+                      <div>Company:.........................................</div>
+                      <div>Policy No.:......................................</div>
+                      <div>Amount:..........................................</div>
+                      <div>Risk:............................................</div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            {/* ── Amount in words + Hamali / GC / Total ─────────────────── */}
-            <div className="flex border-b-2 border-black text-[10px]">
-              <div className="w-[44%] border-r border-black p-1">
-                <div>To pay Lorry freight Rupees in words</div>
-                <div className="mt-2 text-[9px]">.................................................</div>
-                <div className="mt-1.5 text-[9px]">.................................................</div>
-                <div className="mt-1.5 text-[9px]">.................................................</div>
-                <div className="mt-1 text-[8.5px] italic">Unloading by Party</div>
-              </div>
-              <div className="w-[18%] border-r border-black">
-                <div className="border-b border-black px-1 py-[5px]">Hamali</div>
-                <div className="border-b border-black px-1 py-[5px]">GC Charges</div>
-                <div className="px-1 py-[5px] font-bold">TOTAL</div>
-              </div>
-              <div className="flex w-[38%]">
-                {['Paid', 'To Pay'].map((col) => (
-                  <div key={col} className="flex w-1/2 flex-col border-r border-black last:border-r-0">
-                    {[0, 1, 2].map((row) => (
-                      <div key={row} className={`flex flex-1 ${row < 2 ? 'border-b border-black' : ''}`}>
-                        <div className="w-2/3 border-r border-black py-[5px]" />
-                        <div className="w-1/3 py-[5px]" />
+                  {/* Right: NOTE Paragraph */}
+                  <div className="w-[55%] p-1.5 text-justify text-[8.5px] leading-snug">
+                    <span className="font-bold">NOTE :</span> This Consignment covered by this of special lorry receipt from shall be stored at the destination under control of the Transport order and shall be delivered to order of then consignee bank whose name mentioned in the lorry receipt it will under no circumstance be delivered to any one without the written authority from the consignee copy or on a separate letter of Authority.
+                  </div>
+                </div>
+
+                {/* Row 2: Consignor & Consignee vs. GC No & Route Info */}
+                <div className="flex border-b-[2px] border-[#0b2b5a]">
+                  {/* Consignor & Consignee Addresses */}
+                  <div className="w-[58%] border-r-[2px] border-[#0b2b5a] flex flex-col">
+                    <div className="flex-1 border-b border-[#0b2b5a] p-1.5">
+                      <div className="text-[9px] font-bold underline">Consignors Name &amp; Address :</div>
+                      <div className="mt-1 whitespace-pre-line font-sans text-[10.5px] font-bold uppercase leading-snug tracking-tight">
+                        {company.name}
+                        {consignorAddress ? `\n${consignorAddress}` : ''}
+                      </div>
+                    </div>
+                    <div className="flex-1 p-1.5">
+                      <div className="text-[9px] font-bold underline">Consignee Name &amp; Address :</div>
+                      <div className="mt-1 whitespace-pre-line font-sans text-[10.5px] font-bold uppercase leading-snug tracking-tight">
+                        {buyer?.name ?? ''}
+                        {consigneeAddress ? `\n${consigneeAddress}` : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GC No, Date, Truck, Route & Freight Column */}
+                  <div className="w-[42%] font-sans text-[10px]">
+                    <div className="border-b border-[#0b2b5a] px-2 py-1 flex items-center justify-between">
+                      <span className="font-bold font-serif text-[11px]">G.C. No.</span>
+                      <span className="text-[18px] font-black text-[#cc1111] tracking-wider leading-none">
+                        {gcNo || '────'}
+                      </span>
+                    </div>
+                    <div className="border-b border-[#0b2b5a] px-2 py-0.5 flex justify-between">
+                      <span className="font-semibold text-[9.5px]">Invoice No.:</span>
+                      <span className="font-bold text-[10.5px]">{dispatch.invoiceNumber ?? '────'}</span>
+                    </div>
+                    <div className="border-b border-[#0b2b5a] px-2 py-0.5 flex justify-between">
+                      <span className="font-semibold text-[9.5px]">DATE:</span>
+                      <span className="font-bold text-[10.5px]">{gcDate || '────'}</span>
+                    </div>
+                    <div className="border-b border-[#0b2b5a] px-2 py-0.5 flex justify-between">
+                      <span className="font-semibold text-[9.5px]">TRUCK NO.</span>
+                      <span className="font-bold text-[10.5px] uppercase">{truckNo || '────'}</span>
+                    </div>
+                    <div className="border-b border-[#0b2b5a] px-2 py-0.5 flex justify-between">
+                      <span className="font-semibold text-[9.5px]">FROM</span>
+                      <span className="font-bold text-[10.5px] uppercase">{fromPlace}</span>
+                    </div>
+                    <div className="border-b border-[#0b2b5a] px-2 py-0.5 flex justify-between">
+                      <span className="font-semibold text-[9.5px]">TO</span>
+                      <span className="font-bold text-[10.5px] uppercase">{toPlace}</span>
+                    </div>
+                    <div className="border-b border-[#0b2b5a] py-0.5 text-center text-[10px] font-black font-serif uppercase tracking-widest bg-[#f4f1e6]">
+                      FREIGHT
+                    </div>
+                    <div className="flex text-[9px] font-bold text-center">
+                      <div className="w-1/2 border-r border-[#0b2b5a] py-0.5">Paid</div>
+                      <div className="w-1/2 py-0.5">To Pay</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Row 3: Goods & Freight Grid Table */}
+                <div className="flex flex-1 border-b-[2px] border-[#0b2b5a] text-[9.5px]">
+                  {/* Package Column */}
+                  <div className="w-[18%] border-r border-[#0b2b5a] flex flex-col">
+                    <div className="border-b border-[#0b2b5a] py-1 text-center font-bold font-serif text-[10px]">Package</div>
+                    <div className="p-1.5 space-y-1 leading-snug flex-1">
+                      <div><span className="font-sans font-bold text-[11px]">{bags || '────'}</span> Bags</div>
+                      <div className="text-[9px]">Each Bag</div>
+                      <div><span className="font-sans font-bold text-[11px]">{kgPerBag || '────'}</span> Kgs.</div>
+                    </div>
+                  </div>
+
+                  {/* Descriptions Said to Contain Column */}
+                  <div className="w-[30%] border-r border-[#0b2b5a] flex flex-col">
+                    <div className="border-b border-[#0b2b5a] py-1 text-center font-bold font-serif text-[10px] leading-tight">
+                      Descriptions<br />said to contain
+                    </div>
+                    <div className="p-1.5 leading-snug flex-1">
+                      <div className="line-through text-[#0b2b5a]/60 text-[9px]">FEED</div>
+                      <div className="font-sans text-[11px] font-bold text-[#0b2b5a] uppercase">{description}</div>
+                    </div>
+                  </div>
+
+                  {/* Freight Column */}
+                  <div className="w-[18%] border-r border-[#0b2b5a] flex flex-col">
+                    <div className="border-b border-[#0b2b5a] py-1 text-center font-bold font-serif text-[10px]">Freight</div>
+                    <div className="p-1.5 space-y-1 leading-snug flex-1 text-[9px]">
+                      <div>Per Bag</div>
+                      <div>Lorry Freight</div>
+                      <div>Rs. ________</div>
+                    </div>
+                  </div>
+
+                  {/* Money Grid (Paid | To Pay) */}
+                  <div className="w-[34%] flex">
+                    {['Paid', 'To Pay'].map((col) => (
+                      <div key={col} className="flex w-1/2 flex-col border-r border-[#0b2b5a] last:border-r-0">
+                        <div className="flex border-b border-[#0b2b5a] text-[8.5px] font-bold text-center">
+                          <div className="w-2/3 border-r border-[#0b2b5a] py-0.5">Rs.</div>
+                          <div className="w-1/3 py-0.5">Ps.</div>
+                        </div>
+                        <div className="flex flex-1 min-h-[45px]">
+                          <div className="w-2/3 border-r border-[#0b2b5a]" />
+                          <div className="w-1/3" />
+                        </div>
                       </div>
                     ))}
                   </div>
-                ))}
+                </div>
+
+                {/* Row 4: Freight in Words + Hamali / GC Charges / Total */}
+                <div className="flex border-b-[2px] border-[#0b2b5a] text-[9.5px]">
+                  {/* Left: Freight in words */}
+                  <div className="w-[48%] border-r border-[#0b2b5a] p-1.5 flex flex-col justify-between">
+                    <div>
+                      <div className="font-semibold text-[9px]">To pay Lorry freight Rupees in words</div>
+                      <div className="mt-1 text-[8.5px] tracking-widest text-[#0b2b5a]/50">.........................................................................</div>
+                      <div className="mt-1 text-[8.5px] tracking-widest text-[#0b2b5a]/50">.........................................................................</div>
+                    </div>
+                    <div className="text-[8.5px] italic font-semibold mt-1">Unloading by Party</div>
+                  </div>
+
+                  {/* Middle: Charge Headings */}
+                  <div className="w-[18%] border-r border-[#0b2b5a] font-serif font-bold text-[9.5px]">
+                    <div className="border-b border-[#0b2b5a] px-1.5 py-1">Hamali</div>
+                    <div className="border-b border-[#0b2b5a] px-1.5 py-1">GC Charges</div>
+                    <div className="px-1.5 py-1 text-[10px] font-black uppercase">TOTAL</div>
+                  </div>
+
+                  {/* Right: Paid / To Pay Money Boxes */}
+                  <div className="w-[34%] flex">
+                    {['Paid', 'To Pay'].map((col) => (
+                      <div key={col} className="flex w-1/2 flex-col border-r border-[#0b2b5a] last:border-r-0">
+                        {[0, 1, 2].map((row) => (
+                          <div key={row} className={`flex flex-1 ${row < 2 ? 'border-b border-[#0b2b5a]' : ''}`}>
+                            <div className="w-2/3 border-r border-[#0b2b5a] py-1" />
+                            <div className="w-1/3 py-1" />
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Row 5: Footer Notes & Signature */}
+                <div className="p-1.5 flex flex-col justify-between flex-1">
+                  <div className="flex items-start justify-between gap-4 text-[8px] leading-tight">
+                    <div className="space-y-0.5 flex-1">
+                      <div className="text-justify">
+                        <span className="font-bold underline">Note :</span> Our leakage and damage we are not responsible. Insurance to be covered by the party. Any claim towards damage/shortage etc., should not settled with Driver at the unloading it self later date no complaint will be entertained by us.
+                      </div>
+                      <div className="font-bold">
+                        <span className="underline">Note :</span> WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.
+                      </div>
+                    </div>
+                    <div className="w-[30%] text-right font-bold text-[10.5px] font-serif pt-1">
+                      For Surya Road Lines
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-[#0b2b5a]/40 pt-1 mt-2 text-[9px] font-semibold">
+                    <div>Driver&apos;s Name : <span className="font-bold uppercase font-sans text-[10px]">{dispatch.driverName ?? ''}</span></div>
+                    <div className="pr-4">D.L. No. :</div>
+                  </div>
+                </div>
+
               </div>
             </div>
 
-            {/* ── Footer notes + signature ─────────────────────────────── */}
-            <div className="flex items-end gap-2 p-1.5">
-              <div className="flex-1 text-[8.5px] leading-[1.3]">
-                <div className="text-justify">
-                  <span className="font-bold underline">Note :</span> Our leakage and damage we are not responsible. Insurance to be
-                  covered by the party. Any claim towards damage/shortage etc., should not settled with Driver at the unloading it
-                  self later date no complaint will be entertained by us.
-                </div>
-                <div className="mt-0.5 font-bold">
-                  <span className="underline">Note :</span> WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.
-                </div>
-              </div>
-              <div className="w-[34%] pb-1 text-right text-[10px] font-semibold">For Surya Road Lines</div>
-            </div>
-            <div className="flex justify-between border-t border-black px-1.5 py-1 text-[9.5px]">
-              <span>Driver&apos;s Name : {dispatch.driverName ?? ''}</span>
-              <span className="pr-2">D.L. No. :</span>
-            </div>
           </div>
         </div>
       </div>

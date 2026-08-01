@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clock } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Purchase, WeightVerification } from '@/lib/types';
+import type { CompanyProfile, Purchase, WeightVerification } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -19,7 +19,14 @@ import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import { crossVerify, hamaliSplit } from '@/lib/calc';
+import {
+  crossVerify,
+  hamaliSplit,
+  isVehicleExempt,
+  computeQualityAdjustments,
+  QUALITY_ADJUSTMENT_LABELS,
+  type QualityAdjustmentMode,
+} from '@/lib/calc';
 import {
   Dialog,
   DialogContent,
@@ -33,12 +40,23 @@ type PurchaseRow = Purchase & {
   verification?: WeightVerification | null;
   stockIn?: {
     invoiceNumber?: string;
+    lorryNumber?: string | null;
     billingWeightKg?: number;
     partyKataKg?: number;
     selfVehicle?: boolean;
     purchaseOrder?: { poNumber?: string; pricePerKg?: string; hasGst?: boolean; party?: { name: string } };
   };
 };
+
+/** One editable row of the Quality Adjustments list (values stay strings while typing). */
+type AdjustmentDraft = { mode: QualityAdjustmentMode; label: string; value: string };
+
+const ADJUSTMENT_MODES: QualityAdjustmentMode[] = ['WEIGHT', 'PRICE', 'AMOUNT', 'EXPENSE', 'FREIGHT'];
+
+/** Unit suffix shown against a row's value input. */
+function unitOf(mode: QualityAdjustmentMode) {
+  return mode === 'WEIGHT' ? '(kg)' : mode === 'PRICE' ? '(₹/kg)' : '(₹)';
+}
 
 function getCalculationDetails(p: PurchaseRow) {
   if (!p.stockIn || !p.stockIn.purchaseOrder) return null;
@@ -107,9 +125,9 @@ export default function Verification() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED'>('ALL');
   const [partyFilter, setPartyFilter] = useState('ALL');
 
-  // States for discount
-  const [discountType, setDiscountType] = useState<'WEIGHT' | 'PRICE' | 'AMOUNT' | ''>('');
-  const [discountValue, setDiscountValue] = useState('');
+  // Quality adjustments: any number of deduction rows off the party's payable
+  // (weight/price/flat quality cuts, recovered expenses, lorry freight).
+  const [adjustments, setAdjustments] = useState<AdjustmentDraft[]>([]);
 
   // Bill addables: extra costs added on top of the seed value (loading,
   // brokerage, misc). Each row is a label + rupee amount.
@@ -119,10 +137,20 @@ export default function Verification() {
     queryKey: ['purchases'],
     queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
   });
+  // Company vehicle list - decides whether a FREIGHT row lands on the KNM
+  // Freight tab or the Inward (Purchases) tab of Freight Dues.
+  const { data: company } = useQuery({
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
+  });
 
   const verifyMutation = useMutation({
-    mutationFn: (args: { purchaseId: string; discountType?: string | null; discountValue?: number; forceExempt: boolean; billAddables?: { label: string; amount: number }[] }) =>
-      api('/verifications', { method: 'POST', body: args }),
+    mutationFn: (args: {
+      purchaseId: string;
+      forceExempt: boolean;
+      billAddables?: { label: string; amount: number }[];
+      qualityAdjustments?: { mode: QualityAdjustmentMode; label: string; value: number }[];
+    }) => api('/verifications', { method: 'POST', body: args }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['verifications'] });
@@ -148,13 +176,9 @@ export default function Verification() {
 
   function openVerify(p: PurchaseRow) {
     setSelectedPurchase(p);
-    if (p.verification) {
-      setDiscountType(p.discountType || '');
-      setDiscountValue(p.discountValue ? String(p.discountValue) : '');
-    } else {
-      setDiscountType('');
-      setDiscountValue('');
-    }
+    // A verified purchase renders its stored rows read-only, so the draft list
+    // only ever matters for one awaiting approval.
+    setAdjustments([]);
     setAddables([]);
     setForceExempt(false);
     setOpen(true);
@@ -170,25 +194,22 @@ export default function Verification() {
     liveCalcFinalWeight = calc.referenceKg;
   }
 
-  const discountValNum = Number(discountValue) || 0;
-  let livePayableWeight = liveCalcFinalWeight;
-  let livePayablePrice = calc?.pricePerKg ?? 0;
-  let liveDiscountAmount = 0;
+  // Quality adjustments, live. An unverified purchase reads the draft rows; a
+  // verified one replays what was stored so the breakdown is identical.
+  const isVerified = !!selectedPurchase?.verification;
+  const qa = computeQualityAdjustments(
+    isVerified
+      ? (selectedPurchase?.verification?.qualityAdjustments ?? []).map((r) => ({
+          mode: r.mode,
+          label: r.label,
+          value: Number(r.value) || 0,
+        }))
+      : adjustments.map((a) => ({ mode: a.mode, label: a.label, value: Number(a.value) || 0 })),
+    liveCalcFinalWeight,
+    calc?.pricePerKg ?? 0,
+  );
 
-  if (calc) {
-    if (discountType === 'WEIGHT') {
-      livePayableWeight = Math.max(0, liveCalcFinalWeight - discountValNum);
-      liveDiscountAmount = discountValNum * calc.pricePerKg;
-    } else if (discountType === 'PRICE') {
-      livePayablePrice = Math.max(0, calc.pricePerKg - discountValNum);
-      liveDiscountAmount = liveCalcFinalWeight * discountValNum;
-    } else if (discountType === 'AMOUNT') {
-      liveDiscountAmount = discountValNum;
-    }
-  }
-
-  const liveBasePayable = livePayableWeight * livePayablePrice;
-  const liveNetBase = discountType === 'AMOUNT' ? Math.max(0, liveBasePayable - discountValNum) : liveBasePayable;
+  const liveNetBase = qa.netBaseCost;
   // GST is on the invoice billing amount, independent of weight/quality discounts,
   // and only applies when the PO/URP was flagged as a GST invoice.
   const liveHasGst = calc?.hasGst ?? false;
@@ -207,6 +228,12 @@ export default function Verification() {
   const liveAddablesTotal = liveAddables.reduce((sum, a) => sum + a.amount, 0);
 
   const liveTotalAmount = liveNetBase + liveIgst + liveAddablesTotal - liveSelfVehicleHamali - liveSelfVehicleKata;
+
+  // A FREIGHT row settles against the lorry rather than the party, so it shows
+  // up on Freight Dues - the KNM Freight tab for a company vehicle, the Inward
+  // (Purchases) tab for any other lorry.
+  const isKnmLorry = isVehicleExempt(selectedPurchase?.stockIn?.lorryNumber, company?.companyVehicles);
+  const freightDestination = isKnmLorry ? 'KNM Freight' : 'Inward (Purchases)';
 
   const allPurchases = purchases ?? [];
   const verifiedCount = useMemo(() => allPurchases.filter((p) => p.verification).length, [allPurchases]);
@@ -466,40 +493,91 @@ export default function Verification() {
               {/* Adjustments & Overheads Input Section */}
               {!selectedPurchase.verification ? (
                 <div className="space-y-3 border-t pt-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ReceiptText className="h-4 w-4 text-muted-foreground" /> Quality Adjustments</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-semibold text-muted-foreground uppercase">Discount Mode</label>
-                      <select
-                        value={discountType}
-                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-                          setDiscountType(e.target.value as any);
-                          setDiscountValue('');
-                        }}
-                        className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="">No Discount</option>
-                        <option value="WEIGHT">Weight Deduct (kg)</option>
-                        <option value="PRICE">Price Deduct (₹/kg)</option>
-                        <option value="AMOUNT">Flat Amount (₹)</option>
-                      </select>
-                    </div>
-                    {discountType !== '' && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-muted-foreground uppercase">
-                          Val {discountType === 'WEIGHT' ? '(kg)' : discountType === 'PRICE' ? '(₹/kg)' : '(₹)'}
-                        </label>
-                        <input
-                          type="number"
-                          step="any"
-                          value={discountValue}
-                          onChange={(e) => setDiscountValue(e.target.value)}
-                          className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          placeholder="0.00"
-                        />
-                      </div>
-                    )}
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ReceiptText className="h-4 w-4 text-muted-foreground" /> Quality Adjustments</h3>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustments((rows) => [...rows, { mode: 'WEIGHT', label: '', value: '' }])}
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      + Add deduction
+                    </button>
                   </div>
+                  <p className="text-[11px] text-muted-foreground -mt-1">
+                    Deductions off the party's payable. Add as many as you need - the same mode can repeat.
+                  </p>
+                  {adjustments.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground italic">No deductions added.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {adjustments.map((row, i) => (
+                        <div key={i} className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={row.mode}
+                              onChange={(e) =>
+                                setAdjustments((rows) =>
+                                  rows.map((r, j) =>
+                                    j === i ? { ...r, mode: e.target.value as QualityAdjustmentMode, value: '' } : r,
+                                  ),
+                                )
+                              }
+                              className="w-40 shrink-0 h-9 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              {ADJUSTMENT_MODES.map((m) => (
+                                <option key={m} value={m}>
+                                  {QUALITY_ADJUSTMENT_LABELS[m]} {unitOf(m)}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              step="any"
+                              value={row.value}
+                              onChange={(e) =>
+                                setAdjustments((rows) => rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))
+                              }
+                              className="w-24 shrink-0 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              placeholder={row.mode === 'WEIGHT' ? 'kg' : '0.00'}
+                            />
+                            <input
+                              type="text"
+                              value={row.label}
+                              onChange={(e) =>
+                                setAdjustments((rows) => rows.map((r, j) => (j === i ? { ...r, label: e.target.value } : r)))
+                              }
+                              className="flex-1 min-w-0 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              placeholder={
+                                row.mode === 'EXPENSE' ? 'Note (e.g. Unloading)'
+                                : row.mode === 'FREIGHT' ? 'Note (e.g. Lorry freight)'
+                                : 'Note (optional)'
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAdjustments((rows) => rows.filter((_, j) => j !== i))}
+                              className="h-9 w-9 shrink-0 rounded-md border border-input text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors"
+                              aria-label="Remove deduction"
+                            >
+                              ×
+                            </button>
+                          </div>
+                          {row.mode === 'FREIGHT' && (
+                            <p className="text-[11px] text-muted-foreground pl-1">
+                              Recovered from the party and owed to the lorry instead - lands on Freight Dues →{' '}
+                              <span className="font-medium text-foreground">{freightDestination}</span>
+                              {selectedPurchase.stockIn?.lorryNumber ? ` (${selectedPurchase.stockIn.lorryNumber})` : ''}.
+                            </p>
+                          )}
+                          {row.mode === 'EXPENSE' && (
+                            <p className="text-[11px] text-muted-foreground pl-1">
+                              Cost the party bears - lowers their payable and the seed's landed cost.
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Bill Addables: extra costs added to the payable */}
                   <div className="space-y-2 pt-1">
@@ -553,14 +631,27 @@ export default function Verification() {
                 </div>
               ) : (
                 <div className="rounded-lg border p-3 bg-muted/10 space-y-1.5 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Quality Discount Applied:</span>
-                    <span className="font-semibold text-foreground">
+                  <p className="font-semibold text-foreground">Quality Adjustments Applied</p>
+                  {qa.rows.length === 0 ? (
+                    <p className="text-muted-foreground">
                       {selectedPurchase.discountType
-                        ? `${selectedPurchase.discountType === 'WEIGHT' ? 'Weight Deduct' : selectedPurchase.discountType === 'PRICE' ? 'Price Deduct' : 'Flat Deduct'} (-${selectedPurchase.discountValue})`
+                        ? `${QUALITY_ADJUSTMENT_LABELS[selectedPurchase.discountType]} (-${selectedPurchase.discountValue})`
                         : 'None'}
-                    </span>
-                  </div>
+                    </p>
+                  ) : (
+                    qa.rows.map((r, i) => (
+                      <div key={i} className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          {r.label}
+                          <span className="ml-1 text-[10px] uppercase tracking-wide">
+                            ({QUALITY_ADJUSTMENT_LABELS[r.mode]} {r.value}
+                            {r.mode === 'WEIGHT' ? ' kg' : r.mode === 'PRICE' ? ' ₹/kg' : ''})
+                          </span>
+                        </span>
+                        <span className="font-semibold text-foreground shrink-0">-{rupees(r.amount)}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 
@@ -578,12 +669,20 @@ export default function Verification() {
                       <span>-{rupees((calc.referenceKg - liveCalcFinalWeight) * calc.pricePerKg)}</span>
                     </div>
                   )}
-                  {liveDiscountAmount > 0 && (
-                    <div className="flex justify-between text-amber-600 font-semibold">
-                      <span>Quality Discount ({discountType === 'WEIGHT' ? 'Weight Deduct' : discountType === 'PRICE' ? 'Price Deduct' : 'Flat Deduct'})</span>
-                      <span>-{rupees(liveDiscountAmount)}</span>
+                  {qa.rows.map((r, i) => (
+                    <div key={i} className="flex justify-between gap-4 text-amber-600 font-semibold">
+                      <span>
+                        {r.label}
+                        <span className="ml-1 font-normal text-[11px] text-muted-foreground">
+                          {r.mode === 'WEIGHT' ? `${kg(r.value)} @ ${rupees(calc.pricePerKg)}/kg`
+                            : r.mode === 'PRICE' ? `${rupees(r.value)}/kg on ${kg(qa.payableWeightKg)}`
+                            : QUALITY_ADJUSTMENT_LABELS[r.mode]}
+                          {r.mode === 'FREIGHT' ? ` → ${freightDestination}` : ''}
+                        </span>
+                      </span>
+                      <span className="shrink-0">-{rupees(r.amount)}</span>
                     </div>
-                  )}
+                  ))}
                   <div className="flex justify-between border-t pt-1 font-semibold text-foreground">
                     <span className="text-muted-foreground font-normal">Net Base Cost (payable)</span>
                     <span>{rupees(liveNetBase)}</span>
@@ -655,12 +754,13 @@ export default function Verification() {
                       className="gap-1.5 bg-primary"
                       onClick={() => verifyMutation.mutate({
                         purchaseId: selectedPurchase.id,
-                        discountType: discountType || null,
-                        discountValue: Number(discountValue) || 0,
                         forceExempt: forceExempt,
                         billAddables: addables
                           .map((a) => ({ label: a.label.trim(), amount: Number(a.amount) || 0 }))
                           .filter((a) => a.label && a.amount > 0),
+                        qualityAdjustments: adjustments
+                          .map((a) => ({ mode: a.mode, label: a.label.trim(), value: Number(a.value) || 0 }))
+                          .filter((a) => a.value > 0),
                       })}
                       disabled={verifyMutation.isPending}
                     >

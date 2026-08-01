@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { calcHamali, calcKataFee, pappuLoadingHamali } from '@/lib/calc';
+import { calcHamali, calcKataFee, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,15 @@ type PurchaseRow = Purchase & {
     purchaseOrder?: { party?: { name?: string | null } | null } | null;
   };
 };
+
+/**
+ * Inward freight owed on a purchase: the freight fixed at recording (BASE-priced
+ * POs) plus any FREIGHT quality adjustment taken off the party's bill at
+ * approval - that one is recovered from the supplier but still owed to the lorry.
+ */
+function inwardFreightOf(p: PurchaseRow): number {
+  return Number(p.freightCharge ?? 0) + qualityAdjustmentFreight(p.verification?.qualityAdjustments);
+}
 
 type PaymentStatus = 'Paid' | 'Partial' | 'Pending';
 
@@ -496,9 +505,9 @@ export default function FreightDuesPage() {
   // Inward freight (purchases). Hamali & kata are the recorded purchase charges;
   // no Surya transport retention applies inward.
   const allInwardRows: FreightRow[] = (purchases ?? [])
-    .filter((p) => Number(p.freightCharge) > 0)
+    .filter((p) => inwardFreightOf(p) > 0)
     .map((p) => {
-      const freight = Number(p.freightCharge);
+      const freight = round2(inwardFreightOf(p));
       const lorry = p.stockIn?.lorryNumber;
       const isKnm = lorry ? knmList.includes(lorry.trim().toLowerCase()) : false;
       // For KNM vehicles, hamali and kata lorry shares are 0. (The backend stores the total hamali in p.hamaliCharge)

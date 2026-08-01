@@ -142,14 +142,26 @@ export const billAddableSchema = z.object({
   amount: z.coerce.number().nonnegative(),
 });
 
+// One deduction row on the verification's Quality Adjustments list. Any mode
+// may appear any number of times; same-mode rows add up.
+export const qualityAdjustmentSchema = z.object({
+  mode: z.enum(['WEIGHT', 'PRICE', 'AMOUNT', 'EXPENSE', 'FREIGHT']),
+  label: z.string().trim().optional().nullable(),
+  value: z.coerce.number().nonnegative(),
+});
+
 export const createVerificationSchema = z.object({
   purchaseId: z.string().min(1),
+  // Legacy single-discount fields, still sent by the Slack verification flow.
+  // Ignored when `qualityAdjustments` is supplied.
   discountType: z.enum(['WEIGHT', 'PRICE', 'AMOUNT']).optional().nullable(),
   discountValue: z.coerce.number().nonnegative().optional().default(0),
   forceExempt: z.boolean().optional().default(false),
   // Extra costs billed on top of the seed value (loading, brokerage, misc).
   // Each adds to the party's net payable and capitalises into the seed cost.
   billAddables: z.array(billAddableSchema).optional().default([]),
+  // Multi-row deductions off the party's payable (quality, expense, freight).
+  qualityAdjustments: z.array(qualityAdjustmentSchema).optional(),
 });
 
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;

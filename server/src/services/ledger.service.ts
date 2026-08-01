@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
-import { hamaliSplit } from '../lib/calc.js';
+import { hamaliSplit, parseQualityAdjustments, qualityAdjustmentFreight } from '../lib/calc.js';
 
 export interface JournalLineInput {
   accountCode: string;
@@ -192,7 +192,18 @@ export class LedgerService {
     const selfHam = Number(p.verification.selfVehicleHamali);
     const netPayable = Number(p.verification.totalAmount);
     const baseCost = netPayable + selfHam; // includes IGST; split out below
-    const discountVal = Number(p.discountValue);
+    // Quality adjustments split three ways: the quality discount is income (the
+    // seed keeps its full cost), the recovered expense simply makes the seed
+    // cheaper (nothing to post), and the freight leaves the party's payable but
+    // stays in the seed - we owe it to the lorry instead. Pre-feature rows have
+    // no list, so fall back to the legacy single discount on the Purchase.
+    const qaRows = parseQualityAdjustments(p.verification.qualityAdjustments);
+    const discountVal = qaRows.length
+      ? qaRows
+          .filter((r) => r.mode === 'WEIGHT' || r.mode === 'PRICE' || r.mode === 'AMOUNT')
+          .reduce((s, r) => s + Number(r.amount), 0)
+      : Number(p.discountValue);
+    const qaFreight = qualityAdjustmentFreight(qaRows);
     // Input IGST paid to the supplier is claimable Input Tax Credit - NOT a cost of
     // the stock. It is carved out of the inventory debit and parked in 12040, so the
     // seed (Closing Stock) is valued EXCLUSIVE of GST. GST still sits in the supplier
@@ -291,6 +302,26 @@ export class LedgerService {
         accountCode: isKnm ? '20260' : '20230', // KNM Transport Payable vs Freight Payable - Transporters
         debit: 0,
         credit: freight,
+      });
+    }
+
+    // 5. Freight recovered from the party at approval (a FREIGHT quality
+    // adjustment). It already came off the supplier's credit above, so the seed
+    // keeps its landed value and the lorry becomes the creditor instead - KNM
+    // Transport for a company vehicle, the transporter pool for anyone else.
+    // This is what puts the amount on the Freight Dues page (KNM Freight tab vs
+    // Inward (Purchases) tab).
+    if (qaFreight > 0) {
+      lines.push({
+        accountCode: '10010', // Raw Material Inventory
+        debit: qaFreight,
+        credit: 0,
+        costCenter: location,
+      });
+      lines.push({
+        accountCode: isKnm ? '20260' : '20230', // KNM Transport Payable vs Freight Payable - Transporters
+        debit: 0,
+        credit: qaFreight,
       });
     }
 

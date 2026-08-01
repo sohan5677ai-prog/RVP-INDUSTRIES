@@ -1,9 +1,18 @@
 import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
+import type { DiscountType, Prisma } from '@prisma/client';
 import { HttpError } from '../lib/httpError.js';
 import { createVerificationSchema } from '../schemas/purchase.schema.js';
-import { crossVerify, companyHamaliShare, hamaliSplit } from '../lib/calc.js';
+import {
+  crossVerify,
+  companyHamaliShare,
+  hamaliSplit,
+  computeQualityAdjustments,
+  parseQualityAdjustments,
+  qualityAdjustmentFreight,
+  type QualityAdjustmentInput,
+} from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { whatsappService, resolveInternalCopyRecipients } from '../services/whatsapp.service.js';
@@ -114,23 +123,17 @@ export async function createVerification(req: Request, res: Response) {
     finalWeight = reference;
   }
 
-  // Triple-mode discounts:
-  let payableWeight = finalWeight;
-  let payablePrice = pricePerKg;
-  let discountAmount = 0;
-
-  if (data.discountType === 'WEIGHT') {
-    payableWeight = Math.max(0, finalWeight - data.discountValue);
-    discountAmount = data.discountValue * pricePerKg;
-  } else if (data.discountType === 'PRICE') {
-    payablePrice = Math.max(0, pricePerKg - data.discountValue);
-    discountAmount = finalWeight * data.discountValue;
-  } else if (data.discountType === 'AMOUNT') {
-    discountAmount = data.discountValue;
-  }
-
-  const basePayable = payableWeight * payablePrice;
-  const netBaseCost = data.discountType === 'AMOUNT' ? Math.max(0, basePayable - discountAmount) : basePayable;
+  // Quality adjustments: any number of deduction rows (weight/price/flat
+  // quality discounts, recovered expenses, and lorry freight the party bears).
+  // The Slack flow still posts the legacy single discountType/discountValue
+  // pair, so fold that into a one-row list when no explicit list came in.
+  const adjustmentInputs: QualityAdjustmentInput[] =
+    data.qualityAdjustments ??
+    (data.discountType && data.discountValue > 0
+      ? [{ mode: data.discountType, value: data.discountValue }]
+      : []);
+  const qa = computeQualityAdjustments(adjustmentInputs, finalWeight, pricePerKg);
+  const netBaseCost = qa.netBaseCost;
 
   // GST is charged on the invoice billing amount (billing weight x price), NOT
   // on our recalculated payable. Gross payable = net base cost + IGST (5%).
@@ -167,13 +170,24 @@ export async function createVerification(req: Request, res: Response) {
   const toleranceExceeded = shortageKg > 0 && (shortageKg / billingWeightKg) > 0.005;
   const debitNoteAmount = toleranceExceeded ? shortageKg * pricePerKg : 0;
   const supplierName = purchase.stockIn.purchaseOrder.party.name;
+  // Legacy mirror on the Purchase row. A single quality-discount row keeps its
+  // exact old meaning (type + typed value); anything richer collapses to the
+  // total ₹ knocked off, tagged AMOUNT. The ledger reads the full row list off
+  // the verification, so these two are for display/back-compat only.
+  const legacyRows = qa.rows.filter((r) => r.mode === 'WEIGHT' || r.mode === 'PRICE' || r.mode === 'AMOUNT');
+  const isSingleLegacy = qa.rows.length === 1 && legacyRows.length === 1;
+  const legacyDiscountType: DiscountType | null = isSingleLegacy
+    ? (legacyRows[0].mode as DiscountType)
+    : (qa.totalDeduction > 0 ? 'AMOUNT' : null);
+  const legacyDiscountValue = isSingleLegacy ? legacyRows[0].value : qa.totalDeduction;
+
   const verification = await prisma.$transaction(async (tx) => {
     // 1. Update purchase with discounts
     await tx.purchase.update({
       where: { id: purchase.id },
       data: {
-        discountType: data.discountType || null,
-        discountValue: data.discountValue,
+        discountType: legacyDiscountType,
+        discountValue: legacyDiscountValue,
       },
     });
 
@@ -193,6 +207,7 @@ export async function createVerification(req: Request, res: Response) {
         selfVehicleHamali,
         selfVehicleKata,
         billAddables,
+        qualityAdjustments: qa.rows as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -210,7 +225,11 @@ export async function createVerification(req: Request, res: Response) {
     // kata DOES lower the seed's landed cost (the party reimburses it). Bill
     // addables are extra acquisition costs, so they capitalise into the seed too
     // (mirrors the ledger's stock debit, which derives from totalAmount).
-    const totalInventoryCost = netBaseCost + addablesTotal - selfVehicleKata + ourHamali + freight;
+    // A FREIGHT quality adjustment came OFF netBaseCost (we pay the lorry rather
+    // than the party) but the goods still cost that much landed, so add it back.
+    // An EXPENSE adjustment stays deducted - the party genuinely bore it.
+    const totalInventoryCost =
+      netBaseCost + qa.freightAmount + addablesTotal - selfVehicleKata + ourHamali + freight;
 
     // Subtract original purchase stock from inventory
     await InventoryService.updateBlackSeedInventory(
@@ -292,7 +311,12 @@ export async function deleteVerification(req: Request, res: Response) {
       ? Math.round(Number(verification.billingWeightKg) * Number(verification.pricePerKg) * 0.05 * 100) / 100
       : 0;
     const selfHam = Number(verification.selfVehicleHamali);
-    const verifiedCost = Number(verification.totalAmount) + selfHam + ourHamali + freight - igst;
+    // A FREIGHT quality adjustment was added back into the seed at verification
+    // (it left the party's payable but never left the landed cost), so it has to
+    // come back out here too.
+    const qaFreight = qualityAdjustmentFreight(parseQualityAdjustments(verification.qualityAdjustments));
+    const verifiedCost =
+      Number(verification.totalAmount) + qaFreight + selfHam + ourHamali + freight - igst;
 
     // 1. Subtract the verified weight and cost from SiloInventory
     await InventoryService.updateBlackSeedInventory(

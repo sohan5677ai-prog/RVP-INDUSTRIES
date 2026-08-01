@@ -395,4 +395,126 @@ export function stockSummary(bands: ByPriceBandLike[] = []): StockSummary {
   };
 }
 
+// --- Quality adjustments (verification deductions) ---------------------------
+// At approval the operator lists any number of deductions against the party's
+// bill. Every row DEDUCTS; the mode decides how:
+//   WEIGHT  - kg knocked off the payable weight
+//   PRICE   - ₹/kg knocked off the payable rate
+//   AMOUNT  - flat ₹ quality discount (booked as Purchase Discount income)
+//   EXPENSE - flat ₹ cost the party bears. The exact mirror of a bill addable:
+//             it lowers their payable AND the seed's landed cost.
+//   FREIGHT - flat ₹ lorry freight the party bears. Recovered from them but
+//             still owed to the lorry, so it stays in the seed's landed cost
+//             and surfaces on Freight Dues (KNM tab for a company lorry,
+//             Inward (Purchases) tab for any other).
+// Any mode may repeat; same-mode rows simply add up.
+//
+// Keep identical to server/src/lib/calc.ts.
+
+export type QualityAdjustmentMode = 'WEIGHT' | 'PRICE' | 'AMOUNT' | 'EXPENSE' | 'FREIGHT';
+
+export interface QualityAdjustmentInput {
+  mode: QualityAdjustmentMode;
+  label?: string | null;
+  value: number;
+}
+
+export interface QualityAdjustmentRow {
+  mode: QualityAdjustmentMode;
+  label: string;
+  /** What the operator typed: kg for WEIGHT, ₹/kg for PRICE, ₹ for the rest. */
+  value: number;
+  /** Rupee effect on the party's payable (always a deduction). */
+  amount: number;
+}
+
+export const QUALITY_ADJUSTMENT_LABELS: Record<QualityAdjustmentMode, string> = {
+  WEIGHT: 'Weight Deduct',
+  PRICE: 'Price Deduct',
+  AMOUNT: 'Flat Amount',
+  EXPENSE: 'Expense',
+  FREIGHT: 'Freight',
+};
+
+export interface QualityAdjustmentResult {
+  rows: QualityAdjustmentRow[];
+  payableWeightKg: number;
+  payablePricePerKg: number;
+  /** Weight x rate after the WEIGHT/PRICE cuts, before the flat ₹ rows. */
+  basePayable: number;
+  /** Seed value the party is actually billed for, after every row. */
+  netBaseCost: number;
+  /** WEIGHT + PRICE + AMOUNT in ₹ - the quality discount (Purchase Discount). */
+  discountAmount: number;
+  /** EXPENSE rows in ₹ - recovered from the party, de-capitalised off the seed. */
+  expenseAmount: number;
+  /** FREIGHT rows in ₹ - recovered from the party, owed to the lorry instead. */
+  freightAmount: number;
+  /** Total ₹ knocked off the gross seed value by all rows together. */
+  totalDeduction: number;
+}
+
+export function computeQualityAdjustments(
+  inputs: QualityAdjustmentInput[] | null | undefined,
+  finalWeightKg: number,
+  pricePerKg: number,
+): QualityAdjustmentResult {
+  const clean = (inputs ?? []).filter((r) => Number(r.value) > 0);
+  const valueOf = (mode: QualityAdjustmentMode) =>
+    clean.filter((r) => r.mode === mode).reduce((s, r) => s + Number(r.value), 0);
+
+  const payableWeightKg = Math.max(0, finalWeightKg - valueOf('WEIGHT'));
+  const payablePricePerKg = Math.max(0, pricePerKg - valueOf('PRICE'));
+  const basePayable = payableWeightKg * payablePricePerKg;
+
+  // Per-row rupee effect. WEIGHT is valued at the full rate and PRICE at the
+  // post-weight-cut tonnage, so the rows sum EXACTLY to
+  // (finalWeightKg * pricePerKg) - basePayable - no drift between the printed
+  // breakdown and the total.
+  const rows: QualityAdjustmentRow[] = clean.map((r) => {
+    const value = Number(r.value);
+    const amount =
+      r.mode === 'WEIGHT' ? value * pricePerKg
+      : r.mode === 'PRICE' ? value * payableWeightKg
+      : value;
+    return {
+      mode: r.mode,
+      label: (r.label ?? '').trim() || QUALITY_ADJUSTMENT_LABELS[r.mode],
+      value,
+      amount: round2(amount),
+    };
+  });
+
+  const amountOf = (mode: QualityAdjustmentMode) =>
+    rows.filter((r) => r.mode === mode).reduce((s, r) => s + r.amount, 0);
+
+  const discountAmount = round2(amountOf('WEIGHT') + amountOf('PRICE') + amountOf('AMOUNT'));
+  const expenseAmount = round2(amountOf('EXPENSE'));
+  const freightAmount = round2(amountOf('FREIGHT'));
+  const netBaseCost = Math.max(0, basePayable - amountOf('AMOUNT') - expenseAmount - freightAmount);
+
+  return {
+    rows,
+    payableWeightKg,
+    payablePricePerKg,
+    basePayable,
+    netBaseCost,
+    discountAmount,
+    expenseAmount,
+    freightAmount,
+    totalDeduction: round2(finalWeightKg * pricePerKg - netBaseCost),
+  };
+}
+
+/** Total ₹ of the FREIGHT rows on a stored quality-adjustment list. */
+export function qualityAdjustmentFreight(
+  rows: QualityAdjustmentRow[] | null | undefined,
+): number {
+  return round2(
+    (rows ?? [])
+      .filter((r) => r?.mode === 'FREIGHT')
+      .reduce((s, r) => s + (Number(r.amount) || 0), 0),
+  );
+}
+
 

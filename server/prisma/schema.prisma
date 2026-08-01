@@ -382,6 +382,14 @@ model WeightVerification {
   // silo MAP stay balanced (both derive from totalAmount, which already
   // includes the addables total).
   billAddables      Json?
+  // Deductions the user itemises at approval - the mirror of billAddables.
+  // Stored as [{ mode, label, value, amount }] where mode is WEIGHT | PRICE |
+  // AMOUNT | EXPENSE | FREIGHT, `value` is what was typed (kg / ₹ per kg / ₹)
+  // and `amount` is the resulting ₹ off the payable. Any mode may repeat.
+  // FREIGHT rows also become a lorry due on the Freight Dues page - see
+  // computeQualityAdjustments in lib/calc.ts. Null on pre-feature rows, which
+  // fall back to Purchase.discountType/discountValue.
+  qualityAdjustments Json?
   createdAt         DateTime @default(now())
 
   @@index([purchaseId])

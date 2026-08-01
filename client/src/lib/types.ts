@@ -1,3 +1,5 @@
+import type { QualityAdjustmentRow } from './calc';
+
 export type Role = 'ADMIN' | 'USER' | 'OWNER' | 'DEVELOPER';
 export type PartyType = 'SUPPLIER' | 'BUYER' | 'BOTH' | 'HAMALI_TEAM';
 
@@ -57,6 +59,7 @@ export interface WeightVerification {
   selfVehicleHamali?: string;
   selfVehicleKata?: string;
   billAddables?: BillAddable[] | null;
+  qualityAdjustments?: QualityAdjustmentRow[] | null;
   createdAt: string;
 }
 

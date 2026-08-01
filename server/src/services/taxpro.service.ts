@@ -80,6 +80,45 @@ export class TaxproService {
   }
 
   /**
+   * NIC/TaxPro returns date strings in Indian Standard Time (IST) without explicit
+   * timezone offsets (e.g. "2026-08-01 09:59:00" or "01/08/2026 09:59:00 AM").
+   * Running `new Date(str)` on a UTC server parses un-offsetted strings as UTC,
+   * causing a +5:30 double-shift when rendered in India (e.g. 9:59 AM -> 3:29 PM).
+   * This helper explicitly parses un-offsetted strings as IST (+05:30).
+   */
+  public static parseNicDate(raw: string | Date | null | undefined): Date {
+    if (!raw) return new Date();
+    if (raw instanceof Date) return raw;
+    let str = String(raw).trim();
+    if (!str) return new Date();
+
+    if (/[Z+-]\d{2}:?\d{2}$/i.test(str)) {
+      const parsed = new Date(str);
+      return isNaN(parsed.getTime()) ? new Date(raw) : parsed;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(str)) {
+      str = str.replace(' ', 'T');
+    }
+
+    if (/^\d{2}\/\d{2}\/\d{4}/.test(str)) {
+      const [d, m, yWithTime] = str.split('/');
+      const y = yWithTime.slice(0, 4);
+      const rest = yWithTime.slice(4).trim();
+      str = `${y}-${m}-${d}${rest ? 'T' + rest : ''}`;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str) && !/[Z+-]/.test(str.slice(10))) {
+      str += '+05:30';
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      str += 'T00:00:00+05:30';
+    }
+
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? new Date(raw) : d;
+  }
+
+  /**
    * Low-level request with base-URL failover. Returns the parsed JSON body.
    * Throws Error with `.isBusinessError=true` for NIC/GSP validation failures
    * (which must not be retried against other base URLs).
@@ -351,7 +390,7 @@ export class TaxproService {
         success: true,
         irn: data.Irn,
         ackNo: String(data.AckNo),
-        ackDate: new Date(data.AckDt),
+        ackDate: this.parseNicDate(data.AckDt),
         signedQr: data.SignedQRCode,
         signedInvoice: data.SignedInvoice,
         message: company.taxproSandbox ? 'IRN generated (SANDBOX)' : 'IRN generated successfully',
@@ -392,7 +431,7 @@ export class TaxproService {
       const data = this.parseData(json.Data) || {};
       return {
         success: true,
-        cancelledDate: data.CancelDate ? new Date(data.CancelDate) : new Date(),
+        cancelledDate: data.CancelDate ? this.parseNicDate(data.CancelDate) : new Date(),
         message: 'IRN cancelled successfully',
       };
     } catch (err: any) {
@@ -494,8 +533,8 @@ export class TaxproService {
       return {
         success: true,
         ewbNumber: String(data.EwbNo),
-        ewbDate: new Date(data.EwbDt),
-        ewbValidUpto: new Date(data.EwbValidTill),
+        ewbDate: this.parseNicDate(data.EwbDt),
+        ewbValidUpto: this.parseNicDate(data.EwbValidTill),
         distance,
         message: 'E-Way Bill generated successfully',
       };

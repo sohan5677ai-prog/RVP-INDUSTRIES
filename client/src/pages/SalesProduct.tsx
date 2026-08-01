@@ -701,7 +701,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (!ewbDispatch!.dispatch.irn) {
         await api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/einvoice`, { method: 'POST' });
       }
-      return api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
+      return api<{ updated: SaleDispatch; message: string; whatsapp: DispatchWhatsAppResult | null }>(`/sale-dispatches/${dispatchId}/ewaybill`, {
         method: 'POST',
         body: {
           transporterId,
@@ -713,12 +713,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           vehicleType,
           transDocNo,
           transDocDt,
+          notifyWhatsApp: true,
         },
       });
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(res.message || 'E-Way Bill generated successfully');
+      if (res.whatsapp) notifyWhatsAppResult(res.whatsapp);
       setEwbDispatch(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),

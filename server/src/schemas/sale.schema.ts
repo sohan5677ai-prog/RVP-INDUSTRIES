@@ -34,6 +34,12 @@ export const dispatchSaleOrderSchema = z.object({
   dispatchDate: z.coerce.date().optional().nullable(),
   transportProvider: z.enum(['SURYA', 'KNM', 'OTHER']).optional().default('SURYA'),
   customRetention: z.coerce.number().nonnegative().optional().nullable(),
+  // XS Pappu: how many kg of THIS lorry came from yield surplus above the
+  // assumed 60% out-turn. A quantity, not a flag - a shipment can be part-backed
+  // and part-surplus. Must cover at least the unbacked shortfall; see the gate
+  // in dispatchSaleOrder.
+  excessOutKg: z.coerce.number().int().nonnegative().optional().default(0),
+  excessOutNote: z.string().optional().nullable(),
 });
 
 export const listSaleOrdersSchema = z.object({

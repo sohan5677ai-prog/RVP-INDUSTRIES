@@ -255,6 +255,11 @@ export interface SaleDispatch {
   kataFileUrl?: string | null;
   transportProvider?: string | null; // 'SURYA' | 'KNM' | 'OTHER'
   customRetention?: string | number | null;
+  // XS Pappu: kg of this shipment served from yield surplus above the assumed
+  // 60% out-turn. Draws no black seed and carries no seed cost. A quantity, not
+  // a flag - one lorry can be part-backed and part-surplus.
+  excessOutKg?: number | null;
+  excessOutNote?: string | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
   buyerKataKg?: number | null;

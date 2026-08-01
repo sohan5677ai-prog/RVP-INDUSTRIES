@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, IndianRupee, PackageCheck, Scale, Percent, ChevronRight, Trophy, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, IndianRupee, PackageCheck, Scale, Percent, ChevronRight, Trophy, AlertTriangle, Lock, LockOpen } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, rupeesShort, shortDate, toTonnes } from '@/lib/format';
 import {
@@ -42,6 +42,11 @@ interface PappuMargin {
   marginPerKg: number;
   marginPct: number;
   seedBands: { price: number; seedKg: number; cost: number }[];
+  /** Pappu dispatched as XS (excess out) - zero seed cost, so margin % is not a rate benchmark. */
+  excessOutKg: number;
+  unbackedPappuKg: number;
+  /** Set once the order is fully shipped: costs are pinned and can no longer move. */
+  costFrozenAt: string | null;
 }
 
 type ProfitFilter = 'ALL' | 'PROFIT' | 'LOSS';
@@ -143,7 +148,18 @@ export default function PappuProfitLoss() {
     const lossOrders = visible.filter((m) => m.margin < 0);
     const best = visible.reduce<PappuMargin | null>((b, m) => (!b || m.margin > b.margin ? m : b), null);
     const worst = visible.reduce<PappuMargin | null>((w, m) => (!w || m.margin < w.margin ? m : w), null);
+
+    // Implied ACTUAL out-turn. Every XS tonne asserts the mill yielded more than
+    // the assumed 60%, so cumulative XS against seed consumed reveals the yield
+    // we have really been running at. A figure close to 60% is healthy; one that
+    // keeps climbing means the XS tick is papering over a counting problem
+    // (short-weighed lorry, double-counted bags) rather than real surplus.
+    const xsKg = sum((m) => m.excessOutKg);
+    const seedKg = sum((m) => m.seedKg);
+    const impliedOutTurnPct = seedKg > 0 ? ((seedKg * 0.6 + xsKg) / seedKg) * 100 : 0;
+
     return {
+      xsKg, impliedOutTurnPct,
       soldKg, revenue, freight, brokerage, seedCost, prodCost, margin,
       netRealization: sum((m) => m.netRealization),
       totalCost: freight + brokerage + seedCost + prodCost,
@@ -222,6 +238,15 @@ export default function PappuProfitLoss() {
         <MiniStat icon={Scale} label="Black seed cost" value={rupeesShort(t.seedCost)} sub={`${rupees(t.seedCostPerKg)}/kg pappu`} />
         <MiniStat icon={Trophy} label="Best order" value={t.best ? rupeesShort(t.best.margin) : '-'} sub={t.best?.buyer} valueClass="text-emerald-600 dark:text-emerald-400" />
         <MiniStat icon={AlertTriangle} label="Worst order" value={t.worst ? rupeesShort(t.worst.margin) : '-'} sub={t.worst?.buyer} valueClass={t.worst && t.worst.margin < 0 ? 'text-rose-600 dark:text-rose-400' : undefined} />
+        {t.xsKg > 0 && (
+          <MiniStat
+            icon={Percent}
+            label="Implied out-turn"
+            value={`${t.impliedOutTurnPct.toFixed(2)}%`}
+            sub={`${toTonnes(t.xsKg).toFixed(2)} t XS · 60% assumed`}
+            valueClass={t.impliedOutTurnPct > 63 ? 'text-amber-600 dark:text-amber-400' : undefined}
+          />
+        )}
       </div>
 
       {/* Filters */}
@@ -303,9 +328,31 @@ export default function PappuProfitLoss() {
                       <div className="flex items-center gap-2">
                         <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
                         <span className="text-muted-foreground whitespace-nowrap">{shortDate(m.saleDate)}</span>
+                        {m.costFrozenAt ? (
+                          <span title="Fully shipped — seed, freight and production cost are pinned to what backed this order. Later purchases, verifications or rate changes cannot move it.">
+                            <Lock className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-label="Costs frozen" />
+                          </span>
+                        ) : (
+                          <span title="Still open — this margin is a projection and will move as stock arrives. It freezes when the order is fully dispatched.">
+                            <LockOpen className="h-3 w-3 shrink-0 text-amber-500/70" aria-label="Costs still live" />
+                          </span>
+                        )}
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium text-foreground">{m.buyer}</TableCell>
+                    <TableCell className="font-medium text-foreground">
+                      <div className="flex items-center gap-2">
+                        <span>{m.buyer}</span>
+                        {m.excessOutKg > 0 && (
+                          <Badge
+                            variant="warning"
+                            className="shrink-0"
+                            title={`${toTonnes(m.excessOutKg).toFixed(2)} t dispatched from yield surplus. Seed cost is nil on that tonnage (already recovered over the assumed 60% out-turn), so the margin % here is not a rate benchmark.`}
+                          >
+                            XS {toTonnes(m.excessOutKg).toFixed(2)}t
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{m.destination ?? '-'}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{toTonnes(m.orderedKg).toFixed(2)} t</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{rupees(m.ratePerKg)}</TableCell>

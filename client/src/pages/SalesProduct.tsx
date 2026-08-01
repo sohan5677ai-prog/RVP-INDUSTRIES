@@ -36,6 +36,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /** Per-order pappu profit/loss, from the date-aware seed allocation (server). */
 interface PappuMargin {
   orderId: string;
+  committedPappuKg: number;
   ratePerKg: number;
   revenue: number;
   freight: number;
@@ -52,6 +53,10 @@ interface PappuMargin {
   marginPerKg: number;
   marginPct: number;
   seedBands: { price: number; seedKg: number; cost: number }[];
+  /** Pappu already dispatched as XS (excess out) - drew no seed. */
+  excessOutKg: number;
+  /** Committed pappu with no black seed behind it; drives the XS dispatch gate. */
+  unbackedPappuKg: number;
 }
 
 const PRODUCT_META: Record<SaleProduct, { title: string; noun: string }> = {
@@ -220,10 +225,40 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [extractingKata, setExtractingKata] = useState(false);
   const [transportProvider, setTransportProvider] = useState<'SURYA' | 'KNM' | 'OTHER'>('SURYA');
   const [customRetention, setCustomRetention] = useState('');
+  // Tonnes of the current lorry declared as XS (excess out). Blank until the
+  // user opts in; pre-filled with the shortfall so the common case is one click.
+  const [excessOutTonnes, setExcessOutTonnes] = useState('');
 
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
   const dispatchOverflow = dispatchOrder ? Math.round(dispatchTonnesNum * 1000) > dispatchRemaining : false;
+
+  // Pappu with no black seed behind it. Available pappu is derived (remaining
+  // seed × 60%), so this can be > 0 while the surplus physically exists in the
+  // godown - the user asserts that with the XS tick rather than us guessing.
+  // Mirrors the server gate in dispatchSaleOrder: only the tonnage beyond the
+  // seed-backed headroom needs the tick, so a lorry that fits inside what seed
+  // covers goes out unchallenged even on a partially-short order.
+  const dispatchBackedHeadroomKg = useMemo(() => {
+    if (!isPappu || !dispatchOrder) return Infinity;
+    const m = marginById.get(dispatchOrder.id);
+    if (!m || m.unbackedPappuKg <= 0) return Infinity;
+    const backedKg = Math.max(0, m.committedPappuKg - m.unbackedPappuKg);
+    const seedBackedOutKg = (dispatchOrder.dispatches ?? []).reduce(
+      (s, d) => s + d.weightKg - Math.min(Math.max(d.excessOutKg ?? 0, 0), d.weightKg),
+      0,
+    );
+    return Math.max(0, backedKg - seedBackedOutKg);
+  }, [isPappu, dispatchOrder, marginById]);
+
+  // How much of THIS lorry has no seed behind it - the minimum that must be
+  // declared XS. Mirrors the server gate in dispatchSaleOrder.
+  const dispatchShortfallKg = Number.isFinite(dispatchBackedHeadroomKg)
+    ? Math.max(0, Math.round(dispatchTonnesNum * 1000) - dispatchBackedHeadroomKg)
+    : 0;
+  const needsExcessOut = dispatchShortfallKg > 0;
+  const excessOutKg = Math.round((Number(excessOutTonnes) || 0) * 1000);
+  const dispatchBlocked = needsExcessOut && excessOutKg < dispatchShortfallKg;
 
   function openDispatch(o: SaleOrder) {
     setDispatchOrder(o);
@@ -235,6 +270,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setDispatchDate(new Date().toISOString().slice(0, 10));
     setTransportProvider('SURYA');
     setCustomRetention('');
+    setExcessOutTonnes(''); // never sticky - each XS claim must be deliberate
   }
 
   async function extractKata(file: File) {
@@ -267,6 +303,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (dispatchDate) fd.append('dispatchDate', new Date(dispatchDate).toISOString());
       fd.append('transportProvider', transportProvider);
       if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
+      if (excessOutKg > 0) fd.append('excessOutKg', String(excessOutKg));
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -990,6 +1027,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                               {d.invoiceNumber ?? <span className="font-sans text-xs font-medium text-amber-600 dark:text-amber-400">Invoice not raised</span>}
                                             </span>
                                             <Badge variant={statusVariant[d.status]}>{titleCase(d.status)}</Badge>
+                                            {(d.excessOutKg ?? 0) > 0 && (
+                                              <Badge
+                                                variant="warning"
+                                                title={`${toTonnes(d.excessOutKg!).toFixed(2)} t dispatched from yield surplus above the assumed 60% out-turn. That tonnage drew no black seed and carries no seed cost.`}
+                                              >
+                                                XS {toTonnes(d.excessOutKg!).toFixed(2)}t
+                                              </Badge>
+                                            )}
                                           </div>
                                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                                             <span>{shortDate(d.dispatchDate)}</span><span className="opacity-40">·</span>
@@ -1240,8 +1285,52 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining — dispatching the extra is allowed and will bill the full weight.</p>
               )}
             </div>
+            {needsExcessOut && (
+              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                  No black seed backs {toTonnes(dispatchShortfallKg).toFixed(2)} t of this lorry
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Only {toTonnes(dispatchBackedHeadroomKg).toFixed(2)} t of this order has seed behind
+                  it. Available pappu is worked out as remaining black seed × 60%, so if the mill
+                  out-turned better than that, the surplus is real but invisible here. Declare the
+                  surplus portion below — the rest of the lorry still draws seed normally.
+                </p>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs whitespace-nowrap">XS Pappu (excess out)</Label>
+                    <Input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      className="h-8 w-28"
+                      placeholder="tonnes"
+                      value={excessOutTonnes}
+                      onChange={(e) => setExcessOutTonnes(e.target.value)}
+                    />
+                    <span className="text-xs text-muted-foreground">t</span>
+                    {excessOutKg < dispatchShortfallKg && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={() => setExcessOutTonnes(String(dispatchShortfallKg / 1000))}
+                      >
+                        Use {toTonnes(dispatchShortfallKg).toFixed(2)} t
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    This tonnage draws no black seed and carries no seed cost, so its margin is fixed
+                    and incoming seed at RVP won't be consumed against it. Must be at least{' '}
+                    {toTonnes(dispatchShortfallKg).toFixed(2)} t to dispatch.
+                  </p>
+                </div>
+              </div>
+            )}
             <DialogFooter>
-              <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchMutation.isPending}>
+              <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchMutation.isPending || dispatchBlocked}>
                 {dispatchMutation.isPending ? 'Dispatching…' : 'Confirm Dispatch'}
               </Button>
             </DialogFooter>

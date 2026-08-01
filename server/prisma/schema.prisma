@@ -437,6 +437,26 @@ model SaleOrder {
   // be dispatched. The ERP surfaces a login reminder from 3 days before this date.
   reminderDate       DateTime?
 
+  // --- Cost freeze -----------------------------------------------------------
+  // The Pappu P&L used to recompute every order from scratch on each page load,
+  // so a Settings edit, a late stock-in, a PO verification or a loan re-rate all
+  // silently rewrote history. These columns pin an order's costs to what was
+  // true when it was taken / shipped.
+  //
+  // Stamped at CREATION, so changing a destination's rate in Settings applies
+  // only to orders taken after the change (Surat 2800 -> 3000 leaves every
+  // earlier order at 2800). Null on legacy rows = fall back to the live rate.
+  // NB: freight is rated PER TONNE (calcSaleFreight takes tonnes), production
+  // cost PER KG. Keep the units in the names - they are easy to transpose.
+  freightRatePerTonne Decimal? @db.Decimal(12, 4)
+  prodCostPerKg       Decimal? @db.Decimal(12, 4)
+  // Written once the order is FULLY dispatched: the price bands (and seed kg)
+  // that actually backed it. From then on the margin reads this instead of
+  // re-running the allocator, so nothing bought or repriced later can move it.
+  // Cleared by undo-dispatch, which re-opens the order.
+  seedCostSnapshot Json?
+  costFrozenAt     DateTime?
+
   // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
   dispatches  SaleDispatch[]
   allocations SaleAllocation[]
@@ -487,6 +507,25 @@ model SaleDispatch {
   kataFileUrl       String?
   transportProvider String? // 'SURYA' | 'KNM' | 'OTHER'
   customRetention   Decimal?   @db.Decimal(12, 2) // user-entered retention for 'OTHER'
+
+  // XS Pappu (excess out). The 60% out-turn is a planning assumption, not a
+  // measurement - when the mill actually yields more, that surplus pappu is
+  // physically real but invisible to the stock engine. Declaring part of a
+  // shipment as excess-out asserts it was served from that yield surplus, so
+  // that tonnage:
+  //   - draws NO black seed (the seed cost was already fully recovered over the
+  //     assumed 60%, so the surplus carries zero marginal cost)
+  //   - relieves NO silo inventory at dispatch, keeping the GL consistent with
+  //     the zero seed cost the Pappu P&L reports
+  //   - never enters the allocation backlog, so incoming seed at RVP is not
+  //     consumed on its behalf
+  //
+  // A QUANTITY, not a flag: one lorry can be part-backed and part-surplus (30 t
+  // out against 20 t of seed = 10 t excess). Treating it as all-or-nothing would
+  // stop the backed 20 t drawing seed and silently overstate stock.
+  // Both allocators subtract it from an order's demand; see `excessOutKgOf`.
+  excessOutKg   Int     @default(0)
+  excessOutNote String?
 
   // Delivery matching (buyer's kata slip captured at delivery).
   receivedDate               DateTime?

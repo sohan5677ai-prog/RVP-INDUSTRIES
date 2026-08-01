@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
-import type { Party } from '@prisma/client';
+import { Prisma, type Party } from '@prisma/client';
 import { HttpError } from '../lib/httpError.js';
 import {
   createSaleOrderSchema,
@@ -10,9 +10,11 @@ import {
   markPaidSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
+import { computePappuOrderMargins } from './inventory.controller.js';
+import { clearCache } from '../lib/cache.js';
 import { LedgerService } from '../services/ledger.service.js';
 
-import { calcSaleFreight, calcHamali, calcKataFee, pappuLoadingHamali, customLoadingHamali, productLoadingHamali, isVehicleExempt } from '../lib/calc.js';
+import { calcSaleFreight, calcHamali, calcKataFee, pappuLoadingHamali, customLoadingHamali, productLoadingHamali, isVehicleExempt, seedBackedDispatchedKg } from '../lib/calc.js';
 import {
   getFreightRateForDestination,
   getCompanyProfileRow,
@@ -118,6 +120,59 @@ async function assertPappuMargin(product: string, ratePerKg: number, marginOverr
   }
 }
 
+/**
+ * The cost rates as they stand RIGHT NOW, pinned onto a new sale order.
+ *
+ * Freight and production cost used to be read live on every margin calculation,
+ * so editing a destination's rate in Settings silently re-costed every order
+ * ever sold to that destination. Stamping at creation makes a rate change apply
+ * only from that order onwards - Surat 2800 -> 3000 leaves earlier orders at
+ * 2800, which is the rate the delivered sale price was quoted against.
+ */
+async function currentCostStamps(destination: string | null) {
+  const [freightRatePerTonne, prodRows] = await Promise.all([
+    getFreightRateForDestination(destination),
+    prisma.productionCostComponent.findMany({ select: { ratePerKg: true } }),
+  ]);
+  return {
+    freightRatePerTonne,
+    prodCostPerKg: prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0),
+  };
+}
+
+/**
+ * Pin a fully-shipped Pappu order's seed cost to what actually backed it.
+ *
+ * From here the Pappu P&L reads this snapshot instead of re-running the
+ * allocator, so a later stock-in, PO verification, bank-loan re-rate or Settings
+ * edit can no longer move this order's margin.
+ *
+ * MUST run outside the dispatch/delivery transaction: the allocator reads
+ * through `prisma` (not `tx`) and is memoised, so it has to see the committed
+ * row. Clearing the cache first is what makes it recompute with the new lorry
+ * counted. Idempotent - already-frozen orders are left alone, so calling it
+ * again (from delivery, or a re-run of the backfill) is safe.
+ */
+async function freezeOrderCost(orderId: string) {
+  const so = await prisma.saleOrder.findUnique({
+    where: { id: orderId },
+    select: { product: true, costFrozenAt: true },
+  });
+  if (!so || so.product !== 'PAPPU' || so.costFrozenAt != null) return;
+
+  clearCache('pappu_order_margins');
+  const m = (await computePappuOrderMargins()).find((x) => x.orderId === orderId);
+  if (!m) return;
+
+  await prisma.saleOrder.update({
+    where: { id: orderId },
+    data: {
+      seedCostSnapshot: { seedBands: m.seedBands, seedKg: m.seedKg, seedCost: m.seedCost },
+      costFrozenAt: new Date(),
+    },
+  });
+}
+
 export async function createSaleOrder(req: Request, res: Response) {
   const data = createSaleOrderSchema.parse(req.body);
 
@@ -136,6 +191,7 @@ export async function createSaleOrder(req: Request, res: Response) {
 
   const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
   const gstFraction = await gstFractionForProduct(data.product);
+  const stamps = await currentCostStamps(destination ?? buyer.destination ?? null);
 
   const order = await prisma.saleOrder.create({
     data: {
@@ -153,6 +209,7 @@ export async function createSaleOrder(req: Request, res: Response) {
       destination,
       freightCharge,
       marginOverride: data.marginOverride || false,
+      ...stamps,
     },
     include: { buyer: true, broker: true },
   });
@@ -199,6 +256,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
 
       const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
       const gstFraction = await gstFractionForProduct(data.product);
+      const stamps = await currentCostStamps(destination ?? buyer.destination ?? null);
 
       const order = await prisma.saleOrder.create({
         data: {
@@ -214,6 +272,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           destination,
           freightCharge,
           marginOverride: data.marginOverride || false,
+          ...stamps,
         },
       });
 
@@ -323,6 +382,40 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   const alreadyDispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
   const weightKg = data.tonnageKg;
+
+  // ── XS Pappu gate ──────────────────────────────────────────────────────────
+  // Available pappu is DERIVED (remaining black seed × 60%), never counted. When
+  // the mill out-turns better than 60% the surplus is real but invisible here,
+  // so an order can be physically dispatchable while the engine shows nothing
+  // backing it. Rather than blocking on a number we know is an assumption, we
+  // surface it and let the user assert excess-out explicitly.
+  //
+  // Without that assertion the tonnage stays in the allocation backlog and will
+  // consume the next black seed to arrive at RVP - seed it does not need, since
+  // the surplus was already paid for over the assumed 60%.
+  // Only the tonnage BEYOND what seed actually backs needs declaring - a 25 t
+  // lorry against a 30 t order that is 4 t short must still go out unchallenged.
+  // A part-backed lorry declares only its surplus portion (30 t out against
+  // 20 t of seed = 10 t XS), so the backed 20 t keeps drawing seed normally.
+  let excessOutKg = 0;
+  if (order.product === 'PAPPU') {
+    const m = (await computePappuOrderMargins()).find((x) => x.orderId === order.id);
+    const unbackedKg = m?.unbackedPappuKg ?? 0;
+    if (unbackedKg > 0) {
+      const backedKg = Math.max(0, (m?.committedPappuKg ?? order.tonnageKg) - unbackedKg);
+      const headroomKg = Math.max(0, backedKg - seedBackedDispatchedKg(order.dispatches));
+      const shortfallKg = Math.max(0, weightKg - headroomKg);
+      if (shortfallKg > 0 && data.excessOutKg < shortfallKg) {
+        throw new HttpError(
+          400,
+          `Only ${(headroomKg / 1000).toFixed(2)} t of this order has black seed behind it — ` +
+            `this lorry is ${(weightKg / 1000).toFixed(2)} t. If the balance is going out of yield ` +
+            `surplus, declare at least ${(shortfallKg / 1000).toFixed(2)} t as XS Pappu (excess out).`,
+        );
+      }
+    }
+    excessOutKg = Math.min(data.excessOutKg, weightKg); // never more excess than the lorry weighs
+  }
   let internalWeightKg = data.internalWeightKg ?? null;
   if (!internalWeightKg && order.product === 'PAPPU') {
     if (weightKg >= 35000) internalWeightKg = weightKg - 250;
@@ -441,7 +534,11 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     const cogsInventoryAccount: string | undefined = undefined;
     const cogsCostCenter: string | undefined = undefined;
     if (order.product === 'PAPPU') {
-      cogsAmount = await InventoryService.consumeBlackSeedForSale(tx, weightKg);
+      // XS tonnage relieves NO inventory: its seed was already fully expensed
+      // over the assumed 60% out-turn, so relieving it again would book COGS for
+      // seed that is not in the silo and put the GL at odds with the zero seed
+      // cost the Pappu P&L reports for the same tonnage.
+      cogsAmount = await InventoryService.consumeBlackSeedForSale(tx, weightKg - excessOutKg);
     }
     // Shell, Waste and the pre-cleaner byproducts carry no COGS silo relief - they
     // are revenue-only sales that draw down the shared 10% pool (tracked as a
@@ -462,6 +559,8 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         kataFileUrl,
         transportProvider,
         customRetention: transportProvider === 'OTHER' ? (data.customRetention ?? null) : null,
+        excessOutKg,
+        excessOutNote: excessOutKg > 0 ? (data.excessOutNote ?? null) : null,
       },
     });
 
@@ -493,6 +592,8 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
     return created;
   });
+
+  if (order.product === 'PAPPU' && fullyDispatched) await freezeOrderCost(order.id);
 
   // WhatsApp the driver the buyer's name/phone/maps link — fire-and-forget,
   // only when a driver phone was captured on this dispatch. The broker/buyer
@@ -553,7 +654,12 @@ export async function undoSaleDispatch(req: Request, res: Response) {
             .filter((l) => l.account.code === '10010')
             .reduce((s, l) => s + Number(l.credit), 0)
         : 0;
-      await InventoryService.restoreBlackSeedForSale(tx, dispatch.weightKg, invCreditAmount);
+      // Mirror the dispatch: XS tonnage relieved no inventory, so it restores none.
+      await InventoryService.restoreBlackSeedForSale(
+        tx,
+        dispatch.weightKg - dispatch.excessOutKg,
+        invCreditAmount,
+      );
     }
 
     // 2. Delete the sale's ledger posting (journal lines cascade with the entry).
@@ -568,7 +674,17 @@ export async function undoSaleDispatch(req: Request, res: Response) {
     const status = dispatchedKg === 0
       ? 'PENDING'
       : dispatchedKg >= order.tonnageKg ? 'DISPATCHED' : 'PARTIAL';
-    await tx.saleOrder.update({ where: { id: order.id }, data: { status } });
+    // Undoing re-opens the order, so its frozen seed cost no longer describes
+    // what shipped. Clear the freeze and let it go back to being computed live;
+    // it re-freezes when the order is fully dispatched again.
+    const reopened = status !== 'DISPATCHED';
+    await tx.saleOrder.update({
+      where: { id: order.id },
+      data: {
+        status,
+        ...(reopened ? { seedCostSnapshot: Prisma.DbNull, costFrozenAt: null } : {}),
+      },
+    });
   });
 
   res.json({ message: 'Dispatch undone' });
@@ -689,6 +805,7 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
 
   const order = dispatch.saleOrder;
   const rate = Number(order.ratePerKg);
+  let orderIsFullyShipped = false;
 
   let shortageKg: number | null = null;
   let creditNoteAmount: number | null = null;
@@ -748,10 +865,16 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     const orderStatus = dispatchedKg < order.tonnageKg
       ? 'PARTIAL'
       : siblings.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
+    orderIsFullyShipped = orderStatus !== 'PARTIAL';
     await tx.saleOrder.update({ where: { id: order.id }, data: { status: orderStatus } });
 
     return result;
   });
+
+  // Safety net. The freeze normally happens at full dispatch; this catches an
+  // order that got there without one (a freeze that failed, or a row predating
+  // the feature). Idempotent, so it is a no-op in the normal case.
+  if (order.product === 'PAPPU' && orderIsFullyShipped) await freezeOrderCost(order.id);
 
   res.json(updated);
 }

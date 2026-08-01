@@ -17,6 +17,9 @@ import {
   roundRupee,
   calcSaleFreight,
   landedPricePerKg,
+  seedBackedDemandKg,
+  seedBackedDispatchedKg,
+  excessOutKgOf,
 } from './calc';
 
 describe('crossVerify', () => {
@@ -284,5 +287,55 @@ describe('roundRupee - reserved for party-ledger / payment / receipt settlement'
     // 10.4t × ₹123.45/t = 1283.88 - paise preserved for costing/valuation
     expect(calcSaleFreight(10400, 123.45)).toBeCloseTo(1283.88, 2);
     expect(landedPricePerKg(50, 10000, 12345)).toBe(51.23);
+  });
+});
+
+describe('XS Pappu (excess out) demand', () => {
+  it('sums declared excess tonnage only', () => {
+    expect(excessOutKgOf([{ weightKg: 10_000, excessOutKg: 10_000 }, { weightKg: 5_000 }])).toBe(10_000);
+    expect(excessOutKgOf([])).toBe(0);
+  });
+
+  it('clamps excess to the lorry weight and floors it at zero', () => {
+    // A bad value must never credit back seed that was actually consumed.
+    expect(excessOutKgOf([{ weightKg: 10_000, excessOutKg: 99_000 }])).toBe(10_000);
+    expect(excessOutKgOf([{ weightKg: 10_000, excessOutKg: -5_000 }])).toBe(0);
+  });
+
+  it('reserves full seed for an order with no dispatches', () => {
+    expect(seedBackedDemandKg(30_000, [])).toBe(30_000);
+  });
+
+  it('drops XS tonnage from demand so it never draws seed', () => {
+    // 30t order fully dispatched as XS → nothing left to back with black seed.
+    expect(seedBackedDemandKg(30_000, [{ weightKg: 30_000, excessOutKg: 30_000 }])).toBe(0);
+  });
+
+  it('splits a part-backed lorry instead of writing the whole load off', () => {
+    // THE PARTIAL CASE: 30t out with only 20t of seed behind it. Declaring the
+    // 10t surplus must leave the backed 20t still drawing seed - treating the
+    // whole lorry as excess would silently overstate black seed by 33.3t.
+    expect(seedBackedDemandKg(30_000, [{ weightKg: 30_000, excessOutKg: 10_000 }])).toBe(20_000);
+    expect(seedBackedDispatchedKg([{ weightKg: 30_000, excessOutKg: 10_000 }])).toBe(20_000);
+  });
+
+  it('keeps the undispatched balance backed on a partial XS dispatch', () => {
+    // 10t out as XS, 20t still open → the open 20t must still reserve real seed.
+    expect(seedBackedDemandKg(30_000, [{ weightKg: 10_000, excessOutKg: 10_000 }])).toBe(20_000);
+  });
+
+  it('still commits normal dispatches in full', () => {
+    expect(seedBackedDemandKg(30_000, [{ weightKg: 10_000 }])).toBe(30_000);
+    expect(seedBackedDispatchedKg([{ weightKg: 10_000 }])).toBe(10_000);
+  });
+
+  it('honours an over-loaded lorry, less any XS tonnage', () => {
+    // Dispatched 32t against a 30t order → commitment follows the actual weight.
+    expect(seedBackedDemandKg(30_000, [{ weightKg: 32_000 }])).toBe(32_000);
+    expect(seedBackedDemandKg(30_000, [{ weightKg: 32_000, excessOutKg: 32_000 }])).toBe(0);
+  });
+
+  it('never returns negative demand', () => {
+    expect(seedBackedDemandKg(0, [{ weightKg: 5_000, excessOutKg: 5_000 }])).toBe(0);
   });
 });

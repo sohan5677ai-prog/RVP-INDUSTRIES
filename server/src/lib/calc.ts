@@ -19,6 +19,48 @@ export const DEFAULT_OUT_TURN_PCT = 60; // black -> white yield
 export const PAPPU_OUT_TURN = 0.6; // out-turn fraction used in stock calculations
 export const PAPPU_CONSUMABLE = 0.8; // Fraction of milled pappu that is consumable/sellable
 
+/** One dispatch, as far as excess-out accounting is concerned. */
+export type ExcessOutDispatch = { weightKg: number; excessOutKg?: number | null };
+
+/**
+ * Pappu kg across these dispatches that went out as XS (excess out).
+ *
+ * Clamped to the dispatch weight: a lorry can never be more excess than it is
+ * heavy, and a bad value must not silently credit back seed that was consumed.
+ */
+export function excessOutKgOf(dispatches: ExcessOutDispatch[]): number {
+  return dispatches.reduce((s, d) => s + Math.min(Math.max(d.excessOutKg ?? 0, 0), d.weightKg), 0);
+}
+
+/** Pappu kg on these dispatches that DID consume black seed. */
+export function seedBackedDispatchedKg(dispatches: ExcessOutDispatch[]): number {
+  return dispatches.reduce(
+    (s, d) => s + d.weightKg - Math.min(Math.max(d.excessOutKg ?? 0, 0), d.weightKg),
+    0,
+  );
+}
+
+/**
+ * Seed-backed pappu demand for one sale order, in pappu kg.
+ *
+ * An order commits the greater of what was ordered and what actually went out
+ * (a lorry may over-load), MINUS any tonnage dispatched as XS. Excess-out
+ * tonnage came from yield surplus that the 60% assumption never counted, so it
+ * must not draw seed, must not enter the backlog, and must not push a band
+ * negative. Partial dispatches still work: on a 30t order with 10t out as XS,
+ * the 20t balance keeps reserving real seed.
+ *
+ * MUST stay identical in both allocators (stockEngine + pappu margins) - if the
+ * two disagree, the Pappu page and the P&L page report different deficits.
+ */
+export function seedBackedDemandKg(
+  tonnageKg: number,
+  dispatches: ExcessOutDispatch[],
+): number {
+  const dispatchedKg = dispatches.reduce((s, d) => s + d.weightKg, 0);
+  return Math.max(0, Math.max(tonnageKg, dispatchedKg) - excessOutKgOf(dispatches));
+}
+
 // Default freight destinations (fallback before the editable rates load). The
 // actual per-tonne rates live in the FreightRate table, managed in Settings.
 export const SALE_DESTINATIONS = ['Surat', 'Barshi', 'Nagar'] as const;

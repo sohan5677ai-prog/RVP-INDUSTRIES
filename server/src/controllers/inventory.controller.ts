@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import type { SaleProduct } from '@prisma/client';
 import { withCache } from '../lib/cache.js';
-import { companyHamaliShare, calcSaleFreight, PAPPU_OUT_TURN } from '../lib/calc.js';
+import { companyHamaliShare, calcSaleFreight, PAPPU_OUT_TURN, seedBackedDemandKg, excessOutKgOf } from '../lib/calc.js';
 import { getFreightRateForDestination } from './settings.controller.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computeUnifiedStockEngine } from '../services/stockEngine.js';
@@ -263,6 +263,13 @@ export async function getCalculatorDefaults(req: Request, res: Response) {
  * out of realisation. Margin = revenue − freight − brokerage − seed cost −
  * production cost. GST is a pass-through and excluded.
  */
+/** Shape stored in SaleOrder.seedCostSnapshot once an order is fully dispatched. */
+type FrozenSeed = {
+  seedBands: { price: number; seedKg: number; cost: number }[];
+  seedKg: number;
+  seedCost: number;
+};
+
 async function _computePappuOrderMargins() {
   const EPS = 1e-6;
 
@@ -275,23 +282,34 @@ async function _computePappuOrderMargins() {
 
   const orders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
-    include: { buyer: true, dispatches: { select: { weightKg: true } } },
+    include: { buyer: true, dispatches: { select: { weightKg: true, excessOutKg: true } } },
     orderBy: { saleDate: 'asc' },
   });
 
   const prodRows = await prisma.productionCostComponent.findMany();
-  const prodCostPerKg = prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0);
+  const liveProdCostPerKg = prodRows.reduce((s, r) => s + Number(r.ratePerKg), 0);
 
-  // Outward freight is netted out of the (freight-inclusive) sale price. Use the
-  // CURRENT Settings rate for each order's destination - so backdated orders whose
-  // stored freightCharge predates the rate setup are still costed correctly.
+  // Outward freight is netted out of the (freight-inclusive) sale price.
+  //
+  // Rates are read off the ORDER (stamped when it was taken), not from Settings.
+  // That is what stops a rate change rewriting history: putting Surat up from
+  // 2800 to 3000 now applies only to orders taken after the change, because
+  // earlier orders carry their own 2800. The live rate is only a fallback for
+  // legacy rows the backfill has not stamped yet.
   const destOf = (so: { destination: string | null; buyer: { destination: string | null } }) =>
     so.destination ?? so.buyer?.destination ?? null;
-  const freightRateByDest = new Map<string, number>();
+  const liveFreightRateByDest = new Map<string, number>();
   for (const so of orders) {
+    if (so.freightRatePerTonne != null) continue; // stamped - no live lookup needed
     const key = destOf(so) ?? '';
-    if (!freightRateByDest.has(key)) freightRateByDest.set(key, await getFreightRateForDestination(destOf(so)));
+    if (!liveFreightRateByDest.has(key)) liveFreightRateByDest.set(key, await getFreightRateForDestination(destOf(so)));
   }
+  const freightRateOf = (so: (typeof orders)[number]) =>
+    so.freightRatePerTonne != null
+      ? Number(so.freightRatePerTonne)
+      : (liveFreightRateByDest.get(destOf(so) ?? '') ?? 0);
+  const prodCostPerKgOf = (so: (typeof orders)[number]) =>
+    so.prodCostPerKg != null ? Number(so.prodCostPerKg) : liveProdCostPerKg;
 
   // Per order → the price bands (and seed kg) that backed it.
   const orderSeed = new Map<string, Map<string, { price: number; seedKg: number }>>();
@@ -309,10 +327,11 @@ async function _computePappuOrderMargins() {
     | { t: number; kind: 'sale'; orderId: string; seedNeed: number };
   const events: AllocEvent[] = [];
   for (const r of refs) events.push({ t: r.date.getTime(), kind: 'arrive', ref: r });
+  // XS (excess-out) tonnage is dropped from demand, so it draws no seed and never
+  // queues in the backlog to be paid for by black seed arriving later at RVP.
   const committedOf = new Map<string, number>();
   for (const so of orders) {
-    const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
-    const committed = Math.max(so.tonnageKg, dispatched);
+    const committed = seedBackedDemandKg(so.tonnageKg, so.dispatches);
     committedOf.set(so.id, committed);
     if (committed > 0) events.push({ t: so.saleDate.getTime(), kind: 'sale', orderId: so.id, seedNeed: committed / PAPPU_OUT_TURN });
   }
@@ -350,17 +369,24 @@ async function _computePappuOrderMargins() {
   const result = orders.map((so) => {
     const qty = so.tonnageKg; // ordered pappu kg (freight/GST are computed on this)
     const rate = Number(so.ratePerKg);
-    const freight = calcSaleFreight(qty, freightRateByDest.get(destOf(so) ?? '') ?? 0);
+    const freight = calcSaleFreight(qty, freightRateOf(so));
     const brokerage = Math.round(qty * Number(so.brokerageRatePerKg) * 100) / 100;
 
+    // A frozen order still DRAWS from the pool above - it really did consume that
+    // seed, and removing it would hand the seed to someone else and move their
+    // margin. We only stop re-deriving its own cost from the draw.
+    const frozen = so.costFrozenAt != null ? (so.seedCostSnapshot as FrozenSeed | null) : null;
+
     const bandsMap = orderSeed.get(so.id) ?? new Map<string, { price: number; seedKg: number }>();
-    const seedBands = [...bandsMap.values()]
+    const liveBands = [...bandsMap.values()]
       .sort((a, b) => b.price - a.price)
       .map((b) => ({ price: b.price, seedKg: Math.round(b.seedKg), cost: Math.round(b.price * b.seedKg * 100) / 100 }));
-    const seedKg = seedBands.reduce((s, b) => s + b.seedKg, 0);
-    const seedCost = Math.round(seedBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
 
-    const prodCost = Math.round(qty * prodCostPerKg * 100) / 100;
+    const seedBands = frozen?.seedBands ?? liveBands;
+    const seedKg = frozen?.seedKg ?? liveBands.reduce((s, b) => s + b.seedKg, 0);
+    const seedCost = frozen?.seedCost ?? Math.round(liveBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
+
+    const prodCost = Math.round(qty * prodCostPerKgOf(so) * 100) / 100;
     const revenue = Math.round(qty * rate * 100) / 100;
     const netRealization = Math.round((revenue - freight - brokerage) * 100) / 100;
     const margin = Math.round((netRealization - seedCost - prodCost) * 100) / 100;
@@ -371,6 +397,17 @@ async function _computePappuOrderMargins() {
       destination: destOf(so),
       saleDate: so.saleDate,
       committedPappuKg: committedOf.get(so.id) ?? qty,
+      // XS tonnage carries zero seed cost by design (the seed was already fully
+      // recovered over the assumed 60% out-turn), so these rows show a ~100%
+      // margin. Correct as a rupee total, but NOT a per-kg rate benchmark -
+      // hence the badge on the Pappu P&L row.
+      excessOutKg: Math.round(excessOutKgOf(so.dispatches)),
+      // Committed pappu with no seed behind it - i.e. sitting in the allocation
+      // backlog, waiting to eat the next black seed to arrive at RVP. This is
+      // what the dispatch gate offers the XS tick against.
+      unbackedPappuKg: Math.round(
+        Math.max(0, (committedOf.get(so.id) ?? qty) - seedKg * PAPPU_OUT_TURN),
+      ),
       orderedKg: qty,
       ratePerKg: rate,
       revenue,
@@ -381,7 +418,10 @@ async function _computePappuOrderMargins() {
       seedCost,
       seedWacPerKg: seedKg > 0 ? Math.round((seedCost / seedKg) * 100) / 100 : 0,
       seedCostPerPappuKg: qty > 0 ? Math.round((seedCost / qty) * 100) / 100 : 0,
-      prodCostPerKg: Math.round(prodCostPerKg * 100) / 100,
+      prodCostPerKg: Math.round(prodCostPerKgOf(so) * 100) / 100,
+      // Frozen = this order is fully shipped and its costs are a historical
+      // record; nothing bought, verified or re-rated later can move it.
+      costFrozenAt: so.costFrozenAt,
       prodCost,
       netRealization,
       margin,

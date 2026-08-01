@@ -67,6 +67,12 @@ const WASTE_LOADING_PRODUCTS = new Set([
   'WASTE', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
 ]);
 
+// Flat ₹2,000 brokerage per dispatched shipment — same constant as the
+// Brokerage Ledger/Dues reports (client/src/pages/BrokerageLedger.tsx).
+const FLAT_BROKERAGE = 2000;
+// "RVP" is the company's own-orders marker (not a real commission agent).
+const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
+
 /**
  * Husk (byproduct) recovery pool for the dashboard. Pools all non-pappu byproduct
  * SALE revenue and deducts every operating cost, itemized. This is a MANAGEMENT
@@ -101,6 +107,7 @@ export interface HuskExpenses {
   termLoanInterest: number;
   loanInterestUnabsorbed: number;
   termLoanPrincipal: number;
+  brokerage: number;
 }
 
 // Map frontend expense labels to their exact backend keys. Also flag the
@@ -131,6 +138,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'termLoanInterest',   label: 'Term Loan Interest',   pappu: false },
   { key: 'loanInterestUnabsorbed', label: 'Loan Interest (unabsorbed)', pappu: false },
   { key: 'termLoanPrincipal',  label: 'Term Loan Principal',  pappu: false },
+  { key: 'brokerage',          label: 'Brokerage',            pappu: false },
 ];
 
 // Husk-pool INCOME lines (Income tab): each is added on top of the pooled
@@ -179,6 +187,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     interestPaidAgg,
     otherIncomeAgg,
     gunnySalesAgg,
+    brokerageDispatches,
     purchaseKataAgg,
     dustPurchasesForKata,
     saleDispatchesForKata,
@@ -219,6 +228,13 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income / Gunny Sales) ──
       prisma.otherIncomeEntry.aggregate({ _sum: { amount: true } }),
       prisma.gunnySaleEntry.aggregate({ _sum: { amount: true } }),
+      // Flat ₹2000-per-dispatch brokerage, RVP (own orders) excluded — mirrors
+      // the Brokerage Ledger/Dues reports exactly, so it only lands here once a
+      // shipment actually dispatches (not at order-booking time).
+      prisma.saleDispatch.findMany({
+        where: { saleOrder: { brokerId: { not: null } } },
+        select: { saleOrder: { select: { broker: { select: { name: true } } } } },
+      }),
       prisma.purchase.aggregate({ _sum: { kataFee: true } }),
       prisma.dustPurchase.findMany({ select: { weightKg: true, lorryNumber: true } }),
       prisma.saleDispatch.findMany({ select: { weightKg: true, vehicleNumber: true } }),
@@ -313,6 +329,10 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     const interestPaidToBank = Number(interestPaidAgg._sum.interest ?? 0);
     const loanInterestUnabsorbed = Math.round((interestCapitalised - interestPaidToBank) * 100) / 100;
 
+    // Brokerage: one flat ₹2000 per dispatched shipment whose order has a real
+    // (non-RVP) broker — mirrors the Brokerage Ledger/Dues reports exactly.
+    const brokerage = brokerageDispatches.filter((d) => !isOwnBroker(d.saleOrder.broker?.name)).length * FLAT_BROKERAGE;
+
     const expenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
       transferHamali,
@@ -339,6 +359,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       termLoanInterest: interest['TERM_LOAN'] ?? 0,
       loanInterestUnabsorbed,
       termLoanPrincipal: Number(termLoanPrincipalAgg._sum.amount ?? 0),
+      brokerage,
     };
 
     // ── Hamali Company Profit: every hamali margin (purchase unloading + sale

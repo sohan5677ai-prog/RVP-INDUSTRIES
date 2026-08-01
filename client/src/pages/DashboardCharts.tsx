@@ -50,6 +50,7 @@ export interface HuskExpenses {
   termLoanInterest: number;
   loanInterestUnabsorbed: number;
   termLoanPrincipal: number;
+  brokerage: number;
 }
 export interface HuskIncome {
   kataIncome: number;
@@ -103,6 +104,7 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'termLoanInterest', label: 'Term Loan Interest' },
   { key: 'loanInterestUnabsorbed', label: 'Loan Interest (unabsorbed)' },
   { key: 'termLoanPrincipal', label: 'Term Loan Principal' },
+  { key: 'brokerage', label: 'Brokerage' },
 ];
 
 // Display order + labels for the itemized husk-pool income streams.

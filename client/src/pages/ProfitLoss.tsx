@@ -91,7 +91,7 @@ export default function ProfitLoss() {
               <div className="px-5 py-4">
                 <p className="text-xs text-muted-foreground mb-3">
                   Core-product result across {data.pappu.orders} fully dispatched order{data.pappu.orders === 1 ? '' : 's'} — revenue net of
-                  seed cost, milling, freight &amp; brokerage.
+                  seed cost, milling &amp; freight. Brokerage is booked separately in the Husk Pool overheads below, once a shipment dispatches.
                 </p>
                 <div className="flex items-baseline justify-between border-t pt-3">
                   <span className="font-bold text-foreground flex items-center gap-1.5">

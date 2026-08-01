@@ -260,9 +260,10 @@ export async function getCalculatorDefaults(req: Request, res: Response) {
  * order draws the seed available at its sale date, dearest-first, so every order
  * is costed on the ACTUAL black seed that backed it (not a blended pool average).
  * The sale price is a DELIVERED price (freight-inclusive), so freight is netted
- * out of realisation. Margin = revenue − freight − brokerage − seed cost.
+ * out of realisation. Margin = revenue − freight − seed cost.
  * GST is a pass-through and excluded. Milling/labour is NOT costed here - it is
- * already carried by the hamali rates.
+ * already carried by the hamali rates. Brokerage is NOT netted here either - it
+ * is booked once, dispatch-gated, as a Husk Pool overhead (see computeHuskPool).
  */
 /** Shape stored in SaleOrder.seedCostSnapshot once an order is fully dispatched. */
 type FrozenSeed = {
@@ -377,7 +378,6 @@ async function _computePappuOrderMargins() {
     const qty = so.tonnageKg; // ordered pappu kg (freight/GST are computed on this)
     const rate = Number(so.ratePerKg);
     const freight = calcSaleFreight(qty, freightRateOf(so));
-    const brokerage = Math.round(qty * Number(so.brokerageRatePerKg) * 100) / 100;
 
     // A frozen order still DRAWS from the pool above - it really did consume that
     // seed, and removing it would hand the seed to someone else and move their
@@ -394,7 +394,11 @@ async function _computePappuOrderMargins() {
     const seedCost = frozen?.seedCost ?? Math.round(liveBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
 
     const revenue = Math.round(qty * rate * 100) / 100;
-    const netRealization = Math.round((revenue - freight - brokerage) * 100) / 100;
+    // Brokerage is deliberately NOT netted here — it is booked once, dispatch-
+    // gated, as a Husk Pool overhead (flat ₹2000/dispatch, mirroring the
+    // Brokerage Ledger/Dues reports). Netting it again per-order here would
+    // double-count it against the same shipment.
+    const netRealization = Math.round((revenue - freight) * 100) / 100;
     const margin = Math.round((netRealization - seedCost) * 100) / 100;
 
     return {
@@ -419,7 +423,6 @@ async function _computePappuOrderMargins() {
       revenue,
       freight,
       freightPerKg: qty > 0 ? Math.round((freight / qty) * 100) / 100 : 0,
-      brokerage,
       seedKg,
       seedCost,
       seedWacPerKg: seedKg > 0 ? Math.round((seedCost / seedKg) * 100) / 100 : 0,

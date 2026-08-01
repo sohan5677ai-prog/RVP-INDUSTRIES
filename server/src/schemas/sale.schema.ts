@@ -42,12 +42,14 @@ export const dispatchSaleOrderSchema = z.object({
   excessOutNote: z.string().optional().nullable(),
 });
 
+const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);
+
 export const listSaleOrdersSchema = z.object({
-  status: saleStatusEnum.optional(),
-  product: saleProductEnum.optional(),
-  skip: z.coerce.number().int().nonnegative().optional(),
-  take: z.coerce.number().int().positive().optional().default(100),
-  all: z.enum(['true', 'false']).optional()
+  status: z.preprocess(emptyToUndefined, saleStatusEnum.optional()),
+  product: z.preprocess(emptyToUndefined, saleProductEnum.optional()),
+  skip: z.preprocess(emptyToUndefined, z.coerce.number().int().nonnegative().optional()),
+  take: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional().default(100)),
+  all: z.preprocess(emptyToUndefined, z.enum(['true', 'false']).optional())
 });
 
 // Mark a dispatched shipment as delivered. The only valid transition is

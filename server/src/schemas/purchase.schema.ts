@@ -15,11 +15,13 @@ export const createPurchaseOrderSchema = z.object({
   lorryCount: z.preprocess((val) => (val === null || val === undefined || val === '' ? null : Number(val)), z.number().int().positive().nullable().optional()),
 });
 
+const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);
+
 export const listPurchaseOrdersSchema = z.object({
-  status: poStatusEnum.optional(),
-  skip: z.coerce.number().int().nonnegative().optional(),
-  take: z.coerce.number().int().positive().optional().default(100),
-  all: z.enum(['true', 'false']).optional()
+  status: z.preprocess(emptyToUndefined, poStatusEnum.optional()),
+  skip: z.preprocess(emptyToUndefined, z.coerce.number().int().nonnegative().optional()),
+  take: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional().default(100)),
+  all: z.preprocess(emptyToUndefined, z.enum(['true', 'false']).optional())
 });
 
 // Multipart: all values arrive as strings, so coerce.

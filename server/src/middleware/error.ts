@@ -11,12 +11,17 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _next: NextFunction
 ) {
-  if (err instanceof ZodError) {
-    return res.status(400).json({ error: 'Validation failed', details: err.flatten() });
+  const isZodError = err instanceof ZodError || (err && typeof err === 'object' && (err as any).name === 'ZodError');
+  if (isZodError) {
+    const zErr = err as any;
+    const details = typeof zErr.flatten === 'function' ? zErr.flatten() : zErr.issues;
+    return res.status(400).json({ error: 'Validation failed', details });
   }
   if (err instanceof HttpError) {
     return res.status(err.status).json({ error: err.message });
   }
   logger.error(err);
-  return res.status(500).json({ error: 'Internal server error' });
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  return res.status(500).json({ error: 'Internal server error', message, stack });
 }

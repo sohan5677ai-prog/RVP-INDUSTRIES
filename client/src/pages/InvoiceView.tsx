@@ -58,6 +58,7 @@ export default function InvoiceView() {
             <Num label="Margin (mm)" value={layout.marginMm} min={0} max={30} onChange={(v) => setLayout((l) => ({ ...l, marginMm: v }))} />
             <Num label="Font (px)" value={layout.fontPx} min={7} max={18} step={0.5} onChange={(v) => setLayout((l) => ({ ...l, fontPx: v }))} />
             <Num label="Header left %" value={layout.headerLeftPct} min={35} max={75} onChange={(v) => setLayout((l) => ({ ...l, headerLeftPct: v }))} />
+            <Num label="QR (mm)" value={layout.qrMm} min={15} max={60} onChange={(v) => setLayout((l) => ({ ...l, qrMm: v }))} />
             <div className="flex items-end gap-2">
               {(['sl', 'desc', 'hsn', 'qty', 'rate', 'per', 'amt'] as const).map((k) => (
                 <Num key={k} label={k} value={c[k]} min={2} max={50} small onChange={(v) => setLayout((l) => ({ ...l, cols: { ...l.cols, [k]: v } }))} />

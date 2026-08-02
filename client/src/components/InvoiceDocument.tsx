@@ -6,28 +6,37 @@ const GST_RATE = 0.05;
 
 export const PAPER_W: Record<string, number> = { A4: 210, A5: 148, Letter: 216 };
 
+/** Bumped whenever DEFAULT_LAYOUT changes shape enough that a stale saved layout would look wrong. */
+const LAYOUT_VERSION = 2;
+
 export interface InvoiceLayout {
+  v: number;
   paperSize: 'A4' | 'A5' | 'Letter';
   marginMm: number;
   fontPx: number;
   headerLeftPct: number;
+  /** Side of the square e-invoice QR, in mm. */
+  qrMm: number;
   cols: { sl: number; desc: number; hsn: number; qty: number; rate: number; per: number; amt: number };
 }
 
 export const DEFAULT_LAYOUT: InvoiceLayout = {
+  v: LAYOUT_VERSION,
   paperSize: 'A4',
-  marginMm: 8,
+  marginMm: 15,
   fontPx: 12,
-  headerLeftPct: 56,
-  cols: { sl: 5, desc: 33, hsn: 11, qty: 15, rate: 12, per: 7, amt: 17 },
+  headerLeftPct: 51,
+  qrMm: 38,
+  cols: { sl: 4, desc: 47, hsn: 9, qty: 11, rate: 6, per: 5, amt: 18 },
 };
 
-/** Merge the saved company layout JSON over the defaults, tolerating junk. */
+/** Merge the saved company layout JSON over the defaults, tolerating junk and stale versions. */
 export function parseInvoiceLayout(saved: string | null | undefined): InvoiceLayout {
   if (!saved) return DEFAULT_LAYOUT;
   try {
     const parsed = JSON.parse(saved);
-    return { ...DEFAULT_LAYOUT, ...parsed, cols: { ...DEFAULT_LAYOUT.cols, ...parsed.cols } };
+    if (parsed?.v !== LAYOUT_VERSION) return DEFAULT_LAYOUT;
+    return { ...DEFAULT_LAYOUT, ...parsed, v: LAYOUT_VERSION, cols: { ...DEFAULT_LAYOUT.cols, ...parsed.cols } };
   } catch {
     return DEFAULT_LAYOUT;
   }
@@ -43,12 +52,16 @@ export function InvoiceStyles({ paperSize }: { paperSize: InvoiceLayout['paperSi
         .inv-no-print { display: none !important; }
         .inv-page { box-shadow: none !important; margin: 0 !important; }
       }
-      .inv-page { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; line-height: 1.3; }
+      .inv-page { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; line-height: 1.28; }
       .inv-page table { border-collapse: collapse; width: 100%; border: 1px solid #000; }
-      .inv-page td, .inv-page th { border: 1px solid #000; vertical-align: top; padding: 4px 6px; }
-      .inv-page .lbl { font-size: 0.85em; color: #333; line-height: 1.25; }
-      .inv-page .val { font-weight: bold; color: #000; line-height: 1.25; }
+      .inv-page td, .inv-page th { border: 1px solid #000; vertical-align: top; padding: 3px 6px; }
+      .inv-page th { font-weight: bold; }
+      .inv-page .lbl { line-height: 1.28; }
+      .inv-page .val { font-weight: bold; }
+      .inv-page .cap { font-size: 0.9em; }
       .inv-page .sec { margin-top: -1px; }
+      .inv-page .tight { font-size: 0.92em; }
+      .inv-page .tight td, .inv-page .tight th { padding: 1px 6px; }
       .inv-page .nob { border: 0 !important; }
       .inv-page .center { text-align: center; }
       .inv-page .right { text-align: right; }
@@ -101,6 +114,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
   const hsn = tax?.hsn || '';
   const qtyStr = `${(dispatch.weightKg ?? 0).toLocaleString('en-IN')} Kgs`;
   const c = layout.cols;
+  const metaCol = (100 - layout.headerLeftPct) / 4;
 
   const sellerStateCode = company.gstin?.slice(0, 2) || '';
   const isSameState = sellerStateCode === buyerStateCode && sellerStateCode !== '';
@@ -131,71 +145,71 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
 
       {/* Title & IRN / e-Invoice header block */}
       {dispatch.irn ? (
-        <div className="relative mb-3 pb-2 border-b border-black">
-          <div className="center font-extrabold text-2xl tracking-wide">Tax Invoice</div>
-          <div className="absolute right-0 top-0 text-sm font-sans font-medium">e-Invoice</div>
-
-          <div className="flex justify-between items-start mt-2">
-            <div className="text-[0.88em] space-y-1">
-              <div className="flex"><span className="font-bold w-16 shrink-0">IRN</span><span className="font-mono font-bold break-all">: {dispatch.irn}</span></div>
-              <div className="flex"><span className="font-bold w-16 shrink-0">Ack No.</span><span className="font-bold">: {dispatch.irnAckNo || '-'}</span></div>
-              <div className="flex"><span className="font-bold w-16 shrink-0">Ack Date</span><span className="font-bold">: {dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : '-'}</span></div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6mm', marginBottom: '5mm' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="center" style={{ fontWeight: 'bold', fontSize: '1.85em', letterSpacing: '0.01em' }}>Tax Invoice</div>
+            <div style={{ marginTop: '9mm' }}>
+              <IrnRow k="IRN" v={dispatch.irn} />
+              <IrnRow k="Ack No." v={dispatch.irnAckNo || '-'} />
+              <IrnRow k="Ack Date" v={dispatch.irnAckDate ? fmtDate(new Date(dispatch.irnAckDate)) : '-'} />
             </div>
+          </div>
 
+          <div style={{ width: `${layout.qrMm}mm`, flexShrink: 0, textAlign: 'center' }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>e-Invoice</div>
             {dispatch.irnSignedQr && (
-              <div className="w-24 h-24 border border-black p-1 flex items-center justify-center shrink-0">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(dispatch.irnSignedQr)}`}
-                  alt="e-Invoice QR Code"
-                  className="w-full h-full object-contain"
-                />
-              </div>
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=0&data=${encodeURIComponent(dispatch.irnSignedQr)}`}
+                alt="e-Invoice QR Code"
+                style={{ width: `${layout.qrMm}mm`, height: `${layout.qrMm}mm`, display: 'block' }}
+              />
             )}
           </div>
         </div>
       ) : (
-        <div className="center font-extrabold text-2xl mb-3 tracking-wide">Tax Invoice</div>
+        <div className="center" style={{ fontWeight: 'bold', fontSize: '1.85em', marginBottom: '5mm', letterSpacing: '0.01em' }}>Tax Invoice</div>
       )}
 
       {/* Header: seller/buyer + meta grid */}
       <table className="sec">
         <colgroup>
           <col style={{ width: `${layout.headerLeftPct}%` }} />
-          <col style={{ width: `${(100 - layout.headerLeftPct) / 3}%` }} />
-          <col style={{ width: `${(100 - layout.headerLeftPct) / 3}%` }} />
-          <col style={{ width: `${(100 - layout.headerLeftPct) / 3}%` }} />
+          <col style={{ width: `${metaCol}%` }} />
+          <col style={{ width: `${metaCol}%` }} />
+          <col style={{ width: `${metaCol}%` }} />
+          <col style={{ width: `${metaCol}%` }} />
         </colgroup>
         <tbody>
           <tr>
             <td rowSpan={8} style={{ padding: 0 }}>
-              <div style={{ padding: '6px 8px', borderBottom: '1px solid #000' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '1.2em', letterSpacing: '0.02em' }}>{company.name}</div>
+              <div style={{ padding: '5px 8px', borderBottom: '1px solid #000' }}>
+                <div style={{ fontWeight: 'bold', fontSize: '1.15em', letterSpacing: '0.02em' }}>{company.name}</div>
                 {company.address && <div className="lbl" style={{ whiteSpace: 'pre-line', marginTop: '2px' }}>{company.address}</div>}
                 {company.gstin && <div className="lbl" style={{ marginTop: '2px' }}>GSTIN/UIN: <span className="val">{company.gstin}</span></div>}
                 {company.stateName && <div className="lbl">State Name : {company.stateName}{company.stateCode ? `, Code : ${company.stateCode}` : ''}</div>}
                 {company.contact && <div className="lbl">Contact : {company.contact}</div>}
               </div>
-              <div style={{ padding: '6px 8px' }}>
-                <div className="lbl" style={{ color: '#555' }}>Buyer (Bill to)</div>
-                <div style={{ fontWeight: 'bold', fontSize: '1.1em', marginTop: '2px' }}>{order.buyer?.name}</div>
+              <div style={{ padding: '5px 8px' }}>
+                <div className="lbl">Buyer (Bill to)</div>
+                <div style={{ fontWeight: 'bold', fontSize: '1.15em', marginTop: '2px' }}>{order.buyer?.name}</div>
                 {order.buyer?.address && <div className="lbl" style={{ whiteSpace: 'pre-line', marginTop: '2px' }}>{order.buyer.address}</div>}
-                {buyerGstin && <div className="lbl" style={{ marginTop: '2px' }}>GSTIN/UIN : <span className="val">{buyerGstin}</span></div>}
-                {buyerPan && <div className="lbl">PAN/IT No : <span className="val">{buyerPan}</span></div>}
-                {order.buyer?.state && <div className="lbl">State Name : {order.buyer.state}{buyerStateCode ? `, Code : ${buyerStateCode}` : ''}</div>}
-                {order.buyer?.state && <div className="lbl">Place of Supply : {order.buyer.state}</div>}
+                {buyerGstin && <KeyedLine k="GSTIN/UIN" v={buyerGstin} style={{ marginTop: '2px' }} />}
+                {buyerPan && <KeyedLine k="PAN/IT No" v={buyerPan} />}
+                {order.buyer?.state && <KeyedLine k="State Name" v={`${order.buyer.state}${buyerStateCode ? `, Code : ${buyerStateCode}` : ''}`} plain />}
+                {order.buyer?.state && <KeyedLine k="Place of Supply" v={order.buyer.state} plain />}
               </div>
             </td>
             <MetaCell label="Invoice No." value={shownNumber} isBold />
             <MetaCell label="e-Way Bill No." value={dispatch.ewbNumber ?? ''} isBold />
-            <MetaCell label="Dated" value={shownDate} isBold />
+            <MetaCell colSpan={2} label="Dated" value={shownDate} isBold />
           </tr>
-          <tr><MetaCell colSpan={2} label="Delivery Note" value="" /><MetaCell label="Mode/Terms of Payment" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell label="Other References" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Buyer's Order No." value="" /><MetaCell label="Dated" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Dispatch Doc No." value="" /><MetaCell label="Delivery Note Date" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" /><MetaCell label="Destination" value={order.destination || order.buyer?.state || ''} /></tr>
-          <tr><MetaCell colSpan={2} label="Bill of Lading/LR-RR No." value="" /><MetaCell label="Motor Vehicle No." value={dispatch.vehicleNumber ?? ''} isBold /></tr>
-          <tr><MetaCell colSpan={3} label="Terms of Delivery" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Delivery Note" value="" /><MetaCell colSpan={2} label="Mode/Terms of Payment" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell colSpan={2} label="Other References" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Buyer's Order No." value="" /><MetaCell colSpan={2} label="Dated" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Dispatch Doc No." value="" /><MetaCell colSpan={2} label="Delivery Note Date" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" isBold /><MetaCell colSpan={2} label="Destination" value={order.destination || order.buyer?.state || ''} isBold /></tr>
+          <tr><MetaCell colSpan={2} label="Bill of Lading/LR-RR No." value="" /><MetaCell colSpan={2} label="Motor Vehicle No." value={dispatch.vehicleNumber ?? ''} isBold /></tr>
+          <tr><MetaCell colSpan={4} label="Terms of Delivery" value="" /></tr>
         </tbody>
       </table>
 
@@ -206,62 +220,39 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
           <col style={{ width: `${c.qty}%` }} /><col style={{ width: `${c.rate}%` }} /><col style={{ width: `${c.per}%` }} /><col style={{ width: `${c.amt}%` }} />
         </colgroup>
         <thead>
-          <tr style={{ fontWeight: 'bold', backgroundColor: '#f8f9fa' }} className="center">
-            <th>Sl<br />No.</th><th>Description of Goods</th><th>HSN/SAC</th><th>Quantity</th><th>Rate</th><th>per</th><th>Amount</th>
+          <tr className="center">
+            <th style={{ textAlign: 'left' }}>Sl<br />No.</th><th>Description of Goods</th><th>HSN/SAC</th><th>Quantity</th><th>Rate</th><th>per</th><th>Amount</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td className="center val">1</td>
             <td className="val">{description}</td>
-            <td className="center">{hsn}</td>
+            <td>{hsn}</td>
             <td className="right val">{qtyStr}</td>
             <td className="right">{Number(order.ratePerKg).toFixed(2)}</td>
-            <td className="center">Kgs</td>
+            <td>Kgs</td>
             <td className="right val">{inr(amounts.base)}</td>
           </tr>
 
           {!order.gstExempt && (
             isSameState ? (
               <>
-                <tr>
-                  <td className="nob" />
-                  <td className="nob right val" style={{ fontStyle: 'italic' }}>CGST {(gstPct / 2).toFixed(1)}%</td>
-                  <td className="nob" />
-                  <td className="nob" />
-                  <td className="nob center">{(gstPct / 2).toFixed(1)} %</td>
-                  <td className="nob" />
-                  <td className="nob right val">{inr(amounts.gst / 2)}</td>
-                </tr>
-                <tr>
-                  <td className="nob" />
-                  <td className="nob right val" style={{ fontStyle: 'italic' }}>SGST {(gstPct / 2).toFixed(1)}%</td>
-                  <td className="nob" />
-                  <td className="nob" />
-                  <td className="nob center">{(gstPct / 2).toFixed(1)} %</td>
-                  <td className="nob" />
-                  <td className="nob right val">{inr(amounts.gst / 2)}</td>
-                </tr>
+                <TaxLine label={`CGST ${(gstPct / 2).toFixed(1)}%`} rate={(gstPct / 2).toFixed(1)} amount={amounts.gst / 2} />
+                <TaxLine label={`SGST ${(gstPct / 2).toFixed(1)}%`} rate={(gstPct / 2).toFixed(1)} amount={amounts.gst / 2} />
               </>
             ) : (
-              <tr>
-                <td className="nob" />
-                <td className="nob right val" style={{ fontStyle: 'italic' }}>IGST {gstPct}%</td>
-                <td className="nob" />
-                <td className="nob" />
-                <td className="nob center">{gstPct} %</td>
-                <td className="nob" />
-                <td className="nob right val">{inr(amounts.gst)}</td>
-              </tr>
+              <TaxLine label={`IGST ${gstPct}%`} rate={String(gstPct)} amount={amounts.gst} />
             )
           )}
 
-          <tr style={{ height: '44px' }}>
+          <tr style={{ height: '10px' }}>
             <td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" />
           </tr>
 
-          <tr style={{ fontWeight: 'bold', backgroundColor: '#fafafa' }}>
-            <td className="right" colSpan={3}>Total</td>
+          <tr className="val">
+            <td className="right" colSpan={2}>Total</td>
+            <td />
             <td className="right">{qtyStr}</td>
             <td /><td />
             <td className="right">&#8377; {inr(amounts.total)}</td>
@@ -273,21 +264,39 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
       <table className="sec">
         <tbody>
           <tr>
-            <td className="lbl" style={{ padding: '6px 8px' }}>
-              <div style={{ color: '#555', fontSize: '0.85em' }}>Amount Chargeable (in words)</div>
-              <div className="val" style={{ marginTop: 2, fontSize: '1.05em' }}>{rupeesInWords(amounts.total)}</div>
+            <td style={{ padding: '4px 8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '6mm' }}>
+                <span className="cap">Amount Chargeable (in words)</span>
+                <span className="cap" style={{ fontStyle: 'italic' }}>E. &amp; O.E</span>
+              </div>
+              <div className="val">{rupeesInWords(amounts.total)}</div>
             </td>
-            <td className="right lbl val" style={{ width: '20%', padding: '6px 8px' }}>E. &amp; O.E</td>
           </tr>
         </tbody>
       </table>
 
       {/* HSN / tax summary */}
-      <table className="sec">
-        <thead className="center" style={{ fontWeight: 'bold', backgroundColor: '#f8f9fa' }}>
+      <table className="sec tight">
+        <colgroup>
+          {isSameState ? (
+            <>
+              <col style={{ width: '41%' }} /><col style={{ width: '11%' }} />
+              <col style={{ width: '6%' }} /><col style={{ width: '12%' }} />
+              <col style={{ width: '6%' }} /><col style={{ width: '12%' }} />
+              <col style={{ width: '12%' }} />
+            </>
+          ) : (
+            <>
+              <col style={{ width: '59%' }} /><col style={{ width: '11%' }} />
+              <col style={{ width: '6%' }} /><col style={{ width: '12%' }} />
+              <col style={{ width: '12%' }} />
+            </>
+          )}
+        </colgroup>
+        <thead className="center">
           <tr>
             <th rowSpan={2}>HSN/SAC</th>
-            <th rowSpan={2}>Taxable Value</th>
+            <th rowSpan={2}>Taxable<br />Value</th>
             {isSameState ? (
               <>
                 <th colSpan={2}>Central Tax</th>
@@ -296,7 +305,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
             ) : (
               <th colSpan={2}>IGST</th>
             )}
-            <th rowSpan={2}>Total Tax Amount</th>
+            <th rowSpan={2}>Total<br />Tax Amount</th>
           </tr>
           <tr>
             {isSameState ? (
@@ -308,7 +317,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
         </thead>
         <tbody>
           <tr>
-            <td className="center">{hsn}</td>
+            <td>{hsn}</td>
             <td className="right">{inr(amounts.base)}</td>
             {isSameState ? (
               <>
@@ -325,7 +334,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
             )}
             <td className="right">{inr(amounts.gst)}</td>
           </tr>
-          <tr style={{ fontWeight: 'bold', backgroundColor: '#fafafa' }}>
+          <tr className="val">
             <td className="right">Total</td>
             <td className="right">{inr(amounts.base)}</td>
             {isSameState ? (
@@ -350,7 +359,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
       <table className="sec">
         <tbody>
           <tr>
-            <td className="lbl" style={{ padding: '6px 8px' }}>
+            <td className="lbl" style={{ padding: '4px 8px' }}>
               Tax Amount (in words) : <span className="val">{rupeesInWords(amounts.gst)}</span>
             </td>
           </tr>
@@ -359,50 +368,92 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
 
       {/* Declaration + bank */}
       <table className="sec">
-        <colgroup><col style={{ width: '55%' }} /><col style={{ width: '45%' }} /></colgroup>
+        <colgroup><col style={{ width: '50%' }} /><col style={{ width: '50%' }} /></colgroup>
         <tbody>
           <tr>
-            <td className="lbl" style={{ padding: '6px 8px' }}>
-              <div style={{ fontWeight: 'bold' }}>Declaration</div>
-              <div style={{ marginTop: 2, lineHeight: 1.25 }}>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.</div>
+            <td className="lbl" style={{ padding: '4px 8px' }}>
+              <div style={{ textDecoration: 'underline' }}>Declaration</div>
+              <div style={{ marginTop: 2 }}>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.</div>
               <div style={{ fontWeight: 'bold', marginTop: 6 }}>Terms &amp; Conditions</div>
-              <div style={{ color: '#555' }}>E. &amp; O.E.</div>
+              <div>E. &amp; O.E.</div>
               <div>1. Goods once sold will not be taken back.</div>
-              <div>2. Interest @ 18% p.a. will be charged if the payment is not made within the stipulated time.</div>
+              <div>2. Interest @ 18% p.a. will be charged</div>
+              <div>if the payment is not made with in the stipulated time.</div>
               {company.stateName && <div>3. Subject to '{company.stateName}' Jurisdiction only.</div>}
             </td>
-            <td className="lbl" style={{ padding: '6px 8px' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>Company's Bank Details</div>
-              <BankRow k="A/c Holder's Name" v={company.bankAccountName || company.name} />
-              <BankRow k="Bank Name" v={company.bankName} />
-              <BankRow k="A/c No." v={company.bankAccountNumber} />
-              <BankRow k="Branch & IFS Code" v={company.bankBranchIfsc} />
-              <div className="right" style={{ fontWeight: 'bold', marginTop: 14 }}>for {company.name}</div>
-              <div className="right" style={{ marginTop: 32 }}>Authorised Signatory</div>
+            <td className="lbl" style={{ padding: 0 }}>
+              <div style={{ padding: '4px 8px' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: 3 }}>Company's Bank Details</div>
+                <BankRow k="A/c Holder's Name" v={company.bankAccountName || company.name} />
+                <BankRow k="Bank Name" v={company.bankName} />
+                <BankRow k="A/c No." v={company.bankAccountNumber} />
+                <BankRow k="Branch & IFS Code" v={company.bankBranchIfsc} />
+              </div>
+              <div style={{ borderTop: '1px solid #000', padding: '4px 8px' }}>
+                <div className="right val">for {company.name}</div>
+                <div className="right" style={{ marginTop: '10mm' }}>Authorised Signatory</div>
+              </div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div className="center lbl" style={{ marginTop: 6, color: '#555' }}>This is a Computer Generated Invoice</div>
+      <div className="center lbl" style={{ marginTop: 6 }}>This is a Computer Generated Invoice</div>
     </div>
+  );
+}
+
+/** One "IRN : value" line in the e-invoice header, with the colons aligned. */
+function IrnRow({ k, v }: { k: string; v: string }) {
+  return (
+    <div style={{ display: 'flex', marginBottom: '1.5mm' }}>
+      <span style={{ width: '17mm', flexShrink: 0 }}>{k}</span>
+      <span style={{ flexShrink: 0, paddingRight: '2mm' }}>:</span>
+      <span className="val" style={{ wordBreak: 'break-all', minWidth: 0 }}>{v}</span>
+    </div>
+  );
+}
+
+/** Buyer-block line with the label and value colons lined up, Tally style. */
+function KeyedLine({ k, v, plain, style }: { k: string; v: string; plain?: boolean; style?: React.CSSProperties }) {
+  return (
+    <div className="lbl" style={{ display: 'flex', ...style }}>
+      <span style={{ width: '30mm', flexShrink: 0 }}>{k}</span>
+      <span style={{ flexShrink: 0, paddingRight: '2mm' }}>:</span>
+      <span className={plain ? undefined : 'val'} style={{ minWidth: 0 }}>{v}</span>
+    </div>
+  );
+}
+
+function TaxLine({ label, rate, amount }: { label: string; rate: string; amount: number }) {
+  return (
+    <tr>
+      <td className="nob" />
+      <td className="nob right val" style={{ fontStyle: 'italic' }}>{label}</td>
+      <td className="nob" />
+      <td className="nob" />
+      <td className="nob right">{rate}</td>
+      <td className="nob">%</td>
+      <td className="nob right val">{inr(amount)}</td>
+    </tr>
   );
 }
 
 function MetaCell({ label, value, colSpan, isBold }: { label: string; value: string; colSpan?: number; isBold?: boolean }) {
   return (
-    <td colSpan={colSpan} style={{ minHeight: 28, padding: '4px 6px' }}>
-      <div className="lbl" style={{ fontSize: '0.82em', color: '#555' }}>{label}</div>
-      <div className={isBold ? 'val' : ''} style={{ minHeight: '1.1em', fontSize: '0.95em' }}>{value}</div>
+    <td colSpan={colSpan} style={{ padding: '3px 6px' }}>
+      <div className="cap">{label}</div>
+      <div className={isBold ? 'val' : ''} style={{ minHeight: '1.2em' }}>{value}</div>
     </td>
   );
 }
 
 function BankRow({ k, v }: { k: string; v: string | null | undefined }) {
   return (
-    <div style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
-      <span style={{ minWidth: '42%', color: '#333' }}>{k} :</span>
-      <span className="val">{v || ''}</span>
+    <div style={{ display: 'flex', marginBottom: 2 }}>
+      <span style={{ width: '34mm', flexShrink: 0 }}>{k}</span>
+      <span style={{ flexShrink: 0, paddingRight: '2mm' }}>:</span>
+      <span className="val" style={{ minWidth: 0 }}>{v || ''}</span>
     </div>
   );
 }

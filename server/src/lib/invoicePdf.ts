@@ -78,7 +78,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     // IRN block (e-invoice) ---------------------------------------------------
     if (data.irn) {
       const boxTop = y;
-      const qrSize = 40;
+      const qrSize = 88;
       const hasQr = !!data.irn.qrPngBuffer;
       const textW = hasQr ? W - qrSize - 20 : W - 8;
       doc.font('Helvetica-Bold').fontSize(8).text('IRN: ', LEFT + 4, boxTop + 4, { width: textW, continued: true });

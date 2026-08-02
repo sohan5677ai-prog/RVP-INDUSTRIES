@@ -117,6 +117,22 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       txt(t, x + PAD_X, y + PAD_Y, w - PAD_X * 2, o);
 
     /**
+     * Short values - invoice numbers, EWB numbers, amounts - have no space for
+     * PDFKit to wrap at, so an oversized one runs straight past the column rule
+     * and collides with its neighbour. The HTML solves this by letting the
+     * column grow; a PDF's columns are fixed, so shrink the text to fit instead.
+     */
+    const fit = (t: string, w: number, o?: Opt): Opt => {
+      const size = o?.size ?? BASE;
+      doc.font(fontFor(o)).fontSize(size);
+      const need = doc.widthOfString(t);
+      return need <= w ? { ...o, size } : { ...o, size: Math.max(5.5, size * (w / need)) };
+    };
+    /** Cell text that never overflows its column. */
+    const cellFit = (t: string, x: number, y: number, w: number, o?: Opt) =>
+      cell(t, x, y, w, fit(t, w - PAD_X * 2, o));
+
+    /**
      * PDFKit only breaks on whitespace, so an unspaced 64-char IRN would run off
      * the page. Chop it into width-sized pieces ourselves.
      */

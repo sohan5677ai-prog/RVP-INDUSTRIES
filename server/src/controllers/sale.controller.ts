@@ -203,6 +203,28 @@ export async function saveLorryReceipt(req: Request, res: Response) {
 }
 
 /**
+ * Delete / clear the Surya Road Lines lorry receipt (GC) details for a dispatch.
+ */
+export async function deleteLorryReceipt(req: Request, res: Response) {
+  const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+  const updated = await prisma.saleDispatch.update({
+    where: { id: req.params.id },
+    data: {
+      lrNumber: null,
+      lrDate: null,
+      lrBags: null,
+      lrKgPerBag: null,
+    },
+    include: lorryReceiptInclude,
+  });
+
+  clearCache('sale-orders');
+  res.json(updated);
+}
+
+/**
  * The 3% margin requirement only applies to Pappu (whose cost is derived from the
  * black-seed pool). Husk/Waste/TPS carry no black-seed cost, so no margin check.
  */

@@ -1,4 +1,4 @@
-import { SIGNATURE_SRC, STAMP_SRC } from '@/lib/signatureAssets';
+import { signatureUrl, stampUrl } from '@/lib/signatureAssets';
 
 interface AuthorisedSignatureProps {
   /** Rendered as "for <companyName>" above the mark. Omit to drop the line. */
@@ -54,8 +54,8 @@ export default function AuthorisedSignature({
     <div className={className} style={{ textAlign: align, ...style }}>
       {companyName && <div style={{ fontWeight: 700 }}>for {companyName}</div>}
       <div style={{ position: 'relative', height: boxH }}>
-        <img src={STAMP_SRC} alt="" style={{ ...imgBase, ...edge, height: stampSize, opacity: 0.88 }} />
-        <img src={SIGNATURE_SRC} alt="" style={{ ...imgBase, ...inkEdge, bottom: 8, height: signHeight }} />
+        <img src={stampUrl()} alt="" style={{ ...imgBase, ...edge, height: stampSize, opacity: 0.88 }} />
+        <img src={signatureUrl()} alt="" style={{ ...imgBase, ...inkEdge, bottom: 8, height: signHeight }} />
       </div>
       {caption && (
         <div style={captionRule ? { borderTop: '1px solid #cbd5e1', paddingTop: 2 } : undefined}>{caption}</div>

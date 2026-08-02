@@ -54,23 +54,36 @@ export function InvoiceStyles({ paperSize }: { paperSize: InvoiceLayout['paperSi
         .inv-page { box-shadow: none !important; margin: 0 !important; }
       }
       .inv-page { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; line-height: 1.28; }
-      /* table-layout:fixed so the colgroup percentages are honoured exactly -
-         auto layout lets a wordy cell steal width and wrap its neighbour. */
-      .inv-page table { border-collapse: collapse; width: 100%; border: 1px solid #000; table-layout: fixed; }
-      .inv-page td, .inv-page th { border: 1px solid #000; vertical-align: top; padding: 3px 6px; }
+      /* Auto layout on purpose: the colgroup percentages below are honoured
+         while the content fits, and a column that needs more (a long invoice
+         number, a 7-digit taxable value) grows instead of spilling over its
+         neighbour. Never set table-layout:fixed here - fixed columns cannot
+         grow, and values like RVP/105/26-27 have no space to wrap at. */
+      .inv-page table { border-collapse: collapse; width: 100%; border: 1px solid #000; }
+      /* Only where an exact split matters and the content is prose that wraps. */
+      .inv-page .fixedcols { table-layout: fixed; }
+      /* Backstop: an unbroken token longer than any sane column still wraps
+         rather than overlapping. */
+      .inv-page td, .inv-page th { border: 1px solid #000; vertical-align: top; padding: 3px 6px; overflow-wrap: break-word; }
       .inv-page th { font-weight: bold; }
       .inv-page .lbl { line-height: 1.28; }
       .inv-page .val { font-weight: bold; }
       .inv-page .cap { font-size: 0.9em; }
       .inv-page .sec { margin-top: -1px; }
       .inv-page .tight { font-size: 0.92em; }
-      .inv-page .tight td, .inv-page .tight th { padding: 1px 6px; }
+      /* Every cell in the HSN summary is a short token - keep them on one line
+         so the columns size to them (explicit <br> still breaks where wanted). */
+      .inv-page .tight td, .inv-page .tight th { padding: 1px 6px; white-space: nowrap; }
       .inv-page .nob { border: 0 !important; }
       /* Item + tax + filler rows are one open block: the column rules run
          through them, but no horizontal rules divide them. */
       .inv-page .noh td { border-top: 0 !important; border-bottom: 0 !important; }
       .inv-page .center { text-align: center; }
       .inv-page .right { text-align: right; }
+      /* Values that must never break mid-token (invoice numbers, EWB numbers,
+         amounts). nowrap raises the column's min-content width, which is what
+         makes auto layout widen the column to fit instead of overflowing it. */
+      .inv-page .nw { white-space: nowrap; }
     `}</style>
   );
 }
@@ -227,18 +240,18 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
         </colgroup>
         <thead>
           <tr className="center">
-            <th style={{ textAlign: 'left' }}>Sl<br />No.</th><th>Description of Goods</th><th>HSN/SAC</th><th>Quantity</th><th>Rate</th><th>per</th><th>Amount</th>
+            <th className="nw" style={{ textAlign: 'left' }}>Sl<br />No.</th><th>Description of Goods</th><th className="nw">HSN/SAC</th><th className="nw">Quantity</th><th className="nw">Rate</th><th className="nw">per</th><th className="nw">Amount</th>
           </tr>
         </thead>
         <tbody>
           <tr className="noh">
             <td className="center val">1</td>
             <td className="val">{description}</td>
-            <td>{hsn}</td>
-            <td className="right val">{qtyStr}</td>
-            <td className="right">{Number(order.ratePerKg).toFixed(2)}</td>
-            <td>Kgs</td>
-            <td className="right val">{inr(amounts.base)}</td>
+            <td className="nw">{hsn}</td>
+            <td className="right val nw">{qtyStr}</td>
+            <td className="right nw">{Number(order.ratePerKg).toFixed(2)}</td>
+            <td className="nw">Kgs</td>
+            <td className="right val nw">{inr(amounts.base)}</td>
           </tr>
 
           {!order.gstExempt && (
@@ -259,9 +272,9 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
           <tr className="val">
             <td className="right" colSpan={2}>Total</td>
             <td />
-            <td className="right">{qtyStr}</td>
+            <td className="right nw">{qtyStr}</td>
             <td /><td />
-            <td className="right">&#8377; {inr(amounts.total)}</td>
+            <td className="right nw">&#8377; {inr(amounts.total)}</td>
           </tr>
         </tbody>
       </table>
@@ -373,7 +386,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
       </table>
 
       {/* Declaration + bank */}
-      <table className="sec">
+      <table className="sec fixedcols">
         <colgroup><col style={{ width: '50%' }} /><col style={{ width: '50%' }} /></colgroup>
         <tbody>
           <tr>
@@ -447,8 +460,8 @@ function TaxLine({ label, rate, amount }: { label: string; rate: string; amount:
 function MetaCell({ label, value, colSpan, isBold }: { label: string; value: string; colSpan?: number; isBold?: boolean }) {
   return (
     <td colSpan={colSpan} style={{ padding: '3px 6px' }}>
-      <div className="cap">{label}</div>
-      <div className={isBold ? 'val' : ''} style={{ minHeight: '1.2em' }}>{value}</div>
+      <div className="cap nw">{label}</div>
+      <div className={`nw ${isBold ? 'val' : ''}`} style={{ minHeight: '1.2em' }}>{value}</div>
     </td>
   );
 }

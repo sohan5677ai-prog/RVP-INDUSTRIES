@@ -18,7 +18,9 @@ import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Truck, Wallet, Hourglass, MessageCircle, Check, X, FileText } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Loader2, Truck, Wallet, Hourglass, MessageCircle, Check, X, FileText, Trash2 } from 'lucide-react';
 
 type TransportTab = 'SURYA' | 'KNM' | 'OTHER';
 
@@ -189,6 +191,107 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         <div className="flex items-center justify-center h-48">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
+      ) : tab === 'SURYA' ? (
+        <Tabs defaultValue="retention" className="space-y-6">
+          <TabsList className="bg-card border shadow-sm">
+            <TabsTrigger value="retention" className="gap-2 text-sm font-semibold">
+              <Wallet className="h-4 w-4" /> Freight Retention
+            </TabsTrigger>
+            <TabsTrigger value="gc-notes" className="gap-2 text-sm font-semibold">
+              <FileText className="h-4 w-4" /> G.C. Notes
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="retention" className="space-y-6">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="bg-card border shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Released to Surya (Payable)
+                  </CardTitle>
+                  <Wallet className="h-4 w-4 text-emerald-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalReleased)}</div>
+                  <p className="text-[10px] text-muted-foreground mt-1">Delivered trips · retention owed to Surya Road Lines</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-card border shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Retention Held</CardTitle>
+                  <Hourglass className="h-4 w-4 text-amber-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{rupees(totalHeld)}</div>
+                  <p className="text-[10px] text-muted-foreground mt-1">Dispatched but not yet delivered</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-card border shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Trips</CardTitle>
+                  <Truck className="h-4 w-4 text-primary" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalFreightTrips} trips</div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    @ {rupees(retention)} retention per trip
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Ledger Table */}
+            <div className="rounded-lg border bg-card">
+              <div className="px-5 py-4 border-b font-semibold text-sm">
+                Freight Retention Movements
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Buyer</TableHead>
+                    <TableHead>Lorry No</TableHead>
+                    <TableHead>Invoice No</TableHead>
+                    <TableHead>Destination</TableHead>
+                    <TableHead className="text-right">Retention</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                        No Surya Road Lines trips match selected filters.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    visible.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell>{shortDate(r.date)}</TableCell>
+                        <TableCell className="font-semibold">{r.buyer}</TableCell>
+                        <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
+                        <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                        <TableCell>{r.destination ?? '-'}</TableCell>
+                        <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
+                        <TableCell>
+                          <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
+                            {r.released ? 'Delivered' : 'In Transit'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+              <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="gc-notes">
+            <LorryReceiptRegister rows={rows} />
+          </TabsContent>
+        </Tabs>
       ) : (
         <div className="grid gap-6">
           {/* Summary Cards */}
@@ -197,7 +300,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
               <Card className="bg-card border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {tab === 'SURYA' ? 'Released to Surya (Payable)' : 'Released (Payable)'}
+                    Released (Payable)
                   </CardTitle>
                   <Wallet className="h-4 w-4 text-emerald-500" />
                 </CardHeader>
@@ -227,7 +330,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
               <CardContent>
                 <div className="text-2xl font-bold">{totalFreightTrips} trips</div>
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  {tab === 'SURYA' ? `@ ${rupees(retention)} retention per trip` : tab === 'KNM' ? 'Company-owned vehicles · no retention' : 'Custom retention per trip'}
+                  {tab === 'KNM' ? 'Company-owned vehicles · no retention' : 'Custom retention per trip'}
                 </p>
               </CardContent>
             </Card>
@@ -280,10 +383,6 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
             </Table>
             <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
-
-          {/* The GC book itself - every consignment note written on Surya's
-              stationery, in one place. */}
-          {tab === 'SURYA' && <LorryReceiptRegister rows={rows} />}
         </div>
       )}
     </div>
@@ -297,7 +396,19 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
 
 function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [issuedOnly, setIssuedOnly] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<RetentionRow | null>(null);
+
+  const deleteGcMutation = useMutation({
+    mutationFn: (id: string) => api(`/sale-dispatches/${id}/lorry-receipt`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success('GC Note deleted successfully');
+      setDeleteTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
 
   // Only buyers switched on for the GC note belong in the book - plus any older
   // shipment that already carries a number, so nothing written disappears.
@@ -323,100 +434,136 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
   ];
 
   return (
-    <div className="rounded-lg border bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b">
-        <div className="flex items-center gap-2 font-semibold text-sm">
-          <FileText className="h-4 w-4 text-primary" />
-          Lorry Receipts (G.C. Notes)
-          <span className="text-xs font-normal text-muted-foreground">
-            {issuedCount} of {gcRows.length} trip(s) issued
-          </span>
+    <>
+      <div className="rounded-lg border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b">
+          <div className="flex items-center gap-2 font-semibold text-sm">
+            <FileText className="h-4 w-4 text-primary" />
+            Lorry Receipts (G.C. Notes)
+            <span className="text-xs font-normal text-muted-foreground">
+              {issuedCount} of {gcRows.length} trip(s) issued
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Segmented
+              value={issuedOnly ? 'issued' : 'all'}
+              onValueChange={(v) => setIssuedOnly(v === 'issued')}
+              options={[
+                { value: 'all', label: 'All trips' },
+                { value: 'issued', label: 'Issued only' },
+              ]}
+            />
+            <ExportButtons
+              filename="Lorry_Receipts_Surya"
+              title="Lorry Receipts - Surya Road Lines"
+              subtitle={`${filtered.length} receipt(s)`}
+              columns={exportColumns}
+              rows={filtered}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Segmented
-            value={issuedOnly ? 'issued' : 'all'}
-            onValueChange={(v) => setIssuedOnly(v === 'issued')}
-            options={[
-              { value: 'all', label: 'All trips' },
-              { value: 'issued', label: 'Issued only' },
-            ]}
-          />
-          <ExportButtons
-            filename="Lorry_Receipts_Surya"
-            title="Lorry Receipts - Surya Road Lines"
-            subtitle={`${filtered.length} receipt(s)`}
-            columns={exportColumns}
-            rows={filtered}
-          />
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>G.C. No</TableHead>
-              <TableHead>GC Date</TableHead>
-              <TableHead>Lorry No</TableHead>
-              <TableHead>Invoice No</TableHead>
-              <TableHead>Consignee</TableHead>
-              <TableHead>To</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="text-right">Bags</TableHead>
-              <TableHead className="text-right">Weight</TableHead>
-              <TableHead className="text-right">Freight</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Receipt</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
-                  {gcRows.length === 0
-                    ? 'No buyer is switched on for lorry receipts. Turn on "Lorry receipt (GC)" on a buyer in Parties.'
-                    : 'No lorry receipts match the selected filters.'}
-                </TableCell>
+                <TableHead>G.C. No</TableHead>
+                <TableHead>GC Date</TableHead>
+                <TableHead>Lorry No</TableHead>
+                <TableHead>Invoice No</TableHead>
+                <TableHead>Consignee</TableHead>
+                <TableHead>To</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead className="text-right">Bags</TableHead>
+                <TableHead className="text-right">Weight</TableHead>
+                <TableHead className="text-right">Freight</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ) : (
-              visible.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-mono text-sm font-bold">
-                    {r.gcNumber ?? <span className="font-sans text-xs font-normal text-muted-foreground">Not issued</span>}
-                  </TableCell>
-                  <TableCell>{shortDate(r.gcDate ?? r.date)}</TableCell>
-                  <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
-                  <TableCell className="font-semibold">{r.buyer}</TableCell>
-                  <TableCell>{r.destination ?? '-'}</TableCell>
-                  <TableCell className="text-xs">{productDescription(r.product)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums text-sm">
-                    {r.bags != null ? `${r.bags}${r.kgPerBag != null ? ` × ${r.kgPerBag}kg` : ''}` : '-'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums text-sm">{(r.weightKg / 1000).toFixed(2)} t</TableCell>
-                  <TableCell className="text-right font-semibold">{rupees(r.freight)}</TableCell>
-                  <TableCell>
-                    <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
-                      {r.released ? 'Delivered' : 'In Transit'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 gap-1.5 text-xs"
-                      onClick={() => navigate(`/sale-dispatches/${r.id}/lorry-receipt`)}
-                    >
-                      <FileText className="h-3.5 w-3.5" /> {r.gcNumber ? 'Open' : 'Create'}
-                    </Button>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
+                    {gcRows.length === 0
+                      ? 'No buyer is switched on for lorry receipts. Turn on "Lorry receipt (GC)" on a buyer in Parties.'
+                      : 'No lorry receipts match the selected filters.'}
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                visible.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-mono text-sm font-bold">
+                      {r.gcNumber ?? <span className="font-sans text-xs font-normal text-muted-foreground">Not issued</span>}
+                    </TableCell>
+                    <TableCell>{shortDate(r.gcDate ?? r.date)}</TableCell>
+                    <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                    <TableCell className="font-semibold">{r.buyer}</TableCell>
+                    <TableCell>{r.destination ?? '-'}</TableCell>
+                    <TableCell className="text-xs">{productDescription(r.product)}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-sm">
+                      {r.bags != null ? `${r.bags}${r.kgPerBag != null ? ` × ${r.kgPerBag}kg` : ''}` : '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-sm">{(r.weightKg / 1000).toFixed(2)} t</TableCell>
+                    <TableCell className="text-right font-semibold">{rupees(r.freight)}</TableCell>
+                    <TableCell>
+                      <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
+                        {r.released ? 'Delivered' : 'In Transit'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1.5 text-xs"
+                          onClick={() => navigate(`/sale-dispatches/${r.id}/lorry-receipt`)}
+                        >
+                          <FileText className="h-3.5 w-3.5" /> {r.gcNumber ? 'Open' : 'Create'}
+                        </Button>
+                        {r.gcNumber && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            title="Delete GC Note"
+                            onClick={() => setDeleteTarget(r)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
-      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
-    </div>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete GC Note</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete GC Note #{deleteTarget?.gcNumber}? This will clear the GC details for invoice #{deleteTarget?.invoice ?? '-'}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={deleteGcMutation.isPending}
+              onClick={() => deleteTarget && deleteGcMutation.mutate(deleteTarget.id)}
+            >
+              {deleteGcMutation.isPending ? 'Deleting…' : 'Delete GC Note'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

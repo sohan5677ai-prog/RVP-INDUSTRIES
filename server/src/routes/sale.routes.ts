@@ -18,6 +18,7 @@ import {
   undoSaleDispatch,
   saveLorryReceipt,
   assignLorryReceiptNumber,
+  deleteLorryReceipt,
 } from '../controllers/sale.controller.js';
 
 const router = Router();
@@ -60,6 +61,7 @@ router.post(
 // Surya Road Lines lorry receipt (GC): the book number, its date and the packing
 // lines typed on the printable copy. Rendered client-side like the invoice.
 router.patch('/sale-dispatches/:id/lorry-receipt', asyncHandler(saveLorryReceipt));
+router.delete('/sale-dispatches/:id/lorry-receipt', asyncHandler(deleteLorryReceipt));
 
 // Take the next GC number in the book for a shipment that has none (idempotent).
 router.post('/sale-dispatches/:id/lorry-receipt/assign', asyncHandler(assignLorryReceiptNumber));

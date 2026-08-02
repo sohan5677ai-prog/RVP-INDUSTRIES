@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Printer, FileText } from 'lucide-react';
+import { ArrowLeft, Printer, FileText, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleDispatch, CompanyProfile } from '@/lib/types';
@@ -130,6 +130,17 @@ export default function LorryReceiptView() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const deleteGc = useMutation({
+    mutationFn: () => api(`/sale-dispatches/${id}/lorry-receipt`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-dispatch', id] });
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success('Lorry receipt deleted');
+      navigate(-1);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   if (isLoading || !dispatch || !company) {
     return <div className="p-8 text-center text-muted-foreground animate-pulse">Loading lorry receipt…</div>;
   }
@@ -228,9 +239,25 @@ export default function LorryReceiptView() {
             <FileText className="h-4 w-4" /> Surya Road Lines - Lorry Receipt (GC)
           </span>
         </div>
-        <Button size="sm" className="bg-[#1a4a99] hover:bg-[#153c80] text-white" onClick={() => window.print()}>
-          <Printer className="h-4 w-4 mr-1" /> Print Lorry Receipt
-        </Button>
+        <div className="flex items-center gap-2">
+          {dispatch.lrNumber && (
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={deleteGc.isPending}
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to delete GC Note #${dispatch.lrNumber}?`)) {
+                  deleteGc.mutate();
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4 mr-1" /> Delete GC Note
+            </Button>
+          )}
+          <Button size="sm" className="bg-[#1a4a99] hover:bg-[#153c80] text-white" onClick={() => window.print()}>
+            <Printer className="h-4 w-4 mr-1" /> Print Lorry Receipt
+          </Button>
+        </div>
       </div>
 
       {/* Form Bar */}

@@ -432,6 +432,8 @@ export interface CompanyProfile {
   taxproGstUser?: string | null;
   taxproGstPass?: string | null;
   taxproSandbox?: boolean;
+  signatureHeight?: number | null;
+  stampSize?: number | null;
 }
 
 export interface ProductTaxInfo {

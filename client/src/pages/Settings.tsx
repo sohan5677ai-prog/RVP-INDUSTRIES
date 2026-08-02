@@ -206,6 +206,33 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               {field('Branch & IFS code', 'bankBranchIfsc', 'Punganur & UBIN0566837')}
             </div>
 
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <FileText className="h-4 w-4 text-amber-500" />
+              <span className="text-sm font-medium">Signature &amp; Stamp Dimensions (printed documents &amp; PDFs)</span>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Signature Ink Height (px)</Label>
+                <Input
+                  type="number"
+                  value={String(form.signatureHeight ?? 55)}
+                  onChange={(e) => setForm((p) => ({ ...p, signatureHeight: Number(e.target.value) || 55 }))}
+                  placeholder="55"
+                />
+                <p className="text-[10px] text-muted-foreground">Height of the scanned signature image overlay. Default is 55px.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Company Seal / Stamp Size (px)</Label>
+                <Input
+                  type="number"
+                  value={String(form.stampSize ?? 95)}
+                  onChange={(e) => setForm((p) => ({ ...p, stampSize: Number(e.target.value) || 95 }))}
+                  placeholder="95"
+                />
+                <p className="text-[10px] text-muted-foreground">Diameter/height of the round company seal. Default is 95px.</p>
+              </div>
+            </div>
+
             <div className="flex justify-end">
               <Button onClick={() => save.mutate()} disabled={save.isPending}>
                 <Save className="h-4 w-4" /> {save.isPending ? 'Saving…' : 'Save company details'}

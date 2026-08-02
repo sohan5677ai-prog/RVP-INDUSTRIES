@@ -355,8 +355,6 @@ export default function PurchaseStatement() {
           <AuthorisedSignature
             companyName={company?.name ?? 'RVP Industries'}
             captionRule
-            signHeight={55}
-            stampSize={95}
             className="text-[11px]"
           />
         </div>

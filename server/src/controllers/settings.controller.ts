@@ -251,6 +251,8 @@ const companyProfileSchema = z.object({
   taxproGstUser: z.string().optional().nullable(),
   taxproGstPass: z.string().optional().nullable(),
   taxproSandbox: z.boolean().optional().default(true),
+  signatureHeight: z.coerce.number().int().min(10).max(300).optional().nullable(),
+  stampSize: z.coerce.number().int().min(10).max(300).optional().nullable(),
 });
 
 export async function updateCompanyProfile(req: Request, res: Response) {

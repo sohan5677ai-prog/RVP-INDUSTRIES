@@ -1,3 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { CompanyProfile } from '@/lib/types';
 import { signatureUrl, stampUrl } from '@/lib/signatureAssets';
 
 interface AuthorisedSignatureProps {
@@ -27,14 +30,23 @@ interface AuthorisedSignatureProps {
 export default function AuthorisedSignature({
   companyName,
   caption = 'Authorised Signatory',
-  signHeight = 55,
-  stampSize = 95,
+  signHeight,
+  stampSize,
   align = 'right',
   captionRule = false,
   className,
   style,
 }: AuthorisedSignatureProps) {
-  const boxH = Math.max(signHeight, stampSize);
+  const { data: company } = useQuery({
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const effectiveSignHeight = signHeight ?? (company?.signatureHeight ? Number(company.signatureHeight) : 55);
+  const effectiveStampSize = stampSize ?? (company?.stampSize ? Number(company.stampSize) : 95);
+
+  const boxH = Math.max(effectiveSignHeight, effectiveStampSize);
   // The mark hangs off the same edge the block is aligned to.
   const edge = align === 'left' ? { left: 0 } : align === 'center' ? { left: '50%', transform: 'translateX(-50%)' } : { right: 0 };
   const inkEdge =
@@ -54,8 +66,8 @@ export default function AuthorisedSignature({
     <div className={className} style={{ textAlign: align, ...style }}>
       {companyName && <div style={{ fontWeight: 700 }}>for {companyName}</div>}
       <div style={{ position: 'relative', height: boxH }}>
-        <img src={stampUrl()} alt="" style={{ ...imgBase, ...edge, height: stampSize, opacity: 0.88 }} />
-        <img src={signatureUrl()} alt="" style={{ ...imgBase, ...inkEdge, bottom: 8, height: signHeight }} />
+        <img src={stampUrl()} alt="" style={{ ...imgBase, ...edge, height: effectiveStampSize, opacity: 0.88 }} />
+        <img src={signatureUrl()} alt="" style={{ ...imgBase, ...inkEdge, bottom: 8, height: effectiveSignHeight }} />
       </div>
       {caption && (
         <div style={captionRule ? { borderTop: '1px solid #cbd5e1', paddingTop: 2 } : undefined}>{caption}</div>

@@ -864,6 +864,9 @@ model CompanyProfile {
   taxproGstUser   String?
   taxproGstPass   String?
   taxproSandbox   Boolean @default(true)
+  // Signature & Company Stamp dimensions (px)
+  signatureHeight Int?    @default(55)
+  stampSize       Int?    @default(95)
 
   updatedAt DateTime @updatedAt
 }

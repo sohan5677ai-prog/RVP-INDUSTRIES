@@ -549,8 +549,6 @@ export default function LorryReceiptView() {
                   <div className="text-right font-bold">For Surya Road Lines</div>
                   <AuthorisedSignature
                     caption={null}
-                    signHeight={50}
-                    stampSize={85}
                     style={{ marginTop: 2 }}
                   />
                 </div>

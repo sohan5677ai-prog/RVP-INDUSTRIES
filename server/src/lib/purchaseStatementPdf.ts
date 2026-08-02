@@ -481,12 +481,14 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       width: W * 0.4,
       align: 'right',
     });
+    const signH = (company as any).signatureHeight || 48;
+    const stampS = (company as any).stampSize || 80;
     drawSignatureMark(doc, {
       x: LEFT + W * 0.6,
       width: W * 0.4,
       y: footerY + 20,
-      signHeight: 48,
-      stampSize: 80,
+      signHeight: signH,
+      stampSize: stampS,
     });
     doc
       .lineWidth(0.6)

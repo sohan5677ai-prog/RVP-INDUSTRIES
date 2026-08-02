@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { inr, rupeesInWords } from './invoice.js';
 import { IST_TZ } from './istDate.js';
+import { drawSignatureMark } from './signatureAssets.js';
 
 export interface InvoicePdfData {
   company: {
@@ -424,9 +425,10 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 
     // Signature box sits below the bank rows, in the right column only.
     const sigTop = Math.max(by + PAD_Y, decTop + mm(22));
-    txt(`for ${data.company.name}`, bankX, sigTop + PAD_Y, bankW, { bold: true, align: 'right' });
-    txt('Authorised Signatory', bankX, sigTop + PAD_Y + mm(10), bankW, { align: 'right' });
-    const sigBottom = sigTop + PAD_Y + mm(10) + BASE * 1.35 + PAD_Y;
+    let sy = txt(`for ${data.company.name}`, bankX, sigTop + PAD_Y, bankW, { bold: true, align: 'right' });
+    sy = drawSignatureMark(doc, { x: bankX, width: bankW, y: sy + 1, signHeight: 24, stampSize: 40 });
+    txt('Authorised Signatory', bankX, sy + 1, bankW, { align: 'right' });
+    const sigBottom = sy + 1 + BASE * 1.35 + PAD_Y;
 
     const decBottom = Math.max(dy + PAD_Y, sigBottom);
     doc.rect(LEFT, decTop, W, decBottom - decTop).stroke();

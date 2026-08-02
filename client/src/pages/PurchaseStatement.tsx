@@ -7,6 +7,7 @@ import type { Purchase, WeightVerification, StockIn, PurchaseOrder, Party } from
 import { computeQualityAdjustments, type QualityAdjustmentMode, type QualityAdjustmentRow } from '@/lib/calc';
 import { Button } from '@/components/ui/button';
 import { shortDate } from '@/lib/format';
+import AuthorisedSignature from '@/components/AuthorisedSignature';
 
 type PurchaseDetails = Purchase & {
   verification: WeightVerification;
@@ -349,12 +350,15 @@ export default function PurchaseStatement() {
         {/* Footer */}
         <div className="mt-10 flex items-start justify-between gap-6 border-t border-dotted border-neutral-300 pt-3">
           <p className="max-w-[55%] text-[9.5px] text-neutral-500">
-            Computer-generated statement - no signature required. Please report any discrepancy within 7 days of receipt.
+            Computer-generated statement. Please report any discrepancy within 7 days of receipt.
           </p>
-          <div className="text-right">
-            <p className="text-[11px] font-semibold">For {company?.name ?? 'RVP Industries'}</p>
-            <p className="mt-10 border-t border-neutral-300 pt-1 text-[10px] text-neutral-500">Authorised Signatory</p>
-          </div>
+          <AuthorisedSignature
+            companyName={company?.name ?? 'RVP Industries'}
+            captionRule
+            signHeight={34}
+            stampSize={64}
+            className="text-[11px]"
+          />
         </div>
       </div>
 

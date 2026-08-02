@@ -5,6 +5,7 @@ import { inr, rupeesInWords } from './invoice.js';
 import { IST_TZ } from './istDate.js';
 import { logger } from './logger.js';
 import type { QualityAdjustmentRow, QualityAdjustmentMode } from './calc.js';
+import { drawSignatureMark } from './signatureAssets.js';
 
 /**
  * Renders the per-lorry PURCHASE STATEMENT (the bill we settle a supplier on)
@@ -469,24 +470,31 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     y = doc.y + 12;
 
     // --- Footer -------------------------------------------------------------
-    const footerY = Math.max(y, BOTTOM - 74);
+    const footerY = Math.max(y, BOTTOM - 92);
     doc.lineWidth(0.6).strokeColor(HAIR).dash(2, { space: 2 }).moveTo(LEFT, footerY).lineTo(RIGHT, footerY).stroke();
     doc.undash();
     doc.font(F.body).fontSize(7).fillColor(MUTED).text(
-      'Computer-generated statement - no signature required. Please report any discrepancy within 7 days of receipt.',
+      'Computer-generated statement. Please report any discrepancy within 7 days of receipt.',
       LEFT, footerY + 8, { width: W * 0.55 }
     );
     doc.font(F.semi).fontSize(8.5).fillColor(INK).text(`For ${company.name}`, LEFT + W * 0.6, footerY + 8, {
       width: W * 0.4,
       align: 'right',
     });
+    drawSignatureMark(doc, {
+      x: LEFT + W * 0.6,
+      width: W * 0.4,
+      y: footerY + 20,
+      signHeight: 22,
+      stampSize: 38,
+    });
     doc
       .lineWidth(0.6)
       .strokeColor(HAIR)
-      .moveTo(RIGHT - 110, footerY + 44)
-      .lineTo(RIGHT, footerY + 44)
+      .moveTo(RIGHT - 110, footerY + 60)
+      .lineTo(RIGHT, footerY + 60)
       .stroke();
-    doc.font(F.body).fontSize(7.5).fillColor(MUTED).text('Authorised Signatory', LEFT + W * 0.6, footerY + 48, {
+    doc.font(F.body).fontSize(7.5).fillColor(MUTED).text('Authorised Signatory', LEFT + W * 0.6, footerY + 64, {
       width: W * 0.4,
       align: 'right',
     });

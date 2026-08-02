@@ -12,6 +12,7 @@
 
 import type { Party, PartyLedgerSummary, PartyLedgerTxn, LedgerKind } from './types';
 import { inr, rupeesInWords } from './invoiceWords';
+import { SIGNATURE_BLOCK_CSS, signatureBlockHtml } from './signatureAssets';
 
 export interface StatementCompany {
   name: string;
@@ -349,8 +350,10 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
   .stat span:last-child{font-weight:700; font-variant-numeric:tabular-nums;}
   .note{font-size:8.8px; color:var(--muted); line-height:1.45;}
   .sign{margin-top:16px; text-align:right;}
-  .sign-for{font-size:10px; font-weight:700;}
-  .sign-line{margin-top:26px; border-top:1px solid var(--hair); padding-top:3px; font-size:9px; color:var(--muted);}
+  ${SIGNATURE_BLOCK_CSS}
+  .sig-for{font-size:10px;}
+  .sig-mark{margin-top:4px;}
+  .sig-caption{border-top-color:var(--hair); font-size:9px; color:var(--muted);}
   .foot{display:flex; justify-content:space-between; margin-top:14px; padding-top:6px;
         border-top:1px solid var(--line); font-size:8.5px; color:#9ca3af;}
 
@@ -509,15 +512,14 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
         after which the balance shown will be treated as confirmed.
       </div>
       <div class="sign">
-        <div class="sign-for">For ${esc(companyName)}</div>
-        <div class="sign-line">Authorised Signatory</div>
+        ${signatureBlockHtml({ companyName: esc(companyName) })}
       </div>
     </div>
   </div>
 
   <div class="foot">
     <span>${esc(companyName)} &nbsp;·&nbsp; Statement of Account &nbsp;·&nbsp; ${esc(party.name)}</span>
-    <span>Computer-generated - no signature required &nbsp;·&nbsp; ${esc(stamp())}</span>
+    <span>Computer-generated statement &nbsp;·&nbsp; ${esc(stamp())}</span>
   </div>
 </div>
 <script>

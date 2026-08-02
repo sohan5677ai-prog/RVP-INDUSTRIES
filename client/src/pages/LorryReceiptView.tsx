@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { productDescription } from '@/lib/productNames';
+import AuthorisedSignature from '@/components/AuthorisedSignature';
 
 /* -------------------------------------------------------------------------- */
 /* Surya Road Lines' printed stationery fixed details                       */
@@ -517,8 +518,14 @@ export default function LorryReceiptView() {
                     <span className="underline">Note :</span> WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.
                   </div>
                 </div>
-                <div className="w-[30%] text-right font-bold text-[11px] pt-1">
-                  For Surya Road Lines
+                <div className="w-[30%] pt-1 text-[11px]">
+                  <div className="text-right font-bold">For Surya Road Lines</div>
+                  <AuthorisedSignature
+                    caption={null}
+                    signHeight={30}
+                    stampSize={56}
+                    style={{ marginTop: 2 }}
+                  />
                 </div>
               </div>
 

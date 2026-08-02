@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { SaleDispatch, SaleOrder, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { inr, rupeesInWords } from '@/lib/invoiceWords';
+import AuthorisedSignature from '@/components/AuthorisedSignature';
 
 const GST_RATE = 0.05;
 
@@ -395,8 +396,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
                 <BankRow k="Branch & IFS Code" v={company.bankBranchIfsc} />
               </div>
               <div style={{ borderTop: '1px solid #000', padding: '4px 8px' }}>
-                <div className="right val">for {company.name}</div>
-                <div className="right" style={{ marginTop: '10mm' }}>Authorised Signatory</div>
+                <AuthorisedSignature companyName={company.name} signHeight={32} stampSize={60} />
               </div>
             </td>
           </tr>

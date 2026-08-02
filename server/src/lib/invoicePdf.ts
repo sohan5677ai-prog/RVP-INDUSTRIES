@@ -61,8 +61,13 @@ const QR = mm(38);
 /** Goods table column widths, as fractions of the content width. */
 const GOODS_COLS = [0.048, 0.462, 0.09, 0.11, 0.06, 0.05, 0.18];
 
-/** Never shrink text below this - past it, wrap instead of becoming unreadable. */
-const FIT_FLOOR = 6.5;
+/**
+ * Floor for shrink-to-fit. Table rows here are drawn at fixed heights, so
+ * wrapping a value would push it into the row below - shrinking is always the
+ * safer failure mode, and the columns are sized to their content first so this
+ * floor is only reached by absurd values.
+ */
+const FIT_FLOOR = 5;
 
 type Align = 'left' | 'right' | 'center';
 interface Opt { bold?: boolean; italic?: boolean; size?: number; align?: Align }
@@ -126,12 +131,22 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
      * column grow; a PDF's columns are fixed, so shrink the text to fit instead.
      */
     const fit = (t: string, w: number, o?: Opt): Opt => {
-      const size = o?.size ?? BASE;
-      doc.font(fontFor(o)).fontSize(size);
+      const base = o?.size ?? BASE;
       // Explicit \n headers ("Taxable\nValue") must be judged on their widest
       // line, not on the whole string joined together.
-      const need = Math.max(...t.split('\n').map((s) => doc.widthOfString(s)));
-      return need <= w ? { ...o, size } : { ...o, size: Math.max(FIT_FLOOR, size * (w / need)) };
+      const lines = t.split('\n');
+      const widest = (size: number) => {
+        doc.font(fontFor(o)).fontSize(size);
+        return Math.max(...lines.map((s) => doc.widthOfString(s)));
+      };
+      const need = widest(base);
+      if (need <= w) return { ...o, size: base };
+      // Scaling straight to w/need lands exactly on the limit, where rounding
+      // can still tip PDFKit into wrapping the last character onto a new line -
+      // which then collides with the row below. Step down until it really fits.
+      let size = Math.max(FIT_FLOOR, base * (w / need));
+      while (size > FIT_FLOOR && widest(size) > w) size -= 0.1;
+      return { ...o, size };
     };
 
     /**
@@ -140,30 +155,25 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
      */
     const hardWrap = (s: string, w: number, o?: Opt): string => {
       doc.font(fontFor(o)).fontSize(o?.size ?? BASE);
-      if (doc.widthOfString(s) <= w) return s;
-      const out: string[] = [];
-      let cur = '';
-      for (const ch of s) {
-        if (cur && doc.widthOfString(cur + ch) > w) { out.push(cur); cur = ch; } else cur += ch;
-      }
-      if (cur) out.push(cur);
-      return out.join('\n');
+      // Wrap each existing line on its own. Measuring the whole string would
+      // treat "Sl\nNo." as the single token "SlNo." and chop it into three
+      // lines, which then spill out of the header row.
+      return s.split('\n').map((line) => {
+        if (doc.widthOfString(line) <= w) return line;
+        const out: string[] = [];
+        let cur = '';
+        for (const ch of line) {
+          if (cur && doc.widthOfString(cur + ch) > w) { out.push(cur); cur = ch; } else cur += ch;
+        }
+        if (cur) out.push(cur);
+        return out.join('\n');
+      }).join('\n');
     };
 
-    /**
-     * Shrink to fit, and if the text is so long that shrinking would make it
-     * unreadable, wrap it at the floor size instead. Either way it stays inside
-     * its column - nothing ever crosses a rule.
-     */
-    const fitWrap = (t: string, w: number, o?: Opt): { t: string; o: Opt } => {
-      const opt = fit(t, w, o);
-      return { t: hardWrap(t, w, opt), o: opt };
-    };
-    /** Cell text that never overflows its column. */
+    /** Cell text that never overflows its column, and never wraps out of its row. */
     const cellFit = (t: string, x: number, y: number, w: number, o?: Opt) => {
       const inner = w - PAD_X * 2;
-      const f = fitWrap(t, inner, o);
-      return txt(f.t, x + PAD_X, y + PAD_Y, inner, f.o);
+      return txt(t, x + PAD_X, y + PAD_Y, inner, fit(t, inner, o));
     };
 
     /** "Label : bold value" with the colons lined up in a column. */
@@ -249,18 +259,30 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 
     const metaCell = (label: string, value: string, x: number, ry: number, w: number, bold?: boolean) => {
       const inner = w - PAD_X * 2;
-      const l = fitWrap(label, inner, { size: CAP });
-      txt(l.t, x + PAD_X, ry + PAD_Y, inner, l.o);
-      if (value) {
-        const v = fitWrap(value, inner, { bold });
-        txt(v.t, x + PAD_X, ry + PAD_Y + CAP * 1.35, inner, v.o);
-      }
+      txt(label, x + PAD_X, ry + PAD_Y, inner, fit(label, inner, { size: CAP }));
+      if (value) txt(value, x + PAD_X, ry + PAD_Y + CAP * 1.35, inner, fit(value, inner, { bold }));
     };
 
     const rY = (i: number) => headerTop + rowH * i;
-    metaCell('Invoice No.', data.invoiceNumber, splitX, rY(0), metaW, true);
-    metaCell('e-Way Bill No.', data.ewbNumber ?? '', splitX + metaW, rY(0), metaW, true);
-    metaCell('Dated', fmtDate(data.invoiceDate), splitX + metaW * 2, rY(0), metaW * 2, true);
+
+    // Row 1 shares the left half between Invoice No. and e-Way Bill No. Split it
+    // by what each actually needs rather than down the middle, so a long invoice
+    // number borrows the slack next to a short EWB number instead of shrinking.
+    const halfW = metaW * 2;
+    const needOf = (caption: string, value: string) => {
+      doc.font('Helvetica').fontSize(CAP);
+      const capW = doc.widthOfString(caption);
+      doc.font('Helvetica-Bold').fontSize(BASE);
+      return Math.max(capW, doc.widthOfString(value)) + PAD_X * 2;
+    };
+    const nInv = needOf('Invoice No.', data.invoiceNumber);
+    const nEwb = needOf('e-Way Bill No.', data.ewbNumber ?? '');
+    // Clamped so one runaway value can't squeeze the other out entirely.
+    const invW = Math.min(Math.max(halfW * (nInv / (nInv + nEwb)), halfW * 0.35), halfW * 0.65);
+
+    metaCell('Invoice No.', data.invoiceNumber, splitX, rY(0), invW, true);
+    metaCell('e-Way Bill No.', data.ewbNumber ?? '', splitX + invW, rY(0), halfW - invW, true);
+    metaCell('Dated', fmtDate(data.invoiceDate), splitX + halfW, rY(0), halfW, true);
 
     const pairs: [string, string, string, string, boolean?][] = [
       ['Delivery Note', '', 'Mode/Terms of Payment', ''],
@@ -281,8 +303,8 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     vline(splitX, headerTop, headerBottom);
     hline(sellerBottom, LEFT, splitX);
     for (let i = 1; i < 8; i++) hline(rY(i), splitX, RIGHT);
-    vline(splitX + metaW, rY(0), rY(1));
-    vline(splitX + metaW * 2, rY(0), rY(7));
+    vline(splitX + invW, rY(0), rY(1));
+    vline(splitX + halfW, rY(0), rY(7));
 
     y = headerBottom;
 
@@ -355,8 +377,31 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     y = awBottom;
 
     // HSN / tax summary ------------------------------------------------------
-    const sp = isSameState ? [0.41, 0.11, 0.06, 0.12, 0.06, 0.12, 0.12] : [0.59, 0.11, 0.06, 0.12, 0.12];
-    const sw = sp.map((p) => p * W);
+    // Size the numeric columns to their widest actual content - header line or
+    // value - and give the HSN/SAC column whatever is left. A crore-scale
+    // taxable value then just takes the room it needs from the slack on the
+    // left, the way the browser's auto layout does it on screen.
+    const sNeed = (...texts: string[]) => {
+      doc.font('Helvetica-Bold').fontSize(TIGHT);
+      return Math.max(...texts.flatMap((t) => t.split('\n')).map((t) => doc.widthOfString(t))) + PAD_X * 2;
+    };
+    const rateTxt = isSameState ? `${halfPct}%` : `${gstPct}%`;
+    const taxAmt = isSameState ? inr(gst / 2) : inr(gst);
+    const sw: number[] = isSameState
+      ? [0, sNeed('Taxable\nValue', inr(amount)), sNeed('Rate', rateTxt), sNeed('Amount', taxAmt),
+         sNeed('Rate', rateTxt), sNeed('Amount', taxAmt), sNeed('Total\nTax Amount', inr(gst))]
+      : [0, sNeed('Taxable\nValue', inr(amount)), sNeed('Rate', rateTxt), sNeed('Amount', taxAmt),
+         sNeed('Total\nTax Amount', inr(gst))];
+    // The "Central Tax" / "State Tax" / "IGST" headers span their rate+amount
+    // pair, so that pair has to be at least as wide as the group label.
+    const widenPair = (i: number, label: string) => {
+      const need = sNeed(label);
+      const have = sw[i] + sw[i + 1];
+      if (need > have) { const add = (need - have) / 2; sw[i] += add; sw[i + 1] += add; }
+    };
+    if (isSameState) { widenPair(2, 'Central Tax'); widenPair(4, 'State Tax'); } else widenPair(2, 'IGST');
+    sw[0] = W - sw.slice(1).reduce((a, b) => a + b, 0);
+
     const sx: number[] = [];
     let sacc = LEFT;
     for (const w of sw) { sx.push(sacc); sacc += w; }
@@ -369,8 +414,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     // 7-digit taxable value run over the column rule.
     const sCell = (t: string, i: number, ry: number, o?: Opt, spanTo = i) => {
       const w = sx[spanTo] + sw[spanTo] - sx[i] - PAD_X * 2;
-      const f = fitWrap(t, w, { size: TIGHT, ...o });
-      return txt(f.t, sx[i] + PAD_X, ry + sPadY, w, f.o);
+      return txt(t, sx[i] + PAD_X, ry + sPadY, w, fit(t, w, { size: TIGHT, ...o }));
     };
 
     const sTop = y;

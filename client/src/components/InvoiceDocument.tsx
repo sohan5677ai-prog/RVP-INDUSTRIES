@@ -53,7 +53,9 @@ export function InvoiceStyles({ paperSize }: { paperSize: InvoiceLayout['paperSi
         .inv-page { box-shadow: none !important; margin: 0 !important; }
       }
       .inv-page { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; line-height: 1.28; }
-      .inv-page table { border-collapse: collapse; width: 100%; border: 1px solid #000; }
+      /* table-layout:fixed so the colgroup percentages are honoured exactly -
+         auto layout lets a wordy cell steal width and wrap its neighbour. */
+      .inv-page table { border-collapse: collapse; width: 100%; border: 1px solid #000; table-layout: fixed; }
       .inv-page td, .inv-page th { border: 1px solid #000; vertical-align: top; padding: 3px 6px; }
       .inv-page th { font-weight: bold; }
       .inv-page .lbl { line-height: 1.28; }
@@ -63,6 +65,9 @@ export function InvoiceStyles({ paperSize }: { paperSize: InvoiceLayout['paperSi
       .inv-page .tight { font-size: 0.92em; }
       .inv-page .tight td, .inv-page .tight th { padding: 1px 6px; }
       .inv-page .nob { border: 0 !important; }
+      /* Item + tax + filler rows are one open block: the column rules run
+         through them, but no horizontal rules divide them. */
+      .inv-page .noh td { border-top: 0 !important; border-bottom: 0 !important; }
       .inv-page .center { text-align: center; }
       .inv-page .right { text-align: right; }
     `}</style>
@@ -225,7 +230,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
           </tr>
         </thead>
         <tbody>
-          <tr>
+          <tr className="noh">
             <td className="center val">1</td>
             <td className="val">{description}</td>
             <td>{hsn}</td>
@@ -246,8 +251,8 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
             )
           )}
 
-          <tr style={{ height: '10px' }}>
-            <td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" /><td className="nob" />
+          <tr className="noh" style={{ height: '10px' }}>
+            <td /><td /><td /><td /><td /><td /><td />
           </tr>
 
           <tr className="val">
@@ -427,14 +432,14 @@ function KeyedLine({ k, v, plain, style }: { k: string; v: string; plain?: boole
 
 function TaxLine({ label, rate, amount }: { label: string; rate: string; amount: number }) {
   return (
-    <tr>
-      <td className="nob" />
-      <td className="nob right val" style={{ fontStyle: 'italic' }}>{label}</td>
-      <td className="nob" />
-      <td className="nob" />
-      <td className="nob right">{rate}</td>
-      <td className="nob">%</td>
-      <td className="nob right val">{inr(amount)}</td>
+    <tr className="noh">
+      <td />
+      <td className="right val" style={{ fontStyle: 'italic' }}>{label}</td>
+      <td />
+      <td />
+      <td className="right">{rate}</td>
+      <td>%</td>
+      <td className="right val">{inr(amount)}</td>
     </tr>
   );
 }

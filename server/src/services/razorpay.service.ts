@@ -20,10 +20,13 @@ export class RazorpayError extends Error {
   }
 }
 
+// .trim() guards against a trailing newline/space sneaking in when the key is
+// pasted into Render's env var UI - that alone makes Razorpay's Basic Auth
+// fail with a generic "Authentication failed", which is hard to spot by eye.
 export function keys() {
   return {
-    keyId: process.env.RAZORPAY_KEY_ID,
-    keySecret: process.env.RAZORPAY_KEY_SECRET,
+    keyId: process.env.RAZORPAY_KEY_ID?.trim(),
+    keySecret: process.env.RAZORPAY_KEY_SECRET?.trim(),
   };
 }
 

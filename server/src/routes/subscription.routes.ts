@@ -33,10 +33,13 @@ const router = Router();
 
 const RAZORPAY_ORDERS_URL = 'https://api.razorpay.com/v1/orders';
 
+// .trim() guards against a trailing newline/space from pasting into Render's
+// env var UI, which otherwise fails Basic Auth with a generic "Authentication
+// failed" that's hard to diagnose by eye.
 function razorpayKeys() {
   return {
-    keyId: process.env.RAZORPAY_KEY_ID,
-    keySecret: process.env.RAZORPAY_KEY_SECRET,
+    keyId: process.env.RAZORPAY_KEY_ID?.trim(),
+    keySecret: process.env.RAZORPAY_KEY_SECRET?.trim(),
   };
 }
 

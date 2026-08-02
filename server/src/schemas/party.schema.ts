@@ -17,6 +17,8 @@ export const createPartySchema = z.object({
   gstin: z.string().optional(),
   destination: z.string().optional(),
   locationLink: z.string().optional(),
+  // Buyers only - turns the Surya Road Lines lorry receipt (GC) on for their shipments.
+  lorryReceiptEnabled: z.boolean().optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),

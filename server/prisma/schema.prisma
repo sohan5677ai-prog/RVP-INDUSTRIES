@@ -104,6 +104,10 @@ model Party {
   // Google Maps link to the party's delivery point - sent to the lorry driver
   // on dispatch via WhatsApp.
   locationLink      String?
+  // Whether this buyer's shipments travel on a Surya Road Lines lorry receipt
+  // (GC note). Most do not, so the receipt is offered on a dispatch only when
+  // this is switched on for the buyer. Off for everyone until set.
+  lorryReceiptEnabled Boolean        @default(false)
   bankAccountNumber String?
   bankIfsc          String?
   bankName          String?

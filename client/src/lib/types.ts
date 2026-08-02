@@ -27,6 +27,9 @@ export interface Party {
   gstin: string | null;
   destination: string | null;
   locationLink?: string | null;
+  // Buyers only: whether their shipments travel on a Surya Road Lines lorry
+  // receipt (GC note). Off unless switched on for that buyer.
+  lorryReceiptEnabled?: boolean;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;

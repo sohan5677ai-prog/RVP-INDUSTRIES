@@ -136,13 +136,26 @@ const DEFAULT_KG_PER_BAG = 50;
  * transporter's book) is returned untouched, so reprints never renumber. The GC
  * date defaults to the invoice date, falling back to the dispatch date, and the
  * packing to the dispatched weight in 50 kg bags (30 t = 600 bags).
+ *
+ * Only buyers whose party record has the lorry receipt switched on get one, so a
+ * number is never burnt on a shipment that ships without a GC note.
  */
 export async function assignLorryReceiptNumber(req: Request, res: Response) {
   const updated = await prisma.$transaction(async (tx) => {
-    const dispatch = await tx.saleDispatch.findUnique({ where: { id: req.params.id } });
+    const dispatch = await tx.saleDispatch.findUnique({
+      where: { id: req.params.id },
+      include: { saleOrder: { select: { buyer: { select: { name: true, lorryReceiptEnabled: true } } } } },
+    });
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
     if (dispatch.lrNumber) {
       return tx.saleDispatch.findUnique({ where: { id: dispatch.id }, include: lorryReceiptInclude });
+    }
+    const buyer = dispatch.saleOrder?.buyer;
+    if (!buyer?.lorryReceiptEnabled) {
+      throw new HttpError(
+        400,
+        `Lorry receipts are switched off for ${buyer?.name ?? 'this buyer'}. Turn on "Lorry receipt (GC)" on their party record to issue one.`
+      );
     }
     const kgPerBag = dispatch.lrKgPerBag ?? DEFAULT_KG_PER_BAG;
     return tx.saleDispatch.update({

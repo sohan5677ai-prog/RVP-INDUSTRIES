@@ -1186,16 +1186,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                           </Button>
                                         )}
                                         {/* Transporter's lorry receipt (GC). Raised when the lorry
-                                            leaves, so it does not wait on the invoice. */}
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="border-amber-200 text-amber-700 hover:bg-amber-50"
-                                          title="Print the Surya Road Lines lorry receipt (GC) for this lorry"
-                                          onClick={() => navigate(`/sale-dispatches/${d.id}/lorry-receipt`)}
-                                        >
-                                          <ScrollText className="h-3.5 w-3.5 mr-1" /> Lorry Receipt
-                                        </Button>
+                                            leaves, so it does not wait on the invoice. Only buyers
+                                            switched on for it in Parties ship on a GC note. */}
+                                        {o.buyer?.lorryReceiptEnabled && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                            title="Print the Surya Road Lines lorry receipt (GC) for this lorry"
+                                            onClick={() => navigate(`/sale-dispatches/${d.id}/lorry-receipt`)}
+                                          >
+                                            <ScrollText className="h-3.5 w-3.5 mr-1" /> Lorry Receipt
+                                          </Button>
+                                        )}
                                         {d.status === 'DISPATCHED' && d.invoiceNumber && (
                                           <Button size="sm" variant="forest" onClick={() => openDeliver(d, o)}>
                                             <PackageCheck className="h-3.5 w-3.5" /> Mark delivered

@@ -102,7 +102,9 @@ export default function LorryReceiptView() {
   });
 
   useEffect(() => {
-    if (!dispatch || dispatch.lrNumber || assignRequested.current) return;
+    // Buyers who ship without a GC note never take a number off the book.
+    if (!dispatch || !dispatch.saleOrder?.buyer?.lorryReceiptEnabled) return;
+    if (dispatch.lrNumber || assignRequested.current) return;
     assignRequested.current = true;
     assignGc.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,6 +135,24 @@ export default function LorryReceiptView() {
 
   const order = dispatch.saleOrder;
   const buyer = order?.buyer;
+
+  // Reached by a stale link or a typed URL after the buyer was switched off: no
+  // receipt exists and none should be raised, so say so instead of printing one.
+  if (!buyer?.lorryReceiptEnabled && !dispatch.lrNumber) {
+    return (
+      <div className="mx-auto max-w-md p-8 text-center space-y-3">
+        <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
+        <h1 className="text-lg font-semibold">No lorry receipt for this shipment</h1>
+        <p className="text-sm text-muted-foreground">
+          Lorry receipts are switched off for {buyer?.name ?? 'this buyer'}. Turn on "Lorry receipt (GC)" on their
+          party record in Parties to issue one.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back
+        </Button>
+      </div>
+    );
+  }
 
   const description = productDescription(order?.product);
   const fromPlace = (company.dispatchFromPlace || company.stateName || 'PUNGANUR').toUpperCase();

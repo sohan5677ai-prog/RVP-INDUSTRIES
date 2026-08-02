@@ -41,6 +41,8 @@ interface RetentionRow {
   gcDate: string | null;
   bags: number | null;
   kgPerBag: number | null;
+  /** Whether the buyer's party record has lorry receipts switched on. */
+  gcEnabled: boolean;
 }
 
 export default function SuryaRoadTransport({ embedded = false }: { embedded?: boolean } = {}) {
@@ -98,6 +100,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         gcDate: d.lrDate ?? null,
         bags: d.lrBags ?? null,
         kgPerBag: d.lrKgPerBag ?? null,
+        gcEnabled: o.buyer?.lorryReceiptEnabled ?? false,
       };
     })
     .filter((r) => {
@@ -296,9 +299,12 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
   const navigate = useNavigate();
   const [issuedOnly, setIssuedOnly] = useState(false);
 
-  const filtered = issuedOnly ? rows.filter((r) => r.gcNumber) : rows;
+  // Only buyers switched on for the GC note belong in the book - plus any older
+  // shipment that already carries a number, so nothing written disappears.
+  const gcRows = rows.filter((r) => r.gcEnabled || r.gcNumber);
+  const filtered = issuedOnly ? gcRows.filter((r) => r.gcNumber) : gcRows;
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
-  const issuedCount = rows.filter((r) => r.gcNumber).length;
+  const issuedCount = gcRows.filter((r) => r.gcNumber).length;
 
   const exportColumns: ExportColumn<RetentionRow>[] = [
     { header: 'G.C. No', value: (r) => r.gcNumber ?? '' },
@@ -323,7 +329,7 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
           <FileText className="h-4 w-4 text-primary" />
           Lorry Receipts (G.C. Notes)
           <span className="text-xs font-normal text-muted-foreground">
-            {issuedCount} of {rows.length} trip(s) issued
+            {issuedCount} of {gcRows.length} trip(s) issued
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -366,7 +372,9 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
-                  No lorry receipts match the selected filters.
+                  {gcRows.length === 0
+                    ? 'No buyer is switched on for lorry receipts. Turn on "Lorry receipt (GC)" on a buyer in Parties.'
+                    : 'No lorry receipts match the selected filters.'}
                 </TableCell>
               </TableRow>
             ) : (

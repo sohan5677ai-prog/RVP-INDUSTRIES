@@ -129,6 +129,7 @@ const partySchema = z.object({
   gstin: z.string().optional(),
   destination: z.string().optional(),
   locationLink: z.string().optional(),
+  lorryReceiptEnabled: z.boolean(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
@@ -138,7 +139,7 @@ type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
   name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', city: '', state: '', pincode: '', gstin: '', destination: '',
-  locationLink: '', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
+  locationLink: '', lorryReceiptEnabled: false, bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
 export default function Parties() {
@@ -222,6 +223,7 @@ export default function Parties() {
       gstin: p.gstin ?? '',
       destination: p.destination ?? '',
       locationLink: p.locationLink ?? '',
+      lorryReceiptEnabled: p.lorryReceiptEnabled ?? false,
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
@@ -671,6 +673,39 @@ export default function Parties() {
                   />
                 )}
               </div>
+              )}
+              {/* Buyers only. Most shipments travel without the transporter's GC
+                  note, so the receipt is offered on a dispatch only for the
+                  buyers switched on here. */}
+              {!isHamaliTeam && form.watch('type') !== 'SUPPLIER' && (
+                <FormField
+                  control={form.control}
+                  name="lorryReceiptEnabled"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-3">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-sm">Lorry receipt (GC)</FormLabel>
+                        <p className="text-xs text-muted-foreground">
+                          {field.value
+                            ? 'ON - a Surya Road Lines lorry receipt can be printed for dispatches to this buyer.'
+                            : 'OFF - dispatches to this buyer ship without a lorry receipt.'}
+                        </p>
+                      </div>
+                      <FormControl>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={field.value}
+                          aria-label="Lorry receipt (GC)"
+                          onClick={() => field.onChange(!field.value)}
+                          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${field.value ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                        >
+                          <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${field.value ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+                        </button>
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               )}
               {!isHamaliTeam && (
               <FormField

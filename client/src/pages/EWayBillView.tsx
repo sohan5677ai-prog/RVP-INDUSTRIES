@@ -130,7 +130,10 @@ export default function EWayBillView() {
   const baseAmount = Math.round(weight * rate * 100) / 100;
   // GST from the commodity's configured rate (default 5%), not the stored value
   // which can be 0 on legacy dispatches - mirrors the tax invoice / e-invoice.
-  const gstPct = taxInfo?.gstRate != null ? Number(taxInfo.gstRate) : 5;
+  // A GST-exempt order (e.g. an Un-Registered Sale) is billed WITHOUT GST, same
+  // as the tax invoice and the official/in-house EWB PDFs - so it must show 0%
+  // here too rather than falling back to the product's default rate.
+  const gstPct = order.gstExempt ? 0 : (taxInfo?.gstRate != null ? Number(taxInfo.gstRate) : 5);
   const gstAmount = Math.round(baseAmount * gstPct) / 100;
   const totalAmount = Math.round((baseAmount + gstAmount) * 100) / 100;
 

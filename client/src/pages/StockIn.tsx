@@ -1,7 +1,7 @@
 import React, { Fragment, useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronDown, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { usePasteImage, readImageFromClipboard } from '@/lib/usePasteImage';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
@@ -27,6 +27,17 @@ import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
 import { UrpStockInDialog } from '@/components/UrpStockInDialog';
 import { ExportButtons } from '@/components/ExportButtons';
+import {
+  ExpandPanel,
+  Figure,
+  PanelCard,
+  PanelDot,
+  PanelLabel,
+  PanelMeta,
+  PanelStack,
+  PanelTitle,
+} from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 type StockInRow = StockInType;
@@ -536,16 +547,12 @@ const StockInGroupRow = React.memo(({
   return (
     <Fragment>
       <TableRow
-        className={`cursor-pointer font-medium transition-colors ${isOpen ? 'bg-secondary hover:bg-secondary border-b-0' : 'bg-muted/30 hover:bg-muted/50'}`}
+        className={cn('cursor-pointer font-medium transition-colors', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
         onClick={() => toggleGroup(groupId)}
       >
-        <TableCell className={isOpen ? 'shadow-[inset_3px_0_0_0_var(--primary)]' : undefined}>
+        <TableCell>
           <div className="flex items-center gap-2">
-            {isOpen ? (
-              <ChevronDown className="h-4 w-4 text-primary" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            )}
+            <ChevronRight className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
             <div>
               <span className="font-semibold tracking-tight tabular-nums">{poLabel}</span>
               <span className="block text-[11px] font-normal text-muted-foreground">
@@ -580,58 +587,91 @@ const StockInGroupRow = React.memo(({
       </TableRow>
 
       {/* Individual lorry invoices for this PO */}
-      {isOpen && rows.map((s: any, idx: number) => (
-        <TableRow key={s.id} className={`bg-accent/60 hover:bg-accent ${idx === rows.length - 1 ? 'border-b-2 border-border' : 'border-b border-border/60'}`}>
-          <TableCell className="pl-12 text-sm text-muted-foreground shadow-[inset_3px_0_0_0_var(--primary)]">{shortDate(s.arrivalDate)}</TableCell>
-          <TableCell className="text-xs text-muted-foreground tracking-tight tabular-nums">{s.purchaseOrder?.poNumber ?? '-'}</TableCell>
-          <TableCell className="font-semibold tracking-tight tabular-nums">{s.invoiceNumber}</TableCell>
-          <TableCell>{s.lorryNumber}</TableCell>
-          <TableCell><Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge></TableCell>
-          <TableCell className="text-right font-semibold">{kg(s.rvpFirstWeightKg)}</TableCell>
-          <TableCell className="text-right">{kg(s.billingWeightKg)}</TableCell>
-          <TableCell className="text-right">{kg(s.partyKataKg)}</TableCell>
-          <TableCell className="text-right">{s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '-'}</TableCell>
-          <TableCell>
-            {s.invoiceFileUrl ? (
-              <a href={s.invoiceFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline text-sm">
-                <FileText className="h-3 w-3" /> View
-              </a>
-            ) : (
-              <span className="text-muted-foreground">-</span>
-            )}
-          </TableCell>
-          <TableCell className="text-right">
-            <div className="flex justify-end gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                title={s.purchase ? 'Edit - this will roll back the recorded purchase' : 'Edit stock-in'}
-                onClick={(e: any) => {
-                  e.stopPropagation();
-                  if (s.purchase && !confirm('This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Editing will roll back the purchase (reverting inventory & ledger) and you\'ll need to re-record it. Continue?')) return;
-                  openEdit(s);
-                }}
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                title={s.purchase ? 'Delete - this will also roll back the recorded purchase' : 'Delete stock-in'}
-                onClick={(e: any) => {
-                  e.stopPropagation();
-                  const msg = s.purchase
-                    ? 'This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Deleting will also roll back the purchase (reverting inventory & ledger). Delete anyway?'
-                    : 'Delete this stock-in record?';
-                  if (confirm(msg)) deleteMutationMutate(s.id);
-                }}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
-            </div>
-          </TableCell>
-        </TableRow>
-      ))}
+      {isOpen && (
+        <ExpandPanel colSpan={11}>
+          <PanelLabel>Lorries · {rows.length}</PanelLabel>
+          <PanelStack>
+            {rows.map((s: any) => (
+              <PanelCard
+                key={s.id}
+                icon={Truck}
+                identity={
+                  <>
+                    <PanelTitle>
+                      <span className="font-mono text-sm font-semibold">
+                        {s.invoiceNumber || <span className="font-sans text-xs font-medium text-amber-600 dark:text-amber-400">No invoice no</span>}
+                      </span>
+                      {s.purchase
+                        ? <Badge variant="success">Purchased</Badge>
+                        : <Badge variant="warning">Awaiting</Badge>}
+                      <Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge>
+                      {s.selfVehicle && <Badge variant="soft">Self vehicle</Badge>}
+                    </PanelTitle>
+                    <PanelMeta>
+                      <span>{shortDate(s.arrivalDate)}</span><PanelDot />
+                      <span className="tabular-nums">{s.purchaseOrder?.poNumber ?? '-'}</span><PanelDot />
+                      <span>{s.lorryNumber || 'no lorry no'}</span>
+                      {s.invoiceFileUrl && (
+                        <>
+                          <PanelDot />
+                          <a
+                            href={s.invoiceFileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <FileText className="h-3 w-3" /> Invoice
+                          </a>
+                        </>
+                      )}
+                    </PanelMeta>
+                  </>
+                }
+                figures={
+                  <>
+                    <Figure label="RVP first wt" value={kg(s.rvpFirstWeightKg)} />
+                    <Figure label="Billing" value={kg(s.billingWeightKg)} />
+                    <Figure label="Party kata" value={kg(s.partyKataKg)} />
+                    <Figure label="Price/kg" value={s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '-'} />
+                  </>
+                }
+                actions={
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title={s.purchase ? 'Edit - this will roll back the recorded purchase' : 'Edit stock-in'}
+                      onClick={(e: any) => {
+                        e.stopPropagation();
+                        if (s.purchase && !confirm('This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Editing will roll back the purchase (reverting inventory & ledger) and you\'ll need to re-record it. Continue?')) return;
+                        openEdit(s);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                      title={s.purchase ? 'Delete - this will also roll back the recorded purchase' : 'Delete stock-in'}
+                      onClick={(e: any) => {
+                        e.stopPropagation();
+                        const msg = s.purchase
+                          ? 'This lorry has already been purchased' + (s.purchase.verification ? ' and verified' : '') + '. Deleting will also roll back the purchase (reverting inventory & ledger). Delete anyway?'
+                          : 'Delete this stock-in record?';
+                        if (confirm(msg)) deleteMutationMutate(s.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </Button>
+                  </>
+                }
+              />
+            ))}
+          </PanelStack>
+        </ExpandPanel>
+      )}
     </Fragment>
   );
 });

@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale, Table2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale, Table2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
@@ -18,6 +18,17 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
+import {
+  ExpandPanel,
+  Figure,
+  PanelCard,
+  PanelDot,
+  PanelLabel,
+  PanelMeta,
+  PanelStack,
+  PanelTitle,
+} from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 import {
   Table,
@@ -307,12 +318,13 @@ export default function PurchaseOrders() {
               return (
                 <Fragment key={groupId}>
                   {/* Order summary row - click to expand its per-lorry POs */}
-                  <TableRow className={`cursor-pointer font-medium transition-colors ${isOpen ? 'bg-secondary hover:bg-secondary border-b-0' : 'bg-muted/30 hover:bg-muted/50'}`} onClick={() => toggleGroup(groupId)}>
-                    <TableCell className={isOpen ? 'shadow-[inset_3px_0_0_0_var(--primary)]' : undefined}>
+                  <TableRow
+                    className={cn('cursor-pointer font-medium transition-colors', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                    onClick={() => toggleGroup(groupId)}
+                  >
+                    <TableCell>
                       <div className="flex items-center gap-2">
-                        {isOpen
-                          ? <ChevronDown className="h-4 w-4 text-primary" />
-                          : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                        <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
                         {shortDate(ordered[0].poDate)}
                       </div>
                     </TableCell>
@@ -340,49 +352,76 @@ export default function PurchaseOrders() {
                   </TableRow>
 
                   {/* Individual per-lorry POs */}
-                  {isOpen && ordered.map((po, idx) => (
-                    <TableRow key={po.id} className={`bg-accent/60 hover:bg-accent ${idx === ordered.length - 1 ? 'border-b-2 border-border' : 'border-b border-border/60'}`}>
-                      <TableCell className="pl-12 text-sm text-muted-foreground shadow-[inset_3px_0_0_0_var(--primary)]">{shortDate(po.poDate)}</TableCell>
-                      <TableCell className="font-semibold tracking-tight tabular-nums">{po.poNumber}</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">Lorry</TableCell>
-                      <TableCell className="text-right">{rupees(po.pricePerKg)}</TableCell>
-                      <TableCell className="text-right text-xs">
-                        {po.stockIns?.length ? <span className="text-green-600">Arrived</span> : <span className="text-muted-foreground">Awaiting</span>}
-                      </TableCell>
-                      <TableCell className="text-right">{kg(po.tonnageKg)}</TableCell>
-                      <TableCell><Badge variant={statusVariant[po.status]}>{po.status}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        {po.status === 'PENDING' && (
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEdit(po); }}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Void (cancel) this PO"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('Void this purchase order? It will be marked as Cancelled.')) voidMutation.mutate(po.id);
-                              }}
-                            >
-                              <Ban className="h-4 w-4 text-amber-600" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('Delete this purchase order?')) deleteMutation.mutate(po.id);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {isOpen && (
+                    <ExpandPanel colSpan={8}>
+                      <PanelLabel>Lorries · {ordered.length}</PanelLabel>
+                      <PanelStack>
+                        {ordered.map((po) => (
+                          <PanelCard
+                            key={po.id}
+                            icon={Truck}
+                            identity={
+                              <>
+                                <PanelTitle>
+                                  <span className="font-mono text-sm font-semibold">{po.poNumber}</span>
+                                  <Badge variant={statusVariant[po.status]}>{po.status}</Badge>
+                                  {po.stockIns?.length
+                                    ? <Badge variant="success">Arrived</Badge>
+                                    : <Badge variant="outline">Awaiting</Badge>}
+                                  {po.plannedLocation === 'STOCK' && (
+                                    <Badge variant="outline" className="text-[10px] font-normal" title="Held out of the Order Planner until stocked in">Stock</Badge>
+                                  )}
+                                </PanelTitle>
+                                <PanelMeta>
+                                  <span>{shortDate(po.poDate)}</span><PanelDot />
+                                  <span>{po.priceType === 'BASE' ? 'Base price' : 'Delivery price'}</span><PanelDot />
+                                  <span>{po.hasGst === false ? 'No GST' : 'With GST'}</span>
+                                </PanelMeta>
+                              </>
+                            }
+                            figures={
+                              <>
+                                <Figure label="Tonnage" value={kg(po.tonnageKg)} />
+                                <Figure label="Price/kg" value={rupees(po.pricePerKg)} />
+                              </>
+                            }
+                            actions={
+                              po.status === 'PENDING' ? (
+                                <>
+                                  <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openEdit(po); }}>
+                                    <Pencil className="h-3.5 w-3.5" /> Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                    title="Void (cancel) this PO"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Void this purchase order? It will be marked as Cancelled.')) voidMutation.mutate(po.id);
+                                    }}
+                                  >
+                                    <Ban className="h-3.5 w-3.5" /> Void
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Delete this purchase order?')) deleteMutation.mutate(po.id);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                                  </Button>
+                                </>
+                              ) : null
+                            }
+                          />
+                        ))}
+                      </PanelStack>
+                    </ExpandPanel>
+                  )}
                 </Fragment>
               );
             })}

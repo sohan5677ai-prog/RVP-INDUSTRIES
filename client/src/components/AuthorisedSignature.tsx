@@ -27,8 +27,8 @@ interface AuthorisedSignatureProps {
 export default function AuthorisedSignature({
   companyName,
   caption = 'Authorised Signatory',
-  signHeight = 34,
-  stampSize = 62,
+  signHeight = 55,
+  stampSize = 95,
   align = 'right',
   captionRule = false,
   className,

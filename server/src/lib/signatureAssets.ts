@@ -62,7 +62,7 @@ export interface SignatureMarkOptions {
  */
 export function drawSignatureMark(
   doc: PDFKit.PDFDocument,
-  { x, width, y, signHeight = 24, stampSize = 40, align = 'right' }: SignatureMarkOptions,
+  { x, width, y, signHeight = 45, stampSize = 75, align = 'right' }: SignatureMarkOptions,
 ): number {
   const boxH = Math.max(signHeight, stampSize);
   const { sign, stamp } = signatureAssets();

@@ -409,7 +409,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
                 <BankRow k="Branch & IFS Code" v={company.bankBranchIfsc} />
               </div>
               <div style={{ borderTop: '1px solid #000', padding: '4px 8px' }}>
-                <AuthorisedSignature companyName={company.name} signHeight={32} stampSize={60} />
+                <AuthorisedSignature companyName={company.name} signHeight={55} stampSize={95} />
               </div>
             </td>
           </tr>

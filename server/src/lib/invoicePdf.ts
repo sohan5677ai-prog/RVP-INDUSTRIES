@@ -442,7 +442,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     // Signature box sits below the bank rows, in the right column only.
     const sigTop = Math.max(by + PAD_Y, decTop + mm(22));
     let sy = txt(`for ${data.company.name}`, bankX, sigTop + PAD_Y, bankW, { bold: true, align: 'right' });
-    sy = drawSignatureMark(doc, { x: bankX, width: bankW, y: sy + 1, signHeight: 24, stampSize: 40 });
+    sy = drawSignatureMark(doc, { x: bankX, width: bankW, y: sy + 1, signHeight: 48, stampSize: 80 });
     txt('Authorised Signatory', bankX, sy + 1, bankW, { align: 'right' });
     const sigBottom = sy + 1 + BASE * 1.35 + PAD_Y;
 

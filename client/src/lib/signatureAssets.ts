@@ -36,8 +36,8 @@ export interface SignatureBlockOptions {
 export function signatureBlockHtml({
   companyName,
   caption = 'Authorised Signatory',
-  signHeight = 34,
-  stampSize = 62,
+  signHeight = 55,
+  stampSize = 95,
 }: SignatureBlockOptions = {}): string {
   const boxH = Math.max(signHeight, stampSize);
   return `

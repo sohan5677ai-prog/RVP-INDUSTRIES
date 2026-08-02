@@ -485,8 +485,8 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       x: LEFT + W * 0.6,
       width: W * 0.4,
       y: footerY + 20,
-      signHeight: 22,
-      stampSize: 38,
+      signHeight: 48,
+      stampSize: 80,
     });
     doc
       .lineWidth(0.6)

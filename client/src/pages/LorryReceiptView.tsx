@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Printer, FileText } from 'lucide-react';
@@ -8,6 +8,7 @@ import type { SaleDispatch, CompanyProfile } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { productDescription } from '@/lib/productNames';
 
 /* -------------------------------------------------------------------------- */
 /* Surya Road Lines' printed stationery fixed details                       */
@@ -22,17 +23,6 @@ const SRL = {
   udyam: 'UDAYAM AP-02-0002343',
 };
 
-const PRODUCT_DESCRIPTION: Record<string, string> = {
-  PAPPU: 'Tamarind Seed Pappu',
-  HUSK: 'Tamarind Husk',
-  WASTE: 'Tamarind Waste',
-  TPS: 'Tamarind Seed Brokens',
-  SHELL: 'Tamarind Shell',
-  PRECLEANER_DUST: 'Pre Cleaner Dust',
-  NALLA_POKKULU: 'Nalla Pokkulu',
-  NALLA_CHINTAPANDU: 'Nalla Chintapandu',
-};
-
 function dmy(d?: string | null): string {
   if (!d) return '';
   const date = new Date(d);
@@ -45,6 +35,15 @@ function isoDay(d?: string | null): string {
   const date = new Date(d);
   if (Number.isNaN(date.getTime())) return '';
   return date.toISOString().slice(0, 10);
+}
+
+/** Pappu ships in 50 kg bags, so the packing follows from the lorry's weight. */
+const DEFAULT_KG_PER_BAG = 50;
+
+/** Bag count for a load: 30 t at 50 kg = 600 bags, 25 t = 500, 35 t = 700. */
+function bagsFor(weightKg: number, kgPerBag: number): string {
+  if (!weightKg || !kgPerBag) return '';
+  return String(Math.round(weightKg / kgPerBag));
 }
 
 export default function LorryReceiptView() {
@@ -72,8 +71,41 @@ export default function LorryReceiptView() {
     if (!dispatch) return;
     setGcNo(dispatch.lrNumber ?? '');
     setLrDate(isoDay(dispatch.lrDate ?? dispatch.invoiceDate ?? dispatch.dispatchDate));
-    setBags(dispatch.lrBags != null ? String(dispatch.lrBags) : '');
-    setKgPerBag(dispatch.lrKgPerBag != null ? String(dispatch.lrKgPerBag) : '');
+    // Packing defaults to the dispatched weight in 50 kg bags; a receipt that was
+    // saved with its own counts keeps them.
+    const perBag = dispatch.lrKgPerBag ?? DEFAULT_KG_PER_BAG;
+    setKgPerBag(String(perBag));
+    setBags(dispatch.lrBags != null ? String(dispatch.lrBags) : bagsFor(dispatch.weightKg, perBag));
+  }, [dispatch]);
+
+  /** Re-derive the bag count when the bag size is changed by hand. */
+  function onKgPerBagChange(value: string) {
+    setKgPerBag(value);
+    const perBag = Number(value);
+    if (dispatch && perBag > 0) setBags(bagsFor(dispatch.weightKg, perBag));
+  }
+
+  /**
+   * A shipment takes the next number in the GC book the first time its receipt
+   * is opened, so the printed copy never goes out blank. Server-side it is
+   * idempotent; the ref stops React's double-invoked effects (StrictMode) from
+   * firing two requests before the first one lands.
+   */
+  const assignRequested = useRef(false);
+  const assignGc = useMutation({
+    mutationFn: () => api<SaleDispatch>(`/sale-dispatches/${id}/lorry-receipt/assign`, { method: 'POST' }),
+    onSuccess: (updated) => {
+      qc.setQueryData(['sale-dispatch', id], updated);
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  useEffect(() => {
+    if (!dispatch || dispatch.lrNumber || assignRequested.current) return;
+    assignRequested.current = true;
+    assignGc.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
   const save = useMutation({
@@ -102,7 +134,7 @@ export default function LorryReceiptView() {
   const order = dispatch.saleOrder;
   const buyer = order?.buyer;
 
-  const description = PRODUCT_DESCRIPTION[order?.product ?? 'PAPPU'] ?? 'Tamarind Seed Pappu';
+  const description = productDescription(order?.product);
   const fromPlace = (company.dispatchFromPlace || company.stateName || 'PUNGANUR').toUpperCase();
   const toPlace = (order?.destination || buyer?.city || buyer?.state || '').toUpperCase();
   const truckNo = dispatch.vehicleNumber ?? '';
@@ -130,6 +162,26 @@ export default function LorryReceiptView() {
           font-stretch: condensed;
         }
         .lr-emblem { image-rendering: -webkit-optimize-contrast; }
+
+        /* Freight-paid marks. The tick sits beside the printed "Paid" heading;
+           the stamp is the rubber-stamp impression struck across the Paid
+           amount box, drawn in CSS so it stays crisp at print resolution. */
+        .lr-sheet .lr-tick { color: #cc1111; font-weight: 900; }
+        .lr-sheet .lr-paid-stamp {
+          font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+          font-weight: 900;
+          font-size: 15px;
+          line-height: 1;
+          letter-spacing: 0.14em;
+          color: #cc1111;
+          border: 2px solid #cc1111;
+          border-radius: 3px;
+          padding: 3px 8px 3px 10px;
+          /* Second, offset rule = the stamp's outer frame. */
+          box-shadow: 0 0 0 1.5px #fff, 0 0 0 3.5px #cc1111;
+          transform: rotate(-12deg);
+          opacity: 0.85;
+        }
 
         @media print {
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff !important; }
@@ -163,20 +215,20 @@ export default function LorryReceiptView() {
       {/* Form Bar */}
       <div className="lr-no-print grid grid-cols-2 gap-3 border-b bg-background px-4 py-3 sm:grid-cols-5 sm:items-end">
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold text-[#1a4a99]">G.C. No.</Label>
-          <Input value={gcNo} onChange={(e) => setGcNo(e.target.value)} placeholder="e.g. 55" className="h-8 border-[#1a4a99]/30 focus:border-[#1a4a99]" />
+          <Label className="text-xs font-semibold text-[#1a4a99]">G.C. No. (auto)</Label>
+          <Input value={gcNo} onChange={(e) => setGcNo(e.target.value)} placeholder={assignGc.isPending ? 'Assigning…' : 'e.g. 55'} className="h-8 border-[#1a4a99]/30 focus:border-[#1a4a99]" />
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs font-semibold text-[#1a4a99]">GC Date</Label>
           <Input type="date" value={lrDate} onChange={(e) => setLrDate(e.target.value)} className="h-8 border-[#1a4a99]/30 focus:border-[#1a4a99]" />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold text-[#1a4a99]">Bags</Label>
+          <Label className="text-xs font-semibold text-[#1a4a99]">Bags (auto)</Label>
           <Input type="number" min="0" value={bags} onChange={(e) => setBags(e.target.value)} placeholder="e.g. 600" className="h-8 border-[#1a4a99]/30 focus:border-[#1a4a99]" />
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs font-semibold text-[#1a4a99]">Each Bag (Kgs)</Label>
-          <Input type="number" min="0" value={kgPerBag} onChange={(e) => setKgPerBag(e.target.value)} placeholder="e.g. 50" className="h-8 border-[#1a4a99]/30 focus:border-[#1a4a99]" />
+          <Input type="number" min="0" value={kgPerBag} onChange={(e) => onKgPerBagChange(e.target.value)} placeholder="e.g. 50" className="h-8 border-[#1a4a99]/30 focus:border-[#1a4a99]" />
         </div>
         <Button size="sm" variant="outline" className="h-8 border-[#1a4a99] text-[#1a4a99] hover:bg-[#1a4a99]/5" disabled={save.isPending} onClick={() => save.mutate()}>
           {save.isPending ? 'Saving…' : 'Save Details'}
@@ -340,8 +392,12 @@ export default function LorryReceiptView() {
                 <div className="border-b border-[#1a4a99] py-0.5 text-center text-[10px] font-black uppercase tracking-widest">
                   FREIGHT
                 </div>
+                {/* Freight terms: RVP prepays the lorry, so the consignment always
+                    travels freight-paid - the "Paid" side is ticked on the book. */}
                 <div className="flex text-[9px] font-bold text-center">
-                  <div className="w-1/2 border-r border-[#1a4a99] py-0.5">Paid</div>
+                  <div className="w-1/2 border-r border-[#1a4a99] py-0.5">
+                    Paid <span className="lr-tick text-[11px] leading-none">✓</span>
+                  </div>
                   <div className="w-1/2 py-0.5">To Pay</div>
                 </div>
               </div>
@@ -363,7 +419,6 @@ export default function LorryReceiptView() {
                   Descriptions<br />said to contain
                 </div>
                 <div className="p-1.5 leading-snug flex-1">
-                  <div className="line-through text-[#1a4a99]/60 text-[9px]">FEED</div>
                   <div className="lr-fill text-[11px] font-bold text-[#1a4a99] uppercase">{description}</div>
                 </div>
               </div>
@@ -384,9 +439,16 @@ export default function LorryReceiptView() {
                       <div className="w-2/3 border-r border-[#1a4a99] py-0.5">Rs.</div>
                       <div className="w-1/3 py-0.5">Ps.</div>
                     </div>
-                    <div className="flex flex-1">
+                    {/* The PAID stamp lands across the freight amount box on the
+                        Paid side, where the transporter writes it by hand. */}
+                    <div className="relative flex flex-1">
                       <div className="w-2/3 border-r border-[#1a4a99]" />
                       <div className="w-1/3" />
+                      {col === 'Paid' && (
+                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                          <span className="lr-paid-stamp">PAID</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -6,8 +7,9 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { SaleOrder, CompanyProfile } from '@/lib/types';
+import type { SaleOrder, SaleProduct, CompanyProfile } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
+import { productDescription } from '@/lib/productNames';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Truck, Wallet, Hourglass, MessageCircle, Check, X } from 'lucide-react';
+import { Loader2, Truck, Wallet, Hourglass, MessageCircle, Check, X, FileText } from 'lucide-react';
 
 type TransportTab = 'SURYA' | 'KNM' | 'OTHER';
 
@@ -30,6 +32,15 @@ interface RetentionRow {
   amount: number;
   released: boolean;
   provider: TransportTab;
+  // Lorry receipt (GC note) written for this trip, when one has been issued.
+  product: SaleProduct;
+  weightKg: number;
+  freight: number;
+  driverName: string | null;
+  gcNumber: string | null;
+  gcDate: string | null;
+  bags: number | null;
+  kgPerBag: number | null;
 }
 
 export default function SuryaRoadTransport({ embedded = false }: { embedded?: boolean } = {}) {
@@ -79,6 +90,14 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         amount: retentionAmount(d, provider),
         released: d.status === 'DELIVERED',
         provider,
+        product: o.product,
+        weightKg: d.weightKg,
+        freight: Number(d.freightCharge ?? 0),
+        driverName: d.driverName ?? null,
+        gcNumber: d.lrNumber ?? null,
+        gcDate: d.lrDate ?? null,
+        bags: d.lrBags ?? null,
+        kgPerBag: d.lrKgPerBag ?? null,
       };
     })
     .filter((r) => {
@@ -258,8 +277,137 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
             </Table>
             <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
           </div>
+
+          {/* The GC book itself - every consignment note written on Surya's
+              stationery, in one place. */}
+          {tab === 'SURYA' && <LorryReceiptRegister rows={rows} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Lorry receipt (GC) register - the printed consignment notes for the trips  */
+/* shown above, so the book can be read back without opening each shipment.   */
+/* ------------------------------------------------------------------------- */
+
+function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
+  const navigate = useNavigate();
+  const [issuedOnly, setIssuedOnly] = useState(false);
+
+  const filtered = issuedOnly ? rows.filter((r) => r.gcNumber) : rows;
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
+  const issuedCount = rows.filter((r) => r.gcNumber).length;
+
+  const exportColumns: ExportColumn<RetentionRow>[] = [
+    { header: 'G.C. No', value: (r) => r.gcNumber ?? '' },
+    { header: 'GC Date', value: (r) => (r.gcDate ? shortDate(r.gcDate) : shortDate(r.date)) },
+    { header: 'Lorry No', value: (r) => r.lorryNumber ?? '' },
+    { header: 'Invoice No', value: (r) => r.invoice ?? '' },
+    { header: 'Consignee', value: (r) => r.buyer },
+    { header: 'To', value: (r) => r.destination ?? '' },
+    { header: 'Description', value: (r) => productDescription(r.product) },
+    { header: 'Bags', value: (r) => r.bags ?? '', numFmt: '#,##0', align: 'right' },
+    { header: 'Each Bag (Kgs)', value: (r) => r.kgPerBag ?? '', numFmt: '#,##0', align: 'right' },
+    { header: 'Weight (t)', value: (r) => (r.weightKg / 1000).toFixed(2), excel: (r) => r.weightKg / 1000, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Freight', value: (r) => rupees(r.freight), excel: (r) => r.freight, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Driver', value: (r) => r.driverName ?? '' },
+    { header: 'Status', value: (r) => (r.released ? 'Delivered' : 'In Transit') },
+  ];
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b">
+        <div className="flex items-center gap-2 font-semibold text-sm">
+          <FileText className="h-4 w-4 text-primary" />
+          Lorry Receipts (G.C. Notes)
+          <span className="text-xs font-normal text-muted-foreground">
+            {issuedCount} of {rows.length} trip(s) issued
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Segmented
+            value={issuedOnly ? 'issued' : 'all'}
+            onValueChange={(v) => setIssuedOnly(v === 'issued')}
+            options={[
+              { value: 'all', label: 'All trips' },
+              { value: 'issued', label: 'Issued only' },
+            ]}
+          />
+          <ExportButtons
+            filename="Lorry_Receipts_Surya"
+            title="Lorry Receipts - Surya Road Lines"
+            subtitle={`${filtered.length} receipt(s)`}
+            columns={exportColumns}
+            rows={filtered}
+          />
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>G.C. No</TableHead>
+              <TableHead>GC Date</TableHead>
+              <TableHead>Lorry No</TableHead>
+              <TableHead>Invoice No</TableHead>
+              <TableHead>Consignee</TableHead>
+              <TableHead>To</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead className="text-right">Bags</TableHead>
+              <TableHead className="text-right">Weight</TableHead>
+              <TableHead className="text-right">Freight</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Receipt</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
+                  No lorry receipts match the selected filters.
+                </TableCell>
+              </TableRow>
+            ) : (
+              visible.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-mono text-sm font-bold">
+                    {r.gcNumber ?? <span className="font-sans text-xs font-normal text-muted-foreground">Not issued</span>}
+                  </TableCell>
+                  <TableCell>{shortDate(r.gcDate ?? r.date)}</TableCell>
+                  <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                  <TableCell className="font-semibold">{r.buyer}</TableCell>
+                  <TableCell>{r.destination ?? '-'}</TableCell>
+                  <TableCell className="text-xs">{productDescription(r.product)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums text-sm">
+                    {r.bags != null ? `${r.bags}${r.kgPerBag != null ? ` × ${r.kgPerBag}kg` : ''}` : '-'}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums text-sm">{(r.weightKg / 1000).toFixed(2)} t</TableCell>
+                  <TableCell className="text-right font-semibold">{rupees(r.freight)}</TableCell>
+                  <TableCell>
+                    <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
+                      {r.released ? 'Delivered' : 'In Transit'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1.5 text-xs"
+                      onClick={() => navigate(`/sale-dispatches/${r.id}/lorry-receipt`)}
+                    >
+                      <FileText className="h-3.5 w-3.5" /> {r.gcNumber ? 'Open' : 'Create'}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
   );
 }

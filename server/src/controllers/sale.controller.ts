@@ -105,11 +105,68 @@ export async function getSaleDispatch(req: Request, res: Response) {
   res.json(dispatch);
 }
 
+/** The dispatch shape the lorry-receipt endpoints return (drives the printed GC). */
+const lorryReceiptInclude = { saleOrder: { include: { buyer: true, broker: true } } } as const;
+
+/**
+ * Next number in the GC book. The consignment note runs a single plain serial
+ * (the book is not financial-year scoped), so the next one is simply the highest
+ * issued number + 1. Hand-typed numbers that carry a prefix ("SRL-55") still
+ * count - only their digits are read.
+ */
+async function nextGcNumber(tx: Prisma.TransactionClient): Promise<string> {
+  const issued = await tx.saleDispatch.findMany({
+    where: { lrNumber: { not: null } },
+    select: { lrNumber: true },
+  });
+  const highest = issued.reduce((max, r) => {
+    const digits = String(r.lrNumber).replace(/\D/g, '');
+    const n = digits ? Number(digits) : 0;
+    return n > max ? n : max;
+  }, 0);
+  return String(highest + 1);
+}
+
+/** Goods ship in 50 kg bags, so a lorry's packing follows from its weight. */
+const DEFAULT_KG_PER_BAG = 50;
+
+/**
+ * Assign this shipment its GC number, if it has none. Idempotent - a receipt
+ * that already carries a number (auto-assigned earlier, or typed off the
+ * transporter's book) is returned untouched, so reprints never renumber. The GC
+ * date defaults to the invoice date, falling back to the dispatch date, and the
+ * packing to the dispatched weight in 50 kg bags (30 t = 600 bags).
+ */
+export async function assignLorryReceiptNumber(req: Request, res: Response) {
+  const updated = await prisma.$transaction(async (tx) => {
+    const dispatch = await tx.saleDispatch.findUnique({ where: { id: req.params.id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (dispatch.lrNumber) {
+      return tx.saleDispatch.findUnique({ where: { id: dispatch.id }, include: lorryReceiptInclude });
+    }
+    const kgPerBag = dispatch.lrKgPerBag ?? DEFAULT_KG_PER_BAG;
+    return tx.saleDispatch.update({
+      where: { id: dispatch.id },
+      data: {
+        lrNumber: await nextGcNumber(tx),
+        lrDate: dispatch.lrDate ?? dispatch.invoiceDate ?? dispatch.dispatchDate,
+        lrKgPerBag: kgPerBag,
+        lrBags: dispatch.lrBags ?? (kgPerBag > 0 ? Math.round(dispatch.weightKg / kgPerBag) : null),
+      },
+      include: lorryReceiptInclude,
+    });
+  });
+
+  clearCache('sale-orders');
+  res.json(updated);
+}
+
 /**
  * Save the Surya Road Lines lorry receipt (GC) details typed on the printable
- * copy. The GC number is read off the transporter's physical book, so it can
- * only be captured by hand - persisting it here keeps every reprint identical
- * to the copy that travelled with the lorry.
+ * copy. The GC number is assigned automatically (see assignLorryReceiptNumber)
+ * but stays editable here, so a receipt written into the transporter's physical
+ * book out of order can be corrected to match; persisting it keeps every reprint
+ * identical to the copy that travelled with the lorry.
  */
 export async function saveLorryReceipt(req: Request, res: Response) {
   const body = lorryReceiptSchema.parse(req.body);
@@ -125,7 +182,7 @@ export async function saveLorryReceipt(req: Request, res: Response) {
       lrBags: body.lrBags ?? null,
       lrKgPerBag: body.lrKgPerBag ?? null,
     },
-    include: { saleOrder: { include: { buyer: true, broker: true } } },
+    include: lorryReceiptInclude,
   });
 
   clearCache('sale-orders');

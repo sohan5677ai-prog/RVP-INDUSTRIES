@@ -59,7 +59,10 @@ const PAD_Y = 2.2;
 const QR = mm(38);
 
 /** Goods table column widths, as fractions of the content width. */
-const GOODS_COLS = [0.04, 0.47, 0.09, 0.11, 0.06, 0.05, 0.18];
+const GOODS_COLS = [0.048, 0.462, 0.09, 0.11, 0.06, 0.05, 0.18];
+
+/** Never shrink text below this - past it, wrap instead of becoming unreadable. */
+const FIT_FLOOR = 6.5;
 
 type Align = 'left' | 'right' | 'center';
 interface Opt { bold?: boolean; italic?: boolean; size?: number; align?: Align }
@@ -125,12 +128,11 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     const fit = (t: string, w: number, o?: Opt): Opt => {
       const size = o?.size ?? BASE;
       doc.font(fontFor(o)).fontSize(size);
-      const need = doc.widthOfString(t);
-      return need <= w ? { ...o, size } : { ...o, size: Math.max(5.5, size * (w / need)) };
+      // Explicit \n headers ("Taxable\nValue") must be judged on their widest
+      // line, not on the whole string joined together.
+      const need = Math.max(...t.split('\n').map((s) => doc.widthOfString(s)));
+      return need <= w ? { ...o, size } : { ...o, size: Math.max(FIT_FLOOR, size * (w / need)) };
     };
-    /** Cell text that never overflows its column. */
-    const cellFit = (t: string, x: number, y: number, w: number, o?: Opt) =>
-      cell(t, x, y, w, fit(t, w - PAD_X * 2, o));
 
     /**
      * PDFKit only breaks on whitespace, so an unspaced 64-char IRN would run off
@@ -146,6 +148,22 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       }
       if (cur) out.push(cur);
       return out.join('\n');
+    };
+
+    /**
+     * Shrink to fit, and if the text is so long that shrinking would make it
+     * unreadable, wrap it at the floor size instead. Either way it stays inside
+     * its column - nothing ever crosses a rule.
+     */
+    const fitWrap = (t: string, w: number, o?: Opt): { t: string; o: Opt } => {
+      const opt = fit(t, w, o);
+      return { t: hardWrap(t, w, opt), o: opt };
+    };
+    /** Cell text that never overflows its column. */
+    const cellFit = (t: string, x: number, y: number, w: number, o?: Opt) => {
+      const inner = w - PAD_X * 2;
+      const f = fitWrap(t, inner, o);
+      return txt(f.t, x + PAD_X, y + PAD_Y, inner, f.o);
     };
 
     /** "Label : bold value" with the colons lined up in a column. */
@@ -230,8 +248,13 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     const headerBottom = headerTop + rowH * 8;
 
     const metaCell = (label: string, value: string, x: number, ry: number, w: number, bold?: boolean) => {
-      txt(label, x + PAD_X, ry + PAD_Y, w - PAD_X * 2, { size: CAP });
-      if (value) txt(value, x + PAD_X, ry + PAD_Y + CAP * 1.35, w - PAD_X * 2, { bold });
+      const inner = w - PAD_X * 2;
+      const l = fitWrap(label, inner, { size: CAP });
+      txt(l.t, x + PAD_X, ry + PAD_Y, inner, l.o);
+      if (value) {
+        const v = fitWrap(value, inner, { bold });
+        txt(v.t, x + PAD_X, ry + PAD_Y + CAP * 1.35, inner, v.o);
+      }
     };
 
     const rY = (i: number) => headerTop + rowH * i;
@@ -272,27 +295,27 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 
     const thTop = y;
     const thH = BASE * 1.35 * 2 + PAD_Y * 2;
-    cell('Sl\nNo.', gx[0], thTop, gw[0], { bold: true });
+    cellFit('Sl\nNo.', gx[0], thTop, gw[0], { bold: true });
     const heads: [number, string][] = [
       [1, 'Description of Goods'], [2, 'HSN/SAC'], [3, 'Quantity'], [4, 'Rate'], [5, 'per'], [6, 'Amount'],
     ];
-    for (const [i, t] of heads) cell(t, gx[i], thTop, gw[i], { bold: true, align: 'center' });
+    for (const [i, t] of heads) cellFit(t, gx[i], thTop, gw[i], { bold: true, align: 'center' });
 
     const itemTop = thTop + thH;
     cell('1', gx[0], itemTop, gw[0], { bold: true, align: 'center' });
     cell(data.line.description, gx[1], itemTop, gw[1], { bold: true });
-    cell(data.line.hsn, gx[2], itemTop, gw[2]);
-    cell(qtyStr, gx[3], itemTop, gw[3], { bold: true, align: 'right' });
-    cell(data.line.ratePerKg.toFixed(2), gx[4], itemTop, gw[4], { align: 'right' });
+    cellFit(data.line.hsn, gx[2], itemTop, gw[2]);
+    cellFit(qtyStr, gx[3], itemTop, gw[3], { bold: true, align: 'right' });
+    cellFit(data.line.ratePerKg.toFixed(2), gx[4], itemTop, gw[4], { align: 'right' });
     cell('Kgs', gx[5], itemTop, gw[5]);
-    cell(inr(amount), gx[6], itemTop, gw[6], { bold: true, align: 'right' });
+    cellFit(inr(amount), gx[6], itemTop, gw[6], { bold: true, align: 'right' });
 
     let ty = itemTop + BASE * 1.35 + PAD_Y * 2;
     const taxLine = (label: string, rate: string, amt: number) => {
-      cell(label, gx[1], ty, gw[1], { bold: true, italic: true, align: 'right' });
-      cell(rate, gx[4], ty, gw[4], { align: 'right' });
+      cellFit(label, gx[1], ty, gw[1], { bold: true, italic: true, align: 'right' });
+      cellFit(rate, gx[4], ty, gw[4], { align: 'right' });
       cell('%', gx[5], ty, gw[5]);
-      cell(inr(amt), gx[6], ty, gw[6], { bold: true, align: 'right' });
+      cellFit(inr(amt), gx[6], ty, gw[6], { bold: true, align: 'right' });
       ty += BASE * 1.35 + PAD_Y;
     };
     if (taxed) {
@@ -307,8 +330,8 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     const totTop = ty + mm(3);
     const totH = BASE * 1.35 + PAD_Y * 2;
     cell('Total', gx[0], totTop, gw[0] + gw[1], { bold: true, align: 'right' });
-    cell(qtyStr, gx[3], totTop, gw[3], { bold: true, align: 'right' });
-    cell(`Rs. ${inr(total)}`, gx[6], totTop, gw[6], { bold: true, align: 'right' });
+    cellFit(qtyStr, gx[3], totTop, gw[3], { bold: true, align: 'right' });
+    cellFit(`Rs. ${inr(total)}`, gx[6], totTop, gw[6], { bold: true, align: 'right' });
     const goodsBottom = totTop + totH;
 
     doc.rect(LEFT, thTop, W, goodsBottom - thTop).stroke();
@@ -342,8 +365,13 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 
     const sPadY = 1;
     const sRowH = TIGHT * 1.35 + sPadY * 2;
-    const sCell = (t: string, i: number, ry: number, o?: Opt, spanTo = i) =>
-      txt(t, sx[i] + PAD_X, ry + sPadY, sx[spanTo] + sw[spanTo] - sx[i] - PAD_X * 2, { size: TIGHT, ...o });
+    // Every cell here is a short token, so shrink-to-fit rather than let a
+    // 7-digit taxable value run over the column rule.
+    const sCell = (t: string, i: number, ry: number, o?: Opt, spanTo = i) => {
+      const w = sx[spanTo] + sw[spanTo] - sx[i] - PAD_X * 2;
+      const f = fitWrap(t, w, { size: TIGHT, ...o });
+      return txt(f.t, sx[i] + PAD_X, ry + sPadY, w, f.o);
+    };
 
     const sTop = y;
     const sHeadMid = sTop + sRowH;

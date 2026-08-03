@@ -454,8 +454,10 @@ export async function sendLocationWhatsAppTemplate(
     try {
       const parsed = JSON.parse(text);
       providerId = parsed.messages?.[0]?.id ?? parsed.request_id ?? undefined;
-      if (!res.ok || parsed.error) {
-        const error = parsed.error?.message ?? `Fast2SMS error ${res.status}`;
+      if (!res.ok || parsed.error || parsed.status === false) {
+        // Meta passthrough errors nest under `error.message`; Fast2SMS's own
+        // rejections (e.g. "Template not found.") are a flat {status, message}.
+        const error = parsed.error?.message ?? parsed.message ?? `Fast2SMS error ${res.status}`;
         await log(logArgs, 'FAILED', { phone: targetNumber, error: text.slice(0, 500) });
         return { ok: false, error };
       }

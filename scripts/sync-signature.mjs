@@ -1,10 +1,11 @@
-// Mirrors the authorised-signature artwork from client/public into
-// server/src/assets, so the browser-printed documents and the PDFKit-drawn
-// ones (tax invoice, purchase verification statement) carry the same mark.
+// Mirrors the authorised-signature artwork (plus the lorry-receipt masthead
+// emblems) from client/public into server/src/assets, so the browser-printed
+// documents and the PDFKit-drawn ones (tax invoice, purchase verification
+// statement, lorry receipt) carry the same marks.
 //
 //   npm run sync:signature
 //
-// Run it again whenever either PNG is replaced.
+// Run it again whenever any of these PNGs is replaced.
 
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -13,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FROM = path.join(ROOT, 'client', 'public');
 const TO = path.join(ROOT, 'server', 'src', 'assets');
-const FILES = ['authorised-sign.png', 'company-stamp.png'];
+const FILES = ['authorised-sign.png', 'company-stamp.png', 'ganesha.png', 'balaji.png'];
 
 mkdirSync(TO, { recursive: true });
 

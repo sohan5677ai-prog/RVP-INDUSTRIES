@@ -6,9 +6,12 @@ import { buildInvoicePdfData } from './saleDocumentEmail.service.js';
 import { TaxproService } from './taxpro.service.js';
 import { renderInvoicePdf } from '../lib/invoicePdf.js';
 import { renderEwbPdf } from '../lib/ewbPdf.js';
+import { renderLorryReceiptPdf } from '../lib/lorryReceiptPdf.js';
 import { qrPngBuffer } from '../lib/qrcode.js';
 import { mergePdfs } from '../lib/pdfMerge.js';
 import { uploadFileToStorage } from '../lib/upload.js';
+import { ensureLorryReceiptAssigned } from '../controllers/sale.controller.js';
+import { clearCache } from '../lib/cache.js';
 
 /** One recipient's outcome, plus why it didn't land when it didn't. */
 export type DispatchWhatsAppLeg = {
@@ -122,13 +125,54 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
       `Save the distance on the E-Way Bill page, then send the bundle again.`,
     );
   }
-  let buffer = invoiceBuffer;
-  let filename = `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
+  const pages = [invoiceBuffer];
+  const parts = ['Invoice'];
   if (hasEwb) {
     const ewbBuffer = await renderBundleEwbPdf(dispatch, order, company, pdfData);
-    buffer = await mergePdfs([invoiceBuffer, ewbBuffer]);
-    filename = `Invoice-EWB-${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
+    pages.push(ewbBuffer);
+    parts.push('EWB');
   }
+  // Page 3, for buyers switched on for it in Parties: the Surya Road Lines lorry
+  // receipt (GC note). Assigning the GC number here (idempotent - a shipment
+  // that already has one keeps it) is what "generates" the lorry receipt as
+  // part of raising the invoice, same as the IRN/EWB above.
+  if (order.buyer.lorryReceiptEnabled) {
+    const lrDispatch = await ensureLorryReceiptAssigned(dispatch.id);
+    clearCache('sale-orders');
+    if (lrDispatch?.lrNumber) {
+      const lrBuffer = await renderLorryReceiptPdf({
+        company: {
+          name: company.name,
+          address: company.address,
+          dispatchFromPlace: company.dispatchFromPlace,
+          stateName: company.stateName,
+        },
+        buyer: {
+          name: order.buyer.name,
+          address: order.buyer.address,
+          city: order.buyer.city,
+          state: order.buyer.state,
+          pincode: order.buyer.pincode,
+        },
+        destination: order.destination,
+        product: order.product,
+        invoiceNumber: dispatch.invoiceNumber,
+        vehicleNumber: dispatch.vehicleNumber,
+        driverName: dispatch.driverName,
+        weightKg: dispatch.weightKg,
+        gcNo: lrDispatch.lrNumber,
+        gcDate: lrDispatch.lrDate ?? dispatch.invoiceDate ?? dispatch.dispatchDate,
+        bags: lrDispatch.lrBags,
+        kgPerBag: lrDispatch.lrKgPerBag,
+      });
+      pages.push(lrBuffer);
+      parts.push('LR');
+    }
+  }
+  const buffer = pages.length > 1 ? await mergePdfs(pages) : pages[0];
+  const filename = parts.length > 1
+    ? `${parts.join('-')}-${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`
+    : `${dispatch.invoiceNumber!.replace(/\//g, '-')}.pdf`;
   // Park the (combined) PDF in Supabase Storage so Fast2SMS can fetch it as the
   // template's document header.
   const documentUrl = await uploadFileToStorage({

@@ -1181,7 +1181,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 </Button>
                                               </>
                                             )}
-                                            {/* WhatsApp bundle: invoice PDF + EWB + driver → broker/buyer, buyer details → driver */}
+                                            {/* WhatsApp bundle: invoice PDF + EWB (+ lorry receipt, for buyers switched on
+                                                for it) → broker/buyer, buyer details → driver */}
                                             <Button
                                               size="sm"
                                               className="bg-[#00a884] hover:bg-[#008f70] text-white border-none rounded-full px-3.5 font-medium shadow-xs"

@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { productDescription } from '@/lib/productNames';
-import AuthorisedSignature from '@/components/AuthorisedSignature';
 
 /* -------------------------------------------------------------------------- */
 /* Surya Road Lines' printed stationery fixed details                       */
@@ -545,12 +544,13 @@ export default function LorryReceiptView() {
                     <span className="underline">Note :</span> WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.
                   </div>
                 </div>
+                {/* No stamp/signature image here - unlike the tax invoice, this
+                    document carries no company seal; it is signed by hand (or a
+                    lorry-receipt-specific mark can be dropped in here later). */}
                 <div className="w-[30%] pt-1 text-[11px]">
                   <div className="text-right font-bold">For Surya Road Lines</div>
-                  <AuthorisedSignature
-                    caption={null}
-                    style={{ marginTop: 2 }}
-                  />
+                  <div className="mt-6 border-t border-[#1a4a99]/60" />
+                  <div className="text-right text-[9px] mt-0.5">Authorised Signatory</div>
                 </div>
               </div>
 

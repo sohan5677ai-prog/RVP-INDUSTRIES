@@ -138,12 +138,15 @@ const DEFAULT_KG_PER_BAG = 50;
  * packing to the dispatched weight in 50 kg bags (30 t = 600 bags).
  *
  * Only buyers whose party record has the lorry receipt switched on get one, so a
- * number is never burnt on a shipment that ships without a GC note.
+ * number is never burnt on a shipment that ships without a GC note. Shared by
+ * the `/lorry-receipt/assign` route (opening the printable page) and the
+ * WhatsApp dispatch bundle (dispatchWhatsapp.service.ts), which needs the same
+ * number issued before it can render the GC page as the bundle's third PDF page.
  */
-export async function assignLorryReceiptNumber(req: Request, res: Response) {
-  const updated = await prisma.$transaction(async (tx) => {
+export async function ensureLorryReceiptAssigned(dispatchId: string) {
+  return prisma.$transaction(async (tx) => {
     const dispatch = await tx.saleDispatch.findUnique({
-      where: { id: req.params.id },
+      where: { id: dispatchId },
       include: { saleOrder: { select: { buyer: { select: { name: true, lorryReceiptEnabled: true } } } } },
     });
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
@@ -169,7 +172,10 @@ export async function assignLorryReceiptNumber(req: Request, res: Response) {
       include: lorryReceiptInclude,
     });
   });
+}
 
+export async function assignLorryReceiptNumber(req: Request, res: Response) {
+  const updated = await ensureLorryReceiptAssigned(req.params.id);
   clearCache('sale-orders');
   res.json(updated);
 }

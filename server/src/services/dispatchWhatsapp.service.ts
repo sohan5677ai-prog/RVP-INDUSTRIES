@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
+import { HttpError } from '../lib/httpError.js';
 import { whatsappService, resolveInternalCopyRecipients } from './whatsapp.service.js';
 import { buildInvoicePdfData } from './saleDocumentEmail.service.js';
 import { TaxproService } from './taxpro.service.js';
@@ -276,4 +277,30 @@ async function driverLegFromLog(dispatchId: string, driverPhone: string | null):
   }
   if (row.status === 'SENT') return { status: 'sent', error: null };
   return { status: row.status === 'SKIPPED' ? 'skipped' : 'failed', error: row.errorMessage ?? null };
+}
+
+/**
+ * Re-fire just the driver leg for an existing dispatch - used by the "Resend
+ * to driver" button and for testing the Location-header send (see
+ * whatsapp.service.ts notifyDispatchDriver) against Settings -> WhatsApp's
+ * test number without creating a new dispatch. Safe to call repeatedly: it
+ * only sends and logs, no business state changes.
+ */
+export async function resendDispatchDriverWhatsApp(dispatchId: string): Promise<DispatchWhatsAppLeg> {
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: dispatchId },
+    include: { saleOrder: { include: { buyer: true } } },
+  });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+  if (!dispatch.driverPhone) throw new HttpError(400, 'This dispatch has no driver phone on file');
+
+  const buyer = dispatch.saleOrder.buyer;
+  const result = await whatsappService.notifyDispatchDriver(
+    { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
+    { name: buyer.name, phone: buyer.phone, locationLink: buyer.locationLink, address: buyer.address, city: buyer.city },
+  );
+  return {
+    status: result?.ok ? 'sent' : result?.skipped ? 'skipped' : 'failed',
+    error: result?.ok ? null : result?.error ?? null,
+  };
 }

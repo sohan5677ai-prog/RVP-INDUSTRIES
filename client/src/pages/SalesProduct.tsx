@@ -761,6 +761,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  // Re-send just the driver's message - normally fires once at dispatch creation.
+  // Also doubles as the way to test a template fix against Settings -> WhatsApp's
+  // test number without creating a new dispatch.
+  const resendDriverWhatsAppMutation = useMutation({
+    mutationFn: (id: string) =>
+      api<WhatsAppLegResult>(`/whatsapp/dispatches/${id}/resend-driver`, { method: 'POST' }),
+    onSuccess: (r) => {
+      if (r.status === 'sent') toast.success('Driver message sent');
+      else toast.error(`Driver message ${r.status}${r.error ? ` - ${r.error}` : ''}`);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   function openEwb(dispatch: SaleDispatch, order: SaleOrder) {
     setEwbDispatch({ dispatch, order });
     setTransporterId('');
@@ -1179,6 +1192,20 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 ? <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
                                                 : <WhatsAppIcon className="h-3.5 w-3.5 text-white fill-current" />} WhatsApp
                                             </Button>
+                                            {d.driverPhone && (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-[#00a884]/40 text-[#00a884] hover:bg-[#00a884]/10 rounded-full px-3.5 font-medium"
+                                                title="Re-send the lorry/location message to the driver (also lands on the Settings -> WhatsApp test number, if test mode is on)"
+                                                disabled={resendDriverWhatsAppMutation.isPending}
+                                                onClick={() => resendDriverWhatsAppMutation.mutate(d.id)}
+                                              >
+                                                {resendDriverWhatsAppMutation.isPending
+                                                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                  : <WhatsAppIcon className="h-3.5 w-3.5 fill-current" />} Resend driver
+                                              </Button>
+                                            )}
                                           </>
                                         ) : (
                                           <Button size="sm" variant="outline" onClick={() => openInvoice(d, o)}>

@@ -7,6 +7,7 @@ import {
   confirmTransportConfirmation,
   dismissTransportConfirmation,
   sendDispatchWhatsApp,
+  resendDriverWhatsApp,
 } from '../controllers/whatsapp.controller.js';
 
 const router = Router();
@@ -23,5 +24,7 @@ router.post('/whatsapp/transport-confirmations/:id/dismiss', asyncHandler(dismis
 
 // Invoice + EWB + driver bundle to the broker/buyer, and buyer details to the driver.
 router.post('/whatsapp/dispatches/:id/send', asyncHandler(sendDispatchWhatsApp));
+// Re-send just the driver's message (normally fires once, at dispatch creation).
+router.post('/whatsapp/dispatches/:id/resend-driver', asyncHandler(resendDriverWhatsApp));
 
 export default router;

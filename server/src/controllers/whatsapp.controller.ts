@@ -4,7 +4,7 @@ import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { whatsappService, normalizeWhatsAppNumber } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText } from '../lib/gemini.js';
-import { sendDispatchBundleWhatsApp } from '../services/dispatchWhatsapp.service.js';
+import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 
 // ---------------------------------------------------------------------------
@@ -407,4 +407,14 @@ export async function dismissTransportConfirmation(req: Request, res: Response) 
  */
 export async function sendDispatchWhatsApp(req: Request, res: Response) {
   res.json(await sendDispatchBundleWhatsApp(req.params.id));
+}
+
+/**
+ * Re-send just the driver's message for a dispatch - normally only fired once,
+ * at dispatch creation. Useful when a driver lost the message, and to verify a
+ * template fix against Settings -> WhatsApp's test number without creating a
+ * new dispatch.
+ */
+export async function resendDriverWhatsApp(req: Request, res: Response) {
+  res.json(await resendDispatchDriverWhatsApp(req.params.id));
 }

@@ -708,7 +708,13 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // (the invoice/EWB don't exist yet at dispatch time).
   void whatsappService.notifyDispatchDriver(
     { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
-    { name: order.buyer.name, phone: order.buyer.phone, locationLink: order.buyer.locationLink }
+    {
+      name: order.buyer.name,
+      phone: order.buyer.phone,
+      locationLink: order.buyer.locationLink,
+      address: order.buyer.address,
+      city: order.buyer.city,
+    }
   );
 
   res.status(201).json(dispatch);

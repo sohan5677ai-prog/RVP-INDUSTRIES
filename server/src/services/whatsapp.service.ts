@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { istCalendar } from '../lib/istDate.js';
+import { resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -17,13 +18,21 @@ import { istCalendar } from '../lib/istDate.js';
  *
  * Env:
  *  - FAST2SMS_API_KEY          Fast2SMS Dev API key (Authorization header)
- *  - FAST2SMS_PHONE_NUMBER_ID  (optional) Fast2SMS phone-number id; omit to use the
- *                              account's connected number. Do NOT put a Meta
+ *  - FAST2SMS_PHONE_NUMBER_ID  Fast2SMS phone-number id; optional for the simple
+ *                              GET send (omit to use the account's connected
+ *                              number) but REQUIRED for location-header templates
+ *                              (DISPATCH_DRIVER), which go over the separate
+ *                              Meta-format POST endpoint. Do NOT put a Meta
  *                              phone-number-id here - Fast2SMS rejects it.
  *  - WHATSAPP_ENABLED          'true' to send at all (default off, like SLACK_ENABLED)
  *  - WHATSAPP_TEST_MODE        anything but 'false' reroutes to the test number
  *  - WHATSAPP_TEST_NUMBER      where test-mode messages land (owner's phone)
  *  - FAST2SMS_TMPL_<KEY>       numeric Fast2SMS message_id per approved template
+ *                              (used by the simple GET send)
+ *  - FAST2SMS_TMPL_NAME_<KEY>  the template's approved NAME (e.g. rvp_dispatch_driver),
+ *                              needed only for templates sent via the Meta-format
+ *                              POST endpoint (location headers can't use a numeric
+ *                              message_id - Meta's template API wants the name)
  */
 
 const FAST2SMS_URL = 'https://www.fast2sms.com/dev/whatsapp';
@@ -38,7 +47,7 @@ export type WaTemplateKey =
   | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
-  | 'DISPATCH_DRIVER' // rvp_dispatch_driver: lorry, party, phone, maps link
+  | 'DISPATCH_DRIVER' // rvp_dispatch_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // rvp_payment_reminder: buyer, amount, overdue invoice list
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
@@ -53,6 +62,16 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
 
 function templateId(key: WaTemplateKey): string | undefined {
   return process.env[`FAST2SMS_TMPL_${key}`]?.trim() || DEFAULT_TEMPLATE_IDS[key] || undefined;
+}
+
+// Templates sent over the Meta-format POST endpoint (location headers) are
+// addressed by their approved NAME, not the numeric message_id above.
+const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
+  DISPATCH_DRIVER: 'rvp_dispatch_driver',
+};
+
+function templateName(key: WaTemplateKey): string | undefined {
+  return process.env[`FAST2SMS_TMPL_NAME_${key}`]?.trim() || DEFAULT_TEMPLATE_NAMES[key] || undefined;
 }
 
 /**
@@ -331,6 +350,133 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
   return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error ?? 'Send failed' };
 }
 
+interface LocationSendArgs {
+  templateKey: WaTemplateKey;
+  to: string | null | undefined;
+  location: { lat: number; lng: number; name: string; address: string };
+  variables: Array<string | number | null | undefined>;
+  relatedType?: string;
+  relatedId?: string;
+}
+
+/**
+ * Send an approved template whose header is a WhatsApp Location component
+ * (currently only DISPATCH_DRIVER). Fast2SMS's simple `variables_values` GET
+ * send has no way to populate a Location header - Meta only accepts it
+ * through the raw Cloud-API-shaped POST endpoint, addressed by the template's
+ * NAME (not the numeric message_id) - hence the separate function.
+ * Never throws - same SENT/FAILED/SKIPPED contract as sendWhatsAppTemplate.
+ */
+export async function sendLocationWhatsAppTemplate(
+  args: LocationSendArgs,
+): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  // Logged in the same shape as the simple send so WhatsAppLog rows read alike.
+  const logArgs: SendArgs = {
+    templateKey: args.templateKey,
+    to: args.to,
+    variables: args.variables,
+    relatedType: args.relatedType,
+    relatedId: args.relatedId,
+  };
+
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  const phoneNumberId = process.env.FAST2SMS_PHONE_NUMBER_ID;
+  const enabled = process.env.WHATSAPP_ENABLED === 'true';
+  const { testMode, testNumber } = await resolveWhatsAppMode();
+
+  if (!enabled) {
+    await log(logArgs, 'SKIPPED', { error: 'WHATSAPP_ENABLED is not true' });
+    return { ok: false, skipped: true, error: 'WhatsApp sending is disabled (WHATSAPP_ENABLED)' };
+  }
+  if (!apiKey) {
+    await log(logArgs, 'SKIPPED', { error: 'FAST2SMS_API_KEY not configured' });
+    return { ok: false, skipped: true, error: 'Fast2SMS API key is not configured' };
+  }
+  if (!phoneNumberId) {
+    await log(logArgs, 'SKIPPED', { error: 'FAST2SMS_PHONE_NUMBER_ID not configured - required for location-header templates' });
+    return { ok: false, skipped: true, error: 'FAST2SMS_PHONE_NUMBER_ID is not configured (required for location templates)' };
+  }
+  const name = templateName(args.templateKey);
+  if (!name) {
+    await log(logArgs, 'SKIPPED', { error: `FAST2SMS_TMPL_NAME_${args.templateKey} is not configured` });
+    return { ok: false, skipped: true, error: `Template name for ${args.templateKey} is not configured` };
+  }
+
+  const realNumber = normalizeWhatsAppNumber(args.to);
+  const targetNumber = testMode ? normalizeWhatsAppNumber(testNumber) : realNumber;
+  if (!targetNumber) {
+    const error = testMode
+      ? 'WHATSAPP_TEST_NUMBER is missing/invalid (test mode is on)'
+      : `Recipient phone "${args.to ?? ''}" is missing or not a valid Indian mobile`;
+    await log(logArgs, 'FAILED', { phone: realNumber, error });
+    return { ok: false, error };
+  }
+
+  const body = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: targetNumber,
+    type: 'template',
+    template: {
+      name,
+      language: { code: 'en' },
+      components: [
+        {
+          type: 'header',
+          parameters: [
+            {
+              type: 'location',
+              location: {
+                latitude: args.location.lat,
+                longitude: args.location.lng,
+                name: cleanVar(args.location.name),
+                address: cleanVar(args.location.address),
+              },
+            },
+          ],
+        },
+        {
+          type: 'body',
+          parameters: args.variables.map((v) => ({ type: 'text', text: cleanVar(v) })),
+        },
+      ],
+    },
+  };
+
+  try {
+    const res = await fetch(`${FAST2SMS_URL}/v24.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let providerId: string | undefined;
+    try {
+      const parsed = JSON.parse(text);
+      providerId = parsed.messages?.[0]?.id ?? parsed.request_id ?? undefined;
+      if (!res.ok || parsed.error) {
+        const error = parsed.error?.message ?? `Fast2SMS error ${res.status}`;
+        await log(logArgs, 'FAILED', { phone: targetNumber, error: text.slice(0, 500) });
+        return { ok: false, error };
+      }
+    } catch {
+      if (!res.ok) {
+        await log(logArgs, 'FAILED', { phone: targetNumber, error: `HTTP ${res.status}: ${text.slice(0, 500)}` });
+        return { ok: false, error: `Fast2SMS error ${res.status}` };
+      }
+      /* plain-text success body */
+    }
+    await log(logArgs, 'SENT', { phone: targetNumber, providerId });
+    logger.info(`[whatsapp] ${args.templateKey} (location) sent to ${targetNumber}${testMode ? ' (test mode)' : ''}`);
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await log(logArgs, 'FAILED', { phone: targetNumber, error: msg });
+    logger.error(`[whatsapp] ${args.templateKey} (location) send failed: ${msg}`);
+    return { ok: false, error: msg };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Trigger helpers - one per business event. All fire-and-forget safe.
 // ---------------------------------------------------------------------------
@@ -454,13 +600,42 @@ export const whatsappService = {
     );
   },
 
-  /** Dispatch → driver gets the buyer's name, phone and maps link. Returns null when no driver phone. */
-  async notifyDispatchDriver(dispatch: { id: string; vehicleNumber: string | null; driverPhone: string | null }, buyer: { name: string; phone: string | null; locationLink: string | null }) {
+  /**
+   * Dispatch → driver gets the buyer's name, phone and maps link, plus a real
+   * Location header (the approved template requires one) resolved from the
+   * buyer's saved Google Maps link. Returns null when no driver phone.
+   */
+  async notifyDispatchDriver(
+    dispatch: { id: string; vehicleNumber: string | null; driverPhone: string | null },
+    buyer: { name: string; phone: string | null; locationLink: string | null; address?: string | null; city?: string | null },
+  ) {
     if (!dispatch.driverPhone) return null; // no driver captured - nothing to send
-    return sendWhatsAppTemplate({
+    const variables = [dispatch.vehicleNumber ?? '-', buyer.name, buyer.phone ?? '-', buyer.locationLink ?? '-'];
+
+    const point = await resolveLatLngFromMapsLink(buyer.locationLink);
+    if (!point) {
+      // The template's header is mandatory - without coordinates Meta rejects the
+      // whole send (error 132012), so fail loudly here instead of attempting it.
+      const error = buyer.locationLink
+        ? `Could not resolve GPS coordinates from the buyer's saved maps link (${buyer.locationLink})`
+        : `${buyer.name} has no maps link saved - the driver template needs a Location header`;
+      await log({ templateKey: 'DISPATCH_DRIVER', to: dispatch.driverPhone, variables, relatedType: 'DISPATCH', relatedId: dispatch.id }, 'FAILED', {
+        phone: dispatch.driverPhone,
+        error,
+      });
+      return { ok: false, error };
+    }
+
+    return sendLocationWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
-      variables: [dispatch.vehicleNumber ?? '-', buyer.name, buyer.phone ?? '-', buyer.locationLink ?? '-'],
+      location: {
+        lat: point.lat,
+        lng: point.lng,
+        name: buyer.name,
+        address: [buyer.address, buyer.city].filter(Boolean).join(', ') || buyer.name,
+      },
+      variables,
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,
     });

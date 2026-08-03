@@ -591,6 +591,10 @@ interface TransportConfirmationDraft {
 function TransportConfirmationDrafts({ saleOrders }: { saleOrders: SaleOrder[] }) {
   const qc = useQueryClient();
   const [linkTarget, setLinkTarget] = useState<Record<string, string>>({});
+  // Freight is editable before confirming: it overwrites what we owe the
+  // transporter and what the Pappu P&L charges the order, so a misread figure
+  // must be correctable without going to the dispatch.
+  const [freightEdit, setFreightEdit] = useState<Record<string, string>>({});
 
   const { data: drafts } = useQuery({
     queryKey: ['transport-confirmations'],
@@ -604,14 +608,19 @@ function TransportConfirmationDrafts({ saleOrders }: { saleOrders: SaleOrder[] }
     .sort((a, b) => new Date(b.d.dispatchDate).getTime() - new Date(a.d.dispatchDate).getTime());
 
   const confirmMutation = useMutation({
-    mutationFn: ({ id, saleDispatchId }: { id: string; saleDispatchId?: string }) =>
+    mutationFn: ({ id, saleDispatchId, freightAmount }: { id: string; saleDispatchId?: string; freightAmount?: number }) =>
       api(`/whatsapp/transport-confirmations/${id}/confirm`, {
         method: 'POST',
-        body: saleDispatchId ? { saleDispatchId } : {},
+        body: {
+          ...(saleDispatchId ? { saleDispatchId } : {}),
+          ...(freightAmount != null ? { freightAmount } : {}),
+        },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transport-confirmations'] });
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      // The applied freight moves this order's margin on the Pappu P&L.
+      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
       toast.success('Confirmation applied');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -641,6 +650,12 @@ function TransportConfirmationDrafts({ saleOrders }: { saleOrders: SaleOrder[] }
             ({ d }) => c.lorryNumber && d.vehicleNumber?.replace(/\s+/g, '').toUpperCase() === c.lorryNumber
           );
           const selected = linkTarget[c.id] ?? matched?.d.id ?? 'NONE';
+          const freightValue = freightEdit[c.id] ?? (c.freightAmount != null ? String(c.freightAmount) : '');
+          const freightNum = freightValue.trim() === '' ? null : Number(freightValue);
+          const perTonne =
+            freightNum != null && Number.isFinite(freightNum) && c.tonnageKg
+              ? Math.round((freightNum / (c.tonnageKg / 1000)) * 100) / 100
+              : null;
           return (
             <div key={c.id} className="p-4 space-y-2.5">
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -651,9 +666,23 @@ function TransportConfirmationDrafts({ saleOrders }: { saleOrders: SaleOrder[] }
                 {c.tonnageKg != null && <span>{(c.tonnageKg / 1000).toFixed(1)} t</span>}
                 {c.driverName && <span>Driver: <span className="font-medium">{c.driverName}</span></span>}
                 {c.driverPhone && <span className="font-mono">{c.driverPhone}</span>}
-                {c.freightAmount != null && <span>Freight: {rupees(c.freightAmount)}</span>}
               </div>
               <p className="text-xs text-muted-foreground italic line-clamp-2">"{c.rawText}"</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Label className="text-xs text-muted-foreground">Lorry freight ₹</Label>
+                <Input
+                  type="number"
+                  className="h-8 w-32 text-xs bg-card"
+                  placeholder="not read"
+                  value={freightValue}
+                  onChange={(e) => setFreightEdit((s) => ({ ...s, [c.id]: e.target.value }))}
+                />
+                {/* Per-tonne readout: the quickest way to spot a figure that was
+                    read on the wrong basis, since these routes run ~2,000-3,000/t. */}
+                {perTonne != null && (
+                  <span className="text-xs text-muted-foreground">= {rupees(perTonne)}/tonne</span>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select
                   value={selected}
@@ -679,6 +708,10 @@ function TransportConfirmationDrafts({ saleOrders }: { saleOrders: SaleOrder[] }
                     confirmMutation.mutate({
                       id: c.id,
                       saleDispatchId: selected !== 'NONE' ? selected : undefined,
+                      freightAmount:
+                        freightNum != null && Number.isFinite(freightNum) && freightNum >= 0
+                          ? freightNum
+                          : undefined,
                     })
                   }
                 >

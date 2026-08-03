@@ -54,9 +54,36 @@ function extractInbound(body: unknown): { from: string | null; text: string | nu
   return { from, text };
 }
 
+/** Fast2SMS's `message_id` (a Meta `wamid.…`), used to drop retried deliveries. */
+function extractMessageId(body: unknown): string | null {
+  const r = asRecord(body);
+  if (!r) return null;
+  for (const key of ['message_id', 'messageId', 'request_id', 'requestId']) {
+    const v = r[key];
+    if ((typeof v === 'string' || typeof v === 'number') && String(v).trim()) return String(v).trim();
+  }
+  return null;
+}
+
 /** Async post-processing after the webhook has been acknowledged. */
 async function processInboundEvent(rawBody: unknown) {
   const { from, text } = extractInbound(rawBody);
+
+  // Fast2SMS retries a webhook up to 3 times, 60s apart, whenever our response
+  // wasn't a 2xx - so the same message can legitimately arrive more than once.
+  // Without this, one retried transporter message becomes two DRAFT rows, and
+  // confirming both would apply the freight twice.
+  const messageId = extractMessageId(rawBody);
+  if (messageId) {
+    const seen = await prisma.whatsAppLog.findFirst({
+      where: { direction: 'INBOUND', providerId: messageId },
+      select: { id: true },
+    });
+    if (seen) {
+      logger.info(`[whatsapp] duplicate inbound ${messageId} ignored (log ${seen.id})`);
+      return;
+    }
+  }
 
   const logRow = await prisma.whatsAppLog.create({
     data: {
@@ -64,6 +91,7 @@ async function processInboundEvent(rawBody: unknown) {
       phone: from,
       body: text ?? JSON.stringify(rawBody).slice(0, 4000),
       status: 'RECEIVED',
+      providerId: messageId,
     },
   });
 
@@ -246,8 +274,27 @@ async function applyStatusEvent(ev: StatusEvent) {
   logger.error(`[whatsapp] ${row.template ?? 'message'} to ${row.phone} - ${reason}`);
 }
 
-/** Fast2SMS event receiver. Acknowledge immediately; parse in the background. */
+/**
+ * Fast2SMS event receiver. Acknowledge immediately; parse in the background.
+ *
+ * The URL is public (Fast2SMS can't send a JWT), so when
+ * FAST2SMS_WEBHOOK_SECRET is set we require it back on every call - otherwise
+ * anyone who learns the URL can post fabricated transporter messages and get
+ * freight drafts queued for confirmation. Unset = accept everything, so an
+ * un-configured deploy keeps working.
+ */
 export async function handleWhatsAppWebhook(req: Request, res: Response) {
+  const secret = process.env.FAST2SMS_WEBHOOK_SECRET?.trim();
+  if (secret) {
+    const provided = req.header('webhook_secret_key') || req.header('x-webhook-secret');
+    if (provided?.trim() !== secret) {
+      logger.warn('[whatsapp] webhook rejected - bad or missing webhook_secret_key');
+      // 401, not 200: a wrong secret is a real misconfiguration, and Fast2SMS
+      // retrying makes it visible rather than silently dropping every event.
+      res.status(401).json({ error: 'Invalid webhook secret' });
+      return;
+    }
+  }
   res.json({ received: true });
   processWebhookEvent(req.body).catch((err) => {
     logger.error('[whatsapp] webhook processing failed', err);
@@ -255,14 +302,45 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
 }
 
 /**
- * Status callbacks and inbound messages arrive on the same endpoint. Statuses
- * must be handled first and must NOT fall through to the inbound path, which
- * would file every delivery receipt as a "received message" and send it to Gemini.
+ * Status callbacks and inbound messages arrive on the same endpoint.
+ *
+ * Fast2SMS labels which is which in `webhook_type` (`incoming_message` vs
+ * `status_update`), so trust that field above everything else. This matters
+ * because a webhook registered for `event: "all"` renders ONE payload template
+ * for both kinds: an inbound message arrives carrying `status: "received"`, and
+ * the shape-sniffing fallback below would read it as a delivery receipt, find
+ * "received" in neither DELIVERY_OK nor DELIVERY_FAILED, log "unrecognised
+ * status" and DROP the message - no draft, no freight, silently.
+ *
+ * The sniffing path is kept only for payloads that omit the field.
  */
 async function processWebhookEvent(rawBody: unknown) {
+  const kind = asRecord(rawBody)?.webhook_type;
+  const declared = typeof kind === 'string' ? kind.toLowerCase().trim() : null;
+
+  if (declared === 'incoming_message') {
+    await processInboundEvent(rawBody);
+    return;
+  }
+  if (declared !== 'status_update') {
+    // No/unknown label: a payload whose status is literally "received" is an
+    // inbound message however it is shaped.
+    const status = asRecord(rawBody)?.status;
+    if (typeof status === 'string' && status.toLowerCase().trim() === 'received') {
+      await processInboundEvent(rawBody);
+      return;
+    }
+  }
+
   const statuses = extractStatusEvents(rawBody);
   if (statuses.length > 0) {
     for (const ev of statuses) await applyStatusEvent(ev);
+    return;
+  }
+  // Declared a status update but nothing readable in it - don't hand a delivery
+  // receipt to Gemini as if it were a transporter's message.
+  if (declared === 'status_update') {
+    logger.warn('[whatsapp] status_update with no readable status entry');
     return;
   }
   await processInboundEvent(rawBody);
@@ -360,11 +438,30 @@ export async function listTransportConfirmations(req: Request, res: Response) {
 /**
  * Confirm a draft. When a saleDispatchId is supplied, copy the driver (and the
  * lorry number, if the dispatch doesn't have one yet) onto that dispatch.
+ *
+ * The freight OVERWRITES the dispatch's freightCharge, which was seeded at
+ * dispatch time from the Settings per-destination rate. That rate is an estimate
+ * for planning; the transporter's message is what we actually owe, so it becomes
+ * the single figure behind Freight Dues, the Surya retention ledger and the
+ * Pappu P&L. The Order Planner still projects on the Settings rate - it has no
+ * dispatch to read a real number from.
+ *
+ * `freightAmount` may be overridden in the request body when the parsed figure
+ * needs correcting from the review card.
  */
 export async function confirmTransportConfirmation(req: Request, res: Response) {
   const draft = await prisma.transportConfirmation.findUnique({ where: { id: req.params.id } });
   if (!draft) throw new HttpError(404, 'Transport confirmation not found');
   if (draft.status !== 'DRAFT') throw new HttpError(400, 'Already reviewed');
+
+  const rawFreight = req.body?.freightAmount;
+  let freightOverride: number | null = null;
+  if (rawFreight !== undefined && rawFreight !== null && rawFreight !== '') {
+    const n = Number(rawFreight);
+    if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Freight amount must be a positive number');
+    freightOverride = n;
+  }
+  const freight = freightOverride ?? (draft.freightAmount != null ? Number(draft.freightAmount) : null);
 
   const saleDispatchId = (req.body?.saleDispatchId as string | undefined) || null;
   if (saleDispatchId) {
@@ -376,13 +473,20 @@ export async function confirmTransportConfirmation(req: Request, res: Response) 
         driverName: draft.driverName ?? dispatch.driverName,
         driverPhone: draft.driverPhone ?? dispatch.driverPhone,
         vehicleNumber: dispatch.vehicleNumber ?? draft.lorryNumber,
+        ...(freight != null && freight > 0 ? { freightCharge: freight } : {}),
       },
     });
   }
 
   const updated = await prisma.transportConfirmation.update({
     where: { id: draft.id },
-    data: { status: 'CONFIRMED', saleDispatchId },
+    // Store a corrected figure back on the draft too, so the record shows what
+    // was actually applied rather than what Gemini first read.
+    data: {
+      status: 'CONFIRMED',
+      saleDispatchId,
+      ...(freightOverride != null ? { freightAmount: freightOverride } : {}),
+    },
   });
   res.json(updated);
 }

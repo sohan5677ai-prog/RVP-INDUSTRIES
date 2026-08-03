@@ -777,7 +777,10 @@ export interface ParsedTransportConfirmation {
   lorryNumber?: string;
   driverName?: string;
   driverPhone?: string;
-  freightAmount?: number; // total or per-tonne rupee figure as written
+  /** WHOLE-LORRY freight in rupees, normalised from whatever basis was written. */
+  freightAmount?: number;
+  /** How the figure was written before normalisation, for the review card. */
+  freightBasis?: 'TOTAL' | 'PER_TONNE';
 }
 
 const TRANSPORT_SCHEMA = {
@@ -792,9 +795,22 @@ const TRANSPORT_SCHEMA = {
     driverName: { type: Type.STRING },
     driverPhone: { type: Type.STRING },
     freightAmount: { type: Type.NUMBER },
+    freightBasis: { type: Type.STRING },
   },
   required: ['isTransportConfirmation'],
 };
+
+/**
+ * Highest believable PER-TONNE freight rate, in rupees. Our longest routes
+ * (Punganur → Surat) run ~2,500-3,000/tonne, so anything at or above this is a
+ * whole-lorry total no matter what the message calls it.
+ *
+ * This exists because brokers routinely write "Per Tone Lorry Freight Rs 80000/-"
+ * for a 30 t load - the words say per-tonne, the number is plainly the total
+ * (80000/30 = 2,667/t). Trusting the wording would inflate that trip's freight
+ * 30-fold and wipe out the order's margin on the Pappu P&L.
+ */
+const MAX_CREDIBLE_FREIGHT_PER_TONNE = 15000;
 
 /**
  * Parse a raw WhatsApp text into transport-confirmation fields. Returns null on
@@ -823,6 +839,11 @@ Decide whether THIS message is such a lorry-booking confirmation and return JSON
 - driverName: the driver's name.
 - driverPhone: the driver's 10-digit mobile number (digits only).
 - freightAmount: the rupee freight figure as a plain number (strip Rs, commas, "/-").
+- freightBasis: "TOTAL" if that figure is the whole lorry's freight, or "PER_TONNE" if it
+  is a rate per tonne. IMPORTANT: judge this from the SIZE of the number, not the wording.
+  Brokers habitually write "Per Tone Lorry Freight Rs 80000/-" when 80000 is the total for
+  the whole load. A realistic per-tonne rate on these routes is roughly 1,000-3,000, so a
+  five-figure number like 80000 is a TOTAL. Default to "TOTAL" when unsure.
 Only include fields you can read with reasonable confidence. Do not guess.
 
 Message:
@@ -847,7 +868,22 @@ ${text}`;
     if (parsed.driverName?.toString().trim()) clean.driverName = parsed.driverName.toString().trim();
     const phone = parsed.driverPhone?.toString().replace(/\D/g, '') ?? '';
     if (phone.length >= 10) clean.driverPhone = phone.slice(-10);
-    if (typeof parsed.freightAmount === 'number' && parsed.freightAmount > 0) clean.freightAmount = parsed.freightAmount;
+
+    // Normalise freight to a WHOLE-LORRY total. Gemini's own basis call is only a
+    // starting point - the magnitude check below is what actually decides, so a
+    // misread of the message's wording can't multiply the freight by the tonnage.
+    if (typeof parsed.freightAmount === 'number' && parsed.freightAmount > 0) {
+      const written = parsed.freightAmount;
+      const tonnes = clean.tonnageKg ? clean.tonnageKg / 1000 : 0;
+      const saidPerTonne = parsed.freightBasis?.toString().trim().toUpperCase() === 'PER_TONNE';
+      const basis: 'TOTAL' | 'PER_TONNE' =
+        saidPerTonne && written < MAX_CREDIBLE_FREIGHT_PER_TONNE ? 'PER_TONNE' : 'TOTAL';
+      clean.freightBasis = basis;
+      // A per-tonne rate is only convertible when we also read the tonnage; without
+      // it, leave the figure out rather than store a rate in a total's field.
+      if (basis === 'TOTAL') clean.freightAmount = Math.round(written * 100) / 100;
+      else if (tonnes > 0) clean.freightAmount = Math.round(written * tonnes * 100) / 100;
+    }
     return clean;
   } catch {
     return null; // never let a parse failure break the webhook

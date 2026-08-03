@@ -284,7 +284,7 @@ async function _computePappuOrderMargins() {
 
   const orders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
-    include: { buyer: true, dispatches: { select: { weightKg: true, excessOutKg: true } } },
+    include: { buyer: true, dispatches: { select: { weightKg: true, excessOutKg: true, freightCharge: true } } },
     // id is the tie-break, not decoration: two orders on the SAME sale date would
     // otherwise come back in arbitrary Postgres order, and whichever the
     // allocator reached first took the scarce seed. That silently moved money
@@ -293,6 +293,13 @@ async function _computePappuOrderMargins() {
   });
 
   // Outward freight is netted out of the (freight-inclusive) sale price.
+  //
+  // What we charge an order is its ACTUAL freight wherever a lorry has shipped:
+  // each SaleDispatch carries the real rupee figure the transporter quoted, taken
+  // from their WhatsApp confirmation (see confirmTransportConfirmation). Only the
+  // still-undispatched balance is estimated, at the order's stamped rate below.
+  // A booked lorry at 80,000 on a route the Settings rate calls 84,000 is a 4,000
+  // margin difference this used to miss entirely.
   //
   // Rates are read off the ORDER (stamped when it was taken), not from Settings.
   // That is what stops a rate change rewriting history: putting Surat up from
@@ -375,9 +382,18 @@ async function _computePappuOrderMargins() {
   }
 
   const result = orders.map((so) => {
-    const qty = so.tonnageKg; // ordered pappu kg (freight/GST are computed on this)
+    const qty = so.tonnageKg; // ordered pappu kg (GST is computed on this)
     const rate = Number(so.ratePerKg);
-    const freight = calcSaleFreight(qty, freightRateOf(so));
+
+    // Actual freight on the lorries that have shipped + an estimate, at the
+    // order's stamped rate, on the tonnage still to go. A fully shipped order is
+    // therefore 100% actuals, and a part-shipped one blends the two rather than
+    // reverting the whole order to the Settings rate.
+    const dispatchedKg = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+    const actualFreight = so.dispatches.reduce((s, d) => s + Number(d.freightCharge), 0);
+    const pendingKg = Math.max(0, qty - dispatchedKg);
+    const freight =
+      Math.round((actualFreight + calcSaleFreight(pendingKg, freightRateOf(so))) * 100) / 100;
 
     // A frozen order still DRAWS from the pool above - it really did consume that
     // seed, and removing it would hand the seed to someone else and move their

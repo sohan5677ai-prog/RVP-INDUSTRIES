@@ -155,11 +155,62 @@ export async function runDispatchReminderJob() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostic - which phone_number_id actually owns the DISPATCH_DRIVER
+// template, vs. what FAST2SMS_PHONE_NUMBER_ID is currently set to. Fast2SMS's
+// Meta-format send (sendLocationWhatsAppTemplate) 404s with "Template not
+// found." when those two disagree. No Render shell access needed - this rides
+// the same secret-guarded /webhooks/whatsapp/jobs/:job endpoint as the other
+// cron jobs, so it's reachable from a plain browser URL.
+// ---------------------------------------------------------------------------
+async function runCheckDriverTemplate(): Promise<Record<string, unknown>> {
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  if (!apiKey) return { error: 'FAST2SMS_API_KEY is not configured' };
+  const configuredId = process.env.FAST2SMS_PHONE_NUMBER_ID ?? null;
+  const templateName = process.env.FAST2SMS_TMPL_NAME_DISPATCH_DRIVER?.trim() || 'rvp_dispatch_driver';
+
+  const res = await fetch('https://www.fast2sms.com/dev/dlt_manager/whatsapp?type=template', {
+    headers: { Authorization: apiKey },
+  });
+  const text = await res.text();
+  if (!res.ok) return { error: `HTTP ${res.status}`, body: text.slice(0, 2000) };
+
+  let parsed: { data?: Array<{ phone_number_id: string; number: string; templates?: Array<{ template_name: string; status: string; language: string }> }> };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: 'Non-JSON response', body: text.slice(0, 2000) };
+  }
+
+  const numbers = (parsed.data ?? []).map((entry) => ({
+    number: entry.number,
+    phoneNumberId: entry.phone_number_id,
+    isConfigured: entry.phone_number_id === configuredId,
+    templates: (entry.templates ?? []).map((t) => ({
+      name: t.template_name,
+      status: t.status,
+      language: t.language,
+      isMatch: t.template_name === templateName,
+    })),
+  }));
+
+  const owner = numbers.find((n) => n.templates.some((t) => t.isMatch));
+  const verdict = !owner
+    ? `No number has a template named "${templateName}" - check the exact approved name.`
+    : owner.isConfigured
+      ? `OK: FAST2SMS_PHONE_NUMBER_ID already owns "${templateName}". The mismatch is elsewhere.`
+      : `MISMATCH: "${templateName}" is approved under phone_number_id ${owner.phoneNumberId} (number ${owner.number}), ` +
+        `but FAST2SMS_PHONE_NUMBER_ID is set to ${configuredId ?? '(not set)'}. Update the Render env var to ${owner.phoneNumberId}.`;
+
+  return { configuredPhoneNumberId: configuredId, templateName, numbers, verdict };
+}
+
 /** Map a job name (from the manual endpoint) to its runner. */
-export const JOB_RUNNERS: Record<string, () => Promise<Record<string, string>>> = {
+export const JOB_RUNNERS: Record<string, () => Promise<Record<string, unknown>>> = {
   daily: runDailyJobs,
   weekly: runWeeklyJobs,
   'dispatch-reminders': runDispatchReminderJob,
+  'check-driver-template': runCheckDriverTemplate,
 };
 
 /**

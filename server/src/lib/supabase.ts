@@ -24,3 +24,13 @@ export function getSupabase(): SupabaseClient {
 export function storageBucket(): string {
   return process.env.SUPABASE_STORAGE_BUCKET ?? 'invoices';
 }
+
+/**
+ * Bucket holding financial-year archives. Deliberately separate from the invoice
+ * bucket and expected to be PRIVATE: an archive carries every party's GSTIN and
+ * bank details, so it is only ever handed out as a short-lived signed URL, never
+ * a public one.
+ */
+export function archiveBucket(): string {
+  return process.env.SUPABASE_ARCHIVE_BUCKET ?? 'archives';
+}

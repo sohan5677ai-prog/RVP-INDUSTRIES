@@ -104,6 +104,7 @@ const Interest = lazyWithPreload('/reports/interest', () => import('@/pages/Inte
 const Expenses = lazyWithPreload('/reports/expenses', () => import('@/pages/Expenses'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
 const Subscription = lazyWithPreload('/subscription', () => import('@/pages/Subscription'));
+const ArchiveManager = lazyWithPreload('/archives', () => import('@/pages/ArchiveManager'));
 
 function Fallback() {
   return (
@@ -192,6 +193,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
               <Route path="/subscription" element={<Subscription />} />
+              <Route path="/archives" element={<ArchiveManager />} />
             </Route>
             </Route>
           </Route>

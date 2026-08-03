@@ -32,6 +32,7 @@ import whatsappRoutes from './whatsapp.routes.js';
 import { verifyWhatsAppWebhook, handleWhatsAppWebhook, runWhatsAppJob } from '../controllers/whatsapp.controller.js';
 import { globalSearch } from '../controllers/search.controller.js';
 import subscriptionRoutes from './subscription.routes.js';
+import archiveRoutes from './archive.routes.js';
 const router = Router();
 
 // Public
@@ -103,6 +104,7 @@ router.use('/system', systemRoutes);
 router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);
 router.use('/', taxproRoutes);
+router.use('/', archiveRoutes);
 
 router.get('/search', asyncHandler(globalSearch));
 

@@ -39,3 +39,30 @@ export function istFinancialYearStart(date: Date): number {
   const { year, month } = istCalendar(date);
   return month >= 4 ? year : year - 1;
 }
+
+/** IST is a fixed +05:30 offset with no DST, so the shift is a constant. */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * UTC instants bounding an Indian financial year, as a half-open `[from, to)`.
+ *
+ * FY 2025-26 -> 2025-03-31T18:30:00Z .. 2026-03-31T18:30:00Z, i.e. midnight IST
+ * on 1 April at either end. Half-open so a voucher stamped exactly at midnight
+ * on 1 April lands in the new year only, never in both.
+ */
+export function istFinancialYearRange(fyStart: number): { from: Date; to: Date } {
+  const midnightIstOn1April = (year: number) =>
+    new Date(Date.UTC(year, 3, 1) - IST_OFFSET_MS);
+  return { from: midnightIstOn1April(fyStart), to: midnightIstOn1April(fyStart + 1) };
+}
+
+/** Long FY label, e.g. 2025 -> "2025-26". Matches `indianFinancialYear`. */
+export function fyLabelLong(fyStart: number): string {
+  return `${fyStart}-${String((fyStart + 1) % 100).padStart(2, '0')}`;
+}
+
+/** Short FY label, e.g. 2025 -> "25-26". Matches `computeFY` in poNumber.ts. */
+export function fyLabelShort(fyStart: number): string {
+  const yy = (n: number) => String(n % 100).padStart(2, '0');
+  return `${yy(fyStart)}-${yy(fyStart + 1)}`;
+}

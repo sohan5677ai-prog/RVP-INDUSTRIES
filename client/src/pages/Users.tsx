@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Shield, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
@@ -23,6 +24,8 @@ const USER_COLUMNS: ExportColumn<UserRow>[] = [
 ];
 
 export default function Users() {
+  const { user: currentUser } = useAuth();
+  const isDeveloper = currentUser?.role === 'DEVELOPER';
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [formData, setFormData] = useState({ name: '', username: '', password: '', role: 'USER' });
@@ -31,6 +34,7 @@ export default function Users() {
     queryKey: ['users'],
     queryFn: () => api<UserRow[]>('/users'),
   });
+  const visibleUsers = isDeveloper ? users : users?.filter(u => u.role !== 'DEVELOPER');
 
   const createMutation = useMutation({
     mutationFn: (data: { name: string; username: string; role: string; password?: string }) => api('/users', { method: 'POST', body: data }),
@@ -62,7 +66,7 @@ export default function Users() {
       <div className="flex items-center justify-between">
         <PageHeader icon={Shield} title="User Management" description="Manage access and roles across the ERP." />
         <div className="flex items-center gap-2">
-          <ExportButtons filename="Users" title="Users" subtitle={`${users?.length ?? 0} user(s)`} columns={USER_COLUMNS} rows={users ?? []} />
+          <ExportButtons filename="Users" title="Users" subtitle={`${visibleUsers?.length ?? 0} user(s)`} columns={USER_COLUMNS} rows={visibleUsers ?? []} />
           <Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> Add User</Button>
         </div>
       </div>
@@ -79,7 +83,7 @@ export default function Users() {
           </TableHeader>
           <TableBody>
             {isLoading && <TableRow><TableCell colSpan={4} className="text-center">Loading...</TableCell></TableRow>}
-            {users?.map(u => (
+            {visibleUsers?.map(u => (
               <TableRow key={u.id}>
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell>{u.username}</TableCell>
@@ -124,7 +128,7 @@ export default function Users() {
                 <option value="ADMIN">Admin</option>
                 <option value="USER">User</option>
                 <option value="OWNER">Owner</option>
-                <option value="DEVELOPER">Developer</option>
+                {isDeveloper && <option value="DEVELOPER">Developer</option>}
               </select>
             </div>
             <DialogFooter>

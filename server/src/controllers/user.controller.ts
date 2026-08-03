@@ -18,16 +18,22 @@ const updateUserSchema = z.object({
   role: z.enum(['ADMIN', 'USER', 'OWNER', 'DEVELOPER']).optional(),
 });
 
-export async function listUsers(_req: Request, res: Response) {
+export async function listUsers(req: Request, res: Response) {
   const users = await prisma.user.findMany({
     select: { id: true, name: true, username: true, role: true, createdAt: true },
     orderBy: { createdAt: 'desc' }
   });
-  res.json(users);
+  // The DEVELOPER role (licensing/subscription control) is invisible to
+  // everyone else — only a DEVELOPER account may see other DEVELOPER accounts.
+  const visible = req.user?.role === 'DEVELOPER' ? users : users.filter(u => u.role !== 'DEVELOPER');
+  res.json(visible);
 }
 
 export async function createUser(req: Request, res: Response) {
   const data = userSchema.parse(req.body);
+  if (data.role === 'DEVELOPER' && req.user?.role !== 'DEVELOPER') {
+    throw new HttpError(403, 'Only a developer can create a developer account');
+  }
   const existing = await prisma.user.findUnique({ where: { username: data.username } });
   if (existing) throw new HttpError(400, 'Username already in use');
 
@@ -44,11 +50,22 @@ export async function createUser(req: Request, res: Response) {
 
 export async function updateUser(req: Request, res: Response) {
   const data = updateUserSchema.parse(req.body);
+
+  if (req.user?.role !== 'DEVELOPER') {
+    if (data.role === 'DEVELOPER') {
+      throw new HttpError(403, 'Only a developer can grant the developer role');
+    }
+    const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { role: true } });
+    if (target?.role === 'DEVELOPER') {
+      throw new HttpError(403, 'Only a developer can modify a developer account');
+    }
+  }
+
   const updateData: any = { ...data };
   if (data.password) {
     updateData.password = await bcrypt.hash(data.password, 10);
   }
-  
+
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data: updateData,
@@ -58,6 +75,12 @@ export async function updateUser(req: Request, res: Response) {
 }
 
 export async function deleteUser(req: Request, res: Response) {
+  if (req.user?.role !== 'DEVELOPER') {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { role: true } });
+    if (target?.role === 'DEVELOPER') {
+      throw new HttpError(403, 'Only a developer can delete a developer account');
+    }
+  }
   await prisma.user.delete({ where: { id: req.params.id } });
   res.json({ message: 'User deleted' });
 }

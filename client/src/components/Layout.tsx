@@ -127,7 +127,7 @@ const sections: NavSection[] = [
   {
     heading: 'Banking',
     items: [
-      { to: '/loans', label: 'Storage Loans', icon: Banknote, hideForDev: true },
+      { to: '/loans', label: 'Storage Loans', icon: Banknote },
     ],
   },
   {

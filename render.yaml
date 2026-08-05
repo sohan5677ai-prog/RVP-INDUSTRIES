@@ -73,8 +73,8 @@ services:
         sync: false
       # DISPATCH_DRIVER has a Location header, sent via Fast2SMS's Meta-format
       # endpoint which addresses templates by NAME, not message_id. Defaults to
-      # "rvp_dispatch_driver" in code - only set this if the approved template
-      # is ever renamed.
+      # "rvp_driver" in code - only set this if the approved template is ever
+      # renamed again.
       - key: FAST2SMS_TMPL_NAME_DISPATCH_DRIVER
         sync: false
       - key: FAST2SMS_TMPL_REMINDER
@@ -84,6 +84,8 @@ services:
       - key: FAST2SMS_TMPL_VERIFICATION_STATEMENT
         sync: false
       - key: FAST2SMS_TMPL_PAYMENT_SENT_TEXT
+        sync: false
+      - key: FAST2SMS_TMPL_RECEIPT_RECEIVED
         sync: false
       - key: FAST2SMS_TMPL_OWNER_DISPATCH_REMINDER
         sync: false

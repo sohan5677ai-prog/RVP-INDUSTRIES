@@ -29,7 +29,7 @@ import { resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
  *  - WHATSAPP_TEST_NUMBER      where test-mode messages land (owner's phone)
  *  - FAST2SMS_TMPL_<KEY>       numeric Fast2SMS message_id per approved template
  *                              (used by the simple GET send)
- *  - FAST2SMS_TMPL_NAME_<KEY>  the template's approved NAME (e.g. rvp_dispatch_driver),
+ *  - FAST2SMS_TMPL_NAME_<KEY>  the template's approved NAME (e.g. rvp_driver),
  *                              needed only for templates sent via the Meta-format
  *                              POST endpoint (location headers can't use a numeric
  *                              message_id - Meta's template API wants the name)
@@ -44,10 +44,11 @@ export type WaTemplateKey =
   | 'VERIFICATION_STATEMENT' // rvp_verification_statement (document header): party, lorry, net weight, amount
   | 'PAYMENT_SENT' // rvp_payment_sent (image header): party, amount, date, reference
   | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header - used when no screenshot): party, amount, date, reference
+  | 'RECEIPT_RECEIVED' // rvp_receipt_received: payer, amount, date, reference - Receipt has no screenshot field, text-only
   | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
-  | 'DISPATCH_DRIVER' // rvp_dispatch_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
+  | 'DISPATCH_DRIVER' // rvp_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // rvp_payment_reminder: buyer, amount, overdue invoice list
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
@@ -58,6 +59,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
   DISPATCH_PARTY_BROKER: '26406',
   DISPATCH_BROKER: '26407',
+  // Recorded for completeness - the driver template goes out over the
+  // Meta-format endpoint, which addresses it by name (below), not by this id.
+  DISPATCH_DRIVER: '27626',
 };
 
 function templateId(key: WaTemplateKey): string | undefined {
@@ -67,7 +71,7 @@ function templateId(key: WaTemplateKey): string | undefined {
 // Templates sent over the Meta-format POST endpoint (location headers) are
 // addressed by their approved NAME, not the numeric message_id above.
 const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
-  DISPATCH_DRIVER: 'rvp_dispatch_driver',
+  DISPATCH_DRIVER: 'rvp_driver',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {
@@ -517,7 +521,12 @@ async function sendToPartyAndInternal(
   partyPhones: Array<string | null | undefined>
 ): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
   const to = partyPhones.filter(Boolean) as string[];
-  const result = await sendWhatsAppTemplate({ ...message, to });
+  // No real phone to message (e.g. a broker/expense/Hamali payment with nothing
+  // on file) - skip the party leg cleanly instead of logging a FAILED row for a
+  // send that was never attempted. The internal copy still always fires below.
+  const result = to.length > 0
+    ? await sendWhatsAppTemplate({ ...message, to })
+    : { ok: false, skipped: true, error: 'No party phone on file' };
   const internal = await resolveInternalCopyRecipients(to);
   await Promise.all(internal.map((number) => sendWhatsAppTemplate({ ...message, to: number })));
   return result;
@@ -575,6 +584,23 @@ export const whatsappService = {
         relatedId: payment.id,
       },
       [party.phone, party.phone2]
+    );
+  },
+
+  /**
+   * Receipt recorded (money received) → payer, when we have one on file, plus
+   * the internal copy. Unlike Payment, Receipt has no screenshot field, so
+   * there's only ever the text template.
+   */
+  async notifyReceiptReceived(receipt: { id: string; amount: number; date: Date; reference: string | null }, payer: { name: string; phone: string | null; phone2?: string | null }) {
+    await sendToPartyAndInternal(
+      {
+        templateKey: 'RECEIPT_RECEIVED',
+        variables: [payer.name, fmtInr(receipt.amount), fmtDate(receipt.date), receipt.reference ?? '-'],
+        relatedType: 'RECEIPT',
+        relatedId: receipt.id,
+      },
+      [payer.phone, payer.phone2]
     );
   },
 

@@ -139,24 +139,41 @@ export async function createPayment(req: Request, res: Response) {
     return created;
   });
 
-  // WhatsApp the party (amount + screenshot) - only for payments tied to a
-  // party (supplier settlements etc.), never internal expense heads. Fire-and-forget.
-  if (data.partyId) {
-    void (async () => {
-      const party = await prisma.party.findUnique({ where: { id: data.partyId! } });
-      if (!party || party.type === 'HAMALI_TEAM') return;
-      await whatsappService.notifyPaymentSent(
-        {
-          id: payment.id,
-          amount: Number(data.amount),
-          date: data.date,
-          reference: data.reference ?? null,
-          screenshotUrl,
-        },
-        { name: party.name, phone: party.phone, phone2: party.phone2 }
-      );
-    })().catch(() => {});
-  }
+  // WhatsApp the counterparty (amount + screenshot) when we have a phone on
+  // file, and ALWAYS copy the internal alert-recipient members - every payment
+  // (supplier, broker, Hamali, expense heads, everything) gets an office copy,
+  // not just party-tied ones. Fire-and-forget.
+  void (async () => {
+    let name: string;
+    let phone: string | null = null;
+    let phone2: string | null | undefined = null;
+    if (data.partyId) {
+      const party = await prisma.party.findUnique({ where: { id: data.partyId } });
+      name = party?.name ?? 'Party';
+      // Hamali Team is crew, not a WhatsApp-reachable party - still get the
+      // internal office copy, just skip messaging their own phone.
+      if (party && party.type !== 'HAMALI_TEAM') {
+        phone = party.phone;
+        phone2 = party.phone2;
+      }
+    } else if (data.brokerId) {
+      const broker = await prisma.broker.findUnique({ where: { id: data.brokerId } });
+      name = broker?.name ?? 'Broker';
+      phone = broker?.phone ?? null;
+    } else {
+      name = data.payee || data.description || `${data.type} payment`;
+    }
+    await whatsappService.notifyPaymentSent(
+      {
+        id: payment.id,
+        amount: Number(data.amount),
+        date: data.date,
+        reference: data.reference ?? null,
+        screenshotUrl,
+      },
+      { name, phone, phone2 }
+    );
+  })().catch(() => {});
 
   res.status(201).json(payment);
 }

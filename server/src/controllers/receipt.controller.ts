@@ -5,6 +5,7 @@ import { HttpError } from '../lib/httpError.js';
 import { createReceiptSchema, listReceiptsSchema } from '../schemas/receipt.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 
 /**
  * Read an uploaded receipt screenshot (bank/UPI/cheque) with Gemini and return
@@ -43,13 +44,17 @@ export async function listReceipts(req: Request, res: Response) {
 
 export async function createReceipt(req: Request, res: Response) {
   const data = createReceiptSchema.parse(req.body);
+  let partyName: string | undefined;
+  let partyPhone: string | null = null;
+  let partyPhone2: string | null | undefined = null;
 
   const receipt = await prisma.$transaction(async (tx) => {
-    let partyName = undefined;
     if (data.partyId) {
       const party = await tx.party.findUnique({ where: { id: data.partyId } });
       if (!party) throw new HttpError(404, 'Party not found');
       partyName = party.name;
+      partyPhone = party.phone;
+      partyPhone2 = party.phone2;
     }
 
     const created = await tx.receipt.create({
@@ -91,6 +96,22 @@ export async function createReceipt(req: Request, res: Response) {
 
     return created;
   });
+
+  // WhatsApp the payer (when we have a phone on file) and ALWAYS copy the
+  // internal alert-recipient members - every receipt (buyer collections,
+  // gunny/scrap/interest/other income) gets an office copy. Fire-and-forget.
+  void (async () => {
+    const name = partyName || data.payer || `${data.type} receipt`;
+    await whatsappService.notifyReceiptReceived(
+      {
+        id: receipt.id,
+        amount: Number(data.amount),
+        date: data.date,
+        reference: data.reference ?? null,
+      },
+      { name, phone: partyPhone, phone2: partyPhone2 }
+    );
+  })().catch(() => {});
 
   res.json(receipt);
 }

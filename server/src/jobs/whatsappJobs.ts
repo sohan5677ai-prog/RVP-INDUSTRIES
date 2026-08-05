@@ -167,7 +167,7 @@ async function runCheckDriverTemplate(): Promise<Record<string, unknown>> {
   const apiKey = process.env.FAST2SMS_API_KEY;
   if (!apiKey) return { error: 'FAST2SMS_API_KEY is not configured' };
   const configuredId = process.env.FAST2SMS_PHONE_NUMBER_ID ?? null;
-  const templateName = process.env.FAST2SMS_TMPL_NAME_DISPATCH_DRIVER?.trim() || 'rvp_dispatch_driver';
+  const templateName = process.env.FAST2SMS_TMPL_NAME_DISPATCH_DRIVER?.trim() || 'rvp_driver';
 
   const res = await fetch('https://www.fast2sms.com/dev/dlt_manager/whatsapp?type=template', {
     headers: { Authorization: apiKey },

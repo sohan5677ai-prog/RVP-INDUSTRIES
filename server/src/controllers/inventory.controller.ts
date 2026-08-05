@@ -110,7 +110,14 @@ export async function getStockByParty(req: Request, res: Response) {
   // 'RVP' shows only seed physically at the mill; anything else (default/'ALL')
   // combines RVP with stock still sitting at outside storage locations.
   const locationFilter = typeof req.query.location === 'string' ? req.query.location.toUpperCase() : 'ALL';
-  const scopedLots = locationFilter === 'RVP' ? allLots.filter((lot) => lot.location === 'RVP') : allLots;
+  // Only ARRIVED lots. The engine also emits PENDING lots for un-arrived POs
+  // (DELIVERY-priced, RVP-planned ones - see stockEngine.ts), tagged location
+  // 'RVP' so the location filter alone wouldn't drop them. Counting them here
+  // inflated net stock/valuation/WAC with seed that hasn't landed, and
+  // double-counted a partly-arrived PO's tonnage because a PENDING lot carries
+  // the FULL ordered tonnage in `orderedKg`, not just the outstanding gap.
+  const scopedLots = (locationFilter === 'RVP' ? allLots.filter((lot) => lot.location === 'RVP') : allLots)
+    .filter((lot) => lot.kind === 'ARRIVED');
 
   const partyMap = new Map<string, any>();
   for (const lot of scopedLots) {
@@ -186,7 +193,10 @@ export async function getStockByState(req: Request, res: Response) {
   const stateMap = new Map<string, any>();
   const partyCountByState = new Map<string, Set<string>>();
 
+  // Same as Stock by Party: skip PENDING (un-arrived PO) lots so a state's
+  // tonnage/valuation reflects only seed that has actually been received.
   for (const lot of allLots) {
+    if (lot.kind !== 'ARRIVED') continue;
     const state = lot.partyState;
     if (!stateMap.has(state)) {
       stateMap.set(state, {

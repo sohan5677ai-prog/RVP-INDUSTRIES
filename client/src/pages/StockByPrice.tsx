@@ -6,6 +6,7 @@ import {
   ChevronRight, ChevronDown, Scale,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { stockSummary } from '@/lib/calc';
 import type { FreightRate } from '@/lib/types';
 import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -311,12 +312,16 @@ export default function StockByPrice() {
     });
   }
 
-  // At-process totals (net remaining = arrived seed − committed orders).
-  const totalBlackKg = bands.reduce((s, b) => s + b.arrivedRemainingKg, 0);
-      const totalReceivedKg = bands.reduce((s, b) => s + b.arrivedGrossKg, 0);
-      // Committed black seed = seed on hand (arrived, net of sales) + pending consumable PO seed.
-      const totalPendingConsumableBlackKg = bands.reduce((s, b) => s + b.pendingConsumableBlackKg, 0);
-      const committedBlackKg = totalBlackKg + totalPendingConsumableBlackKg;
+  // At-process totals come from the shared stockSummary() roll-up over the same
+  // /inventory/by-price bands the RVP Black Seed Stock page reads, so Arrived /
+  // Remaining / Committed / Available Pappu agree to the kg on both pages.
+  // Remaining is ARRIVED-only: seed a sale drew from a still-coming PENDING PO
+  // is debited off the pending pool instead, never off physical stock at the mill.
+  const summary = stockSummary(data?.bands ?? []);
+  const totalBlackKg = summary.remainingBlackKg;
+  const totalReceivedKg = summary.arrivedBlackKg;
+  const totalPendingConsumableBlackKg = summary.pendingConsumableBlackKg;
+  const committedBlackKg = summary.committedBlackKg;
       // Valuation counts bands with positive net stock + pending stock
   const totalValue = bands.reduce((s, b) => s + Math.max(0, b.value) + Math.max(0, b.pendingValue), 0);
   const totalPositiveBlackKg = bands.reduce((s, b) => s + Math.max(0, b.arrivedRemainingKg) + Math.max(0, b.pendingBlackKg), 0);

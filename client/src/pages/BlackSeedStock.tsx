@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Warehouse, IndianRupee, Package, ClipboardList, ClipboardCheck, TrendingUp } from 'lucide-react';
+import { Loader2, Warehouse, IndianRupee, Package, ClipboardList, ClipboardCheck, TrendingUp, Truck, Factory } from 'lucide-react';
 import { api } from '@/lib/api';
 import { stockSummary } from '@/lib/calc';
 import { kg, rupees, rupeesShort, shortDate, toTonnes } from '@/lib/format';
@@ -92,8 +92,12 @@ export default function BlackSeedStock() {
   // agree to the kg with the Order Planner and every other stock page.
   const summary = stockSummary(plannerData?.bands);
   const rawStockOnHandKg = summary.remainingBlackKg; // Remaining Black Seed
+  // Arrived / consumed are ARRIVED-ONLY figures. Seed the Order Planner drew from
+  // still-coming (pending PO) lots debits the band's pending pool instead, so it
+  // never shows up here - this page only ever moves when physical seed lands or is milled.
   const arrivedSeedKg = summary.arrivedBlackKg;
-  const committedSeedKg = Math.max(0, arrivedSeedKg - rawStockOnHandKg); // arrived seed already sold
+  const consumedSeedKg = summary.consumedBlackKg; // arrived seed already drawn by sale orders
+  const consumedPct = arrivedSeedKg > 0 ? (consumedSeedKg / arrivedSeedKg) * 100 : 0;
   const availablePappuKg = summary.availablePappuKg;
   const committedBlackKg = summary.committedBlackKg;   // on-hand + pending PO seed
   const committedPappuKg = summary.committedPappuKg;   // pappu from committed black seed
@@ -179,7 +183,41 @@ export default function BlackSeedStock() {
       </div>
 
       {/* KPI summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle
+              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              title="Gross black seed physically received at RVP - direct lorry arrivals plus seed transferred in from storage. Pending purchase orders are NOT counted here; they only appear once a lorry actually lands."
+            >
+              Total Black Seed Arrived
+            </CardTitle>
+            <Truck className="h-4 w-4 text-teal-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-teal-600">{toTonnes(arrivedSeedKg).toFixed(2)} MT</div>
+            <p className="text-xs font-semibold text-foreground/80 mt-1">
+              Arrived lorries + transfers in (gross)
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle
+              className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              title="Arrived black seed already drawn by pappu sale orders. Seed the Order Planner drew from still-coming (pending PO) lots is excluded - it never touches arrived stock."
+            >
+              Total Black Seed Consumed
+            </CardTitle>
+            <Factory className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{toTonnes(consumedSeedKg).toFixed(2)} MT</div>
+            <p className="text-xs font-semibold text-foreground/80 mt-1">
+              {consumedPct.toFixed(1)}% of arrived seed, drawn by sale orders
+            </p>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Remaining Black Seed</CardTitle>
@@ -188,7 +226,7 @@ export default function BlackSeedStock() {
           <CardContent>
             <div className="text-2xl font-bold text-primary">{toTonnes(rawStockOnHandKg).toFixed(2)} MT</div>
             <p className="text-xs font-semibold text-foreground/80 mt-1">
-              {toTonnes(arrivedSeedKg).toFixed(2)} MT arrived − {toTonnes(committedSeedKg).toFixed(2)} MT committed
+              {toTonnes(arrivedSeedKg).toFixed(2)} MT arrived − {toTonnes(consumedSeedKg).toFixed(2)} MT consumed
             </p>
           </CardContent>
         </Card>
@@ -200,7 +238,7 @@ export default function BlackSeedStock() {
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{toTonnes(committedBlackKg).toFixed(2)} MT</div>
             <p className="text-xs font-semibold text-foreground/80 mt-1">
-              {toTonnes(rawStockOnHandKg).toFixed(2)} MT on-hand + {toTonnes(summary.pendingBlackKg).toFixed(2)} MT pending PO
+              {toTonnes(rawStockOnHandKg).toFixed(2)} MT on-hand + {toTonnes(summary.pendingConsumableBlackKg).toFixed(2)} MT pending PO
             </p>
           </CardContent>
         </Card>

@@ -367,8 +367,10 @@ export interface ByPriceBandLike {
 
 export interface StockSummary {
   arrivedBlackKg: number;    // total gross seed arrived
+  consumedBlackKg: number;   // arrived seed already drawn by sale orders
   remainingBlackKg: number;  // on-hand seed after sales
-  pendingBlackKg: number;    // still-coming seed from open POs
+  pendingBlackKg: number;    // still-coming seed from open POs (gross, incl. buffer)
+  pendingConsumableBlackKg: number; // the sellable part of the pending seed
   committedBlackKg: number;  // on-hand + consumable pending (buffer excluded)
   availablePappuKg: number;  // remaining seed × out-turn
   committedPappuKg: number;  // committed seed × out-turn
@@ -387,8 +389,13 @@ export function stockSummary(bands: ByPriceBandLike[] = []): StockSummary {
 
   return {
     arrivedBlackKg,
+    // Only the ARRIVED side is debited by sales here: the server tracks the seed a
+    // sale drew from still-coming (PENDING PO) lots separately, so pre-selling an
+    // incoming lorry never reduces arrived/remaining stock at the mill.
+    consumedBlackKg: Math.max(0, arrivedBlackKg - remainingBlackKg),
     remainingBlackKg,
     pendingBlackKg,
+    pendingConsumableBlackKg,
     committedBlackKg,
     availablePappuKg: Math.round(remainingBlackKg * PAPPU_OUT_TURN),
     committedPappuKg: Math.round(committedBlackKg * PAPPU_OUT_TURN),

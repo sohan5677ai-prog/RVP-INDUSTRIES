@@ -361,9 +361,6 @@ export default function SaleOrders() {
                 <TableCell>{o.broker?.name ?? '-'}</TableCell>
                 <TableCell>
                   {o.destination ?? '-'}
-                  {o.priceType === 'DELIVERY' && (
-                    <span className="ml-1.5 text-[11px] text-muted-foreground">· delivered</span>
-                  )}
                 </TableCell>
                 <TableCell className="text-right font-semibold">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
                 <TableCell className="text-right">{toTonnes(o.dispatchedKg ?? 0).toFixed(2)} t</TableCell>

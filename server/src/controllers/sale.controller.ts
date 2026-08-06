@@ -457,6 +457,14 @@ export async function updateSaleOrder(req: Request, res: Response) {
   const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
   const gstFraction = await gstFractionForProduct(data.product);
 
+  // Re-stamp the freight rate while the order is still unshipped. The stamp
+  // exists so a later Settings edit can't re-cost history, but flipping an
+  // order's basis (or moving it to a different buyer) has to move the stamp
+  // with it - otherwise a BASE order switched to DELIVERY keeps the 0 it was
+  // stamped with and the planner costs its pending tonnage at no freight.
+  // Once a lorry has gone out the stamp is history and is left alone.
+  const stamps = dispatchedKg > 0 ? {} : await currentCostStamps(destination, priceType);
+
   const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
   const updated = await prisma.saleOrder.update({
@@ -478,6 +486,7 @@ export async function updateSaleOrder(req: Request, res: Response) {
       priceType,
       marginOverride: data.marginOverride || false,
       status,
+      ...stamps,
     },
     include: { buyer: true, broker: true },
   });

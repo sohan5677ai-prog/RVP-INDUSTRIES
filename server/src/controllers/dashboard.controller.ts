@@ -117,7 +117,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
   { key: 'transferHamali',     label: 'Byproduct Transfer Hamali', pappu: false },
   { key: 'transferTransport',  label: 'Byproduct Transfer Transport', pappu: false },
-  { key: 'saleFreight',        label: 'Byproduct Sale Freight', pappu: false },
+  { key: 'saleFreight',        label: 'Husk Sale Freight', pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },

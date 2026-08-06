@@ -65,35 +65,53 @@ function extractMessageId(body: unknown): string | null {
   return null;
 }
 
-/** Async post-processing after the webhook has been acknowledged. */
-async function processInboundEvent(rawBody: unknown) {
+/**
+ * Persist an inbound message. Runs BEFORE the webhook is acknowledged, so a
+ * restart between the ACK and this write can't lose a transporter's message.
+ *
+ * Returns null when the payload is a retry we've already filed. Throws on a
+ * database failure - the caller turns that into a non-2xx so Fast2SMS retries
+ * rather than dropping the message on the floor.
+ */
+async function recordInboundMessage(rawBody: unknown): Promise<{ id: string; from: string | null; text: string | null } | null> {
   const { from, text } = extractInbound(rawBody);
+  const body = text ?? JSON.stringify(rawBody).slice(0, 4000);
 
   // Fast2SMS retries a webhook up to 3 times, 60s apart, whenever our response
   // wasn't a 2xx - so the same message can legitimately arrive more than once.
   // Without this, one retried transporter message becomes two DRAFT rows, and
   // confirming both would apply the freight twice.
+  //
+  // The body has to match too. A retry repeats the payload verbatim, so an
+  // identical body is the signature of one; matching on the id ALONE would mean
+  // that if Fast2SMS ever sends a per-webhook `request_id` rather than a
+  // per-message `wamid`, every message after the first is discarded forever.
   const messageId = extractMessageId(rawBody);
   if (messageId) {
     const seen = await prisma.whatsAppLog.findFirst({
-      where: { direction: 'INBOUND', providerId: messageId },
+      where: { direction: 'INBOUND', providerId: messageId, body },
       select: { id: true },
     });
     if (seen) {
       logger.info(`[whatsapp] duplicate inbound ${messageId} ignored (log ${seen.id})`);
-      return;
+      return null;
     }
   }
 
   const logRow = await prisma.whatsAppLog.create({
-    data: {
-      direction: 'INBOUND',
-      phone: from,
-      body: text ?? JSON.stringify(rawBody).slice(0, 4000),
-      status: 'RECEIVED',
-      providerId: messageId,
-    },
+    data: { direction: 'INBOUND', phone: from, body, status: 'RECEIVED', providerId: messageId },
   });
+  return { id: logRow.id, from, text };
+}
+
+/**
+ * Turn a filed inbound message into a transport-confirmation draft. Runs after
+ * the ACK: it's the slow half (a Gemini round-trip), and unlike the write above
+ * it is safely repeatable - the raw text is already in WhatsAppLog, so a message
+ * lost here can be re-parsed from the log rather than being gone.
+ */
+async function parseInboundIntoDraft(logRow: { id: string; from: string | null; text: string | null }) {
+  const { from, text } = logRow;
 
   // A transport confirmation is a long-ish text with digits (lorry no / phone).
   if (!text || text.length < 25 || !/\d{4}/.test(text)) return;
@@ -274,14 +292,77 @@ async function applyStatusEvent(ev: StatusEvent) {
   logger.error(`[whatsapp] ${row.template ?? 'message'} to ${row.phone} - ${reason}`);
 }
 
+/** A delivery receipt we know how to interpret. "received" is NOT one - it means inbound. */
+function isKnownDeliveryStatus(status: string): boolean {
+  return DELIVERY_OK.has(status) || DELIVERY_FAILED.has(status);
+}
+
+type WebhookRoute =
+  | { kind: 'inbound' }
+  | { kind: 'status'; events: StatusEvent[] }
+  | { kind: 'ignored'; reason: string };
+
 /**
- * Fast2SMS event receiver. Acknowledge immediately; parse in the background.
+ * Decide what a payload IS. Pure and I/O-free, so the handler can route before
+ * it commits to any database work.
+ *
+ * Status callbacks and inbound messages arrive on the same endpoint. Fast2SMS
+ * labels which is which in `webhook_type` (`incoming_message` vs
+ * `status_update`), so that field is trusted above everything else. It matters
+ * because a webhook registered for `event: "all"` renders ONE payload template
+ * for both kinds, so an inbound message can arrive carrying a `status` field.
+ *
+ * The rule for unlabelled payloads is therefore "a sender plus message text
+ * means inbound, WHATEVER the status field says". An earlier version special-
+ * cased only `status: "received"`, which left every other word Fast2SMS might
+ * stamp on an inbound message ("success", "queued", ...) falling through to the
+ * delivery-receipt path, where it matched neither DELIVERY_OK nor
+ * DELIVERY_FAILED and the message was dropped with nothing written anywhere.
+ * Being over-eager here is cheap; being under-eager loses a lorry's freight.
+ */
+function routeWebhookEvent(rawBody: unknown): WebhookRoute {
+  const declaredRaw = asRecord(rawBody)?.webhook_type;
+  const declared = typeof declaredRaw === 'string' ? declaredRaw.toLowerCase().trim() : null;
+
+  if (declared === 'incoming_message') return { kind: 'inbound' };
+
+  if (declared === 'status_update') {
+    const events = extractStatusEvents(rawBody);
+    // Don't hand a delivery receipt to Gemini as if it were a transporter's
+    // message - but do say what arrived, so an unknown shape is diagnosable.
+    return events.length > 0
+      ? { kind: 'status', events }
+      : { kind: 'ignored', reason: 'status_update with no readable status entry' };
+  }
+
+  // Unlabelled from here down.
+  const { from, text } = extractInbound(rawBody);
+  if (from && text) return { kind: 'inbound' };
+
+  const events = extractStatusEvents(rawBody);
+  if (events.some((e) => isKnownDeliveryStatus(e.status))) return { kind: 'status', events };
+
+  // Neither clearly a message nor a receipt we recognise. File it as inbound
+  // anyway: recordInboundMessage stores the raw payload, so the worst case is a
+  // stray WhatsAppLog row to look at rather than an event that vanished.
+  return { kind: 'inbound' };
+}
+
+/**
+ * Fast2SMS event receiver.
  *
  * The URL is public (Fast2SMS can't send a JWT), so when
  * FAST2SMS_WEBHOOK_SECRET is set we require it back on every call - otherwise
  * anyone who learns the URL can post fabricated transporter messages and get
  * freight drafts queued for confirmation. Unset = accept everything, so an
  * un-configured deploy keeps working.
+ *
+ * Inbound messages are WRITTEN BEFORE THE ACK. Once we return 2xx, Fast2SMS
+ * considers the event delivered and never retries it, so anything still only in
+ * memory at that point is lost for good if the instance is recycled - which on
+ * a sleeping/redeploying host is exactly when it happens. Persisting first costs
+ * one insert and makes the retry protocol work for us: if the database is
+ * unreachable we answer 503 and Fast2SMS brings the message back.
  */
 export async function handleWhatsAppWebhook(req: Request, res: Response) {
   const secret = process.env.FAST2SMS_WEBHOOK_SECRET?.trim();
@@ -295,55 +376,41 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
       return;
     }
   }
-  res.json({ received: true });
-  processWebhookEvent(req.body).catch((err) => {
-    logger.error('[whatsapp] webhook processing failed', err);
-  });
-}
 
-/**
- * Status callbacks and inbound messages arrive on the same endpoint.
- *
- * Fast2SMS labels which is which in `webhook_type` (`incoming_message` vs
- * `status_update`), so trust that field above everything else. This matters
- * because a webhook registered for `event: "all"` renders ONE payload template
- * for both kinds: an inbound message arrives carrying `status: "received"`, and
- * the shape-sniffing fallback below would read it as a delivery receipt, find
- * "received" in neither DELIVERY_OK nor DELIVERY_FAILED, log "unrecognised
- * status" and DROP the message - no draft, no freight, silently.
- *
- * The sniffing path is kept only for payloads that omit the field.
- */
-async function processWebhookEvent(rawBody: unknown) {
-  const kind = asRecord(rawBody)?.webhook_type;
-  const declared = typeof kind === 'string' ? kind.toLowerCase().trim() : null;
+  const route = routeWebhookEvent(req.body);
 
-  if (declared === 'incoming_message') {
-    await processInboundEvent(rawBody);
+  if (route.kind === 'ignored') {
+    logger.warn(`[whatsapp] ${route.reason}: ${JSON.stringify(req.body).slice(0, 500)}`);
+    res.json({ received: true });
     return;
   }
-  if (declared !== 'status_update') {
-    // No/unknown label: a payload whose status is literally "received" is an
-    // inbound message however it is shaped.
-    const status = asRecord(rawBody)?.status;
-    if (typeof status === 'string' && status.toLowerCase().trim() === 'received') {
-      await processInboundEvent(rawBody);
+
+  if (route.kind === 'inbound') {
+    let logRow: Awaited<ReturnType<typeof recordInboundMessage>>;
+    try {
+      logRow = await recordInboundMessage(req.body);
+    } catch (err) {
+      logger.error('[whatsapp] could not record inbound message - asking Fast2SMS to retry', err);
+      res.status(503).json({ error: 'Could not record message' });
       return;
     }
+    res.json({ received: true });
+    // Duplicate (null) needs no further work; otherwise parse in the background,
+    // where a failure costs a draft but never the message itself.
+    if (logRow) {
+      parseInboundIntoDraft(logRow).catch((err) => {
+        logger.error(`[whatsapp] draft parsing failed for log ${logRow.id}`, err);
+      });
+    }
+    return;
   }
 
-  const statuses = extractStatusEvents(rawBody);
-  if (statuses.length > 0) {
-    for (const ev of statuses) await applyStatusEvent(ev);
-    return;
-  }
-  // Declared a status update but nothing readable in it - don't hand a delivery
-  // receipt to Gemini as if it were a transporter's message.
-  if (declared === 'status_update') {
-    logger.warn('[whatsapp] status_update with no readable status entry');
-    return;
-  }
-  await processInboundEvent(rawBody);
+  // Delivery receipts only annotate an existing row, so there is nothing to lose
+  // by acknowledging first.
+  res.json({ received: true });
+  Promise.all(route.events.map(applyStatusEvent)).catch((err) => {
+    logger.error('[whatsapp] status processing failed', err);
+  });
 }
 
 /**

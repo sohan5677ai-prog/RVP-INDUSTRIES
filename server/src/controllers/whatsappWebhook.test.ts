@@ -133,6 +133,56 @@ describe('Fast2SMS webhook routing', () => {
     expect(tcCreate).not.toHaveBeenCalled();
   });
 
+  it('treats an unlabelled message with any other status word as inbound', async () => {
+    // The regression this guards: only `status: "received"` used to be rescued,
+    // so any other word Fast2SMS stamps on an inbound message fell through to
+    // the delivery-receipt path, matched neither status set, and was dropped
+    // without a log row or a draft - the message simply never arrived.
+    await post({ status: 'success', from: '919943262021', body: TRANSPORT_TEXT, message_id: 'wamid.S1' });
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0][0].data).toMatchObject({ direction: 'INBOUND' });
+    expect(tcCreate).toHaveBeenCalledOnce();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('files an unrecognisable payload rather than dropping it', async () => {
+    await post({ something: 'unexpected' });
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0][0].data.direction).toBe('INBOUND');
+  });
+
+  it('asks Fast2SMS to retry when the inbound message cannot be stored', async () => {
+    // Acknowledging a message we failed to persist would lose it permanently:
+    // Fast2SMS never retries an event it saw a 2xx for.
+    create.mockRejectedValue(new Error('db down'));
+    const res = await post({
+      webhook_type: 'incoming_message', from: '919943262021', body: TRANSPORT_TEXT, message_id: 'wamid.DB',
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('persists the message before acknowledging it', async () => {
+    const order: string[] = [];
+    create.mockImplementation(async () => { order.push('write'); return { id: 'log1' }; });
+    const res = { statusCode: 200, json: () => { order.push('ack'); }, status(c: number) { this.statusCode = c; return this; } };
+    const req = { body: { webhook_type: 'incoming_message', from: '919943262021', body: TRANSPORT_TEXT, message_id: 'w9' }, header: () => undefined };
+    await handleWhatsAppWebhook(req as never, res as never);
+    expect(order).toEqual(['write', 'ack']);
+  });
+
+  it('does not mistake a reused request_id for a duplicate', async () => {
+    // Dedupe matches on id AND body: if Fast2SMS ever sends a per-webhook
+    // request_id instead of a per-message wamid, matching on the id alone would
+    // discard every message after the first, forever.
+    findFirst.mockImplementation(async (args: any) =>
+      args.where.body === 'an older message that reused the id' ? { id: 'logExisting' } : null
+    );
+    await post({ webhook_type: 'incoming_message', from: '919943262021', body: TRANSPORT_TEXT, message_id: 'reused-id' });
+    expect(findFirst.mock.calls[0][0].where).toMatchObject({ providerId: 'reused-id', body: TRANSPORT_TEXT });
+    expect(create).toHaveBeenCalledOnce();
+    expect(tcCreate).toHaveBeenCalledOnce();
+  });
+
   it('rejects a call with the wrong secret when one is configured', async () => {
     process.env.FAST2SMS_WEBHOOK_SECRET = 'realsecret';
     const res = await post({ webhook_type: 'incoming_message', body: TRANSPORT_TEXT }, { webhook_secret_key: 'nope' });

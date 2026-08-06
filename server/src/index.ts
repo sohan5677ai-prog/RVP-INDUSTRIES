@@ -55,10 +55,56 @@ app.get("/api/health", (_req, res) => {
   // (cron-job.org) rejects as "output too large". Responding immediately with
   // a tiny plain-text body keeps the response well under that limit no matter
   // what the database is doing.
+  //
+  // The flip side: this endpoint reports OK through a total database outage, so
+  // it is a liveness check for the web process ONLY. /api/health/db below is the
+  // one that actually tells you whether Postgres is answering.
   prisma.$queryRaw`SELECT 1`.catch((err) =>
     logger.error("health check DB keep-alive query failed", err)
   );
   res.type("text/plain").send("OK");
+});
+
+/** Give up on the probe well before Render's own 30s gateway timeout. */
+const DB_PROBE_TIMEOUT_MS = 8000;
+
+/**
+ * Real database probe, kept OFF the keep-alive path.
+ *
+ * Point a second uptime monitor here to be alerted on database trouble rather
+ * than only on the web process dying. Unlike /api/health this awaits the query
+ * and reports what it found, including how long Supabase took - a round-trip
+ * that creeps up is the early warning for the pool exhaustion that shows up in
+ * the UI as pages hanging on load.
+ *
+ * Bounded by its own timeout so a wedged connection can't hold the request open
+ * until the gateway kills it, and every branch returns a tiny JSON body - a slow
+ * database must never become a multi-KB Render error page.
+ */
+app.get("/api/health/db", async (_req, res) => {
+  const started = Date.now();
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`no response in ${DB_PROBE_TIMEOUT_MS}ms`)),
+          DB_PROBE_TIMEOUT_MS
+        );
+      }),
+    ]);
+    res.json({ db: "ok", ms: Date.now() - started });
+  } catch (err) {
+    // Caught here rather than left to the error handler: Express 4 does not
+    // forward async rejections, and a 503 with a short reason is far more useful
+    // to a monitor than a generic 500.
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("[health] database probe failed", err);
+    res.status(503).json({ db: "down", ms: Date.now() - started, error: message.slice(0, 200) });
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 app.use("/api", apiLimiter, apiRoutes);

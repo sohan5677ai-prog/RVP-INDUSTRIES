@@ -435,8 +435,10 @@ export default function FreightDuesPage() {
     queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
   });
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
-    queryKey: ['sale-orders'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+    // Full history - /sale-orders is capped at the latest 100 by default, which
+    // would drop older dispatches (and their outward freight) out of the dues run.
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
   const { data: payments, isLoading: loadingPayments } = useQuery({
     // Full history - dues are matched against every payment, not just latest 100.

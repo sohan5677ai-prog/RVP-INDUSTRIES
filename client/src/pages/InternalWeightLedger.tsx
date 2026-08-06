@@ -30,8 +30,10 @@ const INTERNAL_WEIGHT_COLUMNS: ExportColumn<InternalWeightRow>[] = [
 
 export default function InternalWeightLedger() {
   const { data: saleOrders, isLoading } = useQuery({
-    queryKey: ['sale-orders'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+    // Full history - /sale-orders is capped at the latest 100 by default, which
+    // would drop older dispatches out of the internal-weight totals.
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
 
   const ledgerEntries: InternalWeightRow[] = [];

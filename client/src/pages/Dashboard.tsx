@@ -42,7 +42,10 @@ export default function Dashboard() {
   const { data: accounts } = useQuery({ queryKey: ['ledger-accounts'], queryFn: () => api<Account[]>('/ledger/accounts') });
   const { data: purchases } = useQuery({ queryKey: ['purchases'], queryFn: () => api<PurchaseRow[]>('/purchases?all=true') });
   const { data: poAll } = useQuery({ queryKey: ['purchase-orders', 'ALL'], queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true') });
-  const { data: saleAll } = useQuery({ queryKey: ['sale-orders', 'ALL'], queryFn: () => api<SaleOrder[]>('/sale-orders') });
+  // Full history - the charts count every order by status, so the default
+  // latest-100 cap would silently under-report. Key matches the report pages
+  // so they all share one cached fetch.
+  const { data: saleAll } = useQuery({ queryKey: ['sale-orders', { all: true }], queryFn: () => api<SaleOrder[]>('/sale-orders?all=true') });
   const { data: huskPnl } = useQuery({ queryKey: ['husk-pnl'], queryFn: () => api<HuskPnl>('/reports/husk-pnl') });
 
   const resetMutation = useMutation({

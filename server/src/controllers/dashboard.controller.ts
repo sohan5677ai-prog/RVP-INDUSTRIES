@@ -317,17 +317,20 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       (interestByType as any[]).map((r) => [r.type, Number(r._sum.amount ?? 0)]),
     );
 
-    // Storage-loan interest sweep: the NET ACCRUAL of loan interest is booked to
-    // the husk pool as an unabsorbed financing cost. Net accrual = interest
-    // CAPITALISED onto transferred seed − interest actually PAID to the bank (the
-    // live balance still sitting on account 20280). Positive when we have loaded
-    // more interest onto stock than we have yet paid the bank (the usual case),
-    // burdening the husk pool with the still-owed accrual; negative once repayments
-    // overtake the capitalised amount. (Owner's directive 2026-07-23: the net
-    // accrual comes to husk as unabsorbed.)
+    // Storage-loan interest sweep: interest actually PAID to the bank is the real
+    // cash cost; the slice CAPITALISED onto transferred seed is already recovered
+    // through Pappu COGS. What is left over — paid − capitalised — is the
+    // UNABSORBED financing cost and is a genuine husk-pool expense, so it must be
+    // a POSITIVE number here (every husk expense line is subtracted from the pool).
+    // Clamped at zero: once capitalised interest overtakes what we have paid the
+    // bank, nothing is unabsorbed — the excess is a still-owed accrual sitting on
+    // 20280, not husk-pool income, so it must never credit the pool.
     const interestCapitalised = Number(interestCapitalisedAgg._sum.interestCharge ?? 0);
     const interestPaidToBank = Number(interestPaidAgg._sum.interest ?? 0);
-    const loanInterestUnabsorbed = Math.round((interestCapitalised - interestPaidToBank) * 100) / 100;
+    const loanInterestUnabsorbed = Math.max(
+      0,
+      Math.round((interestPaidToBank - interestCapitalised) * 100) / 100,
+    );
 
     // Brokerage: one flat ₹2000 per dispatched shipment whose order has a real
     // (non-RVP) broker - mirrors the Brokerage Ledger/Dues reports exactly.

@@ -53,8 +53,10 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
   const [tab, setTab] = useState<TransportTab>('SURYA');
 
   const { data: saleOrders, isLoading } = useQuery({
-    queryKey: ['sale-orders'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+    // Full history - /sale-orders is capped at the latest 100 by default, which
+    // would drop older trips (and their retention) off the transport report.
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
 
   const { data: company } = useQuery({

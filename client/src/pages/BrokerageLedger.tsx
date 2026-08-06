@@ -56,8 +56,10 @@ export default function BrokerageLedger() {
     queryFn: () => api<Broker[]>('/brokers'),
   });
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
-    queryKey: ['sale-orders'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+    // Full history - /sale-orders is capped at the latest 100 by default, which
+    // silently dropped older orders (and their brokerage) off this report.
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
   const { data: payments, isLoading: loadingPayments } = useQuery({
     // Full history - the ledger reflects every payment, not just latest 100.

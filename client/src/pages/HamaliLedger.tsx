@@ -158,8 +158,10 @@ export default function HamaliLedger() {
   });
 
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
-    queryKey: ['sale-orders'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+    // Full history - /sale-orders is capped at the latest 100 by default, which
+    // would drop older dispatches (and their loading hamali) off this ledger.
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
 
   const { data: hamaliRates } = useQuery({

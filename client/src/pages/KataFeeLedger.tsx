@@ -98,8 +98,10 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
   });
 
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
-    queryKey: ['sale-orders'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders'),
+    // Full history - /sale-orders is capped at the latest 100 by default, which
+    // would drop older dispatches (and their kata fee) off this ledger.
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
 
   const { data: company } = useQuery({

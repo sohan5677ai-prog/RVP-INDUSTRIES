@@ -370,10 +370,12 @@ export async function updateStockIn(req: Request, res: Response) {
   });
   if (!stockIn) throw new HttpError(404, 'Stock-in not found');
 
-  // Same guard as createStockIn: an edited arrival still cannot predate its PO.
-  if (isBeforePoDate(data.arrivalDate, stockIn.purchaseOrder.poDate)) {
-    throw new HttpError(400, 'Arrival date cannot be before the purchase order date');
-  }
+  // Unlike createStockIn, an EDIT may move an arrival to any date - including one
+  // before its PO. Corrections to historical records (a month keyed wrong, a lorry
+  // logged on the day it was unloaded rather than the day it landed) are exactly
+  // what this form is for, and refusing to backdate leaves the register permanently
+  // out of step with the physical stock book. New arrivals keep the guard.
+  const backdatedBeforePo = isBeforePoDate(data.arrivalDate, stockIn.purchaseOrder.poDate);
 
   const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : stockIn.invoiceFileUrl;
 
@@ -445,6 +447,18 @@ export async function updateStockIn(req: Request, res: Response) {
       await tx.purchaseOrder.update({
         where: { id: stockIn.purchaseOrderId },
         data: { tonnageKg: rvpKataKg },
+      });
+    }
+
+    // That same synthetic PO also has no independent order date - createUrpStockIn
+    // seeds poDate FROM the arrival. So when an edit backdates the arrival, drag the
+    // PO back with it; otherwise the PO ends up dated after the lorry it supposedly
+    // ordered, which computeFY() and the Order Planner both read as real. Genuine
+    // POs are left alone: their date is a fact of its own, not a mirror of arrival.
+    if (backdatedBeforePo && stockIn.purchaseOrder.createdBy === 'URP_DIRECT') {
+      await tx.purchaseOrder.update({
+        where: { id: stockIn.purchaseOrderId },
+        data: { poDate: data.arrivalDate },
       });
     }
 

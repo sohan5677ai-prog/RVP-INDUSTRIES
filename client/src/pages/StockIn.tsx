@@ -392,7 +392,9 @@ function StockInFormDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!poId) return toast.error('Select a purchase order');
-    if (poDateMin && arrivalDate < poDateMin) {
+    // Only new arrivals are held to the PO date. Editing an existing one may move it
+    // anywhere, so historical entries can be corrected against the physical stock book.
+    if (!editing && poDateMin && arrivalDate < poDateMin) {
       return toast.error('Arrival date cannot be before the purchase order date');
     }
     if ((Number(rvpFirstWeightKg) || 0) <= 0) return toast.error('RVP first weight must be positive');
@@ -446,7 +448,12 @@ function StockInFormDialog({
              <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="arrivalDate">Arrival date</Label>
-                <Input id="arrivalDate" type="date" value={arrivalDate} min={poDateMin} onChange={(e) => setArrivalDate(e.target.value)} required />
+                <Input id="arrivalDate" type="date" value={arrivalDate} min={editing ? undefined : poDateMin} onChange={(e) => setArrivalDate(e.target.value)} required />
+                {editing && poDateMin && arrivalDate < poDateMin && (
+                  <p className="text-[11px] text-amber-600">
+                    Before the PO date ({shortDate(poDateMin)}) — allowed on an edit.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="lorry">Lorry number</Label>

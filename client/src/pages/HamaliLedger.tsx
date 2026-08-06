@@ -498,7 +498,6 @@ export default function HamaliLedger() {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   // Metrics
-  const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0);
   const totalPl = filtered.reduce((acc, e) => acc + e.pl, 0);
   const totalTons = filtered.reduce((acc, e) => acc + e.netWeightKg, 0) / 1000;
 
@@ -610,6 +609,17 @@ export default function HamaliLedger() {
         .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0)
     : 0;
   const totalCrew = filtered.reduce((acc, e) => acc + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0) + manualNetInWindow;
+
+  // Total Hamali Charge (Company tile) - purchases/sale loading plus the
+  // Recorded Charges (bag cutting, pappu net, husk packing, misc) that the
+  // crew is also paid for. PAID entries settle a charge rather than being one,
+  // so they're excluded here (unlike totalCrew, which nets them off dues).
+  const manualChargedInWindow = includeManualInTile
+    ? manualSorted
+        .filter((c) => inDateWindow(c.date) && c.type !== 'PAID')
+        .reduce((s, c) => s + Number(c.amount), 0)
+    : 0;
+  const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0) + manualChargedInWindow;
 
   // ── Payables tab: one row per squared-off period ──────────────────────────
   // Crew-settlement payments (HAMALI) grouped by the period they settle.
@@ -852,7 +862,9 @@ export default function HamaliLedger() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-primary">{rupees(totalHamali)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Full charge across purchases &amp; sale loading</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Full charge across purchases &amp; sale loading{includeManualInTile ? ', incl. recorded charges' : ''}
+                  </p>
                 </CardContent>
               </Card>
             ) : (

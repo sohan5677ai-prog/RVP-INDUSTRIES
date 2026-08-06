@@ -28,6 +28,7 @@ export interface HuskExpenses {
   blackSeedUnloading: number;
   transferHamali: number;
   transferTransport: number;
+  saleFreight: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -82,6 +83,7 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading' },
   { key: 'transferHamali', label: 'Byproduct Transfer Hamali' },
   { key: 'transferTransport', label: 'Byproduct Transfer Transport' },
+  { key: 'saleFreight', label: 'Byproduct Sale Freight' },
   { key: 'pappuLoading', label: 'Pappu Loading' },
   { key: 'pappuRoasting', label: 'Pappu Roasting' },
   { key: 'huskLoading', label: 'Husk Loading' },

@@ -327,6 +327,9 @@ export interface SaleOrder {
   brokerageRatePerKg: string;
   destination: string | null;
   freightCharge: string;
+  // BASE = sold ex-works on the buyer's lorry (no freight of ours); DELIVERY =
+  // the rate is landed at their place and we bear the freight.
+  priceType: 'BASE' | 'DELIVERY';
   status: SaleStatus;
   marginOverride: boolean;
   dueDays?: number | null;

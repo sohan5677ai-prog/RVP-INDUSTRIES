@@ -437,6 +437,15 @@ model SaleOrder {
   // since pappu etc. is sold at a delivery price. Freight is our selling expense.
   destination        String?
   freightCharge      Decimal     @default(0) @db.Decimal(12, 2)
+  // Whether ratePerKg is quoted ex-works at our gate (BASE - the buyer lifts the
+  // goods on their own lorry) or landed at their place (DELIVERY - the quoted
+  // rate includes freight and we bear it). Pappu is always DELIVERY; husk and the
+  // other byproducts are usually BASE but are occasionally sold delivered. BASE
+  // forces freightCharge to 0 even when the buyer's party has a destination on
+  // file - see deriveDestinationFreight. Defaults to DELIVERY so every order
+  // booked before this column existed keeps exactly the freight it was booked
+  // with.
+  priceType          PriceType   @default(DELIVERY)
   // PENDING (nothing dispatched) → PARTIAL (some, remaining > 0) → DISPATCHED
   // (fully dispatched). The order itself is never DELIVERED; delivery is tracked
   // per dispatch (shipment).

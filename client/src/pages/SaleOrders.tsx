@@ -95,6 +95,10 @@ export default function SaleOrders() {
   const [toDate, setToDate] = useState('');
   const [override, setOverride] = useState(false);
   const [gstExempt, setGstExempt] = useState(false);
+  // Base (ex-works, buyer's lorry) vs delivery (our freight). Pappu is always
+  // delivered; husk & the byproducts are usually base, so the default follows
+  // the product and the user only flips it for the occasional delivered deal.
+  const [priceType, setPriceType] = useState<'BASE' | 'DELIVERY'>('DELIVERY');
 
   const { data: orders, isLoading } = useQuery({ queryKey: ['sale-orders'], queryFn: () => api<SaleOrder[]>('/sale-orders') });
   const { data: parties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
@@ -130,6 +134,7 @@ export default function SaleOrders() {
     { header: 'Party', value: (o) => o.buyer?.name ?? '' },
     { header: 'Broker', value: (o) => o.broker?.name ?? '' },
     { header: 'Destination', value: (o) => o.destination ?? '' },
+    { header: 'Price Basis', value: (o) => (o.priceType === 'DELIVERY' ? 'Delivery' : 'Base') },
     { header: 'Ordered (t)', value: (o) => toTonnes(o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
     { header: 'Dispatched (t)', value: (o) => toTonnes(o.dispatchedKg ?? 0).toFixed(2), excel: (o) => toTonnes(o.dispatchedKg ?? 0), numFmt: '#,##0.00', align: 'right' },
     { header: 'Remaining (t)', value: (o) => toTonnes(o.remainingKg ?? o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.remainingKg ?? o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
@@ -156,6 +161,7 @@ export default function SaleOrders() {
     setEditing(null);
     setOverride(false);
     setGstExempt(false);
+    setPriceType('DELIVERY'); // create always starts on Pappu
     form.reset({ saleDate: new Date().toISOString().slice(0, 10), product: 'PAPPU', buyerId: '', brokerId: NO_BROKER, tonnes: '', ratePerKg: '', dueDays: '' });
     setOpen(true);
   }
@@ -164,6 +170,7 @@ export default function SaleOrders() {
     setEditing(o);
     setOverride(o.marginOverride);
     setGstExempt(o.gstExempt);
+    setPriceType(o.priceType ?? 'DELIVERY');
     form.reset({
       saleDate: o.saleDate.slice(0, 10),
       product: o.product,
@@ -194,6 +201,7 @@ export default function SaleOrders() {
           reminderDate: v.reminderDate ? v.reminderDate : null,
           marginOverride: override,
           gstExempt,
+          priceType,
         },
       });
     },
@@ -351,7 +359,12 @@ export default function SaleOrders() {
                 <TableCell><Badge variant="outline" className="font-medium">{PRODUCTS.find((p) => p.value === o.product)?.label ?? o.product}</Badge></TableCell>
                 <TableCell className="font-medium">{o.buyer?.name ?? '-'}</TableCell>
                 <TableCell>{o.broker?.name ?? '-'}</TableCell>
-                <TableCell>{o.destination ?? '-'}</TableCell>
+                <TableCell>
+                  {o.destination ?? '-'}
+                  {o.priceType === 'DELIVERY' && (
+                    <span className="ml-1.5 text-[11px] text-muted-foreground">· delivered</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right font-semibold">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
                 <TableCell className="text-right">{toTonnes(o.dispatchedKg ?? 0).toFixed(2)} t</TableCell>
                 <TableCell className="text-right font-semibold">
@@ -401,7 +414,15 @@ export default function SaleOrders() {
               <FormField control={form.control} name="product" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Commodity <span className="text-destructive">*</span></FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select
+                    onValueChange={(v) => {
+                      field.onChange(v);
+                      // Re-default the pricing basis to the norm for the commodity;
+                      // still overridable below for a delivered husk deal.
+                      setPriceType(v === 'PAPPU' ? 'DELIVERY' : 'BASE');
+                    }}
+                    value={field.value}
+                  >
                     <FormControl><SelectTrigger><SelectValue placeholder="Select commodity" /></SelectTrigger></FormControl>
                     <SelectContent>{PRODUCTS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
                   </Select>
@@ -423,7 +444,10 @@ export default function SaleOrders() {
                   </FormControl>
                   {buyerId && (
                     <p className="text-xs text-muted-foreground">
-                      Destination: <span className="font-medium">{buyerDestination ?? 'none set on party'}</span> · freight auto-applied from Settings
+                      Destination: <span className="font-medium">{buyerDestination ?? 'none set on party'}</span>
+                      {priceType === 'DELIVERY'
+                        ? ' · freight auto-applied from Settings'
+                        : ' · base price, no freight applied'}
                     </p>
                   )}
                   <FormMessage />
@@ -476,6 +500,27 @@ export default function SaleOrders() {
                 <div className="flex justify-between"><span className="text-muted-foreground">Base ({toTonnes(weightKg).toFixed(2)} t × {rupees(rate)})</span><span className="font-medium">{base > 0 ? rupees(base) : '-'}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST){gstExempt && <span className="ml-1 text-amber-600">- exempt</span>}</span><span className="font-medium">{gstExempt ? '-' : (gst > 0 ? rupees(gst) : '-')}</span></div>
                 <div className="flex justify-between border-t pt-1.5"><span className="text-muted-foreground font-semibold">Value{gstExempt ? '' : ' (incl. GST)'}</span><span className="font-bold text-emerald-600">{value > 0 ? rupees(value) : '-'}</span></div>
+              </div>
+
+              <div className="space-y-1.5">
+                <FormLabel>Price basis</FormLabel>
+                <Select
+                  value={priceType}
+                  onValueChange={(v: 'BASE' | 'DELIVERY') => setPriceType(v)}
+                  disabled={!!editing && (editing.dispatchedKg ?? 0) > 0}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BASE">Base price - buyer lifts ex-works, they pay the lorry</SelectItem>
+                    <SelectItem value="DELIVERY">Delivery price - rate includes freight, we pay the lorry</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {priceType === 'DELIVERY'
+                    ? "Freight comes off the buyer's destination rate in Settings and is netted out of this commodity's income."
+                    : 'No freight is booked against this order.'}
+                  {!!editing && (editing.dispatchedKg ?? 0) > 0 && ' Locked - this order has already dispatched.'}
+                </p>
               </div>
 
               <label className="flex items-center gap-2 text-sm text-muted-foreground">

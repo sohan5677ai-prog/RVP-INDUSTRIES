@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
-import { Prisma, type Party } from '@prisma/client';
+import { Prisma, type Party, type PriceType } from '@prisma/client';
 import { HttpError } from '../lib/httpError.js';
 import {
   createSaleOrderSchema,
@@ -42,9 +42,31 @@ async function gstFractionForProduct(product: string): Promise<number> {
   return pct / 100;
 }
 
-/** Destination + outward freight, derived from the buyer's party + Settings rate. */
-async function deriveDestinationFreight(buyer: Party, weightKg: number) {
+/**
+ * How this order is priced when the client doesn't say.
+ *
+ * Pappu is always quoted landed at the buyer's place. Husk and the other
+ * byproducts are normally lifted ex-works on the buyer's own lorry, so they
+ * default to BASE - only the occasional delivered husk deal ticks the box.
+ */
+function resolvePriceType(priceType: PriceType | undefined, product: string): PriceType {
+  if (priceType) return priceType;
+  return product === 'PAPPU' ? 'DELIVERY' : 'BASE';
+}
+
+/**
+ * Destination + outward freight, derived from the buyer's party + Settings rate.
+ *
+ * BASE-priced orders carry NO freight: the buyer's rate is ex-works and their own
+ * lorry lifts the goods. The destination is still recorded (it's where the goods
+ * are going, and the invoice/e-way bill wants it) but the freight is zero even
+ * when the party has a destination on file - otherwise a husk buyer who also
+ * takes delivered pappu would silently be charged freight on every ex-works
+ * husk lorry, and the pool would be billed for a lorry we never hired.
+ */
+async function deriveDestinationFreight(buyer: Party, weightKg: number, priceType: PriceType) {
   const destination = buyer.destination ?? null;
+  if (priceType === 'BASE') return { destination, freightCharge: 0 };
   const rate = await getFreightRateForDestination(destination);
   return { destination, freightCharge: calcSaleFreight(weightKg, rate) };
 }
@@ -255,7 +277,11 @@ async function assertPappuMargin(product: string, ratePerKg: number, marginOverr
  * that order onwards - Surat 2800 -> 3000 leaves earlier orders at 2800, which
  * is the rate the delivered sale price was quoted against.
  */
-async function currentCostStamps(destination: string | null) {
+async function currentCostStamps(destination: string | null, priceType: PriceType) {
+  // BASE = ex-works, so there is no freight rate to pin - stamping the Settings
+  // rate here would have the Order Planner and the margins deduct freight the
+  // order never incurs.
+  if (priceType === 'BASE') return { freightRatePerTonne: 0 };
   return { freightRatePerTonne: await getFreightRateForDestination(destination) };
 }
 
@@ -308,9 +334,10 @@ export async function createSaleOrder(req: Request, res: Response) {
 
 
 
-  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+  const priceType = resolvePriceType(data.priceType, data.product);
+  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
   const gstFraction = await gstFractionForProduct(data.product);
-  const stamps = await currentCostStamps(destination ?? buyer.destination ?? null);
+  const stamps = await currentCostStamps(destination ?? buyer.destination ?? null, priceType);
 
   const order = await prisma.saleOrder.create({
     data: {
@@ -327,6 +354,7 @@ export async function createSaleOrder(req: Request, res: Response) {
       brokerageRatePerKg: data.brokerageRatePerKg,
       destination,
       freightCharge,
+      priceType,
       marginOverride: data.marginOverride || false,
       ...stamps,
     },
@@ -373,9 +401,10 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
 
       await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-      const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
+      const priceType = resolvePriceType(data.priceType, data.product);
+      const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
       const gstFraction = await gstFractionForProduct(data.product);
-      const stamps = await currentCostStamps(destination ?? buyer.destination ?? null);
+      const stamps = await currentCostStamps(destination ?? buyer.destination ?? null, priceType);
 
       const order = await prisma.saleOrder.create({
         data: {
@@ -390,6 +419,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           brokerageRatePerKg: 0,
           destination,
           freightCharge,
+          priceType,
           marginOverride: data.marginOverride || false,
           ...stamps,
         },
@@ -418,10 +448,15 @@ export async function updateSaleOrder(req: Request, res: Response) {
   if (!buyer) throw new HttpError(400, 'Buyer not found');
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
-  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg);
-  const gstFraction = await gstFractionForProduct(data.product);
 
   const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
+  // Base/delivery is locked once a lorry has gone out: each dispatch already
+  // posted its own freight (or none) to the ledger, and flipping the basis here
+  // would leave the order disagreeing with postings we can no longer reach.
+  const priceType = dispatchedKg > 0 ? order.priceType : resolvePriceType(data.priceType, data.product);
+  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
+  const gstFraction = await gstFractionForProduct(data.product);
+
   const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
   const updated = await prisma.saleOrder.update({
@@ -440,6 +475,7 @@ export async function updateSaleOrder(req: Request, res: Response) {
       brokerageRatePerKg: data.brokerageRatePerKg,
       destination,
       freightCharge,
+      priceType,
       marginOverride: data.marginOverride || false,
       status,
     },
@@ -545,7 +581,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   }
   const baseAmount = weightKg * Number(order.ratePerKg);
   const gstAmount = order.gstExempt ? 0 : calcGst(weightKg, Number(order.ratePerKg), await gstFractionForProduct(order.product));
-  const { freightCharge } = await deriveDestinationFreight(order.buyer, weightKg);
+  const { freightCharge } = await deriveDestinationFreight(order.buyer, weightKg, order.priceType);
 
   // Lorry freight split (paid by us): destination unloading hamali + kata are
   // auto-computed from the standard rates, a fixed retention is held back until

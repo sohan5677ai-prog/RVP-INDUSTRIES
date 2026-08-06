@@ -20,7 +20,11 @@ export const createSaleOrderSchema = z.object({
   // When true, bill this order without GST.
   gstExempt: z.boolean().optional().default(false),
   brokerageRatePerKg: z.coerce.number().nonnegative().optional().default(0),
-  // Destination + freight are derived from the buyer's party - not taken from the client.
+  // BASE = sold ex-works (the buyer's lorry, we carry no freight); DELIVERY = the
+  // rate is landed at their place and we bear the freight. Omitted → defaults per
+  // product (see resolvePriceType). The freight AMOUNT is still derived from the
+  // buyer's destination + the Settings rate - never taken from the client.
+  priceType: z.enum(['BASE', 'DELIVERY']).optional(),
 });
 
 // Multipart on dispatch: confirmed values read off the kata slip. The tax invoice

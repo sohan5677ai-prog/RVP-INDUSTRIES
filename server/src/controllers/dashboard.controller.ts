@@ -85,6 +85,7 @@ export interface HuskExpenses {
   blackSeedUnloading: number;
   transferHamali: number;
   transferTransport: number;
+  saleFreight: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -116,6 +117,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'blackSeedUnloading', label: 'Black Seed Unloading', pappu: false },
   { key: 'transferHamali',     label: 'Byproduct Transfer Hamali', pappu: false },
   { key: 'transferTransport',  label: 'Byproduct Transfer Transport', pappu: false },
+  { key: 'saleFreight',        label: 'Byproduct Sale Freight', pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
@@ -165,6 +167,7 @@ export const HUSK_INCOME_META: { key: keyof HuskIncome; label: string }[] = [
 export async function computeHuskPool(): Promise<{ revenue: number; expenses: HuskExpenses; income: HuskIncome }> {
   const [
     revAccount,
+    freightOutwardAccount,
     hamaliIncomeAccount,
     dispatches,
     blackSeedHamali,
@@ -197,6 +200,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     companyProfile,
   ] = await Promise.all([
       prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
+      prisma.account.findUnique({ where: { code: '50050' }, select: { id: true } }),
       prisma.account.findUnique({ where: { code: '40030' }, select: { id: true } }),
       prisma.$queryRaw<{product: string, weightKg: bigint}[]>`
         SELECT so."product", SUM(sd."weightKg") as "weightKg"
@@ -255,6 +259,25 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
         where: { accountId: revAccount.id, costCenter: { in: POOL_REVENUE_COST_CENTERS } },
       });
       revenue = Number(revLines._sum.credit ?? 0) - Number(revLines._sum.debit ?? 0);
+    }
+
+    // ── Outward freight on DELIVERY-priced byproduct sales ──────────────────────
+    // Husk & co. are normally quoted BASE (ex-works, on the buyer's lorry), which
+    // posts no freight at all. When a buyer takes them at a delivery price the
+    // quoted rate INCLUDES the freight, so the revenue credited above is inflated
+    // by exactly the freight we then pay the lorry. Netting it here is what makes
+    // the pool's byproduct income a real after-freight figure.
+    //
+    // Cost-centre filtered to the pool products on purpose: Pappu's freight also
+    // lands on 50050 but is already deducted inside the Pappu P/L, so pulling the
+    // whole account in would double-count it.
+    let saleFreight = 0;
+    if (freightOutwardAccount) {
+      const freightLines = await prisma.journalLine.aggregate({
+        _sum: { debit: true, credit: true },
+        where: { accountId: freightOutwardAccount.id, costCenter: { in: POOL_REVENUE_COST_CENTERS } },
+      });
+      saleFreight = Number(freightLines._sum.debit ?? 0) - Number(freightLines._sum.credit ?? 0);
     }
 
     // ── Dispatched tonnage per product (drives recomputed loading hamali) ───────
@@ -349,6 +372,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
       transferHamali,
       transferTransport,
+      saleFreight,
       pappuLoading,
       pappuRoasting,
       huskLoading,

@@ -206,8 +206,11 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       `,
       prisma.purchase.aggregate({ _sum: { hamaliCharge: true } }),
       (prisma.manualHamaliCost.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
-      // Sum debit (purchases) and credit (sales) separately; ignore PAYMENT type (doesn't affect husk cost)
-      prisma.gunnyBagEntry.aggregate({ _sum: { debit: true, credit: true } }),
+      // Purchases (debit) vs sales (credit); PAYMENT rows don't affect husk cost.
+      // Read rows, not an aggregate: legacy entries have debit/credit = 0 and carry
+      // the value in the old `amount`/`direction` pair, exactly as the Feroz Ledger
+      // page falls back. Aggregating `debit` alone silently drops them.
+      prisma.gunnyBagEntry.findMany({ select: { type: true, direction: true, debit: true, credit: true, amount: true } }),
       prisma.electricityBill.aggregate({ _sum: { amount: true } }),
       prisma.maintenanceExpense.aggregate({ _sum: { amount: true } }),
       prisma.miscExpense.aggregate({ _sum: { amount: true } }),
@@ -300,7 +303,13 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       Number(huskAgg._sum.transportCharge || 0);
 
     // Purchases on Feroz Ledger are a husk-pool cost; standalone gunny sales in Income tab are income
-    const gunnyBags = Number(gunnyByDir._sum.debit ?? 0);
+    const gunnyBags = gunnyByDir.reduce((s, r) => {
+      const debit = Number(r.debit ?? 0);
+      const credit = Number(r.credit ?? 0);
+      // Legacy row: both columns 0, value lives in `amount` keyed by `direction`.
+      if (debit === 0 && credit === 0 && r.direction === 'PURCHASE') return s + Number(r.amount ?? 0);
+      return s + debit;
+    }, 0);
     const gunnySales = Number(gunnySalesAgg._sum.amount ?? 0);
     const electricity = Number(electricityAgg._sum.amount ?? 0);
     const maintenance = Number(maintenanceAgg._sum.amount ?? 0);

@@ -432,11 +432,11 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Multi-Language Indic Typography (Ponnala, Anek & Noto Sans)
-   Bold, crisp, highly readable font family rules for statement sheets.
+   Multi-Language Indic Typography (Anek & Noto Sans)
+   Clean, modern, highly readable font family rules for statement sheets.
 ────────────────────────────────────────────────────────────── */
 .lang-te {
-  font-family: 'Ponnala', 'Anek Telugu', 'Noto Sans Telugu', 'Segoe UI', system-ui, sans-serif !important;
+  font-family: 'Anek Telugu', 'Noto Sans Telugu', 'Segoe UI', system-ui, sans-serif !important;
 }
 
 .lang-ta {
@@ -452,12 +452,8 @@
 }
 
 .lang-indic {
-  font-weight: 700 !important;
   letter-spacing: 0.01em;
 }
 
-.lang-indic-bold {
-  font-weight: 800 !important;
-}
 
 

@@ -272,10 +272,8 @@ export default function PurchaseStatement() {
             <Printer className="h-4 w-4" /> Print Statement
           </Button>
         </div>
-      </div>
-
-      {/* Statement sheet - mirrors the PDF sent to the party on WhatsApp */}
-      <div className="bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0 print:rounded-none">
+      </di      {/* Statement sheet - mirrors the PDF sent to the party on WhatsApp */}
+      <div className={`bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0 print:rounded-none lang-${lang} ${lang !== 'en' ? 'lang-indic' : ''}`}>
 
         {/* Letterhead */}
         <div className="flex items-start justify-between gap-6 border-b border-neutral-400 pb-3">
@@ -291,16 +289,16 @@ export default function PurchaseStatement() {
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <h3 className="text-base font-bold tracking-wide">{t.purchaseStatement}</h3>
-            <p className="text-[11px] text-neutral-500">{t.dated} {shortDate(purchase.purchaseDate ?? stockIn.arrivalDate)}</p>
-            <p className="text-[10px] text-neutral-500">{t.unloadedAndVerified}</p>
+            <h3 className={`text-base font-bold tracking-wide ${lang !== 'en' ? 'text-lg text-neutral-950 font-extrabold' : ''}`}>{t.purchaseStatement}</h3>
+            <p className="text-[11px] text-neutral-600">{t.dated} {shortDate(purchase.purchaseDate ?? stockIn.arrivalDate)}</p>
+            <p className={`text-[10px] text-neutral-600 ${lang !== 'en' ? 'text-[11px] font-semibold text-neutral-800' : ''}`}>{t.unloadedAndVerified}</p>
           </div>
         </div>
 
         {/* Party + document meta */}
         <div className="mt-4 grid grid-cols-1 md:grid-cols-[1.25fr_1fr] border border-neutral-300 rounded-sm">
           <div className="p-3 border-b md:border-b-0 md:border-r border-neutral-300">
-            <p className="text-[9px] uppercase tracking-widest text-neutral-500">{t.statementFor}</p>
+            <p className={`text-[9px] uppercase tracking-widest text-neutral-500 ${lang !== 'en' ? 'text-[10.5px] font-bold text-neutral-700' : ''}`}>{t.statementFor}</p>
             <p className="mt-1 text-base font-bold">{party.name}</p>
             {[party.address, party.city, party.state].filter(Boolean).length > 0 && (
               <p className="text-[10px] text-neutral-500">
@@ -314,8 +312,8 @@ export default function PurchaseStatement() {
           <div className="p-3 space-y-1.5">
             {metaPairs.map(([label, value]) => (
               <div key={label} className="flex items-baseline gap-2 text-[11px]">
-                <span className="w-28 shrink-0 text-neutral-500">{label}</span>
-                <span className="font-semibold">{value}</span>
+                <span className={`w-32 shrink-0 text-neutral-500 ${lang !== 'en' ? 'font-semibold text-neutral-700 text-[11.5px]' : ''}`}>{label}</span>
+                <span className="font-semibold text-neutral-900">{value}</span>
               </div>
             ))}
           </div>
@@ -325,21 +323,21 @@ export default function PurchaseStatement() {
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 border border-neutral-300 rounded-sm bg-neutral-50 divide-x divide-neutral-200">
           {weightCells.map(([label, value], i) => (
             <div key={label} className="p-2 text-center">
-              <p className="text-[8px] uppercase tracking-widest text-neutral-500">{label}</p>
-              <p className={`mt-0.5 font-bold ${i === weightCells.length - 1 ? 'text-sm' : 'text-[13px]'}`}>{value}</p>
+              <p className={`text-[8px] uppercase tracking-widest text-neutral-500 ${lang !== 'en' ? 'text-[10px] font-bold text-neutral-700 tracking-normal' : ''}`}>{label}</p>
+              <p className={`mt-0.5 font-bold ${i === weightCells.length - 1 ? 'text-sm text-neutral-950 font-extrabold' : 'text-[13px]'}`}>{value}</p>
             </div>
           ))}
         </div>
-        <p className="mt-1.5 text-[10px] text-neutral-500">{kataNote}</p>
+        <p className={`mt-1.5 text-[10px] text-neutral-600 ${lang !== 'en' ? 'text-[11.5px] font-bold text-neutral-900 leading-snug' : ''}`}>{kataNote}</p>
 
         {/* Particulars */}
         <table className="mt-3 w-full border-collapse text-[12px]">
           <thead>
             <tr className="bg-neutral-900 text-white text-[9px] uppercase tracking-widest">
-              <th className="p-2 text-left font-semibold">{t.particulars}</th>
-              <th className="p-2 text-right font-semibold w-28">{t.quantity}</th>
-              <th className="p-2 text-right font-semibold w-28">{t.ratePerKg}</th>
-              <th className="p-2 text-right font-semibold w-32">{t.amountInr}</th>
+              <th className={`p-2 text-left font-semibold ${lang !== 'en' ? 'text-[11px] font-bold tracking-normal' : ''}`}>{t.particulars}</th>
+              <th className={`p-2 text-right font-semibold w-28 ${lang !== 'en' ? 'text-[11px] font-bold tracking-normal' : ''}`}>{t.quantity}</th>
+              <th className={`p-2 text-right font-semibold w-28 ${lang !== 'en' ? 'text-[11px] font-bold tracking-normal' : ''}`}>{t.ratePerKg}</th>
+              <th className={`p-2 text-right font-semibold w-32 ${lang !== 'en' ? 'text-[11px] font-bold tracking-normal' : ''}`}>{t.amountInr}</th>
             </tr>
           </thead>
           <tbody>
@@ -348,13 +346,13 @@ export default function PurchaseStatement() {
                 key={`${r.label}-${i}`}
                 className={`border-b border-neutral-200 align-top ${r.subtotal ? 'bg-neutral-100 font-semibold' : ''}`}
               >
-                <td className={`p-2 ${/^(Less|Add|கழிக்க|சேர்க்க|తీసివేయండి|కలపండి|കുറയ്ക്കുക|കൂട്ടുക|ಕಳೆಯಿರಿ|ಸೇರಿಸಿ)/.test(r.label) ? 'pl-5' : ''}`}>
+                <td className={`p-2 ${/^(Less|Add|கழிக்க|சேர்க்க|தீసివేయండి|కలపండి|കുറയ്ക്കുക|കൂട്ടുക|ಕಳೆಯಿರಿ|ಸೇರಿಸಿ)/.test(r.label) ? 'pl-5' : ''} ${lang !== 'en' ? 'font-bold text-neutral-950 text-[13px]' : ''}`}>
                   {r.label}
-                  {r.note && <span className="block text-[9.5px] text-neutral-500">{r.note}</span>}
+                  {r.note && <span className={`block text-[9.5px] text-neutral-500 ${lang !== 'en' ? 'text-[11px] font-semibold text-neutral-600' : ''}`}>{r.note}</span>}
                 </td>
                 <td className="p-2 text-right tabular-nums">{r.qty ?? ''}</td>
                 <td className="p-2 text-right tabular-nums">{r.rate ?? ''}</td>
-                <td className={`p-2 text-right tabular-nums ${r.negative ? 'text-red-700' : ''}`}>
+                <td className={`p-2 text-right tabular-nums ${r.negative ? 'text-red-700 font-semibold' : ''}`}>
                   {r.negative ? `(${money(r.amount)})` : money(r.amount)}
                 </td>
               </tr>
@@ -364,13 +362,13 @@ export default function PurchaseStatement() {
 
         {/* Net payable */}
         <div className="mt-0 flex items-center justify-between bg-neutral-900 text-white px-3 py-2.5">
-          <span className="text-[12px] font-bold uppercase tracking-widest">{t.netBalancePayable}</span>
+          <span className={`text-[12px] font-bold uppercase tracking-widest ${lang !== 'en' ? 'text-[13.5px] font-extrabold tracking-normal' : ''}`}>{t.netBalancePayable}</span>
           <span className="text-lg font-bold tabular-nums">{money(netPayable)}</span>
         </div>
 
         {/* Footer */}
         <div className="mt-10 flex items-start justify-between gap-6 border-t border-dotted border-neutral-300 pt-3">
-          <p className="max-w-[55%] text-[9.5px] text-neutral-500">
+          <p className={`max-w-[55%] text-[9.5px] text-neutral-500 ${lang !== 'en' ? 'text-[11px] font-semibold text-neutral-700 leading-snug' : ''}`}>
             {t.computerGeneratedNote}
           </p>
           <AuthorisedSignature
@@ -381,6 +379,7 @@ export default function PurchaseStatement() {
           />
         </div>
       </div>
+
 
       {/* Embedded CSS for Print Layout */}
       <style>{`

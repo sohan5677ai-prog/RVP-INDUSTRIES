@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Printer, ArrowLeft, Download } from 'lucide-react';
+import { Printer, ArrowLeft, Download, Languages } from 'lucide-react';
 import { useState } from 'react';
 import { api, apiBlob } from '@/lib/api';
 import type { Purchase, WeightVerification, StockIn, PurchaseOrder, Party } from '@/lib/types';
@@ -8,6 +8,7 @@ import { computeQualityAdjustments, type QualityAdjustmentMode, type QualityAdju
 import { Button } from '@/components/ui/button';
 import { shortDate } from '@/lib/format';
 import AuthorisedSignature from '@/components/AuthorisedSignature';
+import { SUPPORTED_LANGUAGES, TRANSLATIONS, type StatementLanguage } from '@/lib/i18n/purchaseStatement';
 
 type PurchaseDetails = Purchase & {
   verification: WeightVerification;
@@ -56,6 +57,9 @@ interface Row {
 export default function PurchaseStatement() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const [downloading, setDownloading] = useState(false);
+  const [lang, setLang] = useState<StatementLanguage>('en');
+
+  const t = TRANSLATIONS[lang];
 
   const { data: purchase, isLoading, error } = useQuery({
     queryKey: ['purchases', purchaseId],
@@ -72,7 +76,7 @@ export default function PurchaseStatement() {
   async function downloadPdf(verificationId: string, partyName: string, invoiceNumber: string) {
     setDownloading(true);
     try {
-      const blob = await apiBlob(`/verifications/${verificationId}/statement.pdf`);
+      const blob = await apiBlob(`/verifications/${verificationId}/statement.pdf?lang=${lang}`);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -109,9 +113,6 @@ export default function PurchaseStatement() {
   const price = Number(v.pricePerKg);
 
   // --- Bill arithmetic (mirrors createVerification on the server) ------------
-  // The kata difference is already folded into the verified payable weight, so
-  // bill the reference weight and show the cut as its own line. When RVP weighed
-  // HEAVIER than the reference there is no cut - we pay on the RVP net.
   const billedKg = Math.max(v.referenceKg, v.finalWeightKg);
   const kataDeductKg = Math.max(0, v.referenceKg - v.finalWeightKg);
   const grossSeed = billedKg * price;
@@ -141,7 +142,7 @@ export default function PurchaseStatement() {
   const rows: Row[] = [
     {
       label: 'Tamarind seed (black seed)',
-      note: stockIn.selfVehicle ? "Delivered in party's own vehicle" : undefined,
+      note: stockIn.selfVehicle ? t.partyVehicleNote : undefined,
       qty: kg(billedKg),
       rate: money(price),
       amount: grossSeed,
@@ -150,8 +151,8 @@ export default function PurchaseStatement() {
 
   if (kataDeductKg > 0) {
     rows.push({
-      label: 'Less : Kata difference',
-      note: `${kg(v.diffKg)} short against ${kg(v.referenceKg)} reference, ${ALLOWANCE_KG} kg allowed free`,
+      label: t.lessKataDiff,
+      note: t.kataDiffNote(kg(v.diffKg), kg(v.referenceKg), ALLOWANCE_KG),
       qty: kg(kataDeductKg),
       rate: money(price),
       amount: kataDeductAmount,
@@ -164,7 +165,7 @@ export default function PurchaseStatement() {
     if (!amount) continue;
     const note = MODE_NOTE[r.mode];
     rows.push({
-      label: `Less : ${r.label}`,
+      label: t.lessQualityCut(r.label),
       note: r.label.toLowerCase() === note ? undefined : note,
       qty: r.mode === 'WEIGHT' ? kg(r.value) : undefined,
       rate: r.mode === 'WEIGHT' ? money(price) : r.mode === 'PRICE' ? `${money(r.value)}/kg` : undefined,
@@ -174,13 +175,13 @@ export default function PurchaseStatement() {
   }
 
   if (deductionsTotal > 0 && (hasAdditions || hasRecoveries)) {
-    rows.push({ label: 'Net seed value', amount: netSeedValue, subtotal: true });
+    rows.push({ label: t.netSeedValue, amount: netSeedValue, subtotal: true });
   }
 
   if (gstAmount > 0) {
     rows.push({
-      label: 'Add : IGST @ 5%',
-      note: `on invoice value ${kg(v.billingWeightKg)} × ${money(price)}`,
+      label: t.addIgst,
+      note: t.igstNote(kg(v.billingWeightKg), money(price)),
       amount: gstAmount,
     });
   }
@@ -191,16 +192,16 @@ export default function PurchaseStatement() {
 
   if (selfVehicleHamali > 0) {
     rows.push({
-      label: 'Less : Hamali (unloading)',
-      note: "lorry's share recovered - party's own vehicle",
+      label: t.lessHamali,
+      note: t.hamaliNote,
       amount: selfVehicleHamali,
       negative: true,
     });
   }
   if (selfVehicleKata > 0) {
     rows.push({
-      label: 'Less : Kata charges (weighbridge)',
-      note: "recovered - party's own vehicle",
+      label: t.lessKataCharges,
+      note: t.kataChargesNote,
       amount: selfVehicleKata,
       negative: true,
     });
@@ -208,36 +209,56 @@ export default function PurchaseStatement() {
 
   const kataNote =
     v.finalWeightKg >= v.referenceKg && v.diffKg === 0
-      ? 'Both weighbridges agree - payable at the full reference weight.'
+      ? t.kataBothAgree
       : v.finalWeightKg > v.referenceKg
-        ? `RVP weighbridge read heavier than the party kata - paid on our higher net of ${kg(v.rvpKataKg)}.`
+        ? t.kataRvpHeavier(kg(v.rvpKataKg))
         : v.exempt
-          ? `Difference of ${kg(v.diffKg)} is within the ${ALLOWANCE_KG} kg free allowance - no weight deduction.`
-          : `Difference of ${kg(v.diffKg)} exceeds the ${ALLOWANCE_KG} kg free allowance - ${kg(kataDeductKg)} deducted below.`;
+          ? t.kataWithinAllowance(kg(v.diffKg), ALLOWANCE_KG)
+          : t.kataExceedsAllowance(kg(v.diffKg), ALLOWANCE_KG, kg(kataDeductKg));
 
   const weightCells: [string, string][] = [
-    ['Invoice Weight', kg(v.billingWeightKg)],
-    ['Party Kata', kg(v.partyKataKg)],
-    ['RVP Kata', kg(v.rvpKataKg)],
-    ['Difference', kg(v.diffKg)],
-    ['Payable Weight', kg(v.finalWeightKg)],
+    [t.invoiceWeight, kg(v.billingWeightKg)],
+    [t.partyKata, kg(v.partyKataKg)],
+    [t.rvpKata, kg(v.rvpKataKg)],
+    [t.difference, kg(v.diffKg)],
+    [t.payableWeight, kg(v.finalWeightKg)],
   ];
 
   const metaPairs: [string, string][] = [
-    ['Invoice No.', stockIn.invoiceNumber || '-'],
-    ['Vehicle', `${stockIn.lorryNumber}${stockIn.selfVehicle ? '  (party vehicle)' : ''}`],
-    ['Purchase Order', stockIn.purchaseOrder.poNumber || '-'],
+    [t.invoiceNo, stockIn.invoiceNumber || '-'],
+    [t.vehicle, `${stockIn.lorryNumber}${stockIn.selfVehicle ? `  ${t.partyVehicleNote}` : ''}`],
+    [t.purchaseOrder, stockIn.purchaseOrder.poNumber || '-'],
   ];
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto p-4 md:p-6 print:max-w-none print:p-0 print:m-0 print:space-y-0">
       {/* Action Bar (hidden when printing) */}
-      <div className="flex items-center justify-between print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <Button asChild variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground">
           <Link to="/purchases">
             <ArrowLeft className="h-4 w-4" /> Back to Purchases
           </Link>
         </Button>
+
+        {/* Multi-Language Selector */}
+        <div className="flex items-center gap-1 bg-neutral-100/90 p-1 rounded-lg border border-neutral-200/80 shadow-xs">
+          <Languages className="h-4 w-4 ml-1.5 mr-0.5 text-neutral-500" />
+          {SUPPORTED_LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              onClick={() => setLang(l.code)}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                lang === l.code
+                  ? 'bg-neutral-900 text-white shadow-sm font-semibold'
+                  : 'text-neutral-600 hover:text-neutral-900 hover:bg-white/80'
+              }`}
+            >
+              <span className="mr-1">{l.flag}</span>
+              {l.nativeName}
+            </button>
+          ))}
+        </div>
+
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
@@ -270,16 +291,16 @@ export default function PurchaseStatement() {
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <h3 className="text-base font-bold tracking-wide">PURCHASE STATEMENT</h3>
-            <p className="text-[11px] text-neutral-500">Dated {shortDate(purchase.purchaseDate ?? stockIn.arrivalDate)}</p>
-            <p className="text-[10px] text-neutral-500">Unloaded &amp; weight-verified</p>
+            <h3 className="text-base font-bold tracking-wide">{t.purchaseStatement}</h3>
+            <p className="text-[11px] text-neutral-500">{t.dated} {shortDate(purchase.purchaseDate ?? stockIn.arrivalDate)}</p>
+            <p className="text-[10px] text-neutral-500">{t.unloadedAndVerified}</p>
           </div>
         </div>
 
         {/* Party + document meta */}
         <div className="mt-4 grid grid-cols-1 md:grid-cols-[1.25fr_1fr] border border-neutral-300 rounded-sm">
           <div className="p-3 border-b md:border-b-0 md:border-r border-neutral-300">
-            <p className="text-[9px] uppercase tracking-widest text-neutral-500">Statement for</p>
+            <p className="text-[9px] uppercase tracking-widest text-neutral-500">{t.statementFor}</p>
             <p className="mt-1 text-base font-bold">{party.name}</p>
             {[party.address, party.city, party.state].filter(Boolean).length > 0 && (
               <p className="text-[10px] text-neutral-500">
@@ -293,7 +314,7 @@ export default function PurchaseStatement() {
           <div className="p-3 space-y-1.5">
             {metaPairs.map(([label, value]) => (
               <div key={label} className="flex items-baseline gap-2 text-[11px]">
-                <span className="w-24 shrink-0 text-neutral-500">{label}</span>
+                <span className="w-28 shrink-0 text-neutral-500">{label}</span>
                 <span className="font-semibold">{value}</span>
               </div>
             ))}
@@ -315,10 +336,10 @@ export default function PurchaseStatement() {
         <table className="mt-3 w-full border-collapse text-[12px]">
           <thead>
             <tr className="bg-neutral-900 text-white text-[9px] uppercase tracking-widest">
-              <th className="p-2 text-left font-semibold">Particulars</th>
-              <th className="p-2 text-right font-semibold w-24">Quantity</th>
-              <th className="p-2 text-right font-semibold w-24">Rate / kg</th>
-              <th className="p-2 text-right font-semibold w-28">Amount (INR)</th>
+              <th className="p-2 text-left font-semibold">{t.particulars}</th>
+              <th className="p-2 text-right font-semibold w-28">{t.quantity}</th>
+              <th className="p-2 text-right font-semibold w-28">{t.ratePerKg}</th>
+              <th className="p-2 text-right font-semibold w-32">{t.amountInr}</th>
             </tr>
           </thead>
           <tbody>
@@ -327,7 +348,7 @@ export default function PurchaseStatement() {
                 key={`${r.label}-${i}`}
                 className={`border-b border-neutral-200 align-top ${r.subtotal ? 'bg-neutral-100 font-semibold' : ''}`}
               >
-                <td className={`p-2 ${/^(Less|Add) :/.test(r.label) ? 'pl-5' : ''}`}>
+                <td className={`p-2 ${/^(Less|Add|கழிக்க|சேர்க்க|తీసివేయండి|కలపండి|കുറയ്ക്കുക|കൂട്ടുക|ಕಳೆಯಿರಿ|ಸೇರಿಸಿ)/.test(r.label) ? 'pl-5' : ''}`}>
                   {r.label}
                   {r.note && <span className="block text-[9.5px] text-neutral-500">{r.note}</span>}
                 </td>
@@ -343,17 +364,18 @@ export default function PurchaseStatement() {
 
         {/* Net payable */}
         <div className="mt-0 flex items-center justify-between bg-neutral-900 text-white px-3 py-2.5">
-          <span className="text-[12px] font-bold uppercase tracking-widest">Net Balance Payable</span>
+          <span className="text-[12px] font-bold uppercase tracking-widest">{t.netBalancePayable}</span>
           <span className="text-lg font-bold tabular-nums">{money(netPayable)}</span>
         </div>
 
         {/* Footer */}
         <div className="mt-10 flex items-start justify-between gap-6 border-t border-dotted border-neutral-300 pt-3">
           <p className="max-w-[55%] text-[9.5px] text-neutral-500">
-            Computer-generated statement. Please report any discrepancy within 7 days of receipt.
+            {t.computerGeneratedNote}
           </p>
           <AuthorisedSignature
-            companyName={company?.name ?? 'RVP Industries'}
+            companyName={t.forCompany(company?.name ?? 'RVP Industries')}
+            caption={t.authorisedSignatory}
             captionRule
             className="text-[11px]"
           />
@@ -390,3 +412,4 @@ export default function PurchaseStatement() {
     </div>
   );
 }
+

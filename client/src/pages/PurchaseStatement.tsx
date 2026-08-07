@@ -272,8 +272,12 @@ export default function PurchaseStatement() {
             <Printer className="h-4 w-4" /> Print Statement
           </Button>
         </div>
-      </di      {/* Statement sheet - mirrors the PDF sent to the party on WhatsApp */}
+      </div>
+
+
+      {/* Statement sheet - mirrors the PDF sent to the party on WhatsApp */}
       <div className={`bg-white text-neutral-900 border border-neutral-200 rounded-lg shadow-lg overflow-hidden p-6 md:p-8 font-sans print:shadow-none print:border-none print:p-0 print:rounded-none lang-${lang} ${lang !== 'en' ? 'lang-indic' : ''}`}>
+
 
         {/* Letterhead */}
         <div className="flex items-start justify-between gap-6 border-b border-neutral-400 pb-3">

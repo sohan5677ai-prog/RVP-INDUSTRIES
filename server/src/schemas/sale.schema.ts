@@ -44,6 +44,11 @@ export const dispatchSaleOrderSchema = z.object({
   // in dispatchSaleOrder.
   excessOutKg: z.coerce.number().int().nonnegative().optional().default(0),
   excessOutNote: z.string().optional().nullable(),
+  // "Final lorry for this order" - closes the order even though the kata weight
+  // leaves a balance against the booked tonnage. Only needed for gaps beyond the
+  // Settings tolerance; the everyday 24.87-of-25 case closes on its own. Sent
+  // over multipart, so the string "true" has to count.
+  finalDispatch: z.preprocess((v) => v === true || v === 'true', z.boolean()),
 });
 
 const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);
@@ -80,6 +85,12 @@ export const lorryReceiptSchema = z.object({
   lrDate: z.coerce.date().optional().nullable(),
   lrBags: z.coerce.number().int().nonnegative().optional().nullable(),
   lrKgPerBag: z.coerce.number().int().nonnegative().optional().nullable(),
+});
+
+// Short-close an order the buyer stopped lifting. The reason is free text; a
+// blank one falls back to a generated "Closed short - N kg left unshipped".
+export const closeSaleOrderSchema = z.object({
+  reason: z.string().max(200).optional().nullable(),
 });
 
 export type CreateSaleOrderInput = z.infer<typeof createSaleOrderSchema>;

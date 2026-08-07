@@ -9,13 +9,28 @@ import {
   dispatchSaleOrderSchema,
   markPaidSchema,
   lorryReceiptSchema,
+  closeSaleOrderSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
 import { clearCache } from '../lib/cache.js';
 import { LedgerService } from '../services/ledger.service.js';
 
-import { calcSaleFreight, calcHamali, calcKataFee, pappuLoadingHamali, customLoadingHamali, productLoadingHamali, isVehicleExempt, seedBackedDispatchedKg } from '../lib/calc.js';
+import {
+  calcSaleFreight,
+  calcHamali,
+  calcKataFee,
+  pappuLoadingHamali,
+  customLoadingHamali,
+  productLoadingHamali,
+  isVehicleExempt,
+  seedBackedDispatchedKg,
+  isLooseLoadedProduct,
+  isSaleOrderFulfilled,
+  saleCloseToleranceKg,
+  DEFAULT_SALE_CLOSE_TOLERANCE_PCT,
+  DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
+} from '../lib/calc.js';
 import {
   getFreightRateForDestination,
   getCompanyProfileRow,
@@ -74,10 +89,35 @@ async function deriveDestinationFreight(buyer: Party, weightKg: number, priceTyp
 /**
  * Attach computed fulfilment fields. `dispatchedKg` is the sum of all dispatch
  * weights; `remainingKg` is the still-to-ship balance against the ordered weight.
+ *
+ * A closed order has NO balance left to ship whatever the arithmetic says - it
+ * finished under its booked tonnage and was closed on that (see closedAt). The
+ * gap is still reported as `shortKg` so the shortfall stays visible rather than
+ * silently vanishing.
  */
-function withFulfilment<T extends { tonnageKg: number; dispatches?: { weightKg: number }[] }>(order: T) {
+function withFulfilment<
+  T extends { tonnageKg: number; closedAt?: Date | null; dispatches?: { weightKg: number }[] },
+>(order: T) {
   const dispatchedKg = (order.dispatches ?? []).reduce((s, d) => s + d.weightKg, 0);
-  return { ...order, dispatchedKg, remainingKg: Math.max(0, order.tonnageKg - dispatchedKg) };
+  const balanceKg = Math.max(0, order.tonnageKg - dispatchedKg);
+  const closed = order.closedAt != null;
+  return {
+    ...order,
+    dispatchedKg,
+    remainingKg: closed ? 0 : balanceKg,
+    shortKg: closed ? balanceKg : 0,
+  };
+}
+
+/**
+ * Close tolerance (%) configured for a product: the tight figure for bagged
+ * pappu, the wider one for husk and the other loose byproducts.
+ */
+async function closeTolerancePctFor(product: string): Promise<number> {
+  const company = await getCompanyProfileRow();
+  return isLooseLoadedProduct(product)
+    ? Number(company.saleCloseToleranceByproductPct ?? DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT)
+    : Number(company.saleCloseTolerancePct ?? DEFAULT_SALE_CLOSE_TOLERANCE_PCT);
 }
 
 export async function listSaleOrders(req: Request, res: Response) {
@@ -542,6 +582,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     include: { buyer: true, dispatches: true },
   });
   if (!order) throw new HttpError(404, 'Sale order not found');
+  if (order.closedAt) throw new HttpError(400, 'This sale order was closed - reopen it before dispatching another lorry.');
   if (order.status === 'DISPATCHED') throw new HttpError(400, 'Sale order is already fully dispatched');
 
   const alreadyDispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
@@ -681,8 +722,22 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       hamaliCrewPayable = freightUnloadingHamali;
   }
 
-  // Fully dispatched once this lorry takes the remaining balance to (or below) zero.
-  const fullyDispatched = alreadyDispatchedKg + weightKg >= order.tonnageKg;
+  // ── Order completion ───────────────────────────────────────────────────────
+  // The order finishes when this lorry takes the balance to zero OR lands within
+  // the configured tolerance of the booked tonnage - 24.87 t against a 25 t husk
+  // order IS the whole order, and holding 130 kg open forever helps nobody. A
+  // wider gap needs the user to say so, by ticking "final lorry for this order".
+  const totalDispatchedKg = alreadyDispatchedKg + weightKg;
+  const tolerancePct = await closeTolerancePctFor(order.product);
+  const withinTolerance = isSaleOrderFulfilled(order.tonnageKg, totalDispatchedKg, tolerancePct);
+  const fullyDispatched = withinTolerance || data.finalDispatch;
+  // Finished with tonnage still unshipped on paper. Stamped so nothing re-opens
+  // the order later and the gap stays auditable (tonnageKg is never rewritten).
+  const shortKg = Math.max(0, order.tonnageKg - totalDispatchedKg);
+  const closedShort = fullyDispatched && shortKg > 0;
+  const closeReason = withinTolerance
+    ? `Final lorry landed ${shortKg} kg under the booked tonnage - within the ${tolerancePct}% tolerance`
+    : `Closed on the final lorry - ${shortKg} kg left unshipped`;
 
   // Upload before the transaction starts - network I/O shouldn't hold a DB
   // transaction open.
@@ -745,7 +800,10 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
     await tx.saleOrder.update({
       where: { id: order.id },
-      data: { status: fullyDispatched ? 'DISPATCHED' : 'PARTIAL' },
+      data: {
+        status: fullyDispatched ? 'DISPATCHED' : 'PARTIAL',
+        ...(closedShort ? { closedAt: new Date(), closeReason } : {}),
+      },
     });
 
     return created;
@@ -802,6 +860,7 @@ export async function undoSaleDispatch(req: Request, res: Response) {
   }
 
   const order = dispatch.saleOrder;
+  const tolerancePct = await closeTolerancePctFor(order.product);
 
   await prisma.$transaction(async (tx) => {
     // 1. Restore the inventory relieved at dispatch, valued at the exact cost the
@@ -832,26 +891,105 @@ export async function undoSaleDispatch(req: Request, res: Response) {
     // 3. Remove the dispatch itself.
     await tx.saleDispatch.delete({ where: { id: dispatch.id } });
 
-    // 4. Recompute the order's status from whatever shipments remain.
+    // 4. Recompute the order's status from whatever shipments remain, on the
+    //    same tolerance the dispatch used - a short-closed order that still has
+    //    its final lorry stays closed, one that just lost it re-opens.
     const remaining = await tx.saleDispatch.findMany({ where: { saleOrderId: order.id } });
     const dispatchedKg = remaining.reduce((s, d) => s + d.weightKg, 0);
     const status = dispatchedKg === 0
       ? 'PENDING'
-      : dispatchedKg >= order.tonnageKg ? 'DISPATCHED' : 'PARTIAL';
+      : isSaleOrderFulfilled(order.tonnageKg, dispatchedKg, tolerancePct) ? 'DISPATCHED' : 'PARTIAL';
     // Undoing re-opens the order, so its frozen seed cost no longer describes
     // what shipped. Clear the freeze and let it go back to being computed live;
-    // it re-freezes when the order is fully dispatched again.
+    // it re-freezes when the order is fully dispatched again. An explicit short
+    // close is dropped too - the balance is genuinely back on the order.
     const reopened = status !== 'DISPATCHED';
     await tx.saleOrder.update({
       where: { id: order.id },
       data: {
         status,
-        ...(reopened ? { seedCostSnapshot: Prisma.DbNull, costFrozenAt: null } : {}),
+        ...(reopened
+          ? { seedCostSnapshot: Prisma.DbNull, costFrozenAt: null, closedAt: null, closeReason: null }
+          : {}),
       },
     });
   });
 
   res.json({ message: 'Dispatch undone' });
+}
+
+/**
+ * Short-close a sale order: mark it complete even though its shipped weight
+ * never reached the booked tonnage.
+ *
+ * The tolerance on dispatch handles the everyday kata variance (a 25 t husk
+ * order going out at 24.87 t closes itself). This is for the deliberate case -
+ * the buyer took 22 t of a 25 t booking and is not sending another lorry - where
+ * the gap is far too wide to auto-close but the order is nonetheless finished.
+ *
+ * The booked tonnage is NOT rewritten: the shortfall stays readable as
+ * (tonnageKg - dispatchedKg) and is surfaced as `shortKg`. For Pappu the cost is
+ * frozen exactly as a full dispatch would, so a closed order stops re-costing
+ * itself against seed bought afterwards.
+ */
+export async function closeSaleOrder(req: Request, res: Response) {
+  const { reason } = closeSaleOrderSchema.parse(req.body ?? {});
+
+  const order = await prisma.saleOrder.findUnique({
+    where: { id: req.params.id },
+    include: { dispatches: true },
+  });
+  if (!order) throw new HttpError(404, 'Sale order not found');
+  if (order.closedAt) throw new HttpError(400, 'This sale order is already closed');
+  if (order.dispatches.length === 0) {
+    throw new HttpError(400, 'Nothing has been dispatched against this order - delete it instead of closing it.');
+  }
+
+  const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
+  const shortKg = Math.max(0, order.tonnageKg - dispatchedKg);
+  if (shortKg === 0) throw new HttpError(400, 'This sale order is already fully dispatched');
+
+  await prisma.saleOrder.update({
+    where: { id: order.id },
+    data: {
+      status: 'DISPATCHED',
+      closedAt: new Date(),
+      closeReason: reason?.trim() || `Closed short - ${shortKg} kg left unshipped`,
+    },
+  });
+
+  if (order.product === 'PAPPU') await freezeOrderCost(order.id);
+
+  res.json({ message: 'Sale order closed', shortKg });
+}
+
+/**
+ * Undo a short close: put the unshipped balance back on the order and drop the
+ * frozen cost, so it goes back to being computed live and can take another lorry.
+ */
+export async function reopenSaleOrder(req: Request, res: Response) {
+  const order = await prisma.saleOrder.findUnique({
+    where: { id: req.params.id },
+    include: { dispatches: true },
+  });
+  if (!order) throw new HttpError(404, 'Sale order not found');
+  if (!order.closedAt) throw new HttpError(400, 'This sale order is not closed');
+
+  const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
+
+  await prisma.saleOrder.update({
+    where: { id: order.id },
+    data: {
+      status: dispatchedKg === 0 ? 'PENDING' : 'PARTIAL',
+      closedAt: null,
+      closeReason: null,
+      seedCostSnapshot: Prisma.DbNull,
+      costFrozenAt: null,
+    },
+  });
+
+  clearCache('pappu_order_margins');
+  res.json({ message: 'Sale order reopened' });
 }
 
 /**

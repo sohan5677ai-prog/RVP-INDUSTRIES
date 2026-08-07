@@ -82,6 +82,8 @@ const emptyCompany: CompanyProfile = {
   whatsappTestMode: true,
   whatsappTestNumber: '',
   freightRetentionPerTrip: 3000,
+  saleCloseTolerancePct: 0.5,
+  saleCloseToleranceByproductPct: 2,
   taxproGspId: '', taxproGspSecret: '', taxproGstUser: '', taxproGstPass: '', taxproSandbox: true,
 };
 
@@ -187,6 +189,36 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                 placeholder="3000"
               />
               <p className="text-[10px] text-muted-foreground">Held back from each sale lorry freight until the kata slip arrives, then paid to Surya Roadlines. The rest (less unloading hamali &amp; kata) goes to the lorry owner.</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">Sale order close tolerance (% of ordered weight)</Label>
+              <div className="grid gap-4 md:grid-cols-2 max-w-lg">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground">Pappu</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    value={String(form.saleCloseTolerancePct ?? 0.5)}
+                    onChange={(e) => setForm((p) => ({ ...p, saleCloseTolerancePct: e.target.value }))}
+                    placeholder="0.5"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground">Husk &amp; other byproducts</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    value={String(form.saleCloseToleranceByproductPct ?? 2)}
+                    onChange={(e) => setForm((p) => ({ ...p, saleCloseToleranceByproductPct: e.target.value }))}
+                    placeholder="2"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground">A lorry never weighs exactly what was booked. When the final lorry lands within this much of the ordered tonnage the order is treated as complete instead of holding a few hundred kg of balance open — e.g. 24.87 t against a 25 t husk order. Wider shortfalls need a deliberate <span className="font-medium">Close short</span> on the order.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-4">
               {field('GSTIN/UIN', 'gstin', '37ABJFR4630H1Z1')}

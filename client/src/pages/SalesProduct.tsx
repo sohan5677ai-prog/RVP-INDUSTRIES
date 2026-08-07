@@ -145,9 +145,26 @@ function dispatchedKgOf(o: SaleOrder): number {
   if (o.dispatchedKg != null) return o.dispatchedKg;
   return (o.dispatches ?? []).reduce((s, d) => s + d.weightKg, 0);
 }
+/** Still to ship. A closed order has no balance left, whatever the arithmetic says. */
 function remainingKgOf(o: SaleOrder): number {
+  if (o.closedAt) return 0;
   if (o.remainingKg != null) return o.remainingKg;
   return Math.max(0, o.tonnageKg - dispatchedKgOf(o));
+}
+
+/** The unshipped gap on a closed order - 0 while it is still open. */
+function shortKgOf(o: SaleOrder): number {
+  if (!o.closedAt) return 0;
+  if (o.shortKg != null) return o.shortKg;
+  return Math.max(0, o.tonnageKg - dispatchedKgOf(o));
+}
+
+// A lorry never weighs exactly what was booked. Anything inside this much of the
+// ordered tonnage closes the order by itself on dispatch (server-side); the UI
+// mirrors it only to decide whether to ask for a deliberate "final lorry" tick.
+// Must match saleCloseToleranceKg in server/src/lib/calc.ts.
+function closeToleranceKg(orderedKg: number, tolerancePct: number): number {
+  return Math.max(1, Math.round((orderedKg * (tolerancePct || 0)) / 100));
 }
 
 export default function SalesProduct({ product, hideHeader }: { product: SaleProduct; hideHeader?: boolean }) {
@@ -226,6 +243,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // Tonnes of the current lorry declared as XS (excess out). Blank until the
   // user opts in; pre-filled with the shortfall so the common case is one click.
   const [excessOutTonnes, setExcessOutTonnes] = useState('');
+  // "This is the final lorry" - closes the order despite an unshipped balance.
+  const [finalDispatch, setFinalDispatch] = useState(false);
 
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
@@ -269,6 +288,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setTransportProvider('SURYA');
     setCustomRetention('');
     setExcessOutTonnes(''); // never sticky - each XS claim must be deliberate
+    setFinalDispatch(false); // closing an order short must be deliberate too
   }
 
   async function extractKata(file: File) {
@@ -302,6 +322,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       fd.append('transportProvider', transportProvider);
       if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
       if (excessOutKg > 0) fd.append('excessOutKg', String(excessOutKg));
+      if (finalDispatch) fd.append('finalDispatch', 'true');
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -376,15 +397,60 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [invoicePreview, setInvoicePreview] = useState(false);
 
   // The invoice page needs the letterhead + HSN/GST master, same as the printed view.
+  // Letterhead + HSN/GST master for the invoice view; also the sale-order close
+  // tolerance the dispatch dialog needs, so it loads for that dialog too.
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
-    enabled: invoicePreview,
+    enabled: invoicePreview || !!dispatchOrder,
   });
   const { data: productTax } = useQuery({
     queryKey: ['product-tax'],
     queryFn: () => api<ProductTaxInfo[]>('/settings/product-tax'),
     enabled: invoicePreview,
+  });
+
+  // ── Short close ────────────────────────────────────────────────────────────
+  // How much of the booked tonnage this lorry would leave unshipped, and whether
+  // that gap is small enough for the server to close the order on its own. Only
+  // a wider gap needs the user to tick "final lorry" - the everyday kata
+  // variance (24.87 t on a 25 t husk order) never asks anything.
+  const closeTolerancePct = Number(
+    (isPappu ? company?.saleCloseTolerancePct : company?.saleCloseToleranceByproductPct) ?? (isPappu ? 0.5 : 2),
+  );
+  const dispatchShortKg = dispatchOrder
+    ? Math.max(0, dispatchOrder.tonnageKg - (dispatchedKgOf(dispatchOrder) + Math.round(dispatchTonnesNum * 1000)))
+    : 0;
+  const dispatchAutoCloses = dispatchOrder
+    ? dispatchShortKg <= closeToleranceKg(dispatchOrder.tonnageKg, closeTolerancePct)
+    : false;
+  const offerFinalDispatch = dispatchShortKg > 0 && !dispatchAutoCloses;
+
+  // Short-close an order the buyer stopped lifting (too wide a gap to auto-close).
+  const [closeTarget, setCloseTarget] = useState<SaleOrder | null>(null);
+  const [closeReason, setCloseReason] = useState('');
+  const closeMutation = useMutation({
+    mutationFn: () =>
+      api(`/sale-orders/${closeTarget!.id}/close`, { method: 'POST', body: { reason: closeReason || null } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Order closed - the unshipped balance is off the books');
+      setCloseTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: (id: string) => api(`/sale-orders/${id}/reopen`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Order reopened - the balance is back');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
   // The number this shipment WOULD take - peeked, never consumed, so previewing
   // (or abandoning a preview) leaves no gap in the series.
@@ -969,6 +1035,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             {(pageRows ?? []).map((o) => {
               const dispatchedKg = dispatchedKgOf(o);
               const remainingKg = remainingKgOf(o);
+              const shortKg = shortKgOf(o);
               const dispatches = o.dispatches ?? [];
               const isOpen = expanded.has(o.id);
               const margin = isPappu ? marginById.get(o.id) : undefined;
@@ -1008,12 +1075,45 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                         </span>
                       )}
                     </TableCell>
-                    <TableCell><Badge variant={statusVariant[o.status]}>{titleCase(o.status)}</Badge></TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant={statusVariant[o.status]}>{titleCase(o.status)}</Badge>
+                        {shortKg > 0 && (
+                          <Badge variant="warning" title={o.closeReason ?? undefined}>
+                            Short {toTonnes(shortKg).toFixed(2)}t
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                        {remainingKg > 0
-                          ? <Button size="sm" variant="outline" onClick={() => openDispatch(o)}><Truck className="h-3.5 w-3.5" /> Dispatch</Button>
-                          : dispatches.length > 0 ? <Badge variant="success">Fully dispatched</Badge> : null}
+                      <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        {remainingKg > 0 ? (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => openDispatch(o)}><Truck className="h-3.5 w-3.5" /> Dispatch</Button>
+                            {dispatches.length > 0 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-muted-foreground"
+                                title="Finish this order and take the unshipped balance off the books"
+                                onClick={() => { setCloseTarget(o); setCloseReason(''); }}
+                              >
+                                Close
+                              </Button>
+                            )}
+                          </>
+                        ) : shortKg > 0 ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            title={o.closeReason ?? 'Put the unshipped balance back on this order'}
+                            disabled={reopenMutation.isPending}
+                            onClick={() => reopenMutation.mutate(o.id)}
+                          >
+                            <Undo2 className="h-3.5 w-3.5" /> Reopen
+                          </Button>
+                        ) : dispatches.length > 0 ? <Badge variant="success">Fully dispatched</Badge> : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1337,7 +1437,30 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               {dispatchOverflow && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining - dispatching the extra is allowed and will bill the full weight.</p>
               )}
+              {dispatchShortKg > 0 && dispatchAutoCloses && (
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                  {dispatchShortKg} kg under the booked tonnage - inside the {closeTolerancePct}% tolerance, so this closes the order.
+                </p>
+              )}
             </div>
+            {offerFinalDispatch && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={finalDispatch}
+                  onChange={(e) => setFinalDispatch(e.target.checked)}
+                />
+                <span className="space-y-1">
+                  <span className="block text-sm font-medium">Final lorry for this order</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    Leaves {toTonnes(dispatchShortKg).toFixed(2)} t of the booked {toTonnes(dispatchOrder?.tonnageKg ?? 0).toFixed(2)} t
+                    unshipped - too much to close by itself. Tick this if the buyer is not sending
+                    another lorry, and the order finishes here instead of carrying the balance forever.
+                  </span>
+                </span>
+              </label>
+            )}
             {needsExcessOut && (
               <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
                 <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
@@ -1385,6 +1508,50 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             <DialogFooter>
               <Button onClick={() => dispatchMutation.mutate()} disabled={dispatchTonnesNum <= 0 || dispatchMutation.isPending || dispatchBlocked}>
                 {dispatchMutation.isPending ? 'Dispatching…' : 'Confirm Dispatch'}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Short-close confirmation */}
+      <Dialog open={!!closeTarget} onOpenChange={(v) => !v && setCloseTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Close order - {closeTarget?.buyer?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Booked</span>
+                <span className="font-mono">{toTonnes(closeTarget?.tonnageKg ?? 0).toFixed(2)} t</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Dispatched</span>
+                <span className="font-mono">{toTonnes(closeTarget ? dispatchedKgOf(closeTarget) : 0).toFixed(2)} t</span>
+              </div>
+              <div className="flex justify-between border-t pt-1 font-medium">
+                <span>Left unshipped</span>
+                <span className="font-mono text-amber-600 dark:text-amber-400">
+                  {toTonnes(closeTarget ? remainingKgOf(closeTarget) : 0).toFixed(2)} t
+                </span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Marks the order complete and takes that balance out of the pending pipeline. The booked
+              tonnage is kept as it was, so the shortfall stays on record{isPappu ? ' and the seed cost is frozen at what actually shipped' : ''}.
+              Nothing already invoiced changes. You can reopen the order later if another lorry does go.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reason (optional)</Label>
+              <Input
+                value={closeReason}
+                onChange={(e) => setCloseReason(e.target.value)}
+                placeholder="e.g. buyer stopped lifting"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCloseTarget(null)}>Cancel</Button>
+              <Button onClick={() => closeMutation.mutate()} disabled={closeMutation.isPending}>
+                {closeMutation.isPending ? 'Closing…' : 'Close order'}
               </Button>
             </DialogFooter>
           </div>

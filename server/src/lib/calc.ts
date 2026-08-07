@@ -50,15 +50,58 @@ export function seedBackedDispatchedKg(dispatches: ExcessOutDispatch[]): number 
  * negative. Partial dispatches still work: on a 30t order with 10t out as XS,
  * the 20t balance keeps reserving real seed.
  *
+ * A CLOSED order commits only what actually shipped: it finished under its
+ * booked tonnage and is taking no more lorries, so the unshipped balance must
+ * stop reserving seed that nothing will ever lift.
+ *
  * MUST stay identical in both allocators (stockEngine + pappu margins) - if the
  * two disagree, the Pappu page and the P&L page report different deficits.
  */
 export function seedBackedDemandKg(
   tonnageKg: number,
   dispatches: ExcessOutDispatch[],
+  closed = false,
 ): number {
   const dispatchedKg = dispatches.reduce((s, d) => s + d.weightKg, 0);
-  return Math.max(0, Math.max(tonnageKg, dispatchedKg) - excessOutKgOf(dispatches));
+  const committedKg = closed ? dispatchedKg : Math.max(tonnageKg, dispatchedKg);
+  return Math.max(0, committedKg - excessOutKgOf(dispatches));
+}
+
+// --- Sale-order close tolerance ---------------------------------------------
+// A lorry never weighs exactly what was booked: a 25 t husk order goes out at
+// 24.87 t and is finished, but the arithmetic leaves 130 kg of balance that no
+// future lorry will ever take. These two helpers decide when a shortfall is
+// small enough to call the order complete. The percentages come from Settings
+// (CompanyProfile.saleCloseTolerancePct / ...ByproductPct).
+
+/** Default close tolerances (%) used before Settings loads / on a blank profile. */
+export const DEFAULT_SALE_CLOSE_TOLERANCE_PCT = 0.5; // pappu - bagged, lands close
+export const DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT = 2; // husk & co - loaded loose
+
+/**
+ * Pappu is bagged to a target weight; husk, waste, shell, TPS and the
+ * pre-cleaner byproducts are loaded loose by volume and vary far more, so they
+ * carry the wider tolerance.
+ */
+export function isLooseLoadedProduct(product: string): boolean {
+  return product !== 'PAPPU';
+}
+
+/**
+ * The shortfall (kg) an order may finish under its booked tonnage and still
+ * count as fully dispatched. Always at least 1 kg so an exact-to-the-kg order
+ * can never be held open by a rounding remainder.
+ */
+export function saleCloseToleranceKg(orderedKg: number, tolerancePct: number): number {
+  return Math.max(1, Math.round((orderedKg * (tolerancePct || 0)) / 100));
+}
+
+/**
+ * Is this order complete? True when the shipped weight reaches the booked
+ * tonnage, or falls short of it by no more than the tolerance.
+ */
+export function isSaleOrderFulfilled(orderedKg: number, dispatchedKg: number, tolerancePct: number): boolean {
+  return orderedKg - dispatchedKg <= saleCloseToleranceKg(orderedKg, tolerancePct);
 }
 
 // Default freight destinations (fallback before the editable rates load). The

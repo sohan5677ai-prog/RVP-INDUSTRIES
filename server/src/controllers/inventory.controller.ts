@@ -26,7 +26,7 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
     // placed. One query covers every product we compute a committed figure for.
     prisma.saleOrder.findMany({
       where: { product: { in: ['PAPPU', 'HUSK', 'WASTE'] } },
-      select: { product: true, tonnageKg: true, dispatches: { select: { weightKg: true } } },
+      select: { product: true, tonnageKg: true, closedAt: true, dispatches: { select: { weightKg: true } } },
     }),
     // Total black seed consumed in milling (pappu sold + black seed consumed on it).
     // This is the authoritative raw-stock depletion figure: once seed enters the mill
@@ -56,7 +56,11 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
       .filter((so) => so.product === product)
       .reduce((sum, so) => {
         const dispatched = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
-        return sum + Math.max(so.tonnageKg, dispatched);
+        // A closed order commits only what actually went out. Husk is the worst
+        // case: no lorry ever lands on the booked figure, so without this every
+        // finished order leaves a slice of the pool committed to a balance that
+        // is never going to ship.
+        return sum + (so.closedAt != null ? dispatched : Math.max(so.tonnageKg, dispatched));
       }, 0);
   const pappuCommittedKg = committedKg('PAPPU');
   const huskCommittedKg = committedKg('HUSK');
@@ -351,7 +355,7 @@ async function _computePappuOrderMargins() {
   // queues in the backlog to be paid for by black seed arriving later at RVP.
   const committedOf = new Map<string, number>();
   for (const so of orders) {
-    const committed = seedBackedDemandKg(so.tonnageKg, so.dispatches);
+    const committed = seedBackedDemandKg(so.tonnageKg, so.dispatches, so.closedAt != null);
     committedOf.set(so.id, committed);
     if (committed > 0) events.push({ t: so.saleDate.getTime(), kind: 'sale', orderId: so.id, seedNeed: committed / PAPPU_OUT_TURN });
   }
@@ -392,14 +396,17 @@ async function _computePappuOrderMargins() {
   }
 
   const result = orders.map((so) => {
-    const qty = so.tonnageKg; // ordered pappu kg (GST is computed on this)
+    const dispatchedKg = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
+    // Ordered pappu kg (GST is computed on this). A CLOSED order is taking no
+    // more lorries, so what shipped is the order: billing it on a booked tonnage
+    // that was never fully lifted would overstate both revenue and freight.
+    const qty = so.closedAt != null ? dispatchedKg : so.tonnageKg;
     const rate = Number(so.ratePerKg);
 
     // Actual freight on the lorries that have shipped + an estimate, at the
     // order's stamped rate, on the tonnage still to go. A fully shipped order is
     // therefore 100% actuals, and a part-shipped one blends the two rather than
     // reverting the whole order to the Settings rate.
-    const dispatchedKg = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
     const actualFreight = so.dispatches.reduce((s, d) => s + Number(d.freightCharge), 0);
     const pendingKg = Math.max(0, qty - dispatchedKg);
     const freight =

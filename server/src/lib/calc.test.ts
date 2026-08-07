@@ -20,6 +20,9 @@ import {
   seedBackedDemandKg,
   seedBackedDispatchedKg,
   excessOutKgOf,
+  isSaleOrderFulfilled,
+  saleCloseToleranceKg,
+  isLooseLoadedProduct,
 } from './calc';
 
 describe('crossVerify', () => {
@@ -337,5 +340,50 @@ describe('XS Pappu (excess out) demand', () => {
 
   it('never returns negative demand', () => {
     expect(seedBackedDemandKg(0, [{ weightKg: 5_000, excessOutKg: 5_000 }])).toBe(0);
+  });
+
+  it('commits only what shipped once the order is closed', () => {
+    // 25t booked, 24.87t out, order closed → the 130kg balance must stop
+    // reserving seed no lorry is ever going to lift.
+    expect(seedBackedDemandKg(25_000, [{ weightKg: 24_870 }], true)).toBe(24_870);
+    // Still open → the balance keeps its seed reserved.
+    expect(seedBackedDemandKg(25_000, [{ weightKg: 24_870 }], false)).toBe(25_000);
+  });
+});
+
+describe('sale order close tolerance', () => {
+  it('closes an order whose final lorry lands inside the tolerance', () => {
+    // The husk case: 25t booked, 24.87t on the kata, 2% tolerance = 500kg.
+    expect(isSaleOrderFulfilled(25_000, 24_870, 2)).toBe(true);
+    // Same shortfall against pappu's 0.5% (125kg) is too wide - stays open.
+    expect(isSaleOrderFulfilled(25_000, 24_870, 0.5)).toBe(false);
+  });
+
+  it('holds an order open when the shortfall is beyond the tolerance', () => {
+    // Buyer took 22t of a 25t booking - far too wide to close by itself.
+    expect(isSaleOrderFulfilled(25_000, 22_000, 2)).toBe(false);
+  });
+
+  it('still closes on an exact or over-loaded delivery', () => {
+    expect(isSaleOrderFulfilled(25_000, 25_000, 0)).toBe(true);
+    expect(isSaleOrderFulfilled(25_000, 25_400, 0)).toBe(true);
+  });
+
+  it('never lets a rounding remainder hold an order open', () => {
+    // A zero tolerance still allows 1kg, so a kg-level remainder can't stick.
+    expect(saleCloseToleranceKg(25_000, 0)).toBe(1);
+    expect(isSaleOrderFulfilled(25_000, 24_999, 0)).toBe(true);
+  });
+
+  it('scales the tolerance with the order size', () => {
+    expect(saleCloseToleranceKg(25_000, 2)).toBe(500);
+    expect(saleCloseToleranceKg(10_000, 2)).toBe(200);
+    expect(saleCloseToleranceKg(25_000, 0.5)).toBe(125);
+  });
+
+  it('gives the loose byproducts the wider tolerance, pappu the tight one', () => {
+    expect(isLooseLoadedProduct('HUSK')).toBe(true);
+    expect(isLooseLoadedProduct('SHELL')).toBe(true);
+    expect(isLooseLoadedProduct('PAPPU')).toBe(false);
   });
 });

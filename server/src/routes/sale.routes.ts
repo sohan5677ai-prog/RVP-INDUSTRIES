@@ -16,6 +16,8 @@ import {
   deliverSaleDispatch,
   markDispatchPaid,
   undoSaleDispatch,
+  closeSaleOrder,
+  reopenSaleOrder,
   saveLorryReceipt,
   assignLorryReceiptNumber,
   deleteLorryReceipt,
@@ -38,6 +40,11 @@ router.post(
   upload.fields([{ name: 'kata', maxCount: 1 }]),
   asyncHandler(dispatchSaleOrder)
 );
+
+// Short close: finish an order whose buyer stopped lifting, leaving the balance
+// unshipped (the everyday kata shortfall auto-closes at dispatch instead).
+router.post('/sale-orders/:id/close', asyncHandler(closeSaleOrder));
+router.post('/sale-orders/:id/reopen', asyncHandler(reopenSaleOrder));
 
 // A single dispatch (shipment) - used by the invoice view.
 router.get('/sale-dispatches/:id', asyncHandler(getSaleDispatch));

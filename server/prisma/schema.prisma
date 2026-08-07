@@ -476,6 +476,19 @@ model SaleOrder {
   seedCostSnapshot Json?
   costFrozenAt     DateTime?
 
+  // --- Short close -----------------------------------------------------------
+  // tonnageKg is what was BOOKED; the lorry's kata weight is what actually went.
+  // A 25 t husk order that ships 24.87 t is finished, but plain arithmetic leaves
+  // 130 kg "remaining" on it forever (worst on the loose byproducts, where no
+  // lorry ever lands on the booked figure). closedAt records that the order is
+  // done regardless of the balance - set automatically when the final lorry lands
+  // within the Settings tolerance, or explicitly when the user short-closes an
+  // order the buyer stopped lifting. tonnageKg is never rewritten, so the
+  // shortfall stays readable as (tonnageKg - dispatchedKg).
+  // Cleared by undo-dispatch / reopen, which put the balance back.
+  closedAt    DateTime?
+  closeReason String?
+
   // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
   dispatches  SaleDispatch[]
   allocations SaleAllocation[]
@@ -850,6 +863,16 @@ model CompanyProfile {
   loanInterestRatePct     Decimal @default(0) @db.Decimal(6, 3)
   // Buffer percentage (e.g. 80) of expected yield allowed for soft allocation.
   bufferStockPct          Decimal @default(80) @db.Decimal(5, 2)
+  // --- Sale-order close tolerance -------------------------------------------
+  // How far UNDER the booked tonnage a final lorry may land and still close the
+  // order (% of the ordered weight). A lorry never weighs exactly what was
+  // booked, so without this every order ends life stuck on PARTIAL with a few
+  // hundred kg of phantom balance. Pappu is bagged and lands close, so it gets
+  // the tight figure; husk and the other loose byproducts are loaded by volume
+  // and need the wider one. Beyond the tolerance the order stays open until
+  // someone short-closes it deliberately.
+  saleCloseTolerancePct          Decimal @default(0.5) @db.Decimal(5, 2)
+  saleCloseToleranceByproductPct Decimal @default(2) @db.Decimal(5, 2)
   // Owner/admin mobile that receives internal WhatsApp alerts (weekly summary,
   // daily dues digest, deferred-dispatch reminders). Falls back to
   // WHATSAPP_TEST_NUMBER when blank. Not printed on invoices.

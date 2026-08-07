@@ -334,10 +334,18 @@ export interface SaleOrder {
   marginOverride: boolean;
   dueDays?: number | null;
   reminderDate?: string | null;
+  // Set once the order is finished with tonnage still unshipped on paper -
+  // either the final lorry landed within the Settings tolerance (24.87 t on a
+  // 25 t husk booking) or the user short-closed it. tonnageKg is never rewritten.
+  closedAt?: string | null;
+  closeReason?: string | null;
   // Dispatches (shipments) + server-computed fulfilment fields.
   dispatches?: SaleDispatch[];
   dispatchedKg?: number;
+  // Still to ship. Always 0 on a closed order - the balance is not coming.
   remainingKg?: number;
+  // The unshipped gap on a closed order (0 while it is still open).
+  shortKg?: number;
   createdAt: string;
 }
 
@@ -427,6 +435,11 @@ export interface CompanyProfile {
   whatsappTestMode?: boolean;
   whatsappTestNumber?: string | null;
   freightRetentionPerTrip?: string | number;
+  // How far under the booked tonnage a final lorry may land and still close the
+  // sale order (% of ordered weight). Pappu is bagged and lands close; husk and
+  // the other loose byproducts vary far more, so they get their own figure.
+  saleCloseTolerancePct?: string | number;
+  saleCloseToleranceByproductPct?: string | number;
   invoiceLayout?: string | null;
 
   // TaxPro GSP Config

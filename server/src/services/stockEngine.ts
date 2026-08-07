@@ -345,7 +345,7 @@ async function _computeUnifiedStockEngine(
   // below, so it never shows as committed, never draws seed, and never leaves a
   // band negative. See seedBackedDemandKg().
   const committedPappuKg = pappuOrders.reduce(
-    (sum, so) => sum + seedBackedDemandKg(so.tonnageKg, so.dispatches),
+    (sum, so) => sum + seedBackedDemandKg(so.tonnageKg, so.dispatches, so.closedAt != null),
     0,
   );
 
@@ -379,7 +379,7 @@ async function _computeUnifiedStockEngine(
   const allocEvents: AllocEvent[] = [];
   for (const r of poolRefs) allocEvents.push({ t: r.date.getTime(), kind: 'arrive', ref: r });
   for (const so of pappuOrders) {
-    const committed = seedBackedDemandKg(so.tonnageKg, so.dispatches);
+    const committed = seedBackedDemandKg(so.tonnageKg, so.dispatches, so.closedAt != null);
     if (committed > 0) allocEvents.push({
       t: so.saleDate.getTime(),
       kind: 'sale',

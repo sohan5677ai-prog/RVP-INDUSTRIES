@@ -246,6 +246,11 @@ const companyProfileSchema = z.object({
   whatsappTestMode: z.boolean().optional(),
   whatsappTestNumber: z.string().optional().nullable(),
   freightRetentionPerTrip: z.coerce.number().nonnegative().optional(),
+  // How far under the booked tonnage a final lorry may land and still close the
+  // order (% of ordered weight). Capped at 10% - beyond that a short order needs
+  // a deliberate short close, not a blanket rule.
+  saleCloseTolerancePct: z.coerce.number().min(0).max(10).optional(),
+  saleCloseToleranceByproductPct: z.coerce.number().min(0).max(10).optional(),
   taxproGspId: z.string().optional().nullable(),
   taxproGspSecret: z.string().optional().nullable(),
   taxproGstUser: z.string().optional().nullable(),

@@ -138,6 +138,8 @@ export default function SaleOrders() {
     { header: 'Ordered (t)', value: (o) => toTonnes(o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
     { header: 'Dispatched (t)', value: (o) => toTonnes(o.dispatchedKg ?? 0).toFixed(2), excel: (o) => toTonnes(o.dispatchedKg ?? 0), numFmt: '#,##0.00', align: 'right' },
     { header: 'Remaining (t)', value: (o) => toTonnes(o.remainingKg ?? o.tonnageKg).toFixed(2), excel: (o) => toTonnes(o.remainingKg ?? o.tonnageKg), numFmt: '#,##0.00', align: 'right' },
+    // Booked but never shipped, on an order that was closed short.
+    { header: 'Short (t)', value: (o) => toTonnes(o.shortKg ?? 0).toFixed(2), excel: (o) => toTonnes(o.shortKg ?? 0), numFmt: '#,##0.00', align: 'right' },
     { header: 'Price/kg', value: (o) => rupees(o.ratePerKg), excel: (o) => Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
     { header: 'Status', value: (o) => saleStatusLabel(saleDisplayStatus(o, settled)) },
   ];
@@ -371,10 +373,17 @@ export default function SaleOrders() {
                 </TableCell>
                 <TableCell className="text-right">{rupees(o.ratePerKg)}/kg</TableCell>
                 <TableCell>
-                  {(() => {
-                    const ds = saleDisplayStatus(o, settled);
-                    return <Badge variant={SALE_STATUS_VARIANT[ds]}>{saleStatusLabel(ds)}</Badge>;
-                  })()}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(() => {
+                      const ds = saleDisplayStatus(o, settled);
+                      return <Badge variant={SALE_STATUS_VARIANT[ds]}>{saleStatusLabel(ds)}</Badge>;
+                    })()}
+                    {(o.shortKg ?? 0) > 0 && (
+                      <Badge variant="warning" title={o.closeReason ?? undefined}>
+                        Short {toTonnes(o.shortKg!).toFixed(2)}t
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">

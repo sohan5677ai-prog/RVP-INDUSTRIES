@@ -19,6 +19,47 @@ export const DEFAULT_OUT_TURN_PCT = 60; // black -> white yield
 export const PAPPU_OUT_TURN = 0.6; // out-turn fraction used in stock calculations
 export const PAPPU_CONSUMABLE = 0.8; // Fraction of milled pappu that is consumable/sellable
 
+// --- Sale-order close tolerance ---------------------------------------------
+// A lorry never weighs exactly what was booked: a 25 t husk order goes out at
+// 24.87 t and is finished, but the arithmetic leaves 130 kg of balance that no
+// future lorry will ever take. These two helpers decide when a shortfall is
+// small enough to call the order complete. The percentages come from Settings
+// (CompanyProfile.saleCloseTolerancePct / ...ByproductPct).
+//
+// The SERVER decides this for real, at dispatch. The client mirrors it only to
+// know whether to ask for a deliberate "final lorry" tick - so these MUST stay
+// identical to server/src/lib/calc.ts or the dialog asks at the wrong moment.
+
+/** Default close tolerances (%) used before Settings loads / on a blank profile. */
+export const DEFAULT_SALE_CLOSE_TOLERANCE_PCT = 0.5; // pappu - bagged, lands close
+export const DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT = 2; // husk & co - loaded loose
+
+/**
+ * Pappu is bagged to a target weight; husk, waste, shell, TPS and the
+ * pre-cleaner byproducts are loaded loose by volume and vary far more, so they
+ * carry the wider tolerance.
+ */
+export function isLooseLoadedProduct(product: string): boolean {
+  return product !== 'PAPPU';
+}
+
+/**
+ * The shortfall (kg) an order may finish under its booked tonnage and still
+ * count as fully dispatched. Always at least 1 kg so an exact-to-the-kg order
+ * can never be held open by a rounding remainder.
+ */
+export function saleCloseToleranceKg(orderedKg: number, tolerancePct: number): number {
+  return Math.max(1, Math.round((orderedKg * (tolerancePct || 0)) / 100));
+}
+
+/**
+ * Is this order complete? True when the shipped weight reaches the booked
+ * tonnage, or falls short of it by no more than the tolerance.
+ */
+export function isSaleOrderFulfilled(orderedKg: number, dispatchedKg: number, tolerancePct: number): boolean {
+  return orderedKg - dispatchedKg <= saleCloseToleranceKg(orderedKg, tolerancePct);
+}
+
 // Default freight destinations (fallback before the editable rates load). The
 // actual per-tonne rates live in the FreightRate table, managed in Settings.
 export const SALE_DESTINATIONS = ['Surat', 'Barshi', 'Nagar'] as const;
@@ -88,12 +129,66 @@ export function crossVerify(
   return { reference, diff: Math.max(0, diff), exempt, finalWeight };
 }
 
+/** One row of the KNM vehicle directory held in CompanyProfile.companyVehicles. */
+export interface CompanyVehicle {
+  number: string;
+  driverName: string;
+  driverPhone: string;
+}
+
+/**
+ * Parse the KNM vehicle directory: one vehicle per line, fields pipe-separated
+ * as `AP39UX9105|Ravi|9876543210`. Rows saved before the driver columns existed
+ * are plain numbers (historically a comma-separated list was also accepted), so
+ * a line with no pipe still parses as number-only vehicles with no driver.
+ */
+export function parseCompanyVehicles(companyVehiclesList: string | null | undefined): CompanyVehicle[] {
+  if (!companyVehiclesList) return [];
+  const out: CompanyVehicle[] = [];
+  for (const line of companyVehiclesList.split('\n')) {
+    if (!line.includes('|')) {
+      for (const n of line.split(',')) {
+        const number = n.trim();
+        if (number) out.push({ number, driverName: '', driverPhone: '' });
+      }
+      continue;
+    }
+    const [number = '', driverName = '', driverPhone = ''] = line.split('|');
+    if (number.trim()) out.push({ number: number.trim(), driverName: driverName.trim(), driverPhone: driverPhone.trim() });
+  }
+  return out;
+}
+
+/** Just the vehicle numbers, trimmed and lowercased, for membership checks. */
+export function companyVehicleNumbers(companyVehiclesList: string | null | undefined): string[] {
+  return parseCompanyVehicles(companyVehiclesList).map(v => v.number.toLowerCase());
+}
+
+/** Normalise a lorry number for loose matching: alphanumerics only, uppercased. */
+export function normalizeLorryNumber(vehicleNumber: string | null | undefined): string {
+  return (vehicleNumber ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Look a lorry up in the directory to pre-fill its driver. Matching ignores
+ * spaces and hyphens (the office types `AP 39 UX 9105` as often as not); this
+ * is deliberately looser than isVehicleExempt, which keeps exact matching
+ * because it moves money.
+ */
+export function findCompanyVehicle(
+  vehicleNumber: string | null | undefined,
+  companyVehiclesList: string | null | undefined,
+): CompanyVehicle | null {
+  const target = normalizeLorryNumber(vehicleNumber);
+  if (!target) return null;
+  return parseCompanyVehicles(companyVehiclesList).find(v => normalizeLorryNumber(v.number) === target) ?? null;
+}
+
 /** Helper to check if a vehicle is in the exempt company vehicles list */
 export function isVehicleExempt(vehicleNumber: string | null | undefined, companyVehiclesList: string | null | undefined): boolean {
   if (!vehicleNumber || !companyVehiclesList) return false;
-  const list = companyVehiclesList.split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
   const target = vehicleNumber.trim().toLowerCase();
-  return list.includes(target);
+  return companyVehicleNumbers(companyVehiclesList).includes(target);
 }
 
 /** Hamali (unloading labour) charge in rupees. exact tonnes * rate (no tonne rounding). */

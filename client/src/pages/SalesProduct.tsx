@@ -5,8 +5,14 @@ import { toast } from 'sonner';
 import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, CompanyProfile, ProductTaxInfo } from '@/lib/types';
+import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
+import {
+  saleCloseToleranceKg,
+  DEFAULT_SALE_CLOSE_TOLERANCE_PCT,
+  DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
+} from '@/lib/calc';
+import { findCompanyVehicle } from '@/lib/calc';
 import { settledByDispatch, isDispatchPaid, saleDisplayStatus, type SaleDisplayStatus } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
@@ -159,13 +165,6 @@ function shortKgOf(o: SaleOrder): number {
   return Math.max(0, o.tonnageKg - dispatchedKgOf(o));
 }
 
-// A lorry never weighs exactly what was booked. Anything inside this much of the
-// ordered tonnage closes the order by itself on dispatch (server-side); the UI
-// mirrors it only to decide whether to ask for a deliberate "final lorry" tick.
-// Must match saleCloseToleranceKg in server/src/lib/calc.ts.
-function closeToleranceKg(orderedKg: number, tolerancePct: number): number {
-  return Math.max(1, Math.round((orderedKg * (tolerancePct || 0)) / 100));
-}
 
 export default function SalesProduct({ product, hideHeader }: { product: SaleProduct; hideHeader?: boolean }) {
   const meta = PRODUCT_META[product];
@@ -235,6 +234,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
+  // The WhatsApp booking this lorry number matched, once one is found.
+  const [matchedBooking, setMatchedBooking] = useState<LorryConfirmation | null>(null);
   const [dispatchTonnes, setDispatchTonnes] = useState('');
   const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [extractingKata, setExtractingKata] = useState(false);
@@ -277,12 +278,47 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const excessOutKg = Math.round((Number(excessOutTonnes) || 0) * 1000);
   const dispatchBlocked = needsExcessOut && excessOutKg < dispatchShortfallKg;
 
+  /**
+   * Fill the driver in from the lorry's WhatsApp booking as the number is typed.
+   *
+   * The transporter messages the lorry, driver and phone the day before it
+   * loads; the register holds that WAITING. Re-typing the driver off the phone
+   * at dispatch time is exactly the step this removes - so the lookup runs on
+   * the number alone, debounced, and only fills fields the user has left blank
+   * (anything typed by hand wins, since the office may know better than the
+   * message did).
+   */
+  useEffect(() => {
+    if (!dispatchOrder) return;
+    const key = vehicleNumber.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (key.length < 6) {
+      setMatchedBooking(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api<LorryConfirmation | null>(`/whatsapp/transport-confirmations/lookup?lorryNumber=${encodeURIComponent(key)}`)
+        .then((booking) => {
+          if (cancelled) return;
+          setMatchedBooking(booking);
+          if (!booking) return;
+          if (booking.driverName) setDriverName((cur) => cur.trim() || booking.driverName!);
+          if (booking.driverPhone) setDriverPhone((cur) => cur.trim() || booking.driverPhone!);
+        })
+        // A miss is normal and a failed lookup must never block a dispatch, so
+        // there is nothing to report here - the fields simply stay as typed.
+        .catch(() => { if (!cancelled) setMatchedBooking(null); });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [vehicleNumber, dispatchOrder]);
+
   function openDispatch(o: SaleOrder) {
     setDispatchOrder(o);
     setKataFile(null);
     setVehicleNumber('');
     setDriverName('');
     setDriverPhone('');
+    setMatchedBooking(null);
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
     setDispatchDate(new Date().toISOString().slice(0, 10));
     setTransportProvider('SURYA');
@@ -404,6 +440,29 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     queryFn: () => api<CompanyProfile>('/settings/company'),
     enabled: invoicePreview || !!dispatchOrder,
   });
+
+  /**
+   * Fill the driver in from the KNM vehicle directory (Settings > Company) as
+   * the lorry number is typed.
+   *
+   * Own lorries carry the same driver trip after trip, so the office should not
+   * be retyping it - the directory is the record of who drives what. Unlike the
+   * WhatsApp booking lookup above this needs no network round-trip, so it runs
+   * on the keystroke; it fills only blank fields, and only when the driver is
+   * actually recorded against the vehicle. Anything typed by hand wins, and so
+   * does a booking that arrives first, since both are trip-specific and the
+   * directory is only the usual case.
+   */
+  const matchedCompanyVehicle = useMemo(
+    () => findCompanyVehicle(vehicleNumber, company?.companyVehicles),
+    [vehicleNumber, company?.companyVehicles],
+  );
+  useEffect(() => {
+    if (!dispatchOrder || !matchedCompanyVehicle) return;
+    if (matchedCompanyVehicle.driverName) setDriverName((cur) => cur.trim() || matchedCompanyVehicle.driverName);
+    if (matchedCompanyVehicle.driverPhone) setDriverPhone((cur) => cur.trim() || matchedCompanyVehicle.driverPhone);
+  }, [matchedCompanyVehicle, dispatchOrder]);
+
   const { data: productTax } = useQuery({
     queryKey: ['product-tax'],
     queryFn: () => api<ProductTaxInfo[]>('/settings/product-tax'),
@@ -416,13 +475,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // a wider gap needs the user to tick "final lorry" - the everyday kata
   // variance (24.87 t on a 25 t husk order) never asks anything.
   const closeTolerancePct = Number(
-    (isPappu ? company?.saleCloseTolerancePct : company?.saleCloseToleranceByproductPct) ?? (isPappu ? 0.5 : 2),
+    (isPappu ? company?.saleCloseTolerancePct : company?.saleCloseToleranceByproductPct) ??
+      (isPappu ? DEFAULT_SALE_CLOSE_TOLERANCE_PCT : DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT),
   );
   const dispatchShortKg = dispatchOrder
     ? Math.max(0, dispatchOrder.tonnageKg - (dispatchedKgOf(dispatchOrder) + Math.round(dispatchTonnesNum * 1000)))
     : 0;
   const dispatchAutoCloses = dispatchOrder
-    ? dispatchShortKg <= closeToleranceKg(dispatchOrder.tonnageKg, closeTolerancePct)
+    ? dispatchShortKg <= saleCloseToleranceKg(dispatchOrder.tonnageKg, closeTolerancePct)
     : false;
   const offerFinalDispatch = dispatchShortKg > 0 && !dispatchAutoCloses;
 
@@ -1401,7 +1461,29 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setKataFile(f); extractKata(f); } }} />
               </label>
             </div>
-            <div className="space-y-1.5"><Label className="text-xs">Vehicle No</Label><Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. GJ05AB1234" /></div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Vehicle No</Label>
+              <Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. GJ05AB1234" />
+              {/* The lorry's WhatsApp booking, matched on the number typed above. */}
+              {matchedBooking && (
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-green-50 dark:bg-green-950/30 px-2 py-1.5 text-[11px] text-green-700 dark:text-green-400">
+                  <WhatsAppIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-medium">Booked on WhatsApp</span>
+                  {matchedBooking.messageDate && <span>· {shortDate(matchedBooking.messageDate)}</span>}
+                  {matchedBooking.tonnageKg != null && <span>· {(matchedBooking.tonnageKg / 1000).toFixed(2)} t</span>}
+                  {matchedBooking.freightAmount != null && <span>· {rupees(Number(matchedBooking.freightAmount))} quoted</span>}
+                </p>
+              )}
+              {/* Our own lorry, matched against the KNM vehicle directory in Settings. */}
+              {matchedCompanyVehicle && (
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-sky-50 dark:bg-sky-950/30 px-2 py-1.5 text-[11px] text-sky-700 dark:text-sky-400">
+                  <Truck className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-medium">KNM vehicle</span>
+                  {matchedCompanyVehicle.driverName && <span>· driver {matchedCompanyVehicle.driverName}</span>}
+                  {matchedCompanyVehicle.driverPhone && <span>· {matchedCompanyVehicle.driverPhone}</span>}
+                </p>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><Label className="text-xs">Driver Name</Label><Input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="e.g. Moula" /></div>
               <div className="space-y-1.5"><Label className="text-xs">Driver Phone</Label><Input value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="e.g. 7207012803" /></div>

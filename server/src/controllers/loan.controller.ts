@@ -191,8 +191,9 @@ export async function createRepayment(req: Request, res: Response) {
       interest,
       reference: data.reference,
     });
-    // Close the loan when the outstanding balance is cleared.
-    if (outstanding - data.amount <= 0.01) {
+    // Close the loan when the outstanding balance is cleared, or when the user
+    // settled on the bank's figure and ticked "close this loan" in the dialog.
+    if (outstanding - data.amount <= 0.01 || data.closeLoan) {
       await tx.bankLoan.update({
         where: { id: loan.id },
         data: { status: 'CLOSED', closedDate: data.date },

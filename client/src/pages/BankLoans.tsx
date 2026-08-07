@@ -130,6 +130,7 @@ export default function BankLoansPage() {
   const [repayInterest, setRepayInterest] = useState('');
   const [repayDate, setRepayDate] = useState(today());
   const [repayRef, setRepayRef] = useState('');
+  const [repayClose, setRepayClose] = useState(false);
 
   // Open the repayment dialog, prefilling the interest portion with the loan's
   // accrued interest to date (editable to the bank's actual figure).
@@ -139,7 +140,17 @@ export default function BankLoansPage() {
     setRepayInterest(loan.accruedInterestToDate ? String(loan.accruedInterestToDate) : '');
     setRepayDate(today());
     setRepayRef('');
+    setRepayClose(false);
   }
+
+  // Repaying the whole outstanding closes the loan on the server anyway; the
+  // checkbox is for the other case - the bank's settlement figure differs from
+  // ours by a little and the user wants the loan shut regardless.
+  const repayResidue = repayLoan
+    ? Math.round((Number(repayLoan.outstanding) - (Number(repayAmount) || 0)) * 100) / 100
+    : 0;
+  const repayClearsLoan = !!repayAmount && repayResidue <= 0.01;
+  const repayWillClose = repayClearsLoan || repayClose;
 
   const repayMutation = useMutation({
     mutationFn: () =>
@@ -150,16 +161,18 @@ export default function BankLoansPage() {
           interest: repayInterest !== '' ? Number(repayInterest) : 0,
           date: repayDate,
           reference: repayRef || null,
+          closeLoan: repayWillClose,
         },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] });
-      toast.success('Repayment recorded');
+      toast.success(repayWillClose ? 'Repayment recorded · loan closed' : 'Repayment recorded');
       setRepayLoan(null);
       setRepayAmount('');
       setRepayInterest('');
       setRepayDate(today());
       setRepayRef('');
+      setRepayClose(false);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -477,14 +490,31 @@ export default function BankLoansPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label htmlFor="ramount">Principal (₹)</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="ramount">Principal (₹)</Label>
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => setRepayAmount(String(repayLoan.outstanding))}
+                    >
+                      Full
+                    </button>
+                  </div>
                   <Input id="ramount" type="number" value={repayAmount} onChange={(e) => setRepayAmount(e.target.value)} placeholder="500000" />
                   <p className="text-xs text-muted-foreground">reduces the outstanding loan</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="rinterest">Interest (₹)</Label>
+                  <Label htmlFor="rinterest">Interest (₹) — bank's figure</Label>
                   <Input id="rinterest" type="number" value={repayInterest} onChange={(e) => setRepayInterest(e.target.value)} placeholder="0" />
-                  <p className="text-xs text-muted-foreground">settles capitalised interest</p>
+                  <p className="text-xs text-muted-foreground">
+                    ours: {rupees(repayLoan.accruedInterestToDate)}
+                    {repayInterest !== '' &&
+                      Math.abs(Number(repayInterest) - Number(repayLoan.accruedInterestToDate)) > 0.5 && (
+                        <span className="text-amber-600">
+                          {' '}· diff {rupees(Number(repayInterest) - Number(repayLoan.accruedInterestToDate))}
+                        </span>
+                      )}
+                  </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -503,12 +533,40 @@ export default function BankLoansPage() {
                   {rupees((Number(repayAmount) || 0) + (Number(repayInterest) || 0))}
                 </span>
               </div>
+
+              {/* Settle-and-close: the bank's interest figure is the one that counts,
+                  so once it's entered the loan can be shut here even if a little
+                  principal is still showing against it. */}
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={repayWillClose}
+                  disabled={repayClearsLoan}
+                  onChange={(e) => setRepayClose(e.target.checked)}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Close this loan</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {repayClearsLoan
+                      ? 'this repayment clears the outstanding, so the loan closes automatically'
+                      : repayResidue > 0.01
+                        ? `marks the loan CLOSED and stops interest accruing — ${rupees(repayResidue)} principal will stay showing against it`
+                        : 'marks the loan CLOSED and stops interest accruing'}
+                  </span>
+                </span>
+              </label>
+
               <DialogFooter>
                 <Button
                   onClick={() => repayMutation.mutate()}
                   disabled={!repayAmount || Number(repayAmount) <= 0 || repayMutation.isPending}
                 >
-                  {repayMutation.isPending ? 'Saving…' : 'Save repayment'}
+                  {repayMutation.isPending
+                    ? 'Saving…'
+                    : repayWillClose
+                      ? 'Save & close loan'
+                      : 'Save repayment'}
                 </Button>
               </DialogFooter>
             </div>

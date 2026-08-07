@@ -18,6 +18,9 @@ export const createRepaymentSchema = z.object({
   interest: z.coerce.number().nonnegative().optional(), // interest portion - settles the 20280 accrual
   date: z.coerce.date(),
   reference: z.string().trim().optional().nullable(),
+  // Close the loan on this repayment even if a small principal residue remains -
+  // the bank's own interest/settlement figure rarely matches ours to the paisa.
+  closeLoan: z.boolean().optional(),
 });
 
 export const updateLoanSettingsSchema = z.object({

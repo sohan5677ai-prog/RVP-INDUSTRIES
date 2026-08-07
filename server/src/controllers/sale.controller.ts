@@ -42,6 +42,7 @@ import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
 
 const GST_RATE = 0.05; // fallback IGST fraction (5%) when a commodity has no configured rate
 
@@ -811,6 +812,12 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   if (order.product === 'PAPPU' && fullyDispatched) await freezeOrderCost(order.id);
 
+  // The transporter's WhatsApp booking for this lorry has now been used. Only
+  // the register row moves - the dispatch keeps the freight derived from the
+  // destination rate above; the booking is a record of what was arranged, not a
+  // correction to what we costed.
+  await markConfirmationUsed(dispatch.vehicleNumber, dispatch.id);
+
   // WhatsApp the driver the buyer's name/phone/maps link - fire-and-forget,
   // only when a driver phone was captured on this dispatch. The broker/buyer
   // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
@@ -914,6 +921,10 @@ export async function undoSaleDispatch(req: Request, res: Response) {
       },
     });
   });
+
+  // The lorry was still booked - only the shipment was a mistake - so its
+  // WhatsApp booking goes back on the waiting list for the next dispatch.
+  await releaseConfirmationForDispatch(dispatch.id);
 
   res.json({ message: 'Dispatch undone' });
 }

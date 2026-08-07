@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
-import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer } from '@/lib/types';
+import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer, LorryConfirmation } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { calcHamali, calcKataFee, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
+import { calcHamali, calcKataFee, companyVehicleNumbers, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,12 +14,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight } from 'lucide-react';
+import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import SuryaRoadTransport from '@/pages/SuryaRoadTransport';
+import LorryConfirmations from '@/pages/LorryConfirmations';
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -419,7 +420,8 @@ function TransfersTable({
 
 export default function FreightDuesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialMainTab = searchParams.get('tab') === 'transport' ? 'transport' : 'dues';
+  const tabParam = searchParams.get('tab');
+  const initialMainTab = tabParam === 'transport' || tabParam === 'lorries' ? tabParam : 'dues';
   const [mainTab, setMainTab] = useState(initialMainTab);
   const qc = useQueryClient();
   const [tab, setTab] = useState('outward');
@@ -463,6 +465,15 @@ export default function FreightDuesPage() {
     queryKey: ['stock-transfers'],
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
   });
+  // Lorries booked over WhatsApp and not yet dispatched - badged on the tab so a
+  // new booking is visible without opening it. Shares its key with the register,
+  // so both read one cached response.
+  const { data: waitingBookings } = useQuery({
+    queryKey: ['lorry-confirmations', 'WAITING'],
+    queryFn: () => api<LorryConfirmation[]>('/whatsapp/transport-confirmations?status=WAITING'),
+    refetchInterval: 60_000,
+  });
+  const waitingLorries = waitingBookings?.length ?? 0;
 
   const isLoading = loadingPurchases || loadingSales || loadingPayments;
 
@@ -472,7 +483,7 @@ export default function FreightDuesPage() {
   // render. retention/knmList live inside so the memo stays referentially stable.
   const { outwardRows, inwardRows, knmRows, transferRows, rowStatus, rowDue, paymentsByLorry } = useMemo(() => {
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
-  const knmList = (company?.companyVehicles || '').split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
+  const knmList = companyVehicleNumbers(company?.companyVehicles);
 
   // Outward freight (sales). Hamali deducted off the lorry's freight = the lorry
   // share of the loading hamali (pappu ₹80/t, else flat ₹160/t); Transport = the
@@ -673,7 +684,7 @@ export default function FreightDuesPage() {
         value={mainTab}
         onValueChange={(v) => {
           setMainTab(v);
-          setSearchParams(v === 'transport' ? { tab: 'transport' } : {});
+          setSearchParams(v === 'dues' ? {} : { tab: v });
         }}
         className="space-y-6"
       >
@@ -683,6 +694,12 @@ export default function FreightDuesPage() {
           </TabsTrigger>
           <TabsTrigger value="transport" className="gap-2 text-sm font-semibold">
             <Truck className="h-4 w-4" /> Transport Report
+          </TabsTrigger>
+          <TabsTrigger value="lorries" className="gap-2 text-sm font-semibold">
+            <MessageCircle className="h-4 w-4" /> Lorry Confirmations
+            {waitingLorries > 0 && (
+              <Badge variant="secondary" className="ml-0.5 h-5 px-1.5 text-[10px]">{waitingLorries}</Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -773,6 +790,10 @@ export default function FreightDuesPage() {
 
         <TabsContent value="transport">
           <SuryaRoadTransport embedded />
+        </TabsContent>
+
+        <TabsContent value="lorries">
+          <LorryConfirmations />
         </TabsContent>
       </Tabs>
 

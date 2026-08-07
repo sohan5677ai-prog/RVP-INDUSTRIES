@@ -5,6 +5,12 @@ import { logger } from '../lib/logger.js';
 import { whatsappService, normalizeWhatsAppNumber } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText } from '../lib/gemini.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
+import {
+  normalizeLorryNumber,
+  findWaitingConfirmation,
+  WAITING_STATES,
+  USED_STATES,
+} from '../services/lorryConfirmation.service.js';
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 
 // ---------------------------------------------------------------------------
@@ -105,12 +111,16 @@ async function recordInboundMessage(rawBody: unknown): Promise<{ id: string; fro
 }
 
 /**
- * Turn a filed inbound message into a transport-confirmation draft. Runs after
- * the ACK: it's the slow half (a Gemini round-trip), and unlike the write above
- * it is safely repeatable - the raw text is already in WhatsAppLog, so a message
- * lost here can be re-parsed from the log rather than being gone.
+ * File a booked lorry into the register. Runs after the ACK: it's the slow half
+ * (a Gemini round-trip), and unlike the write above it is safely repeatable -
+ * the raw text is already in WhatsAppLog, so a message lost here can be
+ * re-parsed from the log rather than being gone.
+ *
+ * The row lands WAITING and stays there until a dispatch is raised on the same
+ * lorry number. Nothing existing is touched: a booking message is news about a
+ * lorry that is yet to load, not a correction to a trip already made.
  */
-async function parseInboundIntoDraft(logRow: { id: string; from: string | null; text: string | null }) {
+async function parseInboundIntoRegister(logRow: { id: string; from: string | null; text: string | null }) {
   const { from, text } = logRow;
 
   // A transport confirmation is a long-ish text with digits (lorry no / phone).
@@ -120,7 +130,7 @@ async function parseInboundIntoDraft(logRow: { id: string; from: string | null; 
   if (!parsed?.isTransportConfirmation) return;
   if (!parsed.lorryNumber && !parsed.driverPhone) return; // nothing actionable
 
-  const draft = await prisma.transportConfirmation.create({
+  const booking = await prisma.transportConfirmation.create({
     data: {
       fromPhone: from ?? 'unknown',
       rawText: text,
@@ -128,13 +138,16 @@ async function parseInboundIntoDraft(logRow: { id: string; from: string | null; 
       fromPlace: parsed.fromPlace ?? null,
       toPlace: parsed.toPlace ?? null,
       tonnageKg: parsed.tonnageKg ?? null,
-      lorryNumber: parsed.lorryNumber ?? null,
+      // Normalised on the way in - the dispatch screen looks the row up by lorry
+      // number, and that only works if both sides are spelled the same way.
+      lorryNumber: normalizeLorryNumber(parsed.lorryNumber),
       driverName: parsed.driverName ?? null,
       driverPhone: parsed.driverPhone ?? null,
       freightAmount: parsed.freightAmount ?? null,
+      status: 'WAITING',
     },
   });
-  logger.info(`[whatsapp] transport confirmation draft ${draft.id} created from ${from} (log ${logRow.id})`);
+  logger.info(`[whatsapp] lorry booking ${booking.id} (${booking.lorryNumber ?? 'no lorry no'}) filed from ${from} (log ${logRow.id})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,10 +409,10 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
     }
     res.json({ received: true });
     // Duplicate (null) needs no further work; otherwise parse in the background,
-    // where a failure costs a draft but never the message itself.
+    // where a failure costs a register row but never the message itself.
     if (logRow) {
-      parseInboundIntoDraft(logRow).catch((err) => {
-        logger.error(`[whatsapp] draft parsing failed for log ${logRow.id}`, err);
+      parseInboundIntoRegister(logRow).catch((err) => {
+        logger.error(`[whatsapp] booking parse failed for log ${logRow.id}`, err);
       });
     }
     return;
@@ -490,81 +503,146 @@ export async function sendPartyReminder(req: Request, res: Response) {
   res.json({ ok: true, pendingLorries, breakdown });
 }
 
-// --- Transport-confirmation drafts (Surya Road Transport page) --------------
+// --- Lorry booking register (Freight Dues → Lorry Confirmations) -------------
 
+/**
+ * The register, newest first. `status` accepts WAITING / USED / DISMISSED / ALL;
+ * the legacy DRAFT and CONFIRMED rows are folded into WAITING and USED so the
+ * pre-register history reads as one list.
+ */
 export async function listTransportConfirmations(req: Request, res: Response) {
-  const status = (req.query.status as string) || 'DRAFT';
+  const status = ((req.query.status as string) || 'WAITING').toUpperCase();
+  const where =
+    status === 'ALL'
+      ? undefined
+      : status === 'WAITING'
+        ? { status: { in: [...WAITING_STATES] } }
+        : status === 'USED'
+          ? { status: { in: [...USED_STATES] } }
+          : { status: 'DISMISSED' as const };
+
   const rows = await prisma.transportConfirmation.findMany({
-    where: status === 'ALL' ? undefined : { status: status as 'DRAFT' | 'CONFIRMED' | 'DISMISSED' },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
+    where,
+    orderBy: [{ messageDate: 'desc' }, { createdAt: 'desc' }],
+    take: 500,
   });
-  res.json(rows);
+
+  // The dispatch a used booking went out on, so the register can name the buyer
+  // rather than showing a bare id.
+  const dispatchIds = rows.map((r) => r.saleDispatchId).filter((id): id is string => !!id);
+  const dispatches = dispatchIds.length
+    ? await prisma.saleDispatch.findMany({
+        where: { id: { in: dispatchIds } },
+        select: {
+          id: true,
+          dispatchDate: true,
+          invoiceNumber: true,
+          saleOrder: { select: { destination: true, buyer: { select: { name: true } } } },
+        },
+      })
+    : [];
+  const byId = new Map(dispatches.map((d) => [d.id, d]));
+
+  res.json(
+    rows.map((r) => {
+      const d = r.saleDispatchId ? byId.get(r.saleDispatchId) : null;
+      return {
+        ...r,
+        dispatch: d
+          ? {
+              id: d.id,
+              dispatchDate: d.dispatchDate,
+              invoiceNumber: d.invoiceNumber,
+              buyer: d.saleOrder?.buyer?.name ?? null,
+              destination: d.saleOrder?.destination ?? null,
+            }
+          : null,
+      };
+    }),
+  );
 }
 
 /**
- * Confirm a draft. When a saleDispatchId is supplied, copy the driver (and the
- * lorry number, if the dispatch doesn't have one yet) onto that dispatch.
- *
- * The freight OVERWRITES the dispatch's freightCharge, which was seeded at
- * dispatch time from the Settings per-destination rate. That rate is an estimate
- * for planning; the transporter's message is what we actually owe, so it becomes
- * the single figure behind Freight Dues, the Surya retention ledger and the
- * Pappu P&L. The Order Planner still projects on the Settings rate - it has no
- * dispatch to read a real number from.
- *
- * `freightAmount` may be overridden in the request body when the parsed figure
- * needs correcting from the review card.
+ * The waiting booking for a lorry number, used by the dispatch dialog to fill in
+ * the driver as the number is typed. Answers 200 with `null` when nothing is
+ * booked on that lorry - a miss is the normal case, not an error.
  */
-export async function confirmTransportConfirmation(req: Request, res: Response) {
-  const draft = await prisma.transportConfirmation.findUnique({ where: { id: req.params.id } });
-  if (!draft) throw new HttpError(404, 'Transport confirmation not found');
-  if (draft.status !== 'DRAFT') throw new HttpError(400, 'Already reviewed');
+export async function lookupLorryConfirmation(req: Request, res: Response) {
+  const raw = typeof req.query.lorryNumber === 'string' ? req.query.lorryNumber : '';
+  const row = await findWaitingConfirmation(raw);
+  res.json(row ?? null);
+}
 
-  const rawFreight = req.body?.freightAmount;
-  let freightOverride: number | null = null;
-  if (rawFreight !== undefined && rawFreight !== null && rawFreight !== '') {
-    const n = Number(rawFreight);
-    if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Freight amount must be a positive number');
-    freightOverride = n;
+const EDITABLE_TEXT = ['driverName', 'driverPhone', 'fromPlace', 'toPlace'] as const;
+
+/**
+ * Correct a booking. Gemini reads these off free-text WhatsApp messages, so a
+ * transposed lorry number or a missing driver name has to be fixable - otherwise
+ * the row never matches a dispatch and the auto-fill silently does nothing.
+ */
+export async function updateTransportConfirmation(req: Request, res: Response) {
+  const row = await prisma.transportConfirmation.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Lorry confirmation not found');
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const data: Record<string, unknown> = {};
+
+  for (const key of EDITABLE_TEXT) {
+    if (body[key] !== undefined) {
+      const v = typeof body[key] === 'string' ? (body[key] as string).trim() : '';
+      data[key] = v || null;
+    }
   }
-  const freight = freightOverride ?? (draft.freightAmount != null ? Number(draft.freightAmount) : null);
-
-  const saleDispatchId = (req.body?.saleDispatchId as string | undefined) || null;
-  if (saleDispatchId) {
-    const dispatch = await prisma.saleDispatch.findUnique({ where: { id: saleDispatchId } });
-    if (!dispatch) throw new HttpError(404, 'Sale dispatch not found');
-    await prisma.saleDispatch.update({
-      where: { id: saleDispatchId },
-      data: {
-        driverName: draft.driverName ?? dispatch.driverName,
-        driverPhone: draft.driverPhone ?? dispatch.driverPhone,
-        vehicleNumber: dispatch.vehicleNumber ?? draft.lorryNumber,
-        ...(freight != null && freight > 0 ? { freightCharge: freight } : {}),
-      },
-    });
+  if (body.lorryNumber !== undefined) {
+    data.lorryNumber = normalizeLorryNumber(body.lorryNumber as string);
+  }
+  if (body.messageDate !== undefined) {
+    const raw = body.messageDate as string;
+    if (!raw) data.messageDate = null;
+    else {
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) throw new HttpError(400, 'Date is not valid');
+      data.messageDate = d;
+    }
+  }
+  for (const key of ['tonnageKg', 'freightAmount'] as const) {
+    if (body[key] === undefined) continue;
+    const raw = body[key];
+    if (raw === null || raw === '') {
+      data[key] = null;
+      continue;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${key} must be a positive number`);
+    data[key] = key === 'tonnageKg' ? Math.round(n) : n;
   }
 
+  const updated = await prisma.transportConfirmation.update({ where: { id: row.id }, data });
+  res.json(updated);
+}
+
+/** Hide a mis-parsed or irrelevant message from the register. */
+export async function dismissTransportConfirmation(req: Request, res: Response) {
+  const row = await prisma.transportConfirmation.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Lorry confirmation not found');
   const updated = await prisma.transportConfirmation.update({
-    where: { id: draft.id },
-    // Store a corrected figure back on the draft too, so the record shows what
-    // was actually applied rather than what Gemini first read.
-    data: {
-      status: 'CONFIRMED',
-      saleDispatchId,
-      ...(freightOverride != null ? { freightAmount: freightOverride } : {}),
-    },
+    where: { id: row.id },
+    data: { status: 'DISMISSED', saleDispatchId: null },
   });
   res.json(updated);
 }
 
-export async function dismissTransportConfirmation(req: Request, res: Response) {
-  const draft = await prisma.transportConfirmation.findUnique({ where: { id: req.params.id } });
-  if (!draft) throw new HttpError(404, 'Transport confirmation not found');
-  if (draft.status !== 'DRAFT') throw new HttpError(400, 'Already reviewed');
+/**
+ * Put a dismissed booking back on the waiting list. A row is normally dismissed
+ * because it looked wrong; once corrected it has to be able to come back, or the
+ * lorry it books can never be matched.
+ */
+export async function restoreTransportConfirmation(req: Request, res: Response) {
+  const row = await prisma.transportConfirmation.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Lorry confirmation not found');
   const updated = await prisma.transportConfirmation.update({
-    where: { id: draft.id },
-    data: { status: 'DISMISSED' },
+    where: { id: row.id },
+    data: { status: 'WAITING' },
   });
   res.json(updated);
 }

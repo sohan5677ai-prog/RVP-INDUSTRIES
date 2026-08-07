@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
-import { hamaliSplit, parseQualityAdjustments, qualityAdjustmentFreight } from '../lib/calc.js';
+import { companyVehicleNumbers, hamaliSplit, parseQualityAdjustments, qualityAdjustmentFreight } from '../lib/calc.js';
 
 export interface JournalLineInput {
   accountCode: string;
@@ -179,11 +179,7 @@ export class LedgerService {
     if (!p || !p.verification) return;
 
     const company = await tx.companyProfile.findFirst();
-    const isCompanyVehicle = p.stockIn.lorryNumber ? (company?.companyVehicles ?? '').toLowerCase().includes(p.stockIn.lorryNumber.toLowerCase().trim()) : false;
-    // We could use isVehicleExempt from calc.ts, but we're in ledger.service.ts
-    // Let's implement simple check here to avoid circular imports if any, or just import it.
-    // Wait, let's just do a simple robust check:
-    const knmList = (company?.companyVehicles || '').split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
+    const knmList = companyVehicleNumbers(company?.companyVehicles);
     const isKnm = p.stockIn.lorryNumber ? knmList.includes(p.stockIn.lorryNumber.trim().toLowerCase()) : false;
 
     // totalAmount is the party's NET payable (already net of any self-vehicle
@@ -828,8 +824,7 @@ export class LedgerService {
     let isKnm = false;
     if (data.lorryNumber) {
       const company = await tx.companyProfile.findFirst();
-      const knmList = (company?.companyVehicles || '').split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
-      isKnm = knmList.includes(data.lorryNumber.trim().toLowerCase());
+      isKnm = companyVehicleNumbers(company?.companyVehicles).includes(data.lorryNumber.trim().toLowerCase());
     }
 
     if (data.type === 'SUPPLIER') {

@@ -85,6 +85,29 @@ describe('Fast2SMS webhook routing', () => {
     expect(tcCreate).toHaveBeenCalledOnce();
   });
 
+  it('files the booking as WAITING with a normalised lorry number', async () => {
+    // The register is matched against a dispatch by lorry number alone, so a
+    // number stored the way the message spelled it ("TN 86 A 6588") would never
+    // find its trip.
+    parseTransport.mockResolvedValue({
+      isTransportConfirmation: true,
+      lorryNumber: 'tn 86-a 6588',
+      driverName: 'Karthik',
+      driverPhone: '9943262021',
+      freightAmount: 80000,
+      tonnageKg: 30000,
+    });
+    await post({ webhook_type: 'incoming_message', from: '919943262021', body: TRANSPORT_TEXT, message_id: 'wamid.N1' });
+    expect(tcCreate.mock.calls[0][0].data).toMatchObject({
+      status: 'WAITING',
+      lorryNumber: 'TN86A6588',
+      driverName: 'Karthik',
+      driverPhone: '9943262021',
+      tonnageKg: 30000,
+      freightAmount: 80000,
+    });
+  });
+
   it('treats status "received" as inbound, not a delivery receipt', async () => {
     // The regression this guards: an `event: "all"` template stamps status on
     // EVERY event, so an inbound message arrives looking like a status update.
@@ -120,7 +143,7 @@ describe('Fast2SMS webhook routing', () => {
     expect(parseTransport).not.toHaveBeenCalled();
   });
 
-  it('does not create a draft for a delivered status_update', async () => {
+  it('does not file a booking for a delivered status_update', async () => {
     await post({ webhook_type: 'status_update', status: 'delivered', message_id: 'w1', recipient_id: '919943262021' });
     expect(tcCreate).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();

@@ -1321,17 +1321,27 @@ model WhatsAppLog {
   @@index([createdAt])
 }
 
+// WAITING -> the lorry has been booked on WhatsApp but nothing has gone out on
+// it yet. USED -> a dispatch was raised against that lorry number, which is what
+// links the two. DISMISSED -> mis-parsed or irrelevant, hidden from the register.
+// DRAFT/CONFIRMED are the pre-register states, kept only so old rows still read
+// (DRAFT is shown as waiting, CONFIRMED as used).
 enum TransportConfirmationStatus {
   DRAFT
   CONFIRMED
   DISMISSED
+  WAITING
+  USED
 }
 
 // A transport broker's lorry-confirmation message received on WhatsApp
 // ("18/7 Punganur To Surat 30 Tonnes AP39T8217 Driver Moula 7207012803 ...")
-// parsed into fields by Gemini. Held as a DRAFT until the user reviews it on the
-// Surya Road Transport page; confirming can copy the driver/lorry details onto a
-// SaleDispatch.
+// parsed into fields by Gemini.
+//
+// This is a REGISTER of booked lorries, not a correction tool: the row is filed
+// WAITING and never touches an existing dispatch's freight. It earns its keep at
+// dispatch time - typing the lorry number pulls the driver's name and phone off
+// the waiting row, and raising the dispatch flips the row to USED.
 model TransportConfirmation {
   id             String                      @id @default(cuid())
   fromPhone      String // WhatsApp sender
@@ -1340,15 +1350,19 @@ model TransportConfirmation {
   fromPlace      String?
   toPlace        String?
   tonnageKg      Int?
+  // Stored normalised (upper-case, no spaces or dashes) so a dispatch typed as
+  // "AP 39 T 8217" still finds the row filed as "AP39T8217".
   lorryNumber    String?
   driverName     String?
   driverPhone    String?
   freightAmount  Decimal?                    @db.Decimal(12, 2)
-  status         TransportConfirmationStatus @default(DRAFT)
-  saleDispatchId String? // dispatch the confirmed details were applied to
+  status         TransportConfirmationStatus @default(WAITING)
+  saleDispatchId String? // dispatch this booking went out on
   createdAt      DateTime                    @default(now())
 
   @@index([status])
+  @@index([lorryNumber])
+  @@index([saleDispatchId])
 }
 
 // Persisted drafts for Slack multi-step flows (PO, Stock In, etc.)

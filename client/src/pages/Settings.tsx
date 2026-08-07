@@ -132,53 +132,10 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">KNM Vehicles (Exempt from Kata & Hamali lorry-share)</Label>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  size="sm" 
-                  className="h-6 px-2 text-xs" 
-                  onClick={() => {
-                    const current = (form.companyVehicles || '').split(/[\n,]+/).map(v => v.trim()).filter(v => v);
-                    setForm(p => ({ ...p, companyVehicles: [...current, ''].join('\n') }));
-                  }}
-                >
-                  <Plus className="mr-1 h-3 w-3" /> Add Vehicle
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {((form.companyVehicles || '').split('\n')).map((v, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      value={v}
-                      onChange={(e) => {
-                        const current = (form.companyVehicles || '').split('\n');
-                        current[idx] = e.target.value;
-                        setForm(p => ({ ...p, companyVehicles: current.join('\n') }));
-                      }}
-                      placeholder="e.g. AP03XX1234"
-                      className="h-8 text-sm uppercase"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-destructive"
-                      onClick={() => {
-                        const current = (form.companyVehicles || '').split('\n');
-                        current.splice(idx, 1);
-                        setForm(p => ({ ...p, companyVehicles: current.join('\n') }));
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-muted-foreground">List vehicle numbers. These will automatically have ₹0 kata fee and ₹0 lorry-share hamali (100% borne by company).</p>
-            </div>
+            <KnmVehiclesEditor
+              value={form.companyVehicles}
+              onChange={(companyVehicles) => setForm(p => ({ ...p, companyVehicles }))}
+            />
             <div className="space-y-1.5 max-w-xs">
               <Label className="text-xs">Sale freight retention (₹ held per trip)</Label>
               <Input
@@ -274,6 +231,118 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// --- KNM vehicle directory (number + regular driver) ----------------------------
+
+/**
+ * The directory is stored in the single CompanyProfile.companyVehicles string,
+ * one vehicle per line, fields pipe-separated: `AP39UX9105|Ravi|9876543210`.
+ * Rows saved before the driver columns existed are bare numbers and still read
+ * back fine (see parseCompanyVehicles in lib/calc).
+ *
+ * This editor deliberately does NOT trim while typing - a trim on every
+ * keystroke would eat the space in "Ravi Kumar" the moment it is typed. The
+ * readers trim instead.
+ */
+interface VehicleRow { number: string; driverName: string; driverPhone: string }
+
+function toVehicleRows(raw: string | null | undefined): VehicleRow[] {
+  const text = raw ?? '';
+  if (!text) return [];
+  return text.split('\n').flatMap((line) => {
+    if (!line.includes('|')) {
+      // Legacy: a bare number, or (older still) a comma-separated list of them.
+      // Blank lines survive as one empty row so "Add Vehicle" has something to fill.
+      const parts = line.split(',');
+      if (parts.length > 1) return parts.map((n) => ({ number: n, driverName: '', driverPhone: '' }));
+      return [{ number: line, driverName: '', driverPhone: '' }];
+    }
+    const [number = '', driverName = '', driverPhone = ''] = line.split('|');
+    return [{ number, driverName, driverPhone }];
+  });
+}
+
+function fromVehicleRows(rows: VehicleRow[]): string {
+  return rows
+    // Drop the trailing separators when there is no driver on the row, so a
+    // number-only list stays as readable as it was before this feature.
+    .map((r) => (r.driverName || r.driverPhone ? `${r.number}|${r.driverName}|${r.driverPhone}` : r.number))
+    .join('\n');
+}
+
+/** Pipes are the field separator and newlines the row separator - strip both. */
+const cleanCell = (s: string) => s.replace(/[|\n\r]/g, '');
+
+function KnmVehiclesEditor({ value, onChange }: { value?: string | null; onChange: (v: string) => void }) {
+  const rows = toVehicleRows(value);
+  const update = (idx: number, patch: Partial<VehicleRow>) => {
+    const next = rows.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    onChange(fromVehicleRows(next));
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">KNM Vehicles (Exempt from Kata &amp; Hamali lorry-share)</Label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={() => onChange(fromVehicleRows([...rows, { number: '', driverName: '', driverPhone: '' }]))}
+        >
+          <Plus className="mr-1 h-3 w-3" /> Add Vehicle
+        </Button>
+      </div>
+      {rows.length > 0 && (
+        <div className="grid grid-cols-[1fr_1fr_1fr_2rem] gap-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span>Vehicle No.</span>
+          <span>Driver Name</span>
+          <span>Driver Phone</span>
+          <span />
+        </div>
+      )}
+      <div className="space-y-2">
+        {rows.map((r, idx) => (
+          <div key={idx} className="grid grid-cols-[1fr_1fr_1fr_2rem] items-center gap-2">
+            <Input
+              value={r.number}
+              onChange={(e) => update(idx, { number: cleanCell(e.target.value) })}
+              placeholder="e.g. AP03XX1234"
+              className="h-8 text-sm uppercase"
+            />
+            <Input
+              value={r.driverName}
+              onChange={(e) => update(idx, { driverName: cleanCell(e.target.value) })}
+              placeholder="e.g. Moula"
+              className="h-8 text-sm"
+            />
+            <Input
+              value={r.driverPhone}
+              onChange={(e) => update(idx, { driverPhone: cleanCell(e.target.value) })}
+              placeholder="e.g. 7207012803"
+              inputMode="tel"
+              className="h-8 text-sm"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive"
+              onClick={() => onChange(fromVehicleRows(rows.filter((_, i) => i !== idx)))}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        List vehicle numbers. These will automatically have ₹0 kata fee and ₹0 lorry-share hamali (100% borne by company).
+        The driver name &amp; phone are optional and pre-fill themselves when the lorry is entered on a sale dispatch.
+      </p>
+    </div>
   );
 }
 

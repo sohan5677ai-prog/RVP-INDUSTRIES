@@ -173,12 +173,66 @@ export function crossVerify(
   return { reference, diff: Math.max(0, diff), exempt, finalWeight };
 }
 
+/** One row of the KNM vehicle directory held in CompanyProfile.companyVehicles. */
+export interface CompanyVehicle {
+  number: string;
+  driverName: string;
+  driverPhone: string;
+}
+
+/**
+ * Parse the KNM vehicle directory: one vehicle per line, fields pipe-separated
+ * as `AP39UX9105|Ravi|9876543210`. Rows saved before the driver columns existed
+ * are plain numbers (historically a comma-separated list was also accepted), so
+ * a line with no pipe still parses as number-only vehicles with no driver.
+ */
+export function parseCompanyVehicles(companyVehiclesList: string | null | undefined): CompanyVehicle[] {
+  if (!companyVehiclesList) return [];
+  const out: CompanyVehicle[] = [];
+  for (const line of companyVehiclesList.split('\n')) {
+    if (!line.includes('|')) {
+      for (const n of line.split(',')) {
+        const number = n.trim();
+        if (number) out.push({ number, driverName: '', driverPhone: '' });
+      }
+      continue;
+    }
+    const [number = '', driverName = '', driverPhone = ''] = line.split('|');
+    if (number.trim()) out.push({ number: number.trim(), driverName: driverName.trim(), driverPhone: driverPhone.trim() });
+  }
+  return out;
+}
+
+/** Just the vehicle numbers, trimmed and lowercased, for membership checks. */
+export function companyVehicleNumbers(companyVehiclesList: string | null | undefined): string[] {
+  return parseCompanyVehicles(companyVehiclesList).map(v => v.number.toLowerCase());
+}
+
+/** Normalise a lorry number for loose matching: alphanumerics only, uppercased. */
+export function normalizeLorryNumber(vehicleNumber: string | null | undefined): string {
+  return (vehicleNumber ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Look a lorry up in the directory to pre-fill its driver. Matching ignores
+ * spaces and hyphens (the office types `AP 39 UX 9105` as often as not); this
+ * is deliberately looser than isVehicleExempt, which keeps exact matching
+ * because it moves money.
+ */
+export function findCompanyVehicle(
+  vehicleNumber: string | null | undefined,
+  companyVehiclesList: string | null | undefined,
+): CompanyVehicle | null {
+  const target = normalizeLorryNumber(vehicleNumber);
+  if (!target) return null;
+  return parseCompanyVehicles(companyVehiclesList).find(v => normalizeLorryNumber(v.number) === target) ?? null;
+}
+
 /** Helper to check if a vehicle is in the exempt company vehicles list */
 export function isVehicleExempt(vehicleNumber: string | null | undefined, companyVehiclesList: string | null | undefined): boolean {
   if (!vehicleNumber || !companyVehiclesList) return false;
-  const list = companyVehiclesList.split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
   const target = vehicleNumber.trim().toLowerCase();
-  return list.includes(target);
+  return companyVehicleNumbers(companyVehiclesList).includes(target);
 }
 
 /** Hamali (unloading labour) charge in rupees. exact tonnes * rate (no tonne rounding). */

@@ -4,8 +4,10 @@ import {
   listWhatsAppLogs,
   sendPartyReminder,
   listTransportConfirmations,
-  confirmTransportConfirmation,
+  lookupLorryConfirmation,
+  updateTransportConfirmation,
   dismissTransportConfirmation,
+  restoreTransportConfirmation,
   sendDispatchWhatsApp,
   resendDriverWhatsApp,
 } from '../controllers/whatsapp.controller.js';
@@ -17,10 +19,14 @@ router.get('/whatsapp/logs', asyncHandler(listWhatsAppLogs));
 // Pending-loads reminder to a supplier (Party Ledger button). Throttled server-side.
 router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminder));
 
-// Inbound transport-confirmation drafts (Surya Road Transport page).
+// Lorry booking register, fed by the transporter's inbound WhatsApp messages
+// (Freight Dues → Lorry Confirmations).
 router.get('/whatsapp/transport-confirmations', asyncHandler(listTransportConfirmations));
-router.post('/whatsapp/transport-confirmations/:id/confirm', asyncHandler(confirmTransportConfirmation));
+// Ahead of the :id routes - "lookup" would otherwise be read as an id.
+router.get('/whatsapp/transport-confirmations/lookup', asyncHandler(lookupLorryConfirmation));
+router.patch('/whatsapp/transport-confirmations/:id', asyncHandler(updateTransportConfirmation));
 router.post('/whatsapp/transport-confirmations/:id/dismiss', asyncHandler(dismissTransportConfirmation));
+router.post('/whatsapp/transport-confirmations/:id/restore', asyncHandler(restoreTransportConfirmation));
 
 // Invoice + EWB + driver bundle to the broker/buyer, and buyer details to the driver.
 router.post('/whatsapp/dispatches/:id/send', asyncHandler(sendDispatchWhatsApp));

@@ -409,6 +409,37 @@ export interface EmailLog {
   sentAt: string;
 }
 
+/**
+ * A lorry the transporter booked over WhatsApp, parsed off the message and held
+ * in the register until a dispatch goes out on that lorry number.
+ */
+export type LorryConfirmationStatus = 'WAITING' | 'USED' | 'DISMISSED' | 'DRAFT' | 'CONFIRMED';
+
+export interface LorryConfirmation {
+  id: string;
+  fromPhone: string;
+  rawText: string;
+  messageDate: string | null;
+  fromPlace: string | null;
+  toPlace: string | null;
+  tonnageKg: number | null;
+  lorryNumber: string | null;
+  driverName: string | null;
+  driverPhone: string | null;
+  freightAmount: string | number | null;
+  status: LorryConfirmationStatus;
+  saleDispatchId: string | null;
+  createdAt: string;
+  // The shipment this booking went out on, embedded by the list endpoint.
+  dispatch?: {
+    id: string;
+    dispatchDate: string;
+    invoiceNumber: string | null;
+    buyer: string | null;
+    destination: string | null;
+  } | null;
+}
+
 export interface CompanyProfile {
   id: string;
   name: string;

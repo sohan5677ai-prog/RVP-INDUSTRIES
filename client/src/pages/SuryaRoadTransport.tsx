@@ -9,6 +9,7 @@ import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { SaleOrder, SaleProduct, CompanyProfile } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
+import { companyVehicleNumbers } from '@/lib/calc';
 import { productDescription } from '@/lib/productNames';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,10 +18,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2, Truck, Wallet, Hourglass, MessageCircle, Check, X, FileText, Trash2 } from 'lucide-react';
+import { Loader2, Truck, Wallet, Hourglass, FileText, Trash2 } from 'lucide-react';
 
 type TransportTab = 'SURYA' | 'KNM' | 'OTHER';
 
@@ -65,7 +65,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
   });
 
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
-  const knmList = (company?.companyVehicles || '').split(/[\n,]+/).map(v => v.trim().toLowerCase()).filter(v => v);
+  const knmList = companyVehicleNumbers(company?.companyVehicles);
 
   /** Infer transport provider for legacy dispatches without the field. */
   function inferProvider(d: any): TransportTab {
@@ -163,8 +163,9 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         />
       </div>
 
-      {/* Inbound WhatsApp lorry confirmations awaiting review */}
-      <TransportConfirmationDrafts saleOrders={saleOrders ?? []} />
+      {/* Inbound WhatsApp lorry bookings live in their own register - Freight
+          Dues → Lorry Confirmations - since they describe lorries yet to load
+          rather than the trips reported here. */}
 
       {/* Transport Provider Tabs */}
       <Segmented
@@ -566,173 +567,5 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-/* ------------------------------------------------------------------------- */
-/* Inbound WhatsApp lorry confirmations (parsed by the server webhook) held   */
-/* as drafts until reviewed. Confirming can copy the driver/lorry details     */
-/* onto a chosen dispatch; dismissing hides mis-parsed or irrelevant ones.    */
-/* ------------------------------------------------------------------------- */
-
-interface TransportConfirmationDraft {
-  id: string;
-  fromPhone: string;
-  rawText: string;
-  messageDate: string | null;
-  fromPlace: string | null;
-  toPlace: string | null;
-  tonnageKg: number | null;
-  lorryNumber: string | null;
-  driverName: string | null;
-  driverPhone: string | null;
-  freightAmount: number | null;
-  createdAt: string;
-}
-
-function TransportConfirmationDrafts({ saleOrders }: { saleOrders: SaleOrder[] }) {
-  const qc = useQueryClient();
-  const [linkTarget, setLinkTarget] = useState<Record<string, string>>({});
-  // Freight is editable before confirming: it overwrites what we owe the
-  // transporter and what the Pappu P&L charges the order, so a misread figure
-  // must be correctable without going to the dispatch.
-  const [freightEdit, setFreightEdit] = useState<Record<string, string>>({});
-
-  const { data: drafts } = useQuery({
-    queryKey: ['transport-confirmations'],
-    queryFn: () => api<TransportConfirmationDraft[]>('/whatsapp/transport-confirmations?status=DRAFT'),
-    refetchInterval: 60_000, // new confirmations arrive from outside the app
-  });
-
-  // Undelivered dispatches a confirmation could belong to, newest first.
-  const openDispatches = saleOrders
-    .flatMap((o) => (o.dispatches ?? []).filter((d) => d.status === 'DISPATCHED').map((d) => ({ o, d })))
-    .sort((a, b) => new Date(b.d.dispatchDate).getTime() - new Date(a.d.dispatchDate).getTime());
-
-  const confirmMutation = useMutation({
-    mutationFn: ({ id, saleDispatchId, freightAmount }: { id: string; saleDispatchId?: string; freightAmount?: number }) =>
-      api(`/whatsapp/transport-confirmations/${id}/confirm`, {
-        method: 'POST',
-        body: {
-          ...(saleDispatchId ? { saleDispatchId } : {}),
-          ...(freightAmount != null ? { freightAmount } : {}),
-        },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transport-confirmations'] });
-      qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      // The applied freight moves this order's margin on the Pappu P&L.
-      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
-      toast.success('Confirmation applied');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  const dismissMutation = useMutation({
-    mutationFn: (id: string) => api(`/whatsapp/transport-confirmations/${id}/dismiss`, { method: 'POST' }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transport-confirmations'] });
-      toast.success('Dismissed');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  if (!drafts || drafts.length === 0) return null;
-
-  return (
-    <div className="rounded-lg border border-green-200 dark:border-green-900 bg-green-50/50 dark:bg-green-950/20">
-      <div className="px-5 py-3 border-b border-green-200 dark:border-green-900 flex items-center gap-2 font-semibold text-sm">
-        <MessageCircle className="h-4 w-4 text-green-600" />
-        WhatsApp Lorry Confirmations ({drafts.length} to review)
-      </div>
-      <div className="divide-y divide-green-200/60 dark:divide-green-900/60">
-        {drafts.map((c) => {
-          // Default the link target to the open dispatch whose lorry number matches.
-          const matched = openDispatches.find(
-            ({ d }) => c.lorryNumber && d.vehicleNumber?.replace(/\s+/g, '').toUpperCase() === c.lorryNumber
-          );
-          const selected = linkTarget[c.id] ?? matched?.d.id ?? 'NONE';
-          const freightValue = freightEdit[c.id] ?? (c.freightAmount != null ? String(c.freightAmount) : '');
-          const freightNum = freightValue.trim() === '' ? null : Number(freightValue);
-          const perTonne =
-            freightNum != null && Number.isFinite(freightNum) && c.tonnageKg
-              ? Math.round((freightNum / (c.tonnageKg / 1000)) * 100) / 100
-              : null;
-          return (
-            <div key={c.id} className="p-4 space-y-2.5">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                {c.lorryNumber && <span className="font-mono font-semibold">{c.lorryNumber}</span>}
-                {(c.fromPlace || c.toPlace) && (
-                  <span>{c.fromPlace ?? '?'} → {c.toPlace ?? '?'}</span>
-                )}
-                {c.tonnageKg != null && <span>{(c.tonnageKg / 1000).toFixed(1)} t</span>}
-                {c.driverName && <span>Driver: <span className="font-medium">{c.driverName}</span></span>}
-                {c.driverPhone && <span className="font-mono">{c.driverPhone}</span>}
-              </div>
-              <p className="text-xs text-muted-foreground italic line-clamp-2">"{c.rawText}"</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Label className="text-xs text-muted-foreground">Lorry freight ₹</Label>
-                <Input
-                  type="number"
-                  className="h-8 w-32 text-xs bg-card"
-                  placeholder="not read"
-                  value={freightValue}
-                  onChange={(e) => setFreightEdit((s) => ({ ...s, [c.id]: e.target.value }))}
-                />
-                {/* Per-tonne readout: the quickest way to spot a figure that was
-                    read on the wrong basis, since these routes run ~2,000-3,000/t. */}
-                {perTonne != null && (
-                  <span className="text-xs text-muted-foreground">= {rupees(perTonne)}/tonne</span>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={selected}
-                  onValueChange={(v) => setLinkTarget((s) => ({ ...s, [c.id]: v }))}
-                >
-                  <SelectTrigger className="h-8 w-64 text-xs bg-card">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NONE">Don't link to a dispatch</SelectItem>
-                    {openDispatches.map(({ o, d }) => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {shortDate(d.dispatchDate)} · {o.buyer?.name} · {d.vehicleNumber ?? 'no vehicle'}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  disabled={confirmMutation.isPending}
-                  onClick={() =>
-                    confirmMutation.mutate({
-                      id: c.id,
-                      saleDispatchId: selected !== 'NONE' ? selected : undefined,
-                      freightAmount:
-                        freightNum != null && Number.isFinite(freightNum) && freightNum >= 0
-                          ? freightNum
-                          : undefined,
-                    })
-                  }
-                >
-                  <Check className="h-3.5 w-3.5" /> Confirm
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 gap-1.5 text-muted-foreground"
-                  disabled={dismissMutation.isPending}
-                  onClick={() => dismissMutation.mutate(c.id)}
-                >
-                  <X className="h-3.5 w-3.5" /> Dismiss
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }

@@ -38,7 +38,11 @@ type PurchaseRow = Purchase & {
  * approval - that one is recovered from the supplier but still owed to the lorry.
  */
 function inwardFreightOf(p: PurchaseRow): number {
-  return Number(p.freightCharge ?? 0) + qualityAdjustmentFreight(p.verification?.qualityAdjustments);
+  const rawFreight = Number(p.freightCharge ?? 0);
+  const basis = Number((p as any).freightTonnageKg ?? p.stockIn?.freightTonnageKg ?? 0);
+  const net = Number(p.netWeightKg ?? 0);
+  const baseFreight = basis > 0 && net > 0 ? (rawFreight * net) / basis : rawFreight;
+  return baseFreight + qualityAdjustmentFreight(p.verification?.qualityAdjustments);
 }
 
 type PaymentStatus = 'Paid' | 'Partial' | 'Pending';
@@ -62,6 +66,65 @@ interface FreightRow {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function combineSharedLorryRows(rows: FreightRow[]): FreightRow[] {
+  const groups = new Map<string, FreightRow[]>();
+  for (const r of rows) {
+    if (!r.lorry) {
+      const key = `nolorry-${r.id}`;
+      groups.set(key, [r]);
+      continue;
+    }
+    const dateKey = r.date ? r.date.slice(0, 10) : '';
+    const key = `${r.lorry.toUpperCase()}_${dateKey}`;
+    const list = groups.get(key) || [];
+    list.push(r);
+    groups.set(key, list);
+  }
+
+  const result: FreightRow[] = [];
+  for (const list of groups.values()) {
+    if (list.length === 1) {
+      result.push(list[0]);
+      continue;
+    }
+    const invoices = Array.from(new Set(list.map((x) => x.invoice).filter(Boolean))).join(', ');
+    const parties = Array.from(new Set(list.map((x) => x.party).filter(Boolean))).join(', ');
+    const destinations = Array.from(new Set(list.map((x) => x.destination).filter(Boolean))).join(', ');
+    const sourcedSet = new Set(list.map((x) => x.sourced));
+    const sourced = (sourcedSet.size === 1 ? list[0].sourced : 'Purchase / Sale') as FreightRow['sourced'];
+    const kind = Array.from(new Set(list.map((x) => x.kind).filter(Boolean))).join(', ') as any;
+
+    const totalFreight = round2(list.reduce((s, x) => s + x.freight, 0));
+    const totalHamali = round2(list.reduce((s, x) => s + x.hamali, 0));
+    const totalKata = round2(list.reduce((s, x) => s + x.kata, 0));
+    const totalTransport = round2(list.reduce((s, x) => s + x.transport, 0));
+    const totalNet = round2(list.reduce((s, x) => s + x.net, 0));
+    const totalWeight = list.reduce((s, x) => s + (x.weightKg ?? 0), 0);
+
+    const isReceived = list.some((x) => x.deliveryStatus === 'RECEIVED' || x.deliveryStatus === 'DELIVERED');
+
+    result.push({
+      id: `comb-${list[0].lorry}-${list[0].date.slice(0, 10)}`,
+      date: list[0].date,
+      lorry: list[0].lorry,
+      invoice: invoices || null,
+      freight: totalFreight,
+      hamali: totalHamali,
+      kata: totalKata,
+      transport: totalTransport,
+      net: totalNet,
+      deliveryStatus: isReceived ? 'RECEIVED' : list[0].deliveryStatus,
+      sourced,
+      destination: destinations || null,
+      party: parties || null,
+      kind: kind || undefined,
+      weightKg: totalWeight || undefined,
+    });
+  }
+
+  return result;
+}
 
 const deliveryVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   PENDING: 'secondary',
@@ -543,9 +606,12 @@ export default function FreightDuesPage() {
       };
     });
 
-  const knmRows = [...allOutwardRows.filter(r => r.lorry && knmList.includes(r.lorry.toLowerCase())), ...allInwardRows.filter(r => r.lorry && knmList.includes(r.lorry.toLowerCase()))].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const outwardRows = allOutwardRows.filter(r => !r.lorry || !knmList.includes(r.lorry.toLowerCase()));
-  const inwardRows = allInwardRows.filter(r => !r.lorry || !knmList.includes(r.lorry.toLowerCase()));
+  const knmRows = combineSharedLorryRows([
+    ...allOutwardRows.filter(r => r.lorry && knmList.includes(r.lorry.toLowerCase())),
+    ...allInwardRows.filter(r => r.lorry && knmList.includes(r.lorry.toLowerCase())),
+  ]).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const outwardRows = combineSharedLorryRows(allOutwardRows.filter(r => !r.lorry || !knmList.includes(r.lorry.toLowerCase())));
+  const inwardRows = combineSharedLorryRows(allInwardRows.filter(r => !r.lorry || !knmList.includes(r.lorry.toLowerCase())));
 
   // Transfer transport rows (husk / seed / pre-cleaner dust). The whole transport
   // charge is the net payable to KNM Transport - no hamali/kata/retention deducted.

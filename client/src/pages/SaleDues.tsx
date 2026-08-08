@@ -6,6 +6,7 @@ import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
+import { productDescription } from '@/lib/productNames';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -155,7 +156,10 @@ export default function SaleDuesPage() {
   // no saleDispatchId clears nothing here. Keyed strictly on the source data so
   // it recomputes only when data changes (not on every keystroke in the dialog).
   const outstandingInvoices = useMemo<OutstandingInvoice[]>(() => {
-  const buyers = parties?.filter((p) => p.type === 'BUYER') ?? [];
+  // BOTH counts as a buyer - byproduct customers (Nalla Chintapandu / Pokkulu /
+  // Waste / Pre Cleaner Dust) are usually seed suppliers too, so filtering on
+  // 'BUYER' alone silently dropped every one of their invoices from this list.
+  const buyers = parties?.filter((p) => p.type === 'BUYER' || p.type === 'BOTH') ?? [];
   const rows: OutstandingInvoice[] = [];
   const today = new Date();
 
@@ -369,6 +373,7 @@ export default function SaleDuesPage() {
                   <TableHead>Broker</TableHead>
                   <TableHead>Due Date</TableHead>
                   <TableHead>Customer</TableHead>
+                  <TableHead>Product</TableHead>
                   <TableHead>Invoice No</TableHead>
                   <TableHead>Bill Date</TableHead>
                   <TableHead className="text-right">Bill Amount</TableHead>
@@ -380,7 +385,7 @@ export default function SaleDuesPage() {
               </TableHeader>
               <TableBody>
                 {dueInvoices.length === 0 ? (
-                  <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No sales dues found.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No sales dues found.</TableCell></TableRow>
                 ) : (
                   (pageRows ?? []).map((inv) => (
                     <Fragment key={inv.id}>
@@ -393,6 +398,7 @@ export default function SaleDuesPage() {
                         </TableCell>
                         <TableCell className="font-medium">{shortDate(inv.dueDate.toISOString())}</TableCell>
                         <TableCell>{inv.partyName}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{productDescription(inv.product)}</TableCell>
                         <TableCell className="font-mono text-xs">{inv.invoiceNumber ?? '-'}</TableCell>
                         <TableCell>{shortDate(inv.billDate.toISOString())}</TableCell>
                         <TableCell className="text-right">{rupees(inv.billAmount)}</TableCell>
@@ -443,7 +449,7 @@ export default function SaleDuesPage() {
                       </TableRow>
                       {expandedId === inv.id && (
                         <TableRow className="bg-muted/20">
-                          <TableCell colSpan={10} className="p-0 border-b-0">
+                          <TableCell colSpan={11} className="p-0 border-b-0">
                             <div className="px-10 py-4">
                               <h4 className="font-semibold text-sm mb-3">Allocated Receipts</h4>
                               {inv.appliedReceipts.length > 0 ? (

@@ -130,7 +130,9 @@ export default function ReceiptsPage() {
     queryFn: () => api<Party[]>('/parties'),
   });
 
-  const buyers = parties?.filter((p) => p.type === 'BUYER') ?? [];
+  // BOTH counts as a buyer here (byproduct customers are often suppliers too),
+  // otherwise their invoices can't be settled from this page.
+  const buyers = parties?.filter((p) => p.type === 'BUYER' || p.type === 'BOTH') ?? [];
 
   // Form State
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));

@@ -524,10 +524,10 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
   if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
   if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
 
-  const opening = txns.length ? txns[0].runningBalance - txns[0].debit + txns[0].credit : 0;
+  const opening = txns.length ? txns[0].runningBalance - (txns[0].debit || 0) + (txns[0].credit || 0) : 0;
   const closing = txns.length ? txns[txns.length - 1].runningBalance : 0;
-  const totalDebit = txns.reduce((s, t) => s + t.debit, 0);
-  const totalCredit = txns.reduce((s, t) => s + t.credit, 0);
+  const totalDebit = txns.reduce((s, t) => s + (t.debit || 0), 0);
+  const totalCredit = txns.reduce((s, t) => s + (t.credit || 0), 0);
 
   const fmtAmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(Math.abs(n)));
   const drcr = (n: number) => (n === 0 ? '' : n > 0 ? 'Dr' : 'Cr');
@@ -538,7 +538,7 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
 
   const recentList = txns
     .slice(-5)
-    .map((t) => `• ${t.date.slice(0, 10)}: ${t.particulars} (₹${fmtAmt(t.debit || t.credit)})`)
+    .map((t) => `• ${t.date.slice(0, 10)}: ${t.particulars} (₹${fmtAmt(t.debit || t.credit || 0)})`)
     .join('\n');
 
   const summaryText = `*Account Statement - ${party.name}*\nPeriod: ${periodStr}\nOpening Bal: ₹${fmtAmt(opening)} ${drcr(opening)}\nTotal Debits: ₹${fmtAmt(totalDebit)}\nTotal Credits: ₹${fmtAmt(totalCredit)}\n*Closing Bal: ₹${fmtAmt(closing)} ${drcr(closing)}*\n\nRecent Activity:\n${recentList || 'No transactions in period'}`;

@@ -524,16 +524,18 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
   if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
   if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
 
-  const opening = txns.length ? txns[0].runningBalance - (txns[0].debit || 0) + (txns[0].credit || 0) : 0;
-  const closing = txns.length ? txns[txns.length - 1].runningBalance : 0;
+  const firstTxn = txns[0];
+  const lastTxn = txns[txns.length - 1];
+  const opening = firstTxn ? (firstTxn.runningBalance || 0) - (firstTxn.debit || 0) + (firstTxn.credit || 0) : 0;
+  const closing = lastTxn ? (lastTxn.runningBalance || 0) : 0;
   const totalDebit = txns.reduce((s, t) => s + (t.debit || 0), 0);
   const totalCredit = txns.reduce((s, t) => s + (t.credit || 0), 0);
 
-  const fmtAmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(Math.abs(n)));
+  const fmtAmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(Math.abs(n || 0)));
   const drcr = (n: number) => (n === 0 ? '' : n > 0 ? 'Dr' : 'Cr');
 
-  const fromStr = fromDate ? fromDate.slice(0, 10) : txns.length ? txns[0].date.slice(0, 10) : 'Start';
-  const toStr = toDate ? toDate.slice(0, 10) : txns.length ? txns[txns.length - 1].date.slice(0, 10) : 'As of today';
+  const fromStr = fromDate ? fromDate.slice(0, 10) : firstTxn ? firstTxn.date.slice(0, 10) : 'Start';
+  const toStr = toDate ? toDate.slice(0, 10) : lastTxn ? lastTxn.date.slice(0, 10) : 'As of today';
   const periodStr = `${fromStr} to ${toStr}`;
 
   const recentList = txns

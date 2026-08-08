@@ -28,6 +28,7 @@ type PurchaseRow = Purchase & {
     lorryNumber?: string | null;
     invoiceNumber?: string | null;
     loadingLocation?: string | null;
+    freightTonnageKg?: number | null;
     purchaseOrder?: { party?: { name?: string | null } | null } | null;
   };
 };

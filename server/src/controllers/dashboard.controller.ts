@@ -86,6 +86,8 @@ export interface HuskExpenses {
   transferHamali: number;
   transferTransport: number;
   saleFreight: number;
+  pappuShortage: number;
+  huskShortage: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -118,6 +120,8 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'transferHamali',     label: 'Byproduct Transfer Hamali', pappu: false },
   { key: 'transferTransport',  label: 'Byproduct Transfer Transport', pappu: false },
   { key: 'saleFreight',        label: 'Husk Sale Freight', pappu: false },
+  { key: 'pappuShortage',      label: 'Pappu Shortage',       pappu: true  },
+  { key: 'huskShortage',       label: 'Husk Shortage',        pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
@@ -191,6 +195,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     otherIncomeAgg,
     gunnySalesAgg,
     brokerageDispatches,
+    lockedShortageReceipts,
     purchaseKataAgg,
     dustPurchasesForKata,
     saleDispatchesForKata,
@@ -241,6 +246,17 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       prisma.saleDispatch.findMany({
         where: { saleOrder: { brokerId: { not: null } } },
         select: { saleOrder: { select: { broker: { select: { name: true } } } } },
+      }),
+      // LOCKED weight shortages. A buyer's kata slip at delivery only ESTIMATES a
+      // shortage - we learn whether they actually cut it when the money arrives, so
+      // the deduction booked on the receipt is the real cost. GST-inclusive on
+      // purpose: no credit note goes to the department, so the 5% is lost too.
+      prisma.receipt.findMany({
+        where: { type: 'BUYER', shortageAmount: { gt: 0 }, saleDispatchId: { not: null } },
+        select: {
+          shortageAmount: true,
+          saleDispatch: { select: { saleOrder: { select: { product: true } } } },
+        },
       }),
       prisma.purchase.aggregate({ _sum: { kataFee: true } }),
       prisma.dustPurchase.findMany({ select: { weightKg: true, lorryNumber: true } }),
@@ -368,11 +384,25 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     // (non-RVP) broker - mirrors the Brokerage Ledger/Dues reports exactly.
     const brokerage = brokerageDispatches.filter((d) => !isOwnBroker(d.saleOrder.broker?.name)).length * FLAT_BROKERAGE;
 
+    // Locked shortages split into the two lines the business tracks: Pappu, and
+    // everything else pooled as Husk. Neither is netted anywhere else - the Pappu
+    // margin bills the full ordered tonnage and the pool's byproduct income is
+    // gross dispatched value - so counting them here is the only time they land.
+    let pappuShortage = 0;
+    let huskShortage = 0;
+    for (const r of lockedShortageReceipts) {
+      const amount = Number(r.shortageAmount ?? 0);
+      if (r.saleDispatch?.saleOrder.product === 'PAPPU') pappuShortage += amount;
+      else huskShortage += amount;
+    }
+
     const expenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
       transferHamali,
       transferTransport,
       saleFreight,
+      pappuShortage: Math.round(pappuShortage * 100) / 100,
+      huskShortage: Math.round(huskShortage * 100) / 100,
       pappuLoading,
       pappuRoasting,
       huskLoading,

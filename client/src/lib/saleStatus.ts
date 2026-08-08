@@ -1,4 +1,5 @@
 import type { SaleOrder, SaleDispatch, Receipt } from './types';
+import { shortageWithGst, round2 } from './receiptCalc';
 
 /** Lifecycle a sale moves through, with PAID layered on top of the DB status
  *  (payment is tracked via receipts, not a column on the order). */
@@ -54,6 +55,59 @@ export function settledByDispatch(receipts: SettleReceipt[] | undefined): Map<st
 export function isDispatchPaid(d: SaleDispatch, ratePerKg: number, settled: Map<string, number>): boolean {
   const got = settled.get(d.id) ?? 0;
   return got > 0 && got >= dispatchTotal(d, ratePerKg) - 1;
+}
+
+/**
+ * Where a shipment's weight shortage stands. A shortage is only ever an ESTIMATE
+ * until the buyer pays:
+ *
+ *  • ESTIMATED - the buyer's weighbridge slip came back light at delivery, so
+ *    `shortageKg` is on the dispatch. Nothing is deducted from the bill yet -
+ *    whether the buyer actually cuts it is unknown until the money arrives.
+ *  • LOCKED    - a buyer receipt booked a shortage deduction. That figure is the
+ *    real, final loss and is what the Husk Pool / P&L absorb as an expense.
+ *  • WAIVED    - the shipment was paid in full with no deduction: the buyer did
+ *    not cut the shortage, so it costs nothing.
+ */
+export type ShortageState = 'NONE' | 'ESTIMATED' | 'LOCKED' | 'WAIVED';
+
+export interface DispatchShortage {
+  state: ShortageState;
+  kg: number;
+  /** Delivery-slip estimate, valued base + 5% GST (the invoice is GST-inclusive). */
+  estimated: number;
+  /** Deduction actually taken by the buyer's receipts. Zero until one is booked. */
+  locked: number;
+}
+
+/**
+ * Shortage on one shipment. Valued exactly like the "Mark as Paid" prefill -
+ * shortageKg × rate, plus 5% GST, because the invoice being settled is itself
+ * GST-inclusive. `receipts` defaults to the buyer receipts the sales list embeds
+ * on the dispatch; pass an explicit list on pages that fetch them separately.
+ */
+export function dispatchShortage(
+  d: SaleDispatch,
+  ratePerKg: number,
+  gstExempt = false,
+  receipts?: SettleReceipt[],
+): DispatchShortage {
+  const kg = Number(d.shortageKg ?? 0);
+  const estimated = shortageWithGst(kg * ratePerKg, gstExempt);
+  const linked = (receipts ?? d.receipts ?? []).filter(
+    (r) => r.type === 'BUYER' && r.saleDispatchId === d.id,
+  );
+  const locked = round2(linked.reduce((s, r) => s + Number(r.shortageAmount ?? 0), 0));
+
+  if (locked > 0) return { state: 'LOCKED', kg, estimated, locked };
+  if (kg <= 0) return { state: 'NONE', kg, estimated: 0, locked: 0 };
+
+  // No deduction taken - only a fully-settled shipment proves the buyer let it go.
+  const cleared = linked.reduce(
+    (s, r) => s + Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0), 0,
+  );
+  const fullyPaid = cleared > 0 && cleared >= dispatchTotal(d, ratePerKg) - 1;
+  return { state: fullyPaid ? 'WAIVED' : 'ESTIMATED', kg, estimated, locked: 0 };
 }
 
 /** Order status for display: PAID once it is fully shipped and every shipment is

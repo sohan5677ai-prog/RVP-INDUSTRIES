@@ -13,7 +13,7 @@ import {
   DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
 } from '@/lib/calc';
 import { findCompanyVehicle } from '@/lib/calc';
-import { settledByDispatch, isDispatchPaid, saleDisplayStatus, type SaleDisplayStatus } from '@/lib/saleStatus';
+import { settledByDispatch, isDispatchPaid, saleDisplayStatus, dispatchShortage, type SaleDisplayStatus } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import {
@@ -942,6 +942,22 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visible, 50);
   const realizationPct = totalRevenue > 0 ? (dispatchedRevenue / totalRevenue) * 100 : 0;
 
+  // ── Shortage exposure ───────────────────────────────────────────────────────
+  // The buyer's weighbridge slip at delivery gives an ESTIMATE only. It becomes a
+  // real cost the day the money lands and we see whether the buyer cut it - that
+  // locked figure is what the Husk Pool / P&L absorb as an operating expense.
+  const shortageTotals = useMemo(() => {
+    let estimated = 0, locked = 0, estimatedKg = 0, pendingShipments = 0;
+    for (const o of visible) {
+      for (const d of o.dispatches ?? []) {
+        const s = dispatchShortage(d, Number(o.ratePerKg), o.gstExempt);
+        if (s.state === 'ESTIMATED') { estimated += s.estimated; estimatedKg += s.kg; pendingShipments++; }
+        else if (s.state === 'LOCKED') locked += s.locked;
+      }
+    }
+    return { estimated: round2(estimated), locked: round2(locked), estimatedKg, pendingShipments };
+  }, [visible]);
+
   const exportColumns: ExportColumn<SaleOrder>[] = [
     { header: 'Date', value: (o) => shortDate(o.saleDate) },
     { header: 'Party', value: (o) => o.buyer?.name ?? '' },
@@ -1019,6 +1035,20 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             </CardContent>
           </Card>
         )}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estimated Shortage</CardTitle>
+            <TrendingDown className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{rupees(shortageTotals.estimated)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {toTonnes(shortageTotals.estimatedKg).toFixed(2)} t over {shortageTotals.pendingShipments} shipment{shortageTotals.pendingShipments === 1 ? '' : 's'}
+              {' · '}
+              <span className="text-rose-600 dark:text-rose-400">{rupees(shortageTotals.locked)} locked</span>
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -1195,6 +1225,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                             <div className="space-y-2.5">
                               {dispatches.map((d) => {
                                 const netDue = (d.weightKg * Number(o.ratePerKg) * (o.gstExempt ? 1 : 1 + GST_RATE));
+                                const shortage = dispatchShortage(d, Number(o.ratePerKg), o.gstExempt);
                                 const dueIso = dueDateIso(d.deliveredDate, o.dueDays);
                                 const overdue = isOverdue(dueIso);
                                 const soon = isDueSoon(dueIso);
@@ -1218,6 +1249,30 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 title={`${toTonnes(d.excessOutKg!).toFixed(2)} t dispatched from yield surplus above the assumed 60% out-turn. That tonnage drew no black seed and carries no seed cost.`}
                                               >
                                                 XS {toTonnes(d.excessOutKg!).toFixed(2)}t
+                                              </Badge>
+                                            )}
+                                            {shortage.state === 'ESTIMATED' && (
+                                              <Badge
+                                                variant="warning"
+                                                title={`Buyer's kata came ${shortage.kg} kg light. Estimated only - the deduction is confirmed when the payment is received, and only then does it become a cost.`}
+                                              >
+                                                Est. short {shortage.kg} kg · {rupees(shortage.estimated)}
+                                              </Badge>
+                                            )}
+                                            {shortage.state === 'LOCKED' && (
+                                              <Badge
+                                                variant="destructive"
+                                                title={`Buyer cut ${rupees(shortage.locked)} at payment. Locked - booked to the Husk Pool / P&L as a shortage expense.`}
+                                              >
+                                                Short {rupees(shortage.locked)} locked
+                                              </Badge>
+                                            )}
+                                            {shortage.state === 'WAIVED' && (
+                                              <Badge
+                                                variant="success"
+                                                title={`Buyer's kata was ${shortage.kg} kg light but the shipment was paid in full - nothing was cut.`}
+                                              >
+                                                Shortage waived
                                               </Badge>
                                             )}
                                           </div>
@@ -1268,6 +1323,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                       {/* figures */}
                                       <div className="flex items-center gap-5">
                                         <Figure label="Net due" value={rupees(netDue)} valueClass="text-forest" />
+                                        {shortage.state === 'ESTIMATED' && (
+                                          <Figure label="Est. shortage" value={rupees(shortage.estimated)} valueClass="text-amber-600 dark:text-amber-400" />
+                                        )}
+                                        {shortage.state === 'LOCKED' && (
+                                          <Figure label="Shortage" value={rupees(shortage.locked)} valueClass="text-rose-600 dark:text-rose-400" />
+                                        )}
                                         <div className="text-right">
                                           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Due</div>
                                           <div className="mt-0.5 flex items-center justify-end gap-1 text-sm font-medium">

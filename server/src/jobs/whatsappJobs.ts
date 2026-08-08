@@ -74,21 +74,36 @@ async function runBuyerDuesReminders() {
 // ---------------------------------------------------------------------------
 async function runDeferredDispatchReminders() {
   const todayKey = istDayKey();
+  // Include dispatches due today, overdue, or due within 2 days
+  const twoDaysAhead = new Date();
+  twoDaysAhead.setDate(twoDaysAhead.getDate() + 2);
+  const maxDayKey = istDayKey(twoDaysAhead);
+
   const orders = await prisma.saleOrder.findMany({
-    where: { reminderDate: { not: null }, status: { in: ['PENDING', 'PARTIAL'] } },
-    include: { buyer: { select: { name: true } } },
+    where: { status: { in: ['PENDING', 'PARTIAL'] } },
+    include: { buyer: { select: { name: true } }, dispatches: { select: { weightKg: true } } },
   });
+
   for (const order of orders) {
-    if (!order.reminderDate) continue;
-    if (istDayKey(order.reminderDate) > todayKey) continue; // reminder date not reached yet
+    const effectiveDate = order.reminderDate ?? order.saleDate;
+    if (!effectiveDate) continue;
+
+    // Only alert if dispatch target/sale date is due within 2 days or past due
+    if (istDayKey(effectiveDate) > maxDayKey) continue;
+
     const last = await whatsappService.lastSentAt('OWNER_DISPATCH_REMINDER', order.id);
     if (last && istDayKey(last) === todayKey) continue; // already reminded today
-    const summary = `${order.product} · ${(order.tonnageKg / 1000).toFixed(2)} MT`;
+
+    const dispatchedKg = order.dispatches.reduce((acc: number, d: { weightKg: number }) => acc + (d.weightKg || 0), 0);
+    const remainingKg = Math.max(0, order.tonnageKg - dispatchedKg);
+    const remainingTonnes = (remainingKg > 0 ? remainingKg : order.tonnageKg) / 1000;
+    const summary = `${order.product} · ${remainingTonnes.toFixed(2)}`;
+
     await whatsappService.notifyOwnerDispatch({
       id: order.id,
       buyerName: order.buyer.name,
       orderSummary: summary,
-      dispatchBy: order.reminderDate,
+      dispatchBy: effectiveDate,
       ref: `SO-${order.id.slice(-6)}`,
     });
   }

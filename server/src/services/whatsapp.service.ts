@@ -62,6 +62,7 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // Recorded for completeness - the driver template goes out over the
   // Meta-format endpoint, which addresses it by name (below), not by this id.
   DISPATCH_DRIVER: '27626',
+  OWNER_DISPATCH_REMINDER: '1618894512932537',
 };
 
 function templateId(key: WaTemplateKey): string | undefined {
@@ -72,6 +73,7 @@ function templateId(key: WaTemplateKey): string | undefined {
 // addressed by their approved NAME, not the numeric message_id above.
 const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_DRIVER: 'rvp_driver',
+  OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {

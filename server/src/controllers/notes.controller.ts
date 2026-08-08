@@ -183,10 +183,17 @@ export function emailNote(kind: Kind) {
  * so a taxable sale cannot be reversed tax-free. Only a genuinely GST-exempt sale
  * yields a 0% note.
  *
- * Both stored amounts are GST-INCLUSIVE (they deduct from a GST-inclusive invoice),
- * so the taxable value is derived by dividing the rate back OUT rather than by
- * re-multiplying kg × price - the two disagree whenever the shortage was keyed in
- * by hand at payment time instead of coming off the delivery kata.
+ * The note is priced the same way as the invoice it reverses: taxable value is
+ * shortageKg × ratePerKg at the GST-EXCLUSIVE sale rate, then GST is added on top.
+ * It is deliberately NOT derived by dividing the rate back out of the stored
+ * shortage amount - those amounts are GST-inclusive, so any that were keyed in
+ * already-grossed-up carry 5% twice, and dividing once would leave the surplus
+ * sitting in the taxable base. Pricing off the kata quantity keeps the note
+ * internally consistent no matter what was stored.
+ *
+ * Only a shipment with no buyer kata slip at all falls back to the stored amount,
+ * since there is no quantity to price from; there the rate is divided back out and
+ * the quantity worked backwards, both flagged as approximate.
  */
 export async function listPendingCreditNotes(_req: Request, res: Response) {
   const [dispatches, taxInfo] = await Promise.all([
@@ -216,19 +223,22 @@ export async function listPendingCreditNotes(_req: Request, res: Response) {
       const gstRate = order.gstExempt ? 0 : (rateByProduct.get(order.product) ?? DEFAULT_GST_RATE);
 
       const receiptShortage = d.receipts.find((r) => Number(r.shortageAmount ?? 0) > 0);
-      const gross = receiptShortage
-        ? Number(receiptShortage.shortageAmount)
-        : Number(d.creditNoteAmount ?? 0);
+      // What actually came off the party ledger. GST-inclusive.
+      const ledgerAmount = round2(
+        receiptShortage ? Number(receiptShortage.shortageAmount) : Number(d.creditNoteAmount ?? 0),
+      );
 
-      const taxableValue = round2(gross / (1 + gstRate / 100));
-      const gstAmount = round2(gross - taxableValue);
-      // The kata quantity is the real one when we have it. A shortage keyed in at
-      // payment time against a dispatch whose buyer kata was never captured has no
-      // shortageKg at all - back it out of the taxable value so the note still
-      // states a quantity instead of reading "0 kg".
-      const shortageKg = Number(d.shortageKg ?? 0) > 0
-        ? Number(d.shortageKg)
-        : rate > 0 ? Math.round(taxableValue / rate) : 0;
+      const kataKg = Number(d.shortageKg ?? 0);
+      // Price off the buyer's kata slip at the GST-exclusive sale rate whenever we
+      // have one, so the note is built exactly like the invoice line it reverses.
+      // Without a kata slip the stored amount is all we have, so divide the rate
+      // back out of it and work the quantity backwards.
+      const taxableValue = kataKg > 0
+        ? round2(kataKg * rate)
+        : round2(ledgerAmount / (1 + gstRate / 100));
+      const gstAmount = round2(taxableValue * (gstRate / 100));
+      const totalAmount = round2(taxableValue + gstAmount);
+      const shortageKg = kataKg > 0 ? kataKg : rate > 0 ? Math.round(taxableValue / rate) : 0;
 
       return {
         saleDispatchId: d.id,
@@ -238,11 +248,14 @@ export async function listPendingCreditNotes(_req: Request, res: Response) {
         partyName: order.buyer.name,
         shortageKg,
         /** True when shortageKg was derived from the amount, not a buyer kata slip. */
-        shortageKgDerived: !(Number(d.shortageKg ?? 0) > 0),
+        shortageKgDerived: !(kataKg > 0),
         taxableValue,
         gstRate,
         gstAmount,
-        totalAmount: round2(gross),
+        totalAmount,
+        /** Deduction already posted to the ledger - shown when it disagrees with the
+         *  note, which means the stored figure was keyed in wrong (usually GST twice). */
+        ledgerAmount,
         source: receiptShortage ? ('RECEIPT' as const) : ('DISPATCH' as const),
       };
     })

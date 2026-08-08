@@ -158,7 +158,17 @@ function PendingShortagesCard({
                 {rupees(item.gstAmount)}
                 <span className="ml-1 text-[10px]">({item.gstRate}%)</span>
               </TableCell>
-              <TableCell className="text-right font-semibold">{rupees(item.totalAmount)}</TableCell>
+              <TableCell className="text-right font-semibold">
+                {rupees(item.totalAmount)}
+                {item.ledgerAmount != null && Math.abs(item.ledgerAmount - item.totalAmount) > 1 ? (
+                  <div
+                    className="text-[10px] font-normal text-amber-600 dark:text-amber-400"
+                    title={`The party ledger was deducted ${rupees(item.ledgerAmount)} for this shortage, but at the sale rate excluding GST it works out to ${rupees(item.totalAmount)}. The stored deduction is likely wrong - check it before sending this note.`}
+                  >
+                    ledger {rupees(item.ledgerAmount)}
+                  </div>
+                ) : null}
+              </TableCell>
               <TableCell className="text-right">
                 <Button size="sm" onClick={() => onRaise(item)}>
                   <Plus className="h-3.5 w-3.5 mr-1.5" /> Raise Note

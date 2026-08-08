@@ -389,6 +389,9 @@ export interface PendingCreditNote {
   gstRate: number;
   gstAmount: number;
   totalAmount: number;
+  /** Shortage already deducted on the party ledger; differs from totalAmount only
+   *  when the stored figure was keyed in wrong (typically GST applied twice). */
+  ledgerAmount?: number;
   source: 'DISPATCH' | 'RECEIPT';
 }
 

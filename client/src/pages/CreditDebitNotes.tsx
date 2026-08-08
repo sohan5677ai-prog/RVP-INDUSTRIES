@@ -130,20 +130,34 @@ function PendingShortagesCard({
             <TableHead>Date</TableHead>
             <TableHead>Party</TableHead>
             <TableHead>Shortage</TableHead>
-            <TableHead className="text-right">Amount</TableHead>
+            <TableHead className="text-right">Taxable</TableHead>
+            <TableHead className="text-right">GST</TableHead>
+            <TableHead className="text-right">Total</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading && (
-            <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+            <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
           )}
           {items.map((item) => (
             <TableRow key={item.saleDispatchId}>
               <TableCell className="font-mono text-sm">{item.invoiceNumber ?? '-'}</TableCell>
               <TableCell>{shortDate(item.date)}</TableCell>
               <TableCell className="font-medium">{item.partyName}</TableCell>
-              <TableCell className="text-muted-foreground">{item.shortageKg != null ? `${item.shortageKg} kg` : '-'}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {item.shortageKg ? `${item.shortageKg} kg` : '-'}
+                {item.shortageKgDerived && item.shortageKg ? (
+                  <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400" title="No buyer kata slip on this shipment - quantity worked back from the shortage amount at the sale rate. Verify before sending.">
+                    approx
+                  </span>
+                ) : null}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">{rupees(item.taxableValue)}</TableCell>
+              <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
+                {rupees(item.gstAmount)}
+                <span className="ml-1 text-[10px]">({item.gstRate}%)</span>
+              </TableCell>
               <TableCell className="text-right font-semibold">{rupees(item.totalAmount)}</TableCell>
               <TableCell className="text-right">
                 <Button size="sm" onClick={() => onRaise(item)}>
@@ -244,7 +258,10 @@ export default function CreditDebitNotes() {
     setTab('CREDIT');
     setPartyId(item.partyId);
     setSaleDispatchId(item.saleDispatchId);
-    setReason(`Shortage of ${item.shortageKg ?? 0} kg${item.invoiceNumber ? ` on invoice ${item.invoiceNumber}` : ''}`);
+    // Never state a bogus "0 kg" - fall back to a quantity-free reason when the
+    // shipment carries neither a kata slip nor a rate to work the weight back from.
+    const qty = item.shortageKg ? `Shortage of ${item.shortageKg} kg` : 'Weight shortage';
+    setReason(`${qty}${item.invoiceNumber ? ` on invoice ${item.invoiceNumber}` : ''}`);
     setTaxableValue(String(item.taxableValue));
     setGstRate(String(item.gstRate));
     setNoteDate(new Date().toISOString().slice(0, 10));

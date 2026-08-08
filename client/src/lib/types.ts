@@ -383,8 +383,11 @@ export interface PendingCreditNote {
   partyId: string;
   partyName: string;
   shortageKg: number | null;
+  /** shortageKg was back-derived from the amount (no buyer kata slip on the dispatch). */
+  shortageKgDerived?: boolean;
   taxableValue: number;
   gstRate: number;
+  gstAmount: number;
   totalAmount: number;
   source: 'DISPATCH' | 'RECEIPT';
 }

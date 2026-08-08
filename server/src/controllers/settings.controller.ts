@@ -296,15 +296,17 @@ export async function updateInvoiceLayout(req: Request, res: Response) {
 const PRODUCTS = ['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'] as const;
 type ProductCode = (typeof PRODUCTS)[number];
 
+// HSN must be at least 6 digits: NIC rejects a 4-digit code (e-invoice error 2311)
+// for filers with AATO >= 5 Cr, and the same code is printed on the invoice/EWB.
 const PRODUCT_TAX_DEFAULTS: Record<ProductCode, { hsn: string; description: string }> = {
-  PAPPU: { hsn: '1207', description: 'Tamarind Seed Kernel' },
-  HUSK: { hsn: '1404', description: 'Tamarind Husk' },
-  WASTE: { hsn: '2308', description: 'Tamarind Waste' },
-  TPS: { hsn: '1207', description: 'Tamarind Seed Brokens' },
-  SHELL: { hsn: '1404', description: 'Tamarind Shell' },
-  PRECLEANER_DUST: { hsn: '2308', description: 'Pre Cleaner Dust' },
-  NALLA_POKKULU: { hsn: '2308', description: 'Nalla Pokkulu' },
-  NALLA_CHINTAPANDU: { hsn: '2308', description: 'Nalla Chintapandu' },
+  PAPPU: { hsn: '120799', description: 'Tamarind Seed Kernel' },
+  HUSK: { hsn: '140490', description: 'Tamarind Husk' },
+  WASTE: { hsn: '230800', description: 'Tamarind Waste' },
+  TPS: { hsn: '120799', description: 'Tamarind Seed Brokens' },
+  SHELL: { hsn: '140490', description: 'Tamarind Shell' },
+  PRECLEANER_DUST: { hsn: '230800', description: 'Pre Cleaner Dust' },
+  NALLA_POKKULU: { hsn: '230800', description: 'Nalla Pokkulu' },
+  NALLA_CHINTAPANDU: { hsn: '230800', description: 'Nalla Chintapandu' },
 };
 
 /** Return all product tax rows, creating any missing ones with sensible defaults. */

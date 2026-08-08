@@ -123,7 +123,7 @@ export default function EWayBillView() {
 
   const taxInfo = taxRows?.find(t => t.product === order.product);
   const description = taxInfo?.description || PRODUCT_FALLBACK[order.product] || `${order.product} Sale`;
-  const hsn = taxInfo?.hsn || '1207';
+  const hsn = taxInfo?.hsn || '120799'; // 6 digits minimum - NIC rejects 4-digit HSN (error 2311)
   
   const weight = dispatch.weightKg;
   const rate = Number(order.ratePerKg);

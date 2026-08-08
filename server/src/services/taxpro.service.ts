@@ -252,6 +252,23 @@ export class TaxproService {
     };
   }
 
+  /**
+   * NIC rejects an HSN shorter than 6 digits (e-invoice error 2311) once the
+   * filer's AATO crosses 5 Cr. Catch it here so the ERP explains what to fix
+   * instead of surfacing a raw GSP error code, and never pad the code with
+   * zeroes - a made-up sub-heading would just fail the HSN master lookup.
+   */
+  private static requireHsn(hsn: string | null | undefined, product: string) {
+    const code = (hsn || '').replace(/\s/g, '');
+    if (code.length < 6) {
+      throw new Error(
+        `HSN for ${product} is "${code || 'not set'}" - the government requires at least 6 digits. ` +
+        `Open Settings > HSN / SAC and set the full code (e.g. 120799 for pappu), then try again.`,
+      );
+    }
+    return code;
+  }
+
   /** The buyer's SHIP-TO block. Same rule: `Loc` is the town, not the state. */
   private static shipToDetails(buyer: Record<string, any>) {
     return {
@@ -276,7 +293,7 @@ export class TaxproService {
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
     const description = taxInfo?.description || `${order.product} Sale`;
-    const hsn = taxInfo?.hsn || '120799'; // must be 6+ digits for AATO >= 5 Cr
+    const hsn = this.requireHsn(taxInfo?.hsn, order.product);
 
     if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
     if (!buyer.gstin) throw new Error('Buyer GSTIN is not set in Buyer profile');
@@ -587,7 +604,7 @@ export class TaxproService {
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
     const description = taxInfo?.description || `${order.product} Sale`;
-    const hsn = taxInfo?.hsn || '120799';
+    const hsn = this.requireHsn(taxInfo?.hsn, order.product);
 
     const sellerStateCode = company.gstin?.slice(0, 2) || '';
     const buyerStateCode = buyer.gstin?.slice(0, 2) || '';

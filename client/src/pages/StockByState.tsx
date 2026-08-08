@@ -76,7 +76,7 @@ export default function StockByState() {
             const millPct = s.totalPurchasedKg > 0 ? (s.totalMilledKg / s.totalPurchasedKg) * 100 : 0;
 
             return (
-              <Card key={s.state} className="flex flex-col bg-card hover:-translate-y-0.5 transition-all duration-200">
+              <Card key={s.state} className="flex flex-col bg-card hover:border-primary/40 hover:shadow-md transition-all duration-200">
                 <CardHeader className="pb-3 border-b border-muted/50 bg-muted/5">
                   <div className="flex justify-between items-center gap-2">
                     <CardTitle className="flex items-center gap-2 text-base font-bold text-primary">

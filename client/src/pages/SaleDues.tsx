@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { TrendingUp, Loader2, ChevronDown, ChevronRight, Undo2 } from 'lucide-react';
 import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -50,6 +51,22 @@ const PAY_FILTERS: { value: PayFilter; label: string }[] = [
   { value: 'PAID', label: 'Paid' },
   { value: 'UNPAID', label: 'Unpaid' },
 ];
+
+// Due-month dropdown. Invoices are bucketed by the month their payment falls
+// due (dispatch/delivery date + the order's credit days), NOT by bill date -
+// "show me what's due in August" is a collections question, not a billing one.
+const ALL_MONTHS = 'ALL';
+
+/** Local-time YYYY-MM key for a date (never UTC - a 1st-of-month due date in IST
+ *  would otherwise slide into the previous month). */
+function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+}
 
 interface OutstandingInvoice {
   id: string;
@@ -103,6 +120,7 @@ export default function SaleDuesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
   const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
+  const [monthFilter, setMonthFilter] = useState<string>(ALL_MONTHS);
 
   const { data: parties, isLoading: loadingParties } = useQuery({
     queryKey: ['parties'],
@@ -228,7 +246,25 @@ export default function SaleDuesPage() {
   return rows;
   }, [parties, saleOrders, receipts]);
 
-  const visibleInvoices = outstandingInvoices.filter((inv) => matchesProductFilter(inv.product, productFilter));
+  // Month options come from the FULL invoice set (not the product-filtered one)
+  // so switching product tabs never yanks the selected month out of the list.
+  // Newest month first - collections work is almost always on the recent end.
+  const monthOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    outstandingInvoices.forEach((inv) => {
+      const k = monthKey(inv.dueDate);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, count]) => ({ key, label: monthLabel(key), count }));
+  }, [outstandingInvoices]);
+
+  const visibleInvoices = outstandingInvoices.filter(
+    (inv) =>
+      matchesProductFilter(inv.product, productFilter) &&
+      (monthFilter === ALL_MONTHS || monthKey(inv.dueDate) === monthFilter),
+  );
 
   const totalBillingAll = visibleInvoices.reduce((sum, item) => sum + item.totalAmount, 0);
   const totalReceiptsAll = visibleInvoices.reduce((sum, item) => sum + item.cashReceived, 0);
@@ -307,7 +343,7 @@ export default function SaleDuesPage() {
         <ExportButtons
           filename="Sale_Dues"
           title="Sale Dues (Aging)"
-          subtitle={`${PRODUCT_FILTERS.find((f) => f.value === productFilter)?.label} · ${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${dueInvoices.length} invoice(s)`}
+          subtitle={`${PRODUCT_FILTERS.find((f) => f.value === productFilter)?.label} · ${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${monthFilter === ALL_MONTHS ? 'All months' : `Due ${monthLabel(monthFilter)}`} · ${dueInvoices.length} invoice(s)`}
           columns={SALE_DUES_COLUMNS}
           rows={dueInvoices}
         />
@@ -329,6 +365,31 @@ export default function SaleDuesPage() {
           onValueChange={setPayFilter}
           size="sm"
         />
+
+        {/* Due-month picker: pick "August 2026" to see only invoices falling due that month. */}
+        <div className="flex items-center gap-2 ml-auto">
+          <Label htmlFor="due-month" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+            Due Month
+          </Label>
+          <Select value={monthFilter} onValueChange={setMonthFilter}>
+            <SelectTrigger id="due-month" className="h-9 w-[200px]">
+              <SelectValue placeholder="All months" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_MONTHS}>All months</SelectItem>
+              {monthOptions.map((m) => (
+                <SelectItem key={m.key} value={m.key}>
+                  {m.label} ({m.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {monthFilter !== ALL_MONTHS && (
+            <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setMonthFilter(ALL_MONTHS)}>
+              Clear
+            </Button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -366,7 +427,14 @@ export default function SaleDuesPage() {
           </div>
 
           <div className="rounded-lg border bg-card overflow-auto max-h-[70vh]">
-            <div className="px-5 py-4 border-b font-semibold text-sm">Sales Aging List</div>
+            <div className="px-5 py-4 border-b font-semibold text-sm flex items-center gap-2">
+              Sales Aging List
+              {monthFilter !== ALL_MONTHS && (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  Due in {monthLabel(monthFilter)}
+                </span>
+              )}
+            </div>
             <Table>
               <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-muted [&_th]:shadow-[0_1px_0_0] [&_th]:shadow-border">
                 <TableRow>
@@ -385,7 +453,11 @@ export default function SaleDuesPage() {
               </TableHeader>
               <TableBody>
                 {dueInvoices.length === 0 ? (
-                  <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No sales dues found.</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                      {monthFilter === ALL_MONTHS ? 'No sales dues found.' : `No invoices falling due in ${monthLabel(monthFilter)}.`}
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   (pageRows ?? []).map((inv) => (
                     <Fragment key={inv.id}>

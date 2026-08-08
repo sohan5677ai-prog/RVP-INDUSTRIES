@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import type { PartyLedgerRow, PartyLedgerDetail, PartyLedgerTxn, LedgerKind } from '@/lib/types';
+import type { Party, PartyLedgerRow, PartyLedgerDetail, PartyLedgerTxn, LedgerKind } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import { openPartyStatement, type StatementCompany } from '@/lib/partyStatement';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Search, Loader2, ArrowLeft, FileText, Phone, MapPin, Landmark,
   Hash, Wallet, TrendingUp, TrendingDown, Scale, Building2,
@@ -210,6 +212,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   const [q, setQ] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [waDialogOpen, setWaDialogOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['party-ledger', partyId],
@@ -324,6 +327,13 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
             }}
           >
             <FileText className="h-4 w-4" /> Statement (PDF)
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm"
+            onClick={() => setWaDialogOpen(true)}
+          >
+            <WhatsAppIcon className="h-4 w-4 fill-white" /> WhatsApp Ledger
           </Button>
         </div>
       </div>
@@ -483,6 +493,18 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           </div>
         )}
       </div>
+
+      <SendPartyLedgerWhatsAppDialog
+        open={waDialogOpen}
+        onOpenChange={setWaDialogOpen}
+        party={party}
+        initialFrom={from}
+        initialTo={to}
+        summary={summary}
+        transactions={data.transactions}
+        company={company}
+        kind={kind}
+      />
     </div>
   );
 }
@@ -604,5 +626,176 @@ function KpiCard({ icon: Icon, label, value, hint, sub, tone = 'neutral' }: {
         {hint && <p className="text-[10px] text-muted-foreground mt-1">{hint}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/* =================================================== WhatsApp Send Dialog */
+
+function SendPartyLedgerWhatsAppDialog({
+  open,
+  onOpenChange,
+  party,
+  initialFrom,
+  initialTo,
+  summary,
+  transactions,
+  company,
+  kind,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  party: Party;
+  initialFrom: string;
+  initialTo: string;
+  summary: PartyLedgerDetail['summary'];
+  transactions: PartyLedgerTxn[];
+  company: StatementCompany | null | undefined;
+  kind: string;
+}) {
+  const [fromDate, setFromDate] = useState(initialFrom);
+  const [toDate, setToDate] = useState(initialTo || new Date().toISOString().slice(0, 10));
+  const [phone, setPhone] = useState(party.phone || party.phone2 || '');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setFromDate(initialFrom);
+      setToDate(initialTo || new Date().toISOString().slice(0, 10));
+      setPhone(party.phone || party.phone2 || '');
+    }
+  }, [open, initialFrom, initialTo, party]);
+
+  const periodTxns = useMemo(() => {
+    let t = transactions;
+    if (kind !== 'ALL') t = t.filter((x) => x.kind === kind || (kind === 'RECEIPT' && (x.kind === 'CREDIT_NOTE' || x.kind === 'TDS' || x.kind === 'SHORTAGE')));
+    if (fromDate) t = t.filter((x) => x.date >= fromDate);
+    if (toDate) t = t.filter((x) => x.date <= toDate + 'T23:59:59');
+    return t;
+  }, [transactions, kind, fromDate, toDate]);
+
+  const opening = periodTxns.length ? periodTxns[0].runningBalance - periodTxns[0].debit + periodTxns[0].credit : 0;
+  const closing = periodTxns.length ? periodTxns[periodTxns.length - 1].runningBalance : (summary.balanceType === 'DR' ? summary.balance : -summary.balance);
+  const totalDebit = periodTxns.reduce((s, x) => s + x.debit, 0);
+  const totalCredit = periodTxns.reduce((s, x) => s + x.credit, 0);
+
+  const handleSendApi = async () => {
+    if (!phone.trim()) {
+      toast.error('Please enter a valid phone number');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api<{ ok: boolean; message: string; summaryText: string }>(
+        `/whatsapp/parties/${party.id}/send-ledger`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ fromDate, toDate, phone: phone.trim() }),
+        }
+      );
+      toast.success(res.message || 'Party ledger statement sent!');
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send WhatsApp message');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenWhatsAppWeb = () => {
+    const rawNumber = phone.trim() || party.phone || party.phone2 || '';
+    let num = rawNumber.replace(/\D/g, '');
+    if (num.length === 10) num = `91${num}`;
+
+    const fromStr = fromDate || (periodTxns.length ? periodTxns[0].date.slice(0, 10) : 'Start');
+    const toStr = toDate || (periodTxns.length ? periodTxns[periodTxns.length - 1].date.slice(0, 10) : 'Today');
+
+    const msg = `*ACCOUNT STATEMENT - ${party.name.toUpperCase()}*\nPeriod: ${fromStr} to ${toStr}\nOpening Bal: ₹${Math.abs(opening).toLocaleString('en-IN')} ${opening >= 0 ? 'Dr' : 'Cr'}\nTotal Debits: ₹${totalDebit.toLocaleString('en-IN')}\nTotal Credits: ₹${totalCredit.toLocaleString('en-IN')}\n*Closing Bal: ₹${Math.abs(closing).toLocaleString('en-IN')} ${closing >= 0 ? 'Dr' : 'Cr'}*\n\nThank you,\n*${company?.name || 'RVP INDUSTRIES'}*`;
+
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  const handleOpenPdf = () => {
+    openPartyStatement({
+      company,
+      party,
+      summary,
+      transactions: periodTxns,
+      filterNote: kind === 'ALL' ? undefined : KIND_FILTERS.find((f) => f.value === kind)?.label,
+      fromDate: fromDate || undefined,
+      toDate: toDate || undefined,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-emerald-600">
+            <WhatsAppIcon className="h-5 w-5 fill-emerald-600" />
+            Send Party Ledger via WhatsApp
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+            <div className="font-semibold text-sm">{party.name}</div>
+            <div className="text-xs text-muted-foreground">Select period and confirm recipient phone number below.</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">From Date</label>
+              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">To Date</label>
+              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground">Recipient WhatsApp Mobile</label>
+            <Input
+              type="text"
+              placeholder="e.g. 9876543210"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
+
+          {/* Statement Summary Preview */}
+          <div className="rounded-lg border bg-emerald-500/5 p-3 space-y-2 text-xs">
+            <div className="font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider text-[11px]">
+              Statement Summary ({periodTxns.length} transactions)
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+              <div>Opening: <span className="font-medium text-foreground">₹{Math.abs(opening).toLocaleString('en-IN')} {opening >= 0 ? 'Dr' : 'Cr'}</span></div>
+              <div>Closing: <span className="font-bold text-foreground">₹{Math.abs(closing).toLocaleString('en-IN')} {closing >= 0 ? 'Dr' : 'Cr'}</span></div>
+              <div>Debits: <span className="font-medium text-foreground">₹{totalDebit.toLocaleString('en-IN')}</span></div>
+              <div>Credits: <span className="font-medium text-foreground">₹{totalCredit.toLocaleString('en-IN')}</span></div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              onClick={handleSendApi}
+              disabled={loading}
+              className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4 fill-white" />}
+              Send WhatsApp Message (API)
+            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" size="sm" onClick={handleOpenWhatsAppWeb} className="gap-1.5">
+                <WhatsAppIcon className="h-3.5 w-3.5 fill-emerald-600" /> WhatsApp Web
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleOpenPdf} className="gap-1.5">
+                <FileText className="h-3.5 w-3.5" /> View/Print PDF
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

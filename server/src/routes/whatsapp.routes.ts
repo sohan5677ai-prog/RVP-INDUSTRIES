@@ -3,6 +3,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import {
   listWhatsAppLogs,
   sendPartyReminder,
+  sendPartyLedgerWhatsApp,
   listTransportConfirmations,
   lookupLorryConfirmation,
   updateTransportConfirmation,
@@ -18,6 +19,7 @@ router.get('/whatsapp/logs', asyncHandler(listWhatsAppLogs));
 
 // Pending-loads reminder to a supplier (Party Ledger button). Throttled server-side.
 router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminder));
+router.post('/whatsapp/parties/:partyId/send-ledger', asyncHandler(sendPartyLedgerWhatsApp));
 
 // Lorry booking register, fed by the transporter's inbound WhatsApp messages
 // (Freight Dues → Lorry Confirmations).

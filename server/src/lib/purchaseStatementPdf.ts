@@ -6,6 +6,7 @@ import { IST_TZ } from './istDate.js';
 import { logger } from './logger.js';
 import type { QualityAdjustmentRow, QualityAdjustmentMode } from './calc.js';
 import { drawSignatureMark } from './signatureAssets.js';
+import { TRANSLATIONS, type StatementLanguage } from './i18n/purchaseStatement.js';
 
 /**
  * Renders the per-lorry PURCHASE STATEMENT (the bill we settle a supplier on)
@@ -64,6 +65,8 @@ export interface PurchaseStatementData {
   selfVehicleKata: number;
   /** Net balance payable - the ledger's figure, printed as-is. */
   netPayable: number;
+  /** Language the party-facing text renders in - defaults to English. */
+  lang?: StatementLanguage;
 }
 
 const PAGE = { margin: 36, width: 595.28, height: 841.89 };
@@ -97,10 +100,27 @@ const FALLBACK = { body: 'Helvetica', semi: 'Helvetica-Bold', bold: 'Helvetica-B
 type FontKey = keyof typeof FONT_FILES;
 type FontMap = Record<FontKey, string>;
 
-let warnedMissingFonts = false;
+// Per-language body/bold faces for the party-facing text (Manjari for Malayalam -
+// the bundled Noto Sans Malayalam trips a mark-positioning bug in pdfkit's
+// fontkit shaper; Manjari covers the same script cleanly).
+const INDIC_FONT_FILES: Partial<Record<StatementLanguage, { regular: string; bold: string }>> = {
+  ta: { regular: 'NotoSansTamil-400.woff', bold: 'NotoSansTamil-700.woff' },
+  te: { regular: 'NotoSansTelugu-400.woff', bold: 'NotoSansTelugu-700.woff' },
+  ml: { regular: 'Manjari-400.woff', bold: 'Manjari-700.woff' },
+  kn: { regular: 'NotoSansKannada-400.woff', bold: 'NotoSansKannada-700.woff' },
+};
+const INDIC_FONT_DIR = new URL('indic/', FONT_DIR);
 
-/** Register the bundled faces on a document; returns the names to draw with. */
-function useFonts(doc: PDFKit.PDFDocument): FontMap {
+let warnedMissingFonts = false;
+let warnedMissingIndicFonts = false;
+
+/**
+ * Register the bundled faces on a document; returns the names to draw with.
+ * For a non-English `lang`, every role (display/semi/bold/body) resolves to
+ * that language's Indic face - mirroring the on-screen statement, which
+ * swaps its whole font-family via a single `.lang-xx` class.
+ */
+function useFonts(doc: PDFKit.PDFDocument, lang: StatementLanguage = 'en'): FontMap {
   const names = {} as FontMap;
   for (const key of Object.keys(FONT_FILES) as FontKey[]) {
     const path = fileURLToPath(new URL(FONT_FILES[key], FONT_DIR));
@@ -115,6 +135,24 @@ function useFonts(doc: PDFKit.PDFDocument): FontMap {
       }
     }
   }
+
+  const indic = INDIC_FONT_FILES[lang];
+  if (indic) {
+    const regularPath = fileURLToPath(new URL(indic.regular, INDIC_FONT_DIR));
+    const boldPath = fileURLToPath(new URL(indic.bold, INDIC_FONT_DIR));
+    if (existsSync(regularPath) && existsSync(boldPath)) {
+      doc.registerFont('indicRegular', regularPath);
+      doc.registerFont('indicBold', boldPath);
+      names.body = 'indicRegular';
+      names.semi = 'indicBold';
+      names.bold = 'indicBold';
+      names.display = 'indicBold';
+    } else if (!warnedMissingIndicFonts) {
+      warnedMissingIndicFonts = true;
+      logger.warn(`[pdf] indic font missing for lang=${lang} - falling back to Latin faces`);
+    }
+  }
+
   return names;
 }
 
@@ -159,7 +197,9 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const F = useFonts(doc);
+    const lang = data.lang ?? 'en';
+    const t = TRANSLATIONS[lang];
+    const F = useFonts(doc, lang);
     const { company, party, weights } = data;
     const price = data.pricePerKg;
 
@@ -193,7 +233,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       y = doc.y;
     }
 
-    doc.font(F.display).fontSize(14).fillColor(INK).text('PURCHASE STATEMENT', LEFT, PAGE.margin, {
+    doc.font(F.display).fontSize(14).fillColor(INK).text(t.purchaseStatement, LEFT, PAGE.margin, {
       width: W,
       align: 'right',
       characterSpacing: 0.2,
@@ -202,12 +242,12 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       .font(F.body)
       .fontSize(8)
       .fillColor(MUTED)
-      .text(`Dated ${fmtDate(data.statementDate)}`, LEFT, PAGE.margin + 19, { width: W, align: 'right' });
+      .text(`${t.dated} ${fmtDate(data.statementDate)}`, LEFT, PAGE.margin + 19, { width: W, align: 'right' });
     doc
       .font(F.body)
       .fontSize(7.5)
       .fillColor(MUTED)
-      .text('Unloaded & weight-verified', LEFT, PAGE.margin + 31, { width: W, align: 'right' });
+      .text(t.unloadedAndVerified, LEFT, PAGE.margin + 31, { width: W, align: 'right' });
 
     y = Math.max(y, PAGE.margin + 44) + 6;
     hline(y, RULE, 1);
@@ -222,7 +262,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       .font(F.body)
       .fontSize(7)
       .fillColor(MUTED)
-      .text('STATEMENT FOR', LEFT + 6, metaTop + 5, { characterSpacing: 1 });
+      .text(t.statementFor, LEFT + 6, metaTop + 5, { characterSpacing: 1 });
     doc.font(F.bold).fontSize(11.5).fillColor(INK).text(party.name, LEFT + 6, metaTop + 16, {
       width: metaSplit - LEFT - 12,
     });
@@ -241,25 +281,28 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     }
 
     const metaPairs: [string, string][] = [
-      ['Invoice No.', data.invoiceNumber || '-'],
-      ['Vehicle', `${data.lorryNumber}${data.selfVehicle ? '  (party vehicle)' : ''}`],
-      ['Purchase Order', data.poNumber || '-'],
+      [t.invoiceNo, data.invoiceNumber || '-'],
+      [t.vehicle, `${data.lorryNumber}${data.selfVehicle ? `  ${t.partyVehicleNote}` : ''}`],
+      [t.purchaseOrder, data.poNumber || '-'],
     ];
     let my = metaTop + 5;
+    const metaLabelW = (RIGHT - metaSplit) * 0.42;
+    const metaValueW = (RIGHT - metaSplit) * 0.58 - 14;
     for (const [k, v] of metaPairs) {
-      doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(k, metaSplit + 8, my, {
-        width: (RIGHT - metaSplit) * 0.42,
-        lineBreak: false,
-      });
+      // Translated labels/values can run longer than the English originals and
+      // wrap to a second line - size the row to whichever field needs it so
+      // rows never overlap.
+      const rowHeight = Math.max(
+        doc.font(F.body).fontSize(7.5).heightOfString(k, { width: metaLabelW }),
+        doc.font(F.semi).fontSize(8).heightOfString(v, { width: metaValueW })
+      );
+      doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(k, metaSplit + 8, my, { width: metaLabelW });
       doc
         .font(F.semi)
         .fontSize(8)
         .fillColor(INK)
-        .text(v, metaSplit + 8 + (RIGHT - metaSplit) * 0.42, my - 0.5, {
-          width: (RIGHT - metaSplit) * 0.58 - 14,
-          lineBreak: false,
-        });
-      my += metaRow;
+        .text(v, metaSplit + 8 + metaLabelW, my - 0.5, { width: metaValueW });
+      my += Math.max(metaRow, rowHeight + 4);
     }
 
     const metaBottom = Math.max(py + 8, my + 2);
@@ -269,11 +312,11 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     // --- Weighment strip ----------------------------------------------------
     const cells: [string, string][] = [
-      ['Invoice Weight', kg(weights.billingKg)],
-      ['Party Kata', kg(weights.partyKataKg)],
-      ['RVP Kata', kg(weights.rvpKataKg)],
-      ['Difference', kg(weights.diffKg)],
-      ['Payable Weight', kg(weights.payableKg)],
+      [t.invoiceWeight, kg(weights.billingKg)],
+      [t.partyKata, kg(weights.partyKataKg)],
+      [t.rvpKata, kg(weights.rvpKataKg)],
+      [t.difference, kg(weights.diffKg)],
+      [t.payableWeight, kg(weights.payableKg)],
     ];
     const cellW = W / cells.length;
     const stripH = 34;
@@ -297,12 +340,12 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     const kataNote =
       weights.payableKg >= weights.referenceKg && weights.diffKg === 0
-        ? 'Both weighbridges agree - payable at the full reference weight.'
+        ? t.kataBothAgree
         : weights.payableKg > weights.referenceKg
-          ? `RVP weighbridge read heavier than the party kata - paid on our higher net of ${kg(weights.rvpKataKg)}.`
+          ? t.kataRvpHeavier(kg(weights.rvpKataKg))
           : weights.exempt
-            ? `Difference of ${kg(weights.diffKg)} is within the ${data.allowanceKg} kg free allowance - no weight deduction.`
-            : `Difference of ${kg(weights.diffKg)} exceeds the ${data.allowanceKg} kg free allowance - ${kg(kataDeductKg)} deducted below.`;
+            ? t.kataWithinAllowance(kg(weights.diffKg), data.allowanceKg)
+            : t.kataExceedsAllowance(kg(weights.diffKg), data.allowanceKg, kg(kataDeductKg));
     doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(kataNote, LEFT + 2, y, { width: W - 4 });
     y = doc.y + 8;
 
@@ -311,10 +354,10 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       doc.rect(LEFT, yy, W, 19).fill(INK);
       doc.font(F.semi).fontSize(7.5).fillColor('#ffffff');
       const head = { characterSpacing: 0.9 } as const;
-      doc.text('PARTICULARS', COL_X.particulars + 6, yy + 6, { width: COL_W.particulars - 12, ...head });
-      doc.text('QUANTITY', COL_X.qty, yy + 6, { width: COL_W.qty - 6, align: 'right', ...head });
-      doc.text('RATE / KG', COL_X.rate, yy + 6, { width: COL_W.rate - 6, align: 'right', ...head });
-      doc.text('AMOUNT (INR)', COL_X.amount, yy + 6, { width: COL_W.amount - 8, align: 'right', ...head });
+      doc.text(t.particulars, COL_X.particulars + 6, yy + 6, { width: COL_W.particulars - 12, ...head });
+      doc.text(t.quantity, COL_X.qty, yy + 6, { width: COL_W.qty - 6, align: 'right', ...head });
+      doc.text(t.ratePerKg, COL_X.rate, yy + 6, { width: COL_W.rate - 6, align: 'right', ...head });
+      doc.text(t.amountInr, COL_X.amount, yy + 6, { width: COL_W.amount - 8, align: 'right', ...head });
       return yy + 19;
     };
     y = drawTableHead(y);
@@ -335,7 +378,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     rows.push({
       label: 'Tamarind seed (black seed)',
-      note: data.selfVehicle ? "Delivered in party's own vehicle" : undefined,
+      note: data.selfVehicle ? t.partyVehicleNote : undefined,
       qty: kg(billedKg),
       rate: rate(price),
       amount: grossSeed,
@@ -343,8 +386,8 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     if (kataDeductKg > 0) {
       rows.push({
-        label: 'Less : Kata difference',
-        note: `${kg(weights.diffKg)} short against ${kg(weights.referenceKg)} reference, ${data.allowanceKg} kg allowed free`,
+        label: t.lessKataDiff,
+        note: t.kataDiffNote(kg(weights.diffKg), kg(weights.referenceKg), data.allowanceKg),
         qty: kg(kataDeductKg),
         rate: rate(price),
         amount: kataDeductAmount,
@@ -357,7 +400,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       if (!amount) continue;
       const note = MODE_NOTE[r.mode];
       rows.push({
-        label: `Less : ${r.label}`,
+        label: t.lessQualityCut(r.label),
         note: r.label.toLowerCase() === note ? undefined : note,
         qty: r.mode === 'WEIGHT' ? kg(r.value) : undefined,
         rate: r.mode === 'WEIGHT' ? rate(price) : r.mode === 'PRICE' ? `${rate(r.value)}/kg` : undefined,
@@ -372,13 +415,13 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     const hasRecoveries = data.selfVehicleHamali > 0 || data.selfVehicleKata > 0;
 
     if (deductionsTotal > 0 && (hasAdditions || hasRecoveries)) {
-      rows.push({ label: 'Net seed value', amount: netSeedValue, emphasis: 'subtotal' });
+      rows.push({ label: t.netSeedValue, amount: netSeedValue, emphasis: 'subtotal' });
     }
 
     if (data.gstAmount > 0) {
       rows.push({
-        label: `Add : IGST @ ${data.gstRate}%`,
-        note: `on invoice value ${kg(data.gstBasisKg)} × ${rate(price)}`,
+        label: t.addIgst,
+        note: t.igstNote(kg(data.gstBasisKg), rate(price)),
         amount: data.gstAmount,
       });
     }
@@ -391,16 +434,16 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     if (data.selfVehicleHamali > 0) {
       rows.push({
-        label: 'Less : Hamali (unloading)',
-        note: "lorry's share recovered - party's own vehicle",
+        label: t.lessHamali,
+        note: t.hamaliNote,
         amount: data.selfVehicleHamali,
         negative: true,
       });
     }
     if (data.selfVehicleKata > 0) {
       rows.push({
-        label: 'Less : Kata charges (weighbridge)',
-        note: "recovered - party's own vehicle",
+        label: t.lessKataCharges,
+        note: t.kataChargesNote,
         amount: data.selfVehicleKata,
         negative: true,
       });
@@ -408,26 +451,29 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
 
     doc.font(F.body).fontSize(8.5);
     for (const r of rows) {
-      const rowH = r.note ? 26 : 18;
+      const labelFont = r.emphasis === 'subtotal' ? F.semi : F.body;
+      // Adjustment rows sit one notch in from the goods line they act on.
+      const indent = /^(Less|Add|கழிக்க|சேர்க்க|తీసివేయండి|కలపండి|കുറയ്ക്കുക|കൂട്ടുക|ಕಳೆಯಿರಿ|ಸೇರಿಸಿ)/.test(r.label) ? 14 : 6;
+      const labelW = COL_W.particulars - indent - 6;
+      const noteW = COL_W.particulars + COL_W.qty - indent - 12;
+      // Translated labels/notes can run longer than the English originals and
+      // wrap to extra lines - size the row to fit rather than risk overlap.
+      const labelH = doc.font(labelFont).fontSize(8.5).heightOfString(r.label, { width: labelW });
+      const noteH = r.note ? doc.font(F.body).fontSize(6.5).heightOfString(r.note, { width: noteW }) : 0;
+      const rowH = r.note ? Math.max(26, 15.5 + noteH + 4) : Math.max(18, labelH + 10);
+
       if (y + rowH > BOTTOM - 150) {
         doc.addPage();
         y = drawTableHead(PAGE.margin);
       }
       if (r.emphasis === 'subtotal') doc.rect(LEFT, y, W, rowH).fill(BAND);
 
-      const labelFont = r.emphasis === 'subtotal' ? F.semi : F.body;
-      // Adjustment rows sit one notch in from the goods line they act on.
-      const indent = /^(Less|Add) :/.test(r.label) ? 14 : 6;
       doc.font(labelFont).fontSize(8.5).fillColor(INK).text(r.label, COL_X.particulars + indent, y + 5, {
-        width: COL_W.particulars - indent - 6,
-        lineBreak: false,
-        ellipsis: true,
+        width: labelW,
       });
       if (r.note) {
         doc.font(F.body).fontSize(6.5).fillColor(MUTED).text(r.note, COL_X.particulars + indent + 6, y + 15.5, {
-          width: COL_W.particulars + COL_W.qty - indent - 12,
-          lineBreak: false,
-          ellipsis: true,
+          width: noteW,
         });
       }
       doc.font(F.body).fontSize(8.5).fillColor(INK);
@@ -453,7 +499,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     }
     doc.rect(LEFT, y, W, bandH).fill(INK);
     doc.font(F.bold).fontSize(10).fillColor('#ffffff');
-    doc.text('NET BALANCE PAYABLE', COL_X.particulars + 6, y + 10, {
+    doc.text(t.netBalancePayable, COL_X.particulars + 6, y + 10, {
       width: COL_W.particulars + COL_W.qty,
       characterSpacing: 0.9,
     });
@@ -474,10 +520,10 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     doc.lineWidth(0.6).strokeColor(HAIR).dash(2, { space: 2 }).moveTo(LEFT, footerY).lineTo(RIGHT, footerY).stroke();
     doc.undash();
     doc.font(F.body).fontSize(7).fillColor(MUTED).text(
-      'Computer-generated statement. Please report any discrepancy within 7 days of receipt.',
+      t.computerGeneratedNote,
       LEFT, footerY + 8, { width: W * 0.55 }
     );
-    doc.font(F.semi).fontSize(8.5).fillColor(INK).text(`For ${company.name}`, LEFT + W * 0.6, footerY + 8, {
+    doc.font(F.semi).fontSize(8.5).fillColor(INK).text(t.forCompany(company.name), LEFT + W * 0.6, footerY + 8, {
       width: W * 0.4,
       align: 'right',
     });
@@ -496,7 +542,7 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       .moveTo(RIGHT - 110, footerY + 60)
       .lineTo(RIGHT, footerY + 60)
       .stroke();
-    doc.font(F.body).fontSize(7.5).fillColor(MUTED).text('Authorised Signatory', LEFT + W * 0.6, footerY + 64, {
+    doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(t.authorisedSignatory, LEFT + W * 0.6, footerY + 64, {
       width: W * 0.4,
       align: 'right',
     });

@@ -9,6 +9,15 @@ import {
 } from '../lib/calc.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderPurchaseStatementPdf, type PurchaseStatementData } from '../lib/purchaseStatementPdf.js';
+import { SUPPORTED_LANGUAGES, type StatementLanguage } from '../lib/i18n/purchaseStatement.js';
+
+const LANG_CODES = new Set(SUPPORTED_LANGUAGES.map((l) => l.code));
+
+function parseLang(value: unknown): StatementLanguage {
+  return typeof value === 'string' && LANG_CODES.has(value as StatementLanguage)
+    ? (value as StatementLanguage)
+    : 'en';
+}
 
 /**
  * Assemble the per-lorry purchase statement (the supplier's settlement bill) for
@@ -16,7 +25,8 @@ import { renderPurchaseStatementPdf, type PurchaseStatementData } from '../lib/p
  * so the WhatsApp PDF, the printable page and the party ledger agree exactly.
  */
 export async function buildPurchaseStatementData(
-  verificationId: string
+  verificationId: string,
+  lang: StatementLanguage = 'en'
 ): Promise<PurchaseStatementData | null> {
   const verification = await prisma.weightVerification.findUnique({
     where: { id: verificationId },
@@ -100,12 +110,14 @@ export async function buildPurchaseStatementData(
     selfVehicleHamali: Number(verification.selfVehicleHamali ?? 0),
     selfVehicleKata: Number(verification.selfVehicleKata ?? 0),
     netPayable,
+    lang,
   };
 }
 
 /** GET /verifications/:id/statement.pdf - the same sheet the party gets on WhatsApp. */
 export async function downloadPurchaseStatementPdf(req: Request, res: Response) {
-  const data = await buildPurchaseStatementData(req.params.id);
+  const lang = parseLang(req.query.lang);
+  const data = await buildPurchaseStatementData(req.params.id, lang);
   if (!data) throw new HttpError(404, 'Verification not found');
 
   const buffer = await renderPurchaseStatementPdf(data);

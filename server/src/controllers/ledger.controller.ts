@@ -371,6 +371,28 @@ function round2(n: number): number {
   return Math.round(n); // whole rupees - the ERP carries no paise
 }
 
+// Money collected against a shipment used to be narrated two different ways in
+// the same statement: Mark-as-Paid baked the invoice into the description
+// ("Payment for Invoice RVP/50/26-27") while Sale Dues / the Receipts page left
+// it blank ("Receipt collected"). The invoice belongs in the Invoice column, so
+// we peel that legacy prefix off and let every collection read the same way.
+const AUTO_INVOICE_NARRATION = /^payment for invoice\s+/i;
+// A cuid stand-in (rows booked before the dispatch had an invoice number) is an
+// id, not something to print as an invoice.
+const CUID_LIKE = /^c[a-z0-9]{20,}$/i;
+
+function splitAutoNarration(description: string | null | undefined): {
+  note: string | null;
+  invoiceNumber: string | null;
+} {
+  const d = description?.trim();
+  if (!d) return { note: null, invoiceNumber: null };
+  const m = d.match(AUTO_INVOICE_NARRATION);
+  if (!m) return { note: d, invoiceNumber: null };
+  const token = d.slice(m[0].length).trim();
+  return { note: null, invoiceNumber: token && !CUID_LIKE.test(token) ? token : null };
+}
+
 function buildPartyLedger(
   partyId: string,
   pos: PoWithChain[],
@@ -461,6 +483,30 @@ function buildPartyLedger(
     receipts.filter((r) => r.partyId === partyId && r.saleDispatchId && Number(r.tdsAmount ?? 0) > 0).map((r) => r.saleDispatchId as string)
   );
 
+  // Invoice + lorry of every shipment/arrival of this party, so a money line
+  // booked against one cites the same invoice as the sale/purchase it clears.
+  const dispatchMetaById = new Map<string, { invoiceLabel: string | null; vehicleNumber: string | null }>();
+  for (const s of sales.filter((x) => x.buyerId === partyId)) {
+    for (const d of s.dispatches) {
+      dispatchMetaById.set(d.id, {
+        invoiceLabel:
+          d.invoiceNumber ?? (d.invoiceSeq && d.invoiceFy ? `${d.invoiceSeq}/${d.invoiceFy}` : null),
+        vehicleNumber: d.vehicleNumber,
+      });
+    }
+  }
+  const purchaseMetaById = new Map<string, { invoiceNumber: string | null; lorryNumber: string | null }>();
+  for (const po of pos.filter((p) => p.partyId === partyId)) {
+    for (const si of po.stockIns) {
+      if (si.purchase) {
+        purchaseMetaById.set(si.purchase.id, {
+          invoiceNumber: si.invoiceNumber,
+          lorryNumber: si.lorryNumber,
+        });
+      }
+    }
+  }
+
   // 2. Sales - buyer takes goods → they owe us (DEBIT). Each dispatch (lorry) is a
   //    billed shipment; an order is only a receivable once dispatched. Credit note
   //    (delivery shortage) and TDS deducted by the buyer both reduce it.
@@ -469,8 +515,7 @@ function buildPartyLedger(
     for (const d of s.dispatches) {
       const base = round2(d.weightKg * rate);
       const gst = round2(Number(d.gstAmount));
-      const invoiceLabel =
-        d.invoiceNumber ?? (d.invoiceSeq && d.invoiceFy ? `${d.invoiceSeq}/${d.invoiceFy}` : null);
+      const invoiceLabel = dispatchMetaById.get(d.id)?.invoiceLabel ?? null;
       txns.push({
         id: `SALE-${d.id}`,
         // Ledger sale date = the day the goods left (dispatch date), not the
@@ -537,13 +582,15 @@ function buildPartyLedger(
 
   // 3. Payments we made to the party (as a supplier) → DEBIT (clears payable).
   for (const p of payments.filter((x) => x.partyId === partyId)) {
+    const linkedPurchase = p.purchaseId ? purchaseMetaById.get(p.purchaseId) : undefined;
+    const narration = splitAutoNarration(p.description);
     txns.push({
       id: `PAY-${p.id}`,
       date: p.date.toISOString(),
       kind: 'PAYMENT',
-      particulars: p.description || 'Payment made',
-      invoiceNumber: null,
-      vehicleNumber: null,
+      particulars: narration.note || 'Payment made',
+      invoiceNumber: linkedPurchase?.invoiceNumber ?? narration.invoiceNumber,
+      vehicleNumber: p.lorryNumber ?? linkedPurchase?.lorryNumber ?? null,
       reference: p.reference,
       utr: p.reference,
       transferredDate: p.date.toISOString(),
@@ -560,13 +607,19 @@ function buildPartyLedger(
   //    A receipt can also carry a TDS and/or shortage deduction the buyer took
   //    off the invoice; each is its own credit line so the A/R clears in full.
   for (const r of receipts.filter((x) => x.partyId === partyId)) {
+    const linkedDispatch = r.saleDispatchId ? dispatchMetaById.get(r.saleDispatchId) : undefined;
+    const narration = splitAutoNarration(r.description);
+    // Same wording for every collection, whether it came from Mark-as-Paid,
+    // Sale Dues or the Receipts page; the invoice rides in its own column.
+    const recInvoice = linkedDispatch?.invoiceLabel ?? narration.invoiceNumber;
+    const recVehicle = linkedDispatch?.vehicleNumber ?? null;
     txns.push({
       id: `REC-${r.id}`,
       date: r.date.toISOString(),
       kind: 'RECEIPT',
-      particulars: r.description || 'Receipt collected',
-      invoiceNumber: null,
-      vehicleNumber: null,
+      particulars: narration.note || 'Receipt collected',
+      invoiceNumber: recInvoice,
+      vehicleNumber: recVehicle,
       reference: r.reference,
       utr: r.reference,
       transferredDate: r.date.toISOString(),
@@ -585,8 +638,8 @@ function buildPartyLedger(
         date: r.date.toISOString(),
         kind: 'TDS',
         particulars: 'TDS deducted by buyer',
-        invoiceNumber: null,
-        vehicleNumber: null,
+        invoiceNumber: recInvoice,
+        vehicleNumber: recVehicle,
         reference: r.reference,
         utr: null,
         transferredDate: r.date.toISOString(),
@@ -606,8 +659,8 @@ function buildPartyLedger(
         date: r.date.toISOString(),
         kind: 'SHORTAGE',
         particulars: 'Shortage / kata deduction',
-        invoiceNumber: null,
-        vehicleNumber: null,
+        invoiceNumber: recInvoice,
+        vehicleNumber: recVehicle,
         reference: r.reference,
         utr: null,
         transferredDate: r.date.toISOString(),

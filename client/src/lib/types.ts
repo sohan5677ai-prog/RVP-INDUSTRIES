@@ -272,7 +272,6 @@ export interface SaleDispatch {
   deliveredDate?: string | null;
   buyerKataKg?: number | null;
   internalWeightKg?: number | null;
-  internalWeightProfitAmount?: string | number | null;
   shortageKg?: number | null;
   creditNoteAmount?: string | number | null;
   tdsAmount?: string | number | null;

@@ -1122,8 +1122,6 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
 
   let shortageKg: number | null = null;
   let creditNoteAmount: number | null = null;
-  let internalWeightProfitAmount: number | null = null;
-  let profitWeightKg = 0;
 
   if (data.buyerKataKg !== undefined) {
     if (data.buyerKataKg > dispatch.weightKg) {
@@ -1131,13 +1129,6 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     }
     shortageKg = dispatch.weightKg - data.buyerKataKg;
     creditNoteAmount = shortageKg > 0 ? shortageKg * rate + (order.gstExempt ? 0 : calcGst(shortageKg, rate, await gstFractionForProduct(order.product))) : 0;
-    
-    if (dispatch.internalWeightKg && order.product === 'PAPPU') {
-      profitWeightKg = data.buyerKataKg - dispatch.internalWeightKg;
-      if (profitWeightKg > 0) {
-        internalWeightProfitAmount = profitWeightKg * rate;
-      }
-    }
   }
 
   // Upload before the transaction starts - network I/O shouldn't hold a DB
@@ -1149,10 +1140,6 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     // The shortage is recorded on the dispatch, but A/R is maintained at the full billed amount.
     // Deductions will be handled at the time of Receipt if the party doesn't pay the full amount.
 
-    // Internal Weight Profit is saved on the dispatch record and shown in the
-    // Internal Weight Ledger report, but is no longer posted to the ledger.
-    // The retained freight was already credited to Surya Roadlines at dispatch.
-
     const result = await tx.saleDispatch.update({
       where: { id: dispatch.id },
       data: {
@@ -1163,7 +1150,6 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
           buyerKataKg: data.buyerKataKg,
           shortageKg,
           creditNoteAmount,
-          internalWeightProfitAmount,
         }),
         ...(kataFile && { buyerKataFileUrl }),
       },

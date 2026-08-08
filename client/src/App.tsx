@@ -93,7 +93,6 @@ const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
 const PurchaseDues = lazyWithPreload('/reports/purchase-dues', () => import('@/pages/PurchaseDues'));
 const PaymentPlanner = lazyWithPreload('/reports/payment-planner', () => import('@/pages/PaymentPlanner'));
-const InternalWeightLedger = lazyWithPreload('/reports/internal-weight-ledger', () => import('@/pages/InternalWeightLedger'));
 const BrokerageDues = lazyWithPreload('/reports/brokerage-dues', () => import('@/pages/BrokerageDues'));
 const FreightDues = lazyWithPreload('/reports/freight-dues', () => import('@/pages/FreightDues'));
 const GunnyBags = lazyWithPreload('/reports/gunny-bags', () => import('@/pages/GunnyBags'));
@@ -175,7 +174,6 @@ export default function App() {
               <Route path="/transactions/payments" element={<Payments />} />
               <Route path="/transactions/receipts" element={<Receipts />} />
               <Route path="/reports/sale-dues" element={<SaleDues />} />
-              <Route path="/reports/internal-weight-ledger" element={<InternalWeightLedger />} />
               <Route path="/reports/purchase-dues" element={<PurchaseDues />} />
               <Route path="/reports/payment-planner" element={<PaymentPlanner />} />
               <Route path="/reports/brokerage-dues" element={<BrokerageDues />} />

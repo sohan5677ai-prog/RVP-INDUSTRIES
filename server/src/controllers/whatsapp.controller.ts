@@ -508,57 +508,70 @@ export async function sendPartyReminder(req: Request, res: Response) {
  * Send a party's account ledger statement via WhatsApp for a given date range.
  */
 export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
-  const { partyId } = req.params;
-  const { fromDate, toDate, phone } = (req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string };
+  try {
+    const { partyId } = req.params;
+    const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string };
+    const { fromDate, toDate, phone } = body;
 
-  const statement = await buildPartyStatementData(partyId);
-  if (!statement) throw new HttpError(404, 'Party not found');
-  const { party, transactions } = statement;
+    const statement = await buildPartyStatementData(partyId);
+    if (!statement) throw new HttpError(404, 'Party not found');
+    const { party, transactions } = statement;
 
-  const targetPhone = phone?.trim() || party.phone || party.phone2;
-  if (!targetPhone) {
-    throw new HttpError(400, `No valid phone number for ${party.name}. Please enter one in Parties or in the prompt.`);
+    const targetPhone = phone?.trim() || party.phone || party.phone2;
+    if (!targetPhone) {
+      throw new HttpError(400, `No valid phone number for ${party.name}. Please enter one in Parties or in the prompt.`);
+    }
+
+    let txns = transactions;
+    if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
+    if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
+
+    const firstTxn = txns[0];
+    const lastTxn = txns[txns.length - 1];
+    const opening = firstTxn ? (firstTxn.runningBalance || 0) - (firstTxn.debit || 0) + (firstTxn.credit || 0) : 0;
+    const closing = lastTxn ? (lastTxn.runningBalance || 0) : 0;
+    const totalDebit = txns.reduce((s, t) => s + (t.debit || 0), 0);
+    const totalCredit = txns.reduce((s, t) => s + (t.credit || 0), 0);
+
+    const fmtAmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(Math.abs(n || 0)));
+    const drcr = (n: number) => (n === 0 ? '' : n > 0 ? 'Dr' : 'Cr');
+
+    const fromStr = fromDate ? fromDate.slice(0, 10) : firstTxn ? firstTxn.date.slice(0, 10) : 'Start';
+    const toStr = toDate ? toDate.slice(0, 10) : lastTxn ? lastTxn.date.slice(0, 10) : 'As of today';
+    const periodStr = `${fromStr} to ${toStr}`;
+
+    const recentList = txns
+      .slice(-5)
+      .map((t) => `• ${t.date.slice(0, 10)}: ${t.particulars} (₹${fmtAmt(t.debit || t.credit || 0)})`)
+      .join('\n');
+
+    const summaryText = `*Account Statement - ${party.name}*\nPeriod: ${periodStr}\nOpening Bal: ₹${fmtAmt(opening)} ${drcr(opening)}\nTotal Debits: ₹${fmtAmt(totalDebit)}\nTotal Credits: ₹${fmtAmt(totalCredit)}\n*Closing Bal: ₹${fmtAmt(closing)} ${drcr(closing)}*\n\nRecent Activity:\n${recentList || 'No transactions in period'}`;
+
+    let result: { ok: boolean; error?: string } = { ok: false, error: 'WhatsApp template notification skipped' };
+    try {
+      result = await whatsappService.sendSalesDuesReminder(
+        { id: party.id, name: party.name, phone: targetPhone },
+        Math.abs(closing),
+        `Period ${periodStr} | Opening: ₹${fmtAmt(opening)} ${drcr(opening)} | Closing: ₹${fmtAmt(closing)} ${drcr(closing)}`
+      );
+    } catch (e) {
+      logger.error('[whatsapp] sendPartyLedgerWhatsApp template error', e);
+      result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+
+    res.json({
+      ok: true,
+      message: result.ok ? 'Party ledger statement sent via WhatsApp' : (result.error || 'WhatsApp message processed'),
+      summaryText,
+      targetPhone,
+      period: periodStr,
+      closingBalance: closing,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    logger.error('[whatsapp] sendPartyLedgerWhatsApp error', err);
+    throw new HttpError(500, err instanceof Error ? err.message : 'Failed to send ledger statement');
   }
-
-  let txns = transactions;
-  if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
-  if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
-
-  const firstTxn = txns[0];
-  const lastTxn = txns[txns.length - 1];
-  const opening = firstTxn ? (firstTxn.runningBalance || 0) - (firstTxn.debit || 0) + (firstTxn.credit || 0) : 0;
-  const closing = lastTxn ? (lastTxn.runningBalance || 0) : 0;
-  const totalDebit = txns.reduce((s, t) => s + (t.debit || 0), 0);
-  const totalCredit = txns.reduce((s, t) => s + (t.credit || 0), 0);
-
-  const fmtAmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(Math.abs(n || 0)));
-  const drcr = (n: number) => (n === 0 ? '' : n > 0 ? 'Dr' : 'Cr');
-
-  const fromStr = fromDate ? fromDate.slice(0, 10) : firstTxn ? firstTxn.date.slice(0, 10) : 'Start';
-  const toStr = toDate ? toDate.slice(0, 10) : lastTxn ? lastTxn.date.slice(0, 10) : 'As of today';
-  const periodStr = `${fromStr} to ${toStr}`;
-
-  const recentList = txns
-    .slice(-5)
-    .map((t) => `• ${t.date.slice(0, 10)}: ${t.particulars} (₹${fmtAmt(t.debit || t.credit || 0)})`)
-    .join('\n');
-
-  const summaryText = `*Account Statement - ${party.name}*\nPeriod: ${periodStr}\nOpening Bal: ₹${fmtAmt(opening)} ${drcr(opening)}\nTotal Debits: ₹${fmtAmt(totalDebit)}\nTotal Credits: ₹${fmtAmt(totalCredit)}\n*Closing Bal: ₹${fmtAmt(closing)} ${drcr(closing)}*\n\nRecent Activity:\n${recentList || 'No transactions in period'}`;
-
-  const result = await whatsappService.sendSalesDuesReminder(
-    { id: party.id, name: party.name, phone: targetPhone },
-    Math.abs(closing),
-    `Period ${periodStr} | Opening: ₹${fmtAmt(opening)} ${drcr(opening)} | Closing: ₹${fmtAmt(closing)} ${drcr(closing)}`
-  );
-
-  res.json({
-    ok: true,
-    message: result.ok ? 'Party ledger statement sent via WhatsApp' : (result.error || 'WhatsApp message processed'),
-    summaryText,
-    targetPhone,
-    period: periodStr,
-    closingBalance: closing,
-  });
 }
 
 // --- Lorry booking register (Freight Dues → Lorry Confirmations) -------------

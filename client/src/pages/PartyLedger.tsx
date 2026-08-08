@@ -689,7 +689,7 @@ function SendPartyLedgerWhatsAppDialog({
         `/whatsapp/parties/${party.id}/send-ledger`,
         {
           method: 'POST',
-          body: JSON.stringify({ fromDate, toDate, phone: phone.trim() }),
+          body: { fromDate, toDate, phone: phone.trim() },
         }
       );
       toast.success(res.message || 'Party ledger statement sent!');

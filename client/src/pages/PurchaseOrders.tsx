@@ -363,7 +363,7 @@ export default function PurchaseOrders() {
                             identity={
                               <>
                                 <PanelTitle>
-                                  <span className="font-mono text-sm font-semibold">{po.poNumber}</span>
+                                  <span className="font-sans text-xs font-semibold text-foreground/90">{po.poNumber}</span>
                                   <Badge variant={statusVariant[po.status]}>{po.status}</Badge>
                                   {po.stockIns?.length
                                     ? <Badge variant="success">Arrived</Badge>

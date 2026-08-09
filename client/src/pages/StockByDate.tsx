@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Search, Warehouse, IndianRupee, TrendingUp } from 'lucide-react';
+import { Loader2, Search, Warehouse, IndianRupee, TrendingUp, CalendarDays } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { StockTransfer } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 
 interface BlackSeedRow {
@@ -223,23 +224,20 @@ export default function StockByDate() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Stock by Date (FIFO)</h1>
-          <p className="text-muted-foreground">
-            Date-wise black-seed lots on a first-in-first-out basis. As pappu is sold, the equivalent black seed is
-            drawn from the oldest dates first - so the running weighted-average price reflects the pooled stock still on hand.
-            Transferred stock appears at its transfer date with capitalised costs. Valuation excludes GST.
-          </p>
-        </div>
-        <ExportButtons
-          filename="Stock_By_Date"
-          title="Stock by Date (FIFO)"
-          subtitle={`${visible.length} lot(s)`}
-          columns={DATE_STOCK_COLUMNS}
-          rows={visible}
-        />
-      </div>
+      <PageHeader
+        title="Stock by Date (FIFO)"
+        description="Date-wise black-seed lots on a first-in-first-out basis. Running weighted-average price reflects pooled stock still on hand."
+        icon={CalendarDays}
+        actions={
+          <ExportButtons
+            filename="Stock_By_Date"
+            title="Stock by Date (FIFO)"
+            subtitle={`${visible.length} lot(s)`}
+            columns={DATE_STOCK_COLUMNS}
+            rows={visible}
+          />
+        }
+      />
 
       {/* Headline: overall remaining stock + weighted average */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

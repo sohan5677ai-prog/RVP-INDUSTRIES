@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 
 interface BlackSeedRow {
@@ -375,16 +376,20 @@ export default function StockByPrice() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <h1 className="text-2xl font-bold">Order Planner</h1>
-        <ExportButtons
-          filename="Stock_By_Price"
-          title="Stock by Price (Order Planner)"
-          subtitle={`${visible.length} band(s)`}
-          columns={priceBandColumns}
-          rows={visible}
-        />
-      </div>
+      <PageHeader
+        title="Order Planner"
+        description="Inventory cost basis, price bands and lorry allocations"
+        icon={Tag}
+        actions={
+          <ExportButtons
+            filename="Stock_By_Price"
+            title="Stock by Price (Order Planner)"
+            subtitle={`${visible.length} band(s)`}
+            columns={priceBandColumns}
+            rows={visible}
+          />
+        }
+      />
 
       {/* ─── Order Planner ─────────────────────────────────────────────────── */}
       <Card className="border-l-4 border-l-primary shadow-sm">
@@ -813,12 +818,12 @@ export default function StockByPrice() {
                                     <TableRow key={l.purchaseId} className="hover:bg-muted/20">
                                       <TableCell className="py-2 text-xs">{shortDate(l.date)}</TableCell>
                                       <TableCell className="py-2 text-xs font-medium text-foreground">{l.partyName}</TableCell>
-                                      <TableCell className="py-2 text-xs font-mono">{l.lorryNumber || '-'}</TableCell>
-                                      <TableCell className="py-2 text-xs font-mono">{l.poNumber || '-'}</TableCell>
+                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.lorryNumber || '-'}</TableCell>
+                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.poNumber || '-'}</TableCell>
                                       <TableCell className="py-2 text-xs">
-                                        {l.kind === 'ARRIVED' && <Badge variant="outline" className="text-[10px] border-emerald-200 text-emerald-700 bg-emerald-50">Arrived</Badge>}
-                                        {l.kind === 'PENDING' && <Badge variant="outline" className="text-[10px] border-amber-200 text-amber-700 bg-amber-50">Pending</Badge>}
-                                        {l.kind === 'SHORTFALL' && <Badge variant="outline" className="text-[10px] border-rose-200 text-rose-700 bg-rose-50">Short</Badge>}
+                                        {l.kind === 'ARRIVED' && <Badge variant="success">Arrived</Badge>}
+                                        {l.kind === 'PENDING' && <Badge variant="warning">Pending</Badge>}
+                                        {l.kind === 'SHORTFALL' && <Badge variant="destructive">Short</Badge>}
                                       </TableCell>
                                       <TableCell className="py-2 text-xs text-right font-semibold">
                                         {l.kind === 'SHORTFALL' ? (

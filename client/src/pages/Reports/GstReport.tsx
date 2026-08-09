@@ -191,7 +191,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
                         <TableCell className="whitespace-nowrap">{shortDate(r.date)}</TableCell>
                         <TableCell className="font-medium">{r.invoiceNumber ?? '-'}</TableCell>
                         <TableCell>{r.partyName}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{r.gstin ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.gstin ?? '-'}</TableCell>
                         <TableCell>{prettyProduct(r.product)}</TableCell>
                         <TableCell className="text-right"><Num v={r.taxableValue} /></TableCell>
                         <TableCell className="text-right text-muted-foreground">{r.gstRate}%</TableCell>
@@ -248,9 +248,9 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
                       <TableRow key={r.id}>
                         <TableCell className="whitespace-nowrap">{shortDate(r.date)}</TableCell>
                         <TableCell className="font-medium">{r.invoiceNumber}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{r.poNumber ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.poNumber ?? '-'}</TableCell>
                         <TableCell>{r.partyName}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{r.gstin ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.gstin ?? '-'}</TableCell>
                         <TableCell className="text-right"><Num v={r.taxableValue} /></TableCell>
                         <TableCell className="text-right text-muted-foreground">{r.gstRate}%</TableCell>
                         <TableCell className="text-right"><Num v={r.igst} /></TableCell>

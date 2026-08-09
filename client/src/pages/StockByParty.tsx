@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 
 type BlendStatus = 'ok' | 'already' | 'infeasible' | 'nostock';
@@ -178,21 +179,20 @@ export default function StockByParty() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Purchases by Party</h1>
-          <p className="text-muted-foreground">
-            Track raw black seed stock balances credited to individual suppliers with price pooling
-          </p>
-        </div>
-        <ExportButtons
-          filename="Purchases_By_Party"
-          title="Purchases by Party"
-          subtitle={`${sortedPartyStocks.length} supplier(s)`}
-          columns={PARTY_STOCK_COLUMNS}
-          rows={sortedPartyStocks}
-        />
-      </div>
+      <PageHeader
+        title="Purchases by Party"
+        description="Track raw black seed stock balances credited to individual suppliers with price pooling"
+        icon={Users}
+        actions={
+          <ExportButtons
+            filename="Purchases_By_Party"
+            title="Purchases by Party"
+            subtitle={`${sortedPartyStocks.length} supplier(s)`}
+            columns={PARTY_STOCK_COLUMNS}
+            rows={sortedPartyStocks}
+          />
+        }
+      />
 
       {/* Advanced Business Intelligence Overview */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -303,7 +303,7 @@ export default function StockByParty() {
           )}
 
           {wholeResult && wholeResult.status === 'already' && (
-            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
               <span>Target <span className="font-semibold">{rupees(targetAvg)}/kg</span> is already at or above your current average <span className="font-semibold">{rupees(overallWac)}/kg</span> - no buying needed.</span>
             </div>

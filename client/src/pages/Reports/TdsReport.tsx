@@ -131,8 +131,8 @@ export default function TdsReport({ embedded = false }: { embedded?: boolean } =
                     ) : data.byDeductor.map((r) => (
                       <TableRow key={r.gstin ?? r.deductorName}>
                         <TableCell className="font-medium">{r.deductorName}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{r.pan ?? '-'}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{r.gstin ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.pan ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.gstin ?? '-'}</TableCell>
                         <TableCell className="text-right text-muted-foreground">{r.entryCount}</TableCell>
                         <TableCell className="text-right"><Num v={r.saleValue} /></TableCell>
                         <TableCell className="text-right"><Num v={r.tdsAmount} bold /></TableCell>
@@ -178,7 +178,7 @@ export default function TdsReport({ embedded = false }: { embedded?: boolean } =
                       <TableRow key={r.id}>
                         <TableCell className="whitespace-nowrap">{shortDate(r.date)}</TableCell>
                         <TableCell className="font-medium">{r.deductorName}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{r.pan ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.pan ?? '-'}</TableCell>
                         <TableCell>{r.invoiceNumber ?? '-'}</TableCell>
                         <TableCell><Badge variant="secondary" className="font-mono text-[10px]">{r.section}</Badge></TableCell>
                         <TableCell className="text-right"><Num v={r.saleValue} /></TableCell>

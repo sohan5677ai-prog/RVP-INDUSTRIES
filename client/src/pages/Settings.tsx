@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle } from 'lucide-react';
+import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, HamaliRate } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PageHeader } from '@/components/PageHeader';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -28,10 +29,11 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Company details, bank, invoice setup and rates used across the app.</p>
-      </div>
+      <PageHeader
+        title="Settings"
+        description="Company details, bank, invoice setup and rates used across the app."
+        icon={SlidersHorizontal}
+      />
 
       <Tabs defaultValue="company" className="space-y-4">
         <TabsList className="flex flex-wrap h-auto">

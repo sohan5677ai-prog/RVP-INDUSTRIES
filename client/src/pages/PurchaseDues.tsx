@@ -17,6 +17,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import { ScreenshotUpload } from '@/components/ScreenshotUpload';
 import type { ExportColumn } from '@/lib/export';
 
@@ -399,19 +400,20 @@ export default function PurchaseDuesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Purchase Dues</h1>
-          <p className="text-muted-foreground font-medium">Aging list of outstanding supplier purchases matching payments via FIFO allocation.</p>
-        </div>
-        <ExportButtons
-          filename="Purchase_Dues"
-          title="Purchase Dues (Aging)"
-          subtitle={`${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${shownPurchases.length} bill(s)`}
-          columns={PURCHASE_DUES_COLUMNS}
-          rows={shownPurchases}
-        />
-      </div>
+      <PageHeader
+        title="Purchase Dues"
+        description="Aging list of raw black seed and dust purchase invoices matching payments via FIFO allocation."
+        icon={TrendingDown}
+        actions={
+          <ExportButtons
+            filename="Purchase_Dues"
+            title="Purchase Dues (Aging)"
+            subtitle={`${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${shownPurchases.length} bill(s)`}
+            columns={PURCHASE_DUES_COLUMNS}
+            rows={shownPurchases}
+          />
+        }
+      />
 
       <Segmented
         options={PAY_FILTERS.map((f) => ({
@@ -497,10 +499,10 @@ export default function PurchaseDuesPage() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{bill.invoiceNumber ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{bill.invoiceNumber ?? '-'}</TableCell>
                         <TableCell className="text-right">{rupees(bill.pricePerKg)}/kg</TableCell>
                         <TableCell className="text-right font-semibold">{toTonnes(bill.tonnageKg).toFixed(2)} t</TableCell>
-                        <TableCell className="font-mono text-xs">{bill.lorryNumber ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{bill.lorryNumber ?? '-'}</TableCell>
                         <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">
                           {rupees(bill.amount)}
                         </TableCell>

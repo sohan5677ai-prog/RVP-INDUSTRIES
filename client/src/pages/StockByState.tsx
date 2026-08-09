@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Landmark, AlertTriangle } from 'lucide-react';
+import { Loader2, Landmark, AlertTriangle, Globe } from 'lucide-react';
 import { api } from '@/lib/api';
 import { kg, rupees, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 
 interface StateStock {
@@ -44,21 +45,20 @@ export default function StockByState() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Stock by State</h1>
-          <p className="text-muted-foreground">
-            Geographic inventory breakdown and sourcing patterns by supplier state
-          </p>
-        </div>
-        <ExportButtons
-          filename="Stock_By_State"
-          title="Stock by State"
-          subtitle={`${stateStocks?.length ?? 0} state(s)`}
-          columns={STATE_STOCK_COLUMNS}
-          rows={stateStocks ?? []}
-        />
-      </div>
+      <PageHeader
+        title="Stock by State"
+        description="Geographic inventory breakdown and sourcing patterns by supplier state"
+        icon={Globe}
+        actions={
+          <ExportButtons
+            filename="Stock_By_State"
+            title="Stock by State"
+            subtitle={`${stateStocks?.length ?? 0} state(s)`}
+            columns={STATE_STOCK_COLUMNS}
+            rows={stateStocks ?? []}
+          />
+        }
+      />
 
       {stateStocks?.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">

@@ -4,7 +4,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users } from 'lucide-react';
+import { PageHeader } from '@/components/PageHeader';
 import { api } from '@/lib/api';
 import type { Party } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -285,13 +286,12 @@ export default function Parties() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Parties</h1>
-            <p className="text-muted-foreground">Suppliers and buyers</p>
-          </div>
-          <div className="flex items-center gap-2">
+      <PageHeader
+        title="Parties"
+        description="Suppliers and buyers"
+        icon={Users}
+        actions={
+          <>
             <ExportButtons
               filename="Parties"
               title="Parties (Suppliers & Buyers)"
@@ -302,9 +302,11 @@ export default function Parties() {
             <Button onClick={openCreate}>
               <Plus className="h-4 w-4 mr-2" /> New Party
             </Button>
-          </div>
-        </div>
+          </>
+        }
+      />
 
+      <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Input 
             placeholder="Search Name, GSTIN, Bank A/C..." 
@@ -380,7 +382,7 @@ export default function Parties() {
             {filteredParties?.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell className="font-mono text-xs">{p.nickname ?? '-'}</TableCell>
+                <TableCell className="font-sans font-medium text-xs text-foreground/80">{p.nickname ?? '-'}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{p.type === 'HAMALI_TEAM' ? 'Hamali Team' : p.type}</Badge>
                 </TableCell>
@@ -390,12 +392,12 @@ export default function Parties() {
                 </TableCell>
                 <TableCell>{p.address ?? '-'}</TableCell>
                 <TableCell>{p.state ?? '-'}</TableCell>
-                <TableCell className="font-mono text-xs">{p.gstin ?? '-'}</TableCell>
+                <TableCell className="font-sans text-xs font-medium tracking-wide">{p.gstin ?? '-'}</TableCell>
                 <TableCell>
                   {p.bankName || p.bankAccountNumber || p.bankIfsc ? (
                     <div className="text-xs">
                       <div className="font-medium">{p.bankName ?? '-'}</div>
-                      <div className="text-muted-foreground font-mono">{p.bankAccountNumber ?? '-'} · {p.bankIfsc ?? '-'}</div>
+                      <div className="text-muted-foreground font-sans tabular-nums">{p.bankAccountNumber ?? '-'} · {p.bankIfsc ?? '-'}</div>
                     </div>
                   ) : '-'}
                 </TableCell>

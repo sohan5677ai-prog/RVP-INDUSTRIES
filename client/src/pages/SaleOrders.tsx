@@ -4,9 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Table2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Table2, ClipboardList } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
+import { PageHeader } from '@/components/PageHeader';
 import type { Party, Broker, SaleOrder, SaleStatus, SaleProduct, Commodity, Receipt } from '@/lib/types';
 import { SALE_STATUS_VARIANT, saleDisplayStatus, saleStatusLabel, settledByDispatch } from '@/lib/saleStatus';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
@@ -237,27 +238,28 @@ export default function SaleOrders() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Sale Orders</h1>
-          <p className="text-muted-foreground">Take orders to sell products. Dispatch captures the invoice + kata slip.</p>
-        </div>
-        <div className="flex gap-2">
-          <ExportButtons
-            filename="Sale_Orders"
-            title="Sale Orders"
-            subtitle={`${filtered.length} order(s)`}
-            columns={exportColumns}
-            rows={filtered}
-          />
-          <Button variant="outline" onClick={() => setBulkOpen(true)}>
-            <Table2 className="h-4 w-4" /> Bulk Entry
-          </Button>
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New Sale Order
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Sale Orders"
+        description="Take orders to sell products. Dispatch captures the invoice + kata slip."
+        icon={ClipboardList}
+        actions={
+          <>
+            <ExportButtons
+              filename="Sale_Orders"
+              title="Sale Orders"
+              subtitle={`${filtered.length} order(s)`}
+              columns={exportColumns}
+              rows={filtered}
+            />
+            <Button variant="outline" onClick={() => setBulkOpen(true)}>
+              <Table2 className="h-4 w-4 mr-2" /> Bulk Entry
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-2" /> New Sale Order
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">

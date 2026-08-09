@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, ArrowRight, ArrowLeftRight } from 'lucide-react';
+import { PageHeader } from '@/components/PageHeader';
 import { api, getErrorMessage } from '@/lib/api';
 import type { StockTransfer } from '@/lib/types';
 import {
@@ -163,21 +164,19 @@ export default function StockTransferPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Stock Transfer</h1>
-          <p className="text-muted-foreground">
-            Move black seed from a storage (Rampalli/Murugan/Multi) to the process. Adds a fixed hamali
-            (₹{TRANSFER_HANDLING_RATE}/t load &amp; unload), and per-tonne transport (₹250/t PGR COLD &amp; Murugan, ₹100/t KNM Multi, billed to KNM Transport) to the seed's value.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <ExportButtons filename="Stock_Transfers" title="Stock Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={STOCK_TRANSFER_COLUMNS} rows={transfers ?? []} />
-          <Button onClick={() => { resetForm(); setOpen(true); }}>
-            <Plus className="h-4 w-4" /> Record Transfer
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Stock Transfer"
+        description={`Move black seed from storage to process. Fixed hamali (₹${TRANSFER_HANDLING_RATE}/t), and per-tonne transport (₹250/t PGR COLD & Murugan, ₹100/t KNM Multi).`}
+        icon={ArrowLeftRight}
+        actions={
+          <>
+            <ExportButtons filename="Stock_Transfers" title="Stock Transfers" subtitle={`${transfers?.length ?? 0} transfer(s)`} columns={STOCK_TRANSFER_COLUMNS} rows={transfers ?? []} />
+            <Button onClick={() => { resetForm(); setOpen(true); }}>
+              <Plus className="h-4 w-4 mr-2" /> Record Transfer
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid grid-cols-3 gap-3">
         {STORAGES.map((loc) => (
@@ -220,7 +219,7 @@ export default function StockTransferPage() {
                     {t.fromLocation} <ArrowRight className="h-3 w-3" /> {t.toLocation}
                   </span>
                 </TableCell>
-                <TableCell className="font-mono text-xs">{t.lorryNumber ?? '-'}</TableCell>
+                <TableCell className="font-sans text-xs font-medium tracking-wide">{t.lorryNumber ?? '-'}</TableCell>
                 <TableCell className="text-right">{kg(t.weightKg)}</TableCell>
                 <TableCell className="text-right">{rupees(Number(t.loadingHamali) + Number(t.unloadingHamali))}</TableCell>
                 <TableCell className="text-right">{rupees(t.transportCharge)}</TableCell>

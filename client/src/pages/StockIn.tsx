@@ -605,7 +605,7 @@ const StockInGroupRow = React.memo(({
                 identity={
                   <>
                     <PanelTitle>
-                      <span className="font-mono text-sm font-semibold">
+                      <span className="font-sans text-xs font-semibold text-foreground/90">
                         {s.invoiceNumber || <span className="font-sans text-xs font-medium text-amber-600 dark:text-amber-400">No invoice no</span>}
                       </span>
                       {s.purchase

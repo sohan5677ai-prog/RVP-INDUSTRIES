@@ -18,6 +18,7 @@ import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, Messa
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 import SuryaRoadTransport from '@/pages/SuryaRoadTransport';
 import LorryConfirmations from '@/pages/LorryConfirmations';
@@ -274,8 +275,8 @@ function FreightTable({
                   onClick={() => r.lorry && setExpandedRow(isExpanded ? null : r.lorry)}
                 >
                   <TableCell>{shortDate(r.date)}</TableCell>
-                  <TableCell className="font-mono text-sm font-semibold">{r.lorry ?? '-'}</TableCell>
-                  <TableCell className="font-mono text-sm">{r.invoice ?? '-'}</TableCell>
+                  <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorry ?? '-'}</TableCell>
+                  <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                   {hideDeductions && <TableCell>{r.sourced}</TableCell>}
                   {hideDeductions && <TableCell>{r.destination ?? '-'}</TableCell>}
                   {hideDeductions && <TableCell>{r.party ?? '-'}</TableCell>}
@@ -436,7 +437,7 @@ function TransfersTable({
                 <TableCell>{shortDate(r.date)}</TableCell>
                 <TableCell><Badge variant={kindVariant[r.kind ?? ''] ?? 'secondary'}>{r.kind}</Badge></TableCell>
                 <TableCell className="text-sm">{r.destination ?? '-'}</TableCell>
-                <TableCell className="font-mono text-sm font-semibold">{r.lorry ?? '-'}</TableCell>
+                <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorry ?? '-'}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums">{r.weightKg != null ? `${(r.weightKg / 1000).toFixed(2)} t` : '-'}</TableCell>
                 <TableCell className="text-right font-bold">{rupees(r.net)}</TableCell>
                 <TableCell>
@@ -742,10 +743,11 @@ export default function FreightDuesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Freight Dues</h1>
-        <p className="text-muted-foreground">Transporter freight dues, net payable &amp; transport retention report.</p>
-      </div>
+      <PageHeader
+        title="Freight Dues"
+        description="Transporter freight dues, net payable & transport retention report."
+        icon={Truck}
+      />
 
       <Tabs
         value={mainTab}

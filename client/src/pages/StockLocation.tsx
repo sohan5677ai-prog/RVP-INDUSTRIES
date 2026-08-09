@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Search, Loader2, Warehouse, TrendingUp, IndianRupee, Package, Landmark,
-  ChevronRight, ChevronDown, Tag,
+  ChevronRight, ChevronDown, Tag, MapPin,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { StockTransfer, LoansResponse } from '@/lib/types';
@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 
 type LocationType = 'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi';
@@ -474,25 +475,20 @@ export default function StockLocation() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Stock by Location</h1>
-          <p className="text-muted-foreground">
-            Location-wise black-seed stock grouped into price bands. RVP is the Order Planner's own post-allocation
-            bands, so the two pages agree band-for-band. Storage locations deplete by transfers out
-            <span className="font-medium"> top to bottom</span> - highest-priced seed first, oldest lot first within a
-            band - and transferred seed is re-banded at its landed cost (seed + hamali, transport and carrying
-            interest). Valuation excludes GST.
-          </p>
-        </div>
-        <ExportButtons
-          filename={`Stock_By_Location_${String(selectedLoc).replace(/\s+/g, '_')}`}
-          title={`Stock by Location - ${selectedLoc}`}
-          subtitle={`${visibleBands.length} band(s)`}
-          columns={exportColumns}
-          rows={visibleBands}
-        />
-      </div>
+      <PageHeader
+        title="Stock by Location"
+        description="Location-wise black-seed stock grouped into price bands and landed cost calculations."
+        icon={MapPin}
+        actions={
+          <ExportButtons
+            filename={`Stock_By_Location_${String(selectedLoc).replace(/\s+/g, '_')}`}
+            title={`Stock by Location - ${selectedLoc}`}
+            subtitle={`${visibleBands.length} band(s)`}
+            columns={exportColumns}
+            rows={visibleBands}
+          />
+        }
+      />
 
       {/* KPI tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -735,8 +731,8 @@ export default function StockLocation() {
                                         )}
                                       </TableCell>
                                       <TableCell className="py-2 text-xs font-medium text-foreground">{l.partyName}</TableCell>
-                                      <TableCell className="py-2 text-xs font-mono">{l.lorryNumber || '-'}</TableCell>
-                                      <TableCell className="py-2 text-xs font-mono">{l.poNumber || '-'}</TableCell>
+                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.lorryNumber || '-'}</TableCell>
+                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.poNumber || '-'}</TableCell>
                                       <TableCell className="py-2 text-xs text-right font-semibold">
                                         {kg(l.remainingKg)}
                                         {l.remainingKg !== l.receivedKg && (

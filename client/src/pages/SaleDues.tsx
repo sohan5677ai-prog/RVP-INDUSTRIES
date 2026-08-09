@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PageHeader } from '@/components/PageHeader';
 import type { ExportColumn } from '@/lib/export';
 
 // Byproducts share one tab group in the Sales nav; group them the same way here.
@@ -335,19 +336,20 @@ export default function SaleDuesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Sale Dues</h1>
-          <p className="text-muted-foreground font-medium">Aging list of outstanding buyer sales invoices matching receipts via FIFO allocation.</p>
-        </div>
-        <ExportButtons
-          filename="Sale_Dues"
-          title="Sale Dues (Aging)"
-          subtitle={`${PRODUCT_FILTERS.find((f) => f.value === productFilter)?.label} · ${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${monthFilter === ALL_MONTHS ? 'All months' : `Due ${monthLabel(monthFilter)}`} · ${dueInvoices.length} invoice(s)`}
-          columns={SALE_DUES_COLUMNS}
-          rows={dueInvoices}
-        />
-      </div>
+      <PageHeader
+        title="Sale Dues"
+        description="Aging list of outstanding buyer sales invoices matching receipts via FIFO allocation."
+        icon={TrendingUp}
+        actions={
+          <ExportButtons
+            filename="Sale_Dues"
+            title="Sale Dues (Aging)"
+            subtitle={`${PRODUCT_FILTERS.find((f) => f.value === productFilter)?.label} · ${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${monthFilter === ALL_MONTHS ? 'All months' : `Due ${monthLabel(monthFilter)}`} · ${dueInvoices.length} invoice(s)`}
+            columns={SALE_DUES_COLUMNS}
+            rows={dueInvoices}
+          />
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <Segmented
@@ -471,7 +473,7 @@ export default function SaleDuesPage() {
                         <TableCell className="font-medium">{shortDate(inv.dueDate.toISOString())}</TableCell>
                         <TableCell>{inv.partyName}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{productDescription(inv.product)}</TableCell>
-                        <TableCell className="font-mono text-xs">{inv.invoiceNumber ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{inv.invoiceNumber ?? '-'}</TableCell>
                         <TableCell>{shortDate(inv.billDate.toISOString())}</TableCell>
                         <TableCell className="text-right">{rupees(inv.billAmount)}</TableCell>
                         <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">

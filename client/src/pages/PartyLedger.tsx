@@ -44,6 +44,17 @@ const TYPE_LABEL: Record<string, string> = { SUPPLIER: 'Supplier', BUYER: 'Buyer
  * about - no pending lorries means no "Remind Pending Loads", no outstanding
  * sale invoice means no "Payment Reminder".
  */
+/** One unsettled sale invoice, as offered to the payment-reminder picker. */
+interface DueInvoiceLine {
+  dispatchId: string;
+  invoiceNumber: string;
+  outstanding: number;
+  dueDate: string;
+  overdue: boolean;
+  brokerId: string | null;
+  brokerName: string | null;
+}
+
 interface PartyReminderContext {
   party: { id: string; name: string; phone: string | null; phone2: string | null };
   pending: {
@@ -62,6 +73,9 @@ interface PartyReminderContext {
     overdueOutstanding: number;
     overdueCount: number;
     totalInvoiceCount: number;
+    /** Every unsettled invoice, overdue and upcoming both - the picker's source list. */
+    invoices: DueInvoiceLine[];
+    /** Full per-broker totals across all their invoices (not scoped to overdue). */
     brokers: { id: string; name: string; phone: string | null; invoiceCount: number; outstanding: number }[];
   } | null;
 }
@@ -196,7 +210,7 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
                 <TableRow key={p.id} className="cursor-pointer" onClick={() => onSelect(p.id)}>
                   <TableCell>
                     <div className="font-semibold">{p.name}</div>
-                    {p.gstin && <div className="text-[11px] text-muted-foreground font-mono">{p.gstin}</div>}
+                    {p.gstin && <div className="text-[11px] text-muted-foreground font-sans font-medium tracking-wide">{p.gstin}</div>}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] font-medium">{TYPE_LABEL[p.type] ?? p.type}</Badge>
@@ -336,7 +350,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
             </Button>
           )}
           {/* Only when this party has unsettled sale invoices. */}
-          {dues && dues.invoiceCount > 0 && (
+          {dues && dues.totalInvoiceCount > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -344,7 +358,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
               className="gap-1.5 border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
             >
               <IndianRupee className="h-4 w-4" />
-              Payment Reminder ({dues.invoiceCount})
+              Payment Reminder ({dues.totalInvoiceCount})
             </Button>
           )}
           <ExportButtons
@@ -406,7 +420,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
                   </span>
                 )}
                 {(party.address || party.state) && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" /> {[party.address, party.state].filter(Boolean).join(', ')}</span>}
-                {party.gstin && <span className="inline-flex items-center gap-1.5 group font-mono"><Hash className="h-3.5 w-3.5" /> {party.gstin} <CopyBtn value={party.gstin} /></span>}
+                {party.gstin && <span className="inline-flex items-center gap-1.5 group font-sans font-medium tracking-wide"><Hash className="h-3.5 w-3.5" /> {party.gstin} <CopyBtn value={party.gstin} /></span>}
               </div>
             </div>
           </div>
@@ -713,14 +727,59 @@ function SendPaymentReminderDialog({
   partyPhone: string | null;
   dues: NonNullable<PartyReminderContext['dues']>;
 }) {
-  const brokers = dues.brokers.filter((b) => b.invoiceCount > 0);
-  const reachableBrokers = brokers.filter((b) => b.phone);
   const [target, setTarget] = useState<ReminderTarget>('PARTY');
   const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // Reset on open: overdue invoices are pre-checked - they're the ones the
+  // template's "due date has passed" wording actually fits. If nothing is
+  // overdue yet, start with everything checked so the picker isn't empty.
   useEffect(() => {
-    if (open) setTarget('PARTY');
-  }, [open]);
+    if (!open) return;
+    setTarget('PARTY');
+    const overdueIds = dues.invoices.filter((i) => i.overdue).map((i) => i.dispatchId);
+    setSelected(new Set(overdueIds.length > 0 ? overdueIds : dues.invoices.map((i) => i.dispatchId)));
+  }, [open, dues.invoices]);
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allChecked = dues.invoices.length > 0 && selected.size === dues.invoices.length;
+  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(dues.invoices.map((i) => i.dispatchId)));
+
+  const selectedInvoices = dues.invoices.filter((i) => selected.has(i.dispatchId));
+  const amount = selectedInvoices.reduce((s, i) => s + i.outstanding, 0);
+  const hasOverdueSelected = selectedInvoices.some((i) => i.overdue);
+  const hasUpcomingSelected = selectedInvoices.some((i) => !i.overdue);
+
+  // Brokers behind the SELECTED invoices only - picking an invoice outside the
+  // default overdue scope can bring a broker into play that wasn't offered
+  // before, and unchecking their invoices should drop them again.
+  const brokers = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string; phone: string | null; invoiceCount: number; outstanding: number }>();
+    for (const inv of selectedInvoices) {
+      if (!inv.brokerId) continue;
+      const phone = dues.brokers.find((b) => b.id === inv.brokerId)?.phone ?? null;
+      const row = byId.get(inv.brokerId) ?? { id: inv.brokerId, name: inv.brokerName ?? 'Broker', phone, invoiceCount: 0, outstanding: 0 };
+      row.invoiceCount += 1;
+      row.outstanding += inv.outstanding;
+      byId.set(inv.brokerId, row);
+    }
+    return [...byId.values()];
+  }, [selectedInvoices, dues.brokers]);
+  const reachableBrokers = brokers.filter((b) => b.phone);
+
+  // A target that's no longer valid for the current selection (its only
+  // broker got unchecked) falls back to the party rather than staying stuck.
+  useEffect(() => {
+    if (target !== 'PARTY' && brokers.length === 0) setTarget('PARTY');
+  }, [target, brokers.length]);
 
   const options: { label: string; value: ReminderTarget }[] = [
     { label: 'Party', value: 'PARTY' },
@@ -734,7 +793,7 @@ function SendPaymentReminderDialog({
     try {
       const res = await api<{ ok: boolean; message: string; failed: { recipient: string; error: string }[] }>(
         `/whatsapp/parties/${partyId}/payment-reminder`,
-        { method: 'POST', body: { target } }
+        { method: 'POST', body: { target, dispatchIds: [...selected] } }
       );
       if (res.failed.length > 0) toast.warning(res.message);
       else toast.success(res.message);
@@ -761,28 +820,63 @@ function SendPaymentReminderDialog({
             <div className="font-semibold text-sm">{partyName}</div>
             <div className="flex items-baseline justify-between text-sm">
               <span className="text-muted-foreground">
-                {dues.scope === 'OVERDUE' ? 'Overdue' : 'Outstanding'} · {dues.invoiceCount} invoice{dues.invoiceCount === 1 ? '' : 's'}
+                {selectedInvoices.length} of {dues.totalInvoiceCount} invoice{dues.totalInvoiceCount === 1 ? '' : 's'} selected
               </span>
-              <span className="font-bold tabular-nums">{rupees(dues.amount)}</span>
+              <span className="font-bold tabular-nums">{rupees(amount)}</span>
             </div>
-            {dues.scope === 'OVERDUE' && dues.outstanding > dues.overdueOutstanding && (
-              <div className="text-[11px] text-muted-foreground">
-                Total outstanding {rupees(dues.outstanding)} across {dues.totalInvoiceCount} invoices - only the overdue ones are quoted.
-              </div>
-            )}
-            {/* The exact string that goes out - one comma-separated line. */}
-            <div className="text-[11px] text-muted-foreground font-mono break-words pt-1">{dues.invoiceListText}</div>
           </div>
 
-          {dues.scope === 'UPCOMING' && (
+          {hasUpcomingSelected && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 flex gap-2 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
-                None of these invoices are past their due date yet. The approved template still reads
-                "the due date has passed" - send only if you mean to nudge early.
+                {hasOverdueSelected ? 'Some selected invoices are' : 'None of the selected invoices are'} past their due
+                date yet. The approved template still reads "the due date has passed" - send only if you mean to nudge early.
               </span>
             </div>
           )}
+
+          {/* Which invoices to quote - overdue ones pre-checked, everything else opt-in. */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-muted-foreground">Invoices</label>
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  onChange={toggleAll}
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                All
+              </label>
+            </div>
+            <div className="rounded-lg border divide-y max-h-56 overflow-y-auto">
+              {dues.invoices.map((inv) => (
+                <label
+                  key={inv.dispatchId}
+                  className="flex items-center gap-2.5 px-3 py-2 text-xs cursor-pointer hover:bg-muted/40"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(inv.dispatchId)}
+                    onChange={() => toggleOne(inv.dispatchId)}
+                    className="w-3.5 h-3.5 shrink-0 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <span className="font-mono font-medium flex-1 truncate">{inv.invoiceNumber}</span>
+                  <span
+                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap ${
+                      inv.overdue
+                        ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {inv.overdue ? 'Overdue' : `Due ${shortDate(inv.dueDate)}`}
+                  </span>
+                  <span className="font-semibold tabular-nums shrink-0 w-20 text-right">{rupees(inv.outstanding)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
 
           <div className="space-y-2">
             <label className="text-xs font-semibold text-muted-foreground">Send to</label>
@@ -790,7 +884,9 @@ function SendPaymentReminderDialog({
               <Segmented options={options} value={target} onValueChange={(v) => setTarget(v)} />
             ) : (
               <p className="text-xs text-muted-foreground">
-                These are our own orders - there is no broker to copy, so the reminder goes to the party.
+                {dues.brokers.length === 0
+                  ? 'These are our own orders - there is no broker to copy, so the reminder goes to the party.'
+                  : 'None of the selected invoices are brokered - the reminder goes to the party.'}
               </p>
             )}
           </div>
@@ -801,7 +897,7 @@ function SendPaymentReminderDialog({
               <RecipientLine
                 name={partyName}
                 phone={partyPhone}
-                detail={`${rupees(dues.amount)} · ${dues.invoiceCount} invoice${dues.invoiceCount === 1 ? '' : 's'}`}
+                detail={`${rupees(amount)} · ${selectedInvoices.length} invoice${selectedInvoices.length === 1 ? '' : 's'}`}
               />
             )}
             {(target === 'BROKER' || target === 'BOTH') &&
@@ -817,11 +913,11 @@ function SendPaymentReminderDialog({
 
           <Button
             onClick={handleSend}
-            disabled={loading || (target === 'BROKER' && reachableBrokers.length === 0)}
+            disabled={loading || selected.size === 0 || (target === 'BROKER' && reachableBrokers.length === 0)}
             className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4 fill-white" />}
-            Send Payment Reminder
+            Send Payment Reminder{selected.size > 0 ? ` (${selected.size})` : ''}
           </Button>
         </div>
       </DialogContent>

@@ -555,6 +555,7 @@ export async function getPartyReminderContext(req: Request, res: Response) {
   ]);
 
   const active = dues ? duesScope(dues) : null;
+  const brokerName = new Map(dues?.brokers.map((b) => [b.id, b.name]) ?? []);
 
   res.json({
     party,
@@ -573,8 +574,25 @@ export async function getPartyReminderContext(req: Request, res: Response) {
           overdueOutstanding: dues.overdueOutstanding,
           overdueCount: dues.overdueInvoices.length,
           totalInvoiceCount: dues.invoices.length,
+          // Every unsettled invoice (overdue AND upcoming), oldest due first - the
+          // ledger's picker lets the sender choose which ones to quote rather than
+          // the server deciding for them.
+          invoices: [...dues.invoices]
+            .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+            .map((i) => ({
+              dispatchId: i.dispatchId,
+              invoiceNumber: i.invoiceNumber,
+              outstanding: i.outstanding,
+              dueDate: i.dueDate.toISOString(),
+              overdue: i.overdue,
+              brokerId: i.brokerId,
+              brokerName: i.brokerId ? brokerName.get(i.brokerId) ?? null : null,
+            })),
+          // Full per-broker totals across ALL their invoices, not just the default
+          // scope - the picker can select an invoice outside that scope, and the
+          // "Send to" broker line needs to be able to reflect it.
           brokers: dues.brokers.map((b) => {
-            const theirs = active.invoices.filter((i) => i.brokerId === b.id);
+            const theirs = dues.invoices.filter((i) => i.brokerId === b.id);
             return {
               id: b.id,
               name: b.name,
@@ -601,6 +619,7 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
   const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as {
     target?: string;
     brokerIds?: string[];
+    dispatchIds?: string[];
   };
   const target = (body.target ?? 'PARTY').toUpperCase();
   if (!['PARTY', 'BROKER', 'BOTH'].includes(target)) {
@@ -614,7 +633,18 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
   if (!dues || dues.invoices.length === 0) {
     throw new HttpError(400, `${party.name} has no outstanding sale invoices - nothing to remind about`);
   }
-  const active = duesScope(dues);
+
+  // An explicit dispatchIds list is the ledger's per-invoice picker narrowing
+  // the send; without one (e.g. the scheduled job), fall back to the old
+  // scope default - overdue if any, else the whole outstanding.
+  let active: { invoices: typeof dues.invoices; amount: number };
+  if (body.dispatchIds) {
+    const picked = dues.invoices.filter((i) => body.dispatchIds!.includes(i.dispatchId));
+    if (picked.length === 0) throw new HttpError(400, 'Select at least one invoice to remind about');
+    active = { invoices: picked, amount: picked.reduce((s, i) => s + i.outstanding, 0) };
+  } else {
+    active = duesScope(dues);
+  }
 
   const sent: Array<{ recipient: string; phone: string | null; amount: number; invoices: number }> = [];
   const failed: Array<{ recipient: string; error: string }> = [];
@@ -648,7 +678,7 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
         ? 'No broker on these invoices (own orders) - send to the party instead'
         : selected.length === 0
           ? 'None of the selected brokers are on these invoices'
-          : `No ${active.scope === 'OVERDUE' ? 'overdue' : 'outstanding'} invoice on these brokers' orders`;
+          : `No selected invoice is on these brokers' orders`;
       if (target === 'BROKER') throw new HttpError(400, reason);
       failed.push({ recipient: 'Broker', error: reason });
     }
@@ -677,7 +707,6 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
 
   res.json({
     ok: true,
-    scope: active.scope,
     amount: active.amount,
     invoiceCount: active.invoices.length,
     sent,

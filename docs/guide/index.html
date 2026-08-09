@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RVP Industries ERP — User Guide</title>
+  <meta name="description" content="Comprehensive user guide for the RVP Industries Tamarind Processing ERP. Every page, button, and option explained with annotated screenshots." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       DESIGN TOKENS
+       ═══════════════════════════════════════════════════════════════════ */
+    :root {
+      --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+
+      /* Spacing */
+      --sidebar-w: 280px;
+      --topbar-h: 64px;
+
+      /* Annotation marker */
+      --marker-size: 32px;
+
+      /* Transitions */
+      --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Dark theme (default) */
+    [data-theme="dark"] {
+      --bg: #0a0a0f;
+      --bg-card: #111118;
+      --bg-sidebar: #0d0d14;
+      --bg-topbar: #111118;
+      --bg-hover: rgba(255,255,255,0.04);
+      --bg-active: rgba(217,158,55,0.12);
+      --bg-tooltip: #1a1a24;
+      --bg-search: #161620;
+      --bg-badge: rgba(217,158,55,0.15);
+      --border: rgba(255,255,255,0.08);
+      --border-active: rgba(217,158,55,0.4);
+      --text: #e8e8ed;
+      --text-secondary: #9898a8;
+      --text-muted: #5a5a6e;
+      --accent: #d99e37;
+      --accent-glow: rgba(217,158,55,0.35);
+      --accent-subtle: rgba(217,158,55,0.08);
+      --danger: #ef4444;
+      --success: #22c55e;
+      --info: #3b82f6;
+      --marker-bg: #d99e37;
+      --marker-text: #0a0a0f;
+      --marker-ring: rgba(217,158,55,0.3);
+      --screenshot-shadow: 0 8px 40px rgba(0,0,0,0.5);
+      --screenshot-border: rgba(255,255,255,0.06);
+      --overlay-bg: rgba(0,0,0,0.7);
+    }
+
+    /* Light theme */
+    [data-theme="light"] {
+      --bg: #f5f5f7;
+      --bg-card: #ffffff;
+      --bg-sidebar: #fafafa;
+      --bg-topbar: #ffffff;
+      --bg-hover: rgba(0,0,0,0.03);
+      --bg-active: rgba(180,120,20,0.08);
+      --bg-tooltip: #ffffff;
+      --bg-search: #f0f0f4;
+      --bg-badge: rgba(180,120,20,0.1);
+      --border: rgba(0,0,0,0.08);
+      --border-active: rgba(180,120,20,0.4);
+      --text: #1a1a2e;
+      --text-secondary: #64648a;
+      --text-muted: #9898a8;
+      --accent: #b47814;
+      --accent-glow: rgba(180,120,20,0.25);
+      --accent-subtle: rgba(180,120,20,0.06);
+      --danger: #dc2626;
+      --success: #16a34a;
+      --info: #2563eb;
+      --marker-bg: #b47814;
+      --marker-text: #ffffff;
+      --marker-ring: rgba(180,120,20,0.25);
+      --screenshot-shadow: 0 8px 40px rgba(0,0,0,0.1);
+      --screenshot-border: rgba(0,0,0,0.08);
+      --overlay-bg: rgba(255,255,255,0.85);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       RESET & BASE
+       ═══════════════════════════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: calc(var(--topbar-h) + 24px);
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    img { max-width: 100%; height: auto; display: block; }
+
+    ::selection {
+      background: var(--accent);
+      color: var(--marker-text);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       LAYOUT
+       ═══════════════════════════════════════════════════════════════════ */
+    .app {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: var(--sidebar-w);
+      height: 100vh;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      transition: transform 0.3s var(--ease);
+    }
+
+    .sidebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .sidebar-brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #d99e37, #a87420);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 18px;
+      color: #fff;
+      flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(217,158,55,0.3);
+    }
+
+    .sidebar-brand-text {
+      min-width: 0;
+    }
+
+    .sidebar-brand-text h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .sidebar-brand-text p {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .sidebar-search {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .sidebar-search input {
+      width: 100%;
+      padding: 8px 12px 8px 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-search);
+      color: var(--text);
+      font-size: 13px;
+      font-family: var(--font-sans);
+      outline: none;
+      transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+    }
+
+    .sidebar-search input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .sidebar-search input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .sidebar-search-wrap {
+      position: relative;
+    }
+
+    .sidebar-search-wrap svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px 24px;
+    }
+
+    .nav-section {
+      margin-bottom: 4px;
+    }
+
+    .nav-section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 6px;
+      transition: color 0.2s var(--ease), background 0.2s var(--ease);
+      user-select: none;
+    }
+
+    .nav-section-heading:hover {
+      color: var(--text-secondary);
+      background: var(--bg-hover);
+    }
+
+    .nav-section-heading.active {
+      color: var(--accent);
+    }
+
+    .nav-section-heading .chevron {
+      width: 14px;
+      height: 14px;
+      transition: transform 0.2s var(--ease);
+    }
+
+    .nav-section-heading.open .chevron {
+      transform: rotate(90deg);
+    }
+
+    .nav-section-items {
+      display: none;
+      margin-left: 16px;
+      padding-left: 12px;
+      border-left: 1.5px solid var(--border);
+    }
+
+    .nav-section-items.open {
+      display: block;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s var(--ease);
+      position: relative;
+    }
+
+    .nav-item:hover {
+      color: var(--text);
+      background: var(--bg-hover);
+    }
+
+    .nav-item.active {
+      color: var(--text);
+      background: var(--bg-active);
+      font-weight: 600;
+    }
+
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      left: -13px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 20px;
+      border-radius: 2px;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+
+    .nav-item-badge {
+      margin-left: auto;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      border-radius: 4px;
+      background: var(--bg-badge);
+      color: var(--accent);
+    }
+
+    .nav-item.hidden { display: none; }
+
+    /* ── Topbar ──────────────────────────────────────────────────────── */
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: var(--sidebar-w);
+      right: 0;
+      height: var(--topbar-h);
+      background: var(--bg-topbar);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      z-index: 90;
+      backdrop-filter: blur(12px);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .topbar-section {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--text-muted);
+    }
+
+    .topbar-section::after {
+      content: '/';
+      margin-left: 10px;
+      color: var(--border);
+    }
+
+    .topbar-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .topbar-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s var(--ease);
+    }
+
+    .topbar-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+      border-color: var(--border-active);
+    }
+
+    .topbar-btn svg { width: 18px; height: 18px; }
+
+    .menu-btn {
+      display: none;
+    }
+
+    /* ── Main Content ────────────────────────────────────────────────── */
+    .main {
+      margin-left: var(--sidebar-w);
+      padding-top: var(--topbar-h);
+      flex: 1;
+      min-width: 0;
+    }
+
+    .content {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 32px 80px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       PAGE SECTIONS
+       ═══════════════════════════════════════════════════════════════════ */
+    .guide-section {
+      margin-bottom: 80px;
+      animation: fadeInUp 0.5s var(--ease) both;
+    }
+
+    .guide-section:target {
+      scroll-margin-top: calc(var(--topbar-h) + 24px);
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .section-header {
+      margin-bottom: 24px;
+    }
+
+    .section-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      background: var(--bg-badge);
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      margin-bottom: 8px;
+    }
+
+    .section-desc {
+      font-size: 15px;
+      color: var(--text-secondary);
+      max-width: 680px;
+      line-height: 1.7;
+    }
+
+    .section-route {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      padding: 4px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    /* ── Screenshot Container ───────────────────────────────────────── */
+    .screenshot-wrap {
+      position: relative;
+      margin: 32px 0;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--screenshot-border);
+      box-shadow: var(--screenshot-shadow);
+      background: var(--bg-card);
+    }
+
+    .screenshot-wrap img {
+      width: 100%;
+      display: block;
+    }
+
+    .screenshot-placeholder {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: linear-gradient(135deg, var(--bg-card), var(--bg));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    /* ── Annotation Markers ─────────────────────────────────────────── */
+    .annotation-markers {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .marker {
+      position: absolute;
+      width: var(--marker-size);
+      height: var(--marker-size);
+      border-radius: 50%;
+      background: var(--marker-bg);
+      color: var(--marker-text);
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      pointer-events: all;
+      box-shadow: 0 2px 8px var(--accent-glow), 0 0 0 3px var(--marker-ring);
+      transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+      z-index: 5;
+      transform: translate(-50%, -50%);
+    }
+
+    .marker:hover {
+      transform: translate(-50%, -50%) scale(1.2);
+      box-shadow: 0 4px 16px var(--accent-glow), 0 0 0 5px var(--marker-ring);
+      z-index: 10;
+    }
+
+    .marker.active {
+      transform: translate(-50%, -50%) scale(1.25);
+      box-shadow: 0 4px 20px var(--accent-glow), 0 0 0 6px var(--marker-ring);
+      z-index: 10;
+    }
+
+    .marker-pulse {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: var(--marker-bg);
+      opacity: 0;
+      animation: markerPulse 2s var(--ease) infinite;
+    }
+
+    @keyframes markerPulse {
+      0% { transform: scale(1); opacity: 0.4; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    /* ── Annotation Tooltip ─────────────────────────────────────────── */
+    .marker-tooltip {
+      position: absolute;
+      bottom: calc(100% + 12px);
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      width: 260px;
+      padding: 14px 16px;
+      background: var(--bg-tooltip);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s var(--ease);
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .marker:hover .marker-tooltip,
+    .marker.active .marker-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: all;
+    }
+
+    .marker-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: var(--bg-tooltip);
+    }
+
+    .marker-tooltip-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .marker-tooltip-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .marker-tooltip-type {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 2px 8px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-radius: 4px;
+    }
+
+    .marker-tooltip-type.button { background: rgba(59,130,246,0.15); color: var(--info); }
+    .marker-tooltip-type.field { background: rgba(34,197,94,0.15); color: var(--success); }
+    .marker-tooltip-type.display { background: rgba(168,116,32,0.15); color: var(--accent); }
+    .marker-tooltip-type.section { background: rgba(148,163,184,0.15); color: var(--text-secondary); }
+    .marker-tooltip-type.danger { background: rgba(239,68,68,0.15); color: var(--danger); }
+
+    /* ── Annotation Legend (Below Screenshot) ───────────────────────── */
+    .annotation-list {
+      margin-top: 24px;
+    }
+
+    .annotation-list-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .annotation-list-title svg {
+      width: 16px;
+      height: 16px;
+      color: var(--accent);
+    }
+
+    .annotation-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      transition: all 0.15s var(--ease);
+      cursor: pointer;
+    }
+
+    .annotation-item:hover,
+    .annotation-item.active {
+      background: var(--bg-hover);
+      border-color: var(--border);
+    }
+
+    .annotation-item-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--marker-bg);
+      color: var(--marker-text);
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .annotation-item-content { flex: 1; min-width: 0; }
+
+    .annotation-item-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .annotation-item-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ── Workflow Tips ───────────────────────────────────────────────── */
+    .workflow-box {
+      margin-top: 24px;
+      padding: 20px 24px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--accent-subtle);
+    }
+
+    .workflow-box h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .workflow-box h4 svg { width: 16px; height: 16px; }
+
+    .workflow-box p,
+    .workflow-box li {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    .workflow-box ol, .workflow-box ul {
+      padding-left: 20px;
+      margin-top: 8px;
+    }
+
+    .workflow-box li { margin-bottom: 4px; }
+
+    /* ── Keyboard Shortcut Badges ───────────────────────────────────── */
+    kbd {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      box-shadow: 0 1px 0 var(--border);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       PROGRESS BAR (top of page)
+       ═══════════════════════════════════════════════════════════════════ */
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), #e8b84a);
+      z-index: 200;
+      transition: width 0.15s var(--ease);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       RESPONSIVE
+       ═══════════════════════════════════════════════════════════════════ */
+    @media (max-width: 900px) {
+      .sidebar {
+        transform: translateX(-100%);
+      }
+
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .topbar {
+        left: 0;
+      }
+
+      .main {
+        margin-left: 0;
+      }
+
+      .menu-btn {
+        display: flex;
+      }
+
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 99;
+      }
+
+      .sidebar-overlay.open {
+        display: block;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       PRINT
+       ═══════════════════════════════════════════════════════════════════ */
+    @media print {
+      .sidebar, .topbar, .progress-bar, .topbar-actions, .menu-btn { display: none !important; }
+      .main { margin-left: 0 !important; padding-top: 0 !important; }
+      .content { max-width: none; padding: 20px; }
+      .guide-section { break-inside: avoid; page-break-inside: avoid; margin-bottom: 40px; }
+      .screenshot-wrap { box-shadow: none; border: 1px solid #ccc; }
+      .marker-tooltip { display: none !important; }
+      body { background: #fff; color: #000; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Progress bar -->
+  <div class="progress-bar" id="progressBar"></div>
+
+  <!-- Mobile overlay -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <div class="app">
+    <!-- ═══════════════════════════════════════ SIDEBAR ═══════════════ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-icon">R</div>
+        <div class="sidebar-brand-text">
+          <h1>RVP Industries</h1>
+          <p>ERP User Guide</p>
+        </div>
+      </div>
+
+      <div class="sidebar-search">
+        <div class="sidebar-search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="searchInput" placeholder="Search pages & features…" oninput="filterNav(this.value)" />
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebarNav">
+        <!-- Populated by JS -->
+      </nav>
+    </aside>
+
+    <!-- ═══════════════════════════════════════ TOPBAR ════════════════ -->
+    <header class="topbar" id="topbar">
+      <div class="topbar-left">
+        <button class="topbar-btn menu-btn" onclick="toggleSidebar()" aria-label="Toggle sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        </button>
+        <span class="topbar-section" id="topbarSection"></span>
+        <span class="topbar-title" id="topbarTitle">User Guide</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="topbar-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme" id="themeBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <button class="topbar-btn" onclick="window.print()" title="Print guide" aria-label="Print guide">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════ MAIN ══════════════════ -->
+    <div class="main">
+      <div class="content" id="content">
+        <!-- Sections are rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════════
+    // DATA: All pages with their annotations
+    // ═══════════════════════════════════════════════════════════════════
+    const GUIDE_DATA = [
+      // ══════════════════════════════════════════════════════════════════
+      // LOGIN
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'login',
+        section: 'Getting Started',
+        title: 'Login',
+        route: '/login',
+        screenshot: 'screenshots/01-login.png',
+        description: 'The login page is the entry point to the RVP Industries ERP system. Only authorized personnel with valid credentials can access the system. The login uses session-based authentication with JWT tokens.',
+        annotations: [
+          { x: 50, y: 28, num: 1, title: 'RVP Brand Logo', desc: 'The amber "R" logo and "RVP Industries" branding. Below it says "ENTERPRISE RESOURCE PLANNING" — this confirms you are on the correct ERP system.', type: 'display' },
+          { x: 50, y: 44, num: 2, title: 'Username Field', desc: 'Type your username here. Example: "admin" for the admin account, or your personal username like "sohan". Your admin creates this for you. The field shows a mail icon on the left as a visual cue.', type: 'field' },
+          { x: 50, y: 55, num: 3, title: 'Password Field', desc: 'Type your password here. Example: "admin123" for the default admin account. Characters are hidden as dots (••••) by default for security. Minimum requirements depend on your admin\'s configuration.', type: 'field' },
+          { x: 62, y: 55, num: 4, title: 'Show/Hide Password Toggle (Eye Icon)', desc: 'Click the eye icon 👁 on the right side of the password field to reveal your password in plain text. Click again (eye-off icon) to hide it. Useful when you want to verify you typed the password correctly before submitting.', type: 'button' },
+          { x: 50, y: 67, num: 5, title: 'Sign In Button', desc: 'Click this white button to log in. While authenticating, it shows a spinning loader and text "Authenticating…". If login fails, a red error message appears above this button saying "Invalid credentials. Please try again." On success, you are redirected to the Home page.', type: 'button' },
+          { x: 50, y: 76, num: 6, title: 'Security Notice', desc: '"Secure access restricted to authorized personnel only" — this is a reminder that only authorized company staff should use this system. The copyright year updates automatically.', type: 'display' },
+        ],
+        workflow: '<ol><li>Open <code>https://rvpindustries.co.in</code> in your browser</li><li>Enter your <strong>username</strong> (e.g., "admin")</li><li>Enter your <strong>password</strong> (e.g., "admin123")</li><li>Optionally click the 👁 eye icon to verify your password</li><li>Click <strong>Sign In</strong></li><li>If credentials are wrong, a red error banner appears — recheck and try again</li><li>On success, you land on the <strong>Home</strong> page</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // HOME
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'home',
+        section: 'Getting Started',
+        title: 'Home',
+        route: '/',
+        screenshot: 'screenshots/02-home.png',
+        description: 'The Home page is your command center — a launchpad for every ERP action. It features four live-search bars to instantly find parties, POs, sales, and stock lots, plus six quick-access tiles for the most common actions.',
+        annotations: [
+          { x: 10, y: 8, num: 1, title: 'Sidebar Navigation Panel', desc: 'The dark sidebar on the left contains ALL modules grouped by category: Master Data, Purchases, Stock, Sales, Reports, Banking, Transactions, Accounts, and Settings. Click a section heading (e.g., "Purchases") to expand it and see sub-pages. Click the ◀ icon at the top-right of the sidebar to collapse it. The active page is highlighted in amber.', type: 'section' },
+          { x: 10, y: 50, num: 2, title: 'Sidebar Section Headings (Collapsible)', desc: 'Each section (e.g., "PURCHASES", "STOCK", "SALES") can be expanded/collapsed by clicking. A chevron ▸ rotates to ▼ when open. Only one section stays open at a time — opening a new one closes the previous. Example: Click "PURCHASES" to see Purchase Orders, Stock In, Stock in Detail, and Verification links.', type: 'button' },
+          { x: 60, y: 4, num: 3, title: 'Top Bar — Page Title & Breadcrumb', desc: 'Shows the current section and page name. Example: "PURCHASES / Stock In" tells you exactly where you are. When on the Home page, it just says "Home".', type: 'display' },
+          { x: 95, y: 4, num: 4, title: 'Theme Toggle (☀/🌙)', desc: 'Click to switch between Dark Mode and Light Mode. Your preference is saved in the browser — it remembers your choice next time. Dark mode is the default and is easier on the eyes for long use.', type: 'button' },
+          { x: 45, y: 18, num: 5, title: 'Find a Party — Live Search', desc: 'Type any party\'s name, phone, or GSTIN to find them instantly. Example: Type "Ravi" to find "Ravi Traders" — shows their type (SUPPLIER/BUYER), phone numbers. Click the result to jump to their Party Ledger. Searches across ALL parties in the system — suppliers, buyers, transporters.', type: 'field' },
+          { x: 80, y: 18, num: 6, title: 'Find a Purchase Order — Live Search', desc: 'Type a PO number (e.g., "PO-2026-045") or a supplier name to find purchase orders. Results show the PO number, party name, ordered tonnage (e.g., "50.00 t"), and status badge (PENDING/ARRIVED/COMPLETED). Click a result to navigate to the Purchase Orders page.', type: 'field' },
+          { x: 45, y: 34, num: 7, title: 'Find a Sale / Invoice — Live Search', desc: 'Search by buyer name, product type (Pappu/Husk/TPS), or invoice number (e.g., "RVP/2026/001"). Shows buyer name, product type badge, tonnage, and order status. Example: Type "Pappu" to find all pappu sales. Click a result to go to Sale Orders.', type: 'field' },
+          { x: 80, y: 34, num: 8, title: 'Find a Stock Lot — Live Search', desc: 'Search raw stock lots by party name, invoice number, lorry number (e.g., "AP 05 AB 1234"), or PO number. Results show a package icon 📦, party name, lorry number, net weight (e.g., "24,500 kg"), and value (e.g., "₹4,90,000"). Click to go to Black Seed Stock page.', type: 'field' },
+          { x: 37, y: 57, num: 9, title: 'Quick Access Tile — Purchase Orders', desc: 'Click to jump directly to the Purchase Orders page. Description says "Raise & track supplier POs". Use this when you need to create a new PO or check status of existing ones.', type: 'button' },
+          { x: 60, y: 57, num: 10, title: 'Quick Access Tile — Stock In', desc: 'Click to jump to the Stock In page for recording lorry arrivals. Description says "Record lorry arrivals". Use when a new lorry of tamarind seeds arrives at the factory.', type: 'button' },
+          { x: 83, y: 57, num: 11, title: 'Quick Access Tile — Black Seed Stock', desc: 'Click to view your current raw stock inventory. Shows total stock on hand with quantities and values per lot.', type: 'button' },
+          { x: 37, y: 72, num: 12, title: 'Quick Access Tile — Sale Orders', desc: 'Click to manage sales pipeline. Create new sale orders, track dispatches, and generate invoices for buyers.', type: 'button' },
+          { x: 60, y: 72, num: 13, title: 'Quick Access Tile — Payments', desc: 'Click to record payments made to suppliers, transporters, brokers, and others.', type: 'button' },
+          { x: 83, y: 72, num: 14, title: 'Quick Access Tile — Receipts', desc: 'Click to record money received from buyers and other income sources.', type: 'button' },
+        ],
+        workflow: '<ol><li>When you log in, you land here. Start by using a <strong>search bar</strong> if you\'re looking for something specific</li><li>Example: Type "Ravi" in "Find a party" to check Ravi Traders\' account</li><li>Or click a <strong>Quick Access tile</strong> to jump to a module</li><li>The <strong>sidebar</strong> on the left gives full access to every page — expand a section to see its sub-pages</li><li>Use <kbd>Ctrl+K</kbd> in the guide to search features</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // DASHBOARD
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'dashboard',
+        section: 'Getting Started',
+        title: 'Dashboard',
+        route: '/dashboard',
+        screenshot: 'screenshots/03-dashboard.png',
+        description: 'The Dashboard is a live business intelligence overview — it pulls real-time data from every module to show you the health of your entire operation at a glance. Six KPI cards at the top, followed by interactive charts for deeper analysis.',
+        annotations: [
+          { x: 23, y: 16, num: 1, title: 'KPI Card — Pending POs', desc: 'Shows the count of Purchase Orders with status "PENDING" (placed but no stock arrived yet). Example: "12" means 12 POs are waiting for suppliers to ship. A high number may mean suppliers are delayed — follow up!', type: 'display' },
+          { x: 37, y: 16, num: 2, title: 'KPI Card — Arriving (In Pipeline)', desc: 'POs with status "ARRIVED" — stock is on its way or partially received. Example: "5" means 5 lorries are expected or partially unloaded. Check Stock In to see which lorries have arrived.', type: 'display' },
+          { x: 52, y: 16, num: 3, title: 'KPI Card — Black Stock On Hand', desc: 'Total raw tamarind seed stock in your godowns right now, in kg. Example: "1,24,500 kg" = ~124.5 tonnes of raw seeds available for processing. If this is low, you need more purchases.', type: 'display' },
+          { x: 66, y: 16, num: 4, title: 'KPI Card — Pappu Inventory', desc: 'Processed pappu (tamarind kernel powder) available = total produced minus total sold. Example: "45,200 kg" means you have ~45 tonnes of pappu ready to sell or dispatch. Calculated as total processing output minus dispatched quantities.', type: 'display' },
+          { x: 80, y: 16, num: 5, title: 'KPI Card — Pending Sales', desc: 'Count of Sale Orders with status "PENDING" (ordered but not yet dispatched). Example: "8" means 8 buyers are waiting for their goods. Prioritize dispatch for urgent orders.', type: 'display' },
+          { x: 93, y: 16, num: 6, title: 'KPI Card — Payable to Suppliers', desc: 'Total outstanding amount you owe to all suppliers combined. Example: "₹45,23,000" means you owe ~₹45 lakh. This drives your Payment Planner — plan cash flow accordingly.', type: 'display' },
+          { x: 40, y: 42, num: 7, title: 'Purchase Trend Chart (Line/Bar)', desc: 'Visual chart showing purchase volumes and values over time. Hover over data points to see exact numbers. Example: Shows monthly purchase quantities — helps identify seasonal patterns in tamarind seed availability.', type: 'section' },
+          { x: 85, y: 42, num: 8, title: 'Stock Breakdown / Pie Chart', desc: 'Pie chart showing stock distribution by location, price band, or party. Helps visualize where your inventory is concentrated.', type: 'section' },
+          { x: 50, y: 70, num: 9, title: 'Sales Pipeline & P&L Charts', desc: 'Additional charts showing: PO status distribution (how many Pending vs Completed), Sale order status breakdown, and Husk/Byproduct P&L summary. Hover for details, click legends to filter.', type: 'section' },
+          { x: 50, y: 92, num: 10, title: '⚠️ DANGER ZONE — Reset ERP Data', desc: 'CRITICAL WARNING: This red "Reset ERP data" button PERMANENTLY DELETES all transactional data — POs, arrivals, verifications, sales, payments, receipts, and journal entries. Only master data (Parties, Brokers, Users) is preserved. Requires a confirmation dialog. Use ONLY for a fresh start (e.g., new financial year testing). This action CANNOT be undone!', type: 'danger' },
+        ],
+        workflow: '<ol><li>Visit the Dashboard daily to get a <strong>quick health check</strong> of operations</li><li>Check <strong>Pending POs</strong> — if too many, follow up with suppliers</li><li>Check <strong>Black Stock</strong> — if low, create more Purchase Orders</li><li>Check <strong>Pending Sales</strong> — prioritize dispatch for waiting buyers</li><li>Check <strong>Payable</strong> — plan this week\'s supplier payments</li><li>Scroll down for <strong>charts</strong> showing trends and patterns</li><li>⚠️ NEVER click "Reset ERP data" unless you intend to wipe everything!</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // PARTIES
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'parties',
+        section: 'Master Data',
+        title: 'Parties',
+        route: '/parties',
+        screenshot: 'screenshots/04-parties.png',
+        description: 'The Parties page is your master directory of all business contacts. Parties can be Suppliers (who sell you raw tamarind seeds), Buyers (who purchase your processed products like pappu/husk), Both (who are both supplier and buyer), or Hamali Teams (labor contractors). Each party record stores detailed contact info, GSTIN for GST invoicing, bank details for payments, assigned commodities, and delivery destination.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add Party Button', desc: 'Opens a dialog form to create a new party. Fill in: <br>• <strong>Name</strong> (required) — e.g., "Ravi Tamarind Traders"<br>• <strong>Nickname</strong> — short name, e.g., "Ravi"<br>• <strong>Type</strong> — Supplier, Buyer, Both, or Hamali Team<br>• <strong>Phone 1 & 2</strong> — e.g., "9876543210"<br>• <strong>Email</strong> — e.g., "ravi@traders.com"<br>• <strong>GSTIN</strong> — e.g., "37AABCT1234A1ZP" (15-char)<br>• <strong>Address, City, State, Pincode</strong><br>• <strong>Destination</strong> — delivery location (from Settings freight rates)<br>• <strong>Bank Details</strong> — A/C number, IFSC, bank name (for payments)<br>• <strong>Commodities</strong> — Black Seed, Pappu, Husk, TPS, Byproducts<br>The system auto-detects duplicate names and warns you.', type: 'button' },
+          { x: 35, y: 8, num: 2, title: '🔍 Search Bar', desc: 'Type to instantly filter parties by name, phone number, GSTIN, or bank account number. Example: Type "9876" to find parties with that phone number. Type "37AAB" to find parties with that GSTIN prefix. Results update live as you type — no need to press Enter.', type: 'field' },
+          { x: 55, y: 8, num: 3, title: 'Type Filter Dropdown', desc: 'Filter the table by party type. Options: ALL (show everyone), SUPPLIER (seed sellers), BUYER (product purchasers), BOTH, HAMALI_TEAM (labor contractors). Example: Select "SUPPLIER" to see only your tamarind seed suppliers.', type: 'button' },
+          { x: 65, y: 8, num: 4, title: 'Commodity Filter', desc: 'Filter by commodity the party deals in: ALL, Black Seed, Pappu, Husk, TPS (Brokens), Tamarind By-Products. Example: Select "PAPPU" to see only buyers who purchase pappu.', type: 'button' },
+          { x: 75, y: 8, num: 5, title: 'State Filter', desc: 'Filter by the party\'s state. Lists all states that have at least one party. Example: Select "Andhra Pradesh" to see only AP-based suppliers. Useful for GST planning (IGST vs CGST/SGST).', type: 'button' },
+          { x: 95, y: 8, num: 6, title: '📥 Export Buttons (Excel/PDF)', desc: 'Export the filtered party list to Excel (.xlsx) or PDF. Includes all columns: Name, Nickname, Type, Phone, Email, Address, State, GSTIN, Bank details, Commodities. Use for offline reference or sharing with your CA.', type: 'button' },
+          { x: 50, y: 35, num: 7, title: 'Parties Table', desc: 'Sortable table listing all parties. Columns: Name (with nickname in brackets), Type badge (colored: green=Supplier, blue=Buyer), Phone numbers, GSTIN, City/State, Commodities, and action icons. Example row: "Ravi Tamarind Traders (Ravi) | SUPPLIER | 9876543210 | 37AABCT1234A1ZP | Hyderabad, Telangana | Black Seed, Pappu"', type: 'section' },
+          { x: 92, y: 35, num: 8, title: '✏️ Edit Button (Pencil Icon)', desc: 'Opens the party form pre-filled with existing data. You can modify any field — name, type, phone, GSTIN, bank details, etc. Example: Click edit on "Ravi Traders" to update their new phone number or add bank details for NEFT payments.', type: 'button' },
+          { x: 97, y: 35, num: 9, title: '🗑️ Delete Button (Trash Icon)', desc: 'Permanently removes the party. Shows a confirmation dialog first. WARNING: If the party has linked transactions (POs, sales, payments), deleting them may cause data inconsistencies. Only delete parties that were created by mistake and have no transactions.', type: 'danger' },
+        ],
+        workflow: '<ol><li>Before creating POs or sales, <strong>add all your parties first</strong></li><li>Click <strong>➕ Add Party</strong> → Enter name "Ravi Tamarind Traders", type "SUPPLIER", phone "9876543210"</li><li>Add their <strong>GSTIN</strong> (e.g., "37AABCT1234A1ZP") for tax invoices</li><li>Set <strong>State</strong> to "Andhra Pradesh" — this determines IGST vs SGST on purchases</li><li>Add <strong>Bank Details</strong> (A/C: "1234567890", IFSC: "SBIN0001234") for payment processing</li><li>Select <strong>Commodities</strong> they deal in (e.g., "Black Seed") — this filters them in PO/SO forms</li><li>Use <strong>Search</strong> to quickly find any party — type their name, phone, or GSTIN</li><li>Use <strong>Type Filter</strong> to see only suppliers or only buyers</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // BROKERS
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'brokers',
+        section: 'Master Data',
+        title: 'Brokers',
+        route: '/brokers',
+        screenshot: 'screenshots/05-brokers.png',
+        description: 'Manage commission agents (brokers/dalals) who facilitate purchases and sales. In the tamarind seed business, brokers connect you with suppliers and buyers and earn a commission per kg or per tonne. Add brokers here first — they can then be assigned to Purchase Orders and Sale Orders.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add Broker Button', desc: 'Opens a form to create a new broker. Fields:<br>• <strong>Name</strong> — e.g., "Suresh Dalal"<br>• <strong>Phone</strong> — e.g., "9988776655"<br>• <strong>Default Brokerage Rate</strong> — e.g., "₹0.25/kg" or "₹250/tonne"<br>This rate auto-fills when you assign the broker to a PO or SO, but can be overridden per order.', type: 'button' },
+          { x: 50, y: 30, num: 2, title: 'Broker List Table', desc: 'Shows all registered brokers with: Name, Phone Number, Default Brokerage Rate (₹/kg), and Edit/Delete actions. Example row: "Suresh Dalal | 9988776655 | ₹0.25/kg"', type: 'section' },
+          { x: 92, y: 30, num: 3, title: '✏️ Edit / 🗑️ Delete Buttons', desc: 'Edit: Update broker name, phone, or default rate. Example: Suresh raised his rate from ₹0.25 to ₹0.30/kg — edit his record.<br>Delete: Remove a broker. Warning: Brokers linked to existing POs/SOs should not be deleted.', type: 'button' },
+        ],
+        workflow: '<ol><li>Click <strong>➕ Add Broker</strong></li><li>Enter name "Suresh Dalal", phone "9988776655", rate "0.25" (₹/kg)</li><li>Now when you create a <strong>Purchase Order</strong>, you can select "Suresh Dalal" as the broker</li><li>The system auto-calculates brokerage: e.g., 50 tonnes × ₹0.25/kg = ₹12,500 brokerage</li><li>Track all pending brokerage payments in the <strong>Brokerage Report</strong></li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // PURCHASE ORDERS
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'purchase-orders',
+        section: 'Purchases',
+        title: 'Purchase Orders',
+        route: '/purchase-orders',
+        screenshot: 'screenshots/06-purchase-orders.png',
+        description: 'Create and manage Purchase Orders (POs) for buying raw tamarind seeds from suppliers. Every seed purchase starts here. A PO captures the supplier, quantity (in tonnes), agreed rate (₹/kg), price type (Base or Delivery), broker, and planned storage location. POs flow through statuses: PENDING → ARRIVED → COMPLETED.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Create PO Button', desc: 'Opens a form to create a new Purchase Order with fields:<br>• <strong>Date</strong> — PO date (defaults to today)<br>• <strong>Party</strong> — select supplier, e.g., "Ravi Traders" (only SUPPLIER/BOTH type parties shown)<br>• <strong>Price/kg</strong> — agreed rate, e.g., "₹22.00/kg"<br>• <strong>Price Type</strong> — "Base" (ex-works, we pay freight) or "Delivery" (supplier delivers, freight included in price)<br>• <strong>Planned Location</strong> — "RVP" (our factory) or "Stock" (external godown like PGR Cold or KNM Multi)<br>• <strong>Tonnage</strong> — quantity in tonnes, e.g., "50" = 50,000 kg<br>• <strong>Lorries</strong> — expected number of lorries (optional)<br>• <strong>Exclude GST</strong> — tick if this is a non-GST purchase<br>System auto-generates a PO number like "PO-2026-045".', type: 'button' },
+          { x: 50, y: 8, num: 2, title: '📋 Bulk Import Button', desc: 'Import multiple POs at once from an Excel/CSV file. Useful when you have a batch of orders to enter. Follow the template format for smooth import.', type: 'button' },
+          { x: 25, y: 15, num: 3, title: 'Status Filter Tabs', desc: 'Filter POs by status using segmented tabs:<br>• <strong>ALL</strong> — show all POs<br>• <strong>PENDING</strong> — PO created, no stock arrived yet (yellow badge)<br>• <strong>ARRIVED</strong> — at least one lorry arrived (blue badge)<br>• <strong>CANCELLED</strong> — order cancelled (red badge)<br>Example: Click "PENDING" to see which suppliers haven\'t shipped yet — follow up with them!', type: 'button' },
+          { x: 50, y: 15, num: 4, title: 'KPI Summary Cards', desc: 'Quick stats at the top showing: Total POs, Total Tonnage Ordered, Total Arrived, Pending Arrivals. Example: "45 POs | 2,250 t ordered | 1,800 t arrived | 450 t pending"', type: 'display' },
+          { x: 50, y: 45, num: 5, title: 'PO Cards / Table', desc: 'Each PO is shown as an expandable card with: PO Number (e.g., "PO-2026-045"), Date, Party Name, Tonnage ordered vs arrived, Price/kg, Price Type (Base/Delivery), Status badge, and Broker name. Click the row/chevron ▸ to expand and see linked Stock In entries (lorry arrivals) under this PO.', type: 'section' },
+          { x: 92, y: 45, num: 6, title: '✏️ Edit PO', desc: 'Modify the PO — change tonnage, rate, broker, or location. Example: Ravi Traders negotiated the price down from ₹22 to ₹21.50/kg — edit the PO to update. Cannot edit if PO is COMPLETED.', type: 'button' },
+          { x: 97, y: 45, num: 7, title: '🗑️ Delete / ✖ Cancel PO', desc: 'Delete removes the PO entirely (only if no arrivals linked). Cancel changes status to CANCELLED — the PO remains visible but inactive. Example: Cancel a PO if the supplier cannot deliver.', type: 'danger' },
+          { x: 95, y: 8, num: 8, title: '📥 Export (Excel/PDF)', desc: 'Export the filtered PO list to Excel with all columns: Date, PO Number, Party, Price/kg, Price Type, Tonnage, Arrived status. Useful for sharing with management or auditors.', type: 'button' },
+        ],
+        workflow: '<ol><li>Click <strong>➕ Create PO</strong></li><li>Select supplier "Ravi Traders" from the dropdown</li><li>Enter rate <strong>₹22.00/kg</strong>, type <strong>Base</strong></li><li>Enter <strong>50 tonnes</strong>, set location to <strong>RVP</strong></li><li>Optionally assign broker "Suresh Dalal"</li><li>Click <strong>Save</strong> — PO number "PO-2026-045" is generated</li><li>Status starts as <strong>PENDING</strong></li><li>When the lorry arrives, record it in <strong>Stock In</strong> (linked to this PO)</li><li>PO status auto-changes to <strong>ARRIVED</strong> after first arrival</li><li>Filter by "PENDING" to see which orders haven\'t arrived yet — follow up with suppliers!</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // STOCK IN
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'stock-in',
+        section: 'Purchases',
+        title: 'Stock In',
+        route: '/stock-in',
+        screenshot: 'screenshots/07-stock-in.png',
+        description: 'Record lorry arrivals when raw tamarind seeds arrive at your facility. This is the second step in the purchase flow (after PO creation). Capture lorry number, weights, invoice details, and link to the corresponding PO. The page features AI-powered invoice scanning — paste or upload a supplier invoice image and the system auto-extracts invoice number, lorry number, weight, and party details.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Record Arrival Button', desc: 'Opens a form to log a new lorry arrival:<br>• <strong>Purchase Order</strong> — select the linked PO, e.g., "PO-2026-045 (Ravi Traders)"<br>• <strong>Arrival Date</strong> — when the lorry arrived<br>• <strong>Lorry Number</strong> — e.g., "AP 05 AB 1234"<br>• <strong>Invoice Number</strong> — supplier\'s invoice, e.g., "INV/2026/789"<br>• <strong>Loading Location</strong> — RVP, PGR Cold, or KNM Multi<br>• <strong>RVP First Weight (kg)</strong> — initial weighbridge reading, e.g., "25,200 kg"<br>• <strong>Billing Weight (kg)</strong> — weight on supplier\'s invoice, e.g., "25,000 kg"<br>• <strong>Party Kata (kg)</strong> — party\'s own weighbridge reading', type: 'button' },
+          { x: 60, y: 8, num: 2, title: '🤖 AI Invoice Scan (Paste/Upload)', desc: 'SMART FEATURE: Upload or paste (Ctrl+V) a photo of the supplier\'s invoice. The AI extracts: invoice number, lorry number, date, weight, party name, and rate — and auto-fills the form! Example: Take a photo of the paper invoice on your phone, copy it, and press Ctrl+V on this page. The system reads the image and fills in the details. You just verify and save.', type: 'button' },
+          { x: 25, y: 15, num: 3, title: 'Status Filter — Pending / Purchased', desc: 'Filter arrivals by their verification status:<br>• <strong>Pending</strong> — arrived but not yet verified/purchased (needs weight verification)<br>• <strong>Purchased</strong> — verified and confirmed, stock added to inventory<br>Example: Click "Pending" to see which arrivals need your attention for verification.', type: 'button' },
+          { x: 50, y: 15, num: 4, title: 'KPI Cards — Arrivals Summary', desc: 'Shows: Total Arrivals count, Lorries pending verification, Total weight received. Example: "38 arrivals | 5 pending | 9,50,000 kg received"', type: 'display' },
+          { x: 50, y: 45, num: 5, title: 'Arrivals Table (Expandable Cards)', desc: 'Each arrival is shown as a card: PO Number, Party Name, Arrival Date, Lorry Number, Invoice Number, Location, Weights (RVP First / Billing / Party Kata), and status (Pending/Purchased). Click ▸ to expand and see full details including weight comparison. Example: "PO-2026-045 | Ravi Traders | AP 05 AB 1234 | RVP First: 25,200 kg | Billing: 25,000 kg"', type: 'section' },
+          { x: 92, y: 45, num: 6, title: '📄 Print Lorry Receipt', desc: 'Generate a printable lorry receipt (LR) for the arrival. Contains: Company details, lorry number, driver name, weights, bags count, and a signature area. Print for the driver to acknowledge delivery.', type: 'button' },
+          { x: 97, y: 45, num: 7, title: '✏️ Edit / 🗑️ Delete', desc: 'Edit: Correct arrival details like wrong lorry number or weight. Delete: Remove the arrival record entirely (only if not yet verified).', type: 'button' },
+        ],
+        workflow: '<ol><li>A lorry arrives at the factory with tamarind seeds from "Ravi Traders"</li><li>Click <strong>➕ Record Arrival</strong></li><li>Select PO <strong>"PO-2026-045 (Ravi Traders)"</strong></li><li>Enter lorry number <strong>"AP 05 AB 1234"</strong></li><li>📸 <strong>OR</strong> take a photo of the supplier invoice, paste it (Ctrl+V) — AI auto-fills invoice no, weight, etc.</li><li>Enter weights: RVP First Weight <strong>25,200 kg</strong>, Party Kata <strong>25,000 kg</strong></li><li>Select location <strong>"RVP"</strong></li><li>Click <strong>Save</strong> — arrival is recorded with "Pending" status</li><li>Now go to <strong>Verification</strong> page to quality-check and approve this lot</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // STOCK IN DETAIL
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'stock-in-detail',
+        section: 'Purchases',
+        title: 'Stock in Detail',
+        route: '/purchases',
+        screenshot: 'screenshots/08-stock-in-detail.png',
+        description: 'A detailed, table-based view of all purchase entries (post-verification). Shows the complete weight breakdown with Party-side vs RVP-side measurements, kata (weighbridge) comparisons, invoice details, pricing, and total value. This is your audit trail for every kg of seed purchased.',
+        annotations: [
+          { x: 50, y: 35, num: 1, title: 'Detailed Purchase Table', desc: 'Comprehensive table with columns:<br>• PO Number, Date, Party Name<br>• Invoice Number, Lorry Number<br>• Location (RVP / PGR Cold / KNM Multi)<br>• <strong>RVP First Weight</strong> — your weighbridge reading<br>• <strong>Billing Weight</strong> — on supplier invoice<br>• <strong>Party Kata</strong> — party\'s weighbridge<br>• <strong>Price/kg</strong> — agreed rate<br>• <strong>Purchased</strong> — Yes/Awaiting<br>Example row: "PO-2026-045 | 10 Aug | Ravi Traders | INV/789 | AP 05 AB 1234 | RVP | 25,200 kg | 25,000 kg | 24,800 kg | ₹22.00 | Yes"', type: 'section' },
+          { x: 90, y: 8, num: 2, title: '📥 Export Buttons', desc: 'Export the entire purchase detail table to Excel or PDF. All columns included. Excel format includes proper number formatting and column widths. Useful for: sharing with your accountant, bank loan documentation, or annual audit.', type: 'button' },
+        ],
+        workflow: 'This page is for <strong>reference and auditing</strong>. Use it to:<br>• Compare party-reported weights vs your RVP measurements (catch discrepancies!)<br>• Check which lots are "Awaiting" verification<br>• Export to Excel for your accountant',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // VERIFICATION
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'verification',
+        section: 'Purchases',
+        title: 'Verification',
+        route: '/verification',
+        screenshot: 'screenshots/09-verification.png',
+        description: 'The final step in the purchase flow — quality verification. For each arrived lot, enter your own weight measurements (RVP kata), review the cross-verification calculation (compares billing weight, party kata, and RVP kata to pick the fairest weight), add quality adjustments (deductions for moisture, foreign matter, broken seeds), and approve the purchase. This finalizes the cost and adds the stock to your inventory.',
+        annotations: [
+          { x: 25, y: 12, num: 1, title: 'Status Filter — ALL / PENDING / APPROVED', desc: 'Filter purchases by verification status:<br>• <strong>ALL</strong> — show everything<br>• <strong>PENDING</strong> — not yet verified, needs your action<br>• <strong>APPROVED</strong> — already verified and confirmed<br>Focus on PENDING ones — those are awaiting your quality check.', type: 'button' },
+          { x: 50, y: 12, num: 2, title: 'Party Filter', desc: 'Filter by supplier party. Useful when you want to verify all lots from a specific supplier at once. Example: Select "Ravi Traders" to see only their pending verifications.', type: 'field' },
+          { x: 50, y: 15, num: 3, title: 'KPI Cards — Verification Summary', desc: 'Shows: Total Purchases count, Pending Verification count, Approved count. Example: "38 total | 5 pending | 33 approved"', type: 'display' },
+          { x: 50, y: 40, num: 4, title: 'Purchase List (Pending/Approved)', desc: 'Table of all purchase entries showing: PO number, Party, Invoice, Lorry, Date, Billing Weight, Party Kata, RVP Kata (if verified), Price/kg, and Verification Status badge. Click on a row to open the verification form.', type: 'section' },
+          { x: 90, y: 40, num: 5, title: '✅ Verify Button', desc: 'Opens the detailed verification dialog for a specific lot. Inside you\'ll find:<br>• <strong>Cross-Verification</strong>: System compares Billing Wt, Party Kata, RVP Kata and picks the reference weight (lowest of party kata and RVP kata, unless difference is within tolerance)<br>• <strong>Quality Adjustments</strong>: Add deduction rows for weight cuts (kg), price cuts (₹/kg), or flat amount deductions for moisture, foreign matter, broken seeds, etc.<br>• <strong>Bill Addables</strong>: Extra charges like loading charges, brokerage<br>• <strong>Final Calculation</strong>: Shows base cost, deductions, GST (5% IGST if applicable), hamali recovery, and net payable<br>Example: Billing 25,000 kg × ₹22/kg = ₹5,50,000 base. Deduction 200 kg for moisture = ₹4,400 cut. IGST 5% on billing = ₹27,500. Net payable = ₹5,73,100.', type: 'button' },
+          { x: 90, y: 60, num: 6, title: '↩️ Undo Verification', desc: 'Reverses a previously approved verification. The purchase goes back to "PENDING" status. Use when you made an error in the verification. Example: You entered wrong RVP kata — undo, correct the weight, and re-verify.', type: 'button' },
+        ],
+        workflow: '<ol><li>Go to Verification page → Filter by <strong>PENDING</strong></li><li>Click a pending entry (e.g., "PO-2026-045, Ravi Traders, Lorry AP 05 AB 1234")</li><li>The system shows cross-verification: Billing 25,000 kg vs Party Kata 24,800 kg vs RVP Kata 24,750 kg</li><li>System picks reference weight: <strong>24,800 kg</strong> (within tolerance)</li><li>Add quality adjustments if needed:<br>— Weight deduction: 150 kg for foreign matter<br>— Price deduction: ₹0.50/kg for high moisture</li><li>Review the final calculation: Base ₹5,45,600 – ₹3,300 deduction + ₹27,280 IGST = <strong>₹5,69,580 net payable</strong></li><li>Click <strong>Approve</strong> — the lot is now verified, stock added to inventory</li><li>The supplier\'s account is debited with ₹5,69,580 in the Party Ledger</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // BLACK SEED STOCK
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'black-seed-stock',
+        section: 'Stock',
+        title: 'Black Seed Stock',
+        route: '/stock/overview',
+        screenshot: 'screenshots/10-black-seed-stock.png',
+        description: 'Real-time inventory of all raw tamarind seed (black seed) stock on hand. Each verified purchase lot appears as a row showing party, weight, location, purchase price, and total value. This is your primary inventory register for raw materials.',
+        annotations: [
+          { x: 30, y: 13, num: 1, title: 'Stock Summary — Total On Hand', desc: 'Total raw stock across all locations. Example: "1,24,500 kg" (124.5 tonnes). If this drops below your processing needs, create more Purchase Orders.', type: 'display' },
+          { x: 50, y: 13, num: 2, title: 'Stock Summary — Total Value', desc: 'Total value of all stock at purchase price. Example: "₹27,39,000". Useful for bank pledge value calculations and insurance.', type: 'display' },
+          { x: 70, y: 13, num: 3, title: 'Stock Summary — Avg Price/kg', desc: 'Weighted average purchase price across all lots. Example: "₹22.00/kg". Helps set a minimum sale price for pappu to ensure profitability.', type: 'display' },
+          { x: 50, y: 45, num: 4, title: 'Stock Lots Table', desc: 'Each row is one purchase lot: Date, Invoice No, Party Name, PO Number, Lorry Number, Net Weight (kg), Location (RVP/PGR Cold/KNM Multi), Price/kg, Total Value, Verified status. Example: "10 Aug | INV/789 | Ravi Traders | PO-045 | AP 05 AB 1234 | 24,750 kg | RVP | ₹22.00 | ₹5,44,500 | ✓"', type: 'section' },
+          { x: 90, y: 8, num: 5, title: '📥 Export to Excel', desc: 'Export the entire stock register to Excel. Includes all lot details. Use for: bank pledge statements, insurance declarations, stock audits, and management reporting.', type: 'button' },
+        ],
+        workflow: 'Review this page to know <strong>exactly how much raw stock you have</strong>:<br>• Check <strong>Total On Hand</strong> — is it enough for this week\'s processing?<br>• Check <strong>Avg Price</strong> — this determines your break-even pappu sale price<br>• Look for old lots (sort by date) — process these first (FIFO)<br>• Export to Excel for your bank\'s stock statement',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // ORDER PLANNER
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'order-planner',
+        section: 'Stock',
+        title: 'Order Planner',
+        route: '/stock/price',
+        screenshot: 'screenshots/11-order-planner.png',
+        description: 'Strategic planning tool — view stock grouped by purchase price bands. Shows how much stock you have at each price point, helping you match stock cost to sale orders for maximum profitability. Also shows projected pappu output and committed vs available quantities.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'Price Band Table', desc: 'Stock grouped by purchase price per kg, showing:<br>• Price band (e.g., "₹20-21/kg")<br>• Black seed quantity available at this price<br>• Projected pappu output (at ~60% yield)<br>• Already committed to sale orders<br>• Remaining available for new sales<br>Example: "₹22/kg band: 50,000 kg seed → ~30,000 kg pappu → 20,000 kg committed → 10,000 kg available"', type: 'section' },
+          { x: 50, y: 12, num: 2, title: 'Pappu/Husk/Waste Projections', desc: 'Summary cards showing total projected output:<br>• <strong>Available Pappu</strong>: seed × 60% yield = pappu available to sell<br>• <strong>Committed Pappu</strong>: already allocated to sale orders<br>• <strong>Available Husk</strong>: seed × 25% = husk yield<br>• <strong>Available Waste</strong>: seed × 10% = waste yield<br>These help you decide how many new sale orders you can accept.', type: 'display' },
+        ],
+        workflow: '<ol><li>Before creating a new <strong>Sale Order</strong>, check this page</li><li>See how much pappu you can produce at each cost point</li><li>If a buyer offers ₹35/kg for pappu, find stock bands where seed cost allows profit:<br>— Seed at ₹20/kg → pappu cost ~₹33/kg → ₹2/kg profit ✓<br>— Seed at ₹24/kg → pappu cost ~₹40/kg → ₹5/kg LOSS ✗</li><li>Allocate cheaper stock to lower-margin orders, premium stock to high-value deals</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // REMAINING STOCK PAGES (Stock by Date, Location, Transfer, Party, State)
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'stock-by-date',
+        section: 'Stock',
+        title: 'Stock by Date (FIFO)',
+        route: '/stock/date',
+        screenshot: 'screenshots/12-stock-by-date.png',
+        description: 'Stock organized by arrival date — oldest first (FIFO). Ensures you process and sell the oldest stock first to maintain quality. Tamarind seeds degrade over time, so FIFO is critical for quality management.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'Date-Sorted Stock Table', desc: 'All stock lots sorted by arrival date (oldest at top). Columns: Date, Party, Weight, Location, Price, Days in Stock. Example: A lot from "15 Jun" is now 55 days old — process it before newer stock! Lots older than 90 days should be prioritized. Color-coded aging: green (<30 days), yellow (30-60), orange (60-90), red (>90 days).', type: 'section' },
+        ],
+        workflow: 'Follow <strong>FIFO principles</strong>: Process the oldest stock first to prevent quality degradation. Lots over 90 days old should be processed immediately.',
+      },
+      {
+        id: 'stock-by-location',
+        section: 'Stock',
+        title: 'Stock by Location (Band Price)',
+        route: '/stock/location',
+        screenshot: 'screenshots/13-stock-by-location.png',
+        description: 'View stock grouped by physical storage location with price banding. Three locations are used: RVP (main factory), PGR Cold (cold storage), and KNM Multi (multi-purpose godown). Each location shows total quantity, value, and lot-level details.',
+        annotations: [
+          { x: 50, y: 25, num: 1, title: 'Location Groups', desc: 'Stock grouped by godown with totals:<br>• <strong>RVP</strong> — main factory storage, e.g., "75,000 kg | ₹16,50,000"<br>• <strong>PGR Cold</strong> — cold storage for longer shelf life, e.g., "30,000 kg | ₹6,60,000"<br>• <strong>KNM Multi</strong> — overflow multi-purpose godown, e.g., "19,500 kg | ₹4,29,000"<br>Each location expands to show individual lots.', type: 'section' },
+          { x: 85, y: 8, num: 2, title: 'Location Filter', desc: 'Filter to view stock at a specific location only. Example: Select "PGR Cold" to see only the lots stored in cold storage — useful for pledge-release planning.', type: 'field' },
+        ],
+        workflow: 'Check this page to know <strong>where your stock is physically stored</strong>. If one godown is overstocked, transfer some to another using <strong>Stock Transfer</strong>.',
+      },
+      {
+        id: 'stock-transfer',
+        section: 'Stock',
+        title: 'Stock Transfer',
+        route: '/stock/transfer',
+        screenshot: 'screenshots/14-stock-transfer.png',
+        description: 'Transfer stock between storage locations. When you need to move seeds from one godown to another (e.g., from PGR Cold to RVP for processing, or from RVP to KNM Multi for overflow), record the transfer here.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ New Transfer Button', desc: 'Create a new stock transfer:<br>• <strong>Stock Lot</strong> — select which lot to move (dropdown shows party, weight, location)<br>• <strong>From Location</strong> — source godown (auto-filled from lot\'s current location)<br>• <strong>To Location</strong> — destination godown, e.g., "RVP"<br>• <strong>Quantity (kg)</strong> — how much to move (can be partial, e.g., move 10,000 kg out of 25,000 kg)<br>• <strong>Date</strong> — when the transfer happened<br>Example: Transfer 15,000 kg from "PGR Cold" to "RVP" for processing.', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Transfer History', desc: 'Log of all transfers showing: Date, Lot (Party/Invoice), From Location → To Location, Quantity moved (kg). Provides a complete audit trail of physical stock movements.', type: 'section' },
+        ],
+        workflow: '<ol><li>Click <strong>New Transfer</strong></li><li>Select the lot: "Ravi Traders, PGR Cold, 25,000 kg"</li><li>To Location: <strong>RVP</strong></li><li>Quantity: <strong>15,000 kg</strong> (partial transfer)</li><li>Save — Stock by Location now shows 10,000 kg remaining at PGR Cold and 15,000 kg added to RVP</li></ol>',
+      },
+      {
+        id: 'purchases-by-party',
+        section: 'Stock',
+        title: 'Purchases by Party',
+        route: '/stock/party',
+        screenshot: 'screenshots/15-purchases-by-party.png',
+        description: 'Analyze your purchasing patterns by supplier. See which suppliers provide the most stock, at what rates, and in what quantities — helps evaluate supplier reliability and negotiate better deals.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'Party-wise Breakdown', desc: 'Each supplier shown with:<br>• Total quantity purchased (kg and tonnes)<br>• Number of lots/lorries<br>• Average rate paid (₹/kg)<br>• Total value (₹)<br>Example: "Ravi Traders: 12 lots | 2,98,000 kg | Avg ₹21.50/kg | ₹64,07,000"<br>Compare this with "Kumar Seeds: 5 lots | 1,25,000 kg | Avg ₹23.00/kg" — Ravi gives better rates!', type: 'section' },
+        ],
+        workflow: 'Use this to <strong>evaluate suppliers</strong>: Who gives the best rates? Who delivers most reliably? Who provides the best quality? Negotiate future POs based on this data.',
+      },
+      {
+        id: 'stock-by-state',
+        section: 'Stock',
+        title: 'Stock by State',
+        route: '/stock/state',
+        screenshot: 'screenshots/16-stock-by-state.png',
+        description: 'View purchases grouped by the supplier\'s state. Critical for GST compliance — intrastate purchases (same state, e.g., both in Andhra Pradesh) attract CGST+SGST, while interstate purchases attract IGST at 5%.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'State-wise Stock Summary', desc: 'Purchases grouped by supplier state. Example:<br>• <strong>Andhra Pradesh</strong>: 85,000 kg | ₹18,70,000 (intrastate → CGST 2.5% + SGST 2.5%)<br>• <strong>Telangana</strong>: 25,000 kg | ₹5,50,000 (interstate → IGST 5%)<br>• <strong>Karnataka</strong>: 14,500 kg | ₹3,19,000 (interstate → IGST 5%)<br>Helps your CA prepare state-wise GST returns (GSTR-3B).', type: 'section' },
+        ],
+        workflow: 'Share this report with your <strong>CA/accountant</strong> for GST return filing. It clearly shows which purchases are IGST vs CGST+SGST.',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // PAPPU CALCULATOR
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'pappu-calculator',
+        section: 'Tools',
+        title: 'Pappu Calculator',
+        route: '/pappu-calculator',
+        screenshot: 'screenshots/17-pappu-calculator.png',
+        description: 'A cost-analysis calculator that computes pappu production economics. Input your black seed purchase price, milling cost, and byproduct sale prices — the calculator shows your pappu cost per kg, break-even sale price, and profit at various margins. Auto-fills defaults from your actual stock data.',
+        annotations: [
+          { x: 30, y: 20, num: 1, title: 'Black Seed Price Input (₹/kg)', desc: 'Enter the purchase price of raw tamarind seeds. Example: "22" for ₹22/kg. Auto-filled from your stock\'s weighted average price. This is the biggest cost component — typically 60-70% of pappu cost.', type: 'field' },
+          { x: 30, y: 30, num: 2, title: 'Milling Cost Input (₹/kg)', desc: 'Processing cost per kg of raw seed input. Includes: electricity, labor, machine depreciation. Example: "1.00" for ₹1/kg. This covers your factory overheads.', type: 'field' },
+          { x: 30, y: 40, num: 3, title: 'Husk Price & Waste Price (₹/kg)', desc: 'Sale price of byproducts. Husk (seed shells): e.g., "1.50" ₹/kg. Waste: e.g., "1.00" ₹/kg. These REDUCE your net cost — higher byproduct prices mean cheaper pappu production.', type: 'field' },
+          { x: 30, y: 50, num: 4, title: 'Out-Turn % (Pappu Yield)', desc: 'What percentage of raw seed converts to pappu. Default: 60%. Meaning 1,000 kg seed → 600 kg pappu + 250 kg husk + 100 kg waste + 50 kg loss. Adjust based on actual yields.', type: 'field' },
+          { x: 30, y: 60, num: 5, title: 'Margin % Slider', desc: 'Desired profit margin as a percentage. Example: 15% margin. Calculator shows the required sale price to achieve this margin.', type: 'field' },
+          { x: 30, y: 70, num: 6, title: 'Freight Destination Selector', desc: 'Select a delivery destination from your freight rate table. Adds freight cost per tonne to the landed cost. Example: "Hyderabad — ₹3,500/t" adds ₹3.50/kg to the cost.', type: 'field' },
+          { x: 70, y: 25, num: 7, title: 'Calculation Results — Cost Breakdown', desc: 'Shows per-1000 kg of seed input:<br>• Raw Seed Cost: 1000 × ₹22 = <strong>₹22,000</strong><br>• Milling Cost: 1000 × ₹1 = <strong>₹1,000</strong><br>• Total Gross Cost: <strong>₹23,000</strong><br>• Less Husk Revenue: 250 × ₹1.50 = <strong>-₹375</strong><br>• Less Waste Revenue: 100 × ₹1.00 = <strong>-₹100</strong><br>• Net Cost for 600 kg pappu: <strong>₹22,525</strong><br>• <strong>Pappu Cost/kg: ₹37.54</strong>', type: 'display' },
+          { x: 70, y: 55, num: 8, title: 'Pricing Cards — Break-Even & Target', desc: 'Shows three key prices:<br>• <strong>Break-Even</strong>: Minimum sale price to cover costs (e.g., ₹37.54/kg)<br>• <strong>At 15% Margin</strong>: Price needed for target profit (e.g., ₹43.17/kg)<br>• <strong>With Freight</strong>: Delivered price including transport (e.g., ₹46.67/kg)', type: 'display' },
+          { x: 70, y: 75, num: 9, title: 'Inventory Projections', desc: 'Live data from your stock:<br>• <strong>Available Pappu</strong>: how much pappu your current seed stock can produce<br>• <strong>Committed Pappu</strong>: already allocated to existing sale orders<br>• <strong>Free to Sell</strong>: available for new orders<br>Example: Available 75,000 kg – Committed 50,000 kg = <strong>25,000 kg free to sell</strong>', type: 'display' },
+        ],
+        workflow: '<ol><li>Check the auto-filled <strong>Black Seed Price</strong> (your stock average)</li><li>Adjust <strong>Milling Cost</strong> and <strong>Byproduct Prices</strong> if needed</li><li>Set your desired <strong>Margin %</strong> (e.g., 15%)</li><li>Select a <strong>Freight Destination</strong> if quoting delivered price</li><li>Read the <strong>Target Price</strong> — this is the minimum you should quote to the buyer</li><li>Example: Seed at ₹22/kg → Pappu break-even ₹37.54/kg → At 15% margin: <strong>quote ₹43/kg minimum</strong></li><li>Check <strong>Free to Sell</strong> to confirm you have enough stock for the order</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // SALE ORDERS
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'sale-orders',
+        section: 'Sales',
+        title: 'Sale Orders',
+        route: '/sale-orders',
+        screenshot: 'screenshots/18-sale-orders.png',
+        description: 'Create and manage Sale Orders for all processed products: Pappu, Husk, TPS (Brokens), Tamarind Shell, Pre-Cleaner Dust, Tamarind Waste, Nalla Pokkulu, and Nalla Chintapandu. This is the master sales register. Orders track buyer, product, quantity, rate, broker, dispatches, invoices, and payment status.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Create Sale Order Button', desc: 'Opens form to create a new sale:<br>• <strong>Date</strong> — sale date (defaults today)<br>• <strong>Product</strong> — Pappu, Husk, TPS, Shell, Pre-Cleaner Dust, Waste, Nalla Pokkulu, Nalla Chintapandu<br>• <strong>Buyer</strong> — select from buyer parties (filtered by commodity match)<br>• <strong>Broker</strong> — optional commission agent<br>• <strong>Tonnage</strong> — quantity in tonnes, e.g., "10" = 10,000 kg<br>• <strong>Rate/kg</strong> — agreed price, e.g., "₹42.00"<br>• <strong>Price Type</strong> — "Delivery" (we pay freight) or "Base" (buyer pays freight)<br>• <strong>Due Days</strong> — payment terms, e.g., "30" = Net 30 days<br>• <strong>Reminder Date</strong> — when to send payment reminder via WhatsApp<br>• <strong>GST Exempt</strong> — tick if no GST applies<br>Example: Pappu sale to "Sai Foods, Hyderabad" for 10 tonnes at ₹42/kg, delivery basis, 30-day payment terms.', type: 'button' },
+          { x: 25, y: 12, num: 2, title: 'Status Filter Tabs', desc: 'Filter by order lifecycle:<br>• <strong>ALL</strong> — all orders<br>• <strong>PENDING</strong> — created, not yet dispatched (yellow)<br>• <strong>PARTIAL</strong> — some dispatches made, more remaining<br>• <strong>DISPATCHED</strong> — fully dispatched, pending payment<br>Click "PENDING" to see orders waiting for dispatch.', type: 'button' },
+          { x: 45, y: 12, num: 3, title: 'Payment Status Filter', desc: 'Filter by payment status: All, Received (fully paid), Pending (balance outstanding). Example: Click "Pending" to see orders where buyers haven\'t paid yet — follow up!', type: 'button' },
+          { x: 60, y: 12, num: 4, title: 'Product Filter', desc: 'Filter by product type: ALL, Pappu, Husk, TPS, etc. Example: Select "PAPPU" to see only pappu sale orders.', type: 'button' },
+          { x: 75, y: 12, num: 5, title: 'Broker & Party Filters', desc: 'Filter by specific broker or buyer party. Also supports date range filtering (From/To date).', type: 'field' },
+          { x: 50, y: 45, num: 6, title: 'Sale Orders Table', desc: 'Each row shows: Date, Product badge (Pappu/Husk/etc), Buyer name, Broker, Destination, Tonnage (ordered/dispatched/remaining/short), Rate/kg, Price Type, Status badge, Payment status. Example: "10 Aug | PAPPU | Sai Foods | Suresh | Hyderabad | 10.00t / 6.00t / 4.00t | ₹42.00 | Delivery | PARTIAL | ₹1,76,400 pending"', type: 'section' },
+          { x: 92, y: 45, num: 7, title: '✏️ Edit / 🗑️ Delete Order', desc: 'Edit: Change buyer, rate, tonnage, broker, or payment terms. Delete: Remove the order (only if no dispatches linked).', type: 'button' },
+          { x: 95, y: 8, num: 8, title: '📥 Export & Bulk Import', desc: 'Export: Download all sale orders to Excel with full details. Bulk Import: Import multiple orders from Excel/CSV template.', type: 'button' },
+        ],
+        workflow: '<ol><li>Click <strong>➕ Create Sale Order</strong></li><li>Select product <strong>PAPPU</strong>, buyer <strong>"Sai Foods"</strong></li><li>Enter <strong>10 tonnes</strong> at <strong>₹42/kg</strong>, <strong>Delivery</strong> basis</li><li>Set due days <strong>30</strong>, assign broker <strong>"Suresh"</strong></li><li>Save — order appears as <strong>PENDING</strong></li><li>When ready to ship, go to <strong>Pappu (Sales)</strong> page to record dispatch</li><li>Dispatches include: lorry details, weights, invoice generation, e-Way Bill, WhatsApp notification to buyer</li><li>Payment tracked automatically — order moves to <strong>PAID</strong> when fully settled</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // PAPPU SALES & OTHER PRODUCTS (abbreviated for remaining pages)
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'pappu-sales',
+        section: 'Sales',
+        title: 'Pappu (Sales)',
+        route: '/sales/pappu',
+        screenshot: 'screenshots/19-pappu-sales.png',
+        description: 'The primary sales page for Pappu (Tamarind Seed Kernel Powder). Manages the full dispatch lifecycle: creating dispatches, entering lorry details, weighing, generating invoices with IRN/e-Way Bill, printing invoices, and sending WhatsApp dispatch notifications to buyers, brokers, and drivers.',
+        annotations: [
+          { x: 25, y: 12, num: 1, title: 'Status & Payment Filters', desc: 'Filter pappu orders by status (Pending/Partial/Dispatched/Delivered/Paid) and payment status. Also filter by broker or buyer party.', type: 'button' },
+          { x: 50, y: 15, num: 2, title: 'Sales KPI Cards', desc: 'Quick stats: Total orders, Total tonnage, Dispatched tonnage, Revenue, and Outstanding receivables.', type: 'display' },
+          { x: 50, y: 40, num: 3, title: 'Sale Order Cards (Expandable)', desc: 'Each pappu sale order shown as a card. Click ▸ to expand and see:<br>• <strong>Dispatch details</strong>: lorry number, driver name/phone, weights (gross/tare/net), invoice number<br>• <strong>Invoice actions</strong>: Generate IRN, Generate e-Way Bill, Print Invoice, Send WhatsApp<br>• <strong>Payment status</strong>: amount billed, amount received, balance<br>Example: "Sai Foods | 10t @ ₹42/kg | 2 dispatches (6t done, 4t remaining)"', type: 'section' },
+          { x: 90, y: 40, num: 4, title: '🚚 Add Dispatch Button', desc: 'Record a new dispatch for a pending order:<br>• <strong>Lorry Number</strong> — e.g., "TS 07 UA 5678"<br>• <strong>Driver Name & Phone</strong><br>• <strong>Gross Weight (kg)</strong> — loaded lorry on weighbridge<br>• <strong>Tare Weight (kg)</strong> — empty lorry weight<br>• Net weight auto-calculated (gross – tare)<br>• <strong>Invoice Number</strong> — auto-generated as "RVP/2026/001"<br>After saving, generates the tax invoice with GST details.', type: 'button' },
+          { x: 95, y: 50, num: 5, title: '📄 Print Invoice / 📱 WhatsApp', desc: 'Print: Generates a professional tax invoice PDF with: seller/buyer GSTIN, HSN code, weights, rate, GST breakup, bank details, and authorized signature.<br>WhatsApp: Sends dispatch notification to buyer (with invoice details), broker (with commission info), and driver (with delivery address). Shows status: "Buyer: sent ✓ | Broker: sent ✓ | Driver: skipped (no phone)"', type: 'button' },
+          { x: 95, y: 60, num: 6, title: '🔖 Generate IRN & e-Way Bill', desc: 'Integrates with the GST portal (via TaxPro GSP) to generate:<br>• <strong>IRN</strong> (Invoice Reference Number) — for e-invoicing compliance<br>• <strong>e-Way Bill</strong> — required for transporting goods worth >₹50,000<br>After generation, the IRN/EWB numbers appear on the invoice. Auto-sends WhatsApp after both are done.', type: 'button' },
+        ],
+        workflow: '<ol><li>Find the pending order for "Sai Foods" (10t pappu)</li><li>Click <strong>🚚 Add Dispatch</strong></li><li>Enter lorry <strong>"TS 07 UA 5678"</strong>, driver "Ramesh", phone "9876543210"</li><li>Enter gross <strong>16,500 kg</strong>, tare <strong>6,500 kg</strong> → net <strong>10,000 kg</strong></li><li>System auto-assigns invoice number <strong>"RVP/2026/015"</strong></li><li>Click <strong>Save</strong> — dispatch recorded</li><li>Click <strong>Generate IRN</strong> → then <strong>Generate e-Way Bill</strong></li><li>System auto-sends <strong>WhatsApp</strong> to Sai Foods with dispatch details</li><li>Click <strong>Print Invoice</strong> for a hard copy with the driver</li></ol>',
+      },
+      {
+        id: 'pappu-profit-loss',
+        section: 'Sales',
+        title: 'Pappu Profit & Loss',
+        route: '/sales/profit-loss',
+        screenshot: 'screenshots/20-pappu-profit-loss.png',
+        description: 'Analyze per-order profitability of pappu sales. For each sale order, the system allocates seed cost using FIFO-based date-aware band pricing, calculates freight, and shows the exact margin. Includes seed cost breakdown by price band.',
+        annotations: [
+          { x: 50, y: 15, num: 1, title: 'P&L Summary Cards', desc: 'Aggregate stats: Total Revenue, Total Seed Cost, Total Freight, Gross Profit, and Profit Margin %. Example: "Revenue ₹42,00,000 | Seed Cost ₹35,50,000 | Freight ₹1,20,000 | Profit ₹5,30,000 | Margin 12.6%"', type: 'display' },
+          { x: 50, y: 45, num: 2, title: 'Order-wise P&L Table', desc: 'Each sale order with:<br>• Buyer, Tonnage, Rate/kg<br>• <strong>Revenue</strong>: qty × rate<br>• <strong>Seed Cost</strong>: FIFO-allocated from purchase bands (e.g., 3t from ₹20/kg band + 7t from ₹22/kg band)<br>• <strong>Seed Cost per Pappu kg</strong>: e.g., ₹35.17/kg<br>• <strong>Freight</strong>: delivery cost<br>• <strong>Net Realization</strong>: revenue – freight<br>• <strong>Margin ₹/kg</strong> and <strong>Margin %</strong><br>• <strong>Seed Band Breakdown</strong>: clickable to see which price bands were used<br>Example: "Sai Foods | 10t | ₹42/kg | Rev ₹4,20,000 | Seed ₹3,51,700 | Freight ₹35,000 | Margin ₹3.33/kg (7.9%)"', type: 'section' },
+        ],
+        workflow: 'Review weekly to understand which orders are <strong>profitable</strong> and which are loss-making. If margin is negative, either negotiate higher prices or use cheaper seed stock.',
+      },
+      {
+        id: 'husk',
+        section: 'Sales',
+        title: 'Husk',
+        route: '/sales/husk',
+        screenshot: 'screenshots/21-husk.png',
+        description: 'Manage husk (tamarind seed shell/coat) sales. Husk is a byproduct — every 1,000 kg of seed produces ~250 kg of husk. The revenue from husk sales reduces your net pappu production cost.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add Husk Sale', desc: 'Record a new husk sale. Same workflow as pappu — select buyer, enter tonnage, rate, dispatch details, and generate invoice. Example: "10 tonnes husk to ABC Feeds at ₹1.50/kg = ₹15,000"', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Husk Sales Table', desc: 'All husk orders with buyer, tonnage, rate, dispatches, and payment status. Revenue from husk directly reduces your pappu production cost in the calculator.', type: 'section' },
+        ],
+        workflow: 'Same dispatch workflow as Pappu: Create order → Add dispatch → Generate invoice → Print/WhatsApp. Husk revenue is factored into the <strong>Pappu Calculator</strong> automatically.',
+      },
+      {
+        id: 'tps-brokens',
+        section: 'Sales',
+        title: 'TPS (Brokens)',
+        route: '/sales/tps',
+        screenshot: 'screenshots/22-tps-brokens.png',
+        description: 'Manage TPS (Tamarind Powder Seeds / Brokens) sales. TPS are broken or substandard seed fragments produced during milling. Sold as a separate lower-value product.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add TPS Sale', desc: 'Record a new TPS/brokens sale. Select buyer, enter quantity and rate. Example: "5 tonnes TPS to feed mill at ₹12/kg = ₹60,000"', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'TPS Sales Table', desc: 'All TPS transactions with full dispatch and invoicing workflow.', type: 'section' },
+        ],
+        workflow: 'TPS sales are a secondary revenue stream. Every kg sold contributes to offsetting production costs.',
+      },
+      {
+        id: 'byproducts',
+        section: 'Sales',
+        title: 'Tamarind Byproducts',
+        route: '/sales/byproducts',
+        screenshot: 'screenshots/23-byproducts.png',
+        description: 'Track sales of all remaining tamarind processing byproducts: Tamarind Shell, Pre-Cleaner Dust, Tamarind Waste, Nalla Pokkulu (good quality broken pieces), and Nalla Chintapandu (whole tamarind fruit rejects).',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add Byproduct Sale', desc: 'Record sale of any byproduct. Product types: Shell, Pre-Cleaner Dust, Waste, Nalla Pokkulu, Nalla Chintapandu. Each has its own HSN code and tax rate for invoicing.', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Byproduct Sales Table', desc: 'All byproduct transactions by product type with full sales lifecycle management.', type: 'section' },
+        ],
+        workflow: 'Every byproduct has value — even dust and shells. Recording these sales ensures your <strong>P&L is complete</strong> and shows true profitability.',
+      },
+      {
+        id: 'credit-debit-notes',
+        section: 'Sales',
+        title: 'Credit/Debit Notes',
+        route: '/sales/notes',
+        screenshot: 'screenshots/24-credit-debit-notes.png',
+        description: 'Issue Credit Notes (reduce buyer\'s outstanding) and Debit Notes (increase buyer\'s outstanding) for post-sale adjustments. Common reasons: quality complaints, weight discrepancies at buyer\'s end, rate corrections, or returns.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Create Note', desc: 'Create a new CN or DN:<br>• <strong>Type</strong>: Credit Note or Debit Note<br>• <strong>Party</strong>: select the buyer<br>• <strong>Linked Invoice</strong>: reference the original invoice number<br>• <strong>Reason</strong>: e.g., "Quality complaint - moisture above spec"<br>• <strong>Amount</strong>: adjustment value (₹)<br>Example: CN for Sai Foods — ₹5,000 quality deduction on Invoice RVP/2026/015 for high moisture.', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Notes Table', desc: 'All CN/DNs showing: Date, Type (CN/DN), Party, Linked Invoice, Reason, Amount, GST details. CNs appear as negative adjustments in the Party Ledger; DNs as positive.', type: 'section' },
+        ],
+        workflow: '<ol><li>Buyer "Sai Foods" complains about quality on Invoice RVP/2026/015</li><li>Click <strong>Create Note</strong> → Type: <strong>Credit Note</strong></li><li>Select party "Sai Foods", link to "RVP/2026/015"</li><li>Reason: "Quality complaint - high moisture", Amount: <strong>₹5,000</strong></li><li>Save — ₹5,000 is deducted from Sai Foods\' outstanding in <strong>Party Ledger</strong></li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // REPORTS
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'taxes',
+        section: 'Reports',
+        title: 'Taxes',
+        route: '/reports/taxes',
+        screenshot: 'screenshots/25-taxes.png',
+        description: 'Tax reporting hub with links to GST Report (GSTR-1/3B data), TDS Report, and other tax summaries. Aggregates all taxable transactions for compliance.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'Tax Report Navigation', desc: 'Links to: <strong>GST Report</strong> (B2B, B2C, HSN summary for GSTR-1 filing), <strong>TDS Report</strong> (TDS deducted on purchases — 194Q compliance), and other tax views. Each report can be exported for CA/auditor.', type: 'section' },
+        ],
+        workflow: 'Visit monthly for <strong>GST return preparation</strong>. Export GST data for your CA to file GSTR-1 and GSTR-3B. Export TDS data for TDS return filing.',
+      },
+      {
+        id: 'irn-ewb',
+        section: 'Reports',
+        title: 'IRN/EWB',
+        route: '/reports/irn-ewb',
+        screenshot: 'screenshots/26-irn-ewb.png',
+        description: 'Track e-Invoice (IRN) and e-Way Bill (EWB) status for every dispatch. Shows which invoices have generated IRN/EWB and which are pending — critical for GST compliance. Pending ones need immediate action!',
+        annotations: [
+          { x: 50, y: 25, num: 1, title: 'IRN/EWB Status Table', desc: 'Each dispatch listed with: Invoice number, Date, Buyer, Amount, IRN Status (✅ Generated / ❌ Pending), EWB Status (✅ Generated / ❌ Pending), EWB Number, and EWB Expiry date. Example: "RVP/2026/015 | Sai Foods | ₹4,41,000 | IRN: ✅ | EWB: ✅ | EWB# 1234567890 | Expires 25 Aug"', type: 'section' },
+          { x: 90, y: 25, num: 2, title: 'Generate / Cancel Buttons', desc: 'For pending invoices: Generate IRN, Generate e-Way Bill. For existing: Cancel IRN (within 24 hrs), Cancel e-Way Bill (within validity). Also: Extend EWB if goods not delivered before expiry.', type: 'button' },
+        ],
+        workflow: 'Check this page <strong>daily</strong> — any dispatch without IRN/EWB is non-compliant. Generate them immediately after recording a dispatch.',
+      },
+      {
+        id: 'purchase-dues',
+        section: 'Reports',
+        title: 'Purchase Dues',
+        route: '/reports/purchase-dues',
+        screenshot: 'screenshots/27-purchase-dues.png',
+        description: 'Supplier payment tracking — shows how much you owe each supplier. Calculates: Total purchases (verified amount) minus total payments made = balance due. Sorted by due amount to prioritize payments.',
+        annotations: [
+          { x: 50, y: 12, num: 1, title: 'Total Due Summary', desc: 'Grand total outstanding across ALL suppliers. Example: "₹45,23,000 total due to 18 suppliers". This is your total accounts payable.', type: 'display' },
+          { x: 50, y: 40, num: 2, title: 'Party-wise Dues Table', desc: 'Each supplier with: Name, Total Purchases (₹), Payments Made (₹), Balance Due (₹), Number of pending invoices. Sorted by balance (highest first). Example: "Ravi Traders | Purchases ₹25,50,000 | Paid ₹18,00,000 | Due ₹7,50,000 | 3 invoices pending"', type: 'section' },
+          { x: 90, y: 8, num: 3, title: '📥 Export', desc: 'Export the dues report to Excel for sharing with your finance team or for bank loan documentation.', type: 'button' },
+        ],
+        workflow: 'Review <strong>every Monday</strong> to plan weekly supplier payments. Pay the largest dues first, or prioritize suppliers with the oldest pending invoices.',
+      },
+      {
+        id: 'payment-planner',
+        section: 'Reports',
+        title: 'Payment Planner',
+        route: '/reports/payment-planner',
+        screenshot: 'screenshots/28-payment-planner.png',
+        description: 'Cash flow planning tool — view all upcoming payment obligations organized by priority and due date. Helps decide which suppliers to pay this week based on available cash.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'Payment Schedule', desc: 'Upcoming payments organized by priority/due date. Shows supplier name, PO references, amount due, and suggested payment date. Helps manage weekly cash flow planning. Example: "This week: ₹12,00,000 due to 5 suppliers"', type: 'section' },
+        ],
+        workflow: 'Use alongside <strong>Purchase Dues</strong> to plan payments. Check available bank balance → prioritize urgent payments → record them in the <strong>Payments</strong> page.',
+      },
+      {
+        id: 'sale-dues',
+        section: 'Reports',
+        title: 'Sale Dues',
+        route: '/reports/sale-dues',
+        screenshot: 'screenshots/29-sale-dues.png',
+        description: 'Buyer receivables tracker — shows how much each buyer owes you. Calculates: Total invoiced amount minus receipts collected = balance receivable. Includes aging analysis and WhatsApp reminder feature.',
+        annotations: [
+          { x: 50, y: 12, num: 1, title: 'Total Receivable', desc: 'Grand total outstanding from ALL buyers. Example: "₹32,15,000 receivable from 12 buyers". This is your total accounts receivable.', type: 'display' },
+          { x: 50, y: 40, num: 2, title: 'Buyer-wise Dues', desc: 'Each buyer with: Name, Total Invoiced (₹), Received (₹), Balance Due (₹), Days overdue. Example: "Sai Foods | Invoiced ₹12,60,000 | Received ₹8,40,000 | Due ₹4,20,000 | 15 days overdue"', type: 'section' },
+          { x: 90, y: 40, num: 3, title: '📱 WhatsApp Reminder', desc: 'Send automated payment reminders to buyers via WhatsApp. Includes: outstanding amount, invoice references, bank details for transfer. Example: Sends "Dear Sai Foods, ₹4,20,000 is pending for Invoice RVP/2026/015. Please arrange payment to A/C 1234567890, IFSC SBIN0001234."', type: 'button' },
+        ],
+        workflow: 'Review <strong>weekly</strong>. For overdue buyers, click the <strong>WhatsApp Reminder</strong> button to send an automated payment request. Record received payments in the <strong>Receipts</strong> page.',
+      },
+      {
+        id: 'freight-dues',
+        section: 'Reports',
+        title: 'Freight Dues',
+        route: '/reports/freight-dues',
+        screenshot: 'screenshots/30-freight-dues.png',
+        description: 'Track freight/transportation charges and payments. Covers both inward freight (seed deliveries) and outward freight (product dispatches). Shows transporter-wise dues with trip-level details.',
+        annotations: [
+          { x: 50, y: 12, num: 1, title: 'Freight Summary', desc: 'Total freight charges, payments made, and outstanding balance — split by Inward (purchases) and Outward (sales) freight.', type: 'display' },
+          { x: 50, y: 40, num: 2, title: 'Transporter-wise Dues', desc: 'Each transporter/lorry with: Trips count, Total freight charged, Paid, Balance. Retention amount (₹3,000/trip retained for damage security) shown separately.', type: 'section' },
+        ],
+        workflow: 'Track freight costs and settle transporter dues regularly. Retention amounts are released after confirming no damage claims.',
+      },
+      {
+        id: 'brokerage-report',
+        section: 'Reports',
+        title: 'Brokerage Report',
+        route: '/accounts/brokerage-ledger',
+        screenshot: 'screenshots/31-brokerage-report.png',
+        description: 'Track brokerage commissions auto-calculated from PO/SO assignments. Shows each broker\'s earned commissions, payments made, and outstanding balance.',
+        annotations: [
+          { x: 50, y: 15, num: 1, title: 'Brokerage Summary', desc: 'Per broker: Total Earned (auto-calculated from PO/SO quantities × rate), Paid, Balance. Example: "Suresh Dalal | Earned ₹1,25,000 (from 500t × ₹0.25/kg) | Paid ₹80,000 | Balance ₹45,000"', type: 'display' },
+          { x: 50, y: 40, num: 2, title: 'Transaction-level Ledger', desc: 'Every brokerage-earning transaction: Date, PO/SO reference, Tonnage, Rate, Brokerage amount. Payments shown as credits.', type: 'section' },
+        ],
+        workflow: 'Brokerage is <strong>auto-calculated</strong> — no manual entry needed. Just pay brokers based on the balance shown here and record payments in <strong>Payments</strong> page.',
+      },
+      {
+        id: 'party-ledger',
+        section: 'Reports',
+        title: 'Party Ledger',
+        route: '/accounts/party-ledger',
+        screenshot: 'screenshots/32-party-ledger.png',
+        description: 'The core accounting report — a complete financial statement for any party. Shows every transaction (purchases, sales, payments, receipts, credit/debit notes) in chronological order with running balance. This is what you share with parties for account reconciliation.',
+        annotations: [
+          { x: 40, y: 8, num: 1, title: 'Party Selector (Searchable Dropdown)', desc: 'Type to search and select a party. Example: Type "Ravi" → select "Ravi Traders" → their complete ledger appears below. Shows all suppliers, buyers, and other parties.', type: 'field' },
+          { x: 70, y: 8, num: 2, title: 'Date Range Filter (From – To)', desc: 'Filter ledger to a specific period. Example: Set "01 Apr 2026" to "31 Mar 2027" for the current financial year. Opening balance at period start is auto-calculated from prior transactions.', type: 'field' },
+          { x: 50, y: 18, num: 3, title: 'Opening & Closing Balance', desc: 'Opening Balance: carried forward from before the selected period. Closing Balance: the final amount owed/receivable after all transactions. Example: "Opening: ₹2,50,000 (Dr) → Closing: ₹7,50,000 (Dr)" means you owe ₹7.5 lakh to this supplier.', type: 'display' },
+          { x: 50, y: 45, num: 4, title: 'Transaction Ledger Table', desc: 'Chronological list:<br>• <strong>Date</strong>, <strong>Particulars</strong> (description: "Purchase PO-045, Lorry AP 05 AB 1234" or "Payment - NEFT Ref 12345")<br>• <strong>Debit</strong> column: purchases, CN adjustments (you owe more)<br>• <strong>Credit</strong> column: payments, receipts (reduces balance)<br>• <strong>Balance</strong>: running total after each transaction<br>Example row: "10 Aug | Purchase PO-045, INV/789 | Dr ₹5,69,580 | | ₹8,19,580"', type: 'section' },
+          { x: 90, y: 8, num: 5, title: '📥 Export / 🖨 Print', desc: 'Export to Excel with all columns for offline analysis. Print a formatted PDF statement to share with the party for reconciliation. The printed statement includes your company header, party details, and official stamp area.', type: 'button' },
+        ],
+        workflow: '<ol><li>Select <strong>"Ravi Traders"</strong> from the dropdown</li><li>Set date range to <strong>current FY</strong> (Apr 2026 – Mar 2027)</li><li>Review the ledger — every purchase adds to Debit, every payment adds to Credit</li><li>Closing balance shows ₹7,50,000 Dr — you owe Ravi ₹7.5 lakh</li><li>Click <strong>Print</strong> to generate a statement PDF</li><li>Share with Ravi for <strong>account reconciliation</strong></li><li>If he disagrees on any entry, investigate and adjust via Credit/Debit Notes</li></ol>',
+      },
+      {
+        id: 'hamali-report',
+        section: 'Reports',
+        title: 'Hamali Report',
+        route: '/accounts/hamali-ledger',
+        screenshot: 'screenshots/33-hamali-report.png',
+        description: 'Track hamali (loading/unloading labor) charges. Hamali is auto-calculated per lot based on bags count and configured rate per bag. Shows hamali team-wise ledgers with earned amounts, payments, and balance.',
+        annotations: [
+          { x: 50, y: 15, num: 1, title: 'Hamali Summary', desc: 'Per hamali team: Total earned (bags × rate), Payments made, Balance. The rate has two components: Company share and Lorry share (recovered from supplier for self-vehicle lots). Example: "Team A | Earned ₹45,000 (3,000 bags × ₹15/bag) | Paid ₹30,000 | Balance ₹15,000"', type: 'display' },
+          { x: 50, y: 45, num: 2, title: 'Lot-level Hamali Detail', desc: 'Every lot with: Date, Party, Lorry, Bags count, Rate/bag, Total charge, and company/lorry split.', type: 'section' },
+        ],
+        workflow: 'Hamali is <strong>auto-calculated</strong> during verification based on bags count and rates set in Settings → Hamali Rates. Pay hamali teams based on the balance shown here.',
+      },
+      {
+        id: 'kata-report',
+        section: 'Reports',
+        title: 'Kata Report',
+        route: '/accounts/kata-fee-ledger',
+        screenshot: 'screenshots/34-kata-report.png',
+        description: 'Track kata (weighbridge) fees. Each lorry weighing incurs a kata fee. For self-vehicle lots, the kata fee is recovered from the supplier. Shows total fees, payments, and outstanding balance.',
+        annotations: [
+          { x: 50, y: 15, num: 1, title: 'Kata Fee Summary', desc: 'Total kata fees incurred, payments made, balance due. Example: "Total fees ₹12,000 (40 weighings × ₹300) | Paid ₹9,000 | Balance ₹3,000"', type: 'display' },
+          { x: 50, y: 40, num: 2, title: 'Weighing-level Detail', desc: 'Each weighing with: Date, Lorry Number, Party, Charge Amount (₹300-500 per weighing), Self-Vehicle recovery flag, Payment status.', type: 'section' },
+        ],
+        workflow: 'Settle kata fees with the weighbridge operator based on the balance shown. Self-vehicle kata fees are automatically deducted from the supplier\'s purchase amount during verification.',
+      },
+      {
+        id: 'income-expenses',
+        section: 'Reports',
+        title: 'Income & Expenses',
+        route: '/reports/expenses',
+        screenshot: 'screenshots/35-income-expenses.png',
+        description: 'Track all operational income and expenses that don\'t fit in other modules: electricity bills, machinery maintenance, storage costs, owner drawings (personal withdrawals), and miscellaneous income/expenses.',
+        annotations: [
+          { x: 50, y: 15, num: 1, title: 'Expense Category Tabs', desc: 'Separate pages for each category: <strong>Electricity</strong> (monthly bills), <strong>Maintenance</strong> (machine repairs, spare parts), <strong>Gunny Bags</strong> (purchase & sale), <strong>Drawings</strong> (owner withdrawals), <strong>Other Income</strong>, <strong>Miscellaneous</strong>. Each has its own entry form and table.', type: 'section' },
+          { x: 90, y: 8, num: 2, title: '➕ Add Entry', desc: 'Record a new expense: Date, Category, Description (e.g., "July electricity bill"), Amount (₹). For Electricity: enter units consumed, rate/unit, bill amount. For Maintenance: enter vendor, part/service, amount. Example: "Electricity — July 2026 — 12,000 units × ₹8/unit = ₹96,000"', type: 'button' },
+        ],
+        workflow: 'Record all expenses <strong>as they occur</strong>. These feed into the <strong>Profit & Loss</strong> statement. Missing expenses will overstate your profits!',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // BANKING, TRANSACTIONS, ACCOUNTS, SETTINGS
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'storage-loans',
+        section: 'Banking',
+        title: 'Storage Loans',
+        route: '/loans',
+        screenshot: 'screenshots/36-storage-loans.png',
+        description: 'Manage pledge financing — bank loans taken against stored stock. In the tamarind business, banks lend money against pledged seed stock stored in approved godowns. Track loan amounts, interest accrual, repayments, and outstanding balances per bank.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add Loan', desc: 'Record a new loan:<br>• <strong>Bank Name</strong> — e.g., "State Bank of India"<br>• <strong>Loan Amount</strong> — sanctioned/disbursed, e.g., "₹50,00,000"<br>• <strong>Interest Rate</strong> — annual %, e.g., "11.5%"<br>• <strong>Godown</strong> — which location\'s stock is pledged, e.g., "PGR Cold"<br>• <strong>Disbursement Date</strong><br>Example: ₹50 lakh loan at 11.5% from SBI against PGR Cold stock.', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Loans Table', desc: 'Active loans with: Bank, Principal, Rate, Disbursed, Interest Accrued, Repaid, Outstanding. Example: "SBI | ₹50,00,000 | 11.5% | Repaid ₹20,00,000 | Interest ₹2,87,500 | Outstanding ₹32,87,500"', type: 'section' },
+        ],
+        workflow: '<ol><li>When bank disburses a loan against stock, click <strong>Add Loan</strong></li><li>Record repayments as you make them — interest auto-calculates</li><li>When fully repaid, close the loan and release the pledged stock</li><li>Outstanding loans appear on your <strong>Balance Sheet</strong> as liabilities</li></ol>',
+      },
+      {
+        id: 'payments',
+        section: 'Transactions',
+        title: 'Payments',
+        route: '/transactions/payments',
+        screenshot: 'screenshots/37-payments.png',
+        description: 'Record all outgoing payments. Payment types: Supplier Payment, Transporter Freight (Inward/Outward), Broker Commission, Hamali, Transport Fee, Other Expense. Each payment is linked to a party/broker and reduces their outstanding in the ledger. Supports AI screenshot scanning — paste a bank statement screenshot and the system auto-extracts payment details.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Record Payment Button', desc: 'Opens form with fields:<br>• <strong>Type</strong> — grouped: (1) Suppliers & Counterparties: Supplier Payment, Transporter Freight Inward, Transporter Freight Outward, Broker Commission, Hamali Payment. (2) Expenses: Transport Fee, Other Expense<br>• <strong>Party/Broker</strong> — who you\'re paying (auto-filters by type)<br>• <strong>Amount</strong> — e.g., "₹2,50,000"<br>• <strong>Date</strong> — payment date<br>• <strong>Reference</strong> — cheque no. or NEFT/UTR reference, e.g., "UTR 234567890123"<br>• <strong>Description</strong> — notes, e.g., "Part payment against PO-045"<br>Example: Supplier Payment to Ravi Traders, ₹2,50,000, NEFT, UTR 234567890123.', type: 'button' },
+          { x: 60, y: 8, num: 2, title: '📸 AI Screenshot Import', desc: 'SMART FEATURE: Paste (Ctrl+V) a screenshot of your bank statement or UPI payment confirmation. The AI extracts: party name (matches to existing parties), amount, date, and reference number. Saves manual data entry — especially useful for bulk payment recording. Example: Screenshot your PhonePe payment history → paste → system creates payment entries automatically.', type: 'button' },
+          { x: 50, y: 35, num: 3, title: 'Payments Table (Paginated)', desc: 'All payments with: Date, Type badge, Paid To (party/broker name), Ref/Cheque, Description, Amount. Paginated (50/page) for performance. Some entries show "Managed on [page name]" — these were auto-created from Electricity/Maintenance/Drawings pages and are read-only here.', type: 'section' },
+          { x: 92, y: 35, num: 4, title: '🗑️ Delete Payment', desc: 'Remove an incorrectly recorded payment. WARNING: This re-adds the amount to the party\'s outstanding balance. Only delete genuine errors. Managed payments (Gunny Bags, Electricity, etc.) must be deleted from their own page.', type: 'danger' },
+          { x: 35, y: 8, num: 5, title: 'Pagination Controls', desc: 'Navigate between pages (50 payments per page). Options: 50, 100, All. "All" loads everything — may be slow for large histories. Use for exporting complete data.', type: 'button' },
+          { x: 95, y: 8, num: 6, title: '📥 Export to Excel', desc: 'Export ALL payments (not just current page) to Excel. Includes: Date, Type, Paid To, Reference, Description, Amount. Useful for bank reconciliation with your accountant.', type: 'button' },
+        ],
+        workflow: '<ol><li>You transfer ₹2,50,000 to Ravi Traders via NEFT</li><li>Click <strong>➕ Record Payment</strong></li><li>Type: <strong>Supplier Payment</strong></li><li>Party: <strong>Ravi Traders</strong></li><li>Amount: <strong>₹2,50,000</strong>, Date: <strong>today</strong></li><li>Reference: <strong>UTR 234567890123</strong></li><li>Description: "Part payment against PO-045"</li><li>Save — Ravi\'s outstanding in <strong>Party Ledger</strong> reduces by ₹2,50,000</li><li>💡 TIP: Paste your bank statement screenshot to auto-create multiple payments at once!</li></ol>',
+      },
+      {
+        id: 'receipts',
+        section: 'Transactions',
+        title: 'Receipts',
+        route: '/transactions/receipts',
+        screenshot: 'screenshots/38-receipts.png',
+        description: 'Record all incoming money. Receipt types: Buyer Collection (main), Scrap/Waste Sales, Hamali Income, Interest Income, Other. For buyer collections, you can link to a specific dispatch invoice and the system auto-calculates TDS and shortage deductions. Also supports AI screenshot scanning for bank credits.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Record Receipt Button', desc: 'Opens form with fields:<br>• <strong>Type</strong> — grouped: (1) Buyers: Buyer Collection. (2) Income: Scrap/Waste Sales, Hamali Income, Interest Income. (3) Other Receipt<br>• <strong>Party</strong> — who\'s paying you (for Buyer Collection)<br>• <strong>Invoice</strong> — optionally link to a specific dispatch invoice for auto TDS/shortage calc<br>• <strong>Amount</strong> — received amount, e.g., "₹3,95,000"<br>• <strong>Date, Reference, Description</strong><br>• Auto-fields (when invoice linked): TDS @ 1% (194Q), Shortage deduction (buyer kata difference), Net amount<br>Example: Sai Foods pays ₹3,95,000 against Invoice RVP/2026/015 (billed ₹4,20,000 – TDS ₹4,200 – Shortage ₹20,800).', type: 'button' },
+          { x: 60, y: 8, num: 2, title: '📸 AI Screenshot Import', desc: 'Same as Payments — paste bank credit screenshot to auto-extract receipt details. Example: Screenshot your bank\'s credit alerts → paste → system creates receipt entries.', type: 'button' },
+          { x: 50, y: 35, num: 3, title: 'Receipts Table', desc: 'All receipts with: Date, Type, Received From, Reference, Description, Amount. Managed receipts (from Gunny Bags Sales, Other Income) are read-only here.', type: 'section' },
+        ],
+        workflow: '<ol><li>Sai Foods sends ₹3,95,000 via NEFT for Invoice RVP/2026/015</li><li>Click <strong>➕ Record Receipt</strong></li><li>Type: <strong>Buyer Collection</strong>, Party: <strong>Sai Foods</strong></li><li>Link to Invoice: <strong>RVP/2026/015</strong> (billed ₹4,20,000)</li><li>System shows: TDS ₹4,200 (1%), Shortage ₹20,800 (buyer kata diff)</li><li>Amount received: <strong>₹3,95,000</strong> — matches expected after deductions ✓</li><li>Save — Sai Foods\' receivable reduces, Sale Order moves toward PAID status</li></ol>',
+      },
+      {
+        id: 'chart-of-accounts',
+        section: 'Accounts',
+        title: 'Chart of Accounts',
+        route: '/accounts/chart-of-accounts',
+        screenshot: 'screenshots/39-chart-of-accounts.png',
+        description: 'Master list of all ledger accounts used in double-entry bookkeeping. Organized by type: Assets (Cash, Bank, Stock, Receivables), Liabilities (Payables, Loans), Equity (Capital), Revenue (Sales), Expenses (Purchases, Overheads). All ERP transactions post to these accounts automatically.',
+        annotations: [
+          { x: 50, y: 30, num: 1, title: 'Account Hierarchy', desc: 'Tree-structured list of accounts:<br>• <strong>Assets</strong>: Cash in Hand, SBI Current A/C, Stock (Raw), Sundry Debtors, TDS Receivable<br>• <strong>Liabilities</strong>: Sundry Creditors, Bank Loans, GST Payable<br>• <strong>Revenue</strong>: Pappu Sales, Husk Sales, TPS Sales, Other Income<br>• <strong>Expenses</strong>: Seed Purchases, Freight, Hamali, Brokerage, Electricity, Maintenance<br>Each shows current balance. Example: "SBI Current A/C — ₹12,34,567 (Dr)"', type: 'section' },
+          { x: 90, y: 8, num: 2, title: '➕ Add Account', desc: 'Create a new ledger account. Choose type (Asset/Liability/Equity/Revenue/Expense), enter code and name. Example: Add "Canara Bank CC A/C" under Assets for a new bank account. Typically set up once during initial ERP configuration.', type: 'button' },
+        ],
+        workflow: 'This is the <strong>foundation of accounting</strong>. Set up once, then all transactions auto-post here. Only add new accounts when you have a new bank account, income source, or expense category.',
+      },
+      {
+        id: 'balance-sheet',
+        section: 'Accounts',
+        title: 'Balance Sheet',
+        route: '/accounts/balance-sheet',
+        screenshot: 'screenshots/40-balance-sheet.png',
+        description: 'Financial position statement as of a specific date. Assets (what you own) = Liabilities (what you owe) + Equity (owner\'s capital). Auto-generated from all ERP transactions.',
+        annotations: [
+          { x: 50, y: 20, num: 1, title: 'Assets Section', desc: 'Current & Fixed Assets: Cash, Bank balances, Raw stock value, Finished goods, Receivables from buyers, TDS receivable, fixed assets. Example: "Total Assets: ₹1,45,00,000"', type: 'display' },
+          { x: 50, y: 50, num: 2, title: 'Liabilities Section', desc: 'Current Liabilities: Supplier payables, Bank loans, GST payable, Brokerage payable, Hamali payable. Example: "Total Liabilities: ₹95,00,000"', type: 'display' },
+          { x: 50, y: 70, num: 3, title: 'Equity Section', desc: 'Owner\'s capital + Retained earnings (accumulated profits). Example: "Equity: ₹50,00,000". Assets (₹1.45 Cr) = Liabilities (₹0.95 Cr) + Equity (₹0.50 Cr) ✓', type: 'display' },
+          { x: 85, y: 8, num: 4, title: 'Date Selector', desc: 'Choose the "as of" date for the Balance Sheet. Default: today. Example: Set to "31 Mar 2026" for end-of-FY balance sheet for tax filing.', type: 'field' },
+        ],
+        workflow: 'Generate the Balance Sheet at <strong>end of financial year</strong> (31 March) for your Income Tax return. Check that Assets = Liabilities + Equity — any mismatch means a booking error.',
+      },
+      {
+        id: 'profit-loss',
+        section: 'Accounts',
+        title: 'Profit & Loss',
+        route: '/accounts/profit-loss',
+        screenshot: 'screenshots/41-profit-loss.png',
+        description: 'Income statement showing Revenue minus Expenses = Net Profit/Loss for a period. Auto-compiled from all ERP transactions. Shows business profitability over a selected time period.',
+        annotations: [
+          { x: 50, y: 15, num: 1, title: 'Revenue Lines', desc: 'All income sources: Pappu Sales, Husk Sales, TPS/Brokens Sales, Shell/Dust/Waste Sales, Other Income. Example: "Pappu Sales: ₹1,20,00,000 | Husk: ₹8,50,000 | TPS: ₹3,20,000 | Total Revenue: ₹1,31,70,000"', type: 'display' },
+          { x: 50, y: 40, num: 2, title: 'Expense Lines', desc: 'All costs: Seed Purchases, Freight Inward/Outward, Hamali, Brokerage, Electricity, Maintenance, Kata Fees, Interest on Loans, Drawings. Example: "Purchases: ₹98,50,000 | Freight: ₹6,80,000 | Total Expenses: ₹1,15,30,000"', type: 'display' },
+          { x: 50, y: 65, num: 3, title: 'Net Profit / Loss', desc: 'Revenue – Expenses = Net Profit (green) or Loss (red). Example: "₹1,31,70,000 – ₹1,15,30,000 = <strong>₹16,40,000 Net Profit</strong> (12.4% margin)" 🟢', type: 'display' },
+          { x: 85, y: 8, num: 4, title: 'Period Selector', desc: 'Choose period: This Month, This Quarter, This FY, Custom Range. Example: "01 Apr 2026 – 31 Mar 2027" for annual P&L.', type: 'field' },
+        ],
+        workflow: 'Generate <strong>monthly P&L</strong> to track profitability trends. Compare month-over-month to identify if margins are improving or declining. Annual P&L is needed for <strong>Income Tax</strong> filing.',
+      },
+      {
+        id: 'general-journal',
+        section: 'Accounts',
+        title: 'General Journal',
+        route: '/accounts/journal-entries',
+        screenshot: 'screenshots/42-general-journal.png',
+        description: 'Manual journal entries for adjustments that don\'t fit standard modules. Double-entry: every entry must have equal Debits and Credits. Used for: opening balances, year-end adjustments, corrections, loan interest accrual, depreciation.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Create Journal Entry', desc: 'Opens double-entry form:<br>• <strong>Date</strong> — entry date<br>• <strong>Description/Narration</strong> — e.g., "Opening balance for FY 2026-27"<br>• <strong>Debit Account</strong> — e.g., "Sundry Debtors" + Amount ₹5,00,000<br>• <strong>Credit Account</strong> — e.g., "Capital Account" + Amount ₹5,00,000<br>• <strong>Rule: Total Debits MUST equal Total Credits</strong><br>Example: Record opening balance — Debit "Cash in Hand" ₹50,000, Credit "Capital" ₹50,000.', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Journal Entries Table', desc: 'All manual journal entries with: Entry Number (auto-generated), Date, Description, Debit Account + Amount, Credit Account + Amount. Can be reversed or deleted.', type: 'section' },
+        ],
+        workflow: '<ol><li>Common use: <strong>Opening balances</strong> when starting the ERP</li><li>Click ➕ Create Journal Entry</li><li>Debit "Sundry Debtors" ₹5,00,000 (buyers owe you)</li><li>Credit "Capital Account" ₹5,00,000</li><li>Description: "Opening balance — buyer receivables"</li><li>Save — both accounts updated. Total Debits = Total Credits ✓</li></ol>',
+      },
+      // ══════════════════════════════════════════════════════════════════
+      // SETTINGS
+      // ══════════════════════════════════════════════════════════════════
+      {
+        id: 'settings',
+        section: 'Settings',
+        title: 'Settings',
+        route: '/settings',
+        screenshot: 'screenshots/43-settings.png',
+        description: 'Central configuration hub with 6 tabs: Company (name, GSTIN, bank), Invoice Setup (HSN codes, tax rates per product), Freight Rates (per-destination delivery costs), Hamali Rates (loading/unloading rates), WhatsApp (API integration for automated messages), and TaxPro GSP (e-Invoice/e-Way Bill API credentials).',
+        annotations: [
+          { x: 30, y: 14, num: 1, title: 'Tab: Company Details', desc: 'Set your company info that appears on all invoices:<br>• <strong>Name</strong>: "RVP Industries"<br>• <strong>Address</strong>: full factory address<br>• <strong>GSTIN</strong>: "37AABCR1234A1Z5"<br>• <strong>State</strong>: "Andhra Pradesh" (code: 37)<br>• <strong>Contact</strong>: phone number<br>• <strong>Bank Details</strong>: A/C name, Bank name, A/C number, IFSC (shown on invoices for buyer payments)<br>• <strong>Invoice Prefix</strong>: "RVP" (invoices numbered as RVP/2026/001)<br>• <strong>Owner WhatsApp</strong>: your personal number for alerts<br>• <strong>Freight Retention</strong>: ₹3,000/trip (held from transporter as security)', type: 'field' },
+          { x: 45, y: 14, num: 2, title: 'Tab: Invoice Setup', desc: 'Per-product tax configuration:<br>• <strong>HSN Code</strong> per product (Pappu: 1207, Husk: 2302, etc.)<br>• <strong>GST Rate</strong>: 5% for most agri products<br>• <strong>Tax Type</strong>: IGST for interstate, CGST+SGST for intrastate<br>Also: e-Way Bill dispatch settings and default terms.', type: 'field' },
+          { x: 55, y: 14, num: 3, title: 'Tab: Freight Rates', desc: 'Destination-wise freight rates:<br>• <strong>Destination</strong>: city name, e.g., "Hyderabad"<br>• <strong>Rate/Tonne</strong>: e.g., "₹3,500"<br>These rates auto-fill in the Pappu Calculator and during dispatch cost calculation. Example: Add "Mumbai — ₹5,500/t", "Chennai — ₹4,000/t".', type: 'field' },
+          { x: 65, y: 14, num: 4, title: 'Tab: Hamali Rates', desc: 'Loading/unloading rates per bag:<br>• <strong>Rate/Bag</strong> for different operations<br>• Company share vs Lorry share split<br>Example: ₹15/bag total — ₹12 company share + ₹3 lorry share (recovered from supplier for self-vehicle).', type: 'field' },
+          { x: 75, y: 14, num: 5, title: 'Tab: WhatsApp Integration', desc: 'Configure automated WhatsApp messaging:<br>• <strong>API Provider</strong> settings (Interakt/Gupshup/custom)<br>• <strong>Test Mode</strong>: ON = messages go to test number only<br>• <strong>Test Number</strong>: where test messages go<br>• <strong>Alert Recipients</strong>: comma-separated numbers for system alerts<br>When live, the system sends: dispatch notifications to buyers, payment reminders, lorry confirmations to drivers.', type: 'field' },
+          { x: 85, y: 14, num: 6, title: 'Tab: TaxPro GSP', desc: 'e-Invoice and e-Way Bill API credentials:<br>• <strong>GSP ID & Secret</strong>: from TaxPro (your GST Suvidha Provider)<br>• <strong>GST Username & Password</strong>: your GST portal login<br>• <strong>Sandbox Mode</strong>: ON = test against sandbox (no real IRN/EWB generated)<br>Set to live mode for production e-invoicing.', type: 'field' },
+        ],
+        workflow: '<ol><li><strong>First time setup</strong>: Start with Company tab — enter all business details, GSTIN, bank info</li><li>Go to <strong>Invoice Setup</strong> — verify HSN codes and GST rates per product</li><li>Add <strong>Freight Rates</strong> for all delivery destinations (Hyderabad, Mumbai, Chennai, etc.)</li><li>Set <strong>Hamali Rates</strong> per bag</li><li>Configure <strong>WhatsApp</strong> — start in Test Mode, verify messages work, then go live</li><li>Enter <strong>TaxPro GSP</strong> credentials — start in Sandbox, test IRN generation, then go live</li></ol>',
+      },
+      {
+        id: 'users',
+        section: 'Settings',
+        title: 'Users',
+        route: '/users',
+        screenshot: 'screenshots/44-users.png',
+        description: 'User management — create accounts, assign roles, and control access. Three role levels determine what each user can see and do in the ERP.',
+        annotations: [
+          { x: 90, y: 8, num: 1, title: '➕ Add User', desc: 'Create a new user account:<br>• <strong>Name</strong> — display name, e.g., "Sohan Kumar"<br>• <strong>Username</strong> — login name, e.g., "sohan" (lowercase, no spaces)<br>• <strong>Password</strong> — initial password, e.g., "Welcome@123"<br>• <strong>Role</strong>: <strong>ADMIN</strong>, <strong>USER</strong>, or <strong>DEVELOPER</strong><br>Example: Create "sohan" with role USER for office staff who need to record transactions but not change settings.', type: 'button' },
+          { x: 50, y: 35, num: 2, title: 'Users Table', desc: 'All user accounts with: Name, Username, Role badge, and action buttons. Example: "admin | ADMIN", "sohan | USER", "viewer1 | VIEWER"', type: 'section' },
+          { x: 92, y: 35, num: 3, title: '✏️ Edit / 🔑 Reset Password / 🗑️ Delete', desc: '• <strong>Edit</strong>: Change user\'s name or role<br>• <strong>Reset Password</strong>: Set a new password (user forgot theirs)<br>• <strong>Delete</strong>: Remove the account permanently<br>Example: Sohan forgot his password → click Reset → set to "NewPass@456" → tell him the new password.', type: 'button' },
+        ],
+        workflow: '<ol><li>Access levels explained:<br>• <strong>ADMIN</strong> — Full access: can change Settings, manage Users, reset data, see everything<br>• <strong>USER</strong> — Can create/edit all transactions (POs, Sales, Payments) but cannot access Settings or Users<br>• <strong>DEVELOPER</strong> — Special role with access to Subscription and Archives (system management)</li><li>Create one ADMIN account (yourself), then USER accounts for staff</li><li>Never share the admin password — each person gets their own account</li></ol>',
+      },
+    ];
+
+    // ═══════════════════════════════════════════════════════════════════
+    // BUILD SIDEBAR NAV
+    // ═══════════════════════════════════════════════════════════════════
+    function buildSidebar() {
+      const nav = document.getElementById('sidebarNav');
+      const sections = {};
+      
+      GUIDE_DATA.forEach(page => {
+        if (!sections[page.section]) sections[page.section] = [];
+        sections[page.section].push(page);
+      });
+
+      let html = '';
+      Object.entries(sections).forEach(([section, pages]) => {
+        const sectionId = section.toLowerCase().replace(/\s+/g, '-');
+        html += `
+          <div class="nav-section" data-section="${sectionId}">
+            <div class="nav-section-heading" onclick="toggleSection(this)" data-section="${sectionId}">
+              <span>${section}</span>
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+            <div class="nav-section-items" data-section="${sectionId}">
+              ${pages.map(p => `
+                <div class="nav-item" data-id="${p.id}" data-title="${p.title.toLowerCase()}" onclick="scrollToSection('${p.id}')">
+                  <span>${p.title}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      });
+
+      nav.innerHTML = html;
+
+      // Open first section by default
+      const firstHeading = nav.querySelector('.nav-section-heading');
+      if (firstHeading) toggleSection(firstHeading);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // BUILD MAIN CONTENT
+    // ═══════════════════════════════════════════════════════════════════
+    function buildContent() {
+      const content = document.getElementById('content');
+      let html = '';
+
+      // Hero section
+      html += `
+        <div style="text-align:center; margin-bottom:64px; padding: 48px 0;">
+          <div style="display:inline-flex;align-items:center;justify-content:center;width:72px;height:72px;border-radius:20px;background:linear-gradient(135deg,#d99e37,#a87420);margin-bottom:24px;box-shadow:0 8px 32px rgba(217,158,55,0.3);">
+            <span style="font-weight:900;font-size:32px;color:#fff;">R</span>
+          </div>
+          <h1 style="font-size:36px;font-weight:900;letter-spacing:-0.03em;margin-bottom:8px;">RVP Industries ERP</h1>
+          <p style="font-size:16px;color:var(--text-secondary);max-width:540px;margin:0 auto;">
+            Complete user guide with annotated screenshots for every page, button, and option in the Tamarind Processing ERP system.
+          </p>
+          <div style="margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+            <span style="padding:6px 14px;border-radius:8px;background:var(--bg-badge);color:var(--accent);font-size:12px;font-weight:600;">44 Pages Documented</span>
+            <span style="padding:6px 14px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);font-size:12px;font-weight:600;border:1px solid var(--border);">Interactive Annotations</span>
+            <span style="padding:6px 14px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);font-size:12px;font-weight:600;border:1px solid var(--border);">Searchable</span>
+          </div>
+        </div>
+      `;
+
+      let currentSection = '';
+
+      GUIDE_DATA.forEach(page => {
+        // Section divider
+        if (page.section !== currentSection) {
+          currentSection = page.section;
+          html += `
+            <div style="margin: 64px 0 32px; padding-top: 24px; border-top: 1px solid var(--border);">
+              <h2 style="font-size:22px;font-weight:800;color:var(--text);letter-spacing:-0.02em;">${currentSection}</h2>
+            </div>
+          `;
+        }
+
+        // Markers HTML
+        const markersHtml = page.annotations.map(a => `
+          <div class="marker" style="left:${a.x}%;top:${a.y}%;" data-num="${a.num}" onclick="toggleMarker(this)">
+            <div class="marker-pulse"></div>
+            ${a.num}
+            <div class="marker-tooltip">
+              <div class="marker-tooltip-title">${a.title}</div>
+              <div class="marker-tooltip-desc">${a.desc}</div>
+              <span class="marker-tooltip-type ${a.type}">${a.type}</span>
+            </div>
+          </div>
+        `).join('');
+
+        // Annotation list HTML
+        const annotationListHtml = page.annotations.map(a => `
+          <div class="annotation-item" data-num="${a.num}" onmouseenter="highlightMarker('${page.id}', ${a.num})" onmouseleave="unhighlightMarker('${page.id}', ${a.num})">
+            <div class="annotation-item-num">${a.num}</div>
+            <div class="annotation-item-content">
+              <div class="annotation-item-title">${a.title} <span class="marker-tooltip-type ${a.type}" style="vertical-align:middle;margin-left:6px;">${a.type}</span></div>
+              <div class="annotation-item-desc">${a.desc}</div>
+            </div>
+          </div>
+        `).join('');
+
+        html += `
+          <div class="guide-section" id="${page.id}">
+            <div class="section-header">
+              <div class="section-badge">${page.section}</div>
+              <h3 class="section-title">${page.title}</h3>
+              <p class="section-desc">${page.description}</p>
+              <div class="section-route">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                ${page.route}
+              </div>
+            </div>
+
+            <div class="screenshot-wrap" data-page="${page.id}">
+              <img src="${page.screenshot}" alt="${page.title} screenshot" onerror="this.parentElement.innerHTML='<div class=\\'screenshot-placeholder\\'>Screenshot: ${page.title}<br><small>${page.screenshot}</small></div>'" loading="lazy" />
+              <div class="annotation-markers">
+                ${markersHtml}
+              </div>
+            </div>
+
+            <div class="annotation-list">
+              <div class="annotation-list-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                Annotations
+              </div>
+              ${annotationListHtml}
+            </div>
+
+            ${page.workflow ? `
+              <div class="workflow-box">
+                <h4>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  How to use
+                </h4>
+                <p>${page.workflow}</p>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      });
+
+      content.innerHTML = html;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // INTERACTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    function toggleSection(el) {
+      const sectionId = el.dataset.section;
+      const items = document.querySelector(`.nav-section-items[data-section="${sectionId}"]`);
+      const isOpen = items.classList.contains('open');
+      
+      // Close all
+      document.querySelectorAll('.nav-section-items').forEach(i => i.classList.remove('open'));
+      document.querySelectorAll('.nav-section-heading').forEach(h => h.classList.remove('open'));
+      
+      if (!isOpen) {
+        items.classList.add('open');
+        el.classList.add('open');
+      }
+    }
+
+    function scrollToSection(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Update active nav item
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelector(`.nav-item[data-id="${id}"]`)?.classList.add('active');
+        // Close mobile sidebar
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('sidebarOverlay').classList.remove('open');
+      }
+    }
+
+    function toggleMarker(el) {
+      const wasActive = el.classList.contains('active');
+      // Deactivate all markers in same screenshot
+      el.closest('.annotation-markers').querySelectorAll('.marker').forEach(m => m.classList.remove('active'));
+      if (!wasActive) el.classList.add('active');
+    }
+
+    function highlightMarker(pageId, num) {
+      const wrap = document.querySelector(`.screenshot-wrap[data-page="${pageId}"]`);
+      if (!wrap) return;
+      const marker = wrap.querySelector(`.marker[data-num="${num}"]`);
+      if (marker) marker.classList.add('active');
+    }
+
+    function unhighlightMarker(pageId, num) {
+      const wrap = document.querySelector(`.screenshot-wrap[data-page="${pageId}"]`);
+      if (!wrap) return;
+      const marker = wrap.querySelector(`.marker[data-num="${num}"]`);
+      if (marker) marker.classList.remove('active');
+    }
+
+    function filterNav(query) {
+      const q = query.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(item => {
+        const title = item.dataset.title;
+        if (!q || title.includes(q)) {
+          item.classList.remove('hidden');
+        } else {
+          item.classList.add('hidden');
+        }
+      });
+      // Open all sections when searching
+      if (q) {
+        document.querySelectorAll('.nav-section-items').forEach(i => i.classList.add('open'));
+        document.querySelectorAll('.nav-section-heading').forEach(h => h.classList.add('open'));
+      }
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('guide-theme', next);
+      updateThemeIcon(next);
+    }
+
+    function updateThemeIcon(theme) {
+      const btn = document.getElementById('themeBtn');
+      btn.innerHTML = theme === 'dark'
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+    }
+
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('open');
+      document.getElementById('sidebarOverlay').classList.toggle('open');
+    }
+
+    // ── Scroll tracking ──
+    function updateScrollProgress() {
+      const scrolled = window.scrollY;
+      const total = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = total > 0 ? (scrolled / total) * 100 : 0;
+      document.getElementById('progressBar').style.width = pct + '%';
+    }
+
+    // ── Active section tracking ──
+    function updateActiveSection() {
+      const sections = document.querySelectorAll('.guide-section');
+      let currentId = '';
+      
+      sections.forEach(section => {
+        const rect = section.getBoundingClientRect();
+        if (rect.top <= 120) currentId = section.id;
+      });
+
+      if (currentId) {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        const activeItem = document.querySelector(`.nav-item[data-id="${currentId}"]`);
+        if (activeItem) {
+          activeItem.classList.add('active');
+          // Update topbar
+          const page = GUIDE_DATA.find(p => p.id === currentId);
+          if (page) {
+            document.getElementById('topbarSection').textContent = page.section;
+            document.getElementById('topbarTitle').textContent = page.title;
+          }
+          // Ensure parent section is open
+          const section = activeItem.closest('.nav-section');
+          if (section) {
+            const heading = section.querySelector('.nav-section-heading');
+            const items = section.querySelector('.nav-section-items');
+            if (!items.classList.contains('open')) {
+              heading.classList.add('open');
+              items.classList.add('open');
+            }
+          }
+        }
+      }
+    }
+
+    // ── Init ──
+    window.addEventListener('scroll', () => {
+      updateScrollProgress();
+      updateActiveSection();
+    });
+
+    // Restore theme
+    const savedTheme = localStorage.getItem('guide-theme');
+    if (savedTheme) {
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      updateThemeIcon(savedTheme);
+    }
+
+    // Keyboard shortcut: Ctrl+K for search
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+      }
+    });
+
+    // Build the page
+    buildSidebar();
+    buildContent();
+  </script>
+</body>
+</html>

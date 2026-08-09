@@ -273,8 +273,8 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                       <TableRow key={r.id}>
                         <TableCell>{shortDate(r.date)}</TableCell>
                         <TableCell className="font-semibold">{r.buyer}</TableCell>
-                        <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
-                        <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorryNumber ?? '-'}</TableCell>
+                        <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                         <TableCell>{r.destination ?? '-'}</TableCell>
                         <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
                         <TableCell>
@@ -368,8 +368,8 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                     <TableRow key={r.id}>
                       <TableCell>{shortDate(r.date)}</TableCell>
                       <TableCell className="font-semibold">{r.buyer}</TableCell>
-                      <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                      <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorryNumber ?? '-'}</TableCell>
+                      <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                       <TableCell>{r.destination ?? '-'}</TableCell>
                       {tab !== 'KNM' && (
                         <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
@@ -495,12 +495,12 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
               ) : (
                 visible.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="font-mono text-sm font-bold">
+                    <TableCell className="font-sans text-xs font-semibold text-foreground/90">
                       {r.gcNumber ?? <span className="font-sans text-xs font-normal text-muted-foreground">Not issued</span>}
                     </TableCell>
                     <TableCell>{shortDate(r.gcDate ?? r.date)}</TableCell>
-                    <TableCell className="font-mono text-sm">{r.lorryNumber ?? '-'}</TableCell>
-                    <TableCell className="font-mono text-xs">{r.invoice ?? '-'}</TableCell>
+                    <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorryNumber ?? '-'}</TableCell>
+                    <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                     <TableCell className="font-semibold">{r.buyer}</TableCell>
                     <TableCell>{r.destination ?? '-'}</TableCell>
                     <TableCell className="text-xs">{productDescription(r.product)}</TableCell>

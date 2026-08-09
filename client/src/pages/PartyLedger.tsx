@@ -180,7 +180,6 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
             <TableRow className="bg-muted/40 hover:bg-muted/40">
               <TableHead>Party</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>Contact</TableHead>
               <TableHead>Location</TableHead>
               <TableHead className="text-center">Last Activity</TableHead>
               <TableHead className="text-right">Total Business</TableHead>
@@ -189,9 +188,9 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={7} className="h-40 text-center"><Loader2 className="h-7 w-7 animate-spin text-primary mx-auto" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="h-40 text-center"><Loader2 className="h-7 w-7 animate-spin text-primary mx-auto" /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="h-32 text-center text-muted-foreground">No parties match your search.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground">No parties match your search.</TableCell></TableRow>
             ) : (
               rows.map((p) => (
                 <TableRow key={p.id} className="cursor-pointer" onClick={() => onSelect(p.id)}>
@@ -202,11 +201,7 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] font-medium">{TYPE_LABEL[p.type] ?? p.type}</Badge>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    <div>{p.phone ?? '-'}</div>
-                    {p.phone2 && <div>{p.phone2}</div>}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{[p.address, p.state].filter(Boolean).join(', ') || '-'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{p.state || '-'}</TableCell>
                   <TableCell className="text-center text-sm text-muted-foreground">{p.lastTxnDate ? shortDate(p.lastTxnDate) : '-'}</TableCell>
                   <TableCell className="text-right font-medium">{rupees(p.totalBusiness)}</TableCell>
                   <TableCell className="text-right">

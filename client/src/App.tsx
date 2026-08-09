@@ -153,6 +153,7 @@ export default function App() {
               <Route path="/stock/date" element={<StockByDate />} />
               <Route path="/stock/party" element={<StockByParty />} />
               <Route path="/stock/price" element={<StockByPrice />} />
+              <Route path="/stock-by-price" element={<Navigate to="/stock/price" replace />} />
               <Route path="/stock/state" element={<StockByState />} />
               <Route path="/loans" element={<BankLoans />} />
               <Route path="/sale-orders" element={<SaleOrders />} />

@@ -776,6 +776,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         customRetention: transportProvider === 'OTHER' ? (data.customRetention ?? null) : null,
         excessOutKg,
         excessOutNote: excessOutKg > 0 ? (data.excessOutNote ?? null) : null,
+        fromTransfer: order.product !== 'PAPPU' && order.product !== 'TPS' ? data.fromTransfer : false,
       },
     });
 

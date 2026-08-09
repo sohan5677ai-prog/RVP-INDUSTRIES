@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StatCard } from '@/components/StatCard';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { InvoiceDocument, InvoiceStyles, parseInvoiceLayout } from '@/components/InvoiceDocument';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -173,6 +173,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const hasBroker = !['WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'].includes(product);
   const isPappu = product === 'PAPPU';
+  // Byproducts only (not Pappu/TPS): these get moved between locations via
+  // StockTransfer/ShellTransfer/HuskTransfer, so a shipment can be sold either
+  // straight off the factory or out of one of those transferred lots.
+  const offerFromTransfer = product !== 'PAPPU' && product !== 'TPS';
   // Order row: ⌄ Date · Shipments · Party · [Broker] · Destination · Ordered ·
   // Dispatched · Remaining · Price · Status · Actions. Per-shipment detail lives
   // in the expandable panel.
@@ -246,6 +250,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [excessOutTonnes, setExcessOutTonnes] = useState('');
   // "This is the final lorry" - closes the order despite an unshipped balance.
   const [finalDispatch, setFinalDispatch] = useState(false);
+  // Byproducts only: this lorry is being sold out of transferred stock rather
+  // than straight off the factory. Pure reporting tag.
+  const [fromTransfer, setFromTransfer] = useState(false);
 
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
@@ -325,6 +332,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setCustomRetention('');
     setExcessOutTonnes(''); // never sticky - each XS claim must be deliberate
     setFinalDispatch(false); // closing an order short must be deliberate too
+    setFromTransfer(false); // never sticky - each dispatch must say so explicitly
   }
 
   async function extractKata(file: File) {
@@ -359,6 +367,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
       if (excessOutKg > 0) fd.append('excessOutKg', String(excessOutKg));
       if (finalDispatch) fd.append('finalDispatch', 'true');
+      if (offerFromTransfer && fromTransfer) fd.append('fromTransfer', 'true');
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -936,11 +945,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg) * gstFactor(o)), 0);
   const baseRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
   const wacPrice = totalSoldKg > 0 ? baseRevenue / totalSoldKg : 0;
-  const dispatchedRevenue = visible.reduce((sum, o) => sum + (dispatchedKgOf(o) * Number(o.ratePerKg) * gstFactor(o)), 0);
-  const pendingRevenue = totalRevenue - dispatchedRevenue;
   const dispatchedPct = totalSoldKg > 0 ? (totalDispatchedKg / totalSoldKg) * 100 : 0;
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visible, 50);
-  const realizationPct = totalRevenue > 0 ? (dispatchedRevenue / totalRevenue) * 100 : 0;
 
   // ── Shortage exposure ───────────────────────────────────────────────────────
   // The buyer's weighbridge slip at delivery gives an ESTIMATE only. It becomes a
@@ -982,73 +988,48 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       )}
 
       {/* Metrics Dashboard */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total {meta.noun} Sold</CardTitle>
-            <PackageCheck className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-emerald-600">{toTonnes(totalSoldKg).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Total ordered tonnage</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Dispatched</CardTitle>
-            <Truck className="h-4 w-4 text-indigo-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-indigo-600">{toTonnes(totalDispatchedKg).toFixed(2)} MT</div>
-            <p className="text-[10px] text-muted-foreground mt-1">{dispatchedPct.toFixed(0)}% of ordered tonnage</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Wt Avg Price</CardTitle>
-            <IndianRupee className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-primary">{rupees(wacPrice)}/kg</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Weighted average rate</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Revenue Pipeline</CardTitle>
-            <IndianRupee className="h-4 w-4 text-sky-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-sky-600">{rupees(totalRevenue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Total revenue · incl. GST</p>
-          </CardContent>
-        </Card>
-        {product !== 'HUSK' && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pending Value</CardTitle>
-              <TrendingUp className="h-4 w-4 text-rose-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-rose-600">{rupees(pendingRevenue)}</div>
-              <p className="text-[10px] text-muted-foreground mt-1">{realizationPct.toFixed(0)}% realized · incl. GST</p>
-            </CardContent>
-          </Card>
-        )}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Locked Shortage</CardTitle>
-            <TrendingDown className="h-4 w-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600">{rupees(shortageTotals.locked)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 stagger">
+        <StatCard
+          label={`Total ${meta.noun} Sold`}
+          value={`${toTonnes(totalSoldKg).toFixed(2)} MT`}
+          icon={PackageCheck}
+          tone="forest"
+          hint="Total ordered tonnage"
+        />
+        <StatCard
+          label="Total Dispatched"
+          value={`${toTonnes(totalDispatchedKg).toFixed(2)} MT`}
+          icon={Truck}
+          tone="taupe"
+          hint={`${dispatchedPct.toFixed(0)}% of ordered tonnage`}
+        />
+        <StatCard
+          label="Wt Avg Price"
+          value={`${rupees(wacPrice)}/kg`}
+          icon={IndianRupee}
+          tone="amber"
+          hint="Weighted average rate"
+        />
+        <StatCard
+          label="Revenue Pipeline"
+          value={rupees(totalRevenue)}
+          icon={IndianRupee}
+          tone="clay"
+          hint="Total revenue · incl. GST"
+        />
+        <StatCard
+          label="Locked Shortage"
+          value={rupees(shortageTotals.locked)}
+          icon={TrendingDown}
+          tone="rose"
+          hint={
+            <>
               {toTonnes(shortageTotals.lockedKg).toFixed(2)} t over {shortageTotals.lockedShipments} shipment{shortageTotals.lockedShipments === 1 ? '' : 's'}
               {' · '}
               <span className="text-red-600 dark:text-red-400">{rupees(shortageTotals.estimated)} estimated</span>
-            </p>
-          </CardContent>
-        </Card>
+            </>
+          }
+        />
       </div>
 
       {/* Filters */}
@@ -1243,6 +1224,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                               {d.invoiceNumber ?? <span className="font-sans text-xs font-medium text-amber-600 dark:text-amber-400">Invoice not raised</span>}
                                             </span>
                                             <Badge variant={statusVariant[d.status]}>{titleCase(d.status)}</Badge>
+                                            {d.fromTransfer && (
+                                              <Badge variant="outline" title="Sold out of stock already moved to a storage location, rather than straight off the factory.">
+                                                From Transfer
+                                              </Badge>
+                                            )}
                                             {(d.excessOutKg ?? 0) > 0 && (
                                               <Badge
                                                 variant="warning"
@@ -1586,6 +1572,24 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 </p>
               )}
             </div>
+            {offerFromTransfer && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={fromTransfer}
+                  onChange={(e) => setFromTransfer(e.target.checked)}
+                />
+                <span className="space-y-1">
+                  <span className="block text-sm font-medium">Dispatch from Transfers</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    Tick this if this lorry is being sold out of stock already moved to a storage
+                    location, rather than straight off the factory. Tags the shipment only - it
+                    does not change billing or cost.
+                  </span>
+                </span>
+              </label>
+            )}
             {offerFinalDispatch && (
               <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">
                 <input

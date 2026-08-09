@@ -49,6 +49,9 @@ export const dispatchSaleOrderSchema = z.object({
   // Settings tolerance; the everyday 24.87-of-25 case closes on its own. Sent
   // over multipart, so the string "true" has to count.
   finalDispatch: z.preprocess((v) => v === true || v === 'true', z.boolean()),
+  // Byproducts only: this shipment is sold out of transferred stock rather than
+  // straight off the factory. Pure tag, sent over multipart so "true" has to count.
+  fromTransfer: z.preprocess((v) => v === true || v === 'true', z.boolean().optional().default(false)),
 });
 
 const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);

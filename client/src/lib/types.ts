@@ -268,6 +268,9 @@ export interface SaleDispatch {
   // a flag - one lorry can be part-backed and part-surplus.
   excessOutKg?: number | null;
   excessOutNote?: string | null;
+  // Byproducts only: this shipment sold out of transferred stock rather than
+  // straight off the factory. Pure reporting tag, no cost effect.
+  fromTransfer?: boolean;
   receivedDate?: string | null;
   deliveredDate?: string | null;
   buyerKataKg?: number | null;

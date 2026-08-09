@@ -559,6 +559,13 @@ model SaleDispatch {
   excessOutKg   Int     @default(0)
   excessOutNote String?
 
+  // Byproduct dispatches only (Husk/Shell/Waste/Pre-cleaner Dust/Nalla*): flags
+  // that this shipment's stock is being sold out of a transferred lot (see
+  // StockTransfer/ShellTransfer/HuskTransfer) rather than straight off the
+  // factory. Pure reporting tag - byproducts carry no valued inventory silo, so
+  // it does not change COGS or any allocation.
+  fromTransfer Boolean @default(false)
+
   // Delivery matching (buyer's kata slip captured at delivery).
   receivedDate               DateTime?
   deliveredDate              DateTime?

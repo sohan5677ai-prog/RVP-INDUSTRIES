@@ -843,17 +843,24 @@ export default function StockByPrice() {
                                           </span>
                                         )}
                                         {(isArrived || l.kind === 'PENDING') && l.consumedBy && l.consumedBy.length > 0 && (
-                                          <span className="mt-1 block space-y-0.5 text-left text-[9px] font-normal normal-case">
-                                            {l.consumedBy.slice(0, 6).map((c, i) => (
-                                              <span key={i} className="block text-muted-foreground">
-                                                <span className="text-sky-700">{kg(c.seedKg)}</span> → {c.buyer}
-                                                <span className="text-muted-foreground/70"> · {shortDate(c.saleDate)}</span>
-                                              </span>
-                                            ))}
-                                            {l.consumedBy.length > 6 && (
-                                              <span className="block text-muted-foreground/70">+{l.consumedBy.length - 6} more order(s)</span>
-                                            )}
-                                          </span>
+                                           <div className="mt-1.5 flex flex-col gap-1 text-left">
+                                             {l.consumedBy.slice(0, 6).map((c, i) => (
+                                               <div
+                                                 key={i}
+                                                 className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200/70 bg-sky-50/80 px-2 py-1 text-[10px] font-medium text-sky-950 shadow-xs dark:border-sky-900/50 dark:bg-sky-950/50 dark:text-sky-200"
+                                               >
+                                                 <span className="font-mono font-bold text-sky-700 dark:text-sky-400">{kg(c.seedKg)}</span>
+                                                 <span className="text-sky-400 dark:text-sky-600">→</span>
+                                                 <span className="font-semibold text-foreground">{c.buyer}</span>
+                                                 <span className="text-[9px] text-muted-foreground">· {shortDate(c.saleDate)}</span>
+                                               </div>
+                                             ))}
+                                             {l.consumedBy.length > 6 && (
+                                               <span className="inline-flex items-center self-start rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                                 +{l.consumedBy.length - 6} more order(s)
+                                               </span>
+                                             )}
+                                           </div>
                                         )}
                                       </>
                                     }

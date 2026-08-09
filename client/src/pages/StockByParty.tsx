@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, ChevronDown, Target, ShoppingCart, AlertTriangle, CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, Target, ShoppingCart, AlertTriangle, CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown, Tag } from 'lucide-react';
 import { api } from '@/lib/api';
 import { kg, rupees, toTonnes } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, Figure, PanelEmpty } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 type BlendStatus = 'ok' | 'already' | 'infeasible' | 'nostock';
@@ -497,13 +499,13 @@ export default function StockByParty() {
                 
                 return (
                   <Fragment key={p.partyId}>
-                    <TableRow 
-                      className={`hover:bg-muted/50 ${hasStock ? 'cursor-pointer font-medium' : 'opacity-60'}`}
+                    <TableRow
+                      className={cn('transition-colors', hasStock ? cn('cursor-pointer font-medium', isExpanded ? 'bg-accent/40' : 'hover:bg-accent/30') : 'opacity-60')}
                       onClick={() => hasStock && toggleParty(p.partyId)}
                     >
                       <TableCell className="p-3 text-center">
                         {hasStock && (
-                          isExpanded ? <ChevronDown className="h-4 w-4 mx-auto text-muted-foreground" /> : <ChevronRight className="h-4 w-4 mx-auto text-muted-foreground" />
+                          <ChevronRight className={cn('h-4 w-4 mx-auto text-muted-foreground transition-transform duration-200', isExpanded && 'rotate-90 text-primary')} />
                         )}
                       </TableCell>
                       <TableCell className="font-bold text-foreground">
@@ -550,55 +552,37 @@ export default function StockByParty() {
                     </TableRow>
                     
                     {isExpanded && hasStock && (
-                      <TableRow className="bg-muted/10 hover:bg-muted/10">
-                        <TableCell colSpan={7} className="p-4 pl-12">
-                          <div className="max-w-2xl rounded-lg border bg-card p-4 shadow-sm space-y-3">
-                            <div className="flex items-center justify-between border-b pb-2">
-                              <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider">
-                                Price Pool Breakdown
-                              </span>
-                              <span className="text-xs text-muted-foreground font-semibold">
-                                {p.pricePools?.length || 0} Pool(s) Active
-                              </span>
-                            </div>
-                            
-                            {(!p.pricePools || p.pricePools.length === 0) ? (
-                              <div className="text-center text-xs text-muted-foreground py-2">
-                                No active price pools for this supplier.
-                              </div>
-                            ) : (
-                              <div className="overflow-x-auto">
-                                <Table>
-                                  <TableHeader className="bg-muted/40">
-                                    <TableRow className="hover:bg-transparent">
-                                      <TableHead className="h-8 py-1 text-xs">Price</TableHead>
-                                      <TableHead className="h-8 py-1 text-xs text-right">Total Purchased</TableHead>
-                                      <TableHead className="h-8 py-1 text-xs text-right">Valuation</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {p.pricePools.map((pool) => (
-                                      <TableRow key={pool.pricePerKg} className="hover:bg-muted/20">
-                                        <TableCell className="py-2 text-xs font-bold text-foreground">
-                                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
-                                            {rupees(pool.pricePerKg)}/kg
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell className="py-2 text-xs text-right font-extrabold text-primary">
-                                          {toTonnes(pool.totalPurchasedKg).toFixed(2)} MT <span className="text-[10px] text-muted-foreground font-semibold">({kg(pool.totalPurchasedKg)})</span>
-                                        </TableCell>
-                                        <TableCell className="py-2 text-xs text-right font-bold text-emerald-600">
-                                          {rupees(pool.purchasedValue)}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <ExpandPanel colSpan={7}>
+                        <PanelLabel>Price Pool Breakdown · {p.pricePools?.length || 0}</PanelLabel>
+                        {(!p.pricePools || p.pricePools.length === 0) ? (
+                          <PanelEmpty>No active price pools for this supplier.</PanelEmpty>
+                        ) : (
+                          <PanelStack>
+                            {p.pricePools.map((pool) => (
+                              <PanelCard
+                                key={pool.pricePerKg}
+                                icon={Tag}
+                                identity={
+                                  <PanelTitle>
+                                    <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 font-extrabold">
+                                      {rupees(pool.pricePerKg)}/kg
+                                    </Badge>
+                                  </PanelTitle>
+                                }
+                                figures={
+                                  <>
+                                    <Figure
+                                      label="Total purchased"
+                                      value={<>{toTonnes(pool.totalPurchasedKg).toFixed(2)} MT<span className="block text-[9px] font-normal normal-case text-muted-foreground">{kg(pool.totalPurchasedKg)}</span></>}
+                                    />
+                                    <Figure label="Valuation" value={rupees(pool.purchasedValue)} valueClass="text-emerald-600 dark:text-emerald-400" />
+                                  </>
+                                }
+                              />
+                            ))}
+                          </PanelStack>
+                        )}
+                      </ExpandPanel>
                     )}
                   </Fragment>
                 );

@@ -14,11 +14,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle } from 'lucide-react';
+import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, Figure, PanelEmpty } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 import SuryaRoadTransport from '@/pages/SuryaRoadTransport';
 import LorryConfirmations from '@/pages/LorryConfirmations';
@@ -271,10 +273,15 @@ function FreightTable({
             return (
               <Fragment key={r.id}>
                 <TableRow
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className={cn('transition-colors', r.lorry ? cn('cursor-pointer', isExpanded ? 'bg-accent/40' : 'hover:bg-accent/30') : 'hover:bg-muted/50')}
                   onClick={() => r.lorry && setExpandedRow(isExpanded ? null : r.lorry)}
                 >
-                  <TableCell>{shortDate(r.date)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {r.lorry && <ChevronRight className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200', isExpanded && 'rotate-90 text-primary')} />}
+                      {shortDate(r.date)}
+                    </div>
+                  </TableCell>
                   <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorry ?? '-'}</TableCell>
                   <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                   {hideDeductions && <TableCell>{r.sourced}</TableCell>}
@@ -309,41 +316,33 @@ function FreightTable({
                     ) : null}
                   </TableCell>
                 </TableRow>
-                {isExpanded && r.lorry && (
-                  <TableRow className="bg-muted/10 border-b">
-                    <TableCell colSpan={hideDeductions ? 11 : 11} className="p-0 border-b-0">
-                      <div className="p-4 border border-t-0 rounded-b-md bg-background m-2 mt-0">
-                        <h4 className="font-semibold mb-2 text-sm">Payment History for {r.lorry}</h4>
-                        {(() => {
-                          const history = paymentsByLorry.get(r.lorry!);
-                          if (!history || history.length === 0) {
-                            return <p className="text-sm text-muted-foreground">No payments recorded.</p>;
-                          }
-                          return (
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Date</TableHead>
-                                  <TableHead>Amount</TableHead>
-                                  <TableHead>Reference</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {history.map((pay, i) => (
-                                  <TableRow key={i}>
-                                    <TableCell>{shortDate(pay.date)}</TableCell>
-                                    <TableCell className="font-medium text-emerald-600 dark:text-emerald-400">{rupees(pay.amount)}</TableCell>
-                                    <TableCell className="text-muted-foreground">{pay.reference || '-'}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          );
-                        })()}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
+                {isExpanded && r.lorry && (() => {
+                  const history = paymentsByLorry.get(r.lorry!) ?? [];
+                  return (
+                    <ExpandPanel colSpan={11}>
+                      <PanelLabel>Payment History for {r.lorry} · {history.length}</PanelLabel>
+                      {history.length === 0 ? (
+                        <PanelEmpty>No payments recorded.</PanelEmpty>
+                      ) : (
+                        <PanelStack>
+                          {history.map((pay, i) => (
+                            <PanelCard
+                              key={i}
+                              icon={IndianRupee}
+                              identity={
+                                <PanelTitle>
+                                  <span className="font-mono text-sm font-semibold">{shortDate(pay.date)}</span>
+                                  {pay.reference && <span className="text-xs text-muted-foreground">{pay.reference}</span>}
+                                </PanelTitle>
+                              }
+                              figures={<Figure label="Amount" value={rupees(pay.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
+                            />
+                          ))}
+                        </PanelStack>
+                      )}
+                    </ExpandPanel>
+                  );
+                })()}
               </Fragment>
             );
           })}

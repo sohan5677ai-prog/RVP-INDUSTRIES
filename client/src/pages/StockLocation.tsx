@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Search, Loader2, Warehouse, TrendingUp, IndianRupee, Package, Landmark,
-  ChevronRight, ChevronDown, Tag, MapPin,
+  ChevronRight, Tag, MapPin, Truck,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { StockTransfer, LoansResponse } from '@/lib/types';
@@ -18,6 +18,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, PanelDot, Figure } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 type LocationType = 'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi';
@@ -663,11 +665,11 @@ export default function StockLocation() {
                 return (
                   <Fragment key={key}>
                     <TableRow
-                      className={`hover:bg-muted/50 cursor-pointer font-medium ${depleted ? 'opacity-50' : ''}`}
+                      className={cn('cursor-pointer font-medium transition-colors', depleted && 'opacity-50', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
                       onClick={() => toggle(key)}
                     >
                       <TableCell className="p-3 text-center">
-                        {isOpen ? <ChevronDown className="h-4 w-4 mx-auto text-muted-foreground" /> : <ChevronRight className="h-4 w-4 mx-auto text-muted-foreground" />}
+                        <ChevronRight className={cn('h-4 w-4 mx-auto text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-xs font-extrabold px-2 py-0.5">
@@ -694,62 +696,50 @@ export default function StockLocation() {
                     </TableRow>
 
                     {isOpen && (
-                      <TableRow className="bg-muted/10 hover:bg-muted/10">
-                        <TableCell colSpan={6} className="p-4 pl-12">
-                          <div className="rounded-lg border bg-card p-4 shadow-sm">
-                            <div className="flex items-center justify-between border-b pb-2 mb-2">
-                              <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                                <Tag className="h-3 w-3" /> Lots at {rupees(b.price)}/kg
-                              </span>
-                              <span className="text-xs text-muted-foreground font-semibold">
-                                {b.lots.length} lot{b.lots.length === 1 ? '' : 's'}
-                              </span>
-                            </div>
-                            <div className="overflow-x-auto">
-                              <Table>
-                                <TableHeader className="bg-muted/40">
-                                  <TableRow className="hover:bg-transparent">
-                                    <TableHead className="h-8 py-1 text-xs">Date</TableHead>
-                                    <TableHead className="h-8 py-1 text-xs">Party</TableHead>
-                                    <TableHead className="h-8 py-1 text-xs">Lorry</TableHead>
-                                    <TableHead className="h-8 py-1 text-xs">PO</TableHead>
-                                    <TableHead className="h-8 py-1 text-xs text-right">Remaining Seed</TableHead>
-                                    <TableHead className="h-8 py-1 text-xs text-right">
-                                      {selectedLoc === 'RVP' ? 'Seed Consumed'
-                                        : selectedLoc === 'All' ? 'Seed Depleted'
-                                        : 'Transferred Seed'}
-                                    </TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {b.lots.map((l) => (
-                                    <TableRow key={l.purchaseId} className="hover:bg-muted/20">
-                                      <TableCell className="py-2 text-xs">
-                                        {shortDate(l.date)}
-                                        {l.isTransferredIn && (
-                                          <Badge variant="outline" className="ml-2 text-[10px] text-blue-600">In</Badge>
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="py-2 text-xs font-medium text-foreground">{l.partyName}</TableCell>
-                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.lorryNumber || '-'}</TableCell>
-                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.poNumber || '-'}</TableCell>
-                                      <TableCell className="py-2 text-xs text-right font-semibold">
+                      <ExpandPanel colSpan={6}>
+                        <PanelLabel>Lots at {rupees(b.price)}/kg · {b.lots.length}</PanelLabel>
+                        <PanelStack>
+                          {b.lots.map((l) => (
+                            <PanelCard
+                              key={l.purchaseId}
+                              icon={Truck}
+                              identity={
+                                <>
+                                  <PanelTitle>
+                                    <span className="font-medium text-foreground">{l.partyName}</span>
+                                    {l.isTransferredIn && <Badge variant="outline" className="text-blue-600">In</Badge>}
+                                  </PanelTitle>
+                                  <PanelMeta>
+                                    <span>{shortDate(l.date)}</span><PanelDot />
+                                    <span>{l.lorryNumber || 'no lorry'}</span><PanelDot />
+                                    <span className="tabular-nums">{l.poNumber || '-'}</span>
+                                  </PanelMeta>
+                                </>
+                              }
+                              figures={
+                                <>
+                                  <Figure
+                                    label="Remaining seed"
+                                    value={
+                                      <>
                                         {kg(l.remainingKg)}
                                         {l.remainingKg !== l.receivedKg && (
-                                          <span className="block text-[10px] text-muted-foreground font-normal">of {kg(l.receivedKg)} received</span>
+                                          <span className="block text-[9px] font-normal normal-case text-muted-foreground">of {kg(l.receivedKg)} received</span>
                                         )}
-                                      </TableCell>
-                                      <TableCell className="py-2 text-xs text-right text-muted-foreground">
-                                        {l.transferredKg > 0 ? kg(l.transferredKg) : '-'}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                                      </>
+                                    }
+                                  />
+                                  <Figure
+                                    label={selectedLoc === 'RVP' ? 'Seed consumed' : selectedLoc === 'All' ? 'Seed depleted' : 'Transferred seed'}
+                                    value={l.transferredKg > 0 ? kg(l.transferredKg) : '-'}
+                                    valueClass="text-muted-foreground"
+                                  />
+                                </>
+                              }
+                            />
+                          ))}
+                        </PanelStack>
+                      </ExpandPanel>
                     )}
                   </Fragment>
                 );

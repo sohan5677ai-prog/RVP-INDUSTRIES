@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingUp, Loader2, ChevronDown, ChevronRight, Undo2 } from 'lucide-react';
+import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee } from 'lucide-react';
 import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -22,6 +22,8 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, Figure, PanelEmpty } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 // Byproducts share one tab group in the Sales nav; group them the same way here.
@@ -463,10 +465,13 @@ export default function SaleDuesPage() {
                 ) : (
                   (pageRows ?? []).map((inv) => (
                     <Fragment key={inv.id}>
-                      <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expandedId === inv.id ? null : inv.id)}>
+                      <TableRow
+                        className={cn('cursor-pointer transition-colors', expandedId === inv.id ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                        onClick={() => setExpandedId(expandedId === inv.id ? null : inv.id)}
+                      >
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            {expandedId === inv.id ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                            <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', expandedId === inv.id && 'rotate-90 text-primary')} />
                             {inv.brokerName ?? '-'}
                           </div>
                         </TableCell>
@@ -522,36 +527,30 @@ export default function SaleDuesPage() {
                         </TableCell>
                       </TableRow>
                       {expandedId === inv.id && (
-                        <TableRow className="bg-muted/20">
-                          <TableCell colSpan={11} className="p-0 border-b-0">
-                            <div className="px-10 py-4">
-                              <h4 className="font-semibold text-sm mb-3">Allocated Receipts</h4>
-                              {inv.appliedReceipts.length > 0 ? (
-                                <Table className="bg-background border rounded-md shadow-sm w-full max-w-lg">
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableHead className="w-[150px]">Date</TableHead>
-                                      <TableHead>Amount Paid</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {inv.appliedReceipts.map((ar, idx) => (
-                                      <TableRow key={idx}>
-                                        <TableCell>{shortDate(new Date(ar.date).toISOString())}</TableCell>
-                                        <TableCell className="font-medium text-emerald-600">
-                                          {rupees(ar.amount)}
-                                          {ar.isTdsOrShortage && <span className="text-xs text-muted-foreground ml-2">(TDS/Shortage)</span>}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              ) : (
-                                <p className="text-sm text-muted-foreground">No receipts have been allocated to this invoice yet.</p>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
+                        <ExpandPanel colSpan={11}>
+                          <PanelLabel>Allocated Receipts · {inv.appliedReceipts.length}</PanelLabel>
+                          {inv.appliedReceipts.length > 0 ? (
+                            <PanelStack>
+                              {inv.appliedReceipts.map((ar, idx) => (
+                                <PanelCard
+                                  key={idx}
+                                  icon={IndianRupee}
+                                  identity={
+                                    <>
+                                      <PanelTitle>
+                                        <span className="font-mono text-sm font-semibold">{shortDate(new Date(ar.date).toISOString())}</span>
+                                        {ar.isTdsOrShortage && <span className="text-xs text-muted-foreground">TDS / Shortage</span>}
+                                      </PanelTitle>
+                                    </>
+                                  }
+                                  figures={<Figure label="Amount" value={rupees(ar.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
+                                />
+                              ))}
+                            </PanelStack>
+                          ) : (
+                            <PanelEmpty>No receipts have been allocated to this invoice yet.</PanelEmpty>
+                          )}
+                        </ExpandPanel>
                       )}
                     </Fragment>
                   ))

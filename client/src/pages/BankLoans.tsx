@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, ChevronDown, ChevronRight, Check } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Check, IndianRupee } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { LoansResponse, BankLoan } from '@/lib/types';
 import { loanInterest, daysBetween } from '@/lib/calc';
@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ExportButtons } from '@/components/ExportButtons';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, Figure, PanelEmpty } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -306,10 +308,13 @@ export default function BankLoansPage() {
             )}
             {loans.map((loan) => (
               <Fragment key={loan.id}>
-                <TableRow>
-                  <TableCell>
+                <TableRow
+                  className={cn('cursor-pointer transition-colors', expanded[loan.id] ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                  onClick={() => toggle(loan.id)}
+                >
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => toggle(loan.id)} className="text-muted-foreground">
-                      {expanded[loan.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      <ChevronRight className={cn('h-4 w-4 transition-transform duration-200', expanded[loan.id] && 'rotate-90 text-primary')} />
                     </button>
                   </TableCell>
                   <TableCell>{shortDate(loan.drawdownDate)}</TableCell>
@@ -334,7 +339,7 @@ export default function BankLoansPage() {
                       {loan.status}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1">
                       {loan.status === 'OPEN' && (
                         <Button
@@ -360,37 +365,47 @@ export default function BankLoansPage() {
                   </TableCell>
                 </TableRow>
                 {expanded[loan.id] && (
-                  <TableRow>
-                    <TableCell />
-                    <TableCell colSpan={10} className="bg-muted/30">
-                      {loan.repayments.length === 0 ? (
-                        <div className="text-sm text-muted-foreground py-1">No repayments yet.</div>
-                      ) : (
-                        <div className="space-y-1 py-1">
-                          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Repayments</div>
-                          {loan.repayments.map((r) => (
-                            <div key={r.id} className="flex items-center justify-between text-sm">
-                              <span>{shortDate(r.date)}{r.reference ? ` · ${r.reference}` : ''}</span>
-                              <span className="flex items-center gap-2">
-                                <span className="font-medium">{rupees(r.amount)}</span>
-                                {Number(r.interest) > 0 && (
-                                  <span className="text-xs text-muted-foreground">+ {rupees(r.interest)} int</span>
-                                )}
-                                <button
-                                  onClick={() => {
-                                    if (confirm('Reverse this repayment?')) deleteRepayMutation.mutate(r.id);
-                                  }}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                  <ExpandPanel colSpan={11}>
+                    <PanelLabel>Repayments · {loan.repayments.length}</PanelLabel>
+                    {loan.repayments.length === 0 ? (
+                      <PanelEmpty>No repayments yet.</PanelEmpty>
+                    ) : (
+                      <PanelStack>
+                        {loan.repayments.map((r) => (
+                          <PanelCard
+                            key={r.id}
+                            icon={IndianRupee}
+                            identity={
+                              <>
+                                <PanelTitle>
+                                  <span className="font-mono text-sm font-semibold">{shortDate(r.date)}</span>
+                                </PanelTitle>
+                                {r.reference && <PanelMeta><span>{r.reference}</span></PanelMeta>}
+                              </>
+                            }
+                            figures={
+                              <>
+                                <Figure label="Principal" value={rupees(r.amount)} />
+                                {Number(r.interest) > 0 && <Figure label="Interest" value={rupees(r.interest)} valueClass="text-muted-foreground" />}
+                              </>
+                            }
+                            actions={
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                onClick={() => {
+                                  if (confirm('Reverse this repayment?')) deleteRepayMutation.mutate(r.id);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /> Reverse
+                              </Button>
+                            }
+                          />
+                        ))}
+                      </PanelStack>
+                    )}
+                  </ExpandPanel>
                 )}
               </Fragment>
             ))}

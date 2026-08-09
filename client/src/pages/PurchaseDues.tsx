@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingDown, Loader2, ChevronDown, ChevronRight, Undo2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { TrendingDown, Loader2, ChevronRight, Undo2, IndianRupee } from 'lucide-react';
 import { Fragment } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Segmented } from '@/components/ui/segmented';
@@ -19,6 +20,8 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
 import { ScreenshotUpload } from '@/components/ScreenshotUpload';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, Figure, PanelEmpty } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 // Payment-status tabs. "Unpaid" catches anything with even ₹1 still outstanding
@@ -482,10 +485,13 @@ export default function PurchaseDuesPage() {
                 ) : (
                   (pageRows ?? []).map((bill) => (
                     <Fragment key={bill.id}>
-                      <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expandedId === bill.id ? null : bill.id)}>
+                      <TableRow
+                        className={cn('cursor-pointer transition-colors', expandedId === bill.id ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                        onClick={() => setExpandedId(expandedId === bill.id ? null : bill.id)}
+                      >
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
-                            {expandedId === bill.id ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                            <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', expandedId === bill.id && 'rotate-90 text-primary')} />
                             {shortDate(bill.purchaseDate.toISOString())}
                           </div>
                         </TableCell>
@@ -545,35 +551,32 @@ export default function PurchaseDuesPage() {
                         </TableCell>
                       </TableRow>
                       {expandedId === bill.id && (
-                        <TableRow className="bg-muted/20">
-                          <TableCell colSpan={10} className="p-0 border-b-0">
-                            <div className="px-10 py-4">
-                              <h4 className="font-semibold text-sm mb-3">Allocated Payments</h4>
-                              {bill.appliedPayments.length > 0 ? (
-                                <Table className="bg-background border rounded-md shadow-sm w-full max-w-2xl">
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableHead className="w-[150px]">Date</TableHead>
-                                      <TableHead>Amount Paid</TableHead>
-                                      <TableHead>Mode of Payment</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {bill.appliedPayments.map((ap, idx) => (
-                                      <TableRow key={idx}>
-                                        <TableCell>{shortDate(new Date(ap.date).toISOString())}</TableCell>
-                                        <TableCell className="font-medium text-emerald-600">{rupees(ap.amount)}</TableCell>
-                                        <TableCell>{ap.mode}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              ) : (
-                                <p className="text-sm text-muted-foreground">No payments have been allocated to this purchase yet.</p>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
+                        <ExpandPanel colSpan={10}>
+                          <PanelLabel>Allocated Payments · {bill.appliedPayments.length}</PanelLabel>
+                          {bill.appliedPayments.length > 0 ? (
+                            <PanelStack>
+                              {bill.appliedPayments.map((ap, idx) => (
+                                <PanelCard
+                                  key={idx}
+                                  icon={IndianRupee}
+                                  identity={
+                                    <>
+                                      <PanelTitle>
+                                        <span className="font-mono text-sm font-semibold">{ap.mode}</span>
+                                      </PanelTitle>
+                                      <PanelMeta>
+                                        <span>{shortDate(new Date(ap.date).toISOString())}</span>
+                                      </PanelMeta>
+                                    </>
+                                  }
+                                  figures={<Figure label="Amount paid" value={rupees(ap.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
+                                />
+                              ))}
+                            </PanelStack>
+                          ) : (
+                            <PanelEmpty>No payments have been allocated to this purchase yet.</PanelEmpty>
+                          )}
+                        </ExpandPanel>
                       )}
                     </Fragment>
                   ))

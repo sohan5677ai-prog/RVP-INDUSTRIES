@@ -3,15 +3,16 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Party, Purchase, Payment } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Wallet, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Wallet, Loader2, ChevronRight, Receipt } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
+import { PanelStack, PanelCard, PanelTitle, PanelMeta, PanelDot, Figure } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 type PurchaseRow = Purchase & {
@@ -369,14 +370,10 @@ export default function PaymentPlannerPage() {
                     <div key={group.partyId}>
                       <div
                         onClick={() => toggleParty(group.partyId)}
-                        className="w-full flex items-center justify-between gap-4 px-5 py-4 hover:bg-muted/40 transition-colors cursor-pointer"
+                        className={cn('w-full flex items-center justify-between gap-4 px-5 py-4 transition-colors cursor-pointer', isExpanded ? 'bg-accent/40' : 'hover:bg-accent/30')}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                          )}
+                          <ChevronRight className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200', isExpanded && 'rotate-90 text-primary')} />
                           <div className="min-w-0">
                             <div className="font-semibold truncate">{group.partyName}</div>
                             <div className="text-xs text-muted-foreground">
@@ -414,39 +411,44 @@ export default function PaymentPlannerPage() {
                       </div>
 
                       {isExpanded && (
-                        <div className="border-t bg-muted/20 overflow-x-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Date</TableHead>
-                                <TableHead>Invoice No</TableHead>
-                                <TableHead className="text-right">Price</TableHead>
-                                <TableHead>Vehicle No</TableHead>
-                                <TableHead className="text-right">Outstanding Amount</TableHead>
-                                <TableHead className="text-center">Due Days</TableHead>
-                                <TableHead className="text-right w-[160px]">Amount to Pay (₹)</TableHead>
-                                <TableHead className="text-right">Remaining After</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {group.bills.map((bill) => {
-                                const pay = parseFloat(plans[bill.id]) || 0;
-                                const remaining = bill.amount - pay;
-                                const overPaid = pay > bill.amount + 0.01;
-                                return (
-                                  <TableRow key={bill.id}>
-                                    <TableCell className="font-medium whitespace-nowrap">{shortDate(bill.purchaseDate.toISOString())}</TableCell>
-                                    <TableCell className="font-mono text-xs">{bill.invoiceNumber ?? '-'}</TableCell>
-                                    <TableCell className="text-right whitespace-nowrap">
-                                      {rupees(bill.pricePerKg)}/kg
-                                      <span className="text-muted-foreground text-xs block">{toTonnes(bill.tonnageKg).toFixed(2)} t</span>
-                                    </TableCell>
-                                    <TableCell className="font-mono text-xs">{bill.lorryNumber ?? '-'}</TableCell>
-                                    <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">{rupees(bill.amount)}</TableCell>
-                                    <TableCell className="text-center">
-                                      <span className="text-rose-600 dark:text-rose-400 font-bold">{bill.dueAge} days</span>
-                                    </TableCell>
-                                    <TableCell className="text-right">
+                        <div className="border-t border-border/60 bg-muted/25 px-5 py-4">
+                          <PanelStack>
+                            {group.bills.map((bill) => {
+                              const pay = parseFloat(plans[bill.id]) || 0;
+                              const remaining = bill.amount - pay;
+                              const overPaid = pay > bill.amount + 0.01;
+                              return (
+                                <PanelCard
+                                  key={bill.id}
+                                  icon={Receipt}
+                                  identity={
+                                    <>
+                                      <PanelTitle>
+                                        <span className="font-mono text-sm font-semibold text-foreground/90">
+                                          {bill.invoiceNumber ?? <span className="font-sans text-xs font-medium text-amber-600 dark:text-amber-400">No invoice no</span>}
+                                        </span>
+                                      </PanelTitle>
+                                      <PanelMeta>
+                                        <span>{shortDate(bill.purchaseDate.toISOString())}</span><PanelDot />
+                                        <span>{bill.lorryNumber ?? 'no vehicle'}</span><PanelDot />
+                                        <span className="text-rose-600 dark:text-rose-400 font-medium">{bill.dueAge} days due</span>
+                                      </PanelMeta>
+                                    </>
+                                  }
+                                  figures={
+                                    <>
+                                      <Figure label="Price/kg" value={`${rupees(bill.pricePerKg)} · ${toTonnes(bill.tonnageKg).toFixed(2)}t`} />
+                                      <Figure label="Outstanding" value={rupees(bill.amount)} valueClass="text-rose-600 dark:text-rose-400" />
+                                      <Figure
+                                        label="Remaining after"
+                                        value={rupees(Math.max(0, remaining))}
+                                        valueClass={remaining <= 0.01 ? 'text-emerald-600 dark:text-emerald-400' : undefined}
+                                      />
+                                    </>
+                                  }
+                                  actions={
+                                    <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
+                                      <Label className="text-[10px] uppercase tracking-wider text-muted-foreground block text-right">Amount to pay</Label>
                                       <Input
                                         type="number"
                                         step="0.01"
@@ -454,26 +456,24 @@ export default function PaymentPlannerPage() {
                                         placeholder="0.00"
                                         value={plans[bill.id] ?? ''}
                                         onChange={(e) => setPlan(bill.id, e.target.value)}
-                                        className={`h-9 text-right ${overPaid ? 'border-rose-500 focus-visible:ring-rose-500' : ''}`}
+                                        className={cn('h-9 w-32 text-right', overPaid && 'border-rose-500 focus-visible:ring-rose-500')}
                                       />
-                                    </TableCell>
-                                    <TableCell className={`text-right font-semibold ${remaining <= 0.01 ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
-                                      {rupees(Math.max(0, remaining))}
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                              <TableRow className="bg-muted/40 font-semibold">
-                                <TableCell colSpan={4} className="text-right text-xs text-muted-foreground">Party total</TableCell>
-                                <TableCell className="text-right text-rose-600 dark:text-rose-400">{rupees(group.totalAmount)}</TableCell>
-                                <TableCell />
-                                <TableCell className="text-right">{rupees(groupPlanned)}</TableCell>
-                                <TableCell className={`text-right ${groupRemaining <= 0.01 ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
-                                  {rupees(Math.max(0, groupRemaining))}
-                                </TableCell>
-                              </TableRow>
-                            </TableBody>
-                          </Table>
+                                    </div>
+                                  }
+                                />
+                              );
+                            })}
+                          </PanelStack>
+                          <div className="mt-3 flex flex-wrap items-center justify-end gap-6 rounded-xl border border-dashed border-border px-4 py-2.5">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Party total</span>
+                            <Figure label="Outstanding" value={rupees(group.totalAmount)} valueClass="text-rose-600 dark:text-rose-400" />
+                            <Figure label="Planned" value={rupees(groupPlanned)} />
+                            <Figure
+                              label="Remaining"
+                              value={rupees(Math.max(0, groupRemaining))}
+                              valueClass={groupRemaining <= 0.01 ? 'text-emerald-600 dark:text-emerald-400' : undefined}
+                            />
+                          </div>
                         </div>
                       )}
                     </div>

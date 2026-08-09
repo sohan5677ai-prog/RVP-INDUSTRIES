@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Loader2, Search, Tag, Factory, Wheat, Calculator,
   ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2,
-  ChevronRight, ChevronDown, Scale,
+  ChevronRight, Scale, Truck,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { stockSummary } from '@/lib/calc';
@@ -19,6 +19,8 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
+import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, PanelDot, Figure } from '@/components/ExpandPanel';
+import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 interface BlackSeedRow {
@@ -703,11 +705,11 @@ export default function StockByPrice() {
               return (
                 <Fragment key={key}>
                   <TableRow
-                    className={`hover:bg-muted/50 cursor-pointer font-medium ${isEligible ? 'bg-primary/5' : ''}`}
+                    className={cn('cursor-pointer font-medium transition-colors', isEligible && 'bg-primary/5', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
                     onClick={() => toggle(key)}
                   >
                     <TableCell className="p-3 text-center">
-                      {isOpen ? <ChevronDown className="h-4 w-4 mx-auto text-muted-foreground" /> : <ChevronRight className="h-4 w-4 mx-auto text-muted-foreground" />}
+                      <ChevronRight className={cn('h-4 w-4 mx-auto text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90 text-primary')} />
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-xs font-extrabold px-2 py-0.5">
@@ -763,89 +765,85 @@ export default function StockByPrice() {
                   </TableRow>
 
                   {isOpen && (
-                    <TableRow className="bg-muted/10 hover:bg-muted/10">
-                      <TableCell colSpan={8} className="p-4 pl-12">
-                        <div className="rounded-lg border bg-card p-4 shadow-sm">
-                          <div className="flex items-center justify-between border-b pb-2 mb-2">
-                            <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider">
-                              Lots at {rupees(b.blackPricePerKg)}/kg
-                            </span>
-                            <span className="text-xs text-muted-foreground font-semibold">
-                              {b.lorries} lorry(s)
-                              {b.pendingBlackKg > 0 && <span className="text-amber-600"> · {toTonnes(b.pendingBlackKg).toFixed(2)} MT pending</span>}
-                              {b.shortfallBlackKg > 0 && <span className="text-rose-600"> · {toTonnes(b.shortfallBlackKg).toFixed(2)} MT short</span>}
-                            </span>
-                          </div>
-                          <div className="overflow-x-auto">
-                            <Table>
-                              <TableHeader className="bg-muted/40">
-                                <TableRow className="hover:bg-transparent">
-                                  <TableHead className="h-8 py-1 text-xs">Date</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs">Party</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs" title="Lorry / truck number">Lorry</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs" title="Purchase Order number">PO</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs" title="Arrived = lorry received at RVP. Pending = PO placed, lorry not yet arrived. Short = lorry arrived but delivered less than ordered">Type</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs text-right" title="Black seed left in this lot after sale orders consumed from it (in kg)">Remaining Seed</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs text-right" title="Total black seed consumed from this lot by sale orders (in kg)">Gross Sold</TableHead>
-                                  <TableHead className="h-8 py-1 text-xs text-right" title="Sellable pappu remaining from this lot's seed. Seed × 0.6 out-turn = pappu. For pending lots, 20% is kept as buffer">Remaining Pappu</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {b.lots
-                                  .map((l) => {
-                                      const isArrived = l.kind === 'ARRIVED';
-                                      const isShortfall = l.kind === 'SHORTFALL';
-                                      
-                                      // For PENDING lots, the buffer is fixed based on the original ordered/gross amount,
-                                      // so that it doesn't disappear when consumable seed is drawn down.
-                                      const originalGross = isArrived ? l.receivedKg : l.receivedKg + l.soldKg;
-                                      const bufferBlack = (isArrived || isShortfall) ? 0 : Math.round(originalGross * (1 - PAPPU_CONSUMABLE));
-                                      
-                                      // Consumable remaining is simply whatever is left minus the buffer
-                                      const remainingConsumableBlack = (isArrived || isShortfall) ? l.receivedKg : Math.max(0, l.receivedKg - bufferBlack);
-                                      const consumable = Math.round(remainingConsumableBlack * PAPPU_OUTTURN);
-                                      const bufferPappu = (isArrived || isShortfall) ? 0 : Math.round(bufferBlack * PAPPU_OUTTURN);
-                                      
-                                      // For arrived, no buffer is deducted. For pending, 20% is deducted.
-                                      // For shortfall, we just show the raw gross gap.
-                                      const netRemainingSeed = isShortfall ? l.receivedKg : Math.round(remainingConsumableBlack);
-                                      const netSoldSeed = l.soldKg; // We now show Gross Sold for all to avoid confusion
-                                  // Per-lot shortfall deficit
-                                  const gapPappu = l.receivedKg * PAPPU_OUTTURN;
-                                  // const lotBuffer = l.orderedKg * PAPPU_OUTTURN * (1 - PAPPU_CONSUMABLE);
-                                  // const deficit = Math.round(Math.max(0, gapPappu - lotBuffer));
-                                  return (
-                                    <TableRow key={l.purchaseId} className="hover:bg-muted/20">
-                                      <TableCell className="py-2 text-xs">{shortDate(l.date)}</TableCell>
-                                      <TableCell className="py-2 text-xs font-medium text-foreground">{l.partyName}</TableCell>
-                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.lorryNumber || '-'}</TableCell>
-                                      <TableCell className="py-2 text-xs font-sans font-medium text-foreground/80">{l.poNumber || '-'}</TableCell>
-                                      <TableCell className="py-2 text-xs">
-                                        {l.kind === 'ARRIVED' && <Badge variant="success">Arrived</Badge>}
-                                        {l.kind === 'PENDING' && <Badge variant="warning">Pending</Badge>}
-                                        {l.kind === 'SHORTFALL' && <Badge variant="destructive">Short</Badge>}
-                                      </TableCell>
-                                      <TableCell className="py-2 text-xs text-right font-semibold">
+                    <ExpandPanel colSpan={8}>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <PanelLabel>
+                          <span className="normal-case tracking-normal">Lots at {rupees(b.blackPricePerKg)}/kg</span>
+                        </PanelLabel>
+                        <span className="text-xs font-semibold text-muted-foreground">
+                          {b.lorries} lorry(s)
+                          {b.pendingBlackKg > 0 && <span className="text-amber-600"> · {toTonnes(b.pendingBlackKg).toFixed(2)} MT pending</span>}
+                          {b.shortfallBlackKg > 0 && <span className="text-rose-600"> · {toTonnes(b.shortfallBlackKg).toFixed(2)} MT short</span>}
+                        </span>
+                      </div>
+                      <PanelStack>
+                        {b.lots.map((l) => {
+                          const isArrived = l.kind === 'ARRIVED';
+                          const isShortfall = l.kind === 'SHORTFALL';
+
+                          // For PENDING lots, the buffer is fixed based on the original ordered/gross amount,
+                          // so that it doesn't disappear when consumable seed is drawn down.
+                          const originalGross = isArrived ? l.receivedKg : l.receivedKg + l.soldKg;
+                          const bufferBlack = (isArrived || isShortfall) ? 0 : Math.round(originalGross * (1 - PAPPU_CONSUMABLE));
+
+                          // Consumable remaining is simply whatever is left minus the buffer
+                          const remainingConsumableBlack = (isArrived || isShortfall) ? l.receivedKg : Math.max(0, l.receivedKg - bufferBlack);
+                          const consumable = Math.round(remainingConsumableBlack * PAPPU_OUTTURN);
+                          const bufferPappu = (isArrived || isShortfall) ? 0 : Math.round(bufferBlack * PAPPU_OUTTURN);
+
+                          // For arrived, no buffer is deducted. For pending, 20% is deducted.
+                          // For shortfall, we just show the raw gross gap.
+                          const netRemainingSeed = isShortfall ? l.receivedKg : Math.round(remainingConsumableBlack);
+                          const netSoldSeed = l.soldKg; // We now show Gross Sold for all to avoid confusion
+                          // Per-lot shortfall deficit
+                          const gapPappu = l.receivedKg * PAPPU_OUTTURN;
+                          return (
+                            <PanelCard
+                              key={l.purchaseId}
+                              icon={Truck}
+                              identity={
+                                <>
+                                  <PanelTitle>
+                                    <span className="font-medium text-foreground">{l.partyName}</span>
+                                    {l.kind === 'ARRIVED' && <Badge variant="success">Arrived</Badge>}
+                                    {l.kind === 'PENDING' && <Badge variant="warning">Pending</Badge>}
+                                    {l.kind === 'SHORTFALL' && <Badge variant="destructive">Short</Badge>}
+                                  </PanelTitle>
+                                  <PanelMeta>
+                                    <span>{shortDate(l.date)}</span><PanelDot />
+                                    <span>{l.lorryNumber || 'no lorry'}</span><PanelDot />
+                                    <span className="tabular-nums">{l.poNumber || '-'}</span>
+                                  </PanelMeta>
+                                </>
+                              }
+                              figures={
+                                <>
+                                  <Figure
+                                    label="Remaining seed"
+                                    value={
+                                      <>
+                                        {l.kind === 'SHORTFALL' ? <span className="text-rose-600">−{kg(l.receivedKg)}</span> : kg(netRemainingSeed)}
                                         {l.kind === 'SHORTFALL' ? (
-                                          <span className="text-rose-600">−{kg(l.receivedKg)}</span>
-                                        ) : (
-                                          kg(netRemainingSeed)
-                                        )}
-                                        {l.kind === 'SHORTFALL' ? (
-                                          <span className="block text-[10px] text-muted-foreground font-normal">of {kg(l.orderedKg)} ordered</span>
+                                          <span className="block text-[9px] font-normal normal-case text-muted-foreground">of {kg(l.orderedKg)} ordered</span>
                                         ) : l.kind === 'PENDING' && bufferBlack > 0 ? (
-                                          <span className="block text-[10px] text-muted-foreground font-normal">+{kg(bufferBlack)} seed buffer</span>
+                                          <span className="block text-[9px] font-normal normal-case text-muted-foreground">+{kg(bufferBlack)} seed buffer</span>
                                         ) : null}
-                                      </TableCell>
-                                      <TableCell className="py-2 text-xs text-right text-muted-foreground align-top">
+                                      </>
+                                    }
+                                  />
+                                  <Figure
+                                    label="Gross sold"
+                                    valueClass="text-muted-foreground"
+                                    value={
+                                      <>
                                         {l.soldKg > 0 ? kg(netSoldSeed) : '-'}
                                         {l.kind === 'PENDING' && l.soldKg > 0 && (
-                                          <span className="block text-[10px] text-amber-600 font-normal">
+                                          <span className="block text-[9px] font-normal normal-case text-amber-600">
                                             −{kg(Math.round(l.soldKg * SEED_TO_CONSUMABLE))} pappu consumed
                                           </span>
                                         )}
                                         {(isArrived || l.kind === 'PENDING') && l.consumedBy && l.consumedBy.length > 0 && (
-                                          <span className="mt-1 block space-y-0.5 text-[10px] font-normal">
+                                          <span className="mt-1 block space-y-0.5 text-left text-[9px] font-normal normal-case">
                                             {l.consumedBy.slice(0, 6).map((c, i) => (
                                               <span key={i} className="block text-muted-foreground">
                                                 <span className="text-sky-700">{kg(c.seedKg)}</span> → {c.buyer}
@@ -857,28 +855,31 @@ export default function StockByPrice() {
                                             )}
                                           </span>
                                         )}
-                                      </TableCell>
-                                      <TableCell className="py-2 text-xs text-right font-semibold">
-                                        {l.kind === 'SHORTFALL' ? (
-                                          <span className="text-rose-600">−{kg(gapPappu)}</span>
-                                        ) : (
-                                          <>
-                                            <span className={l.kind === 'PENDING' ? 'text-amber-600' : 'text-sky-600'}>{kg(consumable)}</span>
-                                            {l.kind === 'PENDING' && bufferPappu > 0 && (
-                                              <span className="block text-[10px] text-muted-foreground font-normal">+{kg(bufferPappu)} pappu buffer</span>
-                                            )}
-                                          </>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                })}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                                      </>
+                                    }
+                                  />
+                                  <Figure
+                                    label="Remaining pappu"
+                                    value={
+                                      l.kind === 'SHORTFALL' ? (
+                                        <span className="text-rose-600">−{kg(gapPappu)}</span>
+                                      ) : (
+                                        <>
+                                          <span className={l.kind === 'PENDING' ? 'text-amber-600' : 'text-sky-600'}>{kg(consumable)}</span>
+                                          {l.kind === 'PENDING' && bufferPappu > 0 && (
+                                            <span className="block text-[9px] font-normal normal-case text-muted-foreground">+{kg(bufferPappu)} pappu buffer</span>
+                                          )}
+                                        </>
+                                      )
+                                    }
+                                  />
+                                </>
+                              }
+                            />
+                          );
+                        })}
+                      </PanelStack>
+                    </ExpandPanel>
                   )}
                 </Fragment>
               );

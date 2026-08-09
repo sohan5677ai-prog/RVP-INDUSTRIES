@@ -1,4 +1,5 @@
 import React, { Fragment, useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X } from 'lucide-react';
@@ -732,6 +733,23 @@ export default function StockIn() {
     }
     return [...map.values()];
   }, [items, partyFilter, statusFilter]);
+
+  const [searchParams] = useSearchParams();
+  const paramPo = searchParams.get('po') || searchParams.get('poId') || searchParams.get('expanded');
+
+  useEffect(() => {
+    if (!paramPo || !visibleGroups.length) return;
+    const match = visibleGroups.find(
+      (g) =>
+        g.groupId === paramPo ||
+        g.po?.id === paramPo ||
+        g.po?.poGroupId === paramPo ||
+        (g.po?.poNumber && g.po.poNumber.toLowerCase() === paramPo.toLowerCase())
+    );
+    if (match) {
+      setExpanded((prev) => new Set([...prev, match.groupId]));
+    }
+  }, [paramPo, visibleGroups]);
 
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL';
 

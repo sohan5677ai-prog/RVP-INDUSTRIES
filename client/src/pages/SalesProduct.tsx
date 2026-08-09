@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
@@ -931,6 +931,25 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setCancelReason(type === 'einvoice' ? '2' : '3');
     setCancelRemarks('Cancelled from ERP');
   }
+
+  const [searchParams] = useSearchParams();
+  const paramExpand = searchParams.get('expand') || searchParams.get('orderId') || searchParams.get('id');
+
+  useEffect(() => {
+    if (!paramExpand || !visible.length) return;
+    const match = visible.find(
+      (o) =>
+        o.id === paramExpand ||
+        (o.dispatches ?? []).some(
+          (d) =>
+            d.id === paramExpand ||
+            (d.invoiceNumber && d.invoiceNumber.toLowerCase() === paramExpand.toLowerCase()),
+        ),
+    );
+    if (match) {
+      setExpanded((prev) => new Set([...prev, match.id]));
+    }
+  }, [paramExpand, visible]);
 
   // ── Full workflow view ────────────────────────────────────────────────
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || !!fromDate || !!toDate;

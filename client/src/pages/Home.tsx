@@ -78,7 +78,7 @@ export default function Home() {
             (p.gstin ?? '').toLowerCase().includes(q)
           }
           getKey={(p) => p.id}
-          to="/accounts/party-ledger"
+          to={(p) => `/accounts/party-ledger?party=${p.id}`}
           render={(p) => (
             <>
               <div className="flex items-center gap-2 min-w-0">
@@ -99,7 +99,7 @@ export default function Home() {
             (po.party?.name ?? '').toLowerCase().includes(q)
           }
           getKey={(po) => po.id}
-          to="/purchase-orders"
+          to={(po) => `/stock-in?po=${po.id}`}
           render={(po) => (
             <>
               <div className="flex items-center gap-2 min-w-0">
@@ -124,7 +124,20 @@ export default function Home() {
             (s.dispatches ?? []).some((d) => (d.invoiceNumber ?? '').toLowerCase().includes(q))
           }
           getKey={(s) => s.id}
-          to="/sale-orders"
+          to={(s) => {
+            const productRoutes: Record<string, string> = {
+              PAPPU: '/sales/pappu',
+              TPS: '/sales/tps',
+              HUSK: '/sales/husk',
+              WASTE: '/sales/byproducts',
+              SHELL: '/sales/byproducts',
+              PRECLEANER_DUST: '/sales/byproducts',
+              NALLA_POKKULU: '/sales/byproducts',
+              NALLA_CHINTAPANDU: '/sales/byproducts',
+            };
+            const base = productRoutes[s.product] ?? '/sale-orders';
+            return `${base}?expand=${s.id}`;
+          }}
           render={(s) => (
             <>
               <div className="flex items-center gap-2 min-w-0">
@@ -150,7 +163,7 @@ export default function Home() {
             (r.poNumber ?? '').toLowerCase().includes(q)
           }
           getKey={(r) => r.purchaseId}
-          to="/stock/overview"
+          to={(r) => `/purchases/${r.purchaseId}/statement`}
           render={(r) => (
             <>
               <div className="flex items-center gap-2 min-w-0">
@@ -203,8 +216,8 @@ interface SearchBoxProps<T> {
   filter: (item: T, query: string) => boolean;
   getKey: (item: T) => string;
   render: (item: T) => React.ReactNode;
-  /** Page to navigate to when a result is clicked. */
-  to: string;
+  /** Page or function returning target page URL when a result is clicked. */
+  to: string | ((item: T) => string);
 }
 
 function SearchBox<T>({ label, placeholder, items, filter, getKey, render, to }: SearchBoxProps<T>) {
@@ -250,7 +263,7 @@ function SearchBox<T>({ label, placeholder, items, filter, getKey, render, to }:
                 key={getKey(item)}
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => navigate(to)}
+                onClick={() => navigate(typeof to === 'function' ? to(item) : to)}
                 className={cn(
                   'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm',
                   'hover:bg-accent hover:text-accent-foreground transition-colors',

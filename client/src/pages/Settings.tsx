@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal } from 'lucide-react';
@@ -10,6 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/PageHeader';
+import Subscription from '@/pages/Subscription';
+import ArchiveManager from '@/pages/ArchiveManager';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -26,16 +29,18 @@ const PRODUCT_LABELS: Record<SaleProduct, string> = {
 
 export default function Settings() {
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'company';
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Company details, bank, invoice setup and rates used across the app."
+        description="Company details, bank, invoice setup, rates, subscription and archives."
         icon={SlidersHorizontal}
       />
 
-      <Tabs defaultValue="company" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(val) => setSearchParams({ tab: val })} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="company">Company</TabsTrigger>
           <TabsTrigger value="invoice">Invoice Setup</TabsTrigger>
@@ -43,6 +48,8 @@ export default function Settings() {
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
+          <TabsTrigger value="subscription">Subscription</TabsTrigger>
+          <TabsTrigger value="archives">Archives</TabsTrigger>
         </TabsList>
 
         <TabsContent value="company" className="focus-visible:outline-none focus-visible:ring-0">
@@ -68,6 +75,14 @@ export default function Settings() {
 
         <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">
           <TaxproGspSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="subscription" className="focus-visible:outline-none focus-visible:ring-0">
+          <Subscription />
+        </TabsContent>
+
+        <TabsContent value="archives" className="focus-visible:outline-none focus-visible:ring-0">
+          <ArchiveManager />
         </TabsContent>
       </Tabs>
     </div>

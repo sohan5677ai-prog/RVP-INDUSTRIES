@@ -101,8 +101,6 @@ const Drawings = lazyWithPreload('/reports/drawings', () => import('@/pages/Draw
 const Interest = lazyWithPreload('/reports/interest', () => import('@/pages/Interest'));
 const Expenses = lazyWithPreload('/reports/expenses', () => import('@/pages/Expenses'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
-const Subscription = lazyWithPreload('/subscription', () => import('@/pages/Subscription'));
-const ArchiveManager = lazyWithPreload('/archives', () => import('@/pages/ArchiveManager'));
 
 function Fallback() {
   return (
@@ -192,8 +190,8 @@ export default function App() {
               <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
-              <Route path="/subscription" element={<Subscription />} />
-              <Route path="/archives" element={<ArchiveManager />} />
+              <Route path="/subscription" element={<Navigate to="/settings?tab=subscription" replace />} />
+              <Route path="/archives" element={<Navigate to="/settings?tab=archives" replace />} />
             </Route>
             </Route>
           </Route>

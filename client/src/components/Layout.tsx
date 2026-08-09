@@ -151,12 +151,8 @@ const sections: NavSection[] = [
     items: [
       { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
       { to: '/users', label: 'Users', icon: Shield },
-    ],
-  },
-  {
-    items: [
-      { to: '/subscription', label: 'Subscription', icon: CreditCard, devOnly: true },
-      { to: '/archives', label: 'Archives', icon: Archive, devOnly: true },
+      { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard },
+      { to: '/settings?tab=archives', label: 'Archives', icon: Archive },
     ],
   },
 ];

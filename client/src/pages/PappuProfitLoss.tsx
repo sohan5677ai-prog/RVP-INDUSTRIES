@@ -13,9 +13,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/PageHeader';
-import { StatCard } from '@/components/StatCard';
 import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 /**
@@ -225,87 +225,66 @@ export default function PappuProfitLoss() {
       />
 
       {/* Headline metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger">
-        <StatCard
-          label="Locked Profit"
-          icon={Lock}
-          tone={t.lockedMargin >= 0 ? 'forest' : 'rose'}
-          value={<span className={pnlClass(t.lockedMargin)}>{rupees(t.lockedMargin)}</span>}
-          hint={`${t.lockedCount} locked order${t.lockedCount === 1 ? '' : 's'} · ${t.lockedMarginPct.toFixed(2)}% margin`}
-        />
-        <StatCard
-          label="Total Revenue"
-          icon={IndianRupee}
-          tone="amber"
-          value={<span className="text-sky-600 dark:text-sky-400">{rupees(t.revenue)}</span>}
-          hint={`Avg ${rupees(t.avgSalePerKg)}/kg sale price`}
-        />
-        <StatCard
-          label="Total Cost"
-          icon={Scale}
-          tone="clay"
-          value={<span className="text-amber-600 dark:text-amber-400">{rupees(t.totalCost)}</span>}
-          hint="Seed + production + freight"
-        />
-        <StatCard
-          label="Pappu Sold"
-          icon={PackageCheck}
-          tone="forest"
-          value={<span className="text-emerald-600 dark:text-emerald-400">{toTonnes(t.soldKg).toFixed(2)} MT</span>}
-          hint={`Across ${t.orders} order${t.orders === 1 ? '' : 's'}`}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+              <Lock className="h-3.5 w-3.5 text-indigo-500" /> Locked Profit
+            </CardTitle>
+            {t.lockedMargin >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}
+          </CardHeader>
+          <CardContent>
+            <div className={cn('text-2xl font-bold', pnlClass(t.lockedMargin))}>{rupees(t.lockedMargin)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">{t.lockedCount} locked order{t.lockedCount === 1 ? '' : 's'} · {t.lockedMarginPct.toFixed(2)}% margin</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Revenue</CardTitle>
+            <IndianRupee className="h-4 w-4 text-sky-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-sky-600">{rupees(t.revenue)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Avg {rupees(t.avgSalePerKg)}/kg sale price</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Cost</CardTitle>
+            <Scale className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{rupees(t.totalCost)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Seed + production + freight</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pappu Sold</CardTitle>
+            <PackageCheck className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-600">{toTonnes(t.soldKg).toFixed(2)} MT</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Across {t.orders} order{t.orders === 1 ? '' : 's'}</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Secondary metrics strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 stagger">
-        <StatCard
-          label="Overall margin"
-          icon={Percent}
-          tone={t.margin >= 0 ? 'forest' : 'rose'}
-          value={<span className={pnlClass(t.margin)}>{t.marginPct.toFixed(2)}%</span>}
-        />
-        <StatCard
-          label="Profitable orders"
-          icon={TrendingUp}
-          tone="forest"
-          value={<span className="text-forest">{t.profitCount}</span>}
-          hint={`of ${t.orders}`}
-        />
-        <StatCard
-          label="Loss orders"
-          icon={TrendingDown}
-          tone="rose"
-          value={<span className="text-destructive">{t.lossCount}</span>}
-          hint={t.lossValue < 0 ? rupeesShort(t.lossValue) : '-'}
-        />
-        <StatCard
-          label="Black seed cost"
-          icon={Scale}
-          tone="clay"
-          value={rupeesShort(t.seedCost)}
-          hint={`${rupees(t.seedCostPerKg)}/kg pappu`}
-        />
-        <StatCard
-          label="Best order"
-          icon={Trophy}
-          tone="forest"
-          value={<span className="text-forest">{t.best ? rupeesShort(t.best.margin) : '-'}</span>}
-          hint={t.best?.buyer}
-        />
-        <StatCard
-          label="Worst order"
-          icon={AlertTriangle}
-          tone="rose"
-          value={<span className={t.worst && t.worst.margin < 0 ? 'text-destructive' : undefined}>{t.worst ? rupeesShort(t.worst.margin) : '-'}</span>}
-          hint={t.worst?.buyer}
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <MiniStat icon={Percent} label="Overall margin" value={`${t.marginPct.toFixed(2)}%`} valueClass={pnlClass(t.margin)} />
+        <MiniStat icon={TrendingUp} label="Profitable orders" value={`${t.profitCount}`} sub={`of ${t.orders}`} valueClass="text-forest" />
+        <MiniStat icon={TrendingDown} label="Loss orders" value={`${t.lossCount}`} sub={t.lossValue < 0 ? rupeesShort(t.lossValue) : '-'} valueClass="text-destructive" />
+        <MiniStat icon={Scale} label="Black seed cost" value={rupeesShort(t.seedCost)} sub={`${rupees(t.seedCostPerKg)}/kg pappu`} />
+        <MiniStat icon={Trophy} label="Best order" value={t.best ? rupeesShort(t.best.margin) : '-'} sub={t.best?.buyer} valueClass="text-forest" />
+        <MiniStat icon={AlertTriangle} label="Worst order" value={t.worst ? rupeesShort(t.worst.margin) : '-'} sub={t.worst?.buyer} valueClass={t.worst && t.worst.margin < 0 ? 'text-destructive' : undefined} />
         {t.xsKg > 0 && (
-          <StatCard
-            label="Implied out-turn"
+          <MiniStat
             icon={Percent}
-            tone="gold"
-            value={<span className={t.impliedOutTurnPct > 63 ? 'text-warning' : undefined}>{t.impliedOutTurnPct.toFixed(2)}%</span>}
-            hint={`${toTonnes(t.xsKg).toFixed(2)} t XS · 60% assumed`}
+            label="Implied out-turn"
+            value={`${t.impliedOutTurnPct.toFixed(2)}%`}
+            sub={`${toTonnes(t.xsKg).toFixed(2)} t XS · 60% assumed`}
+            valueClass={t.impliedOutTurnPct > 63 ? 'text-warning' : undefined}
           />
         )}
       </div>
@@ -463,6 +442,20 @@ export default function PappuProfitLoss() {
           )}
         </Table>
       </div>
+    </div>
+  );
+}
+
+function MiniStat({ icon: Icon, label, value, sub, valueClass }: {
+  icon: React.ComponentType<{ className?: string }>; label: string; value: string; sub?: string; valueClass?: string;
+}) {
+  return (
+    <div className="glass rounded-xl px-3.5 py-3">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" /> {label}
+      </div>
+      <div className={cn('mt-1 text-lg font-bold', valueClass ?? 'text-foreground')}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground truncate">{sub}</div>}
     </div>
   );
 }

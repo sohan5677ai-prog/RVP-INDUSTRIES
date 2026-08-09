@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { StatCard } from '@/components/StatCard';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { InvoiceDocument, InvoiceStyles, parseInvoiceLayout } from '@/components/InvoiceDocument';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -988,48 +988,61 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       )}
 
       {/* Metrics Dashboard */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 stagger">
-        <StatCard
-          label={`Total ${meta.noun} Sold`}
-          value={`${toTonnes(totalSoldKg).toFixed(2)} MT`}
-          icon={PackageCheck}
-          tone="forest"
-          hint="Total ordered tonnage"
-        />
-        <StatCard
-          label="Total Dispatched"
-          value={`${toTonnes(totalDispatchedKg).toFixed(2)} MT`}
-          icon={Truck}
-          tone="taupe"
-          hint={`${dispatchedPct.toFixed(0)}% of ordered tonnage`}
-        />
-        <StatCard
-          label="Wt Avg Price"
-          value={`${rupees(wacPrice)}/kg`}
-          icon={IndianRupee}
-          tone="amber"
-          hint="Weighted average rate"
-        />
-        <StatCard
-          label="Revenue Pipeline"
-          value={rupees(totalRevenue)}
-          icon={IndianRupee}
-          tone="clay"
-          hint="Total revenue · incl. GST"
-        />
-        <StatCard
-          label="Locked Shortage"
-          value={rupees(shortageTotals.locked)}
-          icon={TrendingDown}
-          tone="rose"
-          hint={
-            <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total {meta.noun} Sold</CardTitle>
+            <PackageCheck className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-600">{toTonnes(totalSoldKg).toFixed(2)} MT</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Total ordered tonnage</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Dispatched</CardTitle>
+            <Truck className="h-4 w-4 text-indigo-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-indigo-600">{toTonnes(totalDispatchedKg).toFixed(2)} MT</div>
+            <p className="text-[10px] text-muted-foreground mt-1">{dispatchedPct.toFixed(0)}% of ordered tonnage</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Wt Avg Price</CardTitle>
+            <IndianRupee className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-primary">{rupees(wacPrice)}/kg</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Weighted average rate</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Revenue Pipeline</CardTitle>
+            <IndianRupee className="h-4 w-4 text-sky-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-sky-600">{rupees(totalRevenue)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">Total revenue · incl. GST</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Locked Shortage</CardTitle>
+            <TrendingDown className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{rupees(shortageTotals.locked)}</div>
+            <p className="text-[10px] text-muted-foreground mt-1">
               {toTonnes(shortageTotals.lockedKg).toFixed(2)} t over {shortageTotals.lockedShipments} shipment{shortageTotals.lockedShipments === 1 ? '' : 's'}
               {' · '}
               <span className="text-red-600 dark:text-red-400">{rupees(shortageTotals.estimated)} estimated</span>
-            </>
-          }
-        />
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}

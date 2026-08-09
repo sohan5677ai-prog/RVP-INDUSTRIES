@@ -5,12 +5,12 @@ import {
   Search,
   ClipboardList,
   ShoppingCart,
-  Warehouse,
   Truck,
   Wallet,
   Receipt,
   ArrowRight,
   Package,
+  Calculator,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { kg, rupees } from '@/lib/format';
@@ -44,7 +44,7 @@ interface BlackSeedStockResponse {
 const tiles = [
   { to: '/purchase-orders', label: 'Purchase Orders', desc: 'Raise & track supplier POs', icon: ClipboardList },
   { to: '/stock-in', label: 'Stock In', desc: 'Record lorry arrivals', icon: Truck },
-  { to: '/stock/overview', label: 'Black Seed Stock', desc: 'Raw stock on hand', icon: Warehouse },
+  { to: '/stock-by-price', label: 'Order Planner', desc: 'Seed pricing & Pappu margin planner', icon: Calculator },
   { to: '/sale-orders', label: 'Sale Orders', desc: 'Sales pipeline & dispatch', icon: ShoppingCart },
   { to: '/transactions/payments', label: 'Payments', desc: 'Pay suppliers & transporters', icon: Wallet },
   { to: '/transactions/receipts', label: 'Receipts', desc: 'Record buyer receipts', icon: Receipt },

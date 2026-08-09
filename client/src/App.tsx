@@ -107,13 +107,16 @@ const ArchiveManager = lazyWithPreload('/archives', () => import('@/pages/Archiv
 function Fallback() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#1b1510] text-[#c8bba6]">
-      <div className="flex flex-col items-center space-y-4">
+      <div className="flex flex-col items-center space-y-5">
         <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-black/50 ring-1 ring-amber-300/20 animate-pulse">
           <span className="font-display font-semibold text-lg text-amber-50 leading-none">R</span>
         </div>
-        <p className="text-xs uppercase tracking-[0.2em] text-[#c8bba6]/60 animate-pulse">
-          RVP Industries
-        </p>
+        <div className="flex flex-col items-center space-y-2.5">
+          <p className="text-xs uppercase tracking-[0.2em] text-[#c8bba6]/60">RVP Industries</p>
+          <div className="h-[3px] w-28 overflow-hidden rounded-full bg-[#c8bba6]/10">
+            <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-transparent via-amber-400 to-transparent animate-[sweep_1.4s_ease-in-out_infinite]" />
+          </div>
+        </div>
       </div>
     </div>
   );

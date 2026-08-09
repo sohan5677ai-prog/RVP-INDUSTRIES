@@ -28,7 +28,6 @@ import {
   Banknote,
   Tag,
   Shield,
-  Loader2,
   PanelLeftClose,
   Menu,
   FileText,
@@ -161,16 +160,25 @@ const sections: NavSection[] = [
   },
 ];
 
+/** Route-transition placeholder - mirrors the destination page's shape
+ *  (header + stat row + body) instead of a generic spinner, so the swap
+ *  in feels instant and the layout doesn't jump once real content lands. */
 function PageLoader() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4 animate-fade-in">
-      <div className="relative">
-        <div className="absolute inset-0 rounded-full bg-primary/10 animate-ping" />
-        <Loader2 className="h-8 w-8 text-primary animate-spin relative z-10" />
+    <div className="space-y-7 animate-fade-in">
+      <div className="flex items-start gap-4">
+        <div className="hidden sm:block h-12 w-12 shrink-0 rounded-2xl shimmer" />
+        <div className="min-w-0 space-y-2.5 pt-1">
+          <div className="h-5 w-48 rounded-md shimmer" />
+          <div className="h-3 w-72 rounded-md shimmer" />
+        </div>
       </div>
-      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80 font-display">
-        Loading workspace...
-      </p>
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 stagger">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-24 rounded-2xl border border-border shimmer" />
+        ))}
+      </div>
+      <div className="h-96 rounded-2xl border border-border shimmer" />
     </div>
   );
 }

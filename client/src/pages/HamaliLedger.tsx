@@ -1113,9 +1113,9 @@ export default function HamaliLedger() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="w-28">Date</TableHead>
                         <TableHead className="min-w-[240px]">Particulars</TableHead>
-                        <TableHead className="text-right border-l border-border/60 bg-muted/60">Debit</TableHead>
-                        <TableHead className="text-right bg-muted/60">Credit</TableHead>
-                        <TableHead className="text-right border-l border-border/60 bg-muted/60">Balance</TableHead>
+                        <TableHead className="text-right border-l border-border/60 bg-secondary">Debit</TableHead>
+                        <TableHead className="text-right bg-secondary">Credit</TableHead>
+                        <TableHead className="text-right border-l border-border/60 bg-secondary">Balance</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>

@@ -248,9 +248,9 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
                 <TableHead className="w-28">Date</TableHead>
                 <TableHead className="min-w-[260px]">Particulars</TableHead>
                 <TableHead>Reference</TableHead>
-                <TableHead className="text-right border-l border-border/60 bg-muted/60">Debit</TableHead>
-                <TableHead className="text-right bg-muted/60">Credit</TableHead>
-                <TableHead className="text-right border-l border-border/60 bg-muted/60">Balance</TableHead>
+                <TableHead className="text-right border-l border-border/60 bg-secondary">Debit</TableHead>
+                <TableHead className="text-right bg-secondary">Credit</TableHead>
+                <TableHead className="text-right border-l border-border/60 bg-secondary">Balance</TableHead>
                 <TableHead className="text-center w-16 print:hidden">Action</TableHead>
               </TableRow>
             </TableHeader>

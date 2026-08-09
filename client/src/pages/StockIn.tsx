@@ -601,6 +601,7 @@ const StockInGroupRow = React.memo(({
             {rows.map((s: any) => (
               <PanelCard
                 key={s.id}
+                className="max-w-3xl"
                 icon={Truck}
                 identity={
                   <>

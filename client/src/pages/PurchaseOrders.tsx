@@ -359,6 +359,7 @@ export default function PurchaseOrders() {
                         {ordered.map((po) => (
                           <PanelCard
                             key={po.id}
+                            className="max-w-3xl"
                             icon={Truck}
                             identity={
                               <>

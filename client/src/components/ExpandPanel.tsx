@@ -41,14 +41,16 @@ export function PanelCard({
   identity,
   figures,
   actions,
+  className,
 }: {
   icon: LucideIcon;
   identity: React.ReactNode;
   figures?: React.ReactNode;
   actions?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="glass rounded-xl p-3.5">
+    <div className={cn('glass rounded-xl p-3.5 max-w-2xl', className)}>
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -94,7 +96,7 @@ export function Figure({ label, value, valueClass }: { label: string; value: Rea
 /** Empty state used when an expanded row has no children yet. */
 export function PanelEmpty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+    <div className="max-w-2xl rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );

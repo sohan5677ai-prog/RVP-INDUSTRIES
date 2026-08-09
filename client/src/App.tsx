@@ -79,7 +79,6 @@ const PappuProfitLoss = lazyWithPreload('/sales/profit-loss', () => import('@/pa
 const PurchaseStatement = lazyWithPreload('/purchases/:purchaseId/statement', () => import('@/pages/PurchaseStatement'));
 const PartyLedger = lazyWithPreload('/accounts/party-ledger', () => import('@/pages/PartyLedger'));
 const HamaliLedger = lazyWithPreload('/accounts/hamali-ledger', () => import('@/pages/HamaliLedger'));
-const KataFeeLedger = lazyWithPreload('/accounts/kata-fee-ledger', () => import('@/pages/KataFeeLedger'));
 const BrokerageLedger = lazyWithPreload('/accounts/brokerage-ledger', () => import('@/pages/BrokerageLedger'));
 const Ledgers = lazyWithPreload('/accounts/chart-of-accounts', () => import('@/pages/Ledgers'));
 const BalanceSheet = lazyWithPreload('/accounts/balance-sheet', () => import('@/pages/BalanceSheet'));
@@ -164,7 +163,6 @@ export default function App() {
               <Route path="/sales/profit-loss" element={<PappuProfitLoss />} />
               <Route path="/accounts/party-ledger" element={<PartyLedger />} />
               <Route path="/accounts/hamali-ledger" element={<HamaliLedger />} />
-              <Route path="/accounts/kata-fee-ledger" element={<KataFeeLedger />} />
               <Route path="/accounts/surya-road-transport" element={<Navigate to="/reports/freight-dues?tab=transport" replace />} />
               <Route path="/accounts/brokerage-ledger" element={<BrokerageLedger />} />
               <Route path="/accounts/chart-of-accounts" element={<Ledgers />} />

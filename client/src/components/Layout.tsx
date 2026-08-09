@@ -121,7 +121,6 @@ const sections: NavSection[] = [
       { to: '/accounts/brokerage-ledger', label: 'Brokerage Report', icon: Handshake },
       { to: '/accounts/party-ledger', label: 'Party Ledger', icon: BookOpen },
       { to: '/accounts/hamali-ledger', label: 'Hamali Report', icon: Coins },
-      { to: '/accounts/kata-fee-ledger', label: 'Kata Report', icon: Receipt },
       { to: '/reports/expenses', label: 'Income & Expenses', icon: Wallet },
     ],
   },

@@ -685,13 +685,18 @@ function SendPartyLedgerWhatsAppDialog({
     }
     setLoading(true);
     try {
-      const res = await api<{ ok: boolean; message: string; summaryText: string }>(
+      const res = await api<{ ok: boolean; message: string; summaryText: string; transactionCount: number }>(
         `/whatsapp/parties/${party.id}/send-ledger`,
         {
           method: 'POST',
-          body: { fromDate, toDate, phone: phone.trim() },
+          body: { fromDate, toDate, phone: phone.trim(), kind },
         }
       );
+      if (!res.ok) {
+        // Nothing went out - keep the dialog open so WhatsApp Web is one click away.
+        toast.error(res.message || 'WhatsApp send failed');
+        return;
+      }
       toast.success(res.message || 'Party ledger statement sent!');
       onOpenChange(false);
     } catch (err) {

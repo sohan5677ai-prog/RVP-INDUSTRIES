@@ -505,13 +505,26 @@ export async function sendPartyReminder(req: Request, res: Response) {
 }
 
 /**
- * Send a party's account ledger statement via WhatsApp for a given date range.
+ * The kind tabs on the party ledger page. Kept in step with KIND_FILTERS in
+ * client/src/pages/PartyLedger.tsx so the message matches the on-screen preview:
+ * the Receipts tab folds in the adjustments that ride along with a receipt.
+ */
+const LEDGER_KIND_FILTERS: Record<string, { kinds: string[]; label: string }> = {
+  PURCHASE: { kinds: ['PURCHASE'], label: 'Purchases only' },
+  SALE: { kinds: ['SALE'], label: 'Sales only' },
+  PAYMENT: { kinds: ['PAYMENT'], label: 'Payments only' },
+  RECEIPT: { kinds: ['RECEIPT', 'CREDIT_NOTE', 'TDS', 'SHORTAGE'], label: 'Receipts only' },
+};
+
+/**
+ * Send a party's account ledger statement via WhatsApp for a given date range,
+ * optionally narrowed to one ledger kind (the tab the sender had open).
  */
 export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
   try {
     const { partyId } = req.params;
-    const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string };
-    const { fromDate, toDate, phone } = body;
+    const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string; kind?: string };
+    const { fromDate, toDate, phone, kind } = body;
 
     const statement = await buildPartyStatementData(partyId);
     if (!statement) throw new HttpError(404, 'Party not found');
@@ -522,7 +535,14 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
       throw new HttpError(400, `No valid phone number for ${party.name}. Please enter one in Parties or in the prompt.`);
     }
 
+    // Same order as the page: kind first, then the date window, so the opening
+    // balance is read off the first row that survives both filters.
+    const kindKey = kind && kind.toUpperCase() !== 'ALL' ? kind.toUpperCase() : null;
+    const kindFilter = kindKey ? LEDGER_KIND_FILTERS[kindKey] : null;
+    if (kindKey && !kindFilter) throw new HttpError(400, `Unknown ledger filter "${kind}"`);
+
     let txns = transactions;
+    if (kindFilter) txns = txns.filter((t) => kindFilter.kinds.includes(t.kind));
     if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
     if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
 
@@ -538,7 +558,7 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
 
     const fromStr = fromDate ? fromDate.slice(0, 10) : firstTxn ? firstTxn.date.slice(0, 10) : 'Start';
     const toStr = toDate ? toDate.slice(0, 10) : lastTxn ? lastTxn.date.slice(0, 10) : 'As of today';
-    const periodStr = `${fromStr} to ${toStr}`;
+    const periodStr = `${fromStr} to ${toStr}${kindFilter ? ` (${kindFilter.label})` : ''}`;
 
     const recentList = txns
       .slice(-5)
@@ -547,25 +567,38 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
 
     const summaryText = `*Account Statement - ${party.name}*\nPeriod: ${periodStr}\nOpening Bal: ₹${fmtAmt(opening)} ${drcr(opening)}\nTotal Debits: ₹${fmtAmt(totalDebit)}\nTotal Credits: ₹${fmtAmt(totalCredit)}\n*Closing Bal: ₹${fmtAmt(closing)} ${drcr(closing)}*\n\nRecent Activity:\n${recentList || 'No transactions in period'}`;
 
-    let result: { ok: boolean; error?: string } = { ok: false, error: 'WhatsApp template notification skipped' };
+    let result: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, error: 'WhatsApp template notification skipped' };
     try {
-      result = await whatsappService.sendSalesDuesReminder(
-        { id: party.id, name: party.name, phone: targetPhone },
-        Math.abs(closing),
-        `Period ${periodStr} | Opening: ₹${fmtAmt(opening)} ${drcr(opening)} | Closing: ₹${fmtAmt(closing)} ${drcr(closing)}`
+      result = await whatsappService.sendPartyLedgerStatement(
+        { id: party.id, name: party.name },
+        targetPhone,
+        {
+          period: periodStr,
+          opening: `₹${fmtAmt(opening)} ${drcr(opening)}`.trim(),
+          totalDebit: `₹${fmtAmt(totalDebit)}`,
+          totalCredit: `₹${fmtAmt(totalCredit)}`,
+          closing: `₹${fmtAmt(closing)} ${drcr(closing)}`.trim(),
+          recentActivity: recentList || 'No transactions in this period',
+        }
       );
     } catch (e) {
       logger.error('[whatsapp] sendPartyLedgerWhatsApp template error', e);
       result = { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
 
+    // `ok` reports whether the message actually went out - the caller shows the
+    // WhatsApp Web fallback when it didn't, so a failure must not read as a send.
     res.json({
-      ok: true,
-      message: result.ok ? 'Party ledger statement sent via WhatsApp' : (result.error || 'WhatsApp message processed'),
+      ok: result.ok,
+      skipped: result.skipped ?? false,
+      message: result.ok
+        ? `Party ledger statement sent to ${targetPhone}`
+        : result.error || 'WhatsApp send failed',
       summaryText,
       targetPhone,
       period: periodStr,
       closingBalance: closing,
+      transactionCount: txns.length,
     });
   } catch (err) {
     if (err instanceof HttpError) throw err;

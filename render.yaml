@@ -93,9 +93,11 @@ services:
         sync: false
       - key: FAST2SMS_TMPL_OWNER_DUES_DIGEST
         sync: false
-      # Scheduled WhatsApp jobs (owner/party reminders). Off until ready.
+      # Scheduled WhatsApp jobs (owner/party reminders): daily 09:00 IST dues
+      # digest + buyer dues reminders + 2-day dispatch reminders, weekly Mon
+      # 08:00 IST summary. Alerts go to Settings -> WhatsApp alert recipients.
       - key: WHATSAPP_CRON_ENABLED
-        value: "false"
+        value: "true"
       # Shared secret for the public /webhooks/whatsapp/jobs/:job cron endpoints.
       - key: CRON_SECRET
         sync: false

@@ -774,7 +774,9 @@ function SendPaymentReminderDialog({
                 Total outstanding {rupees(dues.outstanding)} across {dues.totalInvoiceCount} invoices - only the overdue ones are quoted.
               </div>
             )}
-            <div className="text-[11px] text-muted-foreground font-mono break-words pt-1">{dues.invoiceListText}</div>
+            {/* whitespace-pre-line: the list is newline-separated and goes out
+                one invoice per line, so the preview has to break the same way. */}
+            <div className="text-[11px] text-muted-foreground font-mono break-words whitespace-pre-line pt-1">{dues.invoiceListText}</div>
           </div>
 
           {dues.scope === 'UPCOMING' && (

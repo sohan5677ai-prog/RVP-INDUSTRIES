@@ -50,7 +50,7 @@ export type WaTemplateKey =
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
   | 'DISPATCH_DRIVER' // rvp_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
-  | 'PAYMENT_REMINDER' // rvp_payment_reminder: buyer, amount, overdue invoice list
+  | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, invoice list
   | 'PARTY_LEDGER' // rvp_party_ledger: party, period, opening bal, total debits, total credits, closing bal, recent activity
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range, seed loads, sale orders, husk orders
@@ -64,6 +64,8 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // Meta-format endpoint, which addresses it by name (below), not by this id.
   DISPATCH_DRIVER: '27626',
   OWNER_DISPATCH_REMINDER: '1618894512932537',
+  // payment_reminder, approved on the shared KNM number (+917207146094).
+  PAYMENT_REMINDER: '26195',
 };
 
 function templateId(key: WaTemplateKey): string | undefined {
@@ -760,17 +762,42 @@ export const whatsappService = {
   },
 
   /**
+   * Payment reminder → whoever is being chased. `recipientName` fills the
+   * template's greeting, so a broker copy can read "Ravi (for ABC Traders)" and
+   * still carry only the invoices that broker stands behind.
+   *
+   * relatedId is always the BUYER's party id, whoever the copy went to: the daily
+   * job throttles off `lastSentAt('PAYMENT_REMINDER', buyerId)`, so a reminder
+   * sent by hand from the ledger correctly stops the cron re-nagging for 48h.
+   */
+  async sendPaymentReminder(args: {
+    recipientName: string;
+    phones: Array<string | null | undefined>;
+    outstanding: number;
+    invoiceListText: string;
+    buyerId: string;
+  }) {
+    return sendWhatsAppTemplate({
+      templateKey: 'PAYMENT_REMINDER',
+      to: args.phones.filter(Boolean) as string[],
+      variables: [args.recipientName, fmtInr(args.outstanding), args.invoiceListText],
+      relatedType: 'PAYMENT_REMINDER',
+      relatedId: args.buyerId,
+    });
+  },
+
+  /**
    * Sales-dues reminder → buyer. `invoiceListText` is the pre-formatted list of
    * overdue invoices (e.g. "RVP/12 (₹1,20,000) · RVP/15 (₹80,000)"). Fired by the
    * daily job and by the manual "Remind" button on the ledger.
    */
   async sendSalesDuesReminder(buyer: { id: string; name: string; phone: string | null; phone2?: string | null }, outstanding: number, invoiceListText: string) {
-    return sendWhatsAppTemplate({
-      templateKey: 'PAYMENT_REMINDER',
-      to: [buyer.phone, buyer.phone2].filter(Boolean) as string[],
-      variables: [buyer.name, fmtInr(outstanding), invoiceListText],
-      relatedType: 'PAYMENT_REMINDER',
-      relatedId: buyer.id,
+    return this.sendPaymentReminder({
+      recipientName: buyer.name,
+      phones: [buyer.phone, buyer.phone2],
+      outstanding,
+      invoiceListText,
+      buyerId: buyer.id,
     });
   },
 

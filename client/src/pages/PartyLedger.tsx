@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Segmented } from '@/components/ui/segmented';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
@@ -20,7 +21,7 @@ import {
   Search, Loader2, ArrowLeft, FileText, Phone, MapPin, Landmark,
   Hash, Wallet, TrendingUp, TrendingDown, Scale, Building2,
   ArrowDownRight, ArrowUpRight, ReceiptText, Copy, Check, Users, IndianRupee,
-  BellRing,
+  BellRing, AlertTriangle,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ helpers */
@@ -36,6 +37,33 @@ const KIND_META: Record<LedgerKind, { label: string; cls: string }> = {
 };
 
 const TYPE_LABEL: Record<string, string> = { SUPPLIER: 'Supplier', BUYER: 'Buyer', BOTH: 'Supplier & Buyer' };
+
+/**
+ * What the two WhatsApp reminder buttons may do for this party, computed server-
+ * side. Both buttons are hidden unless there is actually something to remind
+ * about - no pending lorries means no "Remind Pending Loads", no outstanding
+ * sale invoice means no "Payment Reminder".
+ */
+interface PartyReminderContext {
+  party: { id: string; name: string; phone: string | null; phone2: string | null };
+  pending: {
+    lorries: number;
+    breakdown: string;
+    pos: { poNumber: string | null; pricePerKg: number; remaining: number }[];
+  };
+  dues: {
+    /** OVERDUE once any invoice is past its due date; UPCOMING while all are still inside credit. */
+    scope: 'OVERDUE' | 'UPCOMING';
+    amount: number;
+    invoiceCount: number;
+    invoiceListText: string;
+    outstanding: number;
+    overdueOutstanding: number;
+    overdueCount: number;
+    totalInvoiceCount: number;
+    brokers: { id: string; name: string; phone: string | null; invoiceCount: number; outstanding: number }[];
+  } | null;
+}
 
 const LEDGER_COLUMNS: ExportColumn<PartyLedgerTxn>[] = [
   { header: 'Date', value: (t) => shortDate(t.date) },
@@ -213,10 +241,19 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [waDialogOpen, setWaDialogOpen] = useState(false);
+  const [payDialogOpen, setPayDialogOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['party-ledger', partyId],
     queryFn: () => api<PartyLedgerDetail>(`/ledger/parties/${partyId}`),
+  });
+
+  // Decides which reminder buttons are offered: pending lorries and outstanding
+  // sale invoices are both server-computed, so the page never shows a send the
+  // server would refuse.
+  const { data: reminderCtx } = useQuery({
+    queryKey: ['party-reminder-context', partyId],
+    queryFn: () => api<PartyReminderContext>(`/whatsapp/parties/${partyId}/reminder-context`),
   });
 
   // Letterhead + "remit to" bank block on the printed statement.
@@ -230,14 +267,17 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   // and throttles repeat sends.
   const remindMutation = useMutation({
     mutationFn: () =>
-      api<{ ok: boolean; pendingLorries: number; poLabel: string }>(
+      api<{ ok: boolean; pendingLorries: number; breakdown: string }>(
         `/whatsapp/parties/${partyId}/reminder`,
         { method: 'POST' }
       ),
     onSuccess: (r) =>
-      toast.success(`Reminder sent - ${r.pendingLorries} pending lorries (${r.poLabel})`),
+      toast.success(`Reminder sent - ${r.pendingLorries} pending lorr${r.pendingLorries === 1 ? 'y' : 'ies'}`),
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const pendingLorries = reminderCtx?.pending.lorries ?? 0;
+  const dues = reminderCtx?.dues ?? null;
 
   const filtered = useMemo(() => {
     let t = data?.transactions ?? [];
@@ -280,12 +320,13 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           <ArrowLeft className="h-4 w-4" /> All Parties
         </Button>
         <div className="flex gap-2">
-          {party.type !== 'BUYER' && (
+          {/* Only when lorries are actually still to arrive against a PENDING PO. */}
+          {pendingLorries > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => {
-                if (confirm(`Send ${party.name} a WhatsApp reminder about their pending loads?`)) {
+                if (confirm(`Send ${party.name} a WhatsApp reminder about their ${pendingLorries} pending load${pendingLorries === 1 ? '' : 's'}?`)) {
                   remindMutation.mutate();
                 }
               }}
@@ -295,7 +336,19 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
               {remindMutation.isPending
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : <BellRing className="h-4 w-4" />}
-              Remind Pending Loads
+              Remind Pending Loads ({pendingLorries})
+            </Button>
+          )}
+          {/* Only when this party has unsettled sale invoices. */}
+          {dues && dues.invoiceCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPayDialogOpen(true)}
+              className="gap-1.5 border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+            >
+              <IndianRupee className="h-4 w-4" />
+              Payment Reminder ({dues.invoiceCount})
             </Button>
           )}
           <ExportButtons
@@ -503,8 +556,18 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
         summary={summary}
         transactions={data.transactions}
         company={company}
-        kind={kind}
       />
+
+      {dues && (
+        <SendPaymentReminderDialog
+          open={payDialogOpen}
+          onOpenChange={setPayDialogOpen}
+          partyId={partyId}
+          partyName={party.name}
+          partyPhone={party.phone ?? party.phone2 ?? null}
+          dues={dues}
+        />
+      )}
     </div>
   );
 }
@@ -626,6 +689,163 @@ function KpiCard({ icon: Icon, label, value, hint, sub, tone = 'neutral' }: {
         {hint && <p className="text-[10px] text-muted-foreground mt-1">{hint}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/* ============================================= Payment Reminder Dialog */
+
+type ReminderTarget = 'PARTY' | 'BROKER' | 'BOTH';
+
+/**
+ * "Payment Reminder" on the Party Ledger - shown only when the party has
+ * unsettled sale invoices. The sender picks who gets chased: the party, the
+ * broker(s) who stand behind those invoices, or both. Each broker is messaged
+ * about their own invoices only, so one broker never sees another's business.
+ */
+function SendPaymentReminderDialog({
+  open,
+  onOpenChange,
+  partyId,
+  partyName,
+  partyPhone,
+  dues,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  partyId: string;
+  partyName: string;
+  partyPhone: string | null;
+  dues: NonNullable<PartyReminderContext['dues']>;
+}) {
+  const brokers = dues.brokers.filter((b) => b.invoiceCount > 0);
+  const reachableBrokers = brokers.filter((b) => b.phone);
+  const [target, setTarget] = useState<ReminderTarget>('PARTY');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) setTarget('PARTY');
+  }, [open]);
+
+  const options: { label: string; value: ReminderTarget }[] = [
+    { label: 'Party', value: 'PARTY' },
+    ...(brokers.length > 0
+      ? ([{ label: brokers.length === 1 ? 'Broker' : 'Brokers', value: 'BROKER' }, { label: 'Both', value: 'BOTH' }] as const)
+      : []),
+  ];
+
+  const handleSend = async () => {
+    setLoading(true);
+    try {
+      const res = await api<{ ok: boolean; message: string; failed: { recipient: string; error: string }[] }>(
+        `/whatsapp/parties/${partyId}/payment-reminder`,
+        { method: 'POST', body: { target } }
+      );
+      if (res.failed.length > 0) toast.warning(res.message);
+      else toast.success(res.message);
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send the payment reminder');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-emerald-600">
+            <WhatsAppIcon className="h-5 w-5 fill-emerald-600" />
+            Send Payment Reminder
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
+            <div className="font-semibold text-sm">{partyName}</div>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-muted-foreground">
+                {dues.scope === 'OVERDUE' ? 'Overdue' : 'Outstanding'} · {dues.invoiceCount} invoice{dues.invoiceCount === 1 ? '' : 's'}
+              </span>
+              <span className="font-bold tabular-nums">{rupees(dues.amount)}</span>
+            </div>
+            {dues.scope === 'OVERDUE' && dues.outstanding > dues.overdueOutstanding && (
+              <div className="text-[11px] text-muted-foreground">
+                Total outstanding {rupees(dues.outstanding)} across {dues.totalInvoiceCount} invoices - only the overdue ones are quoted.
+              </div>
+            )}
+            <div className="text-[11px] text-muted-foreground font-mono break-words pt-1">{dues.invoiceListText}</div>
+          </div>
+
+          {dues.scope === 'UPCOMING' && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 flex gap-2 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                None of these invoices are past their due date yet. The approved template still reads
+                "the due date has passed" - send only if you mean to nudge early.
+              </span>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground">Send to</label>
+            {options.length > 1 ? (
+              <Segmented options={options} value={target} onValueChange={(v) => setTarget(v)} />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                These are our own orders - there is no broker to copy, so the reminder goes to the party.
+              </p>
+            )}
+          </div>
+
+          {/* Exactly who will be messaged, with the numbers it goes to. */}
+          <div className="rounded-lg border bg-card p-3 space-y-2 text-xs">
+            {(target === 'PARTY' || target === 'BOTH') && (
+              <RecipientLine
+                name={partyName}
+                phone={partyPhone}
+                detail={`${rupees(dues.amount)} · ${dues.invoiceCount} invoice${dues.invoiceCount === 1 ? '' : 's'}`}
+              />
+            )}
+            {(target === 'BROKER' || target === 'BOTH') &&
+              brokers.map((b) => (
+                <RecipientLine
+                  key={b.id}
+                  name={b.name}
+                  phone={b.phone}
+                  detail={`${rupees(b.outstanding)} · ${b.invoiceCount} invoice${b.invoiceCount === 1 ? '' : 's'} brokered`}
+                />
+              ))}
+          </div>
+
+          <Button
+            onClick={handleSend}
+            disabled={loading || (target === 'BROKER' && reachableBrokers.length === 0)}
+            className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4 fill-white" />}
+            Send Payment Reminder
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One line of the "who gets this" preview - a missing phone is called out, not hidden. */
+function RecipientLine({ name, phone, detail }: { name: string; phone: string | null; detail: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="font-semibold">{name}</div>
+        <div className="text-muted-foreground">{detail}</div>
+      </div>
+      {phone ? (
+        <span className="font-mono text-muted-foreground whitespace-nowrap">{phone}</span>
+      ) : (
+        <span className="text-rose-600 dark:text-rose-400 whitespace-nowrap">No phone on file</span>
+      )}
+    </div>
   );
 }
 

@@ -13,6 +13,7 @@ import {
 } from '../services/lorryConfirmation.service.js';
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
+import { computePartyDues, invoiceListText, type BuyerDues } from '../services/salesDues.service.js';
 
 // ---------------------------------------------------------------------------
 // Inbound webhook (public - Fast2SMS calls this, no JWT)
@@ -459,6 +460,33 @@ export async function listWhatsAppLogs(req: Request, res: Response) {
 const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h - a double-click must not spam the party
 
 /**
+ * The lorries still to arrive against a party's PENDING POs, with the priced
+ * per-PO breakdown the reminder template prints. Shared by the send endpoint and
+ * the context endpoint that decides whether the button is shown at all.
+ */
+async function loadPendingLoads(partyId: string) {
+  const pendingPOs = await prisma.purchaseOrder.findMany({
+    where: { partyId, status: 'PENDING' },
+    include: { stockIns: { select: { id: true } } },
+    orderBy: { poDate: 'asc' },
+  });
+  const pos = pendingPOs
+    .map((po) => ({
+      poNumber: po.poNumber,
+      pricePerKg: Number(po.pricePerKg),
+      remaining: Math.max(0, (po.lorryCount || 1) - po.stockIns.length),
+    }))
+    .filter((p) => p.remaining > 0);
+  const lorries = pos.reduce((s, p) => s + p.remaining, 0);
+  // Priced per-PO breakdown, price → lorries → (PO), e.g.
+  // "• ₹95/kg - 3 lorries (RVP/01)\n• ₹96/kg - 2 lorries (RVP/02)".
+  const breakdown = pos
+    .map((p) => `• ₹${p.pricePerKg}/kg - ${p.remaining} lorr${p.remaining === 1 ? 'y' : 'ies'} (${p.poNumber ?? '-'})`)
+    .join('\n');
+  return { lorries, breakdown, pos };
+}
+
+/**
  * "Remind about pending loads" button on the Party Ledger: counts the lorries
  * still to arrive across the party's PENDING POs and sends rvp_reminder.
  */
@@ -473,35 +501,188 @@ export async function sendPartyReminder(req: Request, res: Response) {
     throw new HttpError(429, `A reminder was already sent recently. Try again in ~${mins} min.`);
   }
 
-  const pendingPOs = await prisma.purchaseOrder.findMany({
-    where: { partyId: party.id, status: 'PENDING' },
-    include: { stockIns: { select: { id: true } } },
-    orderBy: { poDate: 'asc' },
-  });
-  const pending = pendingPOs
-    .map((po) => ({
-      poNumber: po.poNumber,
-      pricePerKg: Number(po.pricePerKg),
-      remaining: Math.max(0, (po.lorryCount || 1) - po.stockIns.length),
-    }))
-    .filter((p) => p.remaining > 0);
-  const pendingLorries = pending.reduce((s, p) => s + p.remaining, 0);
-  if (pendingLorries === 0) {
+  const pending = await loadPendingLoads(party.id);
+  if (pending.lorries === 0) {
     throw new HttpError(400, 'No pending lorries against this party - nothing to remind about');
   }
-  // Priced per-PO breakdown, price → lorries → (PO), e.g.
-  // "• ₹95/kg - 3 lorries (RVP/01)\n• ₹96/kg - 2 lorries (RVP/02)".
-  const breakdown = pending
-    .map((p) => `• ₹${p.pricePerKg}/kg - ${p.remaining} lorr${p.remaining === 1 ? 'y' : 'ies'} (${p.poNumber ?? '-'})`)
-    .join('\n');
 
   const result = await whatsappService.sendReminder(
     { id: party.id, name: party.name, phone: party.phone, phone2: party.phone2 },
-    pendingLorries,
-    breakdown
+    pending.lorries,
+    pending.breakdown
   );
   if (!result.ok) throw new HttpError(502, result.error ?? 'WhatsApp send failed');
-  res.json({ ok: true, pendingLorries, breakdown });
+  res.json({ ok: true, pendingLorries: pending.lorries, breakdown: pending.breakdown });
+}
+
+// --- Party Ledger reminder buttons ------------------------------------------
+
+/**
+ * Which invoices a payment reminder should quote. The approved template says
+ * "the due date has passed", so overdue invoices are used whenever there are
+ * any; a party whose bills are all still inside their credit period is reported
+ * as UPCOMING and reminded about the whole outstanding instead - the caller
+ * shows that distinction before anything is sent.
+ */
+function duesScope(dues: BuyerDues) {
+  const overdue = dues.overdueInvoices.length > 0;
+  return {
+    scope: overdue ? ('OVERDUE' as const) : ('UPCOMING' as const),
+    invoices: overdue ? dues.overdueInvoices : dues.invoices,
+    amount: overdue ? dues.overdueOutstanding : dues.outstanding,
+  };
+}
+
+/**
+ * What the Party Ledger's two reminder buttons may do for this party. Both are
+ * conditional: pending loads only when POs are still to arrive, the payment
+ * reminder only when sale invoices are actually outstanding - so the page never
+ * offers a send that the server would refuse.
+ */
+export async function getPartyReminderContext(req: Request, res: Response) {
+  const party = await prisma.party.findUnique({
+    where: { id: req.params.partyId },
+    select: { id: true, name: true, phone: true, phone2: true },
+  });
+  if (!party) throw new HttpError(404, 'Party not found');
+
+  const [pending, dues] = await Promise.all([
+    loadPendingLoads(party.id),
+    computePartyDues(party.id),
+  ]);
+
+  const active = dues ? duesScope(dues) : null;
+
+  res.json({
+    party,
+    pending: {
+      lorries: pending.lorries,
+      breakdown: pending.breakdown,
+      pos: pending.pos,
+    },
+    dues: dues && active
+      ? {
+          scope: active.scope,
+          amount: active.amount,
+          invoiceCount: active.invoices.length,
+          invoiceListText: invoiceListText(active.invoices),
+          outstanding: dues.outstanding,
+          overdueOutstanding: dues.overdueOutstanding,
+          overdueCount: dues.overdueInvoices.length,
+          totalInvoiceCount: dues.invoices.length,
+          brokers: dues.brokers.map((b) => {
+            const theirs = active.invoices.filter((i) => i.brokerId === b.id);
+            return {
+              id: b.id,
+              name: b.name,
+              phone: b.phone,
+              invoiceCount: theirs.length,
+              outstanding: theirs.reduce((s, i) => s + i.outstanding, 0),
+            };
+          }),
+        }
+      : null,
+  });
+}
+
+/**
+ * Send the payment reminder from the Party Ledger to the buyer, the broker(s)
+ * behind the due invoices, or both. Each broker is only told about the invoices
+ * they brokered - another broker's business is none of theirs.
+ *
+ * Every leg reports itself: one recipient with no phone on file must not
+ * suppress the others, so a partial send answers 200 with the per-recipient
+ * breakdown and only an all-legs failure is an error.
+ */
+export async function sendPartyPaymentReminder(req: Request, res: Response) {
+  const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as {
+    target?: string;
+    brokerIds?: string[];
+  };
+  const target = (body.target ?? 'PARTY').toUpperCase();
+  if (!['PARTY', 'BROKER', 'BOTH'].includes(target)) {
+    throw new HttpError(400, `Unknown reminder target "${body.target}" - expected PARTY, BROKER or BOTH`);
+  }
+
+  const party = await prisma.party.findUnique({ where: { id: req.params.partyId } });
+  if (!party) throw new HttpError(404, 'Party not found');
+
+  const dues = await computePartyDues(party.id);
+  if (!dues || dues.invoices.length === 0) {
+    throw new HttpError(400, `${party.name} has no outstanding sale invoices - nothing to remind about`);
+  }
+  const active = duesScope(dues);
+
+  const sent: Array<{ recipient: string; phone: string | null; amount: number; invoices: number }> = [];
+  const failed: Array<{ recipient: string; error: string }> = [];
+
+  if (target === 'PARTY' || target === 'BOTH') {
+    if (!party.phone && !party.phone2) {
+      failed.push({ recipient: party.name, error: 'No phone number on file - add one in Parties first' });
+    } else {
+      const result = await whatsappService.sendPaymentReminder({
+        recipientName: party.name,
+        phones: [party.phone, party.phone2],
+        outstanding: active.amount,
+        invoiceListText: invoiceListText(active.invoices),
+        buyerId: party.id,
+      });
+      if (result.ok) sent.push({ recipient: party.name, phone: party.phone ?? party.phone2, amount: active.amount, invoices: active.invoices.length });
+      else failed.push({ recipient: party.name, error: result.error ?? 'WhatsApp send failed' });
+    }
+  }
+
+  if (target === 'BROKER' || target === 'BOTH') {
+    // An explicit brokerIds list narrows the copy; without one every broker
+    // behind the due invoices is copied. A broker whose invoices all fall
+    // OUTSIDE the active scope (brokered a bill that isn't overdue yet, while
+    // others are) has nothing to be told about, so drop them here rather than
+    // silently skipping later and reporting an empty failure.
+    const selected = body.brokerIds?.length ? dues.brokers.filter((b) => body.brokerIds!.includes(b.id)) : dues.brokers;
+    const wanted = selected.filter((b) => active.invoices.some((i) => i.brokerId === b.id));
+    if (wanted.length === 0) {
+      const reason = dues.brokers.length === 0
+        ? 'No broker on these invoices (own orders) - send to the party instead'
+        : selected.length === 0
+          ? 'None of the selected brokers are on these invoices'
+          : `No ${active.scope === 'OVERDUE' ? 'overdue' : 'outstanding'} invoice on these brokers' orders`;
+      if (target === 'BROKER') throw new HttpError(400, reason);
+      failed.push({ recipient: 'Broker', error: reason });
+    }
+    for (const broker of wanted) {
+      const theirs = active.invoices.filter((i) => i.brokerId === broker.id);
+      if (!broker.phone) {
+        failed.push({ recipient: broker.name, error: 'No phone number on file for this broker' });
+        continue;
+      }
+      const amount = theirs.reduce((s, i) => s + i.outstanding, 0);
+      const result = await whatsappService.sendPaymentReminder({
+        recipientName: `${broker.name} (for ${party.name})`,
+        phones: [broker.phone],
+        outstanding: amount,
+        invoiceListText: invoiceListText(theirs),
+        buyerId: party.id,
+      });
+      if (result.ok) sent.push({ recipient: broker.name, phone: broker.phone, amount, invoices: theirs.length });
+      else failed.push({ recipient: broker.name, error: result.error ?? 'WhatsApp send failed' });
+    }
+  }
+
+  if (sent.length === 0) {
+    throw new HttpError(502, failed[0]?.error ?? 'WhatsApp send failed');
+  }
+
+  res.json({
+    ok: true,
+    scope: active.scope,
+    amount: active.amount,
+    invoiceCount: active.invoices.length,
+    sent,
+    failed,
+    message: `Payment reminder sent to ${sent.map((s) => s.recipient).join(', ')}${
+      failed.length ? ` (failed: ${failed.map((f) => `${f.recipient} - ${f.error}`).join('; ')})` : ''
+    }`,
+  });
 }
 
 /**

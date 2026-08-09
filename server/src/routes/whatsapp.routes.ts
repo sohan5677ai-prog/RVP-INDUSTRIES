@@ -3,6 +3,8 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import {
   listWhatsAppLogs,
   sendPartyReminder,
+  getPartyReminderContext,
+  sendPartyPaymentReminder,
   sendPartyLedgerWhatsApp,
   listTransportConfirmations,
   lookupLorryConfirmation,
@@ -19,6 +21,11 @@ router.get('/whatsapp/logs', asyncHandler(listWhatsAppLogs));
 
 // Pending-loads reminder to a supplier (Party Ledger button). Throttled server-side.
 router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminder));
+// Which of the ledger's reminder buttons apply to this party (pending loads /
+// outstanding invoices) - the page hides the ones that don't.
+router.get('/whatsapp/parties/:partyId/reminder-context', asyncHandler(getPartyReminderContext));
+// Payment reminder → the buyer, the broker(s) on the due invoices, or both.
+router.post('/whatsapp/parties/:partyId/payment-reminder', asyncHandler(sendPartyPaymentReminder));
 router.post('/whatsapp/parties/:partyId/send-ledger', asyncHandler(sendPartyLedgerWhatsApp));
 
 // Lorry booking register, fed by the transporter's inbound WhatsApp messages

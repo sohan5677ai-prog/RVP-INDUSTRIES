@@ -23,6 +23,15 @@ export interface InvoiceDue {
   outstanding: number;
   dueDate: Date;
   overdue: boolean;
+  /** Broker on the order this shipment came from - null for our own orders. */
+  brokerId: string | null;
+}
+
+/** A broker standing behind at least one of a buyer's unsettled invoices. */
+export interface DuesBroker {
+  id: string;
+  name: string;
+  phone: string | null;
 }
 
 export interface BuyerDues {
@@ -34,6 +43,16 @@ export interface BuyerDues {
   overdueOutstanding: number; // subset that is past its due date
   invoices: InvoiceDue[];
   overdueInvoices: InvoiceDue[];
+  /** Distinct brokers on the unsettled invoices, "RVP" (our own) excluded. */
+  brokers: DuesBroker[];
+}
+
+/**
+ * A broker named "RVP" is us - the order was taken directly, so there is nobody
+ * external to copy. Same rule the dispatch bundle uses.
+ */
+export function isOwnBrokerName(name: string | null | undefined): boolean {
+  return !name || name.trim().toUpperCase() === 'RVP';
 }
 
 export interface DuesPortfolio {
@@ -51,11 +70,24 @@ function addDays(base: Date, days: number): Date {
   return d;
 }
 
-/** Compute every buyer's outstanding + overdue shipments as of `asOf` (default now). */
-export async function computeBuyerDues(asOf: Date = new Date()): Promise<DuesPortfolio> {
+/**
+ * Compute every buyer's outstanding + overdue shipments as of `asOf` (default
+ * now). Pass `buyerId` to scope the scan to one party - the Party Ledger's
+ * payment-reminder button only ever needs that party's book.
+ */
+export async function computeBuyerDues(
+  asOf: Date = new Date(),
+  opts: { buyerId?: string } = {},
+): Promise<DuesPortfolio> {
   const dispatches = await prisma.saleDispatch.findMany({
+    where: opts.buyerId ? { saleOrder: { buyerId: opts.buyerId } } : undefined,
     include: {
-      saleOrder: { include: { buyer: { select: { id: true, name: true, phone: true, phone2: true } } } },
+      saleOrder: {
+        include: {
+          buyer: { select: { id: true, name: true, phone: true, phone2: true } },
+          broker: { select: { id: true, name: true, phone: true } },
+        },
+      },
       receipts: { select: { type: true, amount: true, tdsAmount: true, shortageAmount: true } },
     },
   });
@@ -82,21 +114,26 @@ export async function computeBuyerDues(asOf: Date = new Date()): Promise<DuesPor
     const buyer = order.buyer;
     let row = byBuyer.get(buyer.id);
     if (!row) {
-      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, outstanding: 0, overdueOutstanding: 0, invoices: [], overdueInvoices: [] };
+      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, outstanding: 0, overdueOutstanding: 0, invoices: [], overdueInvoices: [], brokers: [] };
       byBuyer.set(buyer.id, row);
     }
+    const broker = order.broker && !isOwnBrokerName(order.broker.name) ? order.broker : null;
     const invoice: InvoiceDue = {
       dispatchId: d.id,
       invoiceNumber: d.invoiceNumber ?? `Dispatch ${d.id.slice(-6)}`,
       outstanding: Math.round(outstanding),
       dueDate,
       overdue,
+      brokerId: broker?.id ?? null,
     };
     row.outstanding += invoice.outstanding;
     row.invoices.push(invoice);
     if (overdue) {
       row.overdueOutstanding += invoice.outstanding;
       row.overdueInvoices.push(invoice);
+    }
+    if (broker && !row.brokers.some((b) => b.id === broker.id)) {
+      row.brokers.push({ id: broker.id, name: broker.name, phone: broker.phone });
     }
   }
 
@@ -106,6 +143,15 @@ export async function computeBuyerDues(asOf: Date = new Date()): Promise<DuesPor
   const topPending = buyers.slice(0, 5).map((b) => ({ name: b.name, outstanding: b.outstanding }));
 
   return { asOf, buyers, totalReceivable, totalOverdue, topPending };
+}
+
+/**
+ * One party's unsettled sale invoices, or null when nothing is outstanding.
+ * Scoped query - the ledger page asks this per party, not for the whole book.
+ */
+export async function computePartyDues(partyId: string, asOf: Date = new Date()): Promise<BuyerDues | null> {
+  const portfolio = await computeBuyerDues(asOf, { buyerId: partyId });
+  return portfolio.buyers.find((b) => b.buyerId === partyId) ?? null;
 }
 
 /** Indian-grouped amount, e.g. 120000 → "1,20,000". */

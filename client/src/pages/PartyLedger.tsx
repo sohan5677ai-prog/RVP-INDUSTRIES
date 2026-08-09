@@ -56,6 +56,7 @@ interface PartyReminderContext {
     scope: 'OVERDUE' | 'UPCOMING';
     amount: number;
     invoiceCount: number;
+    /** Comma-separated single line - exactly what the message will say. */
     invoiceListText: string;
     outstanding: number;
     overdueOutstanding: number;
@@ -774,9 +775,8 @@ function SendPaymentReminderDialog({
                 Total outstanding {rupees(dues.outstanding)} across {dues.totalInvoiceCount} invoices - only the overdue ones are quoted.
               </div>
             )}
-            {/* whitespace-pre-line: the list is newline-separated and goes out
-                one invoice per line, so the preview has to break the same way. */}
-            <div className="text-[11px] text-muted-foreground font-mono break-words whitespace-pre-line pt-1">{dues.invoiceListText}</div>
+            {/* The exact string that goes out - one comma-separated line. */}
+            <div className="text-[11px] text-muted-foreground font-mono break-words pt-1">{dues.invoiceListText}</div>
           </div>
 
           {dues.scope === 'UPCOMING' && (

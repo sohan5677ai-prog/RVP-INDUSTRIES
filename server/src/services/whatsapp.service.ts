@@ -50,7 +50,7 @@ export type WaTemplateKey =
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
   | 'DISPATCH_DRIVER' // rvp_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
-  | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, invoice list
+  | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range, seed loads, sale orders, husk orders
@@ -774,6 +774,7 @@ export const whatsappService = {
     recipientName: string;
     phones: Array<string | null | undefined>;
     outstanding: number;
+    /** Comma-separated, one variable - Meta forbids newlines inside a parameter. */
     invoiceListText: string;
     buyerId: string;
   }) {

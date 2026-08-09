@@ -167,26 +167,25 @@ export function compactInr(n: number): string {
 }
 
 /**
- * One invoice per line, e.g.
- *   RVP/12/26-27 (₹1,20,000)
- *   RVP/15/26-27 (₹80,000)
- * Capped so a long book doesn't turn the reminder into a wall of text.
+ * The due invoices as one comma-separated line, oldest due first - the order
+ * you'd chase them in:
  *
- * NOTE: this rides in a WhatsApp template variable. Meta's Cloud API documents
- * that a body parameter may not contain newline characters, and no multi-line
- * variable has yet been delivered from this system - every previous one was
- * SKIPPED before reaching Fast2SMS. If a reminder starts failing with a
- * parameter-format error (#132000 / "parameter text cannot have new-line"),
- * this separator is the cause; switch it back to ' · ' and the send recovers.
+ *   RVP/63/26-27 (₹1,75,279), RVP/64/26-27 (₹1,73,820)
+ *
+ * Deliberately ONE line. This rides in a WhatsApp template variable, and Meta's
+ * Cloud API does not allow newline characters inside a parameter: a
+ * newline-joined list was accepted by Fast2SMS and then dropped undelivered by
+ * WhatsApp (Vimal Industries, 09:41 IST 09-Aug-2026). WhatsApp wraps the text
+ * on the phone anyway, so a long list still reads over several lines.
+ *
+ * Sorted on a copy so the caller's array (used for the totals) keeps its order.
  */
 export function invoiceListText(invoices: InvoiceDue[], max = 10): string {
   if (invoices.length === 0) return '-';
-  // Oldest due first - the order you'd chase them in. Sorted on a copy so the
-  // caller's array (used for the totals) keeps its own order.
   const ordered = [...invoices].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   const shown = ordered.slice(0, max).map((i) => `${i.invoiceNumber} (₹${inr(i.outstanding)})`);
   if (ordered.length > max) shown.push(`+${ordered.length - max} more`);
-  return shown.join('\n');
+  return shown.join(', ');
 }
 
 /** "Buyer A ₹12.0L · Buyer B ₹8.0L" for the owner digest. */

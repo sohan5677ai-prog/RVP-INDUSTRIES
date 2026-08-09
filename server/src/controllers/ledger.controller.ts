@@ -471,14 +471,11 @@ function buildPartyLedger(
     });
   }
 
-  // Shortage & TDS can be captured either on the dispatch (buyer-kata at
-  // delivery / Mark-as-Paid) or on the receipt itself (Sale Dues / Receipts
-  // page). We surface each in the ledger exactly once: if a receipt tied to a
-  // dispatch already carries the deduction, we show that and suppress the
-  // dispatch-level line to avoid double-counting the same amount.
-  const linkedShortageDispatchIds = new Set(
-    receipts.filter((r) => r.partyId === partyId && r.saleDispatchId && Number(r.shortageAmount ?? 0) > 0).map((r) => r.saleDispatchId as string)
-  );
+  // TDS can be captured either on the dispatch (Mark-as-Paid) or on the receipt
+  // itself (Sale Dues / Receipts page). We surface it in the ledger exactly once:
+  // if a receipt tied to a dispatch already carries the deduction, we show that
+  // and suppress the dispatch-level line to avoid double-counting the same amount.
+  // (Shortage has no dispatch-level line at all - see the sales loop below.)
   const linkedTdsDispatchIds = new Set(
     receipts.filter((r) => r.partyId === partyId && r.saleDispatchId && Number(r.tdsAmount ?? 0) > 0).map((r) => r.saleDispatchId as string)
   );
@@ -536,26 +533,15 @@ function buildPartyLedger(
         status: d.status,
       });
 
-      const cn = Number(d.creditNoteAmount ?? 0);
-      if (cn > 0 && !linkedShortageDispatchIds.has(d.id)) {
-        txns.push({
-          id: `CN-${d.id}`,
-          date: (d.receivedDate ?? d.deliveredDate ?? d.dispatchDate).toISOString(),
-          kind: 'CREDIT_NOTE',
-          particulars: `Credit note - shortage ${d.shortageKg ?? 0} kg`,
-          invoiceNumber: invoiceLabel,
-          vehicleNumber: d.vehicleNumber,
-          reference: s.destination,
-          utr: null,
-          transferredDate: null,
-          weightKg: d.shortageKg ?? null,
-          ratePerKg: rate,
-          product: s.product,
-          debit: 0,
-          credit: round2(cn),
-          status: 'POSTED',
-        });
-      }
+      // NOTE: the buyer-kata shortage stored on the dispatch (creditNoteAmount /
+      // shortageKg at Mark-as-Delivered) is deliberately NOT a ledger line. It is
+      // only our expectation of what the buyer will deduct; what they actually
+      // deduct is settled when the money lands. So A/R stays at the full billed
+      // amount until a receipt books the deduction, and the shortage reaches the
+      // ledger through that receipt (`REC-SH-` below). This matches the accounting
+      // ledger - deliverSaleDispatch posts no credit-note journal entry either,
+      // only postSaleShortageDeduction at receipt time - and the Sale Dues page,
+      // which clears a shipment purely from its receipts.
 
       const tds = Number(d.tdsAmount ?? 0);
       if (tds > 0 && !linkedTdsDispatchIds.has(d.id)) {
@@ -737,14 +723,15 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     // ties exactly to the per-transaction statement in getPartyLedger/buildPartyLedger.
     // (Summing raw paise and rounding once diverges by a rupee or two, which showed
     // up as a party reading e.g. ₹1 DR here while the statement said "Settled".)
-    // cnTotal / tdsTotal exclude any dispatch whose shortage/TDS is already
-    // carried on a linked receipt, so the balance ties to buildPartyLedger
-    // (which suppresses the dispatch-level line in that case).
-    prisma.$queryRaw<{partyId: string, saleTotal: number, lastTxnDate: Date, dispatchCount: bigint, cnTotal: number, tdsTotal: number}[]>`
+    // tdsTotal excludes any dispatch whose TDS is already carried on a linked
+    // receipt, so the balance ties to buildPartyLedger (which suppresses the
+    // dispatch-level line in that case). The dispatch's buyer-kata shortage is
+    // ignored outright - it only hits the ledger once a receipt books it, and
+    // that lands via shortageTotal on the Receipt aggregate below.
+    prisma.$queryRaw<{partyId: string, saleTotal: number, lastTxnDate: Date, dispatchCount: bigint, tdsTotal: number}[]>`
       SELECT
         so."buyerId" as "partyId",
         SUM(ROUND(sd."weightKg" * so."ratePerKg") + ROUND(sd."gstAmount")) as "saleTotal",
-        SUM(ROUND(sd."creditNoteAmount") * (CASE WHEN EXISTS (SELECT 1 FROM "Receipt" r WHERE r."saleDispatchId" = sd.id AND COALESCE(r."shortageAmount", 0) > 0) THEN 0 ELSE 1 END)) as "cnTotal",
         SUM(ROUND(COALESCE(sd."tdsAmount", 0)) * (CASE WHEN EXISTS (SELECT 1 FROM "Receipt" r WHERE r."saleDispatchId" = sd.id AND COALESCE(r."tdsAmount", 0) > 0) THEN 0 ELSE 1 END)) as "tdsTotal",
         MAX(COALESCE(sd."invoiceDate", sd."dispatchDate")) as "lastTxnDate",
         COUNT(sd.id) as "dispatchCount"
@@ -830,11 +817,10 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     if (!s) continue;
     applyDate(agg.partyId, agg.lastTxnDate);
     const amt = Number(agg.saleTotal || 0);
-    const cnAmt = Number(agg.cnTotal || 0);
     const tdsAmt = Number(agg.tdsTotal || 0);
     s.saleTotal += amt;
     s.totalDebit += amt;
-    s.totalCredit += cnAmt + tdsAmt;
+    s.totalCredit += tdsAmt;
     s.transactionCount += Number(agg.dispatchCount);
   }
   for (const agg of payments) {

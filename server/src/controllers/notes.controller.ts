@@ -172,11 +172,14 @@ export function emailNote(kind: Kind) {
 }
 
 /**
- * Shortage amounts already posted to the party ledger (SaleDispatch.creditNoteAmount
- * from buyer-kata mismatch, or Receipt.shortageAmount entered at payment time) but
- * with no formal CreditNote document raised yet. Mirrors the same-amount-once rule
- * used when building the party ledger: a receipt-level shortage on a dispatch takes
- * priority over the dispatch-level auto amount.
+ * Shortages with no formal CreditNote document raised yet - either the expected
+ * amount from a buyer-kata mismatch (SaleDispatch.creditNoteAmount, recorded at
+ * Mark-as-Delivered) or the amount the buyer actually deducted at payment time
+ * (Receipt.shortageAmount). The receipt-level figure wins where both exist, since
+ * it is the settled one. Note that only the receipt-level figure has hit the party
+ * ledger: a kata shortage is an expectation until the money lands, so a note listed
+ * off the dispatch-level amount alone is raised ahead of the ledger, and its
+ * quantity can still move when the buyer pays.
  *
  * A shortage credit note ALWAYS carries GST at the commodity's configured rate (5%
  * by default) - a credit note follows the tax treatment of the supply it reverses,

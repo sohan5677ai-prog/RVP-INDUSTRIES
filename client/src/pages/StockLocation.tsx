@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Search, Loader2, Warehouse, TrendingUp, IndianRupee, Package, Landmark,
-  ChevronRight, Tag, MapPin, Truck,
+  ChevronRight, MapPin, Truck,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { StockTransfer, LoansResponse } from '@/lib/types';

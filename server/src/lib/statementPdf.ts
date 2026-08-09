@@ -23,16 +23,24 @@ const RIGHT = PAGE.width - PAGE.margin;
 const W = RIGHT - LEFT;
 const BOTTOM = PAGE.height - PAGE.margin;
 
-// Column x-offsets (widths sum to W = 523.28).
-const COL = { date: LEFT, particulars: LEFT + 56, ref: LEFT + 246, debit: LEFT + 336, credit: LEFT + 424 };
-const COL_END = RIGHT; // balance column runs to the right edge
+// Column widths, summing to exactly W (523.28). Balance needs real width - it
+// holds the widest cell on the page ("12,34,567.00 Dr"), and at 11pt it wrapped
+// to one character per line.
 const w = {
-  date: 56,
-  particulars: 190,
-  ref: 90,
-  debit: 88,
-  credit: 88,
-  balance: RIGHT - (LEFT + 424 + 88),
+  date: 52,
+  particulars: 150,
+  ref: 80,
+  debit: 78,
+  credit: 78,
+  balance: W - 438, // 85.28
+};
+const COL = {
+  date: LEFT,
+  particulars: LEFT + w.date,
+  ref: LEFT + 202,
+  debit: LEFT + 282,
+  credit: LEFT + 360,
+  balance: LEFT + 438,
 };
 
 function fmtDate(iso: string | Date): string {
@@ -44,7 +52,23 @@ function money(n: number): string {
   return n ? inr(Math.round(n)) : '';
 }
 
-export function renderStatementPdf(company: StatementCompany, data: PartyStatementData): Promise<Buffer> {
+/**
+ * Period scoping for a ranged statement. When `transactions` covers only part of
+ * the ledger, `opening` is the running balance carried in from before the first
+ * row - without it the rows don't add up to the closing figure and the statement
+ * reads as wrong. Omit both for a full A-to-Z statement.
+ */
+export interface StatementPeriod {
+  /** e.g. "2026-04-01 to 2026-08-09 (Receipts only)" */
+  label?: string;
+  opening?: number;
+}
+
+export function renderStatementPdf(
+  company: StatementCompany,
+  data: PartyStatementData,
+  period?: StatementPeriod,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: PAGE.margin });
     const chunks: Buffer[] = [];
@@ -75,7 +99,13 @@ export function renderStatementPdf(company: StatementCompany, data: PartyStateme
     // Party block
     doc.font('Helvetica').fontSize(8).fillColor('#64748b').text('STATEMENT FOR', LEFT, y);
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text(party.name, LEFT, y + 10, { width: W * 0.7 });
-    y = doc.y + 10;
+    y = doc.y + 4;
+
+    if (period?.label) {
+      doc.font('Helvetica').fontSize(8).fillColor('#475569').text(`Period: ${period.label}`, LEFT, y, { width: W });
+      y = doc.y + 2;
+    }
+    y += 6;
 
     // --- Table header -------------------------------------------------------
     const drawTableHeader = (yy: number): number => {
@@ -86,10 +116,22 @@ export function renderStatementPdf(company: StatementCompany, data: PartyStateme
       doc.text('Ref / Inv', COL.ref + 3, yy + 5, { width: w.ref - 4 });
       doc.text('Debit', COL.debit, yy + 5, { width: w.debit - 4, align: 'right' });
       doc.text('Credit', COL.credit, yy + 5, { width: w.credit - 4, align: 'right' });
-      doc.text('Balance', COL.credit + w.credit, yy + 5, { width: w.balance - 4, align: 'right' });
+      doc.text('Balance', COL.balance, yy + 5, { width: w.balance - 4, align: 'right' });
       return yy + 18;
     };
     y = drawTableHeader(y);
+
+    // --- Opening balance ----------------------------------------------------
+    // Carried in from before the period, so the rows below reconcile to the
+    // closing figure. Always drawn for a ranged statement, including at zero.
+    if (period?.opening !== undefined) {
+      const op = period.opening;
+      doc.rect(LEFT, y, W, 15).fill('#e2e8f0');
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#0f172a');
+      doc.text('Opening Balance', COL.particulars + 3, y + 4, { width: w.particulars - 6 });
+      doc.text(`${inr(Math.abs(Math.round(op)))} ${op >= 0 ? 'Dr' : 'Cr'}`, COL.balance, y + 4, { width: w.balance - 4, align: 'right' });
+      y += 15;
+    }
 
     // --- Rows ---------------------------------------------------------------
     doc.font('Helvetica').fontSize(7.5).fillColor('#0f172a');
@@ -117,7 +159,7 @@ export function renderStatementPdf(company: StatementCompany, data: PartyStateme
       doc.text(money(t.debit), COL.debit, y + 3, { width: w.debit - 4, align: 'right' });
       doc.text(money(t.credit), COL.credit, y + 3, { width: w.credit - 4, align: 'right' });
       const bal = t.runningBalance ?? 0;
-      doc.text(`${inr(Math.abs(Math.round(bal)))} ${bal >= 0 ? 'Dr' : 'Cr'}`, COL.credit + w.credit, y + 3, { width: w.balance - 4, align: 'right' });
+      doc.text(`${inr(Math.abs(Math.round(bal)))} ${bal >= 0 ? 'Dr' : 'Cr'}`, COL.balance, y + 3, { width: w.balance - 4, align: 'right' });
       y += rowH;
     }
 
@@ -135,7 +177,9 @@ export function renderStatementPdf(company: StatementCompany, data: PartyStateme
     doc.font('Helvetica-Bold').fontSize(10).fillColor('#ffffff');
     const closingLabel = summary.balanceType === 'DR' ? 'Balance Receivable' : 'Balance Payable';
     doc.text(closingLabel, COL.particulars + 3, y + 8, { width: 260 });
-    doc.text(`₹ ${inr(summary.balance)} ${summary.balanceType}`, COL.debit, y + 8, { width: w.debit + w.credit + w.balance - 4, align: 'right' });
+    // "INR", not "₹" - PDFKit's built-in Helvetica is WinAnsi-encoded and has no
+    // rupee glyph, so the symbol renders as a stray superscript one.
+    doc.text(`INR ${inr(summary.balance)} ${summary.balanceType}`, COL.debit, y + 8, { width: w.debit + w.credit + w.balance - 4, align: 'right' });
     y += 26;
 
     doc.font('Helvetica').fontSize(7).fillColor('#94a3b8').text(

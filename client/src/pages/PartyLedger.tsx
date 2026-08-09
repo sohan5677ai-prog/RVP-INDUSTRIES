@@ -860,7 +860,6 @@ function SendPartyLedgerWhatsAppDialog({
   summary,
   transactions,
   company,
-  kind,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -870,7 +869,6 @@ function SendPartyLedgerWhatsAppDialog({
   summary: PartyLedgerDetail['summary'];
   transactions: PartyLedgerTxn[];
   company: StatementCompany | null | undefined;
-  kind: string;
 }) {
   const [fromDate, setFromDate] = useState(initialFrom);
   const [toDate, setToDate] = useState(initialTo || new Date().toISOString().slice(0, 10));
@@ -885,13 +883,15 @@ function SendPartyLedgerWhatsAppDialog({
     }
   }, [open, initialFrom, initialTo, party]);
 
+  // Date window only - NOT the page's kind tab. The statement PDF has to carry
+  // every voucher for the period or its opening balance won't reconcile to its
+  // closing figure, so the preview is scoped the same way as what actually goes.
   const periodTxns = useMemo(() => {
     let t = transactions;
-    if (kind !== 'ALL') t = t.filter((x) => x.kind === kind || (kind === 'RECEIPT' && (x.kind === 'CREDIT_NOTE' || x.kind === 'TDS' || x.kind === 'SHORTAGE')));
     if (fromDate) t = t.filter((x) => x.date >= fromDate);
     if (toDate) t = t.filter((x) => x.date <= toDate + 'T23:59:59');
     return t;
-  }, [transactions, kind, fromDate, toDate]);
+  }, [transactions, fromDate, toDate]);
 
   const opening = periodTxns.length ? periodTxns[0].runningBalance - periodTxns[0].debit + periodTxns[0].credit : 0;
   const closing = periodTxns.length ? periodTxns[periodTxns.length - 1].runningBalance : (summary.balanceType === 'DR' ? summary.balance : -summary.balance);
@@ -909,7 +909,7 @@ function SendPartyLedgerWhatsAppDialog({
         `/whatsapp/parties/${party.id}/send-ledger`,
         {
           method: 'POST',
-          body: { fromDate, toDate, phone: phone.trim(), kind },
+          body: { fromDate, toDate, phone: phone.trim() },
         }
       );
       if (!res.ok) {
@@ -945,7 +945,6 @@ function SendPartyLedgerWhatsAppDialog({
       party,
       summary,
       transactions: periodTxns,
-      filterNote: kind === 'ALL' ? undefined : KIND_FILTERS.find((f) => f.value === kind)?.label,
       fromDate: fromDate || undefined,
       toDate: toDate || undefined,
     });
@@ -1008,8 +1007,12 @@ function SendPartyLedgerWhatsAppDialog({
               className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4 fill-white" />}
-              Send WhatsApp Message (API)
+              Send Statement PDF on WhatsApp
             </Button>
+            <p className="text-[11px] text-muted-foreground text-center -mt-0.5">
+              Attaches the full statement for this period as a PDF - all transaction
+              types, so the opening and closing balances reconcile.
+            </p>
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="sm" onClick={handleOpenWhatsAppWeb} className="gap-1.5">
                 <WhatsAppIcon className="h-3.5 w-3.5 fill-emerald-600" /> WhatsApp Web

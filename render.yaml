@@ -82,6 +82,7 @@ services:
       - key: FAST2SMS_TMPL_PAYMENT_REMINDER
         sync: false
       # Party account statement sent from the ledger's "WhatsApp Ledger" button.
+      # Document header (the statement PDF) + 5 body variables.
       - key: FAST2SMS_TMPL_PARTY_LEDGER
         sync: false
       - key: FAST2SMS_TMPL_VERIFICATION_STATEMENT

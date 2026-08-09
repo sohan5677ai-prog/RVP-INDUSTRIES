@@ -13,6 +13,9 @@ import {
 } from '../services/lorryConfirmation.service.js';
 import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
+import { getCompanyProfileRow } from './settings.controller.js';
+import { renderStatementPdf } from '../lib/statementPdf.js';
+import { uploadFileToStorage } from '../lib/upload.js';
 import { computePartyDues, invoiceListText, type BuyerDues } from '../services/salesDues.service.js';
 
 // ---------------------------------------------------------------------------
@@ -686,26 +689,22 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
 }
 
 /**
- * The kind tabs on the party ledger page. Kept in step with KIND_FILTERS in
- * client/src/pages/PartyLedger.tsx so the message matches the on-screen preview:
- * the Receipts tab folds in the adjustments that ride along with a receipt.
- */
-const LEDGER_KIND_FILTERS: Record<string, { kinds: string[]; label: string }> = {
-  PURCHASE: { kinds: ['PURCHASE'], label: 'Purchases only' },
-  SALE: { kinds: ['SALE'], label: 'Sales only' },
-  PAYMENT: { kinds: ['PAYMENT'], label: 'Payments only' },
-  RECEIPT: { kinds: ['RECEIPT', 'CREDIT_NOTE', 'TDS', 'SHORTAGE'], label: 'Receipts only' },
-};
-
-/**
- * Send a party's account ledger statement via WhatsApp for a given date range,
- * optionally narrowed to one ledger kind (the tab the sender had open).
+ * Send a party's account statement via WhatsApp for a given date range, as a PDF
+ * document header with a five-figure summary in the body.
+ *
+ * Deliberately NOT scoped to the ledger page's kind tab. `runningBalance` is
+ * computed across the whole ledger, so a kind-filtered statement can't reconcile:
+ * with receipts alone you get opening 4,33,125 Dr less 6,22,265 in credits but a
+ * closing of 35,298 Dr, because the sales that moved the balance in between are
+ * hidden. Re-running the balance over just the filtered rows would print a
+ * closing that contradicts the party's real account. A statement of account has
+ * to carry every voucher for the period, so that's what goes out.
  */
 export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
   try {
     const { partyId } = req.params;
-    const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string; kind?: string };
-    const { fromDate, toDate, phone, kind } = body;
+    const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string };
+    const { fromDate, toDate, phone } = body;
 
     const statement = await buildPartyStatementData(partyId);
     if (!statement) throw new HttpError(404, 'Party not found');
@@ -716,14 +715,7 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
       throw new HttpError(400, `No valid phone number for ${party.name}. Please enter one in Parties or in the prompt.`);
     }
 
-    // Same order as the page: kind first, then the date window, so the opening
-    // balance is read off the first row that survives both filters.
-    const kindKey = kind && kind.toUpperCase() !== 'ALL' ? kind.toUpperCase() : null;
-    const kindFilter = kindKey ? LEDGER_KIND_FILTERS[kindKey] : null;
-    if (kindKey && !kindFilter) throw new HttpError(400, `Unknown ledger filter "${kind}"`);
-
     let txns = transactions;
-    if (kindFilter) txns = txns.filter((t) => kindFilter.kinds.includes(t.kind));
     if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
     if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
 
@@ -739,7 +731,7 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
 
     const fromStr = fromDate ? fromDate.slice(0, 10) : firstTxn ? firstTxn.date.slice(0, 10) : 'Start';
     const toStr = toDate ? toDate.slice(0, 10) : lastTxn ? lastTxn.date.slice(0, 10) : 'As of today';
-    const periodStr = `${fromStr} to ${toStr}${kindFilter ? ` (${kindFilter.label})` : ''}`;
+    const periodStr = `${fromStr} to ${toStr}`;
 
     const recentList = txns
       .slice(-5)
@@ -748,23 +740,65 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
 
     const summaryText = `*Account Statement - ${party.name}*\nPeriod: ${periodStr}\nOpening Bal: ₹${fmtAmt(opening)} ${drcr(opening)}\nTotal Debits: ₹${fmtAmt(totalDebit)}\nTotal Credits: ₹${fmtAmt(totalCredit)}\n*Closing Bal: ₹${fmtAmt(closing)} ${drcr(closing)}*\n\nRecent Activity:\n${recentList || 'No transactions in period'}`;
 
-    let result: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, error: 'WhatsApp template notification skipped' };
+    // The statement PDF is the template's document header, so it has to exist
+    // before we can send at all. Rendered from the same period-scoped rows as the
+    // summary above, then parked in Supabase Storage for Meta to fetch.
+    let document: { url: string; filename: string } | null = null;
     try {
-      result = await whatsappService.sendPartyLedgerStatement(
-        { id: party.id, name: party.name },
-        targetPhone,
+      const profile = await getCompanyProfileRow();
+      const buffer = await renderStatementPdf(
         {
-          period: periodStr,
-          opening: `₹${fmtAmt(opening)} ${drcr(opening)}`.trim(),
-          totalDebit: `₹${fmtAmt(totalDebit)}`,
-          totalCredit: `₹${fmtAmt(totalCredit)}`,
-          closing: `₹${fmtAmt(closing)} ${drcr(closing)}`.trim(),
-          recentActivity: recentList || 'No transactions in this period',
-        }
+          name: profile.name || 'RVP Industries',
+          address: profile.address,
+          gstin: profile.gstin,
+          contact: profile.contact,
+        },
+        {
+          party,
+          transactions: txns,
+          // Period-scoped, or the totals row would contradict the rows above it.
+          // Closing is the last row's running balance (opening + period movement),
+          // not debits-minus-credits, which ignores the balance carried in.
+          summary: {
+            ...statement.summary,
+            totalDebit,
+            totalCredit,
+            balance: Math.abs(closing),
+            balanceType: closing >= 0 ? ('DR' as const) : ('CR' as const),
+          },
+        },
+        { label: periodStr, opening }
       );
+      const slug = (s: string) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
+      const filename = `Account-Statement-${slug(party.name)}-${slug(fromStr)}-to-${slug(toStr)}.pdf`;
+      const url = await uploadFileToStorage({ originalname: filename, mimetype: 'application/pdf', buffer } as Express.Multer.File);
+      document = { url, filename };
     } catch (e) {
-      logger.error('[whatsapp] sendPartyLedgerWhatsApp template error', e);
-      result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      logger.error('[whatsapp] party ledger statement PDF failed', e);
+    }
+
+    let result: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, error: 'WhatsApp template notification skipped' };
+    if (!document) {
+      // Sending without the header would be rejected by Meta anyway; say so
+      // plainly so the caller falls back to WhatsApp Web or the printed PDF.
+      result = { ok: false, error: 'Could not prepare the statement PDF, so nothing was sent. Please try again or use WhatsApp Web.' };
+    } else {
+      try {
+        result = await whatsappService.sendPartyLedgerStatement(
+          { id: party.id, name: party.name },
+          targetPhone,
+          {
+            period: periodStr,
+            totalDebit: `₹${fmtAmt(totalDebit)}`,
+            totalCredit: `₹${fmtAmt(totalCredit)}`,
+            closing: `₹${fmtAmt(closing)} ${drcr(closing)}`.trim(),
+          },
+          document
+        );
+      } catch (e) {
+        logger.error('[whatsapp] sendPartyLedgerWhatsApp template error', e);
+        result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
     }
 
     // `ok` reports whether the message actually went out - the caller shows the
@@ -773,9 +807,10 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
       ok: result.ok,
       skipped: result.skipped ?? false,
       message: result.ok
-        ? `Party ledger statement sent to ${targetPhone}`
+        ? `Statement PDF sent to ${targetPhone}`
         : result.error || 'WhatsApp send failed',
       summaryText,
+      documentUrl: document?.url ?? null,
       targetPhone,
       period: periodStr,
       closingBalance: closing,

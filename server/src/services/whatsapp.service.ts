@@ -51,7 +51,7 @@ export type WaTemplateKey =
   | 'DISPATCH_DRIVER' // rvp_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, invoice list
-  | 'PARTY_LEDGER' // rvp_party_ledger: party, period, opening bal, total debits, total credits, closing bal, recent activity
+  | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range, seed loads, sale orders, husk orders
   | 'OWNER_DUES_DIGEST'; // rvp_owner_dues: date, total receivable, overdue, top pending
@@ -802,22 +802,26 @@ export const whatsappService = {
   },
 
   /**
-   * Account-statement summary → party, fired by the "WhatsApp Ledger" button on
-   * the party ledger. `to` is passed in rather than read off the party because
-   * the dialog lets the sender type a one-off number. The seven variables are in
-   * the same order as the summary block shown on screen.
+   * Account statement → party, fired by the "WhatsApp Ledger" button on the party
+   * ledger: the full statement rides along as a PDF document header, so the body
+   * carries only the five-figure summary. `to` is passed in rather than read off
+   * the party because the dialog lets the sender type a one-off number.
+   *
+   * The document is mandatory - the approved template has a document header, and
+   * Meta rejects the send outright if the media is missing. Opening balance and
+   * the transaction rows live in the PDF, deliberately not in the body: template
+   * variables cannot contain newlines.
    */
   async sendPartyLedgerStatement(
     party: { id: string; name: string },
     to: string | string[] | null | undefined,
     statement: {
       period: string;
-      opening: string;
       totalDebit: string;
       totalCredit: string;
       closing: string;
-      recentActivity: string;
     },
+    document: { url: string; filename: string },
   ) {
     return sendWhatsAppTemplate({
       templateKey: 'PARTY_LEDGER',
@@ -825,12 +829,12 @@ export const whatsappService = {
       variables: [
         party.name,
         statement.period,
-        statement.opening,
         statement.totalDebit,
         statement.totalCredit,
         statement.closing,
-        statement.recentActivity,
       ],
+      mediaUrl: document.url,
+      documentFilename: document.filename,
       relatedType: 'PARTY_LEDGER',
       relatedId: party.id,
     });

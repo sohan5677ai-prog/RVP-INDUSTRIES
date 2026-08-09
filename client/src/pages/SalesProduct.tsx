@@ -947,15 +947,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // real cost the day the money lands and we see whether the buyer cut it - that
   // locked figure is what the Husk Pool / P&L absorb as an operating expense.
   const shortageTotals = useMemo(() => {
-    let estimated = 0, locked = 0, estimatedKg = 0, pendingShipments = 0;
+    let estimated = 0, locked = 0, estimatedKg = 0, pendingShipments = 0, lockedKg = 0, lockedShipments = 0;
     for (const o of visible) {
       for (const d of o.dispatches ?? []) {
         const s = dispatchShortage(d, Number(o.ratePerKg), o.gstExempt);
         if (s.state === 'ESTIMATED') { estimated += s.estimated; estimatedKg += s.kg; pendingShipments++; }
-        else if (s.state === 'LOCKED') locked += s.locked;
+        else if (s.state === 'LOCKED') { locked += s.locked; lockedKg += s.kg; lockedShipments++; }
       }
     }
-    return { estimated: round2(estimated), locked: round2(locked), estimatedKg, pendingShipments };
+    return { estimated: round2(estimated), locked: round2(locked), estimatedKg, pendingShipments, lockedKg, lockedShipments };
   }, [visible]);
 
   const exportColumns: ExportColumn<SaleOrder>[] = [
@@ -1037,15 +1037,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         )}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estimated Shortage</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Locked Shortage</CardTitle>
             <TrendingDown className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber-600">{rupees(shortageTotals.estimated)}</div>
+            <div className="text-2xl font-bold text-amber-600">{rupees(shortageTotals.locked)}</div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              {toTonnes(shortageTotals.estimatedKg).toFixed(2)} t over {shortageTotals.pendingShipments} shipment{shortageTotals.pendingShipments === 1 ? '' : 's'}
+              {toTonnes(shortageTotals.lockedKg).toFixed(2)} t over {shortageTotals.lockedShipments} shipment{shortageTotals.lockedShipments === 1 ? '' : 's'}
               {' · '}
-              <span className="text-rose-600 dark:text-rose-400">{rupees(shortageTotals.locked)} locked</span>
+              <span className="text-red-600 dark:text-red-400">{rupees(shortageTotals.estimated)} estimated</span>
             </p>
           </CardContent>
         </Card>

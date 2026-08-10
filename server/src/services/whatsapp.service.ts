@@ -53,7 +53,7 @@ export type WaTemplateKey =
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
-  | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range, seed loads, sale orders, husk orders
+  | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST'; // rvp_owner_dues: date, total receivable, overdue, top pending
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
@@ -63,13 +63,37 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // Recorded for completeness - the driver template goes out over the
   // Meta-format endpoint, which addresses it by name (below), not by this id.
   DISPATCH_DRIVER: '27626',
-  OWNER_DISPATCH_REMINDER: '1618894512932537',
-  // payment_reminder, approved on the shared KNM number (+917207146094).
+  // payment_reminder + rvp_owner_dispatch, approved together on the shared KNM
+  // number (+917207146094). OWNER_DISPATCH_REMINDER previously carried
+  // '1618894512932537' - a *Meta* template id, not a Fast2SMS message_id (those
+  // are 5-digit, like these) - and every daily reminder 400'd with "Template ID
+  // (message_id) is invalid or not approved". Keep this column Fast2SMS-only.
   PAYMENT_REMINDER: '26195',
+  OWNER_DISPATCH_REMINDER: '26196',
 };
 
 function templateId(key: WaTemplateKey): string | undefined {
   return process.env[`FAST2SMS_TMPL_${key}`]?.trim() || DEFAULT_TEMPLATE_IDS[key] || undefined;
+}
+
+/**
+ * One saleable product's line in the weekly summary. `orders`/`orderedMt` are
+ * the week's intake; `dispatchedMt` is what physically left during the week
+ * (against any order, new or old); `pendingMt` is the LIVE undelivered balance
+ * across every open order - the standing commitment to buyers, not just the
+ * unshipped part of this week's intake.
+ */
+export interface ProductWeekStats {
+  orders: number;
+  orderedMt: string;
+  dispatchedMt: string;
+  pendingMt: string;
+}
+
+export interface OwnerWeeklyStats {
+  seed: { orderedLorries: number; arrivedLorries: number; pendingLorries: number };
+  pappu: ProductWeekStats;
+  husk: ProductWeekStats;
 }
 
 // Templates sent over the Meta-format POST endpoint (location headers) are
@@ -857,13 +881,32 @@ export const whatsappService = {
     );
   },
 
-  /** Owner weekly business summary. */
-  async sendOwnerWeeklySummary(range: string, counts: { seedLoads: number; saleOrders: number; huskOrders: number }, weekKey: string) {
+  /**
+   * Owner weekly business summary. Twelve variables, in template order: the date
+   * range, three black-seed lorry counts, then four figures each for pappu and
+   * husk. Tonnages arrive pre-formatted to 2dp as plain MT numbers - the unit
+   * lives in the approved template text, not in the value, so re-wording the
+   * message never needs a code change.
+   */
+  async sendOwnerWeeklySummary(range: string, stats: OwnerWeeklyStats, weekKey: string) {
     return fanOutToAlertRecipients((to) =>
       sendWhatsAppTemplate({
         templateKey: 'OWNER_WEEKLY_SUMMARY',
         to,
-        variables: [range, counts.seedLoads, counts.saleOrders, counts.huskOrders],
+        variables: [
+          range,
+          stats.seed.orderedLorries,
+          stats.seed.arrivedLorries,
+          stats.seed.pendingLorries,
+          stats.pappu.orders,
+          stats.pappu.orderedMt,
+          stats.pappu.dispatchedMt,
+          stats.pappu.pendingMt,
+          stats.husk.orders,
+          stats.husk.orderedMt,
+          stats.husk.dispatchedMt,
+          stats.husk.pendingMt,
+        ],
         relatedType: 'OWNER_WEEKLY_SUMMARY',
         relatedId: weekKey,
       })

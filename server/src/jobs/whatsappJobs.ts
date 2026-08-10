@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
-import { whatsappService } from '../services/whatsapp.service.js';
+import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '../services/whatsapp.service.js';
 import { computeBuyerDues, invoiceListText, topPendingText } from '../services/salesDues.service.js';
 
 /**
@@ -23,6 +23,24 @@ function istDayKey(d: Date = new Date()): string {
   return d.toLocaleDateString('en-CA', { timeZone: TZ });
 }
 
+/** IST is a fixed +05:30 offset with no DST, so the shift is a constant. */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * Identity of the week `d` falls in: the YYYY-MM-DD of that week's Monday, IST.
+ *
+ * The weekly summary used to key off "today minus 7 days", which is a different
+ * value every day - so any manual /jobs/weekly trigger on a day other than the
+ * Monday the cron fired sent a second summary for the same week. Anchoring to
+ * the week's Monday makes every trigger inside one week resolve to one key.
+ */
+function istWeekKey(d: Date = new Date()): string {
+  const ist = new Date(d.getTime() + IST_OFFSET_MS); // UTC fields now read as IST
+  const daysSinceMonday = (ist.getUTCDay() + 6) % 7; // Mon -> 0 ... Sun -> 6
+  const monday = new Date(ist.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+  return monday.toISOString().slice(0, 10);
+}
+
 function daysAgo(n: number): Date {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -34,14 +52,24 @@ function fmtShort(d: Date): string {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: TZ });
 }
 
+/**
+ * Turn a send result into something the manual endpoint can report. A bare "ok"
+ * hid the common failure - the job ran, decided to send, and Fast2SMS refused
+ * or the template id was unset - behind the same word as a real delivery.
+ */
+function describeSend(res: { ok: boolean; skipped?: boolean; error?: string }, what: string): string {
+  if (res.ok) return `sent (${what})`;
+  return `${res.skipped ? 'skipped' : 'failed'} (${what}): ${res.error ?? 'unknown reason'}`;
+}
+
 // ---------------------------------------------------------------------------
 // #10 - Owner daily outstanding-dues digest
 // ---------------------------------------------------------------------------
-async function runOwnerDuesDigest() {
+async function runOwnerDuesDigest(): Promise<string> {
   const dayKey = istDayKey();
-  if (await whatsappService.lastSentAt('OWNER_DUES_DIGEST', dayKey)) return; // already sent today
+  if (await whatsappService.lastSentAt('OWNER_DUES_DIGEST', dayKey)) return `already sent for ${dayKey}`;
   const portfolio = await computeBuyerDues();
-  await whatsappService.sendOwnerDuesDigest(
+  const res = await whatsappService.sendOwnerDuesDigest(
     {
       asOn: new Date(),
       totalReceivable: portfolio.totalReceivable,
@@ -50,30 +78,47 @@ async function runOwnerDuesDigest() {
     },
     dayKey
   );
+  return describeSend(res, dayKey);
 }
 
 // ---------------------------------------------------------------------------
 // #7 - Buyer sales-dues reminders (only overdue buyers, throttled)
 // ---------------------------------------------------------------------------
-async function runBuyerDuesReminders() {
+async function runBuyerDuesReminders(): Promise<string> {
   const portfolio = await computeBuyerDues();
+  let sent = 0;
+  let failed = 0;
+  let throttled = 0;
+  let lastError: string | undefined;
   for (const buyer of portfolio.buyers) {
     if (buyer.overdueInvoices.length === 0 || (!buyer.phone && !buyer.phone2)) continue;
     const last = await whatsappService.lastSentAt('PAYMENT_REMINDER', buyer.buyerId);
-    if (last && Date.now() - last.getTime() < DUES_THROTTLE_MS) continue; // throttled
-    await whatsappService.sendSalesDuesReminder(
+    if (last && Date.now() - last.getTime() < DUES_THROTTLE_MS) {
+      throttled += 1;
+      continue;
+    }
+    const res = await whatsappService.sendSalesDuesReminder(
       { id: buyer.buyerId, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2 },
       buyer.overdueOutstanding,
       invoiceListText(buyer.overdueInvoices)
     );
+    if (res.ok) sent += 1;
+    else {
+      failed += 1;
+      lastError = res.error;
+    }
   }
+  return `sent ${sent}, failed ${failed}, throttled ${throttled}${lastError ? ` - last error: ${lastError}` : ''}`;
 }
 
 // ---------------------------------------------------------------------------
 // #8 - Owner deferred-dispatch reminders
 // ---------------------------------------------------------------------------
-async function runDeferredDispatchReminders() {
+async function runDeferredDispatchReminders(): Promise<string> {
   const todayKey = istDayKey();
+  let sent = 0;
+  let failed = 0;
+  let lastError: string | undefined;
   // Include dispatches due today, overdue, or due within 2 days
   const twoDaysAhead = new Date();
   twoDaysAhead.setDate(twoDaysAhead.getDate() + 2);
@@ -99,30 +144,114 @@ async function runDeferredDispatchReminders() {
     const remainingTonnes = (remainingKg > 0 ? remainingKg : order.tonnageKg) / 1000;
     const summary = `${order.product} · ${remainingTonnes.toFixed(2)}`;
 
-    await whatsappService.notifyOwnerDispatch({
+    const res = await whatsappService.notifyOwnerDispatch({
       id: order.id,
       buyerName: order.buyer.name,
       orderSummary: summary,
       dispatchBy: effectiveDate,
       ref: `SO-${order.id.slice(-6)}`,
     });
+    if (res.ok) sent += 1;
+    else {
+      failed += 1;
+      lastError = res.error;
+    }
   }
+  return `sent ${sent}, failed ${failed}${lastError ? ` - last error: ${lastError}` : ''}`;
 }
 
 // ---------------------------------------------------------------------------
 // #9 - Owner weekly summary
 // ---------------------------------------------------------------------------
-async function runWeeklySummary() {
-  const start = daysAgo(7);
-  const weekKey = istDayKey(start);
-  if (await whatsappService.lastSentAt('OWNER_WEEKLY_SUMMARY', weekKey)) return;
-  const [seedLoads, saleOrders, huskOrders] = await Promise.all([
-    prisma.stockIn.count({ where: { arrivalDate: { gte: start } } }),
-    prisma.saleOrder.count({ where: { saleDate: { gte: start } } }),
-    prisma.saleOrder.count({ where: { saleDate: { gte: start }, product: 'HUSK' } }),
+/** kg -> plain 2dp MT number. The "MT" itself lives in the template text. */
+function toMt(kg: number): string {
+  return (kg / 1000).toFixed(2);
+}
+
+/**
+ * One product's week: intake, what shipped during the week, and the standing
+ * balance still owed to buyers.
+ *
+ * `pendingMt` deliberately spans ALL open orders, not just the week's - an order
+ * taken three weeks ago and still undelivered is exactly what the owner needs to
+ * see on a Monday. It mirrors `remainingKg` in sale.controller.ts: a short-closed
+ * order (closedAt set) has no balance left however the arithmetic reads, so those
+ * are excluded rather than left showing a permanent few-hundred-kg tail.
+ */
+async function productWeekStats(product: 'PAPPU' | 'HUSK', start: Date): Promise<ProductWeekStats> {
+  const [taken, dispatched, openOrders] = await Promise.all([
+    prisma.saleOrder.aggregate({
+      where: { product, saleDate: { gte: start } },
+      _count: { _all: true },
+      _sum: { tonnageKg: true },
+    }),
+    prisma.saleDispatch.aggregate({
+      where: { dispatchDate: { gte: start }, saleOrder: { product } },
+      _sum: { weightKg: true },
+    }),
+    prisma.saleOrder.findMany({
+      where: { product, closedAt: null, status: { in: ['PENDING', 'PARTIAL'] } },
+      select: { tonnageKg: true, dispatches: { select: { weightKg: true } } },
+    }),
   ]);
+
+  const pendingKg = openOrders.reduce((sum, o) => {
+    const shipped = o.dispatches.reduce((s, d) => s + d.weightKg, 0);
+    return sum + Math.max(0, o.tonnageKg - shipped);
+  }, 0);
+
+  return {
+    orders: taken._count._all,
+    orderedMt: toMt(taken._sum.tonnageKg ?? 0),
+    dispatchedMt: toMt(dispatched._sum.weightKg ?? 0),
+    pendingMt: toMt(pendingKg),
+  };
+}
+
+/** Everything the weekly template prints. */
+async function collectWeeklyStats(start: Date): Promise<OwnerWeeklyStats> {
+  const [ordered, arrivedLorries, pendingPOs, pappu, husk] = await Promise.all([
+    // Lorries ordered this week. KNM_BATCH POs are synthetic rows minted at
+    // stock-in for cold-storage batches - a movement, not a fresh purchase - so
+    // counting them here would report seed we never ordered.
+    prisma.purchaseOrder.findMany({
+      where: { poDate: { gte: start }, status: { not: 'CANCELLED' }, createdBy: { not: 'KNM_BATCH' } },
+      select: { lorryCount: true },
+    }),
+    prisma.stockIn.count({ where: { arrivalDate: { gte: start } } }),
+    // Still to arrive, live. Same definition as the Party Ledger's pending-loads
+    // reminder (loadPendingLoads), so the two never disagree.
+    prisma.purchaseOrder.findMany({
+      where: { status: 'PENDING' },
+      select: { lorryCount: true, _count: { select: { stockIns: true } } },
+    }),
+    productWeekStats('PAPPU', start),
+    productWeekStats('HUSK', start),
+  ]);
+
+  return {
+    seed: {
+      orderedLorries: ordered.reduce((s, po) => s + (po.lorryCount || 1), 0),
+      arrivedLorries,
+      pendingLorries: pendingPOs.reduce((s, po) => s + Math.max(0, (po.lorryCount || 1) - po._count.stockIns), 0),
+    },
+    pappu,
+    husk,
+  };
+}
+
+async function runWeeklySummary(): Promise<string> {
+  const start = daysAgo(7);
+  // Keyed by the week, not by the run date, so a manual trigger later in the
+  // same week is a no-op rather than a duplicate summary.
+  const weekKey = istWeekKey();
+  if (await whatsappService.lastSentAt('OWNER_WEEKLY_SUMMARY', weekKey)) {
+    return `already sent for week of ${weekKey}`;
+  }
+  const stats = await collectWeeklyStats(start);
   const range = `${fmtShort(start)} – ${fmtShort(new Date())}`;
-  await whatsappService.sendOwnerWeeklySummary(range, { seedLoads, saleOrders, huskOrders }, weekKey);
+  const res = await whatsappService.sendOwnerWeeklySummary(range, stats, weekKey);
+  return describeSend(res, `week of ${weekKey}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -138,8 +267,7 @@ export async function runDailyJobs() {
     ['deferredDispatchReminders', runDeferredDispatchReminders],
   ] as const) {
     try {
-      await fn();
-      results[name] = 'ok';
+      results[name] = await fn();
     } catch (e) {
       results[name] = e instanceof Error ? e.message : String(e);
       logger.error(`[whatsapp-cron] ${name} failed`, e);
@@ -151,8 +279,7 @@ export async function runDailyJobs() {
 /** Weekly summary (#9). */
 export async function runWeeklyJobs() {
   try {
-    await runWeeklySummary();
-    return { weeklySummary: 'ok' };
+    return { weeklySummary: await runWeeklySummary() };
   } catch (e) {
     logger.error('[whatsapp-cron] weeklySummary failed', e);
     return { weeklySummary: e instanceof Error ? e.message : String(e) };
@@ -162,8 +289,7 @@ export async function runWeeklyJobs() {
 /** Just the deferred-dispatch reminders (#8) - exposed separately for testing. */
 export async function runDispatchReminderJob() {
   try {
-    await runDeferredDispatchReminders();
-    return { deferredDispatchReminders: 'ok' };
+    return { deferredDispatchReminders: await runDeferredDispatchReminders() };
   } catch (e) {
     logger.error('[whatsapp-cron] deferredDispatchReminders failed', e);
     return { deferredDispatchReminders: e instanceof Error ? e.message : String(e) };
@@ -220,12 +346,57 @@ async function runCheckDriverTemplate(): Promise<Record<string, unknown>> {
   return { configuredPhoneNumberId: configuredId, templateName, numbers, verdict };
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostic - the whole template picture: every template Fast2SMS has approved
+// (raw, so whatever field carries the numeric message_id is visible) next to the
+// FAST2SMS_TMPL_* vars actually set on this deployment. A template whose id is
+// unset sends nothing and logs SKIPPED "…is not configured"; an id that belongs
+// to another number (or is a Meta id rather than a Fast2SMS one) logs FAILED
+// with "message_id is invalid or not approved". This tells the two apart.
+// ---------------------------------------------------------------------------
+async function runCheckTemplates(): Promise<Record<string, unknown>> {
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  if (!apiKey) return { error: 'FAST2SMS_API_KEY is not configured' };
+  const configuredId = process.env.FAST2SMS_PHONE_NUMBER_ID ?? null;
+
+  const configuredEnv = Object.fromEntries(
+    Object.entries(process.env)
+      .filter(([k]) => k.startsWith('FAST2SMS_TMPL_'))
+      .map(([k, v]) => [k, v?.trim() || '(empty)'])
+  );
+
+  const res = await fetch('https://www.fast2sms.com/dev/dlt_manager/whatsapp?type=template', {
+    headers: { Authorization: apiKey },
+  });
+  const text = await res.text();
+  if (!res.ok) return { error: `HTTP ${res.status}`, body: text.slice(0, 2000), configuredEnv };
+
+  let parsed: { data?: Array<{ phone_number_id?: string; number?: string; templates?: unknown[] }> };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: 'Non-JSON response', body: text.slice(0, 2000), configuredEnv };
+  }
+
+  return {
+    configuredPhoneNumberId: configuredId,
+    configuredEnv,
+    numbers: (parsed.data ?? []).map((entry) => ({
+      number: entry.number,
+      phoneNumberId: entry.phone_number_id,
+      isConfigured: entry.phone_number_id === configuredId,
+      templates: entry.templates ?? [], // raw - id field name varies by panel version
+    })),
+  };
+}
+
 /** Map a job name (from the manual endpoint) to its runner. */
 export const JOB_RUNNERS: Record<string, () => Promise<Record<string, unknown>>> = {
   daily: runDailyJobs,
   weekly: runWeeklyJobs,
   'dispatch-reminders': runDispatchReminderJob,
   'check-driver-template': runCheckDriverTemplate,
+  'check-templates': runCheckTemplates,
 };
 
 /**

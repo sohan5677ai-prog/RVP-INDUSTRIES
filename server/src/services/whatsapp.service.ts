@@ -40,7 +40,7 @@ const FAST2SMS_URL = 'https://www.fast2sms.com/dev/whatsapp';
 /** Template keys - each maps to an approved template's Fast2SMS message_id. */
 export type WaTemplateKey =
   | 'PO_CREATED' // rvp_po_created: party, po number(s), lorries, price/kg
-  | 'STOCKIN_CONFIRMED' // rvp_stockin_confirmed: party, lorry, po number, date
+  | 'STOCKIN_CONFIRMED' // rvp_stockin_confirmed: party, lorry, party invoice number, date
   | 'VERIFICATION_STATEMENT' // rvp_verification_statement (document header): party, lorry, net weight, amount
   | 'PAYMENT_SENT' // rvp_payment_sent (image header): party, amount, date, reference
   | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header - used when no screenshot): party, amount, date, reference
@@ -596,12 +596,21 @@ export const whatsappService = {
     );
   },
 
-  /** Lorry stocked in → party. */
-  async notifyStockIn(stockIn: { id: string; lorryNumber: string; arrivalDate: Date }, po: { poNumber: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
+  /**
+   * Lorry stocked in → party. The template's third slot is the party's OWN
+   * invoice number (as typed at stock-in), not our PO number - fall back to the
+   * PO number only when the arrival was recorded without one.
+   */
+  async notifyStockIn(
+    stockIn: { id: string; lorryNumber: string; arrivalDate: Date; invoiceNumber?: string | null },
+    po: { poNumber: string | null },
+    party: { name: string; phone: string | null; phone2?: string | null }
+  ) {
+    const invoiceLabel = stockIn.invoiceNumber?.trim() || po.poNumber || '-';
     await sendToPartyAndInternal(
       {
         templateKey: 'STOCKIN_CONFIRMED',
-        variables: [party.name, stockIn.lorryNumber, po.poNumber ?? '-', fmtDate(stockIn.arrivalDate)],
+        variables: [party.name, stockIn.lorryNumber, invoiceLabel, fmtDate(stockIn.arrivalDate)],
         relatedType: 'STOCKIN',
         relatedId: stockIn.id,
       },

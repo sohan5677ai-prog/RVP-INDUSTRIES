@@ -246,7 +246,7 @@ export async function createStockIn(req: Request, res: Response) {
 
   // WhatsApp the party that their lorry has been received - fire-and-forget.
   void whatsappService.notifyStockIn(
-    { id: stockIn.id, lorryNumber: stockIn.lorryNumber, arrivalDate: stockIn.arrivalDate },
+    { id: stockIn.id, lorryNumber: stockIn.lorryNumber, arrivalDate: stockIn.arrivalDate, invoiceNumber: stockIn.invoiceNumber },
     { poNumber: po.poNumber },
     { name: po.party.name, phone: po.party.phone, phone2: po.party.phone2 }
   );

@@ -42,7 +42,7 @@ import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 import { whatsappService } from '../services/whatsapp.service.js';
-import { markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
+import { findWaitingConfirmation, markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
 
 const GST_RATE = 0.05; // fallback IGST fraction (5%) when a commodity has no configured rate
 
@@ -632,7 +632,18 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   }
   const baseAmount = weightKg * Number(order.ratePerKg);
   const gstAmount = order.gstExempt ? 0 : calcGst(weightKg, Number(order.ratePerKg), await gstFractionForProduct(order.product));
-  const { freightCharge } = await deriveDestinationFreight(order.buyer, weightKg, order.priceType);
+  const { freightCharge: computedFreightCharge } = await deriveDestinationFreight(order.buyer, weightKg, order.priceType);
+  // If the transporter's WhatsApp booking for this lorry quoted a flat freight,
+  // that told amount is what gets recorded - not the per-tonne formula re-applied
+  // to the exact kata weight (a 25 t lorry landing at 25.04 t must not turn a
+  // quoted ₹30,000 into ₹30,048). Falls back to the formula when there's no
+  // matching booking or it carried no figure. BASE orders never carry freight.
+  let freightCharge = computedFreightCharge;
+  if (order.priceType !== 'BASE') {
+    const matchedBooking = await findWaitingConfirmation(data.vehicleNumber);
+    const bookedFreight = matchedBooking?.freightAmount != null ? Number(matchedBooking.freightAmount) : null;
+    if (bookedFreight != null && bookedFreight > 0) freightCharge = bookedFreight;
+  }
 
   // Lorry freight split (paid by us): destination unloading hamali + kata are
   // auto-computed from the standard rates, a fixed retention is held back until
@@ -813,10 +824,9 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   if (order.product === 'PAPPU' && fullyDispatched) await freezeOrderCost(order.id);
 
-  // The transporter's WhatsApp booking for this lorry has now been used. Only
-  // the register row moves - the dispatch keeps the freight derived from the
-  // destination rate above; the booking is a record of what was arranged, not a
-  // correction to what we costed.
+  // The transporter's WhatsApp booking for this lorry has now been used - flip
+  // it to USED and point it at this dispatch (its freightAmount, if any, was
+  // already pulled into freightCharge above).
   await markConfirmationUsed(dispatch.vehicleNumber, dispatch.id);
 
   // WhatsApp the driver the buyer's name/phone/maps link - fire-and-forget,

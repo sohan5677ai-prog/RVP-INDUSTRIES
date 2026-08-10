@@ -6,10 +6,12 @@ import { logger } from '../lib/logger.js';
  *
  * A message arrives before the lorry does ("18/7 Punganur To Surat 30 Tonnes
  * AP39T8217 Driver Moula 7207012803 Rs 75000"), so the row sits WAITING until a
- * dispatch is raised on that lorry number. It is deliberately read-only towards
- * the rest of the ERP: it never rewrites a dispatch's freight, only supplies the
- * driver details the office would otherwise re-type, and records that the
- * booking has been used.
+ * dispatch is raised on that lorry number. It supplies the driver details the
+ * office would otherwise re-type, and - when the message quoted a freight - the
+ * flat amount that was actually told to the transporter, so the recorded freight
+ * doesn't drift from a small kata-weight overage against the per-tonne formula.
+ * Falls back to the per-tonne formula when there's no matching booking or it
+ * carried no figure (see dispatchSaleOrder in sale.controller.ts).
  */
 
 /** States that mean "booked, nothing shipped on it yet". DRAFT is the legacy name. */

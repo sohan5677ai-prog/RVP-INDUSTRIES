@@ -22,8 +22,10 @@ export const createSaleOrderSchema = z.object({
   brokerageRatePerKg: z.coerce.number().nonnegative().optional().default(0),
   // BASE = sold ex-works (the buyer's lorry, we carry no freight); DELIVERY = the
   // rate is landed at their place and we bear the freight. Omitted → defaults per
-  // product (see resolvePriceType). The freight AMOUNT is still derived from the
-  // buyer's destination + the Settings rate - never taken from the client.
+  // product (see resolvePriceType). The freight AMOUNT is never taken from the
+  // client here - at order creation it's the destination + Settings rate; at
+  // dispatch it's overridden by the matched WhatsApp booking's quoted freight
+  // when there is one (see dispatchSaleOrder).
   priceType: z.enum(['BASE', 'DELIVERY']).optional(),
 });
 

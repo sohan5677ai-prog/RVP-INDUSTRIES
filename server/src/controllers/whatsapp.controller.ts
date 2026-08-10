@@ -781,6 +781,15 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
           address: profile.address,
           gstin: profile.gstin,
           contact: profile.contact,
+          stateName: profile.stateName,
+          stateCode: profile.stateCode,
+          pincode: profile.pincode,
+          bankAccountName: profile.bankAccountName,
+          bankName: profile.bankName,
+          bankAccountNumber: profile.bankAccountNumber,
+          bankBranchIfsc: profile.bankBranchIfsc,
+          signatureHeight: profile.signatureHeight,
+          stampSize: profile.stampSize,
         },
         {
           party,
@@ -796,7 +805,7 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
             balanceType: closing >= 0 ? ('DR' as const) : ('CR' as const),
           },
         },
-        { label: periodStr, opening }
+        { label: periodStr, opening, from: fromStr, to: toStr }
       );
       const slug = (s: string) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
       const filename = `Account-Statement-${slug(party.name)}-${slug(fromStr)}-to-${slug(toStr)}.pdf`;

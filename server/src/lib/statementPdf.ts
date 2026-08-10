@@ -745,10 +745,12 @@ export function renderStatementPdf(
 
     let dy = panelHeading('Declaration', boxX[1] + 8, boxTop + 6, boxW[1] - 16) + 1;
     const declaration =
-      "This statement reflects all vouchers posted to the party's ledger account for the period stated above. "
-      + 'Dr denotes an amount recoverable from the party and Cr an amount payable to the party. '
-      + 'Kindly reconcile with your books and report any discrepancy in writing within 7 days of receipt, '
-      + 'after which the balance shown will be treated as confirmed.';
+      "This is a computer-generated Statement of Account listing every voucher posted to this party's "
+      + 'ledger for the period stated above, covering purchases, sales, payments and receipts alike. '
+      + 'All amounts are in Indian Rupees and remain subject to realisation of instruments and to '
+      + 'pending weight verification, where applicable. Kindly verify these entries against your books '
+      + 'and report any discrepancy in writing within 7 days of receipt, after which the balance shown '
+      + 'will be treated as confirmed.';
     use('body', 6.4, MUTED).text(declaration, boxX[1] + 8, dy, { width: boxW[1] - 16, lineGap: 0.8 });
     dy = doc.y + 8;
 

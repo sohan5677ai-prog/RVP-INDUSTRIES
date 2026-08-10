@@ -108,6 +108,18 @@ function templateName(key: WaTemplateKey): string | undefined {
 }
 
 /**
+ * The ONE number the deferred-dispatch reminder goes to (Reddy).
+ *
+ * Deliberately not the Settings alert list, which every other internal alert
+ * fans out to. This reminder repeats daily for as long as an order sits
+ * undispatched - with the whole list that is 3 billed conversations per order
+ * per day, and the open husk backlog alone makes it 21 a day. One recipient
+ * keeps it useful instead of spam. Override with WHATSAPP_DISPATCH_REMINDER_NUMBER
+ * to redirect it without a deploy.
+ */
+const DISPATCH_REMINDER_NUMBER = process.env.WHATSAPP_DISPATCH_REMINDER_NUMBER?.trim() || '9440416639';
+
+/**
  * Normalise an Indian phone number to the 12-digit "91XXXXXXXXXX" form
  * Fast2SMS expects. Returns null when the input can't be a valid mobile.
  */
@@ -867,18 +879,17 @@ export const whatsappService = {
 
   /**
    * Owner alert: an advance sale order's dispatch date has arrived but it is not
-   * yet dispatched. Goes to the owner number (Settings), NOT the buyer.
+   * yet dispatched. Goes to ONE person, NOT the buyer and NOT the whole alert
+   * list - see DISPATCH_REMINDER_NUMBER.
    */
   async notifyOwnerDispatch(order: { id: string; buyerName: string; orderSummary: string; dispatchBy: Date; ref: string }) {
-    return fanOutToAlertRecipients((to) =>
-      sendWhatsAppTemplate({
-        templateKey: 'OWNER_DISPATCH_REMINDER',
-        to,
-        variables: [order.buyerName, order.orderSummary, fmtDate(order.dispatchBy), order.ref],
-        relatedType: 'OWNER_DISPATCH_REMINDER',
-        relatedId: order.id,
-      })
-    );
+    return sendWhatsAppTemplate({
+      templateKey: 'OWNER_DISPATCH_REMINDER',
+      to: DISPATCH_REMINDER_NUMBER,
+      variables: [order.buyerName, order.orderSummary, fmtDate(order.dispatchBy), order.ref],
+      relatedType: 'OWNER_DISPATCH_REMINDER',
+      relatedId: order.id,
+    });
   },
 
   /**

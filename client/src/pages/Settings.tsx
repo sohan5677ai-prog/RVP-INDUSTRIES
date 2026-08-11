@@ -101,6 +101,7 @@ const emptyCompany: CompanyProfile = {
   freightRetentionPerTrip: 3000,
   saleCloseTolerancePct: 0.5,
   saleCloseToleranceByproductPct: 2,
+  poReminderDays: 3,
   taxproGspId: '', taxproGspSecret: '', taxproGstUser: '', taxproGstPass: '', taxproSandbox: true,
 };
 
@@ -193,6 +194,19 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                 </div>
               </div>
               <p className="text-[10px] text-muted-foreground">A lorry never weighs exactly what was booked. When the final lorry lands within this much of the ordered tonnage the order is treated as complete instead of holding a few hundred kg of balance open — e.g. 24.87 t against a 25 t husk order. Wider shortfalls need a deliberate <span className="font-medium">Close short</span> on the order.</p>
+            </div>
+            <div className="space-y-1.5 max-w-xs">
+              <Label className="text-xs">Purchase order arrival reminder (days)</Label>
+              <Input
+                type="number"
+                step="1"
+                min="0"
+                max="365"
+                value={String(form.poReminderDays ?? 3)}
+                onChange={(e) => setForm((p) => ({ ...p, poReminderDays: e.target.value }))}
+                placeholder="3"
+              />
+              <p className="text-[10px] text-muted-foreground">A PO still awaiting its lorry this many days after the order date pops up on login, with a jump to Stock In. Set <span className="font-medium">0</span> to switch the popup off.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-4">
               {field('GSTIN/UIN', 'gstin', '37ABJFR4630H1Z1')}

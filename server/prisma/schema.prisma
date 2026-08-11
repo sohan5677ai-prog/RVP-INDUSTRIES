@@ -880,6 +880,10 @@ model CompanyProfile {
   // someone short-closes it deliberately.
   saleCloseTolerancePct          Decimal @default(0.5) @db.Decimal(5, 2)
   saleCloseToleranceByproductPct Decimal @default(2) @db.Decimal(5, 2)
+  // --- Purchase-order arrival reminder --------------------------------------
+  // How many days a PO may sit PENDING (ordered, lorry not stocked in) before
+  // the login popup starts nagging about it. 0 turns the popup off entirely.
+  poReminderDays                 Int     @default(3)
   // Owner/admin mobile that receives internal WhatsApp alerts (weekly summary,
   // daily dues digest, deferred-dispatch reminders). Falls back to
   // WHATSAPP_TEST_NUMBER when blank. Not printed on invoices.

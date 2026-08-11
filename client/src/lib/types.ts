@@ -479,6 +479,8 @@ export interface CompanyProfile {
   // the other loose byproducts vary far more, so they get their own figure.
   saleCloseTolerancePct?: string | number;
   saleCloseToleranceByproductPct?: string | number;
+  // Days a PO may sit PENDING before the arrival-reminder popup nags. 0 = off.
+  poReminderDays?: string | number;
   invoiceLayout?: string | null;
 
   // TaxPro GSP Config

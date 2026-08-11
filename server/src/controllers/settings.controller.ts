@@ -251,6 +251,9 @@ const companyProfileSchema = z.object({
   // a deliberate short close, not a blanket rule.
   saleCloseTolerancePct: z.coerce.number().min(0).max(10).optional(),
   saleCloseToleranceByproductPct: z.coerce.number().min(0).max(10).optional(),
+  // Days a PO may sit PENDING before the arrival-reminder popup surfaces it.
+  // 0 disables the popup.
+  poReminderDays: z.coerce.number().int().min(0).max(365).optional(),
   taxproGspId: z.string().optional().nullable(),
   taxproGspSecret: z.string().optional().nullable(),
   taxproGstUser: z.string().optional().nullable(),

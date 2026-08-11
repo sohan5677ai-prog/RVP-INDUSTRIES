@@ -74,6 +74,10 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // (message_id) is invalid or not approved". Keep this column Fast2SMS-only.
   PAYMENT_REMINDER: '26195',
   OWNER_DISPATCH_REMINDER: '26196',
+  // rvp_owner_dues (4 vars) + rvp_owner_weekly (12 vars), approved 2026-08-11.
+  // These two were the last owner templates logging SKIPPED for want of an id.
+  OWNER_DUES_DIGEST: '28387',
+  OWNER_WEEKLY_SUMMARY: '28393',
 };
 
 function templateId(key: WaTemplateKey): string | undefined {

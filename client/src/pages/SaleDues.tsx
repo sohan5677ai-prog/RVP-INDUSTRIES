@@ -19,6 +19,7 @@ import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
@@ -95,7 +96,11 @@ const TILE_TONES = {
   rose: 'text-rose-600 dark:text-rose-400',
 } as const;
 
-/** One number in the expanded row's settlement strip. */
+/** One number in the expanded row's settlement strip.
+ *  `whitespace-normal` is load-bearing: TableCell sets whitespace-nowrap and the
+ *  panel inherits it, so a hint longer than the tile could not wrap and spilled
+ *  out past the tile's right edge. `min-w-0` lets the tile shrink to its column
+ *  instead of being sized by that text. */
 function SettleTile({
   label,
   value,
@@ -108,10 +113,14 @@ function SettleTile({
   tone?: keyof typeof TILE_TONES;
 }) {
   return (
-    <div className="glass rounded-xl px-3.5 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 font-mono text-base font-semibold tabular-nums', TILE_TONES[tone])}>{value}</div>
-      {hint && <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{hint}</div>}
+    <div className="glass min-w-0 rounded-xl px-3.5 py-3">
+      <div className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn('mt-1 truncate font-mono text-base font-semibold tabular-nums', TILE_TONES[tone])}>{value}</div>
+      {hint && (
+        <div className="mt-0.5 whitespace-normal break-words text-[10px] leading-tight text-muted-foreground">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -190,6 +199,11 @@ export default function SaleDuesPage() {
   const [productFilter, setProductFilter] = useState<ProductFilter>('ALL');
   const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
   const [monthFilter, setMonthFilter] = useState<string>(ALL_MONTHS);
+  const [search, setSearch] = useState('');
+  // Bill-date window. Kept separate from the Due Month picker above, which asks a
+  // different question: "what falls due in August" vs "what did we bill in August".
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const { data: parties, isLoading: loadingParties } = useQuery({
     queryKey: ['parties'],
@@ -381,11 +395,26 @@ export default function SaleDuesPage() {
       .map(([key, count]) => ({ key, label: monthLabel(key), count }));
   }, [outstandingInvoices]);
 
-  const visibleInvoices = outstandingInvoices.filter(
-    (inv) =>
-      matchesProductFilter(inv.product, productFilter) &&
-      (monthFilter === ALL_MONTHS || (!inv.inTransit && monthKey(inv.dueDate) === monthFilter)),
-  );
+  // Both date bounds are parsed as LOCAL midnight, never `new Date('2026-08-01')`
+  // - that is UTC midnight, which in IST lands at 05:30 and would drop an invoice
+  // billed early on the boundary day.
+  const query = search.trim().toLowerCase();
+  const fromTime = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+  const toTime = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+  const filtersActive = !!query || !!fromDate || !!toDate;
+
+  const visibleInvoices = outstandingInvoices.filter((inv) => {
+    if (!matchesProductFilter(inv.product, productFilter)) return false;
+    if (monthFilter !== ALL_MONTHS && (inv.inTransit || monthKey(inv.dueDate) !== monthFilter)) return false;
+    if (query && !(
+      inv.partyName.toLowerCase().includes(query) ||
+      (inv.invoiceNumber ?? '').toLowerCase().includes(query)
+    )) return false;
+    const billTime = inv.billDate.getTime();
+    if (fromTime !== null && billTime < fromTime) return false;
+    if (toTime !== null && billTime > toTime) return false;
+    return true;
+  });
 
   const totalBillingAll = visibleInvoices.reduce((sum, item) => sum + item.totalAmount, 0);
   const totalReceiptsAll = visibleInvoices.reduce((sum, item) => sum + item.cashReceived, 0);
@@ -467,7 +496,16 @@ export default function SaleDuesPage() {
           <ExportButtons
             filename="Sale_Dues"
             title="Sale Dues (Aging)"
-            subtitle={`${PRODUCT_FILTERS.find((f) => f.value === productFilter)?.label} · ${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${monthFilter === ALL_MONTHS ? 'All months' : `Due ${monthLabel(monthFilter)}`} · ${dueInvoices.length} invoice(s)`}
+            subtitle={[
+              PRODUCT_FILTERS.find((f) => f.value === productFilter)?.label,
+              PAY_FILTERS.find((f) => f.value === payFilter)?.label,
+              monthFilter === ALL_MONTHS ? 'All months' : `Due ${monthLabel(monthFilter)}`,
+              // Spell out any search/date narrowing on the sheet itself, so nobody
+              // reads a filtered export as the full ledger.
+              ...(fromDate || toDate ? [`Billed ${fromDate || 'start'} to ${toDate || 'today'}`] : []),
+              ...(query ? [`Search "${search.trim()}"`] : []),
+              `${dueInvoices.length} invoice(s)`,
+            ].join(' · ')}
             columns={SALE_DUES_COLUMNS}
             rows={dueInvoices}
           />
@@ -515,6 +553,52 @@ export default function SaleDuesPage() {
             </Button>
           )}
         </div>
+      </div>
+
+      {/* Find one bill: by buyer or invoice number, and/or within a billing window. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search buyer or invoice no…"
+          containerClassName="w-full sm:w-80"
+          className="h-9"
+        />
+        <div className="flex items-center gap-2">
+          <Label htmlFor="bill-from" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+            Bill Date
+          </Label>
+          <Input
+            id="bill-from"
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-9 w-[150px]"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input
+            id="bill-to"
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-9 w-[150px]"
+          />
+        </div>
+        {filtersActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 px-2 text-xs"
+            onClick={() => { setSearch(''); setFromDate(''); setToDate(''); }}
+          >
+            Clear
+          </Button>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">
+          Showing {visibleInvoices.length} of {outstandingInvoices.length} invoices
+        </span>
       </div>
 
       {isLoading ? (
@@ -611,7 +695,11 @@ export default function SaleDuesPage() {
                 {dueInvoices.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
-                      {monthFilter === ALL_MONTHS ? 'No sales dues found.' : `No invoices falling due in ${monthLabel(monthFilter)}.`}
+                      {filtersActive
+                        ? 'No invoices match this search or date range.'
+                        : monthFilter === ALL_MONTHS
+                          ? 'No sales dues found.'
+                          : `No invoices falling due in ${monthLabel(monthFilter)}.`}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -740,7 +828,13 @@ export default function SaleDuesPage() {
                                     label={balance > 0.01 ? 'Still Outstanding' : balance < -0.01 ? 'Excess Received' : 'Fully Settled'}
                                     value={rupees(Math.abs(balance))}
                                     tone={balance > 0.01 ? 'rose' : 'emerald'}
-                                    hint={`Cleared ${rupees(settled)} of ${rupees(inv.billAmount)}`}
+                                    hint={
+                                      balance > 0.01
+                                        ? `${rupees(settled)} cleared`
+                                        : balance < -0.01
+                                          ? 'More received than billed'
+                                          : 'Bill cleared in full'
+                                    }
                                   />
                                 </div>
                               </>

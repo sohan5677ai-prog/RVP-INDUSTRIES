@@ -15,6 +15,7 @@ import { Fragment } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Segmented } from '@/components/ui/segmented';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
@@ -93,6 +94,9 @@ export default function PurchaseDuesPage() {
   const [payProof, setPayProof] = useState<File | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
+  const [search, setSearch] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const { data: parties, isLoading: loadingParties } = useQuery({
     queryKey: ['parties'],
@@ -365,9 +369,24 @@ export default function PurchaseDuesPage() {
   // bills, Unpaid shows anything still carrying a balance (partial or none).
   const paidCount = outstandingPurchases.filter((b) => b.status === 'Paid').length;
   const unpaidCount = outstandingPurchases.length - paidCount;
+
+  // Both bounds parsed as LOCAL midnight - `new Date('2026-08-01')` is UTC
+  // midnight, which in IST is 05:30 and would drop a bill dated that morning.
+  const query = search.trim().toLowerCase();
+  const fromTime = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+  const toTime = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+  const filtersActive = !!query || !!fromDate || !!toDate;
+
   const shownPurchases = outstandingPurchases.filter((b) => {
-    if (payFilter === 'PAID') return b.status === 'Paid';
-    if (payFilter === 'UNPAID') return b.status !== 'Paid';
+    if (payFilter === 'PAID' && b.status !== 'Paid') return false;
+    if (payFilter === 'UNPAID' && b.status === 'Paid') return false;
+    if (query && !(
+      b.partyName.toLowerCase().includes(query) ||
+      (b.invoiceNumber ?? '').toLowerCase().includes(query)
+    )) return false;
+    const purchaseTime = b.purchaseDate.getTime();
+    if (fromTime !== null && purchaseTime < fromTime) return false;
+    if (toTime !== null && purchaseTime > toTime) return false;
     return true;
   });
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(shownPurchases, 50);
@@ -410,22 +429,74 @@ export default function PurchaseDuesPage() {
           <ExportButtons
             filename="Purchase_Dues"
             title="Purchase Dues (Aging)"
-            subtitle={`${PAY_FILTERS.find((f) => f.value === payFilter)?.label} · ${shownPurchases.length} bill(s)`}
+            subtitle={[
+              PAY_FILTERS.find((f) => f.value === payFilter)?.label,
+              // Spell out any narrowing on the sheet itself, so nobody reads a
+              // filtered export as the full dues list.
+              ...(fromDate || toDate ? [`Purchased ${fromDate || 'start'} to ${toDate || 'today'}`] : []),
+              ...(query ? [`Search "${search.trim()}"`] : []),
+              `${shownPurchases.length} bill(s)`,
+            ].join(' · ')}
             columns={PURCHASE_DUES_COLUMNS}
             rows={shownPurchases}
           />
         }
       />
 
-      <Segmented
-        options={PAY_FILTERS.map((f) => ({
-          ...f,
-          count: f.value === 'PAID' ? paidCount : f.value === 'UNPAID' ? unpaidCount : undefined,
-        }))}
-        value={payFilter}
-        onValueChange={setPayFilter}
-        size="sm"
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Segmented
+          options={PAY_FILTERS.map((f) => ({
+            ...f,
+            count: f.value === 'PAID' ? paidCount : f.value === 'UNPAID' ? unpaidCount : undefined,
+          }))}
+          value={payFilter}
+          onValueChange={setPayFilter}
+          size="sm"
+        />
+        {/* Find one bill: by supplier or invoice number, and/or within a date window. */}
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search supplier or invoice no…"
+          containerClassName="w-full sm:w-80"
+          className="h-9"
+        />
+        <div className="flex items-center gap-2">
+          <Label htmlFor="purchase-from" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+            Purchase Date
+          </Label>
+          <Input
+            id="purchase-from"
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-9 w-[150px]"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input
+            id="purchase-to"
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-9 w-[150px]"
+          />
+        </div>
+        {filtersActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 px-2 text-xs"
+            onClick={() => { setSearch(''); setFromDate(''); setToDate(''); }}
+          >
+            Clear
+          </Button>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">
+          Showing {shownPurchases.length} of {outstandingPurchases.length} bills
+        </span>
+      </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center h-48">
@@ -480,7 +551,11 @@ export default function PurchaseDuesPage() {
               </TableHeader>
               <TableBody>
                 {shownPurchases.length === 0 ? (
-                  <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No purchase dues found.</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                      {filtersActive ? 'No bills match this search or date range.' : 'No purchase dues found.'}
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   (pageRows ?? []).map((bill) => (
                     <Fragment key={bill.id}>

@@ -43,7 +43,11 @@ export type WaTemplateKey =
   | 'STOCKIN_CONFIRMED' // rvp_stockin_confirmed: party, lorry, party invoice number, date
   | 'VERIFICATION_STATEMENT' // rvp_verification_statement (document header): party, lorry, net weight, amount
   | 'PAYMENT_SENT' // rvp_payment_sent (image header): party, amount, date, reference
-  | 'PAYMENT_SENT_TEXT' // rvp_payment_sent_text (no header - used when no screenshot): party, amount, date, reference
+  // rvp_payment_sent_text (no header - used when no screenshot): party, amount, date, reference.
+  // Its approved BODY must not mention a screenshot: this is the template that goes
+  // out precisely when there is no attachment. It also must not share PAYMENT_SENT's
+  // message_id - see the guard in notifyPaymentSent.
+  | 'PAYMENT_SENT_TEXT'
   | 'RECEIPT_RECEIVED' // rvp_receipt_received: payer, amount, date, reference - Receipt has no screenshot field, text-only
   | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
@@ -622,9 +626,22 @@ export const whatsappService = {
    * Payment recorded → party. Uses the image-header template with the screenshot
    * when one was uploaded; otherwise falls back to a text-only template so the
    * message still goes out (the image-header template can't send without media).
+   *
+   * If a no-screenshot payment still reaches the party saying a screenshot is
+   * attached, the branch below is not the cause - check the two ids. When both
+   * FAST2SMS_TMPL_* vars carry the same message_id, every payment sends on the
+   * image template's approved copy; that misconfiguration is warned about here.
+   * If the ids differ, the wrong wording is baked into rvp_payment_sent_text's
+   * own approved body and has to be corrected in the Fast2SMS panel.
    */
   async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
     const hasImage = !!payment.screenshotUrl;
+    if (!hasImage && templateId('PAYMENT_SENT_TEXT') && templateId('PAYMENT_SENT_TEXT') === templateId('PAYMENT_SENT')) {
+      logger.error(
+        '[whatsapp] FAST2SMS_TMPL_PAYMENT_SENT_TEXT and FAST2SMS_TMPL_PAYMENT_SENT hold the same message_id ' +
+          `(${templateId('PAYMENT_SENT')}) - this payment has no screenshot but will send on the image template's copy`
+      );
+    }
     await sendToPartyAndInternal(
       {
         templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',

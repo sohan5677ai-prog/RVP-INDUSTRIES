@@ -37,6 +37,45 @@ function collectBrowserInfo(): string {
 }
 
 /**
+ * html-to-image clones the DOM to render it, and clone-node.ts copies styles
+ * via getComputedStyle only - there is no CSS property for "current scroll
+ * offset", so every cloned scrollable element comes back reset to
+ * scrollTop/scrollLeft 0. The app's layout has exactly one scroll container
+ * (`<main>` in Layout.tsx - the sidebar and topbar are fixed, `document.body`
+ * itself never scrolls) plus the odd inner table with its own overflow-auto.
+ * Without this, reporting a bug halfway down a long page or table captures
+ * the top of it instead of the thing the user actually scrolled to see.
+ *
+ * Fix: shift each scrolled container's own children by its current offset
+ * right before cloning starts, so the still-clipped (overflow-auto) box shows
+ * the same slice the user sees, then undo it once the capture settles. Sticky
+ * headers ride along with the shift instead of staying pinned - a minor
+ * cosmetic miss next to capturing the wrong section entirely. This never
+ * paints visibly: the dialog's overlay covers the page before the shift would
+ * be seen (see below).
+ */
+function freezeScrollOffsets(root: HTMLElement): () => void {
+  const restores: Array<() => void> = [];
+  const stack: Element[] = [root];
+  while (stack.length > 0) {
+    const el = stack.pop()!;
+    if (el instanceof HTMLElement && (el.scrollTop > 0 || el.scrollLeft > 0)) {
+      const { scrollTop, scrollLeft } = el;
+      for (const child of Array.from(el.children)) {
+        if (!(child instanceof HTMLElement)) continue;
+        const prevTransform = child.style.transform;
+        child.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)${prevTransform ? ` ${prevTransform}` : ''}`;
+        restores.push(() => {
+          child.style.transform = prevTransform;
+        });
+      }
+    }
+    for (const child of Array.from(el.children)) stack.push(child);
+  }
+  return () => restores.forEach((restore) => restore());
+}
+
+/**
  * "Contact support" - one press captures where the user is and what they are
  * looking at, they add a sentence, and it goes out on WhatsApp.
  *
@@ -68,6 +107,7 @@ export default function SupportButton({ pageLabel, className }: Props) {
     setCapturing(true);
     // Open immediately so the button feels responsive; the preview fills in.
     setOpen(true);
+    const restoreScroll = freezeScrollOffsets(document.body);
     try {
       // cacheBust defeats html-to-image's cross-render image cache, which
       // otherwise reuses a stale copy of the page on a second report.
@@ -101,6 +141,10 @@ export default function SupportButton({ pageLabel, className }: Props) {
       console.error('[support] screen capture failed', err);
       setShot(null);
     } finally {
+      // Held until the capture (or its 10s timeout) settles - see
+      // freezeScrollOffsets, restoring early would un-shift content that
+      // html-to-image hasn't cloned yet.
+      restoreScroll();
       setCapturing(false);
     }
   }

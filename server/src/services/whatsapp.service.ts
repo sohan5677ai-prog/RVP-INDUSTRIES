@@ -97,6 +97,11 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // These two were the last owner templates logging SKIPPED for want of an id.
   OWNER_DUES_DIGEST: '28387',
   OWNER_WEEKLY_SUMMARY: '28393',
+  // rvp_support_ticket (image header) + rvp_support_ticket_text (no header),
+  // approved 2026-08-11. See the guard in notifySupportTicket - these two must
+  // never collapse to the same id.
+  SUPPORT_TICKET: '28539',
+  SUPPORT_TICKET_TEXT: '28541',
 };
 
 /**

@@ -4,11 +4,12 @@ The topbar's **Contact support** button (life-buoy icon, left of the theme
 toggle) captures the page, the screen and the browser, takes the reporter's own
 sentence, stores a `SupportTicket` row, and sends it out on WhatsApp.
 
-Nothing here reaches a phone until the two templates below are approved and
-their message_ids are set. Until then every send logs `SKIPPED` in
-`WhatsAppLog`, the ticket is still stored, and the reporter is told plainly that
-the alert did not go out — see `notifiedStatus` on the row and the "not sent"
-badge on `/support`.
+Both templates are approved and their message_ids are wired into
+`DEFAULT_TEMPLATE_IDS` in `server/src/services/whatsapp.service.ts`:
+`rvp_support_ticket` → `28539`, `rvp_support_ticket_text` → `28541`. Before
+that, every send logged `SKIPPED` in `WhatsAppLog` — the ticket was still
+stored, and the reporter was told plainly that the alert did not go out (see
+`notifiedStatus` on the row and the "not sent" badge on `/support`).
 
 ## Templates to submit on Fast2SMS
 
@@ -67,13 +68,9 @@ Sample values for Meta's approval form (both templates, same four):
 | `{{3}}` | The pending column shows 0 for DCS but there are 3 lorries listed. |
 | `{{4}}` | 11-Aug-2026 04:35 PM |
 
-Then set the ids on Render, or add them to `DEFAULT_TEMPLATE_IDS` in
-`server/src/services/whatsapp.service.ts`:
-
-```
-FAST2SMS_TMPL_SUPPORT_TICKET=<message_id>
-FAST2SMS_TMPL_SUPPORT_TICKET_TEXT=<message_id>
-```
+Checked into `DEFAULT_TEMPLATE_IDS` as above; override on Render with
+`FAST2SMS_TMPL_SUPPORT_TICKET` / `FAST2SMS_TMPL_SUPPORT_TICKET_TEXT` if either
+message_id ever needs to change without a deploy.
 
 ## Where it goes
 

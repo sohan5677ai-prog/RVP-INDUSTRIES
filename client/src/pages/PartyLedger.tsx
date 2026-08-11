@@ -51,6 +51,9 @@ interface DueInvoiceLine {
   outstanding: number;
   dueDate: string;
   overdue: boolean;
+  /** Dispatched but not delivered - billed, but the credit clock hasn't started,
+   *  so it can never be overdue and dueDate is only a placeholder. */
+  inTransit: boolean;
   brokerId: string | null;
   brokerName: string | null;
 }
@@ -71,6 +74,7 @@ interface PartyReminderContext {
     invoiceListText: string;
     outstanding: number;
     overdueOutstanding: number;
+    inTransitOutstanding: number;
     overdueCount: number;
     totalInvoiceCount: number;
     /** Every unsettled invoice, overdue and upcoming both - the picker's source list. */
@@ -733,12 +737,19 @@ function SendPaymentReminderDialog({
 
   // Reset on open: overdue invoices are pre-checked - they're the ones the
   // template's "due date has passed" wording actually fits. If nothing is
-  // overdue yet, start with everything checked so the picker isn't empty.
+  // overdue yet, fall back to the bills inside their credit period but leave
+  // in-transit shipments unticked: the buyer hasn't received those goods, so
+  // asking for the money is not a default worth making. Only if EVERY invoice
+  // is in transit does the picker start fully checked, so it is never empty.
   useEffect(() => {
     if (!open) return;
     setTarget('PARTY');
     const overdueIds = dues.invoices.filter((i) => i.overdue).map((i) => i.dispatchId);
-    setSelected(new Set(overdueIds.length > 0 ? overdueIds : dues.invoices.map((i) => i.dispatchId)));
+    const landedIds = dues.invoices.filter((i) => !i.inTransit).map((i) => i.dispatchId);
+    const defaults = overdueIds.length > 0 ? overdueIds
+      : landedIds.length > 0 ? landedIds
+      : dues.invoices.map((i) => i.dispatchId);
+    setSelected(new Set(defaults));
   }, [open, dues.invoices]);
 
   const toggleOne = (id: string) => {
@@ -756,7 +767,11 @@ function SendPaymentReminderDialog({
   const selectedInvoices = dues.invoices.filter((i) => selected.has(i.dispatchId));
   const amount = selectedInvoices.reduce((s, i) => s + i.outstanding, 0);
   const hasOverdueSelected = selectedInvoices.some((i) => i.overdue);
-  const hasUpcomingSelected = selectedInvoices.some((i) => !i.overdue);
+  const inTransitSelected = selectedInvoices.filter((i) => i.inTransit);
+  // Delivered but still inside the credit period. In-transit shipments are
+  // excluded - they get their own, more specific warning below, and firing both
+  // banners for the same invoice just doubles the noise.
+  const hasUpcomingSelected = selectedInvoices.some((i) => !i.overdue && !i.inTransit);
 
   // Brokers behind the SELECTED invoices only - picking an invoice outside the
   // default overdue scope can bring a broker into play that wasn't offered
@@ -826,6 +841,19 @@ function SendPaymentReminderDialog({
             </div>
           </div>
 
+          {inTransitSelected.length > 0 && (
+            <div className="rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 flex gap-2 text-xs text-sky-700 dark:text-sky-400">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                {inTransitSelected.length === 1
+                  ? `${inTransitSelected[0].invoiceNumber} has not been delivered yet`
+                  : `${inTransitSelected.length} selected invoices have not been delivered yet`}
+                {' '}- the buyer hasn't received the goods and their credit period hasn't started. Untick unless
+                you mean to chase a shipment still on the road.
+              </span>
+            </div>
+          )}
+
           {hasUpcomingSelected && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 flex gap-2 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -867,10 +895,13 @@ function SendPaymentReminderDialog({
                     className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap ${
                       inv.overdue
                         ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                        : inv.inTransit
+                        ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
                         : 'bg-muted text-muted-foreground'
                     }`}
+                    title={inv.inTransit ? 'Not delivered yet - no due date until delivery is recorded' : undefined}
                   >
-                    {inv.overdue ? 'Overdue' : `Due ${shortDate(inv.dueDate)}`}
+                    {inv.overdue ? 'Overdue' : inv.inTransit ? 'In Transit' : `Due ${shortDate(inv.dueDate)}`}
                   </span>
                   <span className="font-semibold tabular-nums shrink-0 w-20 text-right">{rupees(inv.outstanding)}</span>
                 </label>

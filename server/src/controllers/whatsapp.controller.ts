@@ -528,12 +528,25 @@ export async function sendPartyReminder(req: Request, res: Response) {
  * shows that distinction before anything is sent.
  */
 function duesScope(dues: BuyerDues) {
-  const overdue = dues.overdueInvoices.length > 0;
-  return {
-    scope: overdue ? ('OVERDUE' as const) : ('UPCOMING' as const),
-    invoices: overdue ? dues.overdueInvoices : dues.invoices,
-    amount: overdue ? dues.overdueOutstanding : dues.outstanding,
-  };
+  if (dues.overdueInvoices.length > 0) {
+    return { scope: 'OVERDUE' as const, invoices: dues.overdueInvoices, amount: dues.overdueOutstanding };
+  }
+  // Nothing overdue → quote the bills still inside their credit period, but
+  // leave out shipments still on the road: the buyer has not received those
+  // goods, so a "please pay" default that includes them is a reminder we would
+  // not want sent. They stay in the picker (the sender can tick them), just not
+  // in the default scope.
+  const upcoming = dues.invoices.filter((i) => !i.inTransit);
+  if (upcoming.length > 0) {
+    return {
+      scope: 'UPCOMING' as const,
+      invoices: upcoming,
+      amount: upcoming.reduce((s, i) => s + i.outstanding, 0),
+    };
+  }
+  // Every unsettled invoice is in transit - there is nothing to chase yet, but
+  // the picker still needs a list to show.
+  return { scope: 'UPCOMING' as const, invoices: dues.invoices, amount: dues.outstanding };
 }
 
 /**
@@ -572,6 +585,7 @@ export async function getPartyReminderContext(req: Request, res: Response) {
           invoiceListText: invoiceListText(active.invoices),
           outstanding: dues.outstanding,
           overdueOutstanding: dues.overdueOutstanding,
+          inTransitOutstanding: dues.inTransitOutstanding,
           overdueCount: dues.overdueInvoices.length,
           totalInvoiceCount: dues.invoices.length,
           // Every unsettled invoice (overdue AND upcoming), oldest due first - the
@@ -585,6 +599,7 @@ export async function getPartyReminderContext(req: Request, res: Response) {
               outstanding: i.outstanding,
               dueDate: i.dueDate.toISOString(),
               overdue: i.overdue,
+              inTransit: i.inTransit,
               brokerId: i.brokerId,
               brokerName: i.brokerId ? brokerName.get(i.brokerId) ?? null : null,
             })),

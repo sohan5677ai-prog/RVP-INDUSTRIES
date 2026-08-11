@@ -90,6 +90,12 @@ export default function SalesDuesReminders() {
 
         if (paid || remaining <= 0.01) return;
 
+        // Not delivered → the credit clock hasn't started, so there is no due
+        // date to be past. Without this the popup nags about a lorry that is
+        // still on the road (dispatch date + credit days looks overdue the
+        // moment it leaves). Same rule as Sale Dues and the ledger's reminder.
+        if (d.status !== 'DELIVERED') return;
+
         const start = d.deliveredDate || d.dispatchDate;
         const dueDate = new Date(start);
         dueDate.setDate(dueDate.getDate() + (o.dueDays || 0));

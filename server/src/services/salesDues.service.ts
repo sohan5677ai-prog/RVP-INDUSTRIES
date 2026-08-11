@@ -12,7 +12,15 @@ import { prisma } from '../lib/prisma.js';
  * to whole rupees while receipt TDS/shortage carry paise).
  *
  * Due date: the credit clock starts at delivery, so dueDate = (deliveredDate ??
- * dispatchDate) + order.dueDays. An invoice is overdue once that date has passed.
+ * dispatchDate) + order.dueDays.
+ *
+ * A shipment that has not been marked delivered has NO due date yet - the
+ * dispatchDate fallback above is only a sort key, and reading it as a real due
+ * date would say a lorry that left on the 8th with 1 credit day was overdue on
+ * the 10th while it is still on the road. Such invoices are flagged `inTransit`
+ * and are never `overdue`, which keeps the nightly buyer reminder (and the Party
+ * Ledger's picker) from chasing money for goods the buyer has not received.
+ * Same rule as the Sale Dues page.
  */
 
 const TOLERANCE = 1; // sub-₹1 remainder is rounding noise - treat as settled
@@ -21,8 +29,11 @@ export interface InvoiceDue {
   dispatchId: string;
   invoiceNumber: string;
   outstanding: number;
+  /** Placeholder while `inTransit` - only a sort key, not a real due date. */
   dueDate: Date;
   overdue: boolean;
+  /** Dispatched but not yet marked delivered: billed, not yet collectable. */
+  inTransit: boolean;
   /** Broker on the order this shipment came from - null for our own orders. */
   brokerId: string | null;
 }
@@ -41,6 +52,7 @@ export interface BuyerDues {
   phone2?: string | null;
   outstanding: number; // total across all unsettled shipments
   overdueOutstanding: number; // subset that is past its due date
+  inTransitOutstanding: number; // subset still on the road - owed, not yet collectable
   invoices: InvoiceDue[];
   overdueInvoices: InvoiceDue[];
   /** Distinct brokers on the unsettled invoices, "RVP" (our own) excluded. */
@@ -107,14 +119,17 @@ export async function computeBuyerDues(
     const outstanding = invoiceValue - cleared;
     if (outstanding <= TOLERANCE) continue; // settled
 
+    // Undelivered → the credit clock has not started. dueDate is computed off
+    // dispatchDate purely so the row still sorts, and `overdue` is forced false.
+    const inTransit = d.status !== 'DELIVERED';
     const base = d.deliveredDate ?? d.dispatchDate;
     const dueDate = addDays(base, order.dueDays ?? 0);
-    const overdue = dueDate.getTime() < asOf.getTime();
+    const overdue = !inTransit && dueDate.getTime() < asOf.getTime();
 
     const buyer = order.buyer;
     let row = byBuyer.get(buyer.id);
     if (!row) {
-      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, outstanding: 0, overdueOutstanding: 0, invoices: [], overdueInvoices: [], brokers: [] };
+      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, outstanding: 0, overdueOutstanding: 0, inTransitOutstanding: 0, invoices: [], overdueInvoices: [], brokers: [] };
       byBuyer.set(buyer.id, row);
     }
     const broker = order.broker && !isOwnBrokerName(order.broker.name) ? order.broker : null;
@@ -124,6 +139,7 @@ export async function computeBuyerDues(
       outstanding: Math.round(outstanding),
       dueDate,
       overdue,
+      inTransit,
       brokerId: broker?.id ?? null,
     };
     row.outstanding += invoice.outstanding;
@@ -132,6 +148,7 @@ export async function computeBuyerDues(
       row.overdueOutstanding += invoice.outstanding;
       row.overdueInvoices.push(invoice);
     }
+    if (inTransit) row.inTransitOutstanding += invoice.outstanding;
     if (broker && !row.brokers.some((b) => b.id === broker.id)) {
       row.brokers.push({ id: broker.id, name: broker.name, phone: broker.phone });
     }

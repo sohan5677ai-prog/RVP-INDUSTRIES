@@ -372,16 +372,51 @@ export async function exportToPdf<T>(o: ExportOptions<T>): Promise<void> {
   const metaTop = BAND_H + 20;
   const tableTop = metaTop + Math.max(subLines.length, 1) * 9.5 + 8;
 
+  // A 14-column report cannot afford "Rs. " on five money columns - that alone
+  // is what pushed the dates onto two lines. Drop the sign from the numeric
+  // cells and say it once, in the footer imprint.
+  const moneyCols = o.columns.map((c) => !!c.numFmt);
+  const anyMoney = o.rows.length > 0
+    && o.columns.some((c, i) => moneyCols[i] && cellText(c.value(o.rows[0])).includes('₹'));
+  const bodyText = (c: ExportColumn<T>, i: number, row: T) => {
+    const s = pdfText(cellText(c.value(row)));
+    return moneyCols[i] ? s.replace(/^Rs\.\s*/, '') : s;
+  };
+
   const head = [o.columns.map((c) => pdfText(c.header))];
-  const body = o.rows.map((row) => o.columns.map((c) => pdfText(cellText(c.value(row)))));
+  const body = o.rows.map((row) => o.columns.map((c, i) => bodyText(c, i, row)));
 
   const labelIdx = totalsLabelIndex(o.columns);
   const foot = o.columns.some((c) => c.total) && o.rows.length > 0
     ? [o.columns.map((c, i) => {
-        if (c.total) return pdfText(totalText(c, o.rows, columnTotal(c, o.rows)));
+        if (c.total) return pdfText(totalText(c, o.rows, columnTotal(c, o.rows))).replace(/^Rs\.\s*/, '');
         return i === labelIdx ? `TOTAL (${o.rows.length})` : '';
       })]
     : undefined;
+
+  // autoTable's own sizing spends the page evenly, which on a wide report means
+  // "01 Aug 2026" breaks across two lines while a rate column sits half empty.
+  // Pin every column that is naturally narrow to exactly what it needs, and let
+  // the genuinely long text (customer names) share out whatever is left.
+  const avail = pageW - M * 2;
+  const widthOf = (text: string) => doc.getTextWidth(text);
+  const natural = o.columns.map((c, i) => {
+    doc.setFont(font, 'bold');
+    doc.setFontSize(bodySize - 0.6);
+    let w = widthOf(pdfText(c.header));
+    doc.setFont(font, 'normal');
+    doc.setFontSize(bodySize);
+    for (const row of o.rows) w = Math.max(w, widthOf(bodyText(c, i, row)));
+    if (foot) w = Math.max(w, widthOf(foot[0][i]));
+    return Math.ceil(w) + padX * 2 + 2;
+  });
+  // Narrow enough to be worth pinning, and only if the pinned columns leave the
+  // flexible ones room to breathe.
+  const NARROW = 84;
+  const pinned = natural.map((w) => (w <= NARROW ? w : 0));
+  const flexCount = pinned.filter((w) => w === 0).length;
+  const pinnedTotal = pinned.reduce((s, w) => s + w, 0);
+  const usePinned = flexCount > 0 && pinnedTotal <= avail * 0.82;
 
   autoTable(doc, {
     head,
@@ -421,7 +456,10 @@ export async function exportToPdf<T>(o: ExportOptions<T>): Promise<void> {
     },
     alternateRowStyles: { fillColor: ZEBRA },
     columnStyles: Object.fromEntries(
-      o.columns.map((c, i) => [i, { halign: c.align ?? (c.numFmt ? 'right' : 'left') }]),
+      o.columns.map((c, i) => [i, {
+        halign: c.align ?? (c.numFmt ? 'right' : 'left'),
+        ...(usePinned && pinned[i] ? { cellWidth: pinned[i] } : {}),
+      }]),
     ),
     didParseCell: (data) => {
       if (data.section !== 'body') return;
@@ -482,7 +520,9 @@ export async function exportToPdf<T>(o: ExportOptions<T>): Promise<void> {
       doc.setFont(font, 'normal');
       doc.setFontSize(7);
       doc.setTextColor(...TAUPE);
-      doc.text(pdfText(`${COMPANY_NAME} · ${COMPANY_TAGLINE}`), M, pageH - 18);
+      const imprint = `${COMPANY_NAME} · ${COMPANY_TAGLINE}`
+        + (anyMoney ? ' · All amounts in Rs.' : '');
+      doc.text(pdfText(imprint), M, pageH - 18);
     },
   });
 

@@ -175,6 +175,12 @@ interface ReceiveDialogState {
   shortageAmount: string;
 }
 
+/** A lorry number reduced to its letters and digits, so a search for "AP39T1234"
+ *  still finds a plate recorded as "AP 39 T 1234". */
+function plate(s: string | null | undefined): string {
+  return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 /** Status colour, shared by the PDF, the Excel sheet and the print view. */
 function statusTone(i: OutstandingInvoice): ExportTone {
   if (i.status === 'Paid') return 'success';
@@ -416,6 +422,7 @@ export default function SaleDuesPage() {
   // - that is UTC midnight, which in IST lands at 05:30 and would drop an invoice
   // billed early on the boundary day.
   const query = search.trim().toLowerCase();
+  const plateQuery = plate(query);
   const fromTime = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
   const toTime = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
   const filtersActive = !!query || !!fromDate || !!toDate;
@@ -425,7 +432,10 @@ export default function SaleDuesPage() {
     if (monthFilter !== ALL_MONTHS && (inv.inTransit || monthKey(inv.dueDate) !== monthFilter)) return false;
     if (query && !(
       inv.partyName.toLowerCase().includes(query) ||
-      (inv.invoiceNumber ?? '').toLowerCase().includes(query)
+      (inv.invoiceNumber ?? '').toLowerCase().includes(query) ||
+      // Lorry numbers get written every which way ("AP39T1234", "AP 39 T 1234"),
+      // so match on the letters and digits alone rather than the spacing.
+      (!!plateQuery && plate(inv.vehicleNumber).includes(plateQuery))
     )) return false;
     const billTime = inv.billDate.getTime();
     if (fromTime !== null && billTime < fromTime) return false;
@@ -577,7 +587,7 @@ export default function SaleDuesPage() {
         <SearchInput
           value={search}
           onValueChange={setSearch}
-          placeholder="Search buyer or invoice no…"
+          placeholder="Search buyer, invoice or lorry no…"
           containerClassName="w-full sm:w-80"
           className="h-9"
         />

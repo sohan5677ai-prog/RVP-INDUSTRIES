@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee } from 'lucide-react';
+import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle } from 'lucide-react';
 import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -46,7 +46,8 @@ function matchesProductFilter(product: SaleProduct, filter: ProductFilter): bool
 }
 
 // Payment-status tabs. "Unpaid" catches anything with even ₹1 still outstanding
-// (i.e. both fully-unpaid and partially-paid invoices).
+// - fully-unpaid, partially-paid, and in-transit shipments alike (all three are
+// money owed; only the collections clock differs).
 type PayFilter = 'ALL' | 'PAID' | 'UNPAID';
 
 const PAY_FILTERS: { value: PayFilter; label: string }[] = [
@@ -90,6 +91,10 @@ interface OutstandingInvoice {
   cashReceived: number; // actual cash (excludes TDS/shortage) applied to this invoice
   dueDaysAfter: number;
   status: string;
+  // Dispatched but not yet marked delivered. The receivable is real (the ledger
+  // debits the buyer at dispatch, so this page has to agree with it), but the
+  // credit clock hasn't started - dueDate below is only provisional.
+  inTransit: boolean;
   appliedReceipts: { date: string; amount: number; isTdsOrShortage?: boolean }[];
   deletableReceiptIds: string[];
 }
@@ -104,7 +109,9 @@ interface ReceiveDialogState {
 
 const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Broker', value: (i) => i.brokerName ?? '' },
-  { header: 'Due Date', value: (i) => shortDate(i.dueDate.toISOString()) },
+  // In-transit due dates are provisional (credit days run from delivery), so the
+  // export flags them rather than passing an estimate off as a committed date.
+  { header: 'Due Date', value: (i) => `${shortDate(i.dueDate.toISOString())}${i.inTransit ? ' (est.)' : ''}` },
   { header: 'Customer', value: (i) => i.partyName },
   { header: 'Product', value: (i) => i.product },
   { header: 'Invoice No', value: (i) => i.invoiceNumber ?? '' },
@@ -113,7 +120,7 @@ const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Cash Received', value: (i) => rupees(i.cashReceived), excel: (i) => i.cashReceived, numFmt: '#,##0.00', align: 'right' },
   { header: 'Net Amount Due', value: (i) => rupees(i.netAmount), excel: (i) => i.netAmount, numFmt: '#,##0.00', align: 'right' },
   { header: 'Status', value: (i) => i.status, align: 'center' },
-  { header: 'Due Days', value: (i) => (i.status === 'Paid' ? '' : i.dueDaysAfter), align: 'center' },
+  { header: 'Due Days', value: (i) => (i.status === 'Paid' ? '' : i.inTransit ? 'Awaiting delivery' : i.dueDaysAfter), align: 'center' },
 ];
 
 export default function SaleDuesPage() {
@@ -213,12 +220,28 @@ export default function SaleDuesPage() {
 
       const paid = isDispatchPaid(d, rate, settled);
       const remaining = paid ? 0 : Math.max(0, total - cleared);
-      const status = paid ? 'Paid' : cleared > 0.01 ? 'Partially Paid' : 'Unpaid';
 
+      // A shipment still on the road is a receivable (the ledger debits the buyer
+      // at dispatch - see the SALE- lines in ledger.controller), so it belongs on
+      // this list. But it is not yet COLLECTABLE: credit days run from delivery.
+      // Calling it "Unpaid" and ticking overdue days against it would invent an
+      // arrears that nobody can chase, so it reads "In Transit" and the clock
+      // stays at zero until Mark-as-Delivered stamps deliveredDate.
+      const inTransit = d.status !== 'DELIVERED';
+      const status = paid
+        ? 'Paid'
+        : cleared > 0.01 ? 'Partially Paid'
+        : inTransit ? 'In Transit'
+        : 'Unpaid';
+
+      // Provisional for in-transit rows (dispatch date + credit days) purely so
+      // the list still sorts and buckets by month; the UI marks it as an estimate.
       const start = d.deliveredDate || d.dispatchDate;
       const dueDate = new Date(start);
       dueDate.setDate(dueDate.getDate() + (o.dueDays || 0));
-      const dueDaysAfter = Math.max(0, Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
+      const dueDaysAfter = inTransit
+        ? 0
+        : Math.max(0, Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
 
       rows.push({
         id: d.id,
@@ -239,6 +262,7 @@ export default function SaleDuesPage() {
         cashReceived,
         dueDaysAfter,
         status,
+        inTransit,
         appliedReceipts,
         deletableReceiptIds,
       });
@@ -248,6 +272,25 @@ export default function SaleDuesPage() {
   rows.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   return rows;
   }, [parties, saleOrders, receipts]);
+
+  // Buyer money that credited the party ledger but was never stamped with an
+  // invoice. Settlement here is invoice-based only, so these rupees clear
+  // nothing - every bill they were meant to pay still reads Unpaid below. They
+  // used to be invisible on this page, which is exactly how a paid invoice ends
+  // up looking outstanding; surfaced as a banner so the gap is obvious.
+  const onAccountReceipts = useMemo(() => {
+    const rows = (receipts ?? []).filter((r) => r.type === 'BUYER' && !r.saleDispatchId);
+    const byParty = new Map<string, { name: string; amount: number; count: number }>();
+    for (const r of rows) {
+      const key = r.partyId ?? 'unknown';
+      const cur = byParty.get(key) ?? { name: r.party?.name ?? 'Unknown buyer', amount: 0, count: 0 };
+      cur.amount += Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
+      cur.count += 1;
+      byParty.set(key, cur);
+    }
+    const parties = [...byParty.values()].sort((a, b) => b.amount - a.amount);
+    return { total: parties.reduce((s, p) => s + p.amount, 0), parties };
+  }, [receipts]);
 
   // Month options come from the FULL invoice set (not the product-filtered one)
   // so switching product tabs never yanks the selected month out of the list.
@@ -272,6 +315,9 @@ export default function SaleDuesPage() {
   const totalBillingAll = visibleInvoices.reduce((sum, item) => sum + item.totalAmount, 0);
   const totalReceiptsAll = visibleInvoices.reduce((sum, item) => sum + item.cashReceived, 0);
   const totalOutstanding = visibleInvoices.reduce((sum, item) => sum + item.netAmount, 0);
+  // Split out the part of the receivable that is still on the road - it is money
+  // owed, but not money you can chase yet.
+  const inTransitOutstanding = visibleInvoices.reduce((sum, item) => sum + (item.inTransit ? item.netAmount : 0), 0);
 
   // Payment tab: All shows everything (incl. fully paid), Paid shows settled
   // invoices, Unpaid shows anything still carrying a balance (partial or none).
@@ -340,7 +386,7 @@ export default function SaleDuesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Sale Dues"
-        description="Aging list of outstanding buyer sales invoices matching receipts via FIFO allocation."
+        description="Aging list of outstanding buyer sales invoices. Each one is cleared only by the receipts recorded against it."
         icon={TrendingUp}
         actions={
           <ExportButtons
@@ -426,9 +472,40 @@ export default function SaleDuesPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalOutstanding)}</div>
+                {inTransitOutstanding > 0 && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    incl. <span className="font-semibold text-sky-600 dark:text-sky-400">{rupees(inTransitOutstanding)}</span> in transit (not yet due)
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
+
+          {onAccountReceipts.parties.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 dark:border-amber-900 dark:bg-amber-950/30">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    {rupees(onAccountReceipts.total)} received but not applied to any invoice
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    These collections credited the buyer's ledger without settling a bill, so the invoices they
+                    paid still show as unpaid below. Reverse each one on the Receipts page and record it again,
+                    ticking the invoices it covers.
+                  </p>
+                  <ul className="pt-1 text-xs text-amber-800 dark:text-amber-300">
+                    {onAccountReceipts.parties.map((p) => (
+                      <li key={p.name}>
+                        <span className="font-medium">{p.name}</span> · {rupees(p.amount)}
+                        {p.count > 1 ? ` (${p.count} receipts)` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border bg-card overflow-auto max-h-[70vh]">
             <div className="px-5 py-4 border-b font-semibold text-sm flex items-center gap-2">
@@ -475,7 +552,13 @@ export default function SaleDuesPage() {
                             {inv.brokerName ?? '-'}
                           </div>
                         </TableCell>
-                        <TableCell className="font-medium">{shortDate(inv.dueDate.toISOString())}</TableCell>
+                        <TableCell
+                          className={cn('font-medium', inv.inTransit && 'italic text-muted-foreground')}
+                          title={inv.inTransit ? 'Provisional - credit days start from the delivery date' : undefined}
+                        >
+                          {shortDate(inv.dueDate.toISOString())}
+                          {inv.inTransit && <span className="ml-1 text-xs not-italic">(est.)</span>}
+                        </TableCell>
                         <TableCell>{inv.partyName}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{productDescription(inv.product)}</TableCell>
                         <TableCell className="font-sans text-xs font-medium text-foreground/80">{inv.invoiceNumber ?? '-'}</TableCell>
@@ -485,13 +568,24 @@ export default function SaleDuesPage() {
                           {rupees(inv.netAmount)}
                         </TableCell>
                         <TableCell className="text-center">
-                          <span className={`font-semibold ${inv.status === 'Paid' ? 'text-emerald-600 dark:text-emerald-400' : inv.status === 'Unpaid' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                          <span
+                            className={cn(
+                              'font-semibold',
+                              inv.status === 'Paid' ? 'text-emerald-600 dark:text-emerald-400'
+                                : inv.status === 'Unpaid' ? 'text-rose-600 dark:text-rose-400'
+                                : inv.status === 'In Transit' ? 'text-sky-600 dark:text-sky-400'
+                                : 'text-amber-600 dark:text-amber-400',
+                            )}
+                            title={inv.inTransit ? 'Dispatched but not marked delivered - billed, not yet collectable' : undefined}
+                          >
                             {inv.status}
                           </span>
                         </TableCell>
                         <TableCell className="text-center">
                           {inv.status !== 'Paid' ? (
-                            inv.dueDaysAfter > 0 ? (
+                            inv.inTransit ? (
+                              <span className="text-xs text-muted-foreground">Awaiting delivery</span>
+                            ) : inv.dueDaysAfter > 0 ? (
                               <span className="text-rose-600 dark:text-rose-400 font-bold">{inv.dueDaysAfter} days</span>
                             ) : (
                               <span className="text-muted-foreground">Not due</span>

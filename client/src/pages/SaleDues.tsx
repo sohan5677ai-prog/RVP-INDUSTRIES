@@ -25,7 +25,7 @@ import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, Figure, PanelEmpty } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
-import type { ExportColumn } from '@/lib/export';
+import type { ExportColumn, ExportTone } from '@/lib/export';
 
 // Byproducts share one tab group in the Sales nav; group them the same way here.
 const BYPRODUCT_PRODUCTS: SaleProduct[] = ['WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'];
@@ -133,6 +133,8 @@ interface OutstandingInvoice {
   dueDate: Date;
   partyName: string;
   invoiceNumber: string | null;
+  vehicleNumber: string | null; // the lorry this invoice shipped on
+
   billDate: Date;
   billAmount: number;   // billed total (base + GST), whole rupees
   saleBase: number;     // sale value EXCLUDING GST - the TDS calc base
@@ -173,6 +175,13 @@ interface ReceiveDialogState {
   shortageAmount: string;
 }
 
+/** Status colour, shared by the PDF, the Excel sheet and the print view. */
+function statusTone(i: OutstandingInvoice): ExportTone {
+  if (i.status === 'Paid') return 'success';
+  if (i.inTransit) return 'muted';
+  return i.dueDaysAfter > 0 ? 'danger' : 'warning';
+}
+
 const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Broker', value: (i) => i.brokerName ?? '' },
   // An undelivered shipment has no due date yet - credit days run from delivery.
@@ -181,14 +190,21 @@ const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Customer', value: (i) => i.partyName },
   { header: 'Product', value: (i) => i.product },
   { header: 'Invoice No', value: (i) => i.invoiceNumber ?? '' },
+  // The lorry number is how the buyer's office finds the bill on their side, so
+  // it travels with every exported line.
+  { header: 'Vehicle No', value: (i) => i.vehicleNumber ?? '' },
   { header: 'Bill Date', value: (i) => shortDate(i.billDate.toISOString()) },
-  { header: 'Bill Amount', value: (i) => rupees(i.billAmount), excel: (i) => i.billAmount, numFmt: '#,##0.00', align: 'right' },
-  { header: 'Shortage Deducted', value: (i) => rupees(i.shortageDeducted), excel: (i) => i.shortageDeducted, numFmt: '#,##0.00', align: 'right' },
-  { header: 'TDS Withheld', value: (i) => rupees(i.tdsDeducted), excel: (i) => i.tdsDeducted, numFmt: '#,##0.00', align: 'right' },
-  { header: 'Cash Received', value: (i) => rupees(i.cashReceived), excel: (i) => i.cashReceived, numFmt: '#,##0.00', align: 'right' },
-  { header: 'Net Amount Due', value: (i) => rupees(i.netAmount), excel: (i) => i.netAmount, numFmt: '#,##0.00', align: 'right' },
-  { header: 'Status', value: (i) => i.status, align: 'center' },
-  { header: 'Due Days', value: (i) => (i.status === 'Paid' ? '' : i.inTransit ? 'Awaiting delivery' : i.dueDaysAfter), align: 'center' },
+  { header: 'Bill Amount', value: (i) => rupees(i.billAmount), excel: (i) => i.billAmount, numFmt: '#,##0.00', align: 'right', total: true },
+  { header: 'Shortage Deducted', value: (i) => rupees(i.shortageDeducted), excel: (i) => i.shortageDeducted, numFmt: '#,##0.00', align: 'right', total: true },
+  { header: 'TDS Withheld', value: (i) => rupees(i.tdsDeducted), excel: (i) => i.tdsDeducted, numFmt: '#,##0.00', align: 'right', total: true },
+  { header: 'Cash Received', value: (i) => rupees(i.cashReceived), excel: (i) => i.cashReceived, numFmt: '#,##0.00', align: 'right', total: true },
+  {
+    header: 'Net Amount Due', value: (i) => rupees(i.netAmount), excel: (i) => i.netAmount,
+    numFmt: '#,##0.00', align: 'right', total: true,
+    tone: (i) => (i.netAmount > 0.01 ? (i.dueDaysAfter > 0 ? 'danger' : 'default') : 'muted'),
+  },
+  { header: 'Status', value: (i) => i.status, align: 'center', tone: statusTone },
+  { header: 'Due Days', value: (i) => (i.status === 'Paid' ? '' : i.inTransit ? 'Awaiting delivery' : i.dueDaysAfter), align: 'center', tone: (i) => (i.status !== 'Paid' && !i.inTransit && i.dueDaysAfter > 0 ? 'danger' : 'default') },
 ];
 
 export default function SaleDuesPage() {
@@ -333,6 +349,7 @@ export default function SaleDuesPage() {
         dueDate,
         partyName: b.name,
         invoiceNumber: d.invoiceNumber,
+        vehicleNumber: d.vehicleNumber ?? null,
         billDate: new Date(d.dispatchDate),
         billAmount: total,
         saleBase: d.weightKg * rate,

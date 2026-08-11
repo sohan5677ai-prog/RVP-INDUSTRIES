@@ -1,5 +1,6 @@
 import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
+import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createPaymentSchema, listPaymentsSchema } from '../schemas/payment.schema.js';
@@ -147,6 +148,9 @@ export async function createPayment(req: Request, res: Response) {
     let name: string;
     let phone: string | null = null;
     let phone2: string | null | undefined = null;
+    // English unless the counterparty has a language of their own on file. A
+    // payee typed free-hand (expense heads) has no record, so no language.
+    let waLanguage: WaLanguage | null = null;
     if (data.partyId) {
       const party = await prisma.party.findUnique({ where: { id: data.partyId } });
       name = party?.name ?? 'Party';
@@ -155,11 +159,13 @@ export async function createPayment(req: Request, res: Response) {
       if (party && party.type !== 'HAMALI_TEAM') {
         phone = party.phone;
         phone2 = party.phone2;
+        waLanguage = party.waLanguage;
       }
     } else if (data.brokerId) {
       const broker = await prisma.broker.findUnique({ where: { id: data.brokerId } });
       name = broker?.name ?? 'Broker';
       phone = broker?.phone ?? null;
+      waLanguage = broker?.waLanguage ?? null;
     } else {
       name = data.payee || data.description || `${data.type} payment`;
     }
@@ -171,7 +177,7 @@ export async function createPayment(req: Request, res: Response) {
         reference: data.reference ?? null,
         screenshotUrl,
       },
-      { name, phone, phone2 }
+      { name, phone, phone2, waLanguage }
     );
   })().catch(() => {});
 

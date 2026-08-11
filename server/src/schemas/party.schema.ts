@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 export const partyTypeEnum = z.enum(['SUPPLIER', 'BUYER', 'BOTH', 'HAMALI_TEAM']);
+/** Language this party's WhatsApp templates go out in - mirrors the WaLanguage enum. */
+export const waLanguageEnum = z.enum(['EN', 'TE', 'TA', 'KN', 'HI']);
 export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SHELL', 'TAMARIND_WASTE', 'TPS_BROKENS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU']);
 
 export const createPartySchema = z.object({
@@ -19,6 +21,7 @@ export const createPartySchema = z.object({
   locationLink: z.string().optional(),
   // Buyers only - turns the Surya Road Lines lorry receipt (GC) on for their shipments.
   lorryReceiptEnabled: z.boolean().optional(),
+  waLanguage: waLanguageEnum.optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),

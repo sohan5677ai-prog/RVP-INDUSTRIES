@@ -1,5 +1,6 @@
 import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
+import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createReceiptSchema, listReceiptsSchema } from '../schemas/receipt.schema.js';
@@ -47,6 +48,8 @@ export async function createReceipt(req: Request, res: Response) {
   let partyName: string | undefined;
   let partyPhone: string | null = null;
   let partyPhone2: string | null | undefined = null;
+  // Null for an "other income" payer typed free-hand - no party row, no language.
+  let partyLanguage: WaLanguage | null = null;
 
   // Bill-wise split. One bank transfer routinely settles several invoices, but a
   // shipment is only ever cleared by receipts stamped with its own dispatch id
@@ -81,6 +84,7 @@ export async function createReceipt(req: Request, res: Response) {
       partyName = party.name;
       partyPhone = party.phone;
       partyPhone2 = party.phone2;
+      partyLanguage = party.waLanguage;
     }
 
     if (allocations.length > 0) {
@@ -172,7 +176,7 @@ export async function createReceipt(req: Request, res: Response) {
         date: data.date,
         reference: data.reference ?? null,
       },
-      { name, phone: partyPhone, phone2: partyPhone2 }
+      { name, phone: partyPhone, phone2: partyPhone2, waLanguage: partyLanguage }
     );
   })().catch(() => {});
 

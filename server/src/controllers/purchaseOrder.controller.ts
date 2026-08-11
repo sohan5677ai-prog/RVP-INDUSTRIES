@@ -99,7 +99,7 @@ export async function createPurchaseOrder(req: Request, res: Response) {
   // per-lorry split, since that is the figure the party gave us.
   void whatsappService.notifyPoCreated(
     createdPOs.map((po) => ({ id: po.id, poNumber: po.poNumber })),
-    { name: party.name, phone: party.phone, phone2: party.phone2 },
+    { name: party.name, phone: party.phone, phone2: party.phone2, waLanguage: party.waLanguage },
     Number(data.pricePerKg),
     data.sendTonnageInMessage ? data.tonnageKg : null
   );

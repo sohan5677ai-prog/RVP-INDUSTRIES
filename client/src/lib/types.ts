@@ -30,6 +30,9 @@ export interface Party {
   // Buyers only: whether their shipments travel on a Surya Road Lines lorry
   // receipt (GC note). Off unless switched on for that buyer.
   lorryReceiptEnabled?: boolean;
+  // Language this party's WhatsApp messages are sent in. Falls back to the
+  // English template when that language's copy isn't approved yet.
+  waLanguage?: WaLanguage;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;
@@ -37,12 +40,25 @@ export interface Party {
   createdAt: string;
 }
 
+export type WaLanguage = 'EN' | 'TE' | 'TA' | 'KN' | 'HI';
+
+/** Label for each WhatsApp language, in the language itself. */
+export const WA_LANGUAGE_LABELS: Record<WaLanguage, string> = {
+  EN: 'English',
+  TE: 'తెలుగు (Telugu)',
+  TA: 'தமிழ் (Tamil)',
+  KN: 'ಕನ್ನಡ (Kannada)',
+  HI: 'हिंदी (Hindi)',
+};
+
 export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS' | 'PRECLEANER_DUST' | 'NALLA_POKKULU' | 'NALLA_CHINTAPANDU';
 
 export interface Broker {
   id: string;
   name: string;
   phone: string | null;
+  /** Language the broker's payment-reminder copy is sent in. */
+  waLanguage?: WaLanguage;
 }
 
 export type POStatus = 'PENDING' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';

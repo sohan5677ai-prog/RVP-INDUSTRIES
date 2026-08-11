@@ -166,6 +166,8 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Vendor billing, not the client’s books.' },
   { name: 'SubscriptionPayment', delegate: 'subscriptionPayment', cls: 'EXCLUDED', order: 0,
     note: 'Contains Razorpay identifiers; no place in a file handed to a CA.' },
+  { name: 'SupportTicket', delegate: 'supportTicket', cls: 'EXCLUDED', order: 0,
+    note: 'Bug reports about the software, not the client’s books. Carries screen captures that may show any year’s data, so it belongs to no single FY.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
@@ -463,11 +464,31 @@ export async function listWhatsAppLogs(req: Request, res: Response) {
 const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h - a double-click must not spam the party
 
 /**
+ * The word "lorry"/"lorries" as it appears INSIDE the reminder's breakdown
+ * variable, per language.
+ *
+ * Everything else in that message is fixed template text that Meta holds in the
+ * approved translation, but the breakdown is built here - so without this a
+ * Telugu supplier would read a Telugu message wrapped around an English list.
+ * Singular first, plural second.
+ */
+const LORRY_WORDS: Record<WaLanguage, [string, string]> = {
+  EN: ['lorry', 'lorries'],
+  TE: ['లారీ', 'లారీలు'],
+  TA: ['லாரி', 'லாரிகள்'],
+  KN: ['ಲಾರಿ', 'ಲಾರಿಗಳು'],
+  HI: ['लॉरी', 'लॉरी'],
+};
+
+/**
  * The lorries still to arrive against a party's PENDING POs, with the priced
  * per-PO breakdown the reminder template prints. Shared by the send endpoint and
  * the context endpoint that decides whether the button is shown at all.
+ *
+ * `language` is the party's, so the ledger's preview shows the same string that
+ * lands on their phone rather than an English stand-in.
  */
-async function loadPendingLoads(partyId: string) {
+async function loadPendingLoads(partyId: string, language: WaLanguage = 'EN') {
   const pendingPOs = await prisma.purchaseOrder.findMany({
     where: { partyId, status: 'PENDING' },
     include: { stockIns: { select: { id: true } } },
@@ -483,8 +504,9 @@ async function loadPendingLoads(partyId: string) {
   const lorries = pos.reduce((s, p) => s + p.remaining, 0);
   // Priced per-PO breakdown, price → lorries → (PO), e.g.
   // "• ₹95/kg - 3 lorries (RVP/01)\n• ₹96/kg - 2 lorries (RVP/02)".
+  const [one, many] = LORRY_WORDS[language] ?? LORRY_WORDS.EN;
   const breakdown = pos
-    .map((p) => `• ₹${p.pricePerKg}/kg - ${p.remaining} lorr${p.remaining === 1 ? 'y' : 'ies'} (${p.poNumber ?? '-'})`)
+    .map((p) => `• ₹${p.pricePerKg}/kg - ${p.remaining} ${p.remaining === 1 ? one : many} (${p.poNumber ?? '-'})`)
     .join('\n');
   return { lorries, breakdown, pos };
 }
@@ -504,13 +526,13 @@ export async function sendPartyReminder(req: Request, res: Response) {
     throw new HttpError(429, `A reminder was already sent recently. Try again in ~${mins} min.`);
   }
 
-  const pending = await loadPendingLoads(party.id);
+  const pending = await loadPendingLoads(party.id, party.waLanguage);
   if (pending.lorries === 0) {
     throw new HttpError(400, 'No pending lorries against this party - nothing to remind about');
   }
 
   const result = await whatsappService.sendReminder(
-    { id: party.id, name: party.name, phone: party.phone, phone2: party.phone2 },
+    { id: party.id, name: party.name, phone: party.phone, phone2: party.phone2, waLanguage: party.waLanguage },
     pending.lorries,
     pending.breakdown
   );
@@ -558,12 +580,12 @@ function duesScope(dues: BuyerDues) {
 export async function getPartyReminderContext(req: Request, res: Response) {
   const party = await prisma.party.findUnique({
     where: { id: req.params.partyId },
-    select: { id: true, name: true, phone: true, phone2: true },
+    select: { id: true, name: true, phone: true, phone2: true, waLanguage: true },
   });
   if (!party) throw new HttpError(404, 'Party not found');
 
   const [pending, dues] = await Promise.all([
-    loadPendingLoads(party.id),
+    loadPendingLoads(party.id, party.waLanguage),
     computePartyDues(party.id),
   ]);
 
@@ -674,6 +696,7 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
         outstanding: active.amount,
         invoiceListText: invoiceListText(active.invoices),
         buyerId: party.id,
+        language: party.waLanguage,
       });
       if (result.ok) sent.push({ recipient: party.name, phone: party.phone ?? party.phone2, amount: active.amount, invoices: active.invoices.length });
       else failed.push({ recipient: party.name, error: result.error ?? 'WhatsApp send failed' });
@@ -710,6 +733,8 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
         outstanding: amount,
         invoiceListText: invoiceListText(theirs),
         buyerId: party.id,
+        // The broker's own language, not the buyer's - it is the broker reading it.
+        language: broker.waLanguage,
       });
       if (result.ok) sent.push({ recipient: broker.name, phone: broker.phone, amount, invoices: theirs.length });
       else failed.push({ recipient: broker.name, error: result.error ?? 'WhatsApp send failed' });

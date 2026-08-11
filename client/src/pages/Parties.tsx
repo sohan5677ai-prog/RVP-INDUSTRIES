@@ -45,7 +45,8 @@ import { Badge } from '@/components/ui/badge';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { Commodity, FreightRate } from '@/lib/types';
+import type { Commodity, FreightRate, WaLanguage } from '@/lib/types';
+import { WA_LANGUAGE_LABELS } from '@/lib/types';
 
 const PARTY_EXPORT_COLUMNS: ExportColumn<Party>[] = [
   { header: 'Name', value: (p) => p.name },
@@ -131,6 +132,7 @@ const partySchema = z.object({
   destination: z.string().optional(),
   locationLink: z.string().optional(),
   lorryReceiptEnabled: z.boolean(),
+  waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
@@ -140,7 +142,7 @@ type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
   name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', city: '', state: '', pincode: '', gstin: '', destination: '',
-  locationLink: '', lorryReceiptEnabled: false, bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
+  locationLink: '', lorryReceiptEnabled: false, waLanguage: 'EN', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
 export default function Parties() {
@@ -225,6 +227,7 @@ export default function Parties() {
       destination: p.destination ?? '',
       locationLink: p.locationLink ?? '',
       lorryReceiptEnabled: p.lorryReceiptEnabled ?? false,
+      waLanguage: p.waLanguage ?? 'EN',
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
@@ -549,6 +552,37 @@ export default function Parties() {
                       <FormControl>
                         <Input placeholder="e.g. 9876543211" {...field} />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {/* Sits with the phone numbers because it governs what lands on
+                    them: PO, stock-in, verification, payment and reminder
+                    messages all go out in this language. */}
+                <FormField
+                  control={form.control}
+                  name="waLanguage"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>WhatsApp language</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {(Object.keys(WA_LANGUAGE_LABELS) as WaLanguage[]).map((code) => (
+                            <SelectItem key={code} value={code}>
+                              {WA_LANGUAGE_LABELS[code]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Sends this party's WhatsApp messages in their language. Falls back to English
+                        wherever that language's template isn't approved yet.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

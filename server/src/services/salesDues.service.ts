@@ -1,3 +1,4 @@
+import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 
 /**
@@ -43,6 +44,8 @@ export interface DuesBroker {
   id: string;
   name: string;
   phone: string | null;
+  /** The broker's OWN language - a broker copy is read by the broker, not the buyer. */
+  waLanguage?: WaLanguage | null;
 }
 
 export interface BuyerDues {
@@ -50,6 +53,8 @@ export interface BuyerDues {
   name: string;
   phone: string | null;
   phone2?: string | null;
+  /** Language the dues reminder goes out in - see Party.waLanguage. */
+  waLanguage?: WaLanguage | null;
   outstanding: number; // total across all unsettled shipments
   overdueOutstanding: number; // subset that is past its due date
   inTransitOutstanding: number; // subset still on the road - owed, not yet collectable
@@ -96,8 +101,8 @@ export async function computeBuyerDues(
     include: {
       saleOrder: {
         include: {
-          buyer: { select: { id: true, name: true, phone: true, phone2: true } },
-          broker: { select: { id: true, name: true, phone: true } },
+          buyer: { select: { id: true, name: true, phone: true, phone2: true, waLanguage: true } },
+          broker: { select: { id: true, name: true, phone: true, waLanguage: true } },
         },
       },
       receipts: { select: { type: true, amount: true, tdsAmount: true, shortageAmount: true } },
@@ -129,7 +134,7 @@ export async function computeBuyerDues(
     const buyer = order.buyer;
     let row = byBuyer.get(buyer.id);
     if (!row) {
-      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, outstanding: 0, overdueOutstanding: 0, inTransitOutstanding: 0, invoices: [], overdueInvoices: [], brokers: [] };
+      row = { buyerId: buyer.id, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, waLanguage: buyer.waLanguage, outstanding: 0, overdueOutstanding: 0, inTransitOutstanding: 0, invoices: [], overdueInvoices: [], brokers: [] };
       byBuyer.set(buyer.id, row);
     }
     const broker = order.broker && !isOwnBrokerName(order.broker.name) ? order.broker : null;
@@ -150,7 +155,7 @@ export async function computeBuyerDues(
     }
     if (inTransit) row.inTransitOutstanding += invoice.outstanding;
     if (broker && !row.brokers.some((b) => b.id === broker.id)) {
-      row.brokers.push({ id: broker.id, name: broker.name, phone: broker.phone });
+      row.brokers.push({ id: broker.id, name: broker.name, phone: broker.phone, waLanguage: broker.waLanguage });
     }
   }
 

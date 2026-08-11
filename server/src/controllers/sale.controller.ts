@@ -829,19 +829,26 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // already pulled into freightCharge above).
   await markConfirmationUsed(dispatch.vehicleNumber, dispatch.id);
 
-  // WhatsApp the driver the buyer's name/phone/maps link - fire-and-forget,
+  // WhatsApp the driver where he is going and who to call - fire-and-forget,
   // only when a driver phone was captured on this dispatch. The broker/buyer
   // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
   // (the invoice/EWB don't exist yet at dispatch time).
   void whatsappService.notifyDispatchDriver(
-    { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
+    {
+      id: dispatch.id,
+      vehicleNumber: dispatch.vehicleNumber,
+      driverName: dispatch.driverName,
+      driverPhone: dispatch.driverPhone,
+      weightKg: dispatch.weightKg,
+    },
     {
       name: order.buyer.name,
       phone: order.buyer.phone,
       locationLink: order.buyer.locationLink,
       address: order.buyer.address,
       city: order.buyer.city,
-    }
+    },
+    { destination: order.destination, product: order.product }
   );
 
   res.status(201).json(dispatch);

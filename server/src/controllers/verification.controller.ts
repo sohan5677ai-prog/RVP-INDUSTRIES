@@ -1,7 +1,7 @@
 import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
-import type { DiscountType, Prisma } from '@prisma/client';
+import type { DiscountType, Prisma, WaLanguage } from '@prisma/client';
 import { HttpError } from '../lib/httpError.js';
 import { createVerificationSchema } from '../schemas/purchase.schema.js';
 import {
@@ -29,7 +29,7 @@ import { uploadFileToStorage } from '../lib/upload.js';
  * or fails the verification response.
  */
 async function sendVerificationStatement(
-  party: { id: string; name: string; phone: string | null; phone2?: string | null },
+  party: { id: string; name: string; phone: string | null; phone2?: string | null; waLanguage?: WaLanguage | null },
   details: { lorryNumber: string; netWeightKg: number; amount: number },
   verificationId: string
 ) {
@@ -266,7 +266,7 @@ export async function createVerification(req: Request, res: Response) {
   // WhatsApp the supplier: lorry unloaded + verified, with their statement attached.
   const notifyParty = purchase.stockIn.purchaseOrder.party;
   void sendVerificationStatement(
-    { id: notifyParty.id, name: notifyParty.name, phone: notifyParty.phone },
+    { id: notifyParty.id, name: notifyParty.name, phone: notifyParty.phone, phone2: notifyParty.phone2, waLanguage: notifyParty.waLanguage },
     { lorryNumber: purchase.stockIn.lorryNumber, netWeightKg: finalWeight, amount: totalAmount },
     verification.id
   );

@@ -6,9 +6,10 @@ import { logger } from './logger.js';
  * the redirect and reading coordinates out of the final URL - the same thing
  * a browser does when a driver taps the link. No Maps API key required.
  *
- * Needed because the WhatsApp "driver" template (rvp_driver) has an
- * approved Location header component, and Fast2SMS's Meta-format send for
- * that header wants real latitude/longitude - see whatsapp.service.ts.
+ * Written for a WhatsApp Location header, whose Meta-format send wants real
+ * latitude/longitude rather than a link. No template uses that header now - the
+ * driver template sends the link as plain text - so this currently has no
+ * caller; see sendLocationWhatsAppTemplate in whatsapp.service.ts.
  */
 
 const REQUEST_TIMEOUT_MS = 10_000;

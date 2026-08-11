@@ -45,8 +45,15 @@ async function main() {
   );
 
   const result = await whatsappService.notifyDispatchDriver(
-    { id: dispatch.id, vehicleNumber: dispatch.vehicleNumber, driverPhone: dispatch.driverPhone },
+    {
+      id: dispatch.id,
+      vehicleNumber: dispatch.vehicleNumber,
+      driverName: dispatch.driverName,
+      driverPhone: dispatch.driverPhone,
+      weightKg: dispatch.weightKg,
+    },
     { name: buyer.name, phone: buyer.phone, locationLink: buyer.locationLink, address: buyer.address, city: buyer.city },
+    { destination: dispatch.saleOrder.destination, product: dispatch.saleOrder.product },
   );
   console.log('notifyDispatchDriver result:', result);
 

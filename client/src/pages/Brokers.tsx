@@ -32,6 +32,15 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { WA_LANGUAGE_LABELS } from '@/lib/types';
+import type { WaLanguage } from '@/lib/types';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 
@@ -43,6 +52,7 @@ const BROKER_COLUMNS: ExportColumn<Broker>[] = [
 const brokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().optional(),
+  waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
 });
 type BrokerForm = z.infer<typeof brokerSchema>;
 
@@ -58,12 +68,12 @@ export default function Brokers() {
 
   const form = useForm<BrokerForm>({
     resolver: zodResolver(brokerSchema),
-    defaultValues: { name: '', phone: '' },
+    defaultValues: { name: '', phone: '', waLanguage: 'EN' },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ name: '', phone: '' });
+    form.reset({ name: '', phone: '', waLanguage: 'EN' });
     setOpen(true);
   }
 
@@ -72,6 +82,7 @@ export default function Brokers() {
     form.reset({
       name: b.name,
       phone: b.phone ?? '',
+      waLanguage: b.waLanguage ?? 'EN',
     });
     setOpen(true);
   }
@@ -202,6 +213,32 @@ export default function Brokers() {
                     <FormControl>
                       <Input {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {/* Payment reminders copied to a broker go out in the broker's own
+                  language, not the buyer's. */}
+              <FormField
+                control={form.control}
+                name="waLanguage"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>WhatsApp language</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {(Object.keys(WA_LANGUAGE_LABELS) as WaLanguage[]).map((code) => (
+                          <SelectItem key={code} value={code}>
+                            {WA_LANGUAGE_LABELS[code]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}

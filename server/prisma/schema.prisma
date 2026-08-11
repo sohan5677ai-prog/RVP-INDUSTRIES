@@ -108,6 +108,10 @@ model Party {
   // (GC note). Most do not, so the receipt is offered on a dispatch only when
   // this is switched on for the buyer. Off for everyone until set.
   lorryReceiptEnabled Boolean        @default(false)
+  // Language this party's WhatsApp messages go out in. EN until someone sets it
+  // on the party form; an unapproved language falls back to the English copy at
+  // send time, so switching this can never stop a message going out.
+  waLanguage        WaLanguage       @default(EN)
   bankAccountNumber String?
   bankIfsc          String?
   bankName          String?
@@ -128,6 +132,7 @@ model Broker {
   id         String      @id @default(cuid())
   name       String
   phone      String?
+  waLanguage WaLanguage  @default(EN)
   saleOrders SaleOrder[]
   payments   Payment[]
 }
@@ -1302,6 +1307,17 @@ enum WaDirection {
   INBOUND
 }
 
+/// Language a party's WhatsApp messages go out in. Each value maps to a
+/// separately-approved copy of the same template (same variable order), picked
+/// at send time - see FAST2SMS_TMPL_<KEY>_<LANG> in whatsapp.service.ts.
+enum WaLanguage {
+  EN
+  TE
+  TA
+  KN
+  HI
+}
+
 enum WaStatus {
   SENT // handed to Fast2SMS successfully
   FAILED // send attempt errored
@@ -1312,11 +1328,54 @@ enum WaStatus {
 // Audit trail of every WhatsApp message sent (or received) via Fast2SMS.
 // Mirrors EmailLog: one row per attempt, success or failure, so the UI can
 // show delivery state and offer a resend.
+enum SupportTicketStatus {
+  OPEN
+  RESOLVED
+}
+
+/**
+ * An in-app "Contact support" report: whoever hit the problem clicks the button
+ * in the topbar, the app captures where they were and what the screen looked
+ * like, and they add a sentence about what went wrong.
+ *
+ * `userId` is a plain column, not a relation: a ticket is evidence about a
+ * moment in time and must survive the reporter's user row being deleted, so the
+ * name and role are denormalised alongside it rather than joined.
+ */
+model SupportTicket {
+  id             String              @id @default(cuid())
+  userId         String?
+  userName       String
+  userRole       String
+  // Route the reporter was on, captured automatically: the raw path
+  // ("/purchases/orders") plus the sidebar label shown for it ("Purchase Orders").
+  pagePath       String
+  pageLabel      String
+  note           String
+  // Public Supabase Storage URL of the captured screen. Null when the capture
+  // failed or the browser blocked it - the ticket still goes out, text-only.
+  screenshotUrl  String?
+  // Free-form diagnostics gathered without asking the reporter: user agent,
+  // viewport, and the last few console/network errors seen on the page.
+  browserInfo    String?
+  consoleErrors  String?
+  status         SupportTicketStatus @default(OPEN)
+  // Outcome of the WhatsApp alert, so a ticket that never reached a phone is
+  // visibly distinct from one that did.
+  notifiedStatus String?
+  notifiedError  String?
+  createdAt      DateTime            @default(now())
+  resolvedAt     DateTime?
+
+  @@index([status, createdAt])
+}
+
 model WhatsAppLog {
   id           String      @id @default(cuid())
   direction    WaDirection @default(OUTBOUND)
   phone        String? // counterparty number (recipient for outbound, sender for inbound)
   template     String? // template key, e.g. 'PO_CREATED' (outbound only)
+  language     WaLanguage? // which language copy was sent (outbound only)
   body         String? // rendered variable values (outbound) / raw text (inbound)
   mediaUrl     String?
   // Loose link back to the record that triggered the message, e.g.

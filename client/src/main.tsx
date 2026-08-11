@@ -4,11 +4,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth';
+import { installErrorCapture } from '@/lib/errorLog';
 import App from './App';
 import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/fraunces';
 import '@fontsource-variable/geist-mono';
 import './index.css';
+
+// Installed before render so errors thrown during the very first paint are
+// still captured for a support ticket.
+installErrorCapture();
 
 const queryClient = new QueryClient({
   defaultOptions: {

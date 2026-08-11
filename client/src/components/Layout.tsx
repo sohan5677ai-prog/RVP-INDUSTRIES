@@ -39,11 +39,13 @@ import {
   FileSpreadsheet,
   CreditCard,
   Archive,
+  LifeBuoy,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { preloadRoute } from '@/lib/preload';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import SupportButton from '@/components/SupportButton';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
@@ -154,6 +156,7 @@ const sections: NavSection[] = [
       { to: '/users', label: 'Users', icon: Shield },
       { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard },
       { to: '/settings?tab=archives', label: 'Archives', icon: Archive },
+      { to: '/support', label: 'Support tickets', icon: LifeBuoy },
     ],
   },
 ];
@@ -364,7 +367,7 @@ export default function Layout() {
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-
+            <SupportButton pageLabel={current?.label ?? 'Home'} />
             <ThemeToggle />
           </div>
         </header>

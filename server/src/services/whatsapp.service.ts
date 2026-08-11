@@ -1,7 +1,7 @@
+import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
-import { istCalendar } from '../lib/istDate.js';
-import { resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
+import { istCalendar, istParts } from '../lib/istDate.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -20,15 +20,21 @@ import { resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
  *  - FAST2SMS_API_KEY          Fast2SMS Dev API key (Authorization header)
  *  - FAST2SMS_PHONE_NUMBER_ID  Fast2SMS phone-number id; optional for the simple
  *                              GET send (omit to use the account's connected
- *                              number) but REQUIRED for location-header templates
- *                              (DISPATCH_DRIVER), which go over the separate
- *                              Meta-format POST endpoint. Do NOT put a Meta
- *                              phone-number-id here - Fast2SMS rejects it.
+ *                              number) but REQUIRED for location-header templates,
+ *                              which go over the separate Meta-format POST
+ *                              endpoint. Do NOT put a Meta phone-number-id here -
+ *                              Fast2SMS rejects it.
  *  - WHATSAPP_ENABLED          'true' to send at all (default off, like SLACK_ENABLED)
  *  - WHATSAPP_TEST_MODE        anything but 'false' reroutes to the test number
  *  - WHATSAPP_TEST_NUMBER      where test-mode messages land (owner's phone)
  *  - FAST2SMS_TMPL_<KEY>       numeric Fast2SMS message_id per approved template
- *                              (used by the simple GET send)
+ *                              (used by the simple GET send). This is the ENGLISH
+ *                              copy - see FAST2SMS_TMPL_<KEY>_<LANG> below.
+ *  - FAST2SMS_TMPL_<KEY>_<LANG> the same template's message_id in TE/TA/KN/HI.
+ *                              Meta approves one template per language, each with
+ *                              its own id; the ERP picks by the party's
+ *                              Party.waLanguage and falls back to English when the
+ *                              language copy is not configured (or not yet approved).
  *  - FAST2SMS_TMPL_NAME_<KEY>  the template's approved NAME (e.g. rvp_driver),
  *                              needed only for templates sent via the Meta-format
  *                              POST endpoint (location headers can't use a numeric
@@ -52,21 +58,34 @@ export type WaTemplateKey =
   | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
-  | 'DISPATCH_DRIVER' // rvp_driver: LOCATION header (buyer's lat/lng) + lorry, party, phone, maps link body
+  | 'DISPATCH_DRIVER' // rvp_driver (no header): driver, lorry, party, destination, load, party phone, maps link
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
-  | 'OWNER_DUES_DIGEST'; // rvp_owner_dues: date, total receivable, overdue, top pending
+  | 'OWNER_DUES_DIGEST' // rvp_owner_dues: date, total receivable, overdue, top pending
+  | 'SUPPORT_TICKET' // rvp_support_ticket (image header - the screen capture): reporter, page, note, time
+  // rvp_support_ticket_text (no header) - same four variables, used when the
+  // browser couldn't capture the screen. Like PAYMENT_SENT_TEXT, its approved
+  // body must NOT mention an attached screenshot, and it must not share
+  // SUPPORT_TICKET's message_id (see the guard in notifySupportTicket).
+  | 'SUPPORT_TICKET_TEXT';
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
   DISPATCH_PARTY_BROKER: '26406',
   DISPATCH_BROKER: '26407',
-  // Recorded for completeness - the driver template goes out over the
-  // Meta-format endpoint, which addresses it by name (below), not by this id.
-  DISPATCH_DRIVER: '27626',
+  // DISPATCH_DRIVER (rvp_driver) deliberately has NO default: the template it
+  // used to point at was deleted, and a stale id fails as "message_id is invalid
+  // or not approved" - indistinguishable from a real outage. With no id the send
+  // logs a plain SKIPPED "not configured". Set FAST2SMS_TMPL_DISPATCH_DRIVER on
+  // Render to the new message_id once Meta approves rvp_driver, and add it here.
+  //
+  // It is a plain TEXT template: the destination reaches the driver as the maps
+  // LINK in {{7}}, not as a WhatsApp Location card. A Location header is
+  // mandatory once declared, and only 2 of 20 buyers have a link on file to
+  // resolve coordinates from - it would have failed nine sends in ten.
   // payment_reminder + rvp_owner_dispatch, approved together on the shared KNM
   // number (+917207146094). OWNER_DISPATCH_REMINDER previously carried
   // '1618894512932537' - a *Meta* template id, not a Fast2SMS message_id (those
@@ -80,8 +99,49 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   OWNER_WEEKLY_SUMMARY: '28393',
 };
 
-function templateId(key: WaTemplateKey): string | undefined {
+/**
+ * Non-English message_ids, keyed language → template → id. Every entry here is a
+ * SEPARATE approved template on Fast2SMS carrying the same variable slots in the
+ * same order as its English twin, so only the id changes at send time.
+ *
+ * Empty until Meta approves the translated copies (see
+ * docs/whatsapp-multilingual-templates.md for the submitted wording). Anything
+ * missing falls back to English rather than skipping the send.
+ */
+const LANGUAGE_TEMPLATE_IDS: Partial<Record<Exclude<WaLanguage, 'EN'>, Partial<Record<WaTemplateKey, string>>>> = {
+  TE: {},
+  TA: {},
+  KN: {},
+  HI: {},
+};
+
+/**
+ * The message_id to send `key` on, in `language`.
+ *
+ * Resolution order, first hit wins:
+ *   1. FAST2SMS_TMPL_<KEY>_<LANG>   env override for the language copy
+ *   2. LANGUAGE_TEMPLATE_IDS        checked-in id for the language copy
+ *   3. FAST2SMS_TMPL_<KEY>          env override for English
+ *   4. DEFAULT_TEMPLATE_IDS         checked-in English id
+ *
+ * The fall-through to English is deliberate: a party marked Tamil must still get
+ * their PO confirmation on the day the Tamil template is still in review.
+ */
+export function templateId(key: WaTemplateKey, language: WaLanguage = 'EN'): string | undefined {
+  if (language !== 'EN') {
+    const localised =
+      process.env[`FAST2SMS_TMPL_${key}_${language}`]?.trim() || LANGUAGE_TEMPLATE_IDS[language]?.[key];
+    if (localised) return localised;
+  }
   return process.env[`FAST2SMS_TMPL_${key}`]?.trim() || DEFAULT_TEMPLATE_IDS[key] || undefined;
+}
+
+/** Which language a send actually went out in, after the English fall-back above. */
+export function resolvedLanguage(key: WaTemplateKey, language: WaLanguage = 'EN'): WaLanguage {
+  if (language === 'EN') return 'EN';
+  const localised =
+    process.env[`FAST2SMS_TMPL_${key}_${language}`]?.trim() || LANGUAGE_TEMPLATE_IDS[language]?.[key];
+  return localised ? language : 'EN';
 }
 
 /**
@@ -107,7 +167,6 @@ export interface OwnerWeeklyStats {
 // Templates sent over the Meta-format POST endpoint (location headers) are
 // addressed by their approved NAME, not the numeric message_id above.
 const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
-  DISPATCH_DRIVER: 'rvp_driver',
   OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
 };
 
@@ -266,6 +325,10 @@ function cleanVar(v: string | number | null | undefined): string {
 interface SendArgs {
   templateKey: WaTemplateKey;
   to: string | string[] | null | undefined; // raw phone(s), normalised inside
+  // Recipient's preferred language (Party.waLanguage / Broker.waLanguage).
+  // Defaults to English; falls back to English when that language's copy of the
+  // template isn't approved yet. Owner/internal-only templates leave it unset.
+  language?: WaLanguage | null;
   variables: Array<string | number | null | undefined>;
   mediaUrl?: string; // required by templates with a media header
   documentFilename?: string; // PDF display name
@@ -280,6 +343,9 @@ async function log(args: SendArgs, status: 'SENT' | 'FAILED' | 'SKIPPED', extra:
         direction: 'OUTBOUND',
         phone: extra.phone ?? null,
         template: args.templateKey,
+        // The language actually used, not the one asked for - a party set to
+        // Kannada whose template isn't approved yet logs EN, which is what landed.
+        language: resolvedLanguage(args.templateKey, args.language ?? 'EN'),
         body: args.variables.map(cleanVar).join(' | '),
         mediaUrl: args.mediaUrl ?? null,
         relatedType: args.relatedType ?? null,
@@ -314,7 +380,7 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
     await log(args, 'SKIPPED', { error: 'FAST2SMS_API_KEY not configured' });
     return { ok: false, skipped: true, error: 'Fast2SMS API key is not configured' };
   }
-  const messageId = templateId(args.templateKey);
+  const messageId = templateId(args.templateKey, args.language ?? 'EN');
   if (!messageId) {
     await log(args, 'SKIPPED', { error: `FAST2SMS_TMPL_${args.templateKey} is not configured` });
     return { ok: false, skipped: true, error: `Template id for ${args.templateKey} is not configured` };
@@ -413,11 +479,14 @@ interface LocationSendArgs {
 }
 
 /**
- * Send an approved template whose header is a WhatsApp Location component
- * (currently only DISPATCH_DRIVER). Fast2SMS's simple `variables_values` GET
- * send has no way to populate a Location header - Meta only accepts it
- * through the raw Cloud-API-shaped POST endpoint, addressed by the template's
- * NAME (not the numeric message_id) - hence the separate function.
+ * Send an approved template whose header is a WhatsApp Location component.
+ * Fast2SMS's simple `variables_values` GET send has no way to populate a
+ * Location header - Meta only accepts it through the raw Cloud-API-shaped POST
+ * endpoint, addressed by the template's NAME (not the numeric message_id) -
+ * hence the separate function.
+ *
+ * No template currently uses this: the driver template was assumed to carry a
+ * Location header and did not. Kept for the day one is approved with one.
  * Never throws - same SENT/FAILED/SKIPPED contract as sendWhatsAppTemplate.
  */
 export async function sendLocationWhatsAppTemplate(
@@ -558,9 +627,14 @@ type MessageBody = Omit<SendArgs, 'to'>;
  * Send a party message and give the office its own copy of it.
  *
  * The internal members configured in Settings ("Dispatch & alert recipients")
- * receive the very same approved template with the very same wording, media and
+ * receive the very same approved template with the very same media and
  * variables the party got - deliberately a carbon copy rather than a re-worded
  * alert, so the office sees exactly what landed on the party's phone.
+ *
+ * The one thing the internal copy does NOT mirror is the language: it always
+ * goes out in English. The office reads English; a Tamil supplier's confirmation
+ * relayed in Tamil is a copy nobody in the office can check. The figures, media
+ * and variable values are identical either way.
  *
  * The returned result is the *party* leg only: the internal copies are a record,
  * never a reason to report the business message as failed. Never throws.
@@ -577,9 +651,21 @@ async function sendToPartyAndInternal(
     ? await sendWhatsAppTemplate({ ...message, to })
     : { ok: false, skipped: true, error: 'No party phone on file' };
   const internal = await resolveInternalCopyRecipients(to);
-  await Promise.all(internal.map((number) => sendWhatsAppTemplate({ ...message, to: number })));
+  await Promise.all(internal.map((number) => sendWhatsAppTemplate({ ...message, to: number, language: 'EN' })));
   return result;
 }
+
+/**
+ * A messageable counterparty. `waLanguage` is optional so a caller that doesn't
+ * select it (or a broker/payee that has none) simply gets English - never a
+ * missing-field crash on a fire-and-forget notify.
+ */
+type WaRecipient = {
+  name: string;
+  phone: string | null;
+  phone2?: string | null;
+  waLanguage?: WaLanguage | null;
+};
 
 export const whatsappService = {
   send: sendWhatsAppTemplate,
@@ -597,7 +683,7 @@ export const whatsappService = {
    */
   async notifyPoCreated(
     pos: Array<{ id: string; poNumber: string | null }>,
-    party: { name: string; phone: string | null; phone2?: string | null },
+    party: WaRecipient,
     pricePerKg: number,
     tonnageKg?: number | null
   ) {
@@ -610,6 +696,7 @@ export const whatsappService = {
     await sendToPartyAndInternal(
       {
         templateKey: 'PO_CREATED',
+        language: party.waLanguage,
         variables: [party.name, poLabel, lorryLabel, pricePerKg],
         relatedType: 'PO',
         relatedId: pos[0].id,
@@ -626,12 +713,13 @@ export const whatsappService = {
   async notifyStockIn(
     stockIn: { id: string; lorryNumber: string; arrivalDate: Date; invoiceNumber?: string | null },
     po: { poNumber: string | null },
-    party: { name: string; phone: string | null; phone2?: string | null }
+    party: WaRecipient
   ) {
     const invoiceLabel = stockIn.invoiceNumber?.trim() || po.poNumber || '-';
     await sendToPartyAndInternal(
       {
         templateKey: 'STOCKIN_CONFIRMED',
+        language: party.waLanguage,
         variables: [party.name, stockIn.lorryNumber, invoiceLabel, fmtDate(stockIn.arrivalDate)],
         relatedType: 'STOCKIN',
         relatedId: stockIn.id,
@@ -652,17 +740,19 @@ export const whatsappService = {
    * If the ids differ, the wrong wording is baked into rvp_payment_sent_text's
    * own approved body and has to be corrected in the Fast2SMS panel.
    */
-  async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: { name: string; phone: string | null; phone2?: string | null }) {
+  async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: WaRecipient) {
     const hasImage = !!payment.screenshotUrl;
-    if (!hasImage && templateId('PAYMENT_SENT_TEXT') && templateId('PAYMENT_SENT_TEXT') === templateId('PAYMENT_SENT')) {
+    const lang = party.waLanguage ?? 'EN';
+    if (!hasImage && templateId('PAYMENT_SENT_TEXT', lang) && templateId('PAYMENT_SENT_TEXT', lang) === templateId('PAYMENT_SENT', lang)) {
       logger.error(
-        '[whatsapp] FAST2SMS_TMPL_PAYMENT_SENT_TEXT and FAST2SMS_TMPL_PAYMENT_SENT hold the same message_id ' +
-          `(${templateId('PAYMENT_SENT')}) - this payment has no screenshot but will send on the image template's copy`
+        `[whatsapp] the PAYMENT_SENT_TEXT and PAYMENT_SENT ${lang} templates hold the same message_id ` +
+          `(${templateId('PAYMENT_SENT', lang)}) - this payment has no screenshot but will send on the image template's copy`
       );
     }
     await sendToPartyAndInternal(
       {
         templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
+        language: party.waLanguage,
         variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
         mediaUrl: payment.screenshotUrl ?? undefined,
         relatedType: 'PAYMENT',
@@ -677,10 +767,11 @@ export const whatsappService = {
    * the internal copy. Unlike Payment, Receipt has no screenshot field, so
    * there's only ever the text template.
    */
-  async notifyReceiptReceived(receipt: { id: string; amount: number; date: Date; reference: string | null }, payer: { name: string; phone: string | null; phone2?: string | null }) {
+  async notifyReceiptReceived(receipt: { id: string; amount: number; date: Date; reference: string | null }, payer: WaRecipient) {
     await sendToPartyAndInternal(
       {
         templateKey: 'RECEIPT_RECEIVED',
+        language: payer.waLanguage,
         variables: [payer.name, fmtInr(receipt.amount), fmtDate(receipt.date), receipt.reference ?? '-'],
         relatedType: 'RECEIPT',
         relatedId: receipt.id,
@@ -694,7 +785,7 @@ export const whatsappService = {
    * with their account statement attached as a PDF (document header).
    */
   async notifyVerificationStatement(
-    party: { id?: string; name: string; phone: string | null; phone2?: string | null },
+    party: WaRecipient & { id?: string },
     details: { lorryNumber: string; netWeightKg: number; amount: number },
     statementPdfUrl: string | undefined,
     statementFilename: string | undefined,
@@ -703,6 +794,7 @@ export const whatsappService = {
     await sendToPartyAndInternal(
       {
         templateKey: 'VERIFICATION_STATEMENT',
+        language: party.waLanguage,
         variables: [party.name, details.lorryNumber, fmtWeight(details.netWeightKg), fmtInr(details.amount)],
         mediaUrl: statementPdfUrl,
         documentFilename: statementFilename,
@@ -714,41 +806,49 @@ export const whatsappService = {
   },
 
   /**
-   * Dispatch → driver gets the buyer's name, phone and maps link, plus a real
-   * Location header (the approved template requires one) resolved from the
-   * buyer's saved Google Maps link. Returns null when no driver phone.
+   * Dispatch → driver, in the seven slots of the approved rvp_driver template:
+   * driver, lorry, buyer, destination, load, buyer's phone, maps link. Returns
+   * null when no driver phone was captured.
+   *
+   * Destination is spelled out rather than left to the maps link because only a
+   * handful of buyers have a link saved - without it the driver would be told
+   * "-" and nothing else about where he is going. The order's destination is the
+   * authority; the buyer's city is the fallback.
+   *
+   * A buyer with no link still gets the message with "-" in the last slot: the
+   * lorry, name, destination and contact number are worth having on their own,
+   * and refusing to send over a missing link only cost the driver the rest.
+   *
+   * The name is the one slot that can't fall back to "-": it opens the greeting,
+   * and "Namaste - " reads as a broken message rather than a missing field.
    */
   async notifyDispatchDriver(
-    dispatch: { id: string; vehicleNumber: string | null; driverPhone: string | null },
+    dispatch: {
+      id: string;
+      vehicleNumber: string | null;
+      driverName: string | null;
+      driverPhone: string | null;
+      weightKg: number | null;
+    },
     buyer: { name: string; phone: string | null; locationLink: string | null; address?: string | null; city?: string | null },
+    order: { destination: string | null; product: string },
   ) {
     if (!dispatch.driverPhone) return null; // no driver captured - nothing to send
-    const variables = [dispatch.vehicleNumber ?? '-', buyer.name, buyer.phone ?? '-', buyer.locationLink ?? '-'];
-
-    const point = await resolveLatLngFromMapsLink(buyer.locationLink);
-    if (!point) {
-      // The template's header is mandatory - without coordinates Meta rejects the
-      // whole send (error 132012), so fail loudly here instead of attempting it.
-      const error = buyer.locationLink
-        ? `Could not resolve GPS coordinates from the buyer's saved maps link (${buyer.locationLink})`
-        : `${buyer.name} has no maps link saved - the driver template needs a Location header`;
-      await log({ templateKey: 'DISPATCH_DRIVER', to: dispatch.driverPhone, variables, relatedType: 'DISPATCH', relatedId: dispatch.id }, 'FAILED', {
-        phone: dispatch.driverPhone,
-        error,
-      });
-      return { ok: false, error };
-    }
-
-    return sendLocationWhatsAppTemplate({
+    const destination = order.destination?.trim() || buyer.city?.trim() || '-';
+    const load =
+      dispatch.weightKg != null ? `${order.product} - ${fmtWeight(dispatch.weightKg)}` : order.product;
+    return sendWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
-      location: {
-        lat: point.lat,
-        lng: point.lng,
-        name: buyer.name,
-        address: [buyer.address, buyer.city].filter(Boolean).join(', ') || buyer.name,
-      },
-      variables,
+      variables: [
+        dispatch.driverName?.trim() || 'Driver ji',
+        dispatch.vehicleNumber ?? '-',
+        buyer.name,
+        destination,
+        load,
+        buyer.phone ?? '-',
+        buyer.locationLink ?? '-',
+      ],
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,
     });
@@ -831,10 +931,11 @@ export const whatsappService = {
   },
 
   /** Pending-loads reminder → party (manual button on the Party Ledger). */
-  async sendReminder(party: { id: string; name: string; phone: string | null; phone2?: string | null }, pendingLorries: number, poLabel: string) {
+  async sendReminder(party: WaRecipient & { id: string }, pendingLorries: number, poLabel: string) {
     return sendWhatsAppTemplate({
       templateKey: 'REMINDER',
       to: [party.phone, party.phone2].filter(Boolean) as string[],
+      language: party.waLanguage,
       variables: [party.name, pendingLorries, poLabel],
       relatedType: 'REMINDER',
       relatedId: party.id,
@@ -857,10 +958,13 @@ export const whatsappService = {
     /** Comma-separated, one variable - Meta forbids newlines inside a parameter. */
     invoiceListText: string;
     buyerId: string;
+    /** The RECIPIENT's language - the broker's own when this is the broker copy, not the buyer's. */
+    language?: WaLanguage | null;
   }) {
     return sendWhatsAppTemplate({
       templateKey: 'PAYMENT_REMINDER',
       to: args.phones.filter(Boolean) as string[],
+      language: args.language,
       variables: [args.recipientName, fmtInr(args.outstanding), args.invoiceListText],
       relatedType: 'PAYMENT_REMINDER',
       relatedId: args.buyerId,
@@ -872,13 +976,14 @@ export const whatsappService = {
    * overdue invoices (e.g. "RVP/12 (₹1,20,000) · RVP/15 (₹80,000)"). Fired by the
    * daily job and by the manual "Remind" button on the ledger.
    */
-  async sendSalesDuesReminder(buyer: { id: string; name: string; phone: string | null; phone2?: string | null }, outstanding: number, invoiceListText: string) {
+  async sendSalesDuesReminder(buyer: WaRecipient & { id: string }, outstanding: number, invoiceListText: string) {
     return this.sendPaymentReminder({
       recipientName: buyer.name,
       phones: [buyer.phone, buyer.phone2],
       outstanding,
       invoiceListText,
       buyerId: buyer.id,
+      language: buyer.waLanguage,
     });
   },
 
@@ -977,6 +1082,60 @@ export const whatsappService = {
         variables: [fmtDate(totals.asOn), fmtInr(totals.totalReceivable), fmtInr(totals.overdue), totals.topPending],
         relatedType: 'OWNER_DUES_DIGEST',
         relatedId: dayKey,
+      })
+    );
+  },
+
+  /**
+   * In-app support request → the alert recipients. The screen capture rides as
+   * the image header when the browser managed to take one; otherwise the
+   * text-only twin goes out so a report is never lost over a failed capture.
+   *
+   * Unlike every other helper here this one RETURNS its result to the caller
+   * rather than being fired and forgotten: the reporter is standing at the
+   * dialog waiting to be told their issue was received, and "sent" vs "saved
+   * but not sent" is the difference between them walking away and them calling
+   * you anyway. The ticket row is written first regardless, so a WhatsApp
+   * outage still leaves the evidence on the /support page.
+   */
+  async notifySupportTicket(ticket: {
+    id: string;
+    userName: string;
+    userRole: string;
+    pageLabel: string;
+    pagePath: string;
+    note: string;
+    screenshotUrl: string | null;
+    createdAt: Date;
+  }) {
+    const hasImage = !!ticket.screenshotUrl;
+    if (!hasImage && templateId('SUPPORT_TICKET_TEXT') && templateId('SUPPORT_TICKET_TEXT') === templateId('SUPPORT_TICKET')) {
+      logger.error(
+        '[whatsapp] FAST2SMS_TMPL_SUPPORT_TICKET_TEXT and FAST2SMS_TMPL_SUPPORT_TICKET hold the same message_id ' +
+          `(${templateId('SUPPORT_TICKET')}) - this ticket has no screenshot but will send on the image template's copy`
+      );
+    }
+    // Page reads as "Purchase Orders (/purchases/orders)" so the exact route is
+    // there to reproduce from, not just the friendly label.
+    const page = ticket.pageLabel === ticket.pagePath ? ticket.pagePath : `${ticket.pageLabel} (${ticket.pagePath})`;
+    // "11-Aug-2026 04:35 PM" - IST, because Render's clock is UTC.
+    const t = istParts(ticket.createdAt);
+    const when = `${fmtDate(ticket.createdAt)} ${t.hour}:${t.minute} ${t.ampm}`;
+    // The note comes from a free-text textarea, so it WILL contain the Enter key.
+    // Meta forbids a newline inside a template variable: Fast2SMS accepts the
+    // send and logs a provider id, then WhatsApp drops the message undelivered
+    // (see docs/whatsapp-payment-reminder-templates.md). Collapse to a separator
+    // rather than stripping, so the reporter's own line breaks still read as
+    // breaks in their sentence.
+    const note = ticket.note.replace(/\s*\n+\s*/g, ' · ').trim();
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: hasImage ? 'SUPPORT_TICKET' : 'SUPPORT_TICKET_TEXT',
+        to,
+        variables: [`${ticket.userName} (${ticket.userRole})`, page, note, when],
+        mediaUrl: ticket.screenshotUrl ?? undefined,
+        relatedType: 'SUPPORT_TICKET',
+        relatedId: ticket.id,
       })
     );
   },

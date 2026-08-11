@@ -95,10 +95,13 @@ export async function createPurchaseOrder(req: Request, res: Response) {
   });
 
   // WhatsApp the party (lorries + price) - fire-and-forget, never blocks the PO.
+  // The tonnage is quoted back only when asked for: the order's total, not the
+  // per-lorry split, since that is the figure the party gave us.
   void whatsappService.notifyPoCreated(
     createdPOs.map((po) => ({ id: po.id, poNumber: po.poNumber })),
     { name: party.name, phone: party.phone, phone2: party.phone2 },
-    Number(data.pricePerKg)
+    Number(data.pricePerKg),
+    data.sendTonnageInMessage ? data.tonnageKg : null
   );
 
   res.status(201).json(createdPOs[0]);

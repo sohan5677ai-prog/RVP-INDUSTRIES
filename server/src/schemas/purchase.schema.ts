@@ -13,6 +13,9 @@ export const createPurchaseOrderSchema = z.object({
   hasGst: z.boolean().optional().default(false),
   tonnageKg: z.coerce.number().int().positive(), // already in kg (FE converts tonnes -> kg)
   lorryCount: z.preprocess((val) => (val === null || val === undefined || val === '' ? null : Number(val)), z.number().int().positive().nullable().optional()),
+  // Purely a WhatsApp-message option, never stored: when the party quoted an exact
+  // weight, print it in brackets after the lorry count in the confirmation.
+  sendTonnageInMessage: z.boolean().optional().default(false),
 });
 
 const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);

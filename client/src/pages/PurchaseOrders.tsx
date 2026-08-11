@@ -81,6 +81,7 @@ const poSchema = z.object({
   excludeGst: z.boolean(),
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Tonnage must be positive'),
   lorries: z.string().optional(),
+  sendTonnage: z.boolean(),
 });
 type POForm = z.infer<typeof poSchema>;
 
@@ -146,12 +147,26 @@ export default function PurchaseOrders() {
 
   const form = useForm<POForm>({
     resolver: zodResolver(poSchema),
-    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', plannedLocation: 'RVP', excludeGst: false, tonnes: '', lorries: ''},
+    defaultValues: { poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', plannedLocation: 'RVP', excludeGst: false, tonnes: '', lorries: '', sendTonnage: false },
   });
+
+  // Preview of the "Lorries:" line the party will receive. Mirrors the server's
+  // fallback (one lorry per 25 t) for when the count is left blank.
+  const watchedLorries = form.watch('lorries');
+  const watchedTonnes = form.watch('tonnes');
+  const messageLorryLine = useMemo(() => {
+    const kg = Math.round(Number(watchedTonnes || 0) * 1000);
+    if (!kg) return null;
+    const count =
+      watchedLorries && Number(watchedLorries) > 0
+        ? Math.max(1, Math.round(Number(watchedLorries)))
+        : Math.max(1, Math.round(kg / 25000));
+    return `${count} (${kg.toLocaleString('en-IN')} KGS)`;
+  }, [watchedLorries, watchedTonnes]);
 
   function openCreate() {
     setEditing(null);
-    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', plannedLocation: 'RVP', excludeGst: false, tonnes: '', lorries: ''});
+    form.reset({ poDate: new Date().toISOString().slice(0, 10), partyId: '', pricePerKg: '', priceType: 'DELIVERY', plannedLocation: 'RVP', excludeGst: false, tonnes: '', lorries: '', sendTonnage: false });
     setOpen(true);
   }
 
@@ -166,6 +181,7 @@ export default function PurchaseOrders() {
       excludeGst: po.hasGst === false,
       tonnes: String(po.tonnageKg / 1000),
       lorries: po.lorryCount ? String(po.lorryCount) : '',
+      sendTonnage: false, // create-only: editing a PO does not re-send the confirmation
     });
     setOpen(true);
   }
@@ -197,6 +213,7 @@ export default function PurchaseOrders() {
               hasGst: !v.excludeGst,
               tonnageKg: Math.round(Number(v.tonnes) * 1000),
               lorryCount: v.lorries ? Math.max(1, Math.round(Number(v.lorries))) : null,
+              sendTonnageInMessage: v.sendTonnage,
             },
           }),
     onSuccess: () => {
@@ -594,6 +611,35 @@ export default function PurchaseOrders() {
                   )}
                 />
               </div>
+
+              {!editing && (
+                <FormField
+                  control={form.control}
+                  name="sendTonnage"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                      <FormControl>
+                        <input
+                          type="checkbox"
+                          checked={field.value}
+                          onChange={field.onChange}
+                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary mt-0.5"
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel>Send tonnage in message</FormLabel>
+                        <p className="text-[0.8rem] text-muted-foreground">
+                          Tick this when the party quoted an exact weight. The WhatsApp confirmation then reads{' '}
+                          <span className="font-medium text-foreground">
+                            Lorries: {messageLorryLine ?? '1 (25,000 KGS)'}
+                          </span>{' '}
+                          instead of the lorry count alone.
+                        </p>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <DialogFooter>
                 <Button type="submit" disabled={saveMutation.isPending}>

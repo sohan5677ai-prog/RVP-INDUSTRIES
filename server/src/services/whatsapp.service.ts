@@ -583,16 +583,30 @@ export const whatsappService = {
   /**
    * PO created → party. One order may split into several per-lorry POs
    * (poGroupId); send a single message covering the group.
+   *
+   * `tonnageKg` is set only when the order was booked against a weight the party
+   * themselves quoted, and the operator ticked "Send tonnage in message". The
+   * approved template's third slot sits after the static label "Lorries:", so the
+   * weight goes in brackets *after* the count - "2 (50,000 KGS)" - which keeps the
+   * label truthful. Never replace the count with the weight: the party would read
+   * "Lorries: 50,000 KGS".
    */
-  async notifyPoCreated(pos: Array<{ id: string; poNumber: string | null }>, party: { name: string; phone: string | null; phone2?: string | null }, pricePerKg: number) {
+  async notifyPoCreated(
+    pos: Array<{ id: string; poNumber: string | null }>,
+    party: { name: string; phone: string | null; phone2?: string | null },
+    pricePerKg: number,
+    tonnageKg?: number | null
+  ) {
     if (pos.length === 0) return;
     const first = pos[0].poNumber ?? '';
     const last = pos[pos.length - 1].poNumber ?? '';
     const poLabel = pos.length === 1 ? first : `${first} to ${last}`;
+    const lorryLabel =
+      tonnageKg && tonnageKg > 0 ? `${pos.length} (${fmtInr(tonnageKg)} KGS)` : String(pos.length);
     await sendToPartyAndInternal(
       {
         templateKey: 'PO_CREATED',
-        variables: [party.name, poLabel, pos.length, pricePerKg],
+        variables: [party.name, poLabel, lorryLabel, pricePerKg],
         relatedType: 'PO',
         relatedId: pos[0].id,
       },

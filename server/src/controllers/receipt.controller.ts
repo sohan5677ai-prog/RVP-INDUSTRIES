@@ -48,7 +48,33 @@ export async function createReceipt(req: Request, res: Response) {
   let partyPhone: string | null = null;
   let partyPhone2: string | null | undefined = null;
 
-  const receipt = await prisma.$transaction(async (tx) => {
+  // Bill-wise split. One bank transfer routinely settles several invoices, but a
+  // shipment is only ever cleared by receipts stamped with its own dispatch id
+  // (settledByDispatch / isDispatchPaid) - so instead of parking the collection
+  // on account, where it credits the party ledger but leaves every invoice
+  // reading Unpaid, it is written as one Receipt row per invoice.
+  const allocations = data.allocations ?? [];
+  if (allocations.length > 0) {
+    if (data.type !== 'BUYER' || !data.partyId) {
+      throw new HttpError(400, 'Invoice-wise allocation applies to buyer collections only');
+    }
+    const ids = allocations.map((a) => a.saleDispatchId);
+    if (new Set(ids).size !== ids.length) {
+      throw new HttpError(400, 'The same invoice appears more than once in the allocation');
+    }
+    const allocatedCash = allocations.reduce((s, a) => s + a.amount, 0);
+    if (allocatedCash !== data.amount) {
+      throw new HttpError(
+        400,
+        `Allocated cash (${allocatedCash}) does not match the amount received (${data.amount})`
+      );
+    }
+    if (allocations.every((a) => a.amount + a.tdsAmount + a.shortageAmount === 0)) {
+      throw new HttpError(400, 'Every allocation is zero - nothing to settle');
+    }
+  }
+
+  const receipts = await prisma.$transaction(async (tx) => {
     if (data.partyId) {
       const party = await tx.party.findUnique({ where: { id: data.partyId } });
       if (!party) throw new HttpError(404, 'Party not found');
@@ -57,54 +83,91 @@ export async function createReceipt(req: Request, res: Response) {
       partyPhone2 = party.phone2;
     }
 
-    const created = await tx.receipt.create({
-      data: {
-        date: data.date,
-        amount: data.amount,
-        tdsAmount: data.tdsAmount ?? null,
-        shortageAmount: data.shortageAmount ?? null,
-        type: data.type,
-        partyId: data.partyId ?? null,
-        saleDispatchId: data.saleDispatchId ?? null,
-        payer: data.payer ?? null,
-        reference: data.reference ?? null,
-        description: data.description ?? null,
-      },
-    });
-
-    await LedgerService.postReceipt(tx, created.id, {
-      date: data.date,
-      amount: data.amount,
-      type: data.type,
-      partyName,
-      payer: data.payer ?? undefined,
-      reference: data.reference ?? undefined,
-      description: data.description ?? undefined,
-    });
-
-    const journalEntry = await tx.journalEntry.findFirst({
-      where: { reference: `RECEIPT-${created.id}` },
-    });
-
-    if (journalEntry) {
-      return tx.receipt.update({
-        where: { id: created.id },
-        data: { journalEntryId: journalEntry.id },
-        include: { party: true },
+    if (allocations.length > 0) {
+      const dispatches = await tx.saleDispatch.findMany({
+        where: { id: { in: allocations.map((a) => a.saleDispatchId) } },
+        include: { saleOrder: { select: { buyerId: true } } },
       });
+      const byId = new Map(dispatches.map((d) => [d.id, d]));
+      for (const a of allocations) {
+        const d = byId.get(a.saleDispatchId);
+        if (!d) throw new HttpError(404, `Invoice ${a.saleDispatchId} not found`);
+        if (d.saleOrder.buyerId !== data.partyId) {
+          throw new HttpError(400, `Invoice ${d.invoiceNumber ?? d.id} does not belong to this buyer`);
+        }
+      }
     }
 
-    return created;
+    // No allocations → a single row, exactly as before (advance / on-account
+    // money, or a non-buyer income receipt).
+    const rows = allocations.length > 0
+      ? allocations.map((a) => ({
+          amount: a.amount,
+          tdsAmount: a.tdsAmount || null,
+          shortageAmount: a.shortageAmount || null,
+          saleDispatchId: a.saleDispatchId,
+        }))
+      : [{
+          amount: data.amount,
+          tdsAmount: data.tdsAmount ?? null,
+          shortageAmount: data.shortageAmount ?? null,
+          saleDispatchId: data.saleDispatchId ?? null,
+        }];
+
+    const out = [];
+    for (const row of rows) {
+      const created = await tx.receipt.create({
+        data: {
+          date: data.date,
+          amount: row.amount,
+          tdsAmount: row.tdsAmount,
+          shortageAmount: row.shortageAmount,
+          type: data.type,
+          partyId: data.partyId ?? null,
+          saleDispatchId: row.saleDispatchId,
+          payer: data.payer ?? null,
+          reference: data.reference ?? null,
+          description: data.description ?? null,
+        },
+      });
+
+      await LedgerService.postReceipt(tx, created.id, {
+        date: data.date,
+        amount: row.amount,
+        type: data.type,
+        partyName,
+        payer: data.payer ?? undefined,
+        reference: data.reference ?? undefined,
+        description: data.description ?? undefined,
+      });
+
+      const journalEntry = await tx.journalEntry.findFirst({
+        where: { reference: `RECEIPT-${created.id}` },
+      });
+
+      out.push(
+        journalEntry
+          ? await tx.receipt.update({
+              where: { id: created.id },
+              data: { journalEntryId: journalEntry.id },
+              include: { party: true },
+            })
+          : created
+      );
+    }
+    return out;
   });
 
   // WhatsApp the payer (when we have a phone on file) and ALWAYS copy the
   // internal alert-recipient members - every receipt (buyer collections,
   // gunny/scrap/interest/other income) gets an office copy. Fire-and-forget.
+  // A split collection is one payment to the buyer, so it gets one message for
+  // the full amount rather than one per invoice.
   void (async () => {
     const name = partyName || data.payer || `${data.type} receipt`;
     await whatsappService.notifyReceiptReceived(
       {
-        id: receipt.id,
+        id: receipts[0].id,
         amount: Number(data.amount),
         date: data.date,
         reference: data.reference ?? null,
@@ -113,7 +176,9 @@ export async function createReceipt(req: Request, res: Response) {
     );
   })().catch(() => {});
 
-  res.json(receipt);
+  // Single-row creates keep their original response shape; a split returns the
+  // whole set so the caller can see what each invoice took.
+  res.json(allocations.length > 0 ? receipts : receipts[0]);
 }
 
 export async function deleteReceipt(req: Request, res: Response) {

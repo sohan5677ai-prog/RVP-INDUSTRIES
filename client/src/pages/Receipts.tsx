@@ -9,7 +9,7 @@ import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { Receipt, Party, ReceiptType, SaleOrder } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { shortageGst, shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
+import { shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Button } from '@/components/ui/button';
 import {
@@ -62,20 +62,28 @@ const RECEIPT_TYPES: { value: ReceiptType; label: string }[] = [
 // Everything else is a direct-cash income that uses the free-text payer.
 const COLLECTION_TYPES: ReceiptType[] = ['BUYER'];
 
-// Sentinel for the "no specific invoice" option in the invoice picker (shadcn
-// Select can't use an empty-string value).
-const NO_INVOICE = '__none__';
-
 /** One of a buyer's outstanding invoiced shipments, for the receipt picker. */
 interface BuyerInvoice {
   id: string;            // saleDispatch id
   invoiceNumber: string | null;
+  billDate: string;
   billAmount: number;    // billed total (base + GST), whole rupees
-  remaining: number;     // still due after prior receipts (FIFO), whole rupees
+  remaining: number;     // still due after receipts linked to THIS invoice, whole rupees
   saleBase: number;      // sale value EXCLUDING GST - the TDS calc base
   shortageBase: number;  // buyer-kata shortage goods value (GST-excluded) at delivery
   gstExempt: boolean;    // whether 5% GST applies to the shortage deduction
 }
+
+/** What one invoice takes out of a single collection. Shortage is held as the
+ *  GST-EXCLUDED goods value; the 5% is added when the receipt is posted. */
+interface Allocation {
+  cash: string;
+  tds: string;
+  shortage: string;
+}
+
+const EMPTY_ALLOC: Allocation = { cash: '', tds: '', shortage: '' };
+const num = (s: string) => Number(s) || 0;
 
 // Receipts created from a detail page (Gunny Bag sales, Other Income).
 // Read-only here - delete them on their own page so both sides stay in sync.
@@ -142,10 +150,10 @@ export default function ReceiptsPage() {
   const [payer, setPayer] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
-  const [saleDispatchId, setSaleDispatchId] = useState('');
-  const [shortage, setShortage] = useState('');
+  // Invoice-wise split of this collection, keyed by saleDispatch id. Empty =
+  // nothing allocated (only allowed when the buyer has no open invoices).
+  const [allocs, setAllocs] = useState<Record<string, Allocation>>({});
   const [enableTds, setEnableTds] = useState(false);
-  const [tds, setTds] = useState('');
 
   // Outstanding-invoice data - only pulled while the dialog is open, so the
   // register itself stays fast. Sale orders carry the buyer-kata shortage
@@ -162,13 +170,21 @@ export default function ReceiptsPage() {
     enabled: open,
   });
 
-  // FIFO outstanding for the selected buyer, mirroring the Sale Dues page:
-  // direct (invoice-tagged) receipts settle their own shipment first, then any
-  // unallocated buyer receipts flow oldest-invoice-first. TDS + shortage count
-  // as clearing amounts, same as there.
+  // Outstanding invoices for the selected buyer. Settlement is invoice-based
+  // ONLY - exactly as on Sale Dues and the product sales pages: a shipment is
+  // cleared purely by the receipts stamped with its own dispatch id. Receipts
+  // sitting on account clear nothing here, which is precisely why they must be
+  // allocated rather than left floating.
   const buyerInvoices = useMemo<BuyerInvoice[]>(() => {
     if (type !== 'BUYER' || !partyId) return [];
-    const shipments = (allSaleOrders ?? [])
+    const linked = new Map<string, number>();
+    for (const r of allReceipts ?? []) {
+      if (r.type !== 'BUYER' || !r.saleDispatchId) continue;
+      const clearing = Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
+      linked.set(r.saleDispatchId, (linked.get(r.saleDispatchId) ?? 0) + clearing);
+    }
+
+    return (allSaleOrders ?? [])
       .filter((o) => o.buyerId === partyId)
       .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })))
       .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
@@ -176,44 +192,17 @@ export default function ReceiptsPage() {
         const rate = Number(o.ratePerKg);
         const total = Math.round(Number(d.weightKg) * rate + (Number(d.gstAmount) || 0));
         return {
-          d,
-          remaining: total,
+          id: d.id,
+          invoiceNumber: d.invoiceNumber,
+          billDate: d.dispatchDate,
           billAmount: total,
+          remaining: Math.round(Math.max(0, total - (linked.get(d.id) ?? 0))),
           saleBase: Number(d.weightKg) * rate,
           shortageBase: (Number(d.shortageKg) || 0) * rate,
           gstExempt: o.gstExempt,
         };
-      });
-
-    const buyerReceipts = (allReceipts ?? [])
-      .filter((r) => r.type === 'BUYER' && r.partyId === partyId)
-      .sort((a, z) => new Date(a.date).getTime() - new Date(z.date).getTime());
-    const clearing = (r: Receipt) => Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
-
-    shipments.forEach((s) => {
-      buyerReceipts.filter((r) => r.saleDispatchId === s.d.id).forEach((r) => {
-        if (s.remaining > 0) s.remaining -= Math.min(clearing(r), s.remaining);
-      });
-    });
-    const pool = buyerReceipts.filter((r) => !r.saleDispatchId).map((r) => ({ available: clearing(r) }));
-    shipments.forEach((s) => {
-      for (const r of pool) {
-        if (s.remaining <= 0) break;
-        if (r.available > 0) { const ap = Math.min(r.available, s.remaining); r.available -= ap; s.remaining -= ap; }
-      }
-    });
-
-    return shipments
-      .filter((s) => s.remaining > 0.5)
-      .map((s) => ({
-        id: s.d.id,
-        invoiceNumber: s.d.invoiceNumber,
-        billAmount: s.billAmount,
-        remaining: Math.round(s.remaining),
-        saleBase: s.saleBase,
-        shortageBase: s.shortageBase,
-        gstExempt: s.gstExempt,
-      }));
+      })
+      .filter((s) => s.remaining > 0.5);
   }, [type, partyId, allSaleOrders, allReceipts]);
 
   function resetForm() {
@@ -224,35 +213,79 @@ export default function ReceiptsPage() {
     setPayer('');
     setReference('');
     setDescription('');
-    setSaleDispatchId('');
-    setShortage('');
+    setAllocs({});
     setEnableTds(false);
-    setTds('');
   }
 
-  /** Pick an invoice to settle → tie the receipt to it and auto-fill the
-   *  recorded kata shortage (goods value), its 5% GST, TDS, and the net cash
-   *  still expected. Mirrors the "Mark as Paid" and Sale Dues dialogs. */
-  function selectInvoice(v: string) {
-    if (v === NO_INVOICE) { setSaleDispatchId(''); setShortage(''); setEnableTds(false); setTds(''); return; }
-    setSaleDispatchId(v);
-    const inv = buyerInvoices.find((i) => i.id === v);
-    if (inv) {
-      const shortageBase = inv.shortageBase > 0 ? String(round2(inv.shortageBase)) : '';
-      setShortage(shortageBase);
-      setEnableTds(false);
-      setTds(String(saleTds(inv.saleBase)));
-      setAmount(expectedCash(inv, shortageBase, '', false));
-    }
-  }
-
-  /** Cash still expected on an invoice = remaining − shortage(base + 5% GST) − TDS.
+  /** Cash expected on one invoice = its balance − shortage(base + 5% GST) − TDS.
    *  Both deductions come OFF the cash, never on top of it. */
   function expectedCash(inv: BuyerInvoice, shortageStr: string, tdsStr: string, tdsOn: boolean) {
     const shortageTotal = shortageWithGst(parseFloat(shortageStr) || 0, inv.gstExempt);
     const tds = tdsOn ? (parseFloat(tdsStr) || 0) : 0;
     return String(round2(Math.max(0, inv.remaining - shortageTotal - tds)));
   }
+
+  /** Prefilled split for one invoice: its recorded kata shortage, TDS when the
+   *  toggle is on, and the net cash still expected. Same maths as the Sale Dues
+   *  and "Mark as Paid" dialogs. */
+  function defaultAlloc(inv: BuyerInvoice, tdsOn: boolean): Allocation {
+    const shortage = inv.shortageBase > 0 ? String(round2(inv.shortageBase)) : '';
+    const tds = String(saleTds(inv.saleBase));
+    return { shortage, tds, cash: expectedCash(inv, shortage, tds, tdsOn) };
+  }
+
+  /** Tick / untick an invoice on this collection. */
+  function toggleInvoice(inv: BuyerInvoice, on: boolean) {
+    setAllocs((prev) => {
+      const next = { ...prev };
+      if (on) next[inv.id] = defaultAlloc(inv, enableTds);
+      else delete next[inv.id];
+      return next;
+    });
+  }
+
+  function patchAlloc(inv: BuyerInvoice, patch: Partial<Allocation>) {
+    setAllocs((prev) => {
+      const cur = prev[inv.id] ?? EMPTY_ALLOC;
+      const merged = { ...cur, ...patch };
+      // Editing a deduction re-derives the cash; editing cash is left alone.
+      if (patch.cash === undefined && (patch.tds !== undefined || patch.shortage !== undefined)) {
+        merged.cash = expectedCash(inv, merged.shortage, merged.tds, enableTds);
+      }
+      return { ...prev, [inv.id]: merged };
+    });
+  }
+
+  /** TDS applies to the whole collection, so the toggle re-derives every row. */
+  function toggleTds(on: boolean) {
+    setEnableTds(on);
+    setAllocs((prev) => {
+      const next: Record<string, Allocation> = {};
+      for (const [id, a] of Object.entries(prev)) {
+        const inv = buyerInvoices.find((i) => i.id === id);
+        if (!inv) { next[id] = a; continue; }
+        const tds = a.tds || String(saleTds(inv.saleBase));
+        next[id] = { ...a, tds, cash: expectedCash(inv, a.shortage, tds, on) };
+      }
+      return next;
+    });
+  }
+
+  const allocatedIds = Object.keys(allocs);
+  const allocatedCash = allocatedIds.reduce((s, id) => s + num(allocs[id].cash), 0);
+  const allocatedTds = enableTds ? allocatedIds.reduce((s, id) => s + num(allocs[id].tds), 0) : 0;
+  const allocatedShortage = allocatedIds.reduce((s, id) => s + num(allocs[id].shortage), 0);
+  const allocatedShortageGross = allocatedIds.reduce((s, id) => {
+    const inv = buyerInvoices.find((i) => i.id === id);
+    return s + shortageWithGst(num(allocs[id].shortage), inv?.gstExempt ?? false);
+  }, 0);
+  const allocatedTotal = round2(allocatedCash + allocatedTds + allocatedShortageGross);
+
+  // With invoices ticked the amount received IS the sum of their cash shares, so
+  // the two can never drift apart (the server rejects a mismatch anyway).
+  useEffect(() => {
+    if (allocatedIds.length > 0) setAmount(String(round2(allocatedCash)));
+  }, [allocatedCash, allocatedIds.length]);
 
   /** Pre-fill the form from a receipt screenshot read by the server OCR. */
   function applyExtracted(data: ExtractedTransaction) {
@@ -282,8 +315,6 @@ export default function ReceiptsPage() {
     else toast.message('Could not read the screenshot. Enter details manually.');
   }
 
-  const selectedInvoice = buyerInvoices.find((i) => i.id === saleDispatchId);
-
   const mutation = useMutation({
     mutationFn: () =>
       api<Receipt>('/receipts', {
@@ -293,20 +324,31 @@ export default function ReceiptsPage() {
           amount: Number(amount) || 0,
           type,
           partyId: type === 'BUYER' ? partyId || null : null,
-          saleDispatchId: type === 'BUYER' && saleDispatchId ? saleDispatchId : null,
-          // Shortage clears the GST-inclusive invoice → book base + 5% GST on it.
-          shortageAmount: type === 'BUYER'
-            ? shortageWithGst(Number(shortage) || 0, selectedInvoice?.gstExempt ?? false)
-            : 0,
-          tdsAmount: type === 'BUYER' && enableTds ? (Number(tds) || 0) : 0,
           payer: !COLLECTION_TYPES.includes(type) ? payer || null : null,
           reference: reference || null,
           description: description || null,
+          // One row per invoice, so every rupee clears a specific bill instead of
+          // sitting on account where the dues pages can't see it. Shortage clears
+          // the GST-inclusive invoice → book base + 5% GST on it.
+          allocations: allocatedIds.map((id) => {
+            const inv = buyerInvoices.find((i) => i.id === id);
+            const a = allocs[id];
+            return {
+              saleDispatchId: id,
+              amount: round2(num(a.cash)),
+              tdsAmount: enableTds ? round2(num(a.tds)) : 0,
+              shortageAmount: shortageWithGst(num(a.shortage), inv?.gstExempt ?? false),
+            };
+          }),
         },
       }),
     onSuccess: () => {
       invalidateReceiptQueries(qc);
-      toast.success('Receipt recorded successfully');
+      toast.success(
+        allocatedIds.length > 1
+          ? `Receipt recorded against ${allocatedIds.length} invoices`
+          : 'Receipt recorded successfully',
+      );
       setOpen(false);
       resetForm();
     },
@@ -322,9 +364,15 @@ export default function ReceiptsPage() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  // A buyer collection with open invoices MUST say which ones it settles.
+  // Leaving it unallocated credits the party ledger but clears no invoice, so
+  // the bill keeps showing Unpaid on Sale Dues and the statement prints a
+  // receipt with no invoice against it - the exact mismatch this blocks.
+  const needsAllocation = type === 'BUYER' && !!partyId && buyerInvoices.length > 0;
   const isValid =
     Number(amount) > 0 &&
-    (type !== 'BUYER' || partyId);
+    (type !== 'BUYER' || partyId) &&
+    (!needsAllocation || allocatedIds.length > 0);
 
   return (
     <div className="space-y-6">
@@ -386,7 +434,20 @@ export default function ReceiptsPage() {
                     {typeLabel}
                     {managedIn && <span className="ml-1.5 font-normal italic text-[10px]">· via {managedIn}</span>}
                   </TableCell>
-                  <TableCell className="font-medium">{receivedFromText}</TableCell>
+                  <TableCell className="font-medium">
+                    {receivedFromText}
+                    {/* Money that credited the ledger but cleared no bill - the
+                        invoice stays Unpaid on Sale Dues until it is re-recorded
+                        against one. */}
+                    {r.type === 'BUYER' && !r.saleDispatchId && (
+                      <span
+                        className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-400"
+                        title="Not applied to any invoice - reverse it and re-record it against the invoices it settles"
+                      >
+                        On account
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell className="font-mono text-xs">{r.reference ?? '-'}</TableCell>
                   <TableCell className="max-w-xs truncate text-muted-foreground">{r.description ?? '-'}</TableCell>
                   <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">{rupees(r.amount)}</TableCell>
@@ -416,7 +477,7 @@ export default function ReceiptsPage() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Record Receipt</DialogTitle>
           </DialogHeader>
@@ -434,13 +495,25 @@ export default function ReceiptsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="amount">Amount (₹)</Label>
-                <Input id="amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 100000" />
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="e.g. 100000"
+                  readOnly={allocatedIds.length > 0}
+                  className={allocatedIds.length > 0 ? 'bg-muted/60' : undefined}
+                />
+                {allocatedIds.length > 0 && (
+                  <p className="text-[10px] text-muted-foreground">Sum of the cash allocated below.</p>
+                )}
               </div>
             </div>
 
             <div className="space-y-2">
               <Label>Receipt Type</Label>
-              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setSaleDispatchId(''); setShortage(''); setEnableTds(false); setTds(''); }}>
+              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setAllocs({}); setEnableTds(false); }}>
                 <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
                   {RECEIPT_TYPE_GROUPS.map((g) => (
@@ -458,7 +531,7 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label>Buyer</Label>
-                <Select value={partyId} onValueChange={(v) => { setPartyId(v); setSaleDispatchId(''); setShortage(''); setEnableTds(false); setTds(''); }}>
+                <Select value={partyId} onValueChange={(v) => { setPartyId(v); setAllocs({}); setEnableTds(false); }}>
                   <SelectTrigger><SelectValue placeholder="Select buyer" /></SelectTrigger>
                   <SelectContent>
                     {buyers.map((b) => (
@@ -469,130 +542,162 @@ export default function ReceiptsPage() {
               </div>
             )}
 
+            {/* Bill-wise allocation. One transfer routinely covers several
+                invoices, and settlement everywhere else is invoice-based, so the
+                collection is split here rather than left sitting on account. */}
             {type === 'BUYER' && partyId && (
               <div className="space-y-2">
-                <Label>Against Invoice (optional)</Label>
-                <Select value={saleDispatchId || NO_INVOICE} onValueChange={selectInvoice}>
-                  <SelectTrigger><SelectValue placeholder="Unallocated" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_INVOICE}>Unallocated (no specific invoice)</SelectItem>
-                    {buyerInvoices.map((inv) => (
-                      <SelectItem key={inv.id} value={inv.id}>
-                        {inv.invoiceNumber ?? 'No invoice'} · due {rupees(inv.remaining)}
-                        {inv.shortageBase > 0 ? ` · shortage ${rupees(inv.shortageBase)}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {buyerInvoices.length === 0 && (
-                  <p className="text-[10px] text-muted-foreground">No outstanding invoices for this buyer.</p>
-                )}
-              </div>
-            )}
+                <div className="flex items-center justify-between gap-3">
+                  <Label>Settle Against Invoices</Label>
+                  {buyerInvoices.length > 0 && (
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-primary"
+                        checked={enableTds}
+                        onChange={(e) => toggleTds(e.target.checked)}
+                      />
+                      <span className="text-xs font-medium">Deduct TDS (0.1%)</span>
+                    </label>
+                  )}
+                </div>
 
-            {type === 'BUYER' && (
-              <div className="space-y-2">
-                <Label htmlFor="shortage">Shortage / Kata Deduction (₹)</Label>
-                <Input
-                  id="shortage"
-                  type="number"
-                  step="0.01"
-                  value={shortage}
-                  onChange={(e) => {
-                    setShortage(e.target.value);
-                    if (selectedInvoice) setAmount(expectedCash(selectedInvoice, e.target.value, tds, enableTds));
-                  }}
-                  placeholder="0"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Goods value of the buyer's kata shortage (auto-filled from delivery). 5% GST is added on top. Adjust if needed.
-                </p>
-              </div>
-            )}
-
-            {type === 'BUYER' && (
-              <div className="space-y-2">
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-primary"
-                    checked={enableTds}
-                    onChange={(e) => {
-                      const on = e.target.checked;
-                      setEnableTds(on);
-                      let next = tds;
-                      if (on && !tds && selectedInvoice) { next = String(saleTds(selectedInvoice.saleBase)); setTds(next); }
-                      if (selectedInvoice) setAmount(expectedCash(selectedInvoice, shortage, next, on));
-                    }}
-                  />
-                  <span className="text-sm font-medium">Deduct TDS (0.1%)</span>
-                </label>
-                {enableTds && (
+                {buyerInvoices.length === 0 ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    No outstanding invoices for this buyer - this will be recorded as an advance / on-account receipt.
+                  </p>
+                ) : (
                   <>
-                    <Input
-                      id="recv-tds"
-                      type="number"
-                      step="0.01"
-                      value={tds}
-                      onChange={(e) => {
-                        setTds(e.target.value);
-                        if (selectedInvoice) setAmount(expectedCash(selectedInvoice, shortage, e.target.value, true));
-                      }}
-                      placeholder="0"
-                    />
-                    <p className="text-[10px] text-muted-foreground">0.1% of sale value (excluding GST). Auto-filled when an invoice is selected.</p>
+                    <div className="rounded-md border overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/60 text-muted-foreground">
+                          <tr>
+                            <th className="w-8 p-2" />
+                            <th className="p-2 text-left font-medium">Invoice</th>
+                            <th className="p-2 text-right font-medium">Due</th>
+                            <th className="p-2 text-right font-medium">Cash</th>
+                            {enableTds && <th className="p-2 text-right font-medium">TDS</th>}
+                            <th className="p-2 text-right font-medium">Shortage</th>
+                            <th className="p-2 text-right font-medium">Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {buyerInvoices.map((inv) => {
+                            const a = allocs[inv.id];
+                            const on = !!a;
+                            const cleared = on
+                              ? num(a.cash) + (enableTds ? num(a.tds) : 0) + shortageWithGst(num(a.shortage), inv.gstExempt)
+                              : 0;
+                            const balance = round2(inv.remaining - cleared);
+                            return (
+                              <tr key={inv.id} className={`border-t ${on ? 'bg-primary/5' : ''}`}>
+                                <td className="p-2">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 accent-primary"
+                                    checked={on}
+                                    onChange={(e) => toggleInvoice(inv, e.target.checked)}
+                                  />
+                                </td>
+                                <td className="p-2">
+                                  <div className="font-medium">{inv.invoiceNumber ?? 'No invoice'}</div>
+                                  <div className="text-[10px] text-muted-foreground">{shortDate(inv.billDate)}</div>
+                                </td>
+                                <td className="p-2 text-right whitespace-nowrap">{rupees(inv.remaining)}</td>
+                                <td className="p-2">
+                                  <Input
+                                    type="number"
+                                    step="1"
+                                    className="h-8 w-28 text-right"
+                                    disabled={!on}
+                                    value={a?.cash ?? ''}
+                                    onChange={(e) => patchAlloc(inv, { cash: e.target.value })}
+                                  />
+                                </td>
+                                {enableTds && (
+                                  <td className="p-2">
+                                    <Input
+                                      type="number"
+                                      step="1"
+                                      className="h-8 w-24 text-right"
+                                      disabled={!on}
+                                      value={a?.tds ?? ''}
+                                      onChange={(e) => patchAlloc(inv, { tds: e.target.value })}
+                                    />
+                                  </td>
+                                )}
+                                <td className="p-2">
+                                  <Input
+                                    type="number"
+                                    step="1"
+                                    className="h-8 w-24 text-right"
+                                    disabled={!on}
+                                    placeholder="0"
+                                    value={a?.shortage ?? ''}
+                                    onChange={(e) => patchAlloc(inv, { shortage: e.target.value })}
+                                  />
+                                </td>
+                                <td className="p-2 text-right whitespace-nowrap">
+                                  {!on ? (
+                                    <span className="text-muted-foreground">-</span>
+                                  ) : Math.abs(balance) < 1 ? (
+                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">Settled</span>
+                                  ) : (
+                                    <span className="font-medium text-amber-600 dark:text-amber-500">
+                                      {balance > 0 ? rupees(balance) : `+${rupees(-balance)}`}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Tick every invoice this money covers. Shortage is the goods value of the buyer's kata cut
+                      (auto-filled from delivery); 5% GST is added on top. Money left unallocated credits the ledger
+                      but clears no bill, so the invoice would keep reading Unpaid on Sale Dues.
+                    </p>
                   </>
                 )}
               </div>
             )}
 
             {/* Settlement summary - mirrors the "Mark as Paid" / Sale Dues breakdown */}
-            {type === 'BUYER' && (Number(amount) > 0 || Number(shortage) > 0 || (enableTds && Number(tds) > 0)) && (() => {
-              const received = Number(amount) || 0;
-              const tdsAmt = enableTds ? (Number(tds) || 0) : 0;
-              const shortageBase = Number(shortage) || 0;
-              const shortageGstAmt = shortageGst(shortageBase, selectedInvoice?.gstExempt ?? false);
-              // Deductions come off the invoice, never on top of the cash.
-              const outstanding = selectedInvoice?.remaining ?? 0;
-              const netDue = round2(outstanding - shortageBase - shortageGstAmt - tdsAmt);
-              const balance = round2(netDue - received);
-              return (
-                <div className="rounded-md bg-muted/50 px-3 py-2 text-xs space-y-0.5">
-                  {selectedInvoice && (
-                    <div className="flex justify-between"><span>Outstanding</span><span>{rupees(outstanding)}</span></div>
-                  )}
-                  {shortageBase > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
-                      <span>Shortage</span><span>-{rupees(shortageBase)}</span>
-                    </div>
-                  )}
-                  {shortageGstAmt > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
-                      <span>GST on shortage (5%)</span><span>-{rupees(shortageGstAmt)}</span>
-                    </div>
-                  )}
-                  {tdsAmt > 0 && (
-                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
-                      <span>TDS (0.1%)</span><span>-{rupees(tdsAmt)}</span>
-                    </div>
-                  )}
-                  {selectedInvoice && (
-                    <div className="flex justify-between font-semibold border-t pt-1 mt-1">
-                      <span>Net due</span><span>{rupees(netDue)}</span>
-                    </div>
-                  )}
-                  <div className={`flex justify-between ${selectedInvoice ? '' : 'font-semibold'}`}>
-                    <span>Cash received</span><span>{rupees(received)}</span>
-                  </div>
-                  {selectedInvoice && Math.abs(balance) > 0.01 && (
-                    <div className="flex justify-between font-medium">
-                      <span>{balance > 0 ? 'Still outstanding' : 'Excess received'}</span>
-                      <span className="text-amber-600 dark:text-amber-500">{rupees(Math.abs(balance))}</span>
-                    </div>
-                  )}
+            {type === 'BUYER' && allocatedIds.length > 0 && (
+              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs space-y-0.5">
+                <div className="flex justify-between">
+                  <span>Invoices settled</span><span>{allocatedIds.length}</span>
                 </div>
-              );
-            })()}
+                <div className="flex justify-between"><span>Cash received</span><span>{rupees(allocatedCash)}</span></div>
+                {allocatedShortage > 0 && (
+                  <>
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>Shortage</span><span>{rupees(allocatedShortage)}</span>
+                    </div>
+                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                      <span>GST on shortage (5%)</span><span>{rupees(allocatedShortageGross - allocatedShortage)}</span>
+                    </div>
+                  </>
+                )}
+                {allocatedTds > 0 && (
+                  <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                    <span>TDS (0.1%)</span><span>{rupees(allocatedTds)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-semibold border-t pt-1 mt-1">
+                  <span>Total cleared against invoices</span><span>{rupees(allocatedTotal)}</span>
+                </div>
+              </div>
+            )}
+
+            {needsAllocation && allocatedIds.length === 0 && (
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                This buyer has {buyerInvoices.length} outstanding invoice{buyerInvoices.length === 1 ? '' : 's'}.
+                Tick the ones this payment settles - a receipt with no invoice clears nothing.
+              </p>
+            )}
 
             {!COLLECTION_TYPES.includes(type) && (
               <div className="space-y-2">

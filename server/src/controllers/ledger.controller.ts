@@ -599,11 +599,15 @@ function buildPartyLedger(
     // Sale Dues or the Receipts page; the invoice rides in its own column.
     const recInvoice = linkedDispatch?.invoiceLabel ?? narration.invoiceNumber;
     const recVehicle = linkedDispatch?.vehicleNumber ?? null;
+    // A collection that was never stamped with a dispatch id settles no invoice
+    // anywhere in the app, so its blank Invoice cell is a fact about the data,
+    // not a gap in this report - say so rather than leaving it unexplained.
+    const onAccount = !recInvoice;
     txns.push({
       id: `REC-${r.id}`,
       date: r.date.toISOString(),
       kind: 'RECEIPT',
-      particulars: narration.note || 'Receipt collected',
+      particulars: narration.note || (onAccount ? 'Receipt collected (on account)' : 'Receipt collected'),
       invoiceNumber: recInvoice,
       vehicleNumber: recVehicle,
       reference: r.reference,

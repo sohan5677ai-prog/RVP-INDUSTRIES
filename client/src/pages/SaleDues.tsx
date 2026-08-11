@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
-import { shortageGst, shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
+import { shortageGst, shortageWithGst, saleTds, round2, SALE_GST_RATE } from '@/lib/receiptCalc';
 import { productDescription } from '@/lib/productNames';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -80,6 +80,42 @@ function creditTermLabel(dueDays: number): string {
   return `Delivery + ${dueDays} ${dueDays === 1 ? 'day' : 'days'}`;
 }
 
+/** A receipt stores the shortage GST-inclusive (that is how it clears the bill).
+ *  Split it back into goods value + GST so the expanded row can show both. */
+function splitShortage(total: number, gstExempt: boolean): { base: number; gst: number } {
+  if (!(total > 0)) return { base: 0, gst: 0 };
+  const base = gstExempt ? total : round2(total / (1 + SALE_GST_RATE));
+  return { base, gst: round2(total - base) };
+}
+
+const TILE_TONES = {
+  neutral: 'text-foreground',
+  emerald: 'text-emerald-600 dark:text-emerald-400',
+  amber: 'text-amber-600 dark:text-amber-500',
+  rose: 'text-rose-600 dark:text-rose-400',
+} as const;
+
+/** One number in the expanded row's settlement strip. */
+function SettleTile({
+  label,
+  value,
+  hint,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: keyof typeof TILE_TONES;
+}) {
+  return (
+    <div className="glass rounded-xl px-3.5 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn('mt-1 font-mono text-base font-semibold tabular-nums', TILE_TONES[tone])}>{value}</div>
+      {hint && <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{hint}</div>}
+    </div>
+  );
+}
+
 interface OutstandingInvoice {
   id: string;
   partyId: string;
@@ -97,6 +133,10 @@ interface OutstandingInvoice {
   netAmount: number;    // remaining due after FIFO allocation
   totalAmount: number;
   cashReceived: number; // actual cash (excludes TDS/shortage) applied to this invoice
+  // The two non-cash ways a bill gets cleared, kept apart from the cash so the
+  // expanded row can show WHY the invoice closed on less money than it billed.
+  tdsDeducted: number;      // TDS withheld by the buyer against this invoice
+  shortageDeducted: number; // shortage/kata claim allowed, GST-inclusive
   dueDaysAfter: number;
   status: string;
   // Dispatched but not yet marked delivered. The receivable is real (the ledger
@@ -105,7 +145,14 @@ interface OutstandingInvoice {
   // never be shown as a date - the UI prints the credit TERM instead.
   inTransit: boolean;
   dueDays: number; // the order's credit days, for that term label
-  appliedReceipts: { date: string; amount: number; isTdsOrShortage?: boolean }[];
+  appliedReceipts: {
+    date: string;
+    cash: number;      // money that actually landed in the bank
+    tds: number;
+    shortage: number;  // GST-inclusive, as booked
+    amount: number;    // cash + tds + shortage = what this receipt cleared
+    isTdsOrShortage?: boolean;
+  }[];
   deletableReceiptIds: string[];
 }
 
@@ -127,6 +174,8 @@ const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Invoice No', value: (i) => i.invoiceNumber ?? '' },
   { header: 'Bill Date', value: (i) => shortDate(i.billDate.toISOString()) },
   { header: 'Bill Amount', value: (i) => rupees(i.billAmount), excel: (i) => i.billAmount, numFmt: '#,##0.00', align: 'right' },
+  { header: 'Shortage Deducted', value: (i) => rupees(i.shortageDeducted), excel: (i) => i.shortageDeducted, numFmt: '#,##0.00', align: 'right' },
+  { header: 'TDS Withheld', value: (i) => rupees(i.tdsDeducted), excel: (i) => i.tdsDeducted, numFmt: '#,##0.00', align: 'right' },
   { header: 'Cash Received', value: (i) => rupees(i.cashReceived), excel: (i) => i.cashReceived, numFmt: '#,##0.00', align: 'right' },
   { header: 'Net Amount Due', value: (i) => rupees(i.netAmount), excel: (i) => i.netAmount, numFmt: '#,##0.00', align: 'right' },
   { header: 'Status', value: (i) => i.status, align: 'center' },
@@ -218,14 +267,20 @@ export default function SaleDuesPage() {
       // Per-receipt detail (for the expandable panel, cash summary, and Undo).
       const linked = buyerReceipts.filter((r) => r.saleDispatchId === d.id);
       let cashReceived = 0;
+      let tdsDeducted = 0;
+      let shortageDeducted = 0;
       const appliedReceipts: OutstandingInvoice['appliedReceipts'] = [];
       const deletableReceiptIds: string[] = [];
       linked.forEach((r) => {
         const cash = Number(r.amount);
-        const clearing = cash + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
+        const tds = Number(r.tdsAmount ?? 0);
+        const shortage = Number(r.shortageAmount ?? 0);
+        const clearing = cash + tds + shortage;
         cashReceived += cash;
+        tdsDeducted += tds;
+        shortageDeducted += shortage;
         deletableReceiptIds.push(r.id);
-        appliedReceipts.push({ date: r.date, amount: clearing, isTdsOrShortage: cash === 0 });
+        appliedReceipts.push({ date: r.date, cash, tds, shortage, amount: clearing, isTdsOrShortage: cash === 0 });
       });
 
       const paid = isDispatchPaid(d, rate, settled);
@@ -273,6 +328,8 @@ export default function SaleDuesPage() {
         netAmount: remaining,
         totalAmount: total,
         cashReceived,
+        tdsDeducted: round2(tdsDeducted),
+        shortageDeducted: round2(shortageDeducted),
         dueDaysAfter,
         status,
         inTransit,
@@ -643,6 +700,53 @@ export default function SaleDuesPage() {
                       </TableRow>
                       {expandedId === inv.id && (
                         <ExpandPanel colSpan={11}>
+                          {/* How the bill was settled, broken into its parts: a buyer who
+                              deducts shortage and TDS clears the full invoice while paying
+                              less cash, so the lump "amount" alone hid both deductions. */}
+                          {(() => {
+                            const sh = splitShortage(inv.shortageDeducted, inv.gstExempt);
+                            const settled = round2(inv.cashReceived + inv.tdsDeducted + inv.shortageDeducted);
+                            const balance = round2(inv.billAmount - settled);
+                            return (
+                              <>
+                                <PanelLabel>Settlement Breakdown</PanelLabel>
+                                <div className="mb-5 grid max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+                                  <SettleTile label="Bill Amount" value={rupees(inv.billAmount)} />
+                                  <SettleTile
+                                    label="Shortage / Kata"
+                                    value={inv.shortageDeducted > 0 ? `-${rupees(inv.shortageDeducted)}` : rupees(0)}
+                                    tone={inv.shortageDeducted > 0 ? 'amber' : 'neutral'}
+                                    hint={
+                                      inv.shortageDeducted > 0
+                                        ? sh.gst > 0
+                                          ? `${rupees(sh.base)} goods + ${rupees(sh.gst)} GST`
+                                          : 'GST-exempt sale'
+                                        : 'No shortage claimed'
+                                    }
+                                  />
+                                  <SettleTile
+                                    label="TDS Withheld"
+                                    value={inv.tdsDeducted > 0 ? `-${rupees(inv.tdsDeducted)}` : rupees(0)}
+                                    tone={inv.tdsDeducted > 0 ? 'amber' : 'neutral'}
+                                    hint={inv.tdsDeducted > 0 ? '0.1% on sale value (excl. GST)' : 'Not deducted'}
+                                  />
+                                  <SettleTile
+                                    label="Amount Received"
+                                    value={rupees(inv.cashReceived)}
+                                    tone="emerald"
+                                    hint="Cash actually collected"
+                                  />
+                                  <SettleTile
+                                    label={balance > 0.01 ? 'Still Outstanding' : balance < -0.01 ? 'Excess Received' : 'Fully Settled'}
+                                    value={rupees(Math.abs(balance))}
+                                    tone={balance > 0.01 ? 'rose' : 'emerald'}
+                                    hint={`Cleared ${rupees(settled)} of ${rupees(inv.billAmount)}`}
+                                  />
+                                </div>
+                              </>
+                            );
+                          })()}
+
                           <PanelLabel>Allocated Receipts · {inv.appliedReceipts.length}</PanelLabel>
                           {inv.appliedReceipts.length > 0 ? (
                             <PanelStack>
@@ -650,15 +754,27 @@ export default function SaleDuesPage() {
                                 <PanelCard
                                   key={idx}
                                   icon={IndianRupee}
+                                  className="max-w-4xl"
                                   identity={
                                     <>
                                       <PanelTitle>
                                         <span className="font-mono text-sm font-semibold">{shortDate(new Date(ar.date).toISOString())}</span>
-                                        {ar.isTdsOrShortage && <span className="text-xs text-muted-foreground">TDS / Shortage</span>}
+                                        {ar.isTdsOrShortage && <span className="text-xs text-muted-foreground">Deduction only - no cash</span>}
                                       </PanelTitle>
                                     </>
                                   }
-                                  figures={<Figure label="Amount" value={rupees(ar.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
+                                  figures={
+                                    <>
+                                      <Figure label="Received" value={rupees(ar.cash)} valueClass="text-emerald-600 dark:text-emerald-400" />
+                                      {ar.shortage > 0 && (
+                                        <Figure label="Shortage" value={`-${rupees(ar.shortage)}`} valueClass="text-amber-600 dark:text-amber-500" />
+                                      )}
+                                      {ar.tds > 0 && (
+                                        <Figure label="TDS" value={`-${rupees(ar.tds)}`} valueClass="text-amber-600 dark:text-amber-500" />
+                                      )}
+                                      <Figure label="Bill Cleared" value={rupees(ar.amount)} />
+                                    </>
+                                  }
                                 />
                               ))}
                             </PanelStack>

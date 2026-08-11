@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
@@ -197,17 +198,108 @@ export class TaxproService {
   }
 
   /**
-   * GET AuthToken (decrypted variant uses GET). Valid ~6h; ClientId is injected
-   * by TaxPro. We fetch a fresh token per operation (simple + safe).
+   * Cached AuthTokens, keyed by the identity the token was minted for. NIC issues
+   * one token per (GSTIN, API user) and it is valid ~6h, so re-authenticating on
+   * every operation doubled our call count against the GSP for no benefit - the
+   * TaxPro log showed an AUTH row next to every INVOICE row, retries included.
    */
-  private static async getAuthToken(config: TaxproConfig, gstin: string): Promise<string> {
+  private static readonly authCache = new Map<string, { token: string; expiresAt: number }>();
+
+  /** Re-auth this long before the token actually lapses, to cover clock skew. */
+  private static readonly AUTH_EXPIRY_MARGIN_MS = 5 * 60_000;
+  /** Used when NIC omits (or garbles) TokenExpiry. Deliberately under the ~6h life. */
+  private static readonly AUTH_FALLBACK_TTL_MS = 5 * 60 * 60_000;
+
+  /**
+   * The key fingerprints the credentials themselves, not just the GSTIN/user, so
+   * that editing any of them in Settings misses the cache instead of reusing a
+   * token minted under the old ones. (Hashed rather than stored raw - this map
+   * should never hold a password in plain text.)
+   */
+  private static authCacheKey(config: TaxproConfig, gstin: string): string {
+    const secretFingerprint = createHash('sha256')
+      .update([config.taxproGspId, config.taxproGspSecret, config.taxproGstPass].join(' '))
+      .digest('hex')
+      .slice(0, 16);
+    return [
+      config.taxproSandbox ? 'sbx' : 'prod',
+      gstin,
+      config.taxproGstUser || '',
+      secretFingerprint,
+    ].join('|');
+  }
+
+  /**
+   * GET AuthToken (decrypted variant uses GET). Valid ~6h; ClientId is injected
+   * by TaxPro. Cached per identity until shortly before it expires; pass
+   * `forceRefresh` to discard the cached one (see `withAuth`).
+   */
+  private static async getAuthToken(
+    config: TaxproConfig,
+    gstin: string,
+    forceRefresh = false,
+  ): Promise<string> {
+    const key = this.authCacheKey(config, gstin);
+    const cached = this.authCache.get(key);
+    if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.token;
+
     const json = await this.request(config.taxproSandbox, '/eivital/dec/v1.04/auth', {
       method: 'GET',
       headers: this.baseHeaders(config, gstin),
     });
     const token = json?.Data?.AuthToken || json?.AuthToken;
     if (!token) throw new Error('TaxPro auth succeeded but returned no AuthToken');
+
+    // TokenExpiry comes back as an un-offsetted IST timestamp, same as every other
+    // NIC date - parseNicDate pins it to +05:30 so a UTC server doesn't read it as
+    // 5.5h in the past and re-auth on every single call.
+    const rawExpiry = json?.Data?.TokenExpiry || json?.TokenExpiry;
+    const parsed = rawExpiry ? this.parseNicDate(rawExpiry).getTime() : NaN;
+    const expiresAt = Number.isFinite(parsed) && parsed > Date.now()
+      ? parsed - this.AUTH_EXPIRY_MARGIN_MS
+      : Date.now() + this.AUTH_FALLBACK_TTL_MS;
+    this.authCache.set(key, { token, expiresAt });
+
     return token;
+  }
+
+  /** Drops the cached token for an identity, forcing the next call to re-auth. */
+  private static clearAuthToken(config: TaxproConfig, gstin: string) {
+    this.authCache.delete(this.authCacheKey(config, gstin));
+  }
+
+  /**
+   * NIC rejects a lapsed//revoked AuthToken with 1005 (and TaxPro's gateway can
+   * answer 401 with its own wording). Both mean "get a new token", never "the
+   * payload is wrong" - so they must not surface to the user as a failure.
+   */
+  private static isAuthTokenError(err: any): boolean {
+    const codes = Array.isArray(err?.errorDetails)
+      ? err.errorDetails.map((e: any) => String(e.ErrorCode))
+      : [];
+    if (codes.includes('1005')) return true;
+    const msg = String(err?.message || '');
+    return /\b1005\b/.test(msg) || (/token/i.test(msg) && /invalid|expire/i.test(msg));
+  }
+
+  /**
+   * Runs an authenticated call with the cached token, and transparently retries
+   * once with a fresh one if the token turns out to be stale. Without this, a
+   * cached token would be strictly riskier than the old auth-every-time code.
+   */
+  private static async withAuth<T>(
+    config: TaxproConfig,
+    gstin: string,
+    fn: (token: string) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await fn(await this.getAuthToken(config, gstin));
+    } catch (err: any) {
+      if (!this.isAuthTokenError(err)) throw err;
+      this.clearAuthToken(config, gstin);
+      logger.warn('TaxPro AuthToken rejected - re-authenticating and retrying once');
+      return fn(await this.getAuthToken(config, gstin, true));
+    }
   }
 
   /**
@@ -405,12 +497,12 @@ export class TaxproService {
     }
 
     try {
-      const token = await this.getAuthToken(company, company.gstin || '');
-      const json = await this.request(company.taxproSandbox, '/eicore/dec/v1.03/Invoice?QrCodeSize=250', {
-        method: 'POST',
-        headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
-        body: JSON.stringify(payload),
-      });
+      const json = await this.withAuth(company, company.gstin || '', (token) =>
+        this.request(company.taxproSandbox, '/eicore/dec/v1.03/Invoice?QrCodeSize=250', {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          body: JSON.stringify(payload),
+        }));
 
       const data = this.parseData(json.Data);
       return {
@@ -449,12 +541,12 @@ export class TaxproService {
     }
 
     try {
-      const token = await this.getAuthToken(company, company.gstin || '');
-      const json = await this.request(company.taxproSandbox, '/eicore/dec/v1.03/Invoice/Cancel', {
-        method: 'POST',
-        headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
-        body: JSON.stringify(payload),
-      });
+      const json = await this.withAuth(company, company.gstin || '', (token) =>
+        this.request(company.taxproSandbox, '/eicore/dec/v1.03/Invoice/Cancel', {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          body: JSON.stringify(payload),
+        }));
       const data = this.parseData(json.Data) || {};
       return {
         success: true,
@@ -543,12 +635,12 @@ export class TaxproService {
     }
 
     try {
-      const token = await this.getAuthToken(company, company.gstin || '');
-      const json = await this.request(company.taxproSandbox, '/eiewb/dec/v1.03/ewaybill', {
-        method: 'POST',
-        headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
-        body: JSON.stringify(payload),
-      });
+      const json = await this.withAuth(company, company.gstin || '', (token) =>
+        this.request(company.taxproSandbox, '/eiewb/dec/v1.03/ewaybill', {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          body: JSON.stringify(payload),
+        }));
       const data = this.parseData(json.Data) || {};
       // When Distance was submitted as 0, NIC computes it from the two PIN codes
       // and echoes the figure back. Prefer that over what we sent, so the stored
@@ -794,12 +886,12 @@ export class TaxproService {
     }
 
     try {
-      const token = await this.getAuthToken(company, company.gstin || '');
-      const json = await this.request(company.taxproSandbox, '/ewaybillapi/dec/v1.03/ewayapi?action=CANEWB', {
-        method: 'POST',
-        headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
-        body: JSON.stringify(payload),
-      });
+      const json = await this.withAuth(company, company.gstin || '', (token) =>
+        this.request(company.taxproSandbox, '/ewaybillapi/dec/v1.03/ewayapi?action=CANEWB', {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          body: JSON.stringify(payload),
+        }));
       const data = this.parseData(json.Data) || {};
       return {
         success: true,

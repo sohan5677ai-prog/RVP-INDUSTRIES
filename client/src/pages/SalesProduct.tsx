@@ -1295,7 +1295,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             )}
                                           </div>
                                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                                            <span>{shortDate(d.dispatchDate)}</span><span className="opacity-40">·</span>
+                                            <span title="Dispatched">{shortDate(d.dispatchDate)}</span><span className="opacity-40">·</span>
+                                            {d.deliveredDate && (
+                                              <>
+                                                <span className="text-forest" title="Delivered">Delivered {shortDate(d.deliveredDate)}</span>
+                                                <span className="opacity-40">·</span>
+                                              </>
+                                            )}
                                             <span>{d.vehicleNumber ?? 'no vehicle'}</span><span className="opacity-40">·</span>
                                             <span className="font-mono">{toTonnes(d.weightKg).toFixed(2)} t</span>
                                             {d.kataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.kataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Dispatch kata</a>}

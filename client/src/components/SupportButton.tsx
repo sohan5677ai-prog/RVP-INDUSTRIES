@@ -257,10 +257,13 @@ export default function SupportButton({ pageLabel, className }: Props) {
               )}
             </div>
             {shot && (
+              // object-contain, not object-cover: this is the same PNG that
+              // gets uploaded, so cropping it here to fill the box would show
+              // only its top sliver and make a complete capture look cut off.
               <img
                 src={shot}
                 alt="Captured screen"
-                className="max-h-52 w-full rounded-lg border border-border object-cover object-top"
+                className="max-h-52 w-full rounded-lg border border-border object-contain bg-muted/40"
               />
             )}
           </div>

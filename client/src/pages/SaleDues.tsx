@@ -72,6 +72,14 @@ function monthLabel(key: string): string {
   return new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 }
 
+/** What an in-transit shipment's due date will be measured FROM once it lands.
+ *  Shown in place of a date, because until the lorry is marked delivered there
+ *  is no day to count from - only the credit term. */
+function creditTermLabel(dueDays: number): string {
+  if (dueDays <= 0) return 'On delivery';
+  return `Delivery + ${dueDays} ${dueDays === 1 ? 'day' : 'days'}`;
+}
+
 interface OutstandingInvoice {
   id: string;
   partyId: string;
@@ -93,8 +101,10 @@ interface OutstandingInvoice {
   status: string;
   // Dispatched but not yet marked delivered. The receivable is real (the ledger
   // debits the buyer at dispatch, so this page has to agree with it), but the
-  // credit clock hasn't started - dueDate below is only provisional.
+  // credit clock hasn't started, so dueDate above is a placeholder that must
+  // never be shown as a date - the UI prints the credit TERM instead.
   inTransit: boolean;
+  dueDays: number; // the order's credit days, for that term label
   appliedReceipts: { date: string; amount: number; isTdsOrShortage?: boolean }[];
   deletableReceiptIds: string[];
 }
@@ -109,9 +119,9 @@ interface ReceiveDialogState {
 
 const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Broker', value: (i) => i.brokerName ?? '' },
-  // In-transit due dates are provisional (credit days run from delivery), so the
-  // export flags them rather than passing an estimate off as a committed date.
-  { header: 'Due Date', value: (i) => `${shortDate(i.dueDate.toISOString())}${i.inTransit ? ' (est.)' : ''}` },
+  // An undelivered shipment has no due date yet - credit days run from delivery.
+  // Export the credit TERM instead, so nobody chases a date we invented.
+  { header: 'Due Date', value: (i) => (i.inTransit ? creditTermLabel(i.dueDays) : shortDate(i.dueDate.toISOString())) },
   { header: 'Customer', value: (i) => i.partyName },
   { header: 'Product', value: (i) => i.product },
   { header: 'Invoice No', value: (i) => i.invoiceNumber ?? '' },
@@ -234,8 +244,11 @@ export default function SaleDuesPage() {
         : inTransit ? 'In Transit'
         : 'Unpaid';
 
-      // Provisional for in-transit rows (dispatch date + credit days) purely so
-      // the list still sorts and buckets by month; the UI marks it as an estimate.
+      // For an in-transit row this is a PLACEHOLDER, not a forecast: dispatch
+      // date + credit days would say a lorry that left on the 8th is due on the
+      // 9th, which assumes it arrives the day it leaves. It exists only to give
+      // the row a sort key and a month bucket - the UI prints the credit term
+      // ("Delivery + 1 day") in its place until deliveredDate is stamped.
       const start = d.deliveredDate || d.dispatchDate;
       const dueDate = new Date(start);
       dueDate.setDate(dueDate.getDate() + (o.dueDays || 0));
@@ -263,6 +276,7 @@ export default function SaleDuesPage() {
         dueDaysAfter,
         status,
         inTransit,
+        dueDays: o.dueDays || 0,
         appliedReceipts,
         deletableReceiptIds,
       });
@@ -295,9 +309,13 @@ export default function SaleDuesPage() {
   // Month options come from the FULL invoice set (not the product-filtered one)
   // so switching product tabs never yanks the selected month out of the list.
   // Newest month first - collections work is almost always on the recent end.
+  // In-transit shipments are left out: their dueDate is a placeholder, so
+  // counting them into "August 2026" would answer a collections question with a
+  // guess. They stay visible under All months.
   const monthOptions = useMemo(() => {
     const counts = new Map<string, number>();
     outstandingInvoices.forEach((inv) => {
+      if (inv.inTransit) return;
       const k = monthKey(inv.dueDate);
       counts.set(k, (counts.get(k) ?? 0) + 1);
     });
@@ -309,7 +327,7 @@ export default function SaleDuesPage() {
   const visibleInvoices = outstandingInvoices.filter(
     (inv) =>
       matchesProductFilter(inv.product, productFilter) &&
-      (monthFilter === ALL_MONTHS || monthKey(inv.dueDate) === monthFilter),
+      (monthFilter === ALL_MONTHS || (!inv.inTransit && monthKey(inv.dueDate) === monthFilter)),
   );
 
   const totalBillingAll = visibleInvoices.reduce((sum, item) => sum + item.totalAmount, 0);
@@ -553,11 +571,14 @@ export default function SaleDuesPage() {
                           </div>
                         </TableCell>
                         <TableCell
-                          className={cn('font-medium', inv.inTransit && 'italic text-muted-foreground')}
-                          title={inv.inTransit ? 'Provisional - credit days start from the delivery date' : undefined}
+                          className={cn('font-medium', inv.inTransit && 'text-muted-foreground')}
+                          title={inv.inTransit ? 'Not delivered yet - the due date is set once delivery is recorded' : undefined}
                         >
-                          {shortDate(inv.dueDate.toISOString())}
-                          {inv.inTransit && <span className="ml-1 text-xs not-italic">(est.)</span>}
+                          {inv.inTransit ? (
+                            <span className="text-xs">{creditTermLabel(inv.dueDays)}</span>
+                          ) : (
+                            shortDate(inv.dueDate.toISOString())
+                          )}
                         </TableCell>
                         <TableCell>{inv.partyName}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{productDescription(inv.product)}</TableCell>

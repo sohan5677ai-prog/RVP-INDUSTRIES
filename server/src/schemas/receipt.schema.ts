@@ -33,6 +33,18 @@ export const createReceiptSchema = z.object({
 
 export type CreateReceiptInput = z.infer<typeof createReceiptSchema>;
 
+// Correcting a receipt already on the books. The invoice link and its
+// TDS / shortage deductions are NOT re-sent: they stay exactly as recorded, so
+// an edit can never silently re-point a collection at a different bill.
+export const updateReceiptSchema = createReceiptSchema.omit({
+  tdsAmount: true,
+  shortageAmount: true,
+  saleDispatchId: true,
+  allocations: true,
+});
+
+export type UpdateReceiptInput = z.infer<typeof updateReceiptSchema>;
+
 export const listReceiptsSchema = z.object({
   skip: z.coerce.number().int().nonnegative().optional(),
   take: z.coerce.number().int().positive().optional().default(100),

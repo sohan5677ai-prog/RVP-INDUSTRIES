@@ -4,6 +4,7 @@ import { memoryUpload } from '../lib/upload.js';
 import {
   listReceipts,
   createReceipt,
+  updateReceipt,
   deleteReceipt,
   extractReceiptScreenshot,
 } from '../controllers/receipt.controller.js';
@@ -14,6 +15,7 @@ router.get('/receipts', asyncHandler(listReceipts));
 // Read a receipt screenshot for pre-fill (in-memory, not persisted).
 router.post('/receipts/extract', memoryUpload.single('screenshot'), asyncHandler(extractReceiptScreenshot));
 router.post('/receipts', asyncHandler(createReceipt));
+router.patch('/receipts/:id', asyncHandler(updateReceipt));
 router.delete('/receipts/:id', asyncHandler(deleteReceipt));
 
 export default router;

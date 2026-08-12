@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { createPaymentSchema, listPaymentsSchema } from '../schemas/payment.schema.js';
+import { createPaymentSchema, listPaymentsSchema, updatePaymentSchema } from '../schemas/payment.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 import { uploadFileToStorage } from '../lib/upload.js';
@@ -182,6 +182,109 @@ export async function createPayment(req: Request, res: Response) {
   })().catch(() => {});
 
   res.status(201).json(payment);
+}
+
+// Payments auto-posted from a detail page (Gunny Bags / Electricity /
+// Maintenance / Drawings). Their journal entry is keyed to that page's own
+// reference (GUNNYBAG-<id> and friends), not PAYMENT-<id>, so re-posting one
+// from here would orphan the source record. Correct them where they were made.
+const MANAGED_ELSEWHERE: Record<string, string> = {
+  GUNNY_BAGS: 'Gunny Bags',
+  ELECTRICITY: 'Electricity',
+  MAINTENANCE: 'Repairs & Maintenance',
+  DRAWINGS: 'Drawings',
+};
+
+/**
+ * Correct a payment already on the books: the row is updated in place and its
+ * journal entry is re-posted from the new values, so the ledger, the party
+ * balance and every dues page follow the correction. The proof screenshot and
+ * the purchase / hamali-verification links are carried over untouched, except
+ * when the counterparty itself changes - a payment re-pointed at a different
+ * party can no longer belong to the old party's bill, so those links are cut.
+ */
+export async function updatePayment(req: Request, res: Response) {
+  const existing = await prisma.payment.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new HttpError(404, 'Payment not found');
+
+  const managedIn = MANAGED_ELSEWHERE[existing.type];
+  if (managedIn) {
+    throw new HttpError(400, `This payment was recorded on the ${managedIn} page. Edit it there so both sides stay in sync.`);
+  }
+
+  const data = updatePaymentSchema.parse(req.body);
+  if (MANAGED_ELSEWHERE[data.type]) {
+    throw new HttpError(400, `${MANAGED_ELSEWHERE[data.type]} payments are recorded on their own page, not here.`);
+  }
+
+  const counterpartyChanged =
+    data.type !== existing.type ||
+    (data.partyId ?? null) !== existing.partyId ||
+    (data.brokerId ?? null) !== existing.brokerId;
+
+  const payment = await prisma.$transaction(async (tx) => {
+    let partyName: string | undefined;
+    if (data.partyId) {
+      const party = await tx.party.findUnique({ where: { id: data.partyId } });
+      if (!party) throw new HttpError(404, 'Party not found');
+      partyName = party.name;
+    }
+
+    let brokerName: string | undefined;
+    if (data.brokerId) {
+      const broker = await tx.broker.findUnique({ where: { id: data.brokerId } });
+      if (!broker) throw new HttpError(404, 'Broker not found');
+      brokerName = broker.name;
+    }
+
+    // Unlink BEFORE deleting: Payment.journalEntry cascades on delete, so
+    // dropping the entry while it is still attached would take the payment
+    // row down with it.
+    if (existing.journalEntryId) {
+      await tx.payment.update({ where: { id: existing.id }, data: { journalEntryId: null } });
+      await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+    }
+
+    await tx.payment.update({
+      where: { id: existing.id },
+      data: {
+        date: data.date,
+        amount: data.amount,
+        type: data.type,
+        partyId: data.partyId ?? null,
+        brokerId: data.brokerId ?? null,
+        lorryNumber: data.lorryNumber ?? null,
+        payee: data.payee ?? null,
+        reference: data.reference ?? null,
+        description: data.description ?? null,
+        ...(counterpartyChanged ? { purchaseId: null, hamaliVerificationId: null } : {}),
+      },
+    });
+
+    await LedgerService.postPayment(tx, existing.id, {
+      date: data.date,
+      amount: data.amount,
+      type: data.type,
+      partyName,
+      brokerName,
+      lorryNumber: data.lorryNumber ?? undefined,
+      payee: data.payee ?? undefined,
+      reference: data.reference ?? undefined,
+      description: data.description ?? undefined,
+    });
+
+    const journalEntry = await tx.journalEntry.findFirst({
+      where: { reference: `PAYMENT-${existing.id}` },
+    });
+
+    return tx.payment.update({
+      where: { id: existing.id },
+      data: { journalEntryId: journalEntry?.id ?? null },
+      include: { party: true, broker: true },
+    });
+  });
+
+  res.json(payment);
 }
 
 export async function deletePayment(req: Request, res: Response) {

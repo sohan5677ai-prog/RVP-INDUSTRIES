@@ -4,6 +4,7 @@ import { memoryUpload, upload } from '../lib/upload.js';
 import {
   listPayments,
   createPayment,
+  updatePayment,
   deletePayment,
   extractPaymentScreenshot,
 } from '../controllers/payment.controller.js';
@@ -16,6 +17,8 @@ router.post('/payments/extract', memoryUpload.single('screenshot'), asyncHandler
 // Multer only engages on multipart bodies, so plain-JSON creates still work.
 // A 'screenshot' file is persisted and WhatsApp'd to the party as payment proof.
 router.post('/payments', upload.single('screenshot'), asyncHandler(createPayment));
+// Correcting a recorded payment: JSON only - the proof screenshot is kept as-is.
+router.patch('/payments/:id', asyncHandler(updatePayment));
 router.delete('/payments/:id', asyncHandler(deletePayment));
 
 export default router;

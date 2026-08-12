@@ -20,6 +20,16 @@ export const createPaymentSchema = z.object({
 
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
 
+// Correcting a payment already on the books. Only the fields the register's edit
+// dialog exposes - the structural links (purchase / hamali verification /
+// screenshot) are carried over by the controller rather than re-sent.
+export const updatePaymentSchema = createPaymentSchema.omit({
+  purchaseId: true,
+  hamaliVerificationId: true,
+});
+
+export type UpdatePaymentInput = z.infer<typeof updatePaymentSchema>;
+
 export const listPaymentsSchema = z.object({
   skip: z.coerce.number().int().nonnegative().optional(),
   take: z.coerce.number().int().positive().optional().default(100),

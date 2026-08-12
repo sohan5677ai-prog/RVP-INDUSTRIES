@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { createReceiptSchema, listReceiptsSchema } from '../schemas/receipt.schema.js';
+import { createReceiptSchema, listReceiptsSchema, updateReceiptSchema } from '../schemas/receipt.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 import { whatsappService } from '../services/whatsapp.service.js';
@@ -183,6 +183,107 @@ export async function createReceipt(req: Request, res: Response) {
   // Single-row creates keep their original response shape; a split returns the
   // whole set so the caller can see what each invoice took.
   res.json(allocations.length > 0 ? receipts : receipts[0]);
+}
+
+// Receipts auto-posted from a detail page. Their journal entry is keyed to that
+// page's own reference, not RECEIPT-<id>, so re-posting one from here would
+// orphan the source record. Correct them where they were made.
+const MANAGED_ELSEWHERE: Record<string, string> = {
+  GUNNY_BAGS_SALE: 'Gunny Bags',
+  OTHER_INCOME: 'Other Income',
+};
+
+/**
+ * Correct a receipt already on the books: the row is updated in place and its
+ * journal entry is re-posted from the new values, so the ledger, the buyer
+ * balance and the dues pages follow the correction.
+ *
+ * The invoice link and its TDS / shortage deductions are deliberately left
+ * alone - settlement is invoice-based, so an edit may restate WHAT was received
+ * but never re-point the money at a different bill. Reverse and re-record for
+ * that. For the same reason the type and the buyer are frozen once a receipt is
+ * stamped with a dispatch id.
+ */
+export async function updateReceipt(req: Request, res: Response) {
+  const existing = await prisma.receipt.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new HttpError(404, 'Receipt not found');
+
+  const managedIn = MANAGED_ELSEWHERE[existing.type];
+  if (managedIn) {
+    throw new HttpError(400, `This receipt was recorded on the ${managedIn} page. Edit it there so both sides stay in sync.`);
+  }
+
+  const data = updateReceiptSchema.parse(req.body);
+  if (MANAGED_ELSEWHERE[data.type]) {
+    throw new HttpError(400, `${MANAGED_ELSEWHERE[data.type]} receipts are recorded on their own page, not here.`);
+  }
+
+  if (existing.saleDispatchId) {
+    if (data.type !== existing.type || (data.partyId ?? null) !== existing.partyId) {
+      throw new HttpError(
+        400,
+        'This receipt settles a specific invoice. Reverse it and re-record it to move the money to a different buyer.'
+      );
+    }
+    // The deductions were sized against this invoice's balance, so the cash can
+    // never be raised past what the invoice still had outstanding.
+    const cleared = Number(existing.tdsAmount ?? 0) + Number(existing.shortageAmount ?? 0);
+    if (cleared > 0 && data.amount <= 0) {
+      throw new HttpError(400, 'This receipt carries a TDS / shortage deduction, so its cash amount cannot be zeroed out.');
+    }
+  }
+
+  const receipt = await prisma.$transaction(async (tx) => {
+    let partyName: string | undefined;
+    if (data.partyId) {
+      const party = await tx.party.findUnique({ where: { id: data.partyId } });
+      if (!party) throw new HttpError(404, 'Party not found');
+      partyName = party.name;
+    }
+
+    // Unlink BEFORE deleting: Receipt.journalEntry cascades on delete, so
+    // dropping the entry while it is still attached would take the receipt row
+    // down with it.
+    if (existing.journalEntryId) {
+      await tx.receipt.update({ where: { id: existing.id }, data: { journalEntryId: null } });
+      await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+    }
+
+    await tx.receipt.update({
+      where: { id: existing.id },
+      data: {
+        date: data.date,
+        amount: data.amount,
+        type: data.type,
+        partyId: data.partyId ?? null,
+        payer: data.payer ?? null,
+        reference: data.reference ?? null,
+        description: data.description ?? null,
+      },
+    });
+
+    await LedgerService.postReceipt(tx, existing.id, {
+      date: data.date,
+      amount: data.amount,
+      type: data.type,
+      partyName,
+      payer: data.payer ?? undefined,
+      reference: data.reference ?? undefined,
+      description: data.description ?? undefined,
+    });
+
+    const journalEntry = await tx.journalEntry.findFirst({
+      where: { reference: `RECEIPT-${existing.id}` },
+    });
+
+    return tx.receipt.update({
+      where: { id: existing.id },
+      data: { journalEntryId: journalEntry?.id ?? null },
+      include: { party: true },
+    });
+  });
+
+  res.json(receipt);
 }
 
 export async function deleteReceipt(req: Request, res: Response) {

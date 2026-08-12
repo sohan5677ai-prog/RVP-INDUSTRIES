@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
@@ -113,6 +113,9 @@ const RECEIPT_EXPORT_COLUMNS: ExportColumn<Receipt>[] = [
 export default function ReceiptsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  // The receipt being corrected, or null when recording a fresh one. The same
+  // dialog serves both, minus the invoice allocation (see openEdit).
+  const [editing, setEditing] = useState<Receipt | null>(null);
 
   // Server-side pagination: only the visible page loads, so the page opens fast
   // however long the receipt history grows. "All" and Export still pull the full
@@ -162,12 +165,14 @@ export default function ReceiptsPage() {
   const { data: allSaleOrders } = useQuery({
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
-    enabled: open,
+    // Editing never re-runs the split, so the heavy invoice data is only pulled
+    // while a NEW collection is being recorded.
+    enabled: open && !editing,
   });
   const { data: allReceipts } = useQuery({
     queryKey: ['receipts', { all: true }],
     queryFn: () => api<Receipt[]>('/receipts?all=true'),
-    enabled: open,
+    enabled: open && !editing,
   });
 
   // Outstanding invoices for the selected buyer. Settlement is invoice-based
@@ -215,6 +220,23 @@ export default function ReceiptsPage() {
     setDescription('');
     setAllocs({});
     setEnableTds(false);
+  }
+
+  /** Load a recorded receipt back into the dialog so it can be corrected.
+   *  The invoice split is NOT reopened - settlement is invoice-based, so an edit
+   *  restates what came in without re-pointing it at a different bill. */
+  function openEdit(r: Receipt) {
+    setEditing(r);
+    setDate(r.date.slice(0, 10));
+    setAmount(String(Math.round(Number(r.amount))));
+    setType(r.type);
+    setPartyId(r.partyId ?? '');
+    setPayer(r.payer ?? '');
+    setReference(r.reference ?? '');
+    setDescription(r.description ?? '');
+    setAllocs({});
+    setEnableTds(false);
+    setOpen(true);
   }
 
   /** Cash expected on one invoice = its balance − shortage(base + 5% GST) − TDS.
@@ -316,8 +338,25 @@ export default function ReceiptsPage() {
   }
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api<Receipt>('/receipts', {
+    mutationFn: () => {
+      // Correcting an existing receipt: the server re-posts its ledger entry
+      // from these values and keeps the invoice link, TDS and shortage as
+      // recorded.
+      if (editing) {
+        return api<Receipt>(`/receipts/${editing.id}`, {
+          method: 'PATCH',
+          body: {
+            date,
+            amount: Number(amount) || 0,
+            type,
+            partyId: type === 'BUYER' ? partyId || null : null,
+            payer: !COLLECTION_TYPES.includes(type) ? payer || null : null,
+            reference: reference || null,
+            description: description || null,
+          },
+        });
+      }
+      return api<Receipt>('/receipts', {
         method: 'POST',
         body: {
           date,
@@ -341,15 +380,19 @@ export default function ReceiptsPage() {
             };
           }),
         },
-      }),
+      });
+    },
     onSuccess: () => {
       invalidateReceiptQueries(qc);
       toast.success(
-        allocatedIds.length > 1
-          ? `Receipt recorded against ${allocatedIds.length} invoices`
-          : 'Receipt recorded successfully',
+        editing
+          ? 'Receipt updated'
+          : allocatedIds.length > 1
+            ? `Receipt recorded against ${allocatedIds.length} invoices`
+            : 'Receipt recorded successfully',
       );
       setOpen(false);
+      setEditing(null);
       resetForm();
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -368,7 +411,13 @@ export default function ReceiptsPage() {
   // Leaving it unallocated credits the party ledger but clears no invoice, so
   // the bill keeps showing Unpaid on Sale Dues and the statement prints a
   // receipt with no invoice against it - the exact mismatch this blocks.
-  const needsAllocation = type === 'BUYER' && !!partyId && buyerInvoices.length > 0;
+  // Editing never re-runs the split (the receipt already carries its invoice
+  // link), so the allocation requirement applies to new collections only.
+  const needsAllocation = !editing && type === 'BUYER' && !!partyId && buyerInvoices.length > 0;
+  // A receipt stamped with a dispatch id clears that specific bill, so an edit
+  // can restate the money but not re-point it at another buyer (the server
+  // rejects it too).
+  const invoiceLocked = !!editing?.saleDispatchId;
   const isValid =
     Number(amount) > 0 &&
     (type !== 'BUYER' || partyId) &&
@@ -391,7 +440,7 @@ export default function ReceiptsPage() {
             columns={RECEIPT_EXPORT_COLUMNS}
             rows={() => api<Receipt[]>('/receipts?all=true')}
           />
-          <Button onClick={() => { resetForm(); setOpen(true); }}>
+          <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Receipt
           </Button>
         </div>
@@ -407,7 +456,7 @@ export default function ReceiptsPage() {
               <TableHead>Ref / Cheque</TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="text-right">Amount</TableHead>
-              <TableHead className="w-16 text-right">Actions</TableHead>
+              <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -453,19 +502,30 @@ export default function ReceiptsPage() {
                   <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">{rupees(r.amount)}</TableCell>
                   <TableCell className="text-right">
                     {managedIn ? (
-                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>-</span>
+                      <span className="text-[10px] text-muted-foreground pr-1" title={`Edit or delete this on the ${managedIn}`}>-</span>
                     ) : (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm(`Reverse this receipt of ${rupees(r.amount)}? This will remove its associated general ledger journal entry.`)) {
-                            deleteMutation.mutate(r.id);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center justify-end">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Edit this receipt"
+                          onClick={() => openEdit(r)}
+                        >
+                          <Pencil className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Reverse this receipt"
+                          onClick={() => {
+                            if (confirm(`Reverse this receipt of ${rupees(r.amount)}? This will remove its associated general ledger journal entry.`)) {
+                              deleteMutation.mutate(r.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>
@@ -476,17 +536,26 @@ export default function ReceiptsPage() {
         <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Record Receipt</DialogTitle>
+            <DialogTitle>{editing ? 'Edit Receipt' : 'Record Receipt'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <ScreenshotUpload
-              endpoint="/receipts/extract"
-              hint="Drop a receipt screenshot to auto-fill"
-              onExtracted={applyExtracted}
-            />
+            {editing ? (
+              <p className="rounded-md bg-muted/60 px-3 py-2 text-[11px] text-muted-foreground">
+                Saving re-posts this receipt's ledger entry from the corrected values.
+                {editing.saleDispatchId
+                  ? ' It stays applied to the same invoice, and its TDS / shortage deduction is left as recorded - to move the money to a different bill, reverse it and record it again.'
+                  : ' No new WhatsApp notification is sent.'}
+              </p>
+            ) : (
+              <ScreenshotUpload
+                endpoint="/receipts/extract"
+                hint="Drop a receipt screenshot to auto-fill"
+                onExtracted={applyExtracted}
+              />
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -513,7 +582,11 @@ export default function ReceiptsPage() {
 
             <div className="space-y-2">
               <Label>Receipt Type</Label>
-              <Select value={type} onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setAllocs({}); setEnableTds(false); }}>
+              <Select
+                value={type}
+                disabled={invoiceLocked}
+                onValueChange={(val: any) => { setType(val); setPartyId(''); setPayer(''); setAllocs({}); setEnableTds(false); }}
+              >
                 <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
                   {RECEIPT_TYPE_GROUPS.map((g) => (
@@ -531,7 +604,7 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label>Buyer</Label>
-                <Select value={partyId} onValueChange={(v) => { setPartyId(v); setAllocs({}); setEnableTds(false); }}>
+                <Select value={partyId} disabled={invoiceLocked} onValueChange={(v) => { setPartyId(v); setAllocs({}); setEnableTds(false); }}>
                   <SelectTrigger><SelectValue placeholder="Select buyer" /></SelectTrigger>
                   <SelectContent>
                     {buyers.map((b) => (
@@ -545,7 +618,7 @@ export default function ReceiptsPage() {
             {/* Bill-wise allocation. One transfer routinely covers several
                 invoices, and settlement everywhere else is invoice-based, so the
                 collection is split here rather than left sitting on account. */}
-            {type === 'BUYER' && partyId && (
+            {type === 'BUYER' && partyId && !editing && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <Label>Settle Against Invoices</Label>
@@ -719,7 +792,7 @@ export default function ReceiptsPage() {
 
             <DialogFooter>
               <Button onClick={() => mutation.mutate()} disabled={!isValid || mutation.isPending}>
-                {mutation.isPending ? 'Saving…' : 'Record Receipt'}
+                {mutation.isPending ? 'Saving…' : editing ? 'Save Changes' : 'Record Receipt'}
               </Button>
             </DialogFooter>
           </div>

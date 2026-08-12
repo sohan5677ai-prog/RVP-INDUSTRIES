@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
@@ -95,6 +95,9 @@ const PAYMENT_EXPORT_COLUMNS: ExportColumn<Payment>[] = [
 export default function PaymentsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  // The payment being corrected, or null when recording a fresh one. The same
+  // dialog serves both.
+  const [editing, setEditing] = useState<Payment | null>(null);
 
   // Server-side pagination: only the visible page is fetched, so opening the page
   // stays fast no matter how long the payment history grows. "All" (Infinity) and
@@ -156,6 +159,22 @@ export default function PaymentsPage() {
     setScreenshotFile(null);
   }
 
+  /** Load a recorded payment back into the dialog so it can be corrected. */
+  function openEdit(p: Payment) {
+    setEditing(p);
+    setDate(p.date.slice(0, 10));
+    setAmount(String(Math.round(Number(p.amount))));
+    setType(p.type);
+    setPartyId(p.partyId ?? '');
+    setBrokerId(p.brokerId ?? '');
+    setLorryNumber(p.lorryNumber ?? '');
+    setPayee(p.payee ?? '');
+    setReference(p.reference ?? '');
+    setDescription(p.description ?? '');
+    setScreenshotFile(null);
+    setOpen(true);
+  }
+
   /** Pre-fill the form from a payment screenshot read by the server OCR. */
   function applyExtracted(data: ExtractedTransaction) {
     const filled: string[] = [];
@@ -203,6 +222,11 @@ export default function PaymentsPage() {
         reference: reference || null,
         description: description || null,
       };
+      // Correcting an existing payment: the server re-posts its journal entry
+      // from these values. The stored proof screenshot is left as it was.
+      if (editing) {
+        return api<Payment>(`/payments/${editing.id}`, { method: 'PATCH', body: fields });
+      }
       // With a proof screenshot the create goes multipart so the server can
       // persist the file and WhatsApp it to the party; otherwise plain JSON.
       if (screenshotFile) {
@@ -219,8 +243,10 @@ export default function PaymentsPage() {
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
-      toast.success('Payment recorded successfully');
+      qc.invalidateQueries({ queryKey: ['party-ledger'] });
+      toast.success(editing ? 'Payment updated' : 'Payment recorded successfully');
       setOpen(false);
+      setEditing(null);
       resetForm();
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -260,7 +286,7 @@ export default function PaymentsPage() {
             columns={PAYMENT_EXPORT_COLUMNS}
             rows={() => api<Payment[]>('/payments?all=true')}
           />
-          <Button onClick={() => { resetForm(); setOpen(true); }}>
+          <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Payment
           </Button>
         </div>
@@ -276,7 +302,7 @@ export default function PaymentsPage() {
               <TableHead>Ref / Cheque</TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="text-right">Amount</TableHead>
-              <TableHead className="w-16 text-right">Actions</TableHead>
+              <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -313,19 +339,30 @@ export default function PaymentsPage() {
                   <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">{rupees(p.amount)}</TableCell>
                   <TableCell className="text-right">
                     {managedIn ? (
-                      <span className="text-[10px] text-muted-foreground pr-1" title={`Delete this on the ${managedIn}`}>-</span>
+                      <span className="text-[10px] text-muted-foreground pr-1" title={`Edit or delete this on the ${managedIn}`}>-</span>
                     ) : (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm(`Reverse this payment of ${rupees(p.amount)}? This will remove its associated general ledger journal entry.`)) {
-                            deleteMutation.mutate(p.id);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center justify-end">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Edit this payment"
+                          onClick={() => openEdit(p)}
+                        >
+                          <Pencil className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Reverse this payment"
+                          onClick={() => {
+                            if (confirm(`Reverse this payment of ${rupees(p.amount)}? This will remove its associated general ledger journal entry.`)) {
+                              deleteMutation.mutate(p.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>
@@ -336,18 +373,25 @@ export default function PaymentsPage() {
         <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Record Payment</DialogTitle>
+            <DialogTitle>{editing ? 'Edit Payment' : 'Record Payment'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <ScreenshotUpload
-              endpoint="/payments/extract"
-              hint="Drop a payment screenshot to auto-fill"
-              onExtracted={applyExtracted}
-              onFile={setScreenshotFile}
-            />
+            {editing ? (
+              <p className="rounded-md bg-muted/60 px-3 py-2 text-[11px] text-muted-foreground">
+                Saving re-posts this payment's ledger entry from the corrected values. The proof screenshot
+                already on file is kept, and no new WhatsApp notification is sent.
+              </p>
+            ) : (
+              <ScreenshotUpload
+                endpoint="/payments/extract"
+                hint="Drop a payment screenshot to auto-fill"
+                onExtracted={applyExtracted}
+                onFile={setScreenshotFile}
+              />
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -433,7 +477,7 @@ export default function PaymentsPage() {
 
             <DialogFooter>
               <Button onClick={() => mutation.mutate()} disabled={!isValid || mutation.isPending}>
-                {mutation.isPending ? 'Saving…' : 'Record Payment'}
+                {mutation.isPending ? 'Saving…' : editing ? 'Save Changes' : 'Record Payment'}
               </Button>
             </DialogFooter>
           </div>

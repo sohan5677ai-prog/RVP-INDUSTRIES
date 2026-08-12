@@ -7,8 +7,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  * language actually SENT rather than the one asked for.
  *
  * The mechanism tests deliberately use a template with NO approved translations
- * (STOCKIN_CONFIRMED today) so they keep testing the fall-back itself as more
- * languages get approved. Approved ids are pinned separately, by value.
+ * (RECEIPT_RECEIVED today - STOCKIN_CONFIRMED held the role until its four
+ * translations were approved on 2026-08-12) so they keep testing the fall-back
+ * itself as more languages get approved. When RECEIPT_RECEIVED is translated in
+ * turn, move these to the next untranslated key rather than deleting them - the
+ * fall-back is the safety property, and it needs a template that exercises it.
+ * Approved ids are pinned separately, by value.
  */
 
 vi.mock('../lib/prisma.js', () => ({ prisma: {} }));
@@ -17,9 +21,11 @@ vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), err
 const { templateId, resolvedLanguage } = await import('./whatsapp.service.js');
 
 const ENV_KEYS = [
+  'FAST2SMS_TMPL_RECEIPT_RECEIVED',
+  'FAST2SMS_TMPL_RECEIPT_RECEIVED_TA',
+  'FAST2SMS_TMPL_RECEIPT_RECEIVED_TE',
   'FAST2SMS_TMPL_STOCKIN_CONFIRMED',
   'FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA',
-  'FAST2SMS_TMPL_STOCKIN_CONFIRMED_TE',
   'FAST2SMS_TMPL_PO_CREATED',
   'FAST2SMS_TMPL_PO_CREATED_TA',
 ];
@@ -40,30 +46,30 @@ afterEach(() => {
 
 describe('templateId language resolution', () => {
   it('uses the language copy when one is configured', () => {
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED = '10000';
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA = '20000';
-    expect(templateId('STOCKIN_CONFIRMED', 'TA')).toBe('20000');
-    expect(resolvedLanguage('STOCKIN_CONFIRMED', 'TA')).toBe('TA');
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '10000';
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED_TA = '20000';
+    expect(templateId('RECEIPT_RECEIVED', 'TA')).toBe('20000');
+    expect(resolvedLanguage('RECEIPT_RECEIVED', 'TA')).toBe('TA');
   });
 
   it('falls back to English when the language copy is not approved yet', () => {
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED = '10000';
-    expect(templateId('STOCKIN_CONFIRMED', 'TE')).toBe('10000');
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '10000';
+    expect(templateId('RECEIPT_RECEIVED', 'TE')).toBe('10000');
     // ...and says so, so a log full of EN on a Telugu party is the missing id.
-    expect(resolvedLanguage('STOCKIN_CONFIRMED', 'TE')).toBe('EN');
+    expect(resolvedLanguage('RECEIPT_RECEIVED', 'TE')).toBe('EN');
   });
 
   it('does not let one language leak into another', () => {
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED = '10000';
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA = '20000';
-    expect(templateId('STOCKIN_CONFIRMED', 'TE')).toBe('10000');
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '10000';
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED_TA = '20000';
+    expect(templateId('RECEIPT_RECEIVED', 'TE')).toBe('10000');
   });
 
   it('ignores a blank language override rather than sending on an empty id', () => {
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED = '10000';
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA = '   ';
-    expect(templateId('STOCKIN_CONFIRMED', 'TA')).toBe('10000');
-    expect(resolvedLanguage('STOCKIN_CONFIRMED', 'TA')).toBe('EN');
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '10000';
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED_TA = '   ';
+    expect(templateId('RECEIPT_RECEIVED', 'TA')).toBe('10000');
+    expect(resolvedLanguage('RECEIPT_RECEIVED', 'TA')).toBe('EN');
   });
 
   it('stays undefined when neither copy exists - a clean SKIPPED, not a bad send', () => {
@@ -71,8 +77,8 @@ describe('templateId language resolution', () => {
   });
 
   it('never reports a language for an EN recipient', () => {
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA = '20000';
-    expect(resolvedLanguage('STOCKIN_CONFIRMED', 'EN')).toBe('EN');
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED_TA = '20000';
+    expect(resolvedLanguage('RECEIPT_RECEIVED', 'EN')).toBe('EN');
   });
 
   it('lets an env override beat the checked-in language id', () => {
@@ -94,15 +100,31 @@ describe('approved language ids', () => {
     expect(templateId('PO_CREATED', 'HI')).toBe('28596');
   });
 
-  it('reports every PO language as itself, not as an English fall-back', () => {
+  it('maps each stock-in language to its own approved message_id', () => {
+    expect(templateId('STOCKIN_CONFIRMED', 'TE')).toBe('28595');
+    expect(templateId('STOCKIN_CONFIRMED', 'TA')).toBe('28594');
+    expect(templateId('STOCKIN_CONFIRMED', 'KN')).toBe('28593');
+    expect(templateId('STOCKIN_CONFIRMED', 'HI')).toBe('28592');
+  });
+
+  it('keeps the PO and stock-in blocks apart', () => {
+    // Neighbouring five-digit blocks: 2859x is stock-in, 2859x is PO. Sending a
+    // PO on a stock-in id is a valid, approved message about the wrong event.
+    for (const lang of ['TE', 'TA', 'KN', 'HI'] as const) {
+      expect(templateId('PO_CREATED', lang)).not.toBe(templateId('STOCKIN_CONFIRMED', lang));
+    }
+  });
+
+  it('reports every translated language as itself, not as an English fall-back', () => {
     for (const lang of ['TE', 'TA', 'KN', 'HI'] as const) {
       expect(resolvedLanguage('PO_CREATED', lang)).toBe(lang);
+      expect(resolvedLanguage('STOCKIN_CONFIRMED', lang)).toBe(lang);
     }
   });
 
   it('leaves a template with no translations falling back to English', () => {
-    process.env.FAST2SMS_TMPL_STOCKIN_CONFIRMED = '26130';
-    expect(templateId('STOCKIN_CONFIRMED', 'TA')).toBe('26130');
-    expect(resolvedLanguage('STOCKIN_CONFIRMED', 'TA')).toBe('EN');
+    process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '26130';
+    expect(templateId('RECEIPT_RECEIVED', 'TA')).toBe('26130');
+    expect(resolvedLanguage('RECEIPT_RECEIVED', 'TA')).toBe('EN');
   });
 });

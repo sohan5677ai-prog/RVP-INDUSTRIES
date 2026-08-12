@@ -172,7 +172,10 @@ take the small MESSAGE ID.)
 The four translations live in `LANGUAGE_TEMPLATE_IDS` in whatsapp.service.ts and
 are pinned by value in `whatsappLanguage.test.ts` — the ids are consecutive, so a
 transposed pair would send a Tamil supplier a perfectly valid Telugu message with
-nothing in the logs to show for it.
+nothing in the logs to show for it. The stock-in block below sits immediately
+under this one (2859x against 2859x), so the same slip across the two blocks
+would send a party a valid *arrival* confirmation for an order just placed;
+that is pinned too.
 
 Sample values for the approval form: `Sri Venkateswara Traders`, `DCS/07/26-27`,
 `3`, `95.50`.
@@ -256,6 +259,22 @@ Kindly begin dispatch and share lorry details on this number. Thank you for your
 ```
 
 ### `stockin_confirmed` — 4 vars, no header, category Utility
+
+**All five languages are approved and wired** (2026-08-12):
+
+| Language | Template | message_id |
+| --- | --- | --- |
+| en | `stockin_confirmed` | `FAST2SMS_TMPL_STOCKIN_CONFIRMED` on Render |
+| te | `stockin_telugu` | 28595 |
+| ta | `stockin_tamil` | 28594 |
+| kn | `stockin_kannada` | 28593 |
+| hi | `stockin_hindi` | 28592 |
+
+The English id is the one template in this file that is **env-only** — it has no
+entry in `DEFAULT_TEMPLATE_IDS`, so an EN party's stock-in confirmation depends
+on `FAST2SMS_TMPL_STOCKIN_CONFIRMED` being set on Render. The four translations
+are checked in and need no env var. If EN parties stop getting arrival
+confirmations while Telugu/Tamil ones still do, that missing env var is why.
 
 Sample values: `Sri Venkateswara Traders` (native script per language),
 `AP39TR1234`, `1042`, `11-Aug-2026`.

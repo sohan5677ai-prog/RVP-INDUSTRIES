@@ -118,11 +118,13 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
  * ids, and nothing errors. `whatsappLanguage.test.ts` pins each one.
  */
 const LANGUAGE_TEMPLATE_IDS: Partial<Record<Exclude<WaLanguage, 'EN'>, Partial<Record<WaTemplateKey, string>>>> = {
-  // po_telugu / po_tamil / po_kannada / po_hindi, approved 2026-08-11.
-  TE: { PO_CREATED: '28599' },
-  TA: { PO_CREATED: '28598' },
-  KN: { PO_CREATED: '28597' },
-  HI: { PO_CREATED: '28596' },
+  // po_* approved 2026-08-11; stockin_* approved 2026-08-12. Both blocks run
+  // downwards TE → TA → KN → HI, which is exactly the transposition risk the
+  // pinned tests exist for.
+  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595' },
+  TA: { PO_CREATED: '28598', STOCKIN_CONFIRMED: '28594' },
+  KN: { PO_CREATED: '28597', STOCKIN_CONFIRMED: '28593' },
+  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592' },
 };
 
 /**

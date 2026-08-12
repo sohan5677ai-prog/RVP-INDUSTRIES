@@ -73,10 +73,17 @@ That is a Fast2SMS approval plus a small branch in `notifyDispatchDriver`.
 | `{{4}}` | Destination — order's, else buyer's city | `Surat` |
 | `{{5}}` | Load — product and weight | `PAPPU - 25.00 MT` |
 | `{{6}}` | Party contact | `9876543210` |
-| `{{7}}` | Maps link | `https://maps.app.goo.gl/...` |
+| `{{7}}` | Maps link | `https://maps.google.com/?q=11.237543,77.55936` |
 
 The header's own two slots are filled from the buyer: name, and street address
 falling back to the destination.
+
+`{{7}}` is **not** whatever was pasted into the party form. Once the
+coordinates are known the link is rebuilt as a short `?q=lat,lng` — a copied
+Google Maps place URL runs past 300 characters and wrapped over eight lines in
+the driver's message, pushing the lorry number and load off his first screen.
+Only a share link that could not be resolved is passed through as stored, and
+those buyers are skipped anyway.
 
 Destination is spelled out in `{{4}}` even though the pin says it too — the
 location card is easy to scroll past, and a driver who has the town in text can

@@ -2,7 +2,7 @@ import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
-import { mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
+import { coordUrl, mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -853,7 +853,8 @@ export const whatsappService = {
    * following a wrong pin is worse off than one who got no message at all.
    *
    * Destination is still spelled out in {{4}} rather than left to the pin, and
-   * the link still goes in {{7}}: the pin card is easy to scroll past, and a
+   * a link still goes in {{7}} - shortened to `?q=lat,lng` from whatever was
+   * pasted into the party form: the pin card is easy to scroll past, and a
    * driver who has the text can read the town name out to someone.
    *
    * The name is the one slot that can't fall back to "-": it opens the greeting,
@@ -874,6 +875,7 @@ export const whatsappService = {
     const destination = order.destination?.trim() || buyer.city?.trim() || '-';
     const load =
       dispatch.weightKg != null ? `${order.product} - ${fmtWeight(dispatch.weightKg)}` : order.product;
+    const coords = await resolveLatLngFromMapsLink(buyer.locationLink);
     const variables = [
       dispatch.driverName?.trim() || 'Driver ji',
       dispatch.vehicleNumber ?? '-',
@@ -881,10 +883,13 @@ export const whatsappService = {
       destination,
       load,
       buyer.phone ?? '-',
-      mapsUrlFor(buyer.locationLink) ?? '-',
+      // Once the coordinates are known, {{7}} is rebuilt as a short `?q=lat,lng`
+      // link rather than echoing what is stored: a copied Google Maps place URL
+      // runs 300-odd characters and wrapped over eight lines in the driver's
+      // message, pushing the lorry and load details out of his first screen.
+      (coords ? coordUrl(coords) : mapsUrlFor(buyer.locationLink)) ?? '-',
     ];
 
-    const coords = await resolveLatLngFromMapsLink(buyer.locationLink);
     if (!coords) {
       const error = buyer.locationLink?.trim()
         ? `Could not read coordinates from ${buyer.name}'s saved maps link - the driver template needs a pin. ` +

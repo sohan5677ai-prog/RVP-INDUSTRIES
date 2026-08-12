@@ -64,15 +64,25 @@ export function parseLatLng(raw: string | null | undefined): { lat: number; lng:
 }
 
 /**
- * A tappable maps URL for the driver's message. Stored links pass through
- * unchanged; bare coordinates become a link rather than reaching the driver as
- * two numbers he cannot tap.
+ * The shortest link that opens a pin at these coordinates - about 45
+ * characters, against the 300-plus of a copied Google Maps place URL, which
+ * wrapped over eight lines in the driver's message and buried the trip details
+ * above it. Six decimals is ~10 cm; trailing zeros are dropped by Number.
+ */
+export function coordUrl(coords: { lat: number; lng: number }): string {
+  const round = (n: number) => Number(n.toFixed(6));
+  return `https://maps.google.com/?q=${round(coords.lat)},${round(coords.lng)}`;
+}
+
+/**
+ * A tappable maps URL for the driver's message. Coordinates - typed in bare, or
+ * already spelled out in a long URL - become the short `?q=` link above; a
+ * share link with nothing to read passes through unchanged.
  */
 export function mapsUrlFor(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
-  const bare = raw.match(BARE_COORDS);
-  if (!bare) return raw.trim();
-  return `https://www.google.com/maps?q=${Number(bare[1])},${Number(bare[2])}`;
+  const coords = parseLatLng(raw);
+  return coords ? coordUrl(coords) : raw.trim();
 }
 
 /** lat/lng from a Google Maps link, or null when it can't be resolved. Never throws. */

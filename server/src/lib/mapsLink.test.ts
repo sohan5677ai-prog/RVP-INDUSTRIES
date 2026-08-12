@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapsUrlFor, parseLatLng, resolveLatLngFromMapsLink } from './mapsLink.js';
+import { coordUrl, mapsUrlFor, parseLatLng, resolveLatLngFromMapsLink } from './mapsLink.js';
 
 /**
  * These coordinates are what the driver's WhatsApp pin is built from
@@ -53,17 +53,33 @@ describe('parseLatLng', () => {
 });
 
 describe('mapsUrlFor', () => {
-  it('passes a stored link through untouched', () => {
-    const link = 'https://maps.app.goo.gl/cEwGDzoZK4Kdssy39?g_st=aw';
-    expect(mapsUrlFor(link)).toBe(link);
+  it('shortens a copied place URL to its coordinates', () => {
+    // The 300-character link that wrapped over eight lines in the driver's message.
+    const pasted =
+      'https://google.com/maps/place/Krishi+Nutrition+Company+Private+Limited+office/@11.2375428,77.5593605,17z/data=!3m1!4b1!4m6!3m5!1s0x3ba96d6a4b3a30cf:0x2b803235e7b65cdc!8m2!3d11.2375428!4d77.5593605!16s%2Fg%2F11f08fyrzh?entry=tts&g_ep=EgoyMDI2MDgwMy4wIPu8ASoASAFQAw%3D%3D';
+    const short = mapsUrlFor(pasted);
+    expect(short).toBe('https://maps.google.com/?q=11.237543,77.55936');
+    expect(short!.length).toBeLessThan(50);
   });
 
   it('turns bare coordinates into something the driver can tap', () => {
-    expect(mapsUrlFor('21.132722, 72.833611')).toBe('https://www.google.com/maps?q=21.132722,72.833611');
+    expect(mapsUrlFor('21.132722, 72.833611')).toBe('https://maps.google.com/?q=21.132722,72.833611');
+  });
+
+  it('passes a share link through untouched - nothing to shorten it to', () => {
+    const link = 'https://maps.app.goo.gl/cEwGDzoZK4Kdssy39?g_st=aw';
+    expect(mapsUrlFor(link)).toBe(link);
   });
 
   it('gives nothing back for an empty field, so the slot falls to "-"', () => {
     expect(mapsUrlFor('   ')).toBeNull();
     expect(mapsUrlFor(null)).toBeNull();
+  });
+});
+
+describe('coordUrl', () => {
+  it('trims to six decimals without leaving trailing zeros', () => {
+    expect(coordUrl({ lat: 11.2375428, lng: 77.5593605 })).toBe('https://maps.google.com/?q=11.237543,77.55936');
+    expect(coordUrl({ lat: 21.13, lng: 72.8 })).toBe('https://maps.google.com/?q=21.13,72.8');
   });
 });

@@ -52,6 +52,12 @@ office can check.
   read correctly with a Latin-script value dropped into it.
 - Header type (document / image / none) must match the English original, or the
   send fails on missing media.
+- **A text header is not part of the body.** Whatever the title says, the body
+  must not repeat it - the party sees both components stacked.
+
+Suggested header text per language, if you localise the title too:
+`PURCHASE ORDER` / `కొనుగోలు ఆర్డర్` / `கொள்முதல் ஆர்டர்` / `ಖರೀದಿ ಆದೇಶ` /
+`क्रय आदेश`.
 
 ## Variable contract
 
@@ -137,7 +143,17 @@ same variable lands in the same place in every language.
 `RVP INDUSTRIES` / `PUNGANUR` stay in Latin script everywhere — it is how the
 name appears on the letterhead, the invoice and the board at the gate.
 
-### `po_created` — 4 vars, no header, category Utility
+### `po_created` — 4 vars, TEXT header, category Utility
+
+**The header is a separate component. Never repeat it as the body's first line.**
+`po_telugu` was first created with a `PURCHASE ORDER` text header *and*
+`PURCHASE ORDER` as line 1 of the body, so the party read it twice
+(seen live 2026-08-12). The bodies below start at the greeting - keep them that
+way and put the title only in the header field.
+
+A static text header needs nothing from the ERP: Fast2SMS's `variables_values`
+send fills body parameters only, so a header with no variables of its own just
+rides along.
 
 English is live: message_id **26129**, sender +917207146094. (The panel also shows
 TEMPLATE ID `1366575302101445` — that is the **Meta** id and would 400. Always
@@ -521,11 +537,31 @@ The ERP formats values once, for every language:
   typed in the ERP, which is Latin script today.
 
 So a Telugu supplier reads a Telugu message with Latin names, numbers and month
-abbreviations in it. That is the intended result, not a gap.
+abbreviations in it. **That is the intended result, not a gap** — confirmed by the
+owner on 2026-08-12 after seeing it live. Putting the name in Telugu would mean
+storing a second, local-script name per party; it was considered and declined.
+Do not "fix" it by transliterating at send time.
 
 The one exception is the pending-loads breakdown (`REMINDER` `{{3}}`), which the
 server builds itself and therefore DOES translate the lorry/lorries word — see
 `LORRY_WORDS` in whatsapp.controller.ts.
+
+## "Two messages arrived, one translated and one English"
+
+Not a bug, and worth recognising before chasing it again. Every party message is
+also copied to the office members in Settings → WhatsApp, and that copy is
+deliberately English (see `sendToPartyAndInternal`). In production those are
+different phones — the supplier gets one translated message, the office gets
+theirs.
+
+**With test mode ON, every recipient reroutes to the one test number**, so the
+party leg and the office copy both land on the tester's phone and read as a
+duplicate in two languages. Check `whatsappTestMode` before concluding anything
+from a test send — and remember that while it is on, no real party receives
+anything at all.
+
+`WhatsAppLog` tells them apart: the party leg carries the party's `language`, the
+office copy always carries `EN`.
 
 ## Wiring an approved id
 

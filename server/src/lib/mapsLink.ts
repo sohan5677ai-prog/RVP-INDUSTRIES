@@ -6,10 +6,18 @@ import { logger } from './logger.js';
  * the redirect and reading coordinates out of the final URL - the same thing
  * a browser does when a driver taps the link. No Maps API key required.
  *
- * Written for a WhatsApp Location header, whose Meta-format send wants real
- * latitude/longitude rather than a link. No template uses that header now - the
- * driver template sends the link as plain text - so this currently has no
- * caller; see sendLocationWhatsAppTemplate in whatsapp.service.ts.
+ * Feeds the WhatsApp Location header on the driver template (driver_industries),
+ * whose Meta-format send wants real latitude/longitude rather than a link - see
+ * notifyDispatchDriver in whatsapp.service.ts. Without coordinates that template
+ * cannot go out at all, so what this resolves decides which drivers get messaged.
+ *
+ * Roughly half of Google's share links resolve this way. A business-listing link
+ * ("place/Hari+Om+Gum+Industries/data=!4m2!3m1!1s0x3be0...") carries a place id
+ * and no coordinates anywhere in the redirect or the page body - only a pin-drop
+ * or map-view link carries `@lat,lng`. For those, paste the plain coordinates
+ * ("21.132722, 72.833611" - long-press the pin in Google Maps and tap the
+ * numbers to copy) into the party's location field instead; `parseLatLng`
+ * accepts that form directly and skips the network entirely.
  */
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -24,6 +32,10 @@ const COORD_PATTERNS: RegExp[] = [
   /[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)/, // ?ll=lat,lng
 ];
 
+// A field holding nothing but coordinates: "21.132722, 72.833611" - what
+// Google Maps copies when you long-press a spot and tap the numbers.
+const BARE_COORDS = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
+
 const cache = new Map<string, { lat: number; lng: number } | null>();
 
 function extractCoords(text: string): { lat: number; lng: number } | null {
@@ -34,11 +46,42 @@ function extractCoords(text: string): { lat: number; lng: number } | null {
   return null;
 }
 
+/** True for a coordinate pair that could be a real place on Earth. */
+function plausible(c: { lat: number; lng: number }): boolean {
+  return Math.abs(c.lat) <= 90 && Math.abs(c.lng) <= 180 && !(c.lat === 0 && c.lng === 0);
+}
+
+/**
+ * Coordinates readable from the stored value without any network call - either
+ * bare "lat,lng" or a long maps URL that already spells them out. Null when the
+ * value needs the redirect followed (a short link) or has no coordinates at all.
+ */
+export function parseLatLng(raw: string | null | undefined): { lat: number; lng: number } | null {
+  if (!raw) return null;
+  const bare = raw.match(BARE_COORDS);
+  const coords = bare ? { lat: Number(bare[1]), lng: Number(bare[2]) } : extractCoords(raw);
+  return coords && plausible(coords) ? coords : null;
+}
+
+/**
+ * A tappable maps URL for the driver's message. Stored links pass through
+ * unchanged; bare coordinates become a link rather than reaching the driver as
+ * two numbers he cannot tap.
+ */
+export function mapsUrlFor(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const bare = raw.match(BARE_COORDS);
+  if (!bare) return raw.trim();
+  return `https://www.google.com/maps?q=${Number(bare[1])},${Number(bare[2])}`;
+}
+
 /** lat/lng from a Google Maps link, or null when it can't be resolved. Never throws. */
 export async function resolveLatLngFromMapsLink(
   link: string | null | undefined,
 ): Promise<{ lat: number; lng: number } | null> {
   if (!link) return null;
+  const direct = parseLatLng(link);
+  if (direct) return direct;
   if (cache.has(link)) return cache.get(link)!;
 
   const result = await (async () => {
@@ -49,11 +92,12 @@ export async function resolveLatLngFromMapsLink(
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       const fromUrl = extractCoords(res.url || link);
-      if (fromUrl) return fromUrl;
+      if (fromUrl) return plausible(fromUrl) ? fromUrl : null;
       // A short link occasionally lands on an interstitial HTML page instead of
       // redirecting the query string itself - the coordinates are still in the body.
       const body = await res.text();
-      return extractCoords(body);
+      const fromBody = extractCoords(body);
+      return fromBody && plausible(fromBody) ? fromBody : null;
     } catch (err) {
       logger.warn(
         `[maps-link] could not resolve coordinates from ${link}: ${err instanceof Error ? err.message : String(err)}`,

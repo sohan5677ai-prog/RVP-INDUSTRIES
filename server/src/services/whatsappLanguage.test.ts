@@ -28,6 +28,8 @@ const ENV_KEYS = [
   'FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA',
   'FAST2SMS_TMPL_PO_CREATED',
   'FAST2SMS_TMPL_PO_CREATED_TA',
+  // Cleared so the "no id anywhere" case below reads the source, not a local .env.
+  'FAST2SMS_TMPL_PARTY_LEDGER',
 ];
 const saved: Record<string, string | undefined> = {};
 
@@ -73,7 +75,8 @@ describe('templateId language resolution', () => {
   });
 
   it('stays undefined when neither copy exists - a clean SKIPPED, not a bad send', () => {
-    expect(templateId('DISPATCH_DRIVER', 'KN')).toBeUndefined();
+    // PARTY_LEDGER has no checked-in id in any language: it lives on Render only.
+    expect(templateId('PARTY_LEDGER', 'KN')).toBeUndefined();
   });
 
   it('never reports a language for an EN recipient', () => {

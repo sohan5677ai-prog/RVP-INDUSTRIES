@@ -751,9 +751,13 @@ export default function Parties() {
                   <FormItem>
                     <FormLabel>Google Maps Location Link</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. https://maps.app.goo.gl/..." {...field} />
+                      <Input placeholder="e.g. https://maps.app.goo.gl/... or 21.132722, 72.833611" {...field} />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">Sent to the lorry driver on dispatch via WhatsApp</p>
+                    <p className="text-xs text-muted-foreground">
+                      Sent to the lorry driver on dispatch via WhatsApp, as a map pin. Business-listing
+                      links often carry no coordinates - if the driver message reports a missing pin,
+                      long-press the spot in Google Maps and paste the "lat, lng" numbers here instead.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

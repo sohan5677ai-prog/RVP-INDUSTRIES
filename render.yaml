@@ -69,12 +69,15 @@ services:
         sync: false
       - key: FAST2SMS_TMPL_DISPATCH_BROKER
         sync: false
+      # Inert: the driver template ("driver_industries", message id 28540) has a
+      # LOCATION header, which only the name-addressed POST send can fill, so its
+      # numeric message_id is never used. Kept so the panel id has a home.
       - key: FAST2SMS_TMPL_DISPATCH_DRIVER
         sync: false
-      # Only the /check-driver-template diagnostic reads this now: DISPATCH_DRIVER
-      # turned out to be a plain text template ("dispatch_driver", message id
-      # 26193) and goes over the ordinary message_id send like every other one.
-      # Set it only if that template is ever renamed.
+      # The name the driver send actually goes out on - defaults to
+      # "driver_industries" in whatsapp.service.ts. Set only if it is renamed.
+      # It must be approved under the number FAST2SMS_PHONE_NUMBER_ID points at;
+      # /check-driver-template reports the mismatch when it isn't.
       - key: FAST2SMS_TMPL_NAME_DISPATCH_DRIVER
         sync: false
       - key: FAST2SMS_TMPL_REMINDER

@@ -2,6 +2,7 @@ import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
+import { mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -35,7 +36,7 @@ import { istCalendar, istParts } from '../lib/istDate.js';
  *                              its own id; the ERP picks by the party's
  *                              Party.waLanguage and falls back to English when the
  *                              language copy is not configured (or not yet approved).
- *  - FAST2SMS_TMPL_NAME_<KEY>  the template's approved NAME (e.g. rvp_driver),
+ *  - FAST2SMS_TMPL_NAME_<KEY>  the template's approved NAME (e.g. driver_industries),
  *                              needed only for templates sent via the Meta-format
  *                              POST endpoint (location headers can't use a numeric
  *                              message_id - Meta's template API wants the name)
@@ -58,7 +59,7 @@ export type WaTemplateKey =
   | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
-  | 'DISPATCH_DRIVER' // rvp_driver (no header): driver, lorry, party, destination, load, party phone, maps link
+  | 'DISPATCH_DRIVER' // driver_industries (LOCATION header - name-addressed POST): driver, lorry, party, destination, load, party phone, maps link
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
@@ -76,16 +77,12 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
   DISPATCH_PARTY_BROKER: '26406',
   DISPATCH_BROKER: '26407',
-  // DISPATCH_DRIVER (rvp_driver) deliberately has NO default: the template it
-  // used to point at was deleted, and a stale id fails as "message_id is invalid
-  // or not approved" - indistinguishable from a real outage. With no id the send
-  // logs a plain SKIPPED "not configured". Set FAST2SMS_TMPL_DISPATCH_DRIVER on
-  // Render to the new message_id once Meta approves rvp_driver, and add it here.
-  //
-  // It is a plain TEXT template: the destination reaches the driver as the maps
-  // LINK in {{7}}, not as a WhatsApp Location card. A Location header is
-  // mandatory once declared, and only 2 of 20 buyers have a link on file to
-  // resolve coordinates from - it would have failed nine sends in ten.
+  // DISPATCH_DRIVER is absent on purpose. driver_industries (message_id 28540,
+  // approved 2026-08-12) carries a LOCATION header, and a location header can
+  // only be filled over the Meta-format POST send, which addresses templates by
+  // NAME - see DEFAULT_TEMPLATE_NAMES below and notifyDispatchDriver. An id here
+  // would send the body with no header and fail the whole message on Meta's
+  // parameter-count check, so FAST2SMS_TMPL_DISPATCH_DRIVER is inert by design.
   // payment_reminder + rvp_owner_dispatch, approved together on the shared KNM
   // number (+917207146094). OWNER_DISPATCH_REMINDER previously carried
   // '1618894512932537' - a *Meta* template id, not a Fast2SMS message_id (those
@@ -177,9 +174,14 @@ export interface OwnerWeeklyStats {
 }
 
 // Templates sent over the Meta-format POST endpoint (location headers) are
-// addressed by their approved NAME, not the numeric message_id above.
+// addressed by their approved NAME, not the numeric message_id above. The name
+// must match the Fast2SMS panel exactly, and the template must be approved under
+// the number FAST2SMS_PHONE_NUMBER_ID points at - a name approved on another of
+// the account's numbers 404s with "Template not found." Run the
+// /check-driver-template diagnostic (whatsappJobs.ts) when that happens.
 const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
+  DISPATCH_DRIVER: 'driver_industries',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {
@@ -510,8 +512,9 @@ interface LocationSendArgs {
  * endpoint, addressed by the template's NAME (not the numeric message_id) -
  * hence the separate function.
  *
- * No template currently uses this: the driver template was assumed to carry a
- * Location header and did not. Kept for the day one is approved with one.
+ * Used by DISPATCH_DRIVER (driver_industries), the one template with a Location
+ * header. Meta rejects the send outright if the header parameter is missing, so
+ * callers must have real coordinates before reaching here.
  * Never throws - same SENT/FAILED/SKIPPED contract as sendWhatsAppTemplate.
  */
 export async function sendLocationWhatsAppTemplate(
@@ -831,18 +834,27 @@ export const whatsappService = {
   },
 
   /**
-   * Dispatch → driver, in the seven slots of the approved rvp_driver template:
-   * driver, lorry, buyer, destination, load, buyer's phone, maps link. Returns
-   * null when no driver phone was captured.
+   * Dispatch → driver, in the seven slots of the approved driver_industries
+   * template: driver, lorry, buyer, destination, load, buyer's phone, maps link.
+   * Returns null when no driver phone was captured.
    *
-   * Destination is spelled out rather than left to the maps link because only a
-   * handful of buyers have a link saved - without it the driver would be told
-   * "-" and nothing else about where he is going. The order's destination is the
-   * authority; the buyer's city is the fallback.
+   * driver_industries carries a LOCATION HEADER - the pin card above the text -
+   * so it goes over the Meta-format POST send addressed by template NAME, not
+   * the numeric message_id GET send every other template uses. Meta requires the
+   * header's latitude/longitude on every send: there is no way to send this
+   * template without a pin, and no id-based fallback, because the plain-text
+   * driver template it replaced was deleted.
    *
-   * A buyer with no link still gets the message with "-" in the last slot: the
-   * lorry, name, destination and contact number are worth having on their own,
-   * and refusing to send over a missing link only cost the driver the rest.
+   * Hence the hard requirement below. Coordinates come from the buyer's saved
+   * location (see resolveLatLngFromMapsLink) - a maps link that spells them out,
+   * a short link whose redirect does, or plain "lat,lng" typed into the field.
+   * A buyer whose link resolves to nothing is SKIPPED with that spelled out,
+   * rather than sent a message with a pin invented from their city: a driver
+   * following a wrong pin is worse off than one who got no message at all.
+   *
+   * Destination is still spelled out in {{4}} rather than left to the pin, and
+   * the link still goes in {{7}}: the pin card is easy to scroll past, and a
+   * driver who has the text can read the town name out to someone.
    *
    * The name is the one slot that can't fall back to "-": it opens the greeting,
    * and "Namaste - " reads as a broken message rather than a missing field.
@@ -862,18 +874,49 @@ export const whatsappService = {
     const destination = order.destination?.trim() || buyer.city?.trim() || '-';
     const load =
       dispatch.weightKg != null ? `${order.product} - ${fmtWeight(dispatch.weightKg)}` : order.product;
-    return sendWhatsAppTemplate({
+    const variables = [
+      dispatch.driverName?.trim() || 'Driver ji',
+      dispatch.vehicleNumber ?? '-',
+      buyer.name,
+      destination,
+      load,
+      buyer.phone ?? '-',
+      mapsUrlFor(buyer.locationLink) ?? '-',
+    ];
+
+    const coords = await resolveLatLngFromMapsLink(buyer.locationLink);
+    if (!coords) {
+      const error = buyer.locationLink?.trim()
+        ? `Could not read coordinates from ${buyer.name}'s saved maps link - the driver template needs a pin. ` +
+          `Open the pin in Google Maps, copy the "lat, lng" numbers and paste those into the party's location field.`
+        : `${buyer.name} has no maps location on file - the driver template needs a pin to send.`;
+      await log(
+        {
+          templateKey: 'DISPATCH_DRIVER',
+          to: dispatch.driverPhone,
+          variables,
+          relatedType: 'DISPATCH',
+          relatedId: dispatch.id,
+        },
+        'SKIPPED',
+        { phone: normalizeWhatsAppNumber(dispatch.driverPhone), error },
+      );
+      logger.warn(`[whatsapp] DISPATCH_DRIVER skipped for dispatch ${dispatch.id}: ${error}`);
+      return { ok: false, skipped: true, error };
+    }
+
+    return sendLocationWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
-      variables: [
-        dispatch.driverName?.trim() || 'Driver ji',
-        dispatch.vehicleNumber ?? '-',
-        buyer.name,
-        destination,
-        load,
-        buyer.phone ?? '-',
-        buyer.locationLink ?? '-',
-      ],
+      location: {
+        lat: coords.lat,
+        lng: coords.lng,
+        name: buyer.name,
+        // The header's address line, under the pin's name - the town the driver
+        // is heading for, with the buyer's street address when we hold one.
+        address: buyer.address?.trim() || destination,
+      },
+      variables,
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,
     });

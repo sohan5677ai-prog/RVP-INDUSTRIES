@@ -935,16 +935,23 @@ export const whatsappService = {
     });
   },
 
-  /** Pending-loads reminder → party (manual button on the Party Ledger). */
+  /**
+   * Pending-loads reminder → party (manual button on the Party Ledger). The
+   * office gets its own copy: someone pressing "Remind" from the ledger is
+   * chasing a supplier on the firm's behalf, and the owners want the same
+   * message on their phone rather than having to open the log to see it went.
+   */
   async sendReminder(party: WaRecipient & { id: string }, pendingLorries: number, poLabel: string) {
-    return sendWhatsAppTemplate({
-      templateKey: 'REMINDER',
-      to: [party.phone, party.phone2].filter(Boolean) as string[],
-      language: party.waLanguage,
-      variables: [party.name, pendingLorries, poLabel],
-      relatedType: 'REMINDER',
-      relatedId: party.id,
-    });
+    return sendToPartyAndInternal(
+      {
+        templateKey: 'REMINDER',
+        language: party.waLanguage,
+        variables: [party.name, pendingLorries, poLabel],
+        relatedType: 'REMINDER',
+        relatedId: party.id,
+      },
+      [party.phone, party.phone2]
+    );
   },
 
   /**
@@ -965,15 +972,24 @@ export const whatsappService = {
     buyerId: string;
     /** The RECIPIENT's language - the broker's own when this is the broker copy, not the buyer's. */
     language?: WaLanguage | null;
+    /**
+     * Copy the office on this reminder. Opt-in, and set only by the Party Ledger
+     * button: the nightly dues job would otherwise bill an internal conversation
+     * per overdue buyer per member, every night, on top of the single
+     * OWNER_DUES_DIGEST that already tells the owners the same thing.
+     */
+    internalCopy?: boolean;
   }) {
-    return sendWhatsAppTemplate({
+    const message: MessageBody = {
       templateKey: 'PAYMENT_REMINDER',
-      to: args.phones.filter(Boolean) as string[],
       language: args.language,
       variables: [args.recipientName, fmtInr(args.outstanding), args.invoiceListText],
       relatedType: 'PAYMENT_REMINDER',
       relatedId: args.buyerId,
-    });
+    };
+    return args.internalCopy
+      ? sendToPartyAndInternal(message, args.phones)
+      : sendWhatsAppTemplate({ ...message, to: args.phones.filter(Boolean) as string[] });
   },
 
   /**
@@ -1002,6 +1018,9 @@ export const whatsappService = {
    * Meta rejects the send outright if the media is missing. Opening balance and
    * the transaction rows live in the PDF, deliberately not in the body: template
    * variables cannot contain newlines.
+   *
+   * The office is copied on the same statement PDF, so the owners hold a record
+   * of exactly which figures went out to which party on which day.
    */
   async sendPartyLedgerStatement(
     party: { id: string; name: string },
@@ -1014,21 +1033,23 @@ export const whatsappService = {
     },
     document: { url: string; filename: string },
   ) {
-    return sendWhatsAppTemplate({
-      templateKey: 'PARTY_LEDGER',
-      to,
-      variables: [
-        party.name,
-        statement.period,
-        statement.totalDebit,
-        statement.totalCredit,
-        statement.closing,
-      ],
-      mediaUrl: document.url,
-      documentFilename: document.filename,
-      relatedType: 'PARTY_LEDGER',
-      relatedId: party.id,
-    });
+    return sendToPartyAndInternal(
+      {
+        templateKey: 'PARTY_LEDGER',
+        variables: [
+          party.name,
+          statement.period,
+          statement.totalDebit,
+          statement.totalCredit,
+          statement.closing,
+        ],
+        mediaUrl: document.url,
+        documentFilename: document.filename,
+        relatedType: 'PARTY_LEDGER',
+        relatedId: party.id,
+      },
+      Array.isArray(to) ? to : [to]
+    );
   },
 
   /**

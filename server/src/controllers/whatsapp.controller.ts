@@ -686,6 +686,11 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
   const sent: Array<{ recipient: string; phone: string | null; amount: number; invoices: number }> = [];
   const failed: Array<{ recipient: string; error: string }> = [];
 
+  // The office is copied on this reminder, but ONCE per press. A "both" send is
+  // one act of chasing, not two: the first leg to actually go out carries the
+  // internal copy, and the broker legs after it do not repeat it.
+  let internalCopyDone = false;
+
   if (target === 'PARTY' || target === 'BOTH') {
     if (!party.phone && !party.phone2) {
       failed.push({ recipient: party.name, error: 'No phone number on file - add one in Parties first' });
@@ -697,7 +702,9 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
         invoiceListText: invoiceListText(active.invoices),
         buyerId: party.id,
         language: party.waLanguage,
+        internalCopy: true,
       });
+      internalCopyDone = true;
       if (result.ok) sent.push({ recipient: party.name, phone: party.phone ?? party.phone2, amount: active.amount, invoices: active.invoices.length });
       else failed.push({ recipient: party.name, error: result.error ?? 'WhatsApp send failed' });
     }
@@ -735,7 +742,9 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
         buyerId: party.id,
         // The broker's own language, not the buyer's - it is the broker reading it.
         language: broker.waLanguage,
+        internalCopy: !internalCopyDone,
       });
+      internalCopyDone = true;
       if (result.ok) sent.push({ recipient: broker.name, phone: broker.phone, amount, invoices: theirs.length });
       else failed.push({ recipient: broker.name, error: result.error ?? 'WhatsApp send failed' });
     }

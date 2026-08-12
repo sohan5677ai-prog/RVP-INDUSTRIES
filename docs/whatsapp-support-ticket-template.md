@@ -74,10 +74,16 @@ message_id ever needs to change without a deploy.
 
 ## Where it goes
 
-To the **alert recipients** configured in Settings ("Dispatch & alert
-recipients"), falling back to the owner number, then `WHATSAPP_TEST_NUMBER` —
-the same list the weekly summary and dues digest use. With
-`WHATSAPP_TEST_MODE` on (the default) every send is rerouted to the test number.
+To **one number: 8019965187**, the developer's — not the alert recipient list,
+and never the owners. A support ticket is a bug report with a screenshot of
+somebody's own mis-click on it; an owner cannot act on it, and every extra copy
+is a billed conversation. Override with `SUPPORT_WHATSAPP_NUMBER` on Render if
+the person on call changes; there is deliberately no Settings field for it.
+
+This is the one internal template that does **not** go through
+`fanOutToAlertRecipients` — the weekly summary and dues digest still do. With
+`WHATSAPP_TEST_MODE` on (the default) the send is still rerouted to the test
+number like every other message.
 
 ## Two constraints that are easy to trip over
 

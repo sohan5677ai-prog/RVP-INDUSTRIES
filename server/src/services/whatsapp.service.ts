@@ -301,6 +301,19 @@ export async function resolveAlertRecipients(): Promise<string[]> {
 }
 
 /**
+ * The single phone that in-app support tickets go to - the developer's, not the
+ * owners'. Support reports are a bug queue, not business news: fanning them out
+ * to the alert list put a screenshot of somebody's own mis-click on every
+ * owner's phone and billed a conversation per copy. Override with
+ * SUPPORT_WHATSAPP_NUMBER if the person on call changes.
+ */
+export const DEFAULT_SUPPORT_NUMBER = '8019965187';
+
+export function resolveSupportRecipient(): string | null {
+  return normalizeWhatsAppNumber(process.env.SUPPORT_WHATSAPP_NUMBER?.trim() || DEFAULT_SUPPORT_NUMBER);
+}
+
+/**
  * Who gets an *internal copy* of a message that just went to a party: the same
  * alert members as above, minus anyone already on the outgoing message (a member
  * whose number is also the party's shouldn't be told twice).
@@ -1159,16 +1172,19 @@ export const whatsappService = {
     // rather than stripping, so the reporter's own line breaks still read as
     // breaks in their sentence.
     const note = ticket.note.replace(/\s*\n+\s*/g, ' · ').trim();
-    return fanOutToAlertRecipients((to) =>
-      sendWhatsAppTemplate({
-        templateKey: hasImage ? 'SUPPORT_TICKET' : 'SUPPORT_TICKET_TEXT',
-        to,
-        variables: [`${ticket.userName} (${ticket.userRole})`, page, note, when],
-        mediaUrl: ticket.screenshotUrl ?? undefined,
-        relatedType: 'SUPPORT_TICKET',
-        relatedId: ticket.id,
-      })
-    );
+    // Support goes to ONE phone - the developer's - never the alert fan-out. An
+    // owner cannot act on a stack trace, and each extra copy is a billed
+    // conversation carrying a screenshot of a colleague's mistake.
+    const to = resolveSupportRecipient();
+    if (!to) return { ok: false, skipped: true, error: 'No support recipient configured' };
+    return sendWhatsAppTemplate({
+      templateKey: hasImage ? 'SUPPORT_TICKET' : 'SUPPORT_TICKET_TEXT',
+      to,
+      variables: [`${ticket.userName} (${ticket.userRole})`, page, note, when],
+      mediaUrl: ticket.screenshotUrl ?? undefined,
+      relatedType: 'SUPPORT_TICKET',
+      relatedId: ticket.id,
+    });
   },
 
   /** Last reminder sent to this party (throttle guard for the reminder button). */

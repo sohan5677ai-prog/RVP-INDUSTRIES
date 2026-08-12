@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
-import type { Account, PurchaseOrder, SaleOrder } from '@/lib/types';
+import type { ProfitLoss, PurchaseOrder, SaleOrder } from '@/lib/types';
 import type { Summary, HuskPnl, PurchaseRow } from './DashboardCharts';
 
 // Charts pull in recharts (~300 kB). Splitting them into a lazy chunk lets the
@@ -39,7 +39,10 @@ export default function Dashboard() {
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Summary>('/dashboard/summary') });
-  const { data: accounts } = useQuery({ queryKey: ['ledger-accounts'], queryFn: () => api<Account[]>('/ledger/accounts') });
+  // Management P&L - the Profitability card mirrors the Profit & Loss A/c page
+  // so the dashboard and the report never quote two different net profits.
+  // Key matches ProfitLoss.tsx so both share one cached fetch.
+  const { data: pnl } = useQuery({ queryKey: ['profit-loss'], queryFn: () => api<ProfitLoss>('/reports/profit-loss') });
   const { data: purchases } = useQuery({ queryKey: ['purchases'], queryFn: () => api<PurchaseRow[]>('/purchases?all=true') });
   const { data: poAll } = useQuery({ queryKey: ['purchase-orders', 'ALL'], queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true') });
   // Full history - the charts count every order by status, so the default
@@ -81,7 +84,7 @@ export default function Dashboard() {
           </div>
 
           <Suspense fallback={<ChartsSkeleton />}>
-            <DashboardCharts data={data} accounts={accounts} purchases={purchases} poAll={poAll} saleAll={saleAll} huskPnl={huskPnl} />
+            <DashboardCharts data={data} pnl={pnl} purchases={purchases} poAll={poAll} saleAll={saleAll} huskPnl={huskPnl} />
           </Suspense>
         </div>
       )}

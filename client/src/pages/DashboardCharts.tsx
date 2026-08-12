@@ -10,7 +10,7 @@ import {
 import { kg, rupees } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { ChartCard } from '@/components/ChartCard';
-import type { Account, Purchase, PurchaseOrder, SaleOrder, POStatus, SaleStatus } from '@/lib/types';
+import type { ProfitLoss, Purchase, PurchaseOrder, SaleOrder, POStatus, SaleStatus } from '@/lib/types';
 
 // ── Shared types (also imported by Dashboard) ────────────────────────
 export interface Summary {
@@ -162,14 +162,14 @@ const axisTick = { fill: C.axis, fontSize: 11 };
 
 interface Props {
   data: Summary;
-  accounts?: Account[];
+  pnl?: ProfitLoss;
   purchases?: PurchaseRow[];
   poAll?: PurchaseOrder[];
   saleAll?: SaleOrder[];
   huskPnl?: HuskPnl;
 }
 
-export default function DashboardCharts({ data, accounts, purchases, poAll, saleAll, huskPnl }: Props) {
+export default function DashboardCharts({ data, pnl, purchases, poAll, saleAll, huskPnl }: Props) {
   // ── Monthly procurement spend + volume (from March) ────────────
   const trend = useMemo(() => {
     const now = new Date();
@@ -213,14 +213,19 @@ export default function DashboardCharts({ data, accounts, purchases, poAll, sale
     return months;
   }, [purchases]);
 
-  // ── Profitability from ledger ─────────────────────────────────────
-  const totalRevenue = accounts?.filter((a) => a.type === 'REVENUE').reduce((s, a) => s + a.balance, 0) ?? 0;
-  const totalExpense = accounts?.filter((a) => a.type === 'EXPENSE').reduce((s, a) => s + a.balance, 0) ?? 0;
-  const netProfit = totalRevenue - totalExpense;
-  const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+  // ── Profitability (management P&L) ────────────────────────────────
+  // Same model as the Profit & Loss A/c page: pappu margin ± the husk pool.
+  // Not the accrual ledger result - the pool also absorbs capital items (term
+  // loan principal, drawings) that never hit a P&L ledger head.
+  const pappuProfit = pnl?.pappu.profitLoss ?? 0;
+  const poolIncome = (pnl?.huskPool.byproductIncome ?? 0) + (pnl?.huskPool.otherIncomeTotal ?? 0);
+  const poolOverheads = pnl?.huskPool.overheadExpenses ?? 0;
+  const netProfit = pnl?.totals.netProfit ?? 0;
+  const poolNet = pnl?.huskPool.net ?? 0;
   const profitData = [
-    { name: 'Revenue', value: totalRevenue, fill: C.forest },
-    { name: 'Expense', value: totalExpense, fill: C.brick },
+    { name: 'Pappu P/L', value: pappuProfit, fill: C.forest },
+    { name: 'Pool income', value: poolIncome, fill: C.gold },
+    { name: 'Overheads', value: poolOverheads, fill: C.brick },
   ];
 
   // ── PO pipeline by status ─────────────────────────────────────────
@@ -361,18 +366,20 @@ export default function DashboardCharts({ data, accounts, purchases, poAll, sale
           <Legend items={salePipeline.map((d, i) => ({ label: d.name, color: PIE_COLORS[i % PIE_COLORS.length] }))} />
         </ChartCard>
 
-        <ChartCard title="Profitability" subtitle="Accrued from the ledger" icon={TrendingUp}>
+        <ChartCard title="Profitability" subtitle="Pappu P/L ± the husk pool" icon={TrendingUp}>
           <div className="px-3 pt-1">
-            <div className="text-[11px] text-muted-foreground">Net profit (accrued)</div>
+            <div className="text-[11px] text-muted-foreground">Net profit</div>
             <div className={`font-mono text-3xl font-medium tracking-tight tabular-nums mt-0.5 ${netProfit >= 0 ? 'text-forest' : 'text-destructive'}`}>
               {rupees(netProfit)}
             </div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">Margin {margin.toFixed(1)}%</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Pool {poolNet >= 0 ? 'surplus' : 'deficit'} {rupees(Math.abs(poolNet))}
+            </div>
           </div>
-          <ResponsiveContainer width="100%" height={120}>
+          <ResponsiveContainer width="100%" height={140}>
             <BarChart data={profitData} layout="vertical" margin={{ top: 8, right: 12, left: 8, bottom: 0 }}>
               <XAxis type="number" hide tickFormatter={inrCompact} />
-              <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={62} />
+              <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={76} />
               <Tooltip content={<ChartTip fmt={rupees} />} cursor={{ fill: C.amber, fillOpacity: 0.06 }} />
               <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26}>
                 {profitData.map((d, i) => <Cell key={i} fill={d.fill} />)}

@@ -14,7 +14,10 @@ import {
   createStorageMaintenanceSchema,
   createOtherIncomeSchema,
   createGunnySaleSchema,
+  createSubscriptionChargeSchema,
+  updateSubscriptionPlanSchema,
 } from '../schemas/poolReport.schema.js';
+import { ensureSubscriptionCharges, getSubscriptionPlans } from '../services/subscriptionExpense.service.js';
 
 /**
  * Delete the ledger posting (and, via cascade, the linked Payment/Receipt) that a
@@ -217,6 +220,67 @@ export async function deleteMiscExpense(req: Request, res: Response) {
     await tx.miscExpense.delete({ where: { id: row.id } });
   });
   res.json({ message: 'Miscellaneous expense deleted' });
+}
+
+// ── Subscription charges (recurring) ─────────────────────────────────────────
+// The list endpoint generates first: Render's free tier spins down when idle, so
+// the daily cron alone can miss a charge date. Opening the tab catches it up.
+export async function listSubscriptionCharges(_req: Request, res: Response) {
+  await ensureSubscriptionCharges();
+  res.json(await prisma.subscriptionCharge.findMany({ orderBy: { date: 'desc' } }));
+}
+
+export async function listSubscriptionPlans(_req: Request, res: Response) {
+  res.json(await getSubscriptionPlans());
+}
+
+export async function updateSubscriptionPlan(req: Request, res: Response) {
+  const id = req.params.id;
+  if (id !== 'MONTHLY' && id !== 'YEARLY') throw new HttpError(400, 'Unknown subscription plan');
+  const data = updateSubscriptionPlanSchema.parse(req.body);
+  await getSubscriptionPlans(); // seed the row before updating a fresh database
+  const updated = await prisma.subscriptionPlanConfig.update({ where: { id }, data });
+  // A re-dated start or a re-enabled plan may already owe charges.
+  await ensureSubscriptionCharges();
+  res.json(updated);
+}
+
+export async function createSubscriptionCharge(req: Request, res: Response) {
+  const data = createSubscriptionChargeSchema.parse(req.body);
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.subscriptionCharge.create({
+      data: {
+        date: data.date,
+        plan: data.plan,
+        periodKey: null, // manual one-off: owned by nobody's recurrence cursor
+        amount: data.amount,
+        dueDate: data.dueDate ?? data.date,
+        auto: false,
+        note: data.note ?? null,
+      },
+    });
+    await LedgerService.recordLinkedPayment(tx, {
+      date: data.date,
+      amount: Number(data.amount),
+      type: 'SUBSCRIPTION',
+      payee: data.plan === 'YEARLY' ? 'Yearly subscription' : 'Monthly subscription',
+      description: data.note ?? undefined,
+      refKey: `SUBSCRIPTION-${row.id}`,
+    });
+    return row;
+  });
+  res.status(201).json(created);
+}
+
+export async function deleteSubscriptionCharge(req: Request, res: Response) {
+  const row = await prisma.subscriptionCharge.findUnique({ where: { id: req.params.id } });
+  if (!row) throw new HttpError(404, 'Subscription charge not found');
+  await prisma.$transaction(async (tx) => {
+    await reverseLinkedEntry(tx, `SUBSCRIPTION-${row.id}`);
+    await tx.subscriptionCharge.delete({ where: { id: row.id } });
+  });
+  // Deliberately no cursor rewind - a deleted period stays deleted.
+  res.json({ message: 'Subscription charge deleted' });
 }
 
 // ── Drawings (Shabri / Reddy) ────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import Miscellaneous from '@/pages/Miscellaneous';
 import Drawings from '@/pages/Drawings';
 import Interest from '@/pages/Interest';
 import StorageMaintenance from '@/pages/StorageMaintenance';
+import SubscriptionExpense from '@/pages/SubscriptionExpense';
 import KataFeeLedger from '@/pages/KataFeeLedger';
 import HamaliCompanyProfit from '@/pages/HamaliCompanyProfit';
 import GunnySales from '@/pages/GunnySales';
@@ -18,8 +19,9 @@ import OtherIncome from '@/pages/OtherIncome';
  *
  * Expenses tab: the standalone operating-expense reports (Feroz Ledger/Gunny Bags,
  * Electricity, Maintenance, Miscellaneous, Drawings, Interest) plus Storage
- * Maintenance - unchanged from before. Every tab feeds the husk recovery pool
- * and the Profit & Loss.
+ * Maintenance and Subscription. Every tab feeds the husk recovery pool and the
+ * Profit & Loss. Subscription is the one that fills itself in: its charges are
+ * generated on their renewal dates rather than typed in.
  *
  * Income tab: Kata Income, Hamali Company Profit, Gunny Sales and Other Income -
  * all four are added to the husk recovery pool as income and to the Profit &
@@ -65,6 +67,7 @@ export default function Expenses() {
               <TabsTrigger value="drawings">Drawings</TabsTrigger>
               <TabsTrigger value="interest">Interest</TabsTrigger>
               <TabsTrigger value="storage">Storage Maintenance</TabsTrigger>
+              <TabsTrigger value="subscription">Subscription</TabsTrigger>
             </TabsList>
 
             <TabsContent value="gunny"><GunnyBags embedded /></TabsContent>
@@ -74,6 +77,7 @@ export default function Expenses() {
             <TabsContent value="drawings"><Drawings embedded /></TabsContent>
             <TabsContent value="interest"><Interest embedded /></TabsContent>
             <TabsContent value="storage"><StorageMaintenance /></TabsContent>
+            <TabsContent value="subscription"><SubscriptionExpense /></TabsContent>
           </Tabs>
         </TabsContent>
       </Tabs>

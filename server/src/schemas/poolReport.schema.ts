@@ -65,6 +65,25 @@ export const createOtherIncomeSchema = z.object({
   note: z.string().trim().optional().nullable(),
 });
 
+/** Manual one-off subscription charge (the recurring ones are generated). */
+export const createSubscriptionChargeSchema = z.object({
+  date: z.coerce.date(),
+  plan: z.enum(['MONTHLY', 'YEARLY']),
+  amount: z.coerce.number().positive(),
+  dueDate: z.coerce.date().optional().nullable(),
+  note: z.string().trim().optional().nullable(),
+});
+
+/** Partial edit of a plan's recurrence settings from the Subscription tab. */
+export const updateSubscriptionPlanSchema = z.object({
+  enabled: z.boolean().optional(),
+  amount: z.coerce.number().positive().optional(),
+  chargeDay: z.coerce.number().int().min(1).max(31).optional(),
+  chargeMonth: z.coerce.number().int().min(1).max(12).optional().nullable(),
+  dueDays: z.coerce.number().int().min(0).max(365).optional(),
+  startDate: z.coerce.date().optional(),
+});
+
 export const createGunnySaleSchema = z.object({
   date: z.coerce.date(),
   bags: z.coerce.number().int().positive(),

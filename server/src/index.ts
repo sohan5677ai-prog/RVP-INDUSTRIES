@@ -147,6 +147,11 @@ app.listen(port, "0.0.0.0", () => {
   import("./jobs/whatsappJobs.js")
     .then(({ registerWhatsappCron }) => registerWhatsappCron())
     .catch((err) => logger.error("[whatsapp-cron] failed to register:", err));
+
+  // Daily sweep that posts recurring subscription fees as they fall due.
+  import("./jobs/subscriptionExpenseJobs.js")
+    .then(({ registerSubscriptionCron }) => registerSubscriptionCron())
+    .catch((err) => logger.error("[subscription-cron] failed to register:", err));
 });
 
 

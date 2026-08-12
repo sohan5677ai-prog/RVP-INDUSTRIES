@@ -44,6 +44,19 @@ export function istFinancialYearStart(date: Date): number {
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 /**
+ * UTC instant of midnight IST on a calendar date. `month` is 1-based, and the
+ * usual Date overflow applies, so (2026, 13, 1) is January 2027.
+ */
+export function istMidnight(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month - 1, day) - IST_OFFSET_MS);
+}
+
+/** Days in a calendar month. `month` is 1-based. */
+export function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
  * UTC instants bounding an Indian financial year, as a half-open `[from, to)`.
  *
  * FY 2025-26 -> 2025-03-31T18:30:00Z .. 2026-03-31T18:30:00Z, i.e. midnight IST

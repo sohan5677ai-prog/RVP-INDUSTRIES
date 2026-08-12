@@ -102,6 +102,7 @@ export interface HuskExpenses {
   electricity: number;
   maintenance: number;
   miscExpense: number;
+  subscription: number;
   storageElectricity: number;
   storageSalaries: number;
   drawingsShabri: number;
@@ -136,6 +137,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'electricity',        label: 'Electricity',          pappu: false },
   { key: 'maintenance',        label: 'Maintenance',          pappu: false },
   { key: 'miscExpense',        label: 'Miscellaneous Expenses', pappu: false },
+  { key: 'subscription',       label: 'Subscription',         pappu: false },
   { key: 'storageElectricity', label: 'Storage Electricity',  pappu: false },
   { key: 'storageSalaries',    label: 'Storage Salaries',     pappu: false },
   { key: 'drawingsShabri',     label: 'Drawings - Shabri',    pappu: false },
@@ -180,6 +182,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     electricityAgg,
     maintenanceAgg,
     miscExpenseAgg,
+    subscriptionAgg,
     storageByKind,
     drawingsByOwner,
     interestByType,
@@ -223,6 +226,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       prisma.electricityBill.aggregate({ _sum: { amount: true } }),
       prisma.maintenanceExpense.aggregate({ _sum: { amount: true } }),
       prisma.miscExpense.aggregate({ _sum: { amount: true } }),
+      prisma.subscriptionCharge.aggregate({ _sum: { amount: true } }),
       (prisma.storageMaintenanceExpense.groupBy as any)({ by: ['kind'], _sum: { amount: true } }),
       (prisma.drawing.groupBy as any)({ by: ['owner'], _sum: { amount: true } }),
       (prisma.interestCharge.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
@@ -353,6 +357,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     const electricity = Number(electricityAgg._sum.amount ?? 0);
     const maintenance = Number(maintenanceAgg._sum.amount ?? 0);
     const miscExpense = Number(miscExpenseAgg._sum.amount ?? 0);
+    const subscription = Number(subscriptionAgg._sum.amount ?? 0);
     const storage = Object.fromEntries(
       (storageByKind as any[]).map((r) => [r.kind, Number(r._sum.amount ?? 0)]),
     );
@@ -417,6 +422,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       electricity,
       maintenance,
       miscExpense,
+      subscription,
       storageElectricity,
       storageSalaries,
       drawingsShabri: drawings['SHABRI'] ?? 0,

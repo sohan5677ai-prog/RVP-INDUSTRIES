@@ -1213,6 +1213,50 @@ model MiscExpense {
   createdAt   DateTime @default(now())
 }
 
+enum SubscriptionPlan {
+  MONTHLY
+  YEARLY
+}
+
+// Recurring software/service subscription fee shown on the Expenses → Subscription
+// tab. Rows are normally created by the recurring generator (subscription.service)
+// rather than by hand; `periodKey` is the period the charge belongs to and is null
+// on a manually-added one-off. Posts a linked Payment like every other expense
+// head and is deducted from the husk recovery pool.
+model SubscriptionCharge {
+  id        String           @id @default(cuid())
+  date      DateTime // the day the fee is charged (1 July / the 24th)
+  plan      SubscriptionPlan
+  periodKey String? // "2026" (yearly) or "2026-08" (monthly); null = manual entry
+  amount    Decimal          @db.Decimal(12, 2)
+  dueDate   DateTime // date + the plan's payment window (28 days for monthly)
+  auto      Boolean          @default(true) // false = added by hand
+  note      String?
+  createdAt DateTime         @default(now())
+
+  // Belt-and-braces against a double trigger racing the generator's cursor.
+  // Postgres allows many NULLs here, so manual entries are unconstrained.
+  @@unique([plan, periodKey])
+}
+
+// Recurrence settings for one SubscriptionCharge plan - one row per plan, seeded
+// on first read and edited from the Subscription tab.
+//
+// `generatedThrough` is the cursor: only periods falling AFTER it are created, and
+// it advances as they are. Without it, deleting an auto-generated charge would let
+// the next run resurrect it.
+model SubscriptionPlanConfig {
+  id               SubscriptionPlan @id
+  enabled          Boolean          @default(true)
+  amount           Decimal          @db.Decimal(12, 2)
+  chargeDay        Int // day of the month the fee lands, clamped to the month's length
+  chargeMonth      Int? // yearly only: 1-based month, e.g. 7 = July
+  dueDays          Int              @default(0) // payment window in days
+  startDate        DateTime // nothing is generated before this
+  generatedThrough DateTime? // charge date of the last period generated
+  updatedAt        DateTime         @updatedAt
+}
+
 enum DrawingOwner {
   SHABRI
   REDDY

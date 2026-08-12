@@ -109,15 +109,20 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
  * SEPARATE approved template on Fast2SMS carrying the same variable slots in the
  * same order as its English twin, so only the id changes at send time.
  *
- * Empty until Meta approves the translated copies (see
+ * Filled in as Meta approves each translated copy (see
  * docs/whatsapp-multilingual-templates.md for the submitted wording). Anything
  * missing falls back to English rather than skipping the send.
+ *
+ * The ids run in one near-consecutive block per template, so a transposed digit
+ * silently sends a Tamil supplier the Telugu copy - both are valid, approved
+ * ids, and nothing errors. `whatsappLanguage.test.ts` pins each one.
  */
 const LANGUAGE_TEMPLATE_IDS: Partial<Record<Exclude<WaLanguage, 'EN'>, Partial<Record<WaTemplateKey, string>>>> = {
-  TE: {},
-  TA: {},
-  KN: {},
-  HI: {},
+  // po_telugu / po_tamil / po_kannada / po_hindi, approved 2026-08-11.
+  TE: { PO_CREATED: '28599' },
+  TA: { PO_CREATED: '28598' },
+  KN: { PO_CREATED: '28597' },
+  HI: { PO_CREATED: '28596' },
 };
 
 /**

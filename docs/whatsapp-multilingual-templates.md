@@ -143,6 +143,21 @@ English is live: message_id **26129**, sender +917207146094. (The panel also sho
 TEMPLATE ID `1366575302101445` — that is the **Meta** id and would 400. Always
 take the small MESSAGE ID.)
 
+**All five languages are approved and wired** (2026-08-11):
+
+| Language | Template | message_id |
+| --- | --- | --- |
+| en | `po_created` | 26129 |
+| te | `po_telugu` | 28599 |
+| ta | `po_tamil` | 28598 |
+| kn | `po_kannada` | 28597 |
+| hi | `po_hindi` | 28596 |
+
+The four translations live in `LANGUAGE_TEMPLATE_IDS` in whatsapp.service.ts and
+are pinned by value in `whatsappLanguage.test.ts` — the ids are consecutive, so a
+transposed pair would send a Tamil supplier a perfectly valid Telugu message with
+nothing in the logs to show for it.
+
 Sample values for the approval form: `Sri Venkateswara Traders`, `DCS/07/26-27`,
 `3`, `95.50`.
 

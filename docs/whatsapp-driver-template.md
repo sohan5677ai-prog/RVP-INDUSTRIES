@@ -75,13 +75,24 @@ That is a Fast2SMS approval plus a small branch in `notifyDispatchDriver`.
 | `{{6}}` | Party contact | `9876543210` |
 | `{{7}}` | Maps link | `https://maps.google.com/?q=11.237543,77.55936` |
 
-The header's own two caption slots — `{{Location name}}` and `{{Address}}` — are
-sent **empty on purpose**. Meta has both optional, and filling them changes what
-a tap on the pin does: the map app looks up those strings instead of opening the
-coordinates. The first live send carried "Colourtex Industries Private Ltd" /
-"Unit - 6, Plot No.294/10, G.I.D.C, Pandesar…" and tapping the pin offered a
-list of candidates rather than the gate. With coordinates alone there is nothing
-to search, so the pin opens where it was dropped. The driver loses no
+### The pin's caption is the coordinates, deliberately
+
+`{{Location name}}` is sent as `21.132513, 72.832685` and `{{Address}}` is not
+sent at all. Both of those are the result of live sends, not preference:
+
+- **Filling them with the buyer's name and street address breaks the tap.** A
+  tap on the pin hands the map app those *strings* to look up rather than the
+  coordinates it was sent. The first live send carried "Colourtex Industries
+  Private Ltd" / "Unit - 6, Plot No.294/10, G.I.D.C, Pandesar…" and tapping
+  offered a list of Pandesara candidates instead of the gate.
+- **`name` cannot simply be dropped.** Meta rejects the send outright:
+  `(#100) Parameter 'name' is mandatory for component parameter type 'location'`
+  — regardless of what the location-*message* docs say about it being optional.
+- **`address` really is optional.** That rejected request omitted both fields
+  and Meta named only `name`.
+
+Coordinates as the caption satisfy Meta and resolve to one exact point whether
+the tap opens the pin directly or looks the caption up. The driver loses no
 information: `{{3}}` and `{{4}}` right below the card name the buyer and the town.
 
 `{{7}}` is **not** whatever was pasted into the party form. Once the

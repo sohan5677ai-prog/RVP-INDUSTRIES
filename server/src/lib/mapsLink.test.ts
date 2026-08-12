@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coordUrl, mapsUrlFor, parseLatLng, resolveLatLngFromMapsLink } from './mapsLink.js';
+import { coordLabel, coordUrl, mapsUrlFor, parseLatLng, resolveLatLngFromMapsLink } from './mapsLink.js';
 
 /**
  * These coordinates are what the driver's WhatsApp pin is built from
@@ -81,5 +81,19 @@ describe('coordUrl', () => {
   it('trims to six decimals without leaving trailing zeros', () => {
     expect(coordUrl({ lat: 11.2375428, lng: 77.5593605 })).toBe('https://maps.google.com/?q=11.237543,77.55936');
     expect(coordUrl({ lat: 21.13, lng: 72.8 })).toBe('https://maps.google.com/?q=21.13,72.8');
+  });
+});
+
+describe('coordLabel', () => {
+  // This is the location header's mandatory `name`, and a tap on the pin can
+  // hand it to the map app as a search string - so it has to be something maps
+  // resolve to one exact point, which a business name is not.
+  it('reads as a coordinate pair, not a place', () => {
+    expect(coordLabel({ lat: 21.1325133, lng: 72.8326854 })).toBe('21.132513, 72.832685');
+  });
+
+  it('agrees with the link the driver gets in the same message', () => {
+    const coords = { lat: 11.2375428, lng: 77.5593605 };
+    expect(coordUrl(coords)).toContain(coordLabel(coords).replace(' ', ''));
   });
 });

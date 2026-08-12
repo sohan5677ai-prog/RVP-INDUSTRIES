@@ -2,7 +2,7 @@ import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
-import { coordUrl, mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
+import { coordLabel, coordUrl, mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -500,14 +500,17 @@ interface LocationSendArgs {
   templateKey: WaTemplateKey;
   to: string | null | undefined;
   /**
-   * `name`/`address` are the two caption lines under the pin, and Meta has them
-   * optional. Leave them out unless the caption is worth what they cost: with a
-   * name and address present, tapping the card hands the map app those STRINGS
-   * to look up rather than the coordinates, and a "Plot No.294/10, G.I.D.C"
-   * lookup comes back with a list of candidates instead of the gate. Coordinates
-   * alone leave nothing to search, so the pin opens where it was dropped.
+   * The two caption lines under the pin. `name` is MANDATORY on a location
+   * header - Meta rejects the send with "(#100) Parameter 'name' is mandatory
+   * for component parameter type 'location'" without it, whatever the general
+   * location-message docs say. `address` genuinely is optional: the request
+   * that drew that error omitted both, and Meta named only `name`.
+   *
+   * Mind what goes in them. Tapping the card hands the map app these STRINGS to
+   * look up rather than the coordinates it was sent, so a buyer's name and
+   * street address come back as a list of candidates instead of the gate.
    */
-  location: { lat: number; lng: number; name?: string; address?: string };
+  location: { lat: number; lng: number; name: string; address?: string };
   variables: Array<string | number | null | undefined>;
   relatedType?: string;
   relatedId?: string;
@@ -587,9 +590,9 @@ export async function sendLocationWhatsAppTemplate(
               location: {
                 latitude: args.location.lat,
                 longitude: args.location.lng,
+                name: cleanVar(args.location.name),
                 // Omitted entirely when unset - an empty string is still a
                 // search term to the map app, which is the thing being avoided.
-                ...(args.location.name ? { name: cleanVar(args.location.name) } : {}),
                 ...(args.location.address ? { address: cleanVar(args.location.address) } : {}),
               },
             },
@@ -923,12 +926,15 @@ export const whatsappService = {
     return sendLocationWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
-      // Coordinates only, no name or address: those two caption lines turn the
-      // driver's tap on the pin into a text search - the first live send showed
-      // a list of Pandesara GIDC candidates instead of the buyer's gate. He
-      // loses nothing by their absence, since {{3}} and {{4}} directly below
+      // The pin's caption is the coordinates themselves, not the buyer's name
+      // and street address. Those two turned the driver's tap into a text
+      // search - the first live send offered a list of Pandesara GIDC
+      // candidates instead of the gate - and `name` cannot simply be dropped,
+      // Meta rejects a location header without one. Coordinates as the caption
+      // resolve to the same point whether the tap opens the pin or looks the
+      // string up. He loses nothing: {{3}} and {{4}} directly below the card
       // name the buyer and the town.
-      location: { lat: coords.lat, lng: coords.lng },
+      location: { lat: coords.lat, lng: coords.lng, name: coordLabel(coords) },
       variables,
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,

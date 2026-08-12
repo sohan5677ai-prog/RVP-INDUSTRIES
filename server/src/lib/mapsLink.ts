@@ -63,15 +63,20 @@ export function parseLatLng(raw: string | null | undefined): { lat: number; lng:
   return coords && plausible(coords) ? coords : null;
 }
 
+/** "21.132513, 72.832685" - six decimals is ~10 cm, trailing zeros dropped. */
+export function coordLabel(coords: { lat: number; lng: number }): string {
+  const round = (n: number) => Number(n.toFixed(6));
+  return `${round(coords.lat)}, ${round(coords.lng)}`;
+}
+
 /**
  * The shortest link that opens a pin at these coordinates - about 45
  * characters, against the 300-plus of a copied Google Maps place URL, which
  * wrapped over eight lines in the driver's message and buried the trip details
- * above it. Six decimals is ~10 cm; trailing zeros are dropped by Number.
+ * above it.
  */
 export function coordUrl(coords: { lat: number; lng: number }): string {
-  const round = (n: number) => Number(n.toFixed(6));
-  return `https://maps.google.com/?q=${round(coords.lat)},${round(coords.lng)}`;
+  return `https://maps.google.com/?q=${coordLabel(coords).replace(' ', '')}`;
 }
 
 /**

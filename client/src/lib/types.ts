@@ -712,9 +712,9 @@ export type ManualHamaliType =
   | 'BAG_CUTTING_NORMAL'
   | 'BAG_CUTTING_DISTANCE'
   | 'PAPPU_NET'
-  | 'HUSK_PACKING'
   | 'TPS_BROKENS_PACKING'
   | 'TAMARIND_BYPRODUCTS_PACKING'
+  | 'TARBAL_FEE'
   | 'MISC'
   | 'PAID';
 

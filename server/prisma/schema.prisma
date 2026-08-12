@@ -788,6 +788,7 @@ model HamaliRate {
 //     - PAPPU_NET             - pappu netting/bagging (≈₹6/bag)
 //   Flat amounts (amount entered directly, bags/ratePerBag null):
 //     - DIESEL                - diesel/fuel cost borne for the crew
+//     - TARBAL_FEE            - tarpaulin (tarbal) charge for sheeting a lorry
 //     - MISC                  - any other charge given to the hamali crew
 //     - PAID                  - cash actually disbursed to the crew (settles the payable)
 // Charge entries post Dr Factory Labor 50020 / Cr Hamali payable 20200; PAID
@@ -796,10 +797,10 @@ enum ManualHamaliType {
   BAG_CUTTING_NORMAL
   BAG_CUTTING_DISTANCE
   PAPPU_NET
-  HUSK_PACKING
   TPS_BROKENS_PACKING
   TAMARIND_BYPRODUCTS_PACKING
   DIESEL
+  TARBAL_FEE
   MISC
   PAID
 }

@@ -37,9 +37,9 @@ export interface HuskExpenses {
   tWasteLoading: number;
   bagCutting: number;
   pappuNet: number;
-  huskPacking: number;
   tpsBrokensPacking: number;
   tamarindByproductsPacking: number;
+  tarbalFee: number;
   misc: number;
   gunnyBags: number;
   electricity: number;
@@ -95,10 +95,12 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'tWasteLoading', label: 'T-Waste Loading' },
   { key: 'bagCutting', label: 'Bag Cutting' },
   { key: 'pappuNet', label: 'Pappu Net (Rasi)' },
-  { key: 'huskPacking', label: 'Husk Packing' },
   { key: 'tpsBrokensPacking', label: 'TPS Brokens Packing' },
   { key: 'tamarindByproductsPacking', label: 'Tamarind Byproducts Packing' },
-  { key: 'misc', label: 'Miscellaneous' },
+  { key: 'tarbalFee', label: 'Tarbal Fee' },
+  // Hamali-crew MISC charges - not the Expenses > Miscellaneous tab, which is
+  // the `miscExpense` row below.
+  { key: 'misc', label: 'Hamali Miscellaneous' },
   { key: 'gunnyBags', label: 'Gunny Bags (purchases)' },
   { key: 'electricity', label: 'Electricity' },
   { key: 'maintenance', label: 'Maintenance' },

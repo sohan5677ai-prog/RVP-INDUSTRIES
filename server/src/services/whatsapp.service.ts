@@ -499,7 +499,15 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
 interface LocationSendArgs {
   templateKey: WaTemplateKey;
   to: string | null | undefined;
-  location: { lat: number; lng: number; name: string; address: string };
+  /**
+   * `name`/`address` are the two caption lines under the pin, and Meta has them
+   * optional. Leave them out unless the caption is worth what they cost: with a
+   * name and address present, tapping the card hands the map app those STRINGS
+   * to look up rather than the coordinates, and a "Plot No.294/10, G.I.D.C"
+   * lookup comes back with a list of candidates instead of the gate. Coordinates
+   * alone leave nothing to search, so the pin opens where it was dropped.
+   */
+  location: { lat: number; lng: number; name?: string; address?: string };
   variables: Array<string | number | null | undefined>;
   relatedType?: string;
   relatedId?: string;
@@ -579,8 +587,10 @@ export async function sendLocationWhatsAppTemplate(
               location: {
                 latitude: args.location.lat,
                 longitude: args.location.lng,
-                name: cleanVar(args.location.name),
-                address: cleanVar(args.location.address),
+                // Omitted entirely when unset - an empty string is still a
+                // search term to the map app, which is the thing being avoided.
+                ...(args.location.name ? { name: cleanVar(args.location.name) } : {}),
+                ...(args.location.address ? { address: cleanVar(args.location.address) } : {}),
               },
             },
           ],
@@ -913,14 +923,12 @@ export const whatsappService = {
     return sendLocationWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
-      location: {
-        lat: coords.lat,
-        lng: coords.lng,
-        name: buyer.name,
-        // The header's address line, under the pin's name - the town the driver
-        // is heading for, with the buyer's street address when we hold one.
-        address: buyer.address?.trim() || destination,
-      },
+      // Coordinates only, no name or address: those two caption lines turn the
+      // driver's tap on the pin into a text search - the first live send showed
+      // a list of Pandesara GIDC candidates instead of the buyer's gate. He
+      // loses nothing by their absence, since {{3}} and {{4}} directly below
+      // name the buyer and the town.
+      location: { lat: coords.lat, lng: coords.lng },
       variables,
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,

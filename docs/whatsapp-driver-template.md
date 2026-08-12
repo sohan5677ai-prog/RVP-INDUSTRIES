@@ -75,8 +75,14 @@ That is a Fast2SMS approval plus a small branch in `notifyDispatchDriver`.
 | `{{6}}` | Party contact | `9876543210` |
 | `{{7}}` | Maps link | `https://maps.google.com/?q=11.237543,77.55936` |
 
-The header's own two slots are filled from the buyer: name, and street address
-falling back to the destination.
+The header's own two caption slots — `{{Location name}}` and `{{Address}}` — are
+sent **empty on purpose**. Meta has both optional, and filling them changes what
+a tap on the pin does: the map app looks up those strings instead of opening the
+coordinates. The first live send carried "Colourtex Industries Private Ltd" /
+"Unit - 6, Plot No.294/10, G.I.D.C, Pandesar…" and tapping the pin offered a
+list of candidates rather than the gate. With coordinates alone there is nothing
+to search, so the pin opens where it was dropped. The driver loses no
+information: `{{3}}` and `{{4}}` right below the card name the buyer and the town.
 
 `{{7}}` is **not** whatever was pasted into the party form. Once the
 coordinates are known the link is rebuilt as a short `?q=lat,lng` — a copied

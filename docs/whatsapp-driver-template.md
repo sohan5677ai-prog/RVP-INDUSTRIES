@@ -75,25 +75,28 @@ That is a Fast2SMS approval plus a small branch in `notifyDispatchDriver`.
 | `{{6}}` | Party contact | `9876543210` |
 | `{{7}}` | Maps link | `https://maps.google.com/?q=11.237543,77.55936` |
 
-### The pin's caption is the coordinates, deliberately
+### The pin's address line is the coordinates, deliberately
 
-`{{Location name}}` is sent as `21.132513, 72.832685` and `{{Address}}` is not
-sent at all. Both of those are the result of live sends, not preference:
+The header's two caption lines are sent as the buyer's name and then the
+coordinates — `Colourtex Industries Private Ltd` / `21.132513, 72.832685` —
+rather than the buyer's street address. Both facts behind that came from live
+sends, not preference:
 
-- **Filling them with the buyer's name and street address breaks the tap.** A
-  tap on the pin hands the map app those *strings* to look up rather than the
-  coordinates it was sent. The first live send carried "Colourtex Industries
-  Private Ltd" / "Unit - 6, Plot No.294/10, G.I.D.C, Pandesar…" and tapping
-  offered a list of Pandesara candidates instead of the gate.
-- **`name` cannot simply be dropped.** Meta rejects the send outright:
-  `(#100) Parameter 'name' is mandatory for component parameter type 'location'`
-  — regardless of what the location-*message* docs say about it being optional.
-- **`address` really is optional.** That rejected request omitted both fields
-  and Meta named only `name`.
+- **Both caption fields are mandatory**, whatever the location-*message* docs
+  say about them being optional. Meta rejects the send with
+  `(#100) Parameter '<field>' is mandatory for component parameter type 'location'`,
+  and it reports **one missing field at a time** — omit both and it names only
+  `name`, which reads as though `address` were optional until you supply `name`
+  and the next rejection names `address`.
+- **A street address in that slot breaks the tap.** Tapping the pin hands the
+  caption to the map app to look up rather than opening the coordinates it was
+  sent, and the first live send's "Unit - 6, Plot No.294/10, G.I.D.C, Pandesar…"
+  came back as a list of Pandesara candidates instead of the gate.
 
-Coordinates as the caption satisfy Meta and resolve to one exact point whether
-the tap opens the pin directly or looks the caption up. The driver loses no
-information: `{{3}}` and `{{4}}` right below the card name the buyer and the town.
+Coordinates in the address slot look up as one exact point. If a tap still
+offers a list, the remaining suspect is the **name** line — try the coordinates
+there too, and note that `{{7}}`'s `?q=lat,lng` link has always landed exactly,
+so it is the reliable thing to tell a driver to use.
 
 `{{7}}` is **not** whatever was pasted into the party form. Once the
 coordinates are known the link is rebuilt as a short `?q=lat,lng` — a copied

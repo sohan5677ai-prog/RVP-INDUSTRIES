@@ -500,17 +500,18 @@ interface LocationSendArgs {
   templateKey: WaTemplateKey;
   to: string | null | undefined;
   /**
-   * The two caption lines under the pin. `name` is MANDATORY on a location
-   * header - Meta rejects the send with "(#100) Parameter 'name' is mandatory
-   * for component parameter type 'location'" without it, whatever the general
-   * location-message docs say. `address` genuinely is optional: the request
-   * that drew that error omitted both, and Meta named only `name`.
+   * The two caption lines under the pin. BOTH are mandatory on a location
+   * header, whatever the general location-message docs say about them being
+   * optional - Meta rejects the send with "(#100) Parameter '<field>' is
+   * mandatory for component parameter type 'location'". It reports one missing
+   * field at a time, so dropping both looks like only `name` is required until
+   * you supply it and the next rejection names `address`.
    *
    * Mind what goes in them. Tapping the card hands the map app these STRINGS to
-   * look up rather than the coordinates it was sent, so a buyer's name and
-   * street address come back as a list of candidates instead of the gate.
+   * look up rather than the coordinates it was sent, so a street address comes
+   * back as a list of candidates instead of the gate.
    */
-  location: { lat: number; lng: number; name: string; address?: string };
+  location: { lat: number; lng: number; name: string; address: string };
   variables: Array<string | number | null | undefined>;
   relatedType?: string;
   relatedId?: string;
@@ -591,9 +592,7 @@ export async function sendLocationWhatsAppTemplate(
                 latitude: args.location.lat,
                 longitude: args.location.lng,
                 name: cleanVar(args.location.name),
-                // Omitted entirely when unset - an empty string is still a
-                // search term to the map app, which is the thing being avoided.
-                ...(args.location.address ? { address: cleanVar(args.location.address) } : {}),
+                address: cleanVar(args.location.address),
               },
             },
           ],
@@ -926,15 +925,15 @@ export const whatsappService = {
     return sendLocationWhatsAppTemplate({
       templateKey: 'DISPATCH_DRIVER',
       to: dispatch.driverPhone,
-      // The pin's caption is the coordinates themselves, not the buyer's name
-      // and street address. Those two turned the driver's tap into a text
-      // search - the first live send offered a list of Pandesara GIDC
-      // candidates instead of the gate - and `name` cannot simply be dropped,
-      // Meta rejects a location header without one. Coordinates as the caption
-      // resolve to the same point whether the tap opens the pin or looks the
-      // string up. He loses nothing: {{3}} and {{4}} directly below the card
-      // name the buyer and the town.
-      location: { lat: coords.lat, lng: coords.lng, name: coordLabel(coords) },
+      // Both caption lines are mandatory, so the choice is only what goes in
+      // them. The street address is the one that has to go: tapping the pin
+      // hands the caption to the map app to look up, and "Unit - 6, Plot
+      // No.294/10, G.I.D.C, Pandesar…" is exactly the kind of string that comes
+      // back as a list of candidates rather than the buyer's gate. The
+      // coordinates take its place - a lookup of "21.132513, 72.832685"
+      // resolves to that one point - while the buyer's name keeps the card
+      // readable.
+      location: { lat: coords.lat, lng: coords.lng, name: buyer.name, address: coordLabel(coords) },
       variables,
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,

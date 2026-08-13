@@ -807,6 +807,39 @@ export interface SetOffOpenItems {
   totals: { payable: number; receivable: number };
 }
 
+/** A purchase bill this set-off cleared (the payment-side leg). */
+export interface SetOffPurchaseLeg {
+  legId: string;
+  kind: 'GRAIN' | 'DUST';
+  id: string | null;
+  amount: string;
+  invoiceNumber: string | null;
+  lorryNumber: string | null;
+}
+
+/** A sale invoice this set-off cleared (the collection-side leg). */
+export interface SetOffSaleLeg {
+  legId: string;
+  saleDispatchId: string | null;
+  amount: string;
+  invoiceNumber: string | null;
+  vehicleNumber: string | null;
+  product: string | null;
+}
+
+/** One recorded knock-off, with both sides spelled out. */
+export interface SetOff {
+  id: string;
+  date: string;
+  amount: string;
+  note: string | null;
+  party: { id: string; name: string };
+  journalEntryId: string | null;
+  createdAt: string;
+  purchases: SetOffPurchaseLeg[];
+  sales: SetOffSaleLeg[];
+}
+
 // --- Party Ledger -----------------------------------------------------------
 
 export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE' | 'SET_OFF';

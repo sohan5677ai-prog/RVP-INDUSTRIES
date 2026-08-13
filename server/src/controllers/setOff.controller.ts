@@ -1,7 +1,8 @@
 import type { Request, Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { createSetOffSchema, listSetOffsSchema } from '../schemas/setOff.schema.js';
+import { createSetOffSchema, listSetOffsSchema, type CreateSetOffInput } from '../schemas/setOff.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
 
 // ---------------------------------------------------------------------------
@@ -38,10 +39,17 @@ const DUST_TAG = (dustId: string) => `DUST:${dustId}:`;
  * carrying its own dispatch id, counting cash + TDS + shortage). Both must agree
  * with those pages or the dialog would offer to knock off an amount the page
  * says is already settled.
+ *
+ * `excludeSetOffId` blanks out one set-off's own legs. An EDIT has to see the
+ * world as if that set-off had never been recorded - otherwise its own legs make
+ * every bill it touches read as settled, and re-allocating them looks like
+ * over-allocation.
  */
-async function buildOpenItems(partyId: string) {
+async function buildOpenItems(partyId: string, excludeSetOffId?: string) {
   const party = await prisma.party.findUnique({ where: { id: partyId } });
   if (!party) throw new HttpError(404, 'Party not found');
+
+  const notThisSetOff = excludeSetOffId ? { setOffId: { not: excludeSetOffId } } : {};
 
   const [purchases, dustPurchases, payments, saleOrders, receipts] = await Promise.all([
     prisma.purchase.findMany({
@@ -49,9 +57,12 @@ async function buildOpenItems(partyId: string) {
       include: { verification: true, stockIn: true },
     }),
     prisma.dustPurchase.findMany({ where: { partyId } }),
-    prisma.payment.findMany({ where: { partyId, type: 'SUPPLIER' }, orderBy: { date: 'asc' } }),
+    prisma.payment.findMany({
+      where: { partyId, type: 'SUPPLIER', ...notThisSetOff },
+      orderBy: { date: 'asc' },
+    }),
     prisma.saleOrder.findMany({ where: { buyerId: partyId }, include: { dispatches: true } }),
-    prisma.receipt.findMany({ where: { partyId, type: 'BUYER' } }),
+    prisma.receipt.findMany({ where: { partyId, type: 'BUYER', ...notThisSetOff } }),
   ]);
 
   // ── Purchase side ────────────────────────────────────────────────────────
@@ -176,9 +187,15 @@ async function buildOpenItems(partyId: string) {
 type OpenItems = Awaited<ReturnType<typeof buildOpenItems>>;
 
 export async function getSetOffOpenItems(req: Request, res: Response) {
-  res.json(await buildOpenItems(req.params.partyId));
+  const excludeSetOffId = typeof req.query.excludeSetOffId === 'string' ? req.query.excludeSetOffId : undefined;
+  res.json(await buildOpenItems(req.params.partyId, excludeSetOffId));
 }
 
+/**
+ * Every recorded set-off with both sides spelled out - which purchase bills it
+ * cleared and which sale invoices - so the register reads as a document rather
+ * than a pair of opaque amounts.
+ */
 export async function listSetOffs(req: Request, res: Response) {
   const { partyId } = listSetOffsSchema.parse(req.query);
   const rows = await prisma.partySetOff.findMany({
@@ -186,16 +203,91 @@ export async function listSetOffs(req: Request, res: Response) {
     orderBy: { date: 'desc' },
     include: {
       party: { select: { id: true, name: true } },
-      payments: { select: { id: true, amount: true, purchaseId: true, reference: true } },
-      receipts: { select: { id: true, amount: true, saleDispatchId: true } },
+      payments: {
+        select: {
+          id: true,
+          amount: true,
+          purchaseId: true,
+          reference: true,
+          purchase: { select: { stockIn: { select: { invoiceNumber: true, lorryNumber: true } } } },
+        },
+      },
+      receipts: {
+        select: {
+          id: true,
+          amount: true,
+          saleDispatchId: true,
+          saleDispatch: {
+            select: {
+              invoiceNumber: true,
+              invoiceSeq: true,
+              invoiceFy: true,
+              vehicleNumber: true,
+              saleOrder: { select: { product: true } },
+            },
+          },
+        },
+      },
     },
   });
-  res.json(rows);
+
+  // Dust bills carry no Purchase relation - their leg is tagged `DUST:<id>:…`,
+  // so resolve those invoice numbers in one lookup rather than per row.
+  const dustIds = rows
+    .flatMap((s) => s.payments)
+    .map((p) => (p.reference?.startsWith('DUST:') ? p.reference.split(':')[1] : null))
+    .filter((id): id is string => !!id);
+  const dustById = new Map(
+    dustIds.length
+      ? (await prisma.dustPurchase.findMany({
+          where: { id: { in: dustIds } },
+          select: { id: true, invoiceNumber: true, lorryNumber: true },
+        })).map((d) => [d.id, d])
+      : []
+  );
+
+  res.json(
+    rows.map((s) => ({
+      id: s.id,
+      date: s.date,
+      amount: s.amount,
+      note: s.note,
+      party: s.party,
+      journalEntryId: s.journalEntryId,
+      createdAt: s.createdAt,
+      purchases: s.payments.map((p) => {
+        const dust = p.reference?.startsWith('DUST:') ? dustById.get(p.reference.split(':')[1]) : undefined;
+        return {
+          legId: p.id,
+          kind: dust ? ('DUST' as const) : ('GRAIN' as const),
+          id: dust ? dust.id : p.purchaseId,
+          amount: p.amount,
+          invoiceNumber: dust ? dust.invoiceNumber : p.purchase?.stockIn?.invoiceNumber ?? null,
+          lorryNumber: dust ? dust.lorryNumber : p.purchase?.stockIn?.lorryNumber ?? null,
+        };
+      }),
+      sales: s.receipts.map((r) => ({
+        legId: r.id,
+        saleDispatchId: r.saleDispatchId,
+        amount: r.amount,
+        invoiceNumber:
+          r.saleDispatch?.invoiceNumber ??
+          (r.saleDispatch?.invoiceSeq && r.saleDispatch?.invoiceFy
+            ? `${r.saleDispatch.invoiceSeq}/${r.saleDispatch.invoiceFy}`
+            : null),
+        vehicleNumber: r.saleDispatch?.vehicleNumber ?? null,
+        product: r.saleDispatch?.saleOrder?.product ?? null,
+      })),
+    }))
+  );
 }
 
-export async function createSetOff(req: Request, res: Response) {
-  const data = createSetOffSchema.parse(req.body);
-
+/**
+ * Shared validation for create and edit: the two sides must balance, no bill may
+ * appear twice, and every allocation must fit inside what that bill still has
+ * open. `excludeSetOffId` lets an edit ignore its own legs while checking.
+ */
+async function validateAllocations(data: CreateSetOffInput, excludeSetOffId?: string) {
   const purchaseTotal = data.purchases.reduce((s, p) => s + p.amount, 0);
   const saleTotal = data.sales.reduce((s, d) => s + d.amount, 0);
   if (purchaseTotal !== saleTotal) {
@@ -214,7 +306,7 @@ export async function createSetOff(req: Request, res: Response) {
 
   // Re-derive what is actually open right now, from the same source the dues
   // pages read, so a stale dialog can never over-allocate a bill.
-  const open = await buildOpenItems(data.partyId);
+  const open = await buildOpenItems(data.partyId, excludeSetOffId);
   const openPurchaseById = new Map<string, OpenItems['purchases'][number]>(
     open.purchases.map((p) => [`${p.kind}:${p.id}`, p])
   );
@@ -247,6 +339,70 @@ export async function createSetOff(req: Request, res: Response) {
     }
   }
 
+  return { purchaseTotal, openPurchaseById, openSaleById };
+}
+
+/**
+ * Write both sides of a set-off. The legs carry NO journalEntryId of their own:
+ * the single contra entry is the whole accounting effect, and posting each leg
+ * the normal way would move the bank for cash that never went anywhere.
+ */
+async function writeLegs(
+  tx: Prisma.TransactionClient,
+  setOffId: string,
+  data: CreateSetOffInput,
+  openPurchaseById: Map<string, OpenItems['purchases'][number]>,
+  openSaleById: Map<string, OpenItems['sales'][number]>
+) {
+  const saleLabels = data.sales
+    .map((s) => openSaleById.get(s.saleDispatchId)?.invoiceNumber)
+    .filter(Boolean)
+    .join(', ');
+  const purchaseLabels = data.purchases
+    .map((p) => openPurchaseById.get(`${p.kind}:${p.id}`)?.invoiceNumber)
+    .filter(Boolean)
+    .join(', ');
+
+  for (const leg of data.purchases) {
+    await tx.payment.create({
+      data: {
+        date: data.date,
+        amount: leg.amount,
+        type: 'SUPPLIER',
+        partyId: data.partyId,
+        setOffId,
+        // A dust bill has no Purchase row to point at, so it is settled by the
+        // same `DUST:<id>:<mode>` reference tag the Purchase Dues page matches.
+        ...(leg.kind === 'DUST'
+          ? { reference: `${DUST_TAG(leg.id)}SET-OFF` }
+          : { purchaseId: leg.id, reference: 'SET-OFF' }),
+        description: `Set-off against sale invoice${saleLabels ? ` ${saleLabels}` : 's'} (no cash paid)`,
+      },
+    });
+  }
+
+  // Receipt-side legs, one per sale invoice - invoice-based settlement means a
+  // shipment is only ever cleared by a receipt stamped with its dispatch id.
+  for (const leg of data.sales) {
+    await tx.receipt.create({
+      data: {
+        date: data.date,
+        amount: leg.amount,
+        type: 'BUYER',
+        partyId: data.partyId,
+        saleDispatchId: leg.saleDispatchId,
+        setOffId,
+        reference: 'SET-OFF',
+        description: `Set-off against purchase bill${purchaseLabels ? ` ${purchaseLabels}` : 's'} (no cash received)`,
+      },
+    });
+  }
+}
+
+export async function createSetOff(req: Request, res: Response) {
+  const data = createSetOffSchema.parse(req.body);
+  const { purchaseTotal, openPurchaseById, openSaleById } = await validateAllocations(data);
+
   const setOff = await prisma.$transaction(async (tx) => {
     const party = await tx.party.findUnique({ where: { id: data.partyId } });
     if (!party) throw new HttpError(404, 'Party not found');
@@ -260,52 +416,7 @@ export async function createSetOff(req: Request, res: Response) {
       },
     });
 
-    const saleLabels = data.sales
-      .map((s) => openSaleById.get(s.saleDispatchId)?.invoiceNumber)
-      .filter(Boolean)
-      .join(', ');
-    const purchaseLabels = data.purchases
-      .map((p) => openPurchaseById.get(`${p.kind}:${p.id}`)?.invoiceNumber)
-      .filter(Boolean)
-      .join(', ');
-
-    // Payment-side legs. They carry NO journalEntryId: the single contra entry
-    // below is the whole accounting effect, and posting each leg the normal way
-    // would credit the bank for cash that never left.
-    for (const leg of data.purchases) {
-      await tx.payment.create({
-        data: {
-          date: data.date,
-          amount: leg.amount,
-          type: 'SUPPLIER',
-          partyId: data.partyId,
-          setOffId: created.id,
-          // A dust bill has no Purchase row to point at, so it is settled by the
-          // same `DUST:<id>:<mode>` reference tag the Purchase Dues page matches.
-          ...(leg.kind === 'DUST'
-            ? { reference: `${DUST_TAG(leg.id)}SET-OFF` }
-            : { purchaseId: leg.id, reference: 'SET-OFF' }),
-          description: `Set-off against sale invoice${saleLabels ? ` ${saleLabels}` : 's'} (no cash paid)`,
-        },
-      });
-    }
-
-    // Receipt-side legs, one per sale invoice - invoice-based settlement means a
-    // shipment is only ever cleared by a receipt stamped with its dispatch id.
-    for (const leg of data.sales) {
-      await tx.receipt.create({
-        data: {
-          date: data.date,
-          amount: leg.amount,
-          type: 'BUYER',
-          partyId: data.partyId,
-          saleDispatchId: leg.saleDispatchId,
-          setOffId: created.id,
-          reference: 'SET-OFF',
-          description: `Set-off against purchase bill${purchaseLabels ? ` ${purchaseLabels}` : 's'} (no cash received)`,
-        },
-      });
-    }
+    await writeLegs(tx, created.id, data, openPurchaseById, openSaleById);
 
     const entry = await LedgerService.postSetOff(tx, created.id, {
       date: data.date,
@@ -322,6 +433,68 @@ export async function createSetOff(req: Request, res: Response) {
   });
 
   res.status(201).json(setOff);
+}
+
+/**
+ * Correct a set-off already on the books. A knock-off has no editable "fields"
+ * the way a payment does - what it IS is the pair of allocations - so a
+ * correction restates the whole thing: the old legs and contra entry come out
+ * and the new ones go in, inside one transaction. The row keeps its id, so
+ * anything referring to this set-off still refers to the corrected one.
+ *
+ * Re-validation ignores this set-off's own legs (`excludeSetOffId`), otherwise
+ * the bills it currently clears would read as settled and every edit that kept
+ * an existing allocation would be rejected as over-allocation.
+ */
+export async function updateSetOff(req: Request, res: Response) {
+  const existing = await prisma.partySetOff.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new HttpError(404, 'Set-off not found');
+
+  const data = createSetOffSchema.parse(req.body);
+  if (data.partyId !== existing.partyId) {
+    // Both sides belong to one party by definition; moving it elsewhere is a
+    // different knock-off entirely.
+    throw new HttpError(400, 'A set-off cannot be moved to a different party. Reverse it and record a new one.');
+  }
+
+  const { purchaseTotal, openPurchaseById, openSaleById } = await validateAllocations(data, existing.id);
+
+  const setOff = await prisma.$transaction(async (tx) => {
+    const party = await tx.party.findUnique({ where: { id: data.partyId } });
+    if (!party) throw new HttpError(404, 'Party not found');
+
+    // Clear the old shape first: both leg sets, then the contra entry. Unlink
+    // the entry before deleting it - PartySetOff.journalEntryId is nullable and
+    // would otherwise be left pointing at a deleted row mid-transaction.
+    await tx.payment.deleteMany({ where: { setOffId: existing.id } });
+    await tx.receipt.deleteMany({ where: { setOffId: existing.id } });
+    if (existing.journalEntryId) {
+      await tx.partySetOff.update({ where: { id: existing.id }, data: { journalEntryId: null } });
+      await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+    }
+
+    await tx.partySetOff.update({
+      where: { id: existing.id },
+      data: { date: data.date, amount: purchaseTotal, note: data.note ?? null },
+    });
+
+    await writeLegs(tx, existing.id, data, openPurchaseById, openSaleById);
+
+    const entry = await LedgerService.postSetOff(tx, existing.id, {
+      date: data.date,
+      amount: purchaseTotal,
+      partyName: party.name,
+      note: data.note ?? undefined,
+    });
+
+    return tx.partySetOff.update({
+      where: { id: existing.id },
+      data: { journalEntryId: entry.id },
+      include: { party: { select: { id: true, name: true } }, payments: true, receipts: true },
+    });
+  });
+
+  res.json(setOff);
 }
 
 /**

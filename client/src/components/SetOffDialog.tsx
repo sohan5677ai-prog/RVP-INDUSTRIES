@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeftRight, Loader2 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
-import type { Party, SetOffOpenItems, SetOffOpenPurchase, SetOffOpenSale } from '@/lib/types';
+import type { Party, SetOff, SetOffOpenItems, SetOffOpenPurchase, SetOffOpenSale } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -51,40 +51,73 @@ export function SetOffDialog({
   onOpenChange,
   parties,
   initialPartyId,
+  editing,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   parties: Party[] | undefined;
   /** Pre-selects the party when opened from a specific bill's row. */
   initialPartyId?: string;
+  /** Correcting an existing knock-off rather than recording a new one. */
+  editing?: SetOff | null;
 }) {
   const qc = useQueryClient();
+  const isEdit = !!editing;
   const [partyId, setPartyId] = useState(initialPartyId ?? '');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState('');
   const [purchaseAlloc, setPurchaseAlloc] = useState<Alloc>({});
   const [saleAlloc, setSaleAlloc] = useState<Alloc>({});
+  // An edit seeds the panels from the saved allocation instead of the default
+  // oldest-first fill, and only once - after that the user's edits stand.
+  const [seeded, setSeeded] = useState(false);
 
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    setSeeded(false);
+    if (editing) {
+      setPartyId(editing.party.id);
+      setDate(editing.date.slice(0, 10));
+      setNote(editing.note ?? '');
+    } else {
       setPartyId(initialPartyId ?? '');
       setDate(new Date().toISOString().slice(0, 10));
       setNote('');
       setPurchaseAlloc({});
       setSaleAlloc({});
     }
-  }, [open, initialPartyId]);
+  }, [open, initialPartyId, editing]);
 
   const { data: openItems, isLoading } = useQuery({
-    queryKey: ['set-off-open', partyId],
-    queryFn: () => api<SetOffOpenItems>(`/set-offs/open/${partyId}`),
+    // While editing, the server must ignore this set-off's own legs - otherwise
+    // the bills it currently clears read as settled and nothing is left to edit.
+    queryKey: ['set-off-open', partyId, editing?.id ?? null],
+    queryFn: () =>
+      api<SetOffOpenItems>(
+        `/set-offs/open/${partyId}${editing ? `?excludeSetOffId=${editing.id}` : ''}`
+      ),
     enabled: open && !!partyId,
   });
 
   // Default allocation: square the smaller side off in full, oldest bills first.
-  // Both sides get the SAME budget, so the dialog opens already balanced.
+  // Both sides get the SAME budget, so the dialog opens already balanced. An
+  // edit instead restores what was saved.
   useEffect(() => {
-    if (!openItems) return;
+    if (!openItems || seeded) return;
+    setSeeded(true);
+    if (editing) {
+      const p: Alloc = {};
+      for (const leg of editing.purchases) {
+        if (leg.id) p[`${leg.kind}:${leg.id}`] = String(Math.round(Number(leg.amount)));
+      }
+      const s: Alloc = {};
+      for (const leg of editing.sales) {
+        if (leg.saleDispatchId) s[leg.saleDispatchId] = String(Math.round(Number(leg.amount)));
+      }
+      setPurchaseAlloc(p);
+      setSaleAlloc(s);
+      return;
+    }
     const budget = Math.min(openItems.totals.payable, openItems.totals.receivable);
     setPurchaseAlloc(
       fillOldestFirst(openItems.purchases.map((p) => ({ key: purchaseKey(p), outstanding: p.outstanding })), budget)
@@ -92,7 +125,7 @@ export function SetOffDialog({
     setSaleAlloc(
       fillOldestFirst(openItems.sales.map((s) => ({ key: s.saleDispatchId, outstanding: s.outstanding })), budget)
     );
-  }, [openItems]);
+  }, [openItems, seeded, editing]);
 
   const purchaseTotal = useMemo(() => sum(purchaseAlloc), [purchaseAlloc]);
   const saleTotal = useMemo(() => sum(saleAlloc), [saleAlloc]);
@@ -101,8 +134,8 @@ export function SetOffDialog({
 
   const mutation = useMutation({
     mutationFn: () =>
-      api('/set-offs', {
-        method: 'POST',
+      api(isEdit ? `/set-offs/${editing!.id}` : '/set-offs', {
+        method: isEdit ? 'PATCH' : 'POST',
         body: {
           date,
           partyId,
@@ -119,18 +152,23 @@ export function SetOffDialog({
         },
       }),
     onSuccess: () => {
-      toast.success('Set-off recorded - both sides cleared, no cash moved');
+      toast.success(
+        isEdit
+          ? 'Set-off updated - both sides restated, no cash moved'
+          : 'Set-off recorded - both sides cleared, no cash moved'
+      );
       // A set-off writes a receipt AND a payment, so both cache families go:
       // the receipt side has its own fan-out (Sale Dues, product sales pages,
       // ledger, dashboard), and the payment side feeds Purchase Dues.
       invalidateReceiptQueries(qc);
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['party-ledgers'] });
+      qc.invalidateQueries({ queryKey: ['set-offs'] });
       qc.invalidateQueries({ queryKey: ['set-off-open'] });
       onOpenChange(false);
     },
     onError: (e) =>
-      toast.error(e instanceof ApiError ? e.message : 'Failed to record the set-off'),
+      toast.error(e instanceof ApiError ? e.message : `Failed to ${isEdit ? 'update' : 'record'} the set-off`),
   });
 
   // Only parties that could plausibly have both sides. The server re-checks what
@@ -152,20 +190,22 @@ export function SetOffDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowLeftRight className="h-5 w-5 text-sky-600 dark:text-sky-400" />
-            Set off purchase against sale
+            {isEdit ? 'Edit set-off' : 'Set off purchase against sale'}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">
-            Squares what we owe this party against what they owe us. No money moves: the
-            purchase bills and the sale invoices below are both marked settled, and the
-            party's ledger balance stays exactly where it is.
+            {isEdit
+              ? "Restates the whole knock-off: the old legs and contra entry come out and the corrected ones go in, so Purchase Dues, Sale Dues and the ledger all follow. Still no money moves."
+              : "Squares what we owe this party against what they owe us. No money moves: the purchase bills and the sale invoices below are both marked settled, and the party's ledger balance stays exactly where it is."}
           </p>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1 sm:col-span-2">
               <Label>Party</Label>
+              {/* Both sides of a knock-off belong to one party by definition, so
+                  a correction can restate the amounts but never move parties. */}
               <Combobox
                 options={options}
                 value={partyId}
@@ -173,6 +213,7 @@ export function SetOffDialog({
                 placeholder="Select the party…"
                 searchPlaceholder="Search parties…"
                 ariaLabel="Party"
+                disabled={isEdit}
               />
             </div>
             <div className="space-y-1">
@@ -271,7 +312,7 @@ export function SetOffDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={() => mutation.mutate()} disabled={!balanced || mutation.isPending}>
-            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Record Set-off'}
+            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : isEdit ? 'Save Changes' : 'Record Set-off'}
           </Button>
         </DialogFooter>
       </DialogContent>

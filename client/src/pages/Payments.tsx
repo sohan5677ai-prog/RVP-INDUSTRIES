@@ -22,6 +22,8 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import type { PaymentType } from '@/lib/types';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SetOffsRegister } from '@/components/SetOffsRegister';
 
 // Types you can record directly from this page. Gunny Bags, Electricity,
 // Maintenance and Drawings are entered on their own detail pages (which auto-post
@@ -273,107 +275,121 @@ export default function PaymentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Payments</h1>
-          <p className="text-muted-foreground">
-            Record cash or bank payments to suppliers, transporters, brokers, or other expenses. Automatically generates general ledger postings.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <ExportButtons
-            filename="Payments"
-            title="Payments Register"
-            subtitle={`${total} payment(s)`}
-            columns={PAYMENT_EXPORT_COLUMNS}
-            rows={() => api<Payment[]>('/payments?all=true&excludeSetOffs=true')}
-          />
-          <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
-            <Plus className="h-4 w-4" /> Record Payment
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold">Payments</h1>
+        <p className="text-muted-foreground">
+          Record cash or bank payments to suppliers, transporters, brokers, or other expenses. Automatically generates general ledger postings.
+        </p>
       </div>
 
-      <div className="rounded-lg border bg-card overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Paid To</TableHead>
-              <TableHead>Ref / Cheque</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead className="w-24 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
-            )}
-            {!isLoading && total === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
-            )}
-            {visiblePayments.map((p) => {
-              const typeLabel = PAYMENT_TYPES.find((t) => t.value === p.type)?.label ?? p.type;
-              const managedIn = MANAGED_ELSEWHERE[p.type];
-              let paidToText = '-';
-              if (p.type === 'SUPPLIER' || p.type === 'HAMALI') {
-                paidToText = p.party?.name ?? '-';
-              } else if (p.type === 'BROKER') {
-                paidToText = p.broker?.name ?? '-';
-              } else if (p.type === 'TRANSPORTER_INWARD' || p.type === 'TRANSPORTER_OUTWARD') {
-                paidToText = p.lorryNumber ? `Transporter (Lorry ${p.lorryNumber})` : 'Transporter';
-              } else {
-                paidToText = p.payee || typeLabel;
-              }
+      {/* Money that left the bank, and knock-offs that settled bills without it.
+          Kept as separate registers on purpose - a set-off is not a payment. */}
+      <Tabs defaultValue="payments" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="set-offs">Set-offs</TabsTrigger>
+        </TabsList>
 
-              return (
-                <TableRow key={p.id}>
-                  <TableCell>{shortDate(p.date)}</TableCell>
-                  <TableCell className="font-semibold text-xs text-muted-foreground">
-                    {typeLabel}
-                    {managedIn && <span className="ml-1.5 font-normal italic text-[10px]">· via {managedIn}</span>}
-                  </TableCell>
-                  <TableCell className="font-medium">{paidToText}</TableCell>
-                  <TableCell className="font-mono text-xs">{p.reference ?? '-'}</TableCell>
-                  <TableCell className="max-w-xs truncate text-muted-foreground">{p.description ?? '-'}</TableCell>
-                  <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">{rupees(p.amount)}</TableCell>
-                  <TableCell className="text-right">
-                    {managedIn ? (
-                      <span className="text-[10px] text-muted-foreground pr-1" title={`Edit or delete this on the ${managedIn}`}>-</span>
-                    ) : (
-                      <div className="flex items-center justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Edit this payment"
-                          onClick={() => openEdit(p)}
-                        >
-                          <Pencil className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Reverse this payment"
-                          onClick={() => {
-                            if (confirm(`Reverse this payment of ${rupees(p.amount)}? This will remove its associated general ledger journal entry.`)) {
-                              deleteMutation.mutate(p.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    )}
-                  </TableCell>
+        <TabsContent value="payments" className="space-y-4">
+          <div className="flex items-center justify-end gap-2">
+            <ExportButtons
+              filename="Payments"
+              title="Payments Register"
+              subtitle={`${total} payment(s)`}
+              columns={PAYMENT_EXPORT_COLUMNS}
+              rows={() => api<Payment[]>('/payments?all=true&excludeSetOffs=true')}
+            />
+            <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
+              <Plus className="h-4 w-4" /> Record Payment
+            </Button>
+          </div>
+
+          <div className="rounded-lg border bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Paid To</TableHead>
+                  <TableHead>Ref / Cheque</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-24 text-right">Actions</TableHead>
                 </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
-      </div>
+              </TableHeader>
+              <TableBody>
+                {isLoading && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+                )}
+                {!isLoading && total === 0 && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
+                )}
+                {visiblePayments.map((p) => {
+                  const typeLabel = PAYMENT_TYPES.find((t) => t.value === p.type)?.label ?? p.type;
+                  const managedIn = MANAGED_ELSEWHERE[p.type];
+                  let paidToText = '-';
+                  if (p.type === 'SUPPLIER' || p.type === 'HAMALI') {
+                    paidToText = p.party?.name ?? '-';
+                  } else if (p.type === 'BROKER') {
+                    paidToText = p.broker?.name ?? '-';
+                  } else if (p.type === 'TRANSPORTER_INWARD' || p.type === 'TRANSPORTER_OUTWARD') {
+                    paidToText = p.lorryNumber ? `Transporter (Lorry ${p.lorryNumber})` : 'Transporter';
+                  } else {
+                    paidToText = p.payee || typeLabel;
+                  }
+    
+                  return (
+                    <TableRow key={p.id}>
+                      <TableCell>{shortDate(p.date)}</TableCell>
+                      <TableCell className="font-semibold text-xs text-muted-foreground">
+                        {typeLabel}
+                        {managedIn && <span className="ml-1.5 font-normal italic text-[10px]">· via {managedIn}</span>}
+                      </TableCell>
+                      <TableCell className="font-medium">{paidToText}</TableCell>
+                      <TableCell className="font-mono text-xs">{p.reference ?? '-'}</TableCell>
+                      <TableCell className="max-w-xs truncate text-muted-foreground">{p.description ?? '-'}</TableCell>
+                      <TableCell className="text-right font-bold text-rose-600 dark:text-rose-400">{rupees(p.amount)}</TableCell>
+                      <TableCell className="text-right">
+                        {managedIn ? (
+                          <span className="text-[10px] text-muted-foreground pr-1" title={`Edit or delete this on the ${managedIn}`}>-</span>
+                        ) : (
+                          <div className="flex items-center justify-end">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Edit this payment"
+                              onClick={() => openEdit(p)}
+                            >
+                              <Pencil className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Reverse this payment"
+                              onClick={() => {
+                                if (confirm(`Reverse this payment of ${rupees(p.amount)}? This will remove its associated general ledger journal entry.`)) {
+                                  deleteMutation.mutate(p.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="set-offs">
+          <SetOffsRegister parties={parties} />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
         <DialogContent className="max-w-md">

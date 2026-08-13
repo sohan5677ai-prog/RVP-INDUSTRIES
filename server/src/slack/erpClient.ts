@@ -1,4 +1,5 @@
 import { signToken, type JwtPayload } from '../lib/jwt.js';
+import { SERVICE_SESSION_ID } from '../lib/sessionPolicy.js';
 
 /**
  * Internal HTTP client the Slack bot uses to drive the ERP. Rather than calling
@@ -34,7 +35,7 @@ export class ErpApiError extends Error {
 
 /** Mint a short-lived JWT so the request is attributed to this ERP user. */
 function mintToken(user: ErpUser): string {
-  return signToken({ userId: user.userId, role: user.role });
+  return signToken({ userId: user.userId, role: user.role, sid: SERVICE_SESSION_ID });
 }
 
 async function parseOrThrow(res: globalThis.Response): Promise<any> {

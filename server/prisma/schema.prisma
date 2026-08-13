@@ -81,6 +81,28 @@ model User {
   // this ERP user. Null until an admin links the account.
   slackUserId String?  @unique
   createdAt   DateTime @default(now())
+
+  sessions UserSession[]
+}
+
+/// One row per device a user is signed in on. The login flow caps a normal
+/// account at MAX_DEVICES_PER_USER live rows; rows go stale (and stop counting)
+/// once lastSeenAt falls outside the idle window, so a lost or closed device
+/// frees its slot on its own. See server/src/lib/sessionPolicy.ts.
+model UserSession {
+  id         String   @id @default(cuid())
+  userId     String
+  /// Random id the browser mints once and keeps in localStorage.
+  deviceId   String
+  userAgent  String?
+  ip         String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId, lastSeenAt])
 }
 
 model Party {

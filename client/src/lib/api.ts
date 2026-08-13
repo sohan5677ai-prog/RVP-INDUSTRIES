@@ -50,8 +50,14 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     body,
   });
 
+  // A 401 on an authenticated call means the session is gone (revoked from
+  // another device, or timed out). Broadcast it so AuthProvider drops the user
+  // and the app falls back to the login screen without a manual refresh.
   if (res.status === 401) {
     clearToken();
+    if (token && path !== '/auth/login') {
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
   }
 
   // 402 = the licensing gate rejected the call (subscription expired / stopped).

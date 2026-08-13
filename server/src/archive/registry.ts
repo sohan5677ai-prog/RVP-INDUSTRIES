@@ -171,6 +171,8 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Contains Razorpay identifiers; no place in a file handed to a CA.' },
   { name: 'SupportTicket', delegate: 'supportTicket', cls: 'EXCLUDED', order: 0,
     note: 'Bug reports about the software, not the client’s books. Carries screen captures that may show any year’s data, so it belongs to no single FY.' },
+  { name: 'UserSession', delegate: 'userSession', cls: 'EXCLUDED', order: 0,
+    note: 'Live sign-in state for the device cap. Worthless once exported and it carries IP/user-agent, so it never leaves the building.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

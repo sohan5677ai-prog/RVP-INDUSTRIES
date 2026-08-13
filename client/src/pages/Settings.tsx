@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/PageHeader';
+import { useAuth } from '@/lib/auth';
 import Subscription from '@/pages/Subscription';
 import ArchiveManager from '@/pages/ArchiveManager';
 
@@ -27,16 +28,28 @@ const PRODUCT_LABELS: Record<SaleProduct, string> = {
   NALLA_CHINTAPANDU: 'Nalla Chintapandu',
 };
 
+/** Tabs only a developer account may see. */
+const DEV_ONLY_TABS = ['subscription', 'archives'];
+
 export default function Settings() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'company';
+  const isDeveloper = user?.role === 'DEVELOPER';
+  const requested = searchParams.get('tab') || 'company';
+  // Someone who types /settings?tab=archives without the role lands on Company
+  // rather than an empty tab strip.
+  const activeTab = !isDeveloper && DEV_ONLY_TABS.includes(requested) ? 'company' : requested;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Company details, bank, invoice setup, rates, subscription and archives."
+        description={
+          isDeveloper
+            ? 'Company details, bank, invoice setup, rates, subscription and archives.'
+            : 'Company details, bank, invoice setup and rates.'
+        }
         icon={SlidersHorizontal}
       />
 
@@ -48,8 +61,8 @@ export default function Settings() {
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
-          <TabsTrigger value="subscription">Subscription</TabsTrigger>
-          <TabsTrigger value="archives">Archives</TabsTrigger>
+          {isDeveloper && <TabsTrigger value="subscription">Subscription</TabsTrigger>}
+          {isDeveloper && <TabsTrigger value="archives">Archives</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="company" className="focus-visible:outline-none focus-visible:ring-0">
@@ -77,13 +90,17 @@ export default function Settings() {
           <TaxproGspSection qc={qc} />
         </TabsContent>
 
-        <TabsContent value="subscription" className="focus-visible:outline-none focus-visible:ring-0">
-          <Subscription />
-        </TabsContent>
+        {isDeveloper && (
+          <TabsContent value="subscription" className="focus-visible:outline-none focus-visible:ring-0">
+            <Subscription />
+          </TabsContent>
+        )}
 
-        <TabsContent value="archives" className="focus-visible:outline-none focus-visible:ring-0">
-          <ArchiveManager />
-        </TabsContent>
+        {isDeveloper && (
+          <TabsContent value="archives" className="focus-visible:outline-none focus-visible:ring-0">
+            <ArchiveManager />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

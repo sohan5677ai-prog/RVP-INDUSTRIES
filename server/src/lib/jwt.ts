@@ -4,6 +4,8 @@ import type { Role } from '@prisma/client';
 export interface JwtPayload {
   userId: string;
   role: Role;
+  /** UserSession row this token belongs to — one per signed-in device. */
+  sid: string;
 }
 
 let cachedSecret: string | undefined;

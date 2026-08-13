@@ -155,8 +155,10 @@ const sections: NavSection[] = [
     items: [
       { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
       { to: '/users', label: 'Users', icon: Shield },
-      { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard },
-      { to: '/settings?tab=archives', label: 'Archives', icon: Archive },
+      // Licensing and financial-year archives are developer-only tooling - an
+      // admin should never see, let alone open, either one.
+      { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard, devOnly: true },
+      { to: '/settings?tab=archives', label: 'Archives', icon: Archive, devOnly: true },
       { to: '/support', label: 'Support tickets', icon: LifeBuoy },
     ],
   },

@@ -49,6 +49,7 @@ import SupportButton from '@/components/SupportButton';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
+import { ReminderQueueProvider } from '@/components/ReminderQueue';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
 type NavSection = { heading?: string; items: NavItem[] };
@@ -216,9 +217,12 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <DispatchReminders />
-      <SalesDuesReminders />
-      <PurchaseOrderReminders />
+      {/* One queue, one popup on screen at a time - see ReminderQueue. */}
+      <ReminderQueueProvider>
+        <DispatchReminders />
+        <SalesDuesReminders />
+        <PurchaseOrderReminders />
+      </ReminderQueueProvider>
       <aside className={cn('w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border relative', sidebarOpen ? 'flex' : 'hidden')}>
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(125%_40%_at_0%_0%,rgba(232,169,63,0.11),transparent_62%)]" />
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.025] via-transparent to-black/25" />

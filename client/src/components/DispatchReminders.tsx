@@ -1,15 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { BellRing, Truck, X } from 'lucide-react';
+import { Truck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { SaleOrder, SaleProduct } from '@/lib/types';
 import { shortDate, toTonnes } from '@/lib/format';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import ReminderDialog from '@/components/ReminderDialog';
+import { useReminderSlot } from '@/components/ReminderQueue';
 
 // Dispatch reminders surface from 3 days before an order's reminder date. Ignored
 // reminders are remembered locally (keyed by order id + reminder date) so re-saving
@@ -70,7 +69,14 @@ export default function DispatchReminders() {
       .sort((a, b) => dayStart(a.reminderDate!) - dayStart(b.reminderDate!));
   }, [orders, dismissed]);
 
-  if (closed || due.length === 0) return null;
+  const slot = useReminderSlot('dispatch', due.length > 0);
+
+  const close = () => {
+    setClosed(true);
+    slot.close();
+  };
+
+  if (closed || !slot.open || due.length === 0) return null;
 
   const ignore = (o: SaleOrder) => {
     const next = new Set(dismissed);
@@ -80,48 +86,50 @@ export default function DispatchReminders() {
   };
 
   const dispatch = (o: SaleOrder) => {
-    setClosed(true);
+    close();
     navigate(DISPATCH_ROUTE[o.product] ?? '/sale-orders');
   };
 
+  const late = due.filter((o) => daysUntil(o.reminderDate!) < 0).length;
+
   return (
-    <Dialog open onOpenChange={(v) => !v && setClosed(true)}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <BellRing className="h-5 w-5 text-amber-500" />
-            Upcoming dispatches ({due.length})
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-          {due.map((o) => {
-            const d = daysUntil(o.reminderDate!);
-            const when = d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`;
-            return (
-              <div key={o.id} className="rounded-lg border bg-card p-3 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold truncate">{o.buyer?.name ?? '-'}</span>
-                    <Badge variant="outline" className="text-[10px]">{o.product}</Badge>
-                    <Badge variant={d < 0 ? 'destructive' : 'secondary'} className="text-[10px]">{when}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Dispatch by <b>{shortDate(o.reminderDate!)}</b> · {toTonnes(o.remainingKg ?? o.tonnageKg).toFixed(2)} t remaining
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Button size="sm" onClick={() => dispatch(o)}>
-                    <Truck className="h-4 w-4" /> Dispatch
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => ignore(o)} title="Ignore this reminder">
-                    <X className="h-4 w-4" /> Ignore
-                  </Button>
-                </div>
+    <ReminderDialog
+      open
+      onClose={close}
+      icon={Truck}
+      tone="amber"
+      title="Upcoming dispatches"
+      subtitle={late > 0 ? `${late} already past its dispatch date` : 'Due within the next few days'}
+      count={due.length}
+      step={slot.step}
+      total={slot.total}
+    >
+      {due.map((o) => {
+        const d = daysUntil(o.reminderDate!);
+        const when = d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`;
+        return (
+          <div key={o.id} className="rounded-lg border bg-card p-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold truncate">{o.buyer?.name ?? '-'}</span>
+                <Badge variant="outline" className="text-[10px]">{o.product}</Badge>
+                <Badge variant={d < 0 ? 'destructive' : 'secondary'} className="text-[10px]">{when}</Badge>
               </div>
-            );
-          })}
-        </div>
-      </DialogContent>
-    </Dialog>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Dispatch by <b>{shortDate(o.reminderDate!)}</b> · {toTonnes(o.remainingKg ?? o.tonnageKg).toFixed(2)} t remaining
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button size="sm" onClick={() => dispatch(o)}>
+                <Truck className="h-4 w-4" /> Dispatch
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => ignore(o)} title="Ignore this reminder">
+                <X className="h-4 w-4" /> Ignore
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </ReminderDialog>
   );
 }

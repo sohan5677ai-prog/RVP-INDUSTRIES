@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -380,6 +381,45 @@ export default function SaleDuesPage() {
   rows.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   return rows;
   }, [parties, saleOrders, receipts]);
+
+  // Deep link from the overdue-dues login reminder:
+  //   /reports/sale-dues?collect=<saleDispatchId>
+  // opens Record Receipt on that exact invoice instead of dropping the user on
+  // the list to hunt for it. Fires once and then strips the param, so a refresh
+  // (or Back) doesn't pop the dialog again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const collectId = searchParams.get('collect');
+  const collectHandled = useRef(false);
+  const duesLoaded = !loadingParties && !loadingSales && !loadingReceipts;
+
+  useEffect(() => {
+    if (!collectId || collectHandled.current || !duesLoaded) return;
+    collectHandled.current = true;
+
+    const clearParam = () => {
+      const next = new URLSearchParams(searchParams);
+      next.delete('collect');
+      setSearchParams(next, { replace: true });
+    };
+
+    const inv = outstandingInvoices.find((i) => i.id === collectId);
+    if (!inv || inv.netAmount <= 0.01) {
+      toast.info('That invoice is already settled.');
+      clearParam();
+      return;
+    }
+
+    // Clear the filters so the row is actually on screen behind the dialog.
+    setProductFilter('ALL');
+    setPayFilter('ALL');
+    setMonthFilter(ALL_MONTHS);
+    setSearch('');
+    setFromDate('');
+    setToDate('');
+    setExpandedId(inv.id);
+    openReceiveDialog(inv);
+    clearParam();
+  }, [collectId, duesLoaded, outstandingInvoices]);
 
   // Buyer money that credited the party ledger but was never stamped with an
   // invoice. Settlement here is invoice-based only, so these rupees clear

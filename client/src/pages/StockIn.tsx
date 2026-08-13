@@ -202,12 +202,15 @@ function StockInFormDialog({
   onOpenChange,
   editing,
   pendingPOs,
+  initialPoId,
   onSuccess
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing: StockInRow | null;
   pendingPOs: PurchaseOrder[] | undefined;
+  /** Preselects a PO when the form is opened from a deep link (?record=<poId>). */
+  initialPoId?: string;
   onSuccess: () => void;
 }) {
   const [poId, setPoId] = useState('');
@@ -245,7 +248,7 @@ function StockInFormDialog({
         setTotalLorryFreight('');
         setTotalLorryWeight('');
       } else {
-        setPoId('');
+        setPoId(initialPoId ?? '');
         setArrivalDate(new Date().toISOString().slice(0, 10));
         setLorryNumber('');
         setInvoiceNumber('');
@@ -261,7 +264,7 @@ function StockInFormDialog({
         setTotalLorryWeight('');
       }
     }
-  }, [open, editing]);
+  }, [open, editing, initialPoId]);
 
   const poOptions = useMemo(() => {
     return (pendingPOs ?? []).map((po) => ({
@@ -734,8 +737,15 @@ export default function StockIn() {
     return [...map.values()];
   }, [items, partyFilter, statusFilter]);
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const paramPo = searchParams.get('po') || searchParams.get('poId') || searchParams.get('expanded');
+  // ?record=<poId|poGroupId|poNumber> comes from the "PO awaiting arrival" login
+  // reminder and means "open Record Stock In on this order", not just "show me
+  // the page". Resolved against the pending POs so a group key still lands on a
+  // real lorry.
+  const paramRecord = searchParams.get('record');
+  const [recordPoId, setRecordPoId] = useState<string | undefined>();
+  const recordHandled = useRef(false);
 
   useEffect(() => {
     if (!paramPo || !visibleGroups.length) return;
@@ -761,8 +771,31 @@ export default function StockIn() {
     queryFn: () => api<PurchaseOrder[]>('/purchase-orders?status=PENDING&all=true'),
   });
 
+  useEffect(() => {
+    if (!paramRecord || recordHandled.current || !pendingPOs) return;
+    recordHandled.current = true;
+
+    const match =
+      pendingPOs.find((p) => p.id === paramRecord) ??
+      pendingPOs.find((p) => p.poGroupId === paramRecord) ??
+      pendingPOs.find((p) => p.poNumber?.toLowerCase() === paramRecord.toLowerCase());
+
+    if (match) {
+      setEditing(null);
+      setRecordPoId(match.id);
+      setOpen(true);
+    } else {
+      toast.info('That order has already been stocked in.');
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('record');
+    setSearchParams(next, { replace: true });
+  }, [paramRecord, pendingPOs]);
+
   const openCreate = useCallback(() => {
     setEditing(null);
+    setRecordPoId(undefined);
     setOpen(true);
   }, []);
 
@@ -891,8 +924,9 @@ export default function StockIn() {
       {open && <StockInFormDialog 
         open={open} 
         onOpenChange={setOpen} 
-        editing={editing} 
+        editing={editing}
         pendingPOs={pendingPOs}
+        initialPoId={recordPoId}
         onSuccess={() => {
           ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
             (k) => qc.invalidateQueries({ queryKey: [k] }),
@@ -900,6 +934,7 @@ export default function StockIn() {
           toast.success(editing ? 'Stock-in updated' : 'Stock-in recorded');
           setOpen(false);
           setEditing(null);
+          setRecordPoId(undefined);
         }}
       />}
 

@@ -1,16 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { BellRing, IndianRupee, X } from 'lucide-react';
+import { IndianRupee, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import ReminderDialog from '@/components/ReminderDialog';
+import { useReminderSlot } from '@/components/ReminderQueue';
 
 const DISMISS_KEY = 'salesDuesReminders:dismissed';
 
@@ -124,7 +123,14 @@ export default function SalesDuesReminders() {
     return items;
   }, [parties, saleOrders, receipts, dismissed]);
 
-  if (closed || dueItems.length === 0) return null;
+  const slot = useReminderSlot('sales-dues', dueItems.length > 0);
+
+  const close = () => {
+    setClosed(true);
+    slot.close();
+  };
+
+  if (closed || !slot.open || dueItems.length === 0) return null;
 
   const ignore = (item: OverdueDueItem) => {
     const key = reminderKey(item.dispatchId, item.dueDate);
@@ -134,53 +140,59 @@ export default function SalesDuesReminders() {
     localStorage.setItem(DISMISS_KEY, JSON.stringify([...next]));
   };
 
-  const goToDues = () => {
-    setClosed(true);
-    navigate('/sales/dues');
+  // Straight into the Record Receipt dialog for that exact invoice - the popup
+  // already knows which bill is overdue, so landing on the list and hunting for
+  // it again is a wasted step. (The old link pointed at /sales/dues, which is
+  // not a route: it rendered a blank page.)
+  const collect = (item: OverdueDueItem) => {
+    close();
+    navigate(`/reports/sale-dues?collect=${encodeURIComponent(item.dispatchId)}`);
   };
 
+  const totalDue = dueItems.reduce((s, i) => s + i.netAmount, 0);
+
   return (
-    <Dialog open onOpenChange={(v) => !v && setClosed(true)}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <BellRing className="h-5 w-5 text-rose-500" />
-            Overdue sales dues ({dueItems.length})
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-          {dueItems.map((item) => {
-            const when = item.daysOverdue === 0 ? 'Due Today' : `${item.daysOverdue}d overdue`;
-            return (
-              <div key={item.dispatchId} className="rounded-lg border bg-card p-3 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold truncate">{item.partyName}</span>
-                    <Badge variant="outline" className="text-[10px]">{item.product}</Badge>
-                    <Badge variant={item.daysOverdue === 0 ? 'warning' : 'destructive'} className="text-[10px]">
-                      {when}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {item.invoiceNumber ? `Invoice #${item.invoiceNumber}` : 'Uninvoiced dispatch'} · Due <b>{shortDate(item.dueDate.toISOString())}</b>
-                  </p>
-                  <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 mt-0.5">
-                    Net Due: {rupees(item.netAmount)} <span className="font-normal text-muted-foreground">(of {rupees(item.billAmount)})</span>
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Button size="sm" onClick={goToDues}>
-                    <IndianRupee className="h-4 w-4" /> Collect
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => ignore(item)} title="Ignore this reminder">
-                    <X className="h-4 w-4" /> Ignore
-                  </Button>
-                </div>
+    <ReminderDialog
+      open
+      onClose={close}
+      icon={IndianRupee}
+      tone="rose"
+      title="Overdue sales dues"
+      subtitle={`${rupees(totalDue)} past its due date across ${dueItems.length} invoice${dueItems.length > 1 ? 's' : ''}`}
+      count={dueItems.length}
+      step={slot.step}
+      total={slot.total}
+    >
+      {dueItems.map((item) => {
+        const when = item.daysOverdue === 0 ? 'Due Today' : `${item.daysOverdue}d overdue`;
+        return (
+          <div key={item.dispatchId} className="rounded-lg border bg-card p-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold truncate">{item.partyName}</span>
+                <Badge variant="outline" className="text-[10px]">{item.product}</Badge>
+                <Badge variant={item.daysOverdue === 0 ? 'warning' : 'destructive'} className="text-[10px]">
+                  {when}
+                </Badge>
               </div>
-            );
-          })}
-        </div>
-      </DialogContent>
-    </Dialog>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {item.invoiceNumber ? `Invoice #${item.invoiceNumber}` : 'Uninvoiced dispatch'} · Due <b>{shortDate(item.dueDate.toISOString())}</b>
+              </p>
+              <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 mt-0.5">
+                Net Due: {rupees(item.netAmount)} <span className="font-normal text-muted-foreground">(of {rupees(item.billAmount)})</span>
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button size="sm" onClick={() => collect(item)}>
+                <IndianRupee className="h-4 w-4" /> Collect
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => ignore(item)} title="Ignore this reminder">
+                <X className="h-4 w-4" /> Ignore
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </ReminderDialog>
   );
 }

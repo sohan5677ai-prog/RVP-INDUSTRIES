@@ -212,7 +212,12 @@ export async function getBalanceSheet(_req: Request, res: Response) {
 //   The "husk pool" collects ALL byproduct income (husk/shell/waste/etc.) and
 //   absorbs every operating overhead. A pool surplus is added to the Pappu P/L;
 //   a pool deficit is deducted from it. The remainder is the net P/L.
-export async function getProfitLoss(_req: Request, res: Response) {
+/**
+ * The P&L numbers, decoupled from the Express req/res so the WhatsApp owner
+ * digest (whatsappJobs.ts) can pull the same `totals.netProfit` the P&L page
+ * headlines without faking a response object.
+ */
+export async function computeProfitLossSummary() {
   const [huskPool, byproductOrders, pappuMargins] = await Promise.all([
     computeHuskPool(),
     prisma.saleOrder.findMany({
@@ -262,7 +267,7 @@ export async function getProfitLoss(_req: Request, res: Response) {
   const estimatedNetProfit = r2(pappuEstimatedProfit + huskPoolNet);
   const lockedNetProfit = r2(pappuLockedProfit + huskPoolNet);
 
-  res.json({
+  return {
     period: new Date().toISOString(),
     pappu: {
       profitLoss: pappuLockedProfit,
@@ -287,7 +292,11 @@ export async function getProfitLoss(_req: Request, res: Response) {
       estimatedNetProfit,
       isProfit: lockedNetProfit >= 0,
     },
-  });
+  };
+}
+
+export async function getProfitLoss(_req: Request, res: Response) {
+  res.json(await computeProfitLossSummary());
 }
 
 export async function listJournalEntries(req: Request, res: Response) {

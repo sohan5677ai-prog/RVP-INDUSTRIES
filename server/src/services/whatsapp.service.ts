@@ -66,6 +66,8 @@ export type WaTemplateKey =
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST' // rvp_owner_dues: date, total receivable, overdue, top pending
+  | 'OWNER_DUE_TODAY_DIGEST' // rvp_owner_due_today: date, total due today, bill count, itemised list - see docs/whatsapp-owner-due-today-template.md
+  | 'OWNER_BUSINESS_SNAPSHOT' // rvp_owner_snapshot: date, total receivable, overdue receivable, total payable, overdue invoices pending, net profit (closing motivational line is fixed template text, not a variable) - see docs/whatsapp-owner-business-snapshot-template.md
   | 'SUPPORT_TICKET' // rvp_support_ticket (image header - the screen capture): reporter, page, note, time
   // rvp_support_ticket_text (no header) - same four variables, used when the
   // browser couldn't capture the screen. Like PAYMENT_SENT_TEXT, its approved
@@ -94,6 +96,15 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // These two were the last owner templates logging SKIPPED for want of an id.
   OWNER_DUES_DIGEST: '28387',
   OWNER_WEEKLY_SUMMARY: '28393',
+  // OWNER_DUE_TODAY_DIGEST (rvp_owner_due_today) has no id yet - not yet submitted
+  // to Fast2SMS for approval. Wording is drafted in
+  // docs/whatsapp-owner-due-today-template.md. Until an id lands here, every
+  // send logs SKIPPED "is not configured" - same state OWNER_DUES_DIGEST and
+  // OWNER_WEEKLY_SUMMARY sat in before 2026-08-11. Set FAST2SMS_TMPL_OWNER_DUE_TODAY_DIGEST
+  // once approved, or add the message_id here.
+  // OWNER_BUSINESS_SNAPSHOT (rvp_owner_snapshot) also has no id yet - see
+  // docs/whatsapp-owner-business-snapshot-template.md for the wording to submit.
+  // Set FAST2SMS_TMPL_OWNER_BUSINESS_SNAPSHOT once approved, or add it here.
   // rvp_support_ticket (image header) + rvp_support_ticket_text (no header),
   // approved 2026-08-11. See the guard in notifySupportTicket - these two must
   // never collapse to the same id.
@@ -1188,6 +1199,61 @@ export const whatsappService = {
         to,
         variables: [fmtDate(totals.asOn), fmtInr(totals.totalReceivable), fmtInr(totals.overdue), totals.topPending],
         relatedType: 'OWNER_DUES_DIGEST',
+        relatedId: dayKey,
+      })
+    );
+  },
+
+  /**
+   * Owner "bills due today" digest, 06:00 IST. Unlike sendOwnerDuesDigest (which
+   * always fires with a summary, even "No overdue dues 🎉"), the caller
+   * (`runOwnerDueTodayDigest` in whatsappJobs.ts) skips calling this entirely
+   * when nothing is due today - so on a day with no dues, no message goes out
+   * at all, by design.
+   */
+  async sendOwnerDueTodayDigest(totals: { asOn: Date; totalDueToday: number; count: number; listText: string }, dayKey: string) {
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: 'OWNER_DUE_TODAY_DIGEST',
+        to,
+        variables: [fmtDate(totals.asOn), fmtInr(totals.totalDueToday), String(totals.count), totals.listText],
+        relatedType: 'OWNER_DUE_TODAY_DIGEST',
+        relatedId: dayKey,
+      })
+    );
+  },
+
+  /**
+   * Owner daily business snapshot, 06:00 IST. The one-glance "how are we
+   * doing" message: total receivable (everything, due or not), the overdue
+   * slice of it, total payable, how many sale invoices are overdue and still
+   * uncleared, and net profit to date. The closing motivational line is fixed
+   * text in the approved template body, not a variable here.
+   */
+  async sendOwnerBusinessSnapshot(
+    totals: {
+      asOn: Date;
+      totalReceivable: number;
+      overdueReceivable: number;
+      totalPayable: number;
+      pendingInvoices: number;
+      netProfit: number;
+    },
+    dayKey: string
+  ) {
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: 'OWNER_BUSINESS_SNAPSHOT',
+        to,
+        variables: [
+          fmtDate(totals.asOn),
+          fmtInr(totals.totalReceivable),
+          fmtInr(totals.overdueReceivable),
+          fmtInr(totals.totalPayable),
+          String(totals.pendingInvoices),
+          fmtInr(totals.netProfit),
+        ],
+        relatedType: 'OWNER_BUSINESS_SNAPSHOT',
         relatedId: dayKey,
       })
     );

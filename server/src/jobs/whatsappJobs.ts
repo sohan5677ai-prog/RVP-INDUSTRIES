@@ -2,7 +2,9 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '../services/whatsapp.service.js';
-import { computeBuyerDues, invoiceListText, topPendingText } from '../services/salesDues.service.js';
+import { computeBuyerDues, invoiceListText, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
+import { computeSupplierDues } from '../services/purchaseDues.service.js';
+import { computeProfitLossSummary } from '../controllers/ledger.controller.js';
 
 /**
  * Scheduled WhatsApp jobs (use cases 7, 8, 9, 10). Runs in-process via node-cron
@@ -75,6 +77,61 @@ async function runOwnerDuesDigest(): Promise<string> {
       totalReceivable: portfolio.totalReceivable,
       overdue: portfolio.totalOverdue,
       topPending: topPendingText(portfolio.topPending),
+    },
+    dayKey
+  );
+  return describeSend(res, dayKey);
+}
+
+// ---------------------------------------------------------------------------
+// #11 - Owner "bills due today" digest, 06:00 IST. Deliberately silent on a
+// day with nothing due - see the skip below - unlike runOwnerDuesDigest above,
+// which always sends (even a "no overdue dues" summary).
+// ---------------------------------------------------------------------------
+async function runOwnerDueTodayDigest(): Promise<string> {
+  const dayKey = istDayKey();
+  if (await whatsappService.lastSentAt('OWNER_DUE_TODAY_DIGEST', dayKey)) return `already sent for ${dayKey}`;
+  const portfolio = await computeBuyerDues();
+  if (portfolio.dueToday.length === 0) return `no bills due today (${dayKey}) - nothing sent`;
+  const res = await whatsappService.sendOwnerDueTodayDigest(
+    {
+      asOn: new Date(),
+      totalDueToday: portfolio.totalDueToday,
+      count: portfolio.dueToday.length,
+      listText: dueTodayListText(portfolio.dueToday),
+    },
+    dayKey
+  );
+  return describeSend(res, dayKey);
+}
+
+// ---------------------------------------------------------------------------
+// #12 - Owner daily business snapshot (receivables, overdue receivables,
+// payables, overdue invoices pending, net profit), 06:00 IST alongside the
+// due-today digest. Always sends, like runOwnerDuesDigest - an owner wants
+// this greeting whether the numbers are good or bad. The closing line of
+// motivation is fixed text baked into the approved template body, not a
+// variable - see docs/whatsapp-owner-business-snapshot-template.md.
+// ---------------------------------------------------------------------------
+async function runOwnerBusinessSnapshot(): Promise<string> {
+  const dayKey = istDayKey();
+  if (await whatsappService.lastSentAt('OWNER_BUSINESS_SNAPSHOT', dayKey)) return `already sent for ${dayKey}`;
+  const [portfolio, supplierDues, pnl] = await Promise.all([
+    computeBuyerDues(),
+    computeSupplierDues(),
+    computeProfitLossSummary(),
+  ]);
+  // "Pending clearance" means overdue - past due date and still uncollected -
+  // not every unsettled invoice (a bill not yet due isn't something to chase).
+  const overduePendingInvoices = portfolio.buyers.reduce((n, b) => n + b.overdueInvoices.length, 0);
+  const res = await whatsappService.sendOwnerBusinessSnapshot(
+    {
+      asOn: new Date(),
+      totalReceivable: portfolio.totalReceivable,
+      overdueReceivable: portfolio.totalOverdue,
+      totalPayable: supplierDues.totalPayable,
+      pendingInvoices: overduePendingInvoices,
+      netProfit: pnl.totals.netProfit,
     },
     dayKey
   );
@@ -286,6 +343,26 @@ export async function runWeeklyJobs() {
   }
 }
 
+/** Just the owner "due today" digest (#11) - exposed separately since it runs on its own 06:00 schedule, not inside runDailyJobs. */
+export async function runDueTodayJob() {
+  try {
+    return { ownerDueTodayDigest: await runOwnerDueTodayDigest() };
+  } catch (e) {
+    logger.error('[whatsapp-cron] ownerDueTodayDigest failed', e);
+    return { ownerDueTodayDigest: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Just the owner business snapshot (#12) - exposed separately since it runs on its own 06:00 schedule, not inside runDailyJobs. */
+export async function runBusinessSnapshotJob() {
+  try {
+    return { ownerBusinessSnapshot: await runOwnerBusinessSnapshot() };
+  } catch (e) {
+    logger.error('[whatsapp-cron] ownerBusinessSnapshot failed', e);
+    return { ownerBusinessSnapshot: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Just the deferred-dispatch reminders (#8) - exposed separately for testing. */
 export async function runDispatchReminderJob() {
   try {
@@ -395,6 +472,8 @@ export const JOB_RUNNERS: Record<string, () => Promise<Record<string, unknown>>>
   daily: runDailyJobs,
   weekly: runWeeklyJobs,
   'dispatch-reminders': runDispatchReminderJob,
+  'due-today': runDueTodayJob,
+  'business-snapshot': runBusinessSnapshotJob,
   'check-driver-template': runCheckDriverTemplate,
   'check-templates': runCheckTemplates,
 };
@@ -408,9 +487,14 @@ export function registerWhatsappCron() {
     logger.info('[whatsapp-cron] disabled (set WHATSAPP_CRON_ENABLED=true to enable)');
     return;
   }
+  // Daily at 06:00 IST - owner "bills due today" digest + business snapshot.
+  // Both are meant to greet the owners before the business day starts, ahead
+  // of the 09:00 bundle below.
+  cron.schedule('0 6 * * *', () => { void runDueTodayJob(); }, { timezone: TZ });
+  cron.schedule('0 6 * * *', () => { void runBusinessSnapshotJob(); }, { timezone: TZ });
   // Daily at 09:00 IST - dues digest, buyer reminders, deferred-dispatch reminders.
   cron.schedule('0 9 * * *', () => { void runDailyJobs(); }, { timezone: TZ });
   // Weekly on Monday at 08:00 IST - owner business summary.
   cron.schedule('0 8 * * 1', () => { void runWeeklyJobs(); }, { timezone: TZ });
-  logger.info('[whatsapp-cron] scheduled (daily 09:00, weekly Mon 08:00, IST)');
+  logger.info('[whatsapp-cron] scheduled (due-today + business-snapshot 06:00, daily 09:00, weekly Mon 08:00, IST)');
 }

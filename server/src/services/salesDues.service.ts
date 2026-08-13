@@ -1,5 +1,6 @@
 import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { istCalendar } from '../lib/istDate.js';
 
 /**
  * Server-side sales-dues (buyer receivables) computation. This mirrors the
@@ -37,6 +38,11 @@ export interface InvoiceDue {
   inTransit: boolean;
   /** Broker on the order this shipment came from - null for our own orders. */
   brokerId: string | null;
+  /** Broker's display name - null for our own orders. Denormalised here because
+   *  the owner "due today" digest spans every buyer, unlike the per-buyer lists
+   *  below that already have their buyer/broker in scope. */
+  brokerName: string | null;
+  buyerName: string;
 }
 
 /** A broker standing behind at least one of a buyer's unsettled invoices. */
@@ -79,12 +85,22 @@ export interface DuesPortfolio {
   totalOverdue: number;
   /** Buyers with the largest OVERDUE (past due date) balance, most first - excludes buyers with nothing yet overdue. */
   topPending: Array<{ name: string; outstanding: number }>;
+  /** Every invoice whose due date IS today (IST calendar day), across all buyers - the owner "due today" digest. */
+  dueToday: InvoiceDue[];
+  totalDueToday: number;
 }
 
 function addDays(base: Date, days: number): Date {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
   return d;
+}
+
+/** Same IST calendar day, not the same 24h window - a due date at 00:05 IST and `asOf` at 23:50 IST are still "today". */
+function isSameIstDay(a: Date, b: Date): boolean {
+  const pa = istCalendar(a);
+  const pb = istCalendar(b);
+  return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;
 }
 
 /**
@@ -146,6 +162,8 @@ export async function computeBuyerDues(
       overdue,
       inTransit,
       brokerId: broker?.id ?? null,
+      brokerName: broker?.name ?? null,
+      buyerName: buyer.name,
     };
     row.outstanding += invoice.outstanding;
     row.invoices.push(invoice);
@@ -165,10 +183,15 @@ export async function computeBuyerDues(
   const topPending = buyers
     .filter((b) => b.overdueOutstanding > 0)
     .sort((a, b) => b.overdueOutstanding - a.overdueOutstanding)
-    .slice(0, 5)
     .map((b) => ({ name: b.name, outstanding: b.overdueOutstanding }));
 
-  return { asOf, buyers, totalReceivable, totalOverdue, topPending };
+  const dueToday = buyers
+    .flatMap((b) => b.invoices)
+    .filter((i) => !i.inTransit && isSameIstDay(i.dueDate, asOf))
+    .sort((a, b) => b.outstanding - a.outstanding);
+  const totalDueToday = dueToday.reduce((s, i) => s + i.outstanding, 0);
+
+  return { asOf, buyers, totalReceivable, totalOverdue, topPending, dueToday, totalDueToday };
 }
 
 /**
@@ -218,4 +241,21 @@ export function invoiceListText(invoices: InvoiceDue[], max = 10): string {
 export function topPendingText(top: Array<{ name: string; outstanding: number }>): string {
   if (top.length === 0) return 'No overdue dues 🎉';
   return top.map((t) => `${t.name} ${compactInr(t.outstanding)}`).join(' · ');
+}
+
+/**
+ * The "due today" list as one comma-separated line for the owner digest -
+ * INVOICE ₹AMOUNT - BUYER (via BROKER | direct). Same one-line constraint as
+ * `invoiceListText` (see docs/whatsapp-payment-reminder-templates.md) - Meta
+ * drops any template variable containing a newline. Largest amount first,
+ * since that's the bill an owner would chase first.
+ */
+export function dueTodayListText(invoices: InvoiceDue[], max = 10): string {
+  if (invoices.length === 0) return '-';
+  const shown = invoices.slice(0, max).map((i) => {
+    const broker = i.brokerName ? `via ${i.brokerName}` : 'direct';
+    return `${i.invoiceNumber} ₹${inr(i.outstanding)} - ${i.buyerName} (${broker})`;
+  });
+  if (invoices.length > max) shown.push(`+${invoices.length - max} more`);
+  return shown.join(', ');
 }

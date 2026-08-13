@@ -46,6 +46,7 @@ import { cn } from '@/lib/utils';
 import { preloadRoute } from '@/lib/preload';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import SupportButton from '@/components/SupportButton';
+import SupportAnnouncements from '@/components/SupportAnnouncements';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
@@ -221,6 +222,7 @@ export default function Layout() {
     <div className="flex h-screen overflow-hidden">
       {/* One queue, one popup on screen at a time - see ReminderQueue. */}
       <ReminderQueueProvider>
+        <SupportAnnouncements />
         <DispatchReminders />
         <SalesDuesReminders />
         <PurchaseOrderReminders />

@@ -101,23 +101,164 @@ const listTicketsSchema = z.object({
   take: z.coerce.number().int().positive().max(500).optional().default(100),
 });
 
+/** Reading someone else's ticket in full - screenshot and diagnostics - stays an
+ *  admin job. Everyone else opens the page only to acknowledge replies. */
+const SEES_EVERYTHING = new Set(['ADMIN', 'DEVELOPER']);
+
 export async function listSupportTickets(req: Request, res: Response) {
   const { status, take } = listTicketsSchema.parse(req.query);
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  const viewerId = req.user.userId;
+  const privileged = SEES_EVERYTHING.has(req.user.role);
+
+  // A plain user sees their own reports plus every answered ticket - the same
+  // set the login popup announces to them, so the "Checked" button on this page
+  // can clear anything the popup could have raised.
+  const visibility = privileged
+    ? {}
+    : { OR: [{ userId: viewerId }, { status: 'RESOLVED' as const, developerMessage: { not: null } }] };
+
   const tickets = await prisma.supportTicket.findMany({
-    where: status ? { status } : undefined,
+    where: { ...visibility, ...(status ? { status } : {}) },
     orderBy: { createdAt: 'desc' },
     take,
+    include: { acks: { where: { userId: viewerId }, select: { createdAt: true } } },
   });
+
+  res.json(tickets.map((t) => shapeForViewer(t, viewerId, privileged)));
+}
+
+/**
+ * Collapses the viewer's own ack into a boolean, and withholds the evidence on
+ * other people's tickets from non-admins: a screen capture and a console dump
+ * can carry anything that was on a colleague's screen, and none of it is needed
+ * to read a reply and tick it off.
+ */
+function shapeForViewer<T extends { userId: string | null; acks: { createdAt: Date }[] }>(
+  ticket: T,
+  viewerId: string,
+  privileged: boolean,
+) {
+  const { acks, ...rest } = ticket;
+  const own = ticket.userId === viewerId;
+  return {
+    ...rest,
+    ...(privileged || own ? {} : { screenshotUrl: null, browserInfo: null, consoleErrors: null }),
+    acknowledged: acks.length > 0,
+    acknowledgedAt: acks[0]?.createdAt ?? null,
+  };
+}
+
+/**
+ * Closing a ticket is a developer-only act, and it cannot be done silently: the
+ * message written here is what every user and admin is shown on their next
+ * login, so a resolve with nothing to say would raise an empty popup.
+ *
+ * Reopening clears the message and every acknowledgement with it - the ticket is
+ * unanswered again, and whatever reply gets written next has to be read afresh.
+ */
+const updateTicketSchema = z
+  .object({
+    status: z.enum(['OPEN', 'RESOLVED']),
+    developerMessage: z.string().trim().max(2000).optional(),
+  })
+  .refine((v) => v.status !== 'RESOLVED' || !!v.developerMessage, {
+    message: 'Write a message for the team before resolving this ticket',
+    path: ['developerMessage'],
+  });
+
+export async function updateSupportTicket(req: Request, res: Response) {
+  const { status, developerMessage } = updateTicketSchema.parse(req.body);
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+
+  const resolver =
+    status === 'RESOLVED'
+      ? await prisma.user.findUnique({ where: { id: req.user.userId }, select: { name: true } })
+      : null;
+
+  const ticket = await prisma.$transaction(async (tx) => {
+    if (status === 'OPEN') {
+      await tx.supportTicketAck.deleteMany({ where: { ticketId: req.params.id } });
+    }
+    return tx.supportTicket.update({
+      where: { id: req.params.id },
+      data:
+        status === 'RESOLVED'
+          ? {
+              status,
+              resolvedAt: new Date(),
+              developerMessage: developerMessage!,
+              resolvedById: req.user!.userId,
+              resolvedByName: resolver?.name ?? 'Developer',
+            }
+          : { status, resolvedAt: null, developerMessage: null, resolvedById: null, resolvedByName: null },
+    });
+  });
+
+  res.json(ticket);
+}
+
+/**
+ * The login announcement: answered tickets this person has not ticked off yet.
+ *
+ * The developer is left out - they wrote the replies. Everyone else sees every
+ * answered ticket, reporter's name included, because a fix that lands on one
+ * person's screen usually explains what the rest of the office saw too.
+ */
+export async function listSupportAnnouncements(req: Request, res: Response) {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  if (req.user.role === 'DEVELOPER') return res.json([]);
+
+  const tickets = await prisma.supportTicket.findMany({
+    where: {
+      status: 'RESOLVED',
+      developerMessage: { not: null },
+      acks: { none: { userId: req.user.userId } },
+    },
+    orderBy: { resolvedAt: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      userName: true,
+      pageLabel: true,
+      note: true,
+      developerMessage: true,
+      resolvedByName: true,
+      resolvedAt: true,
+    },
+  });
+
   res.json(tickets);
 }
 
-const updateTicketSchema = z.object({ status: z.enum(['OPEN', 'RESOLVED']) });
+/** "Yes, checked". Idempotent, so a second press (page and popup both offer it)
+ *  is not an error. */
+export async function acknowledgeSupportTicket(req: Request, res: Response) {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
 
-export async function updateSupportTicket(req: Request, res: Response) {
-  const { status } = updateTicketSchema.parse(req.body);
-  const ticket = await prisma.supportTicket.update({
+  const ticket = await prisma.supportTicket.findUnique({
     where: { id: req.params.id },
-    data: { status, resolvedAt: status === 'RESOLVED' ? new Date() : null },
+    select: { status: true, developerMessage: true },
   });
-  res.json(ticket);
+  if (!ticket) throw new HttpError(404, 'Ticket not found');
+  if (ticket.status !== 'RESOLVED' || !ticket.developerMessage) {
+    throw new HttpError(400, 'This ticket has no developer message to acknowledge yet');
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { name: true },
+  });
+
+  const ack = await prisma.supportTicketAck.upsert({
+    where: { ticketId_userId: { ticketId: req.params.id, userId: req.user.userId } },
+    create: {
+      ticketId: req.params.id,
+      userId: req.user.userId,
+      userName: user?.name ?? 'Unknown user',
+    },
+    update: {},
+  });
+
+  res.json({ acknowledged: true, acknowledgedAt: ack.createdAt });
 }

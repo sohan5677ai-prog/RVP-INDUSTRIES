@@ -148,6 +148,7 @@ model Party {
   creditNotes       CreditNote[]
   debitNotes        DebitNote[]
   emailLogs         EmailLog[]
+  setOffs           PartySetOff[]
 }
 
 model Broker {
@@ -762,6 +763,7 @@ model JournalEntry {
   lines       JournalLine[]
   payment     Payment?
   receipt     Receipt?
+  setOff      PartySetOff?
 }
 
 model JournalLine {
@@ -1106,6 +1108,12 @@ model Payment {
   // Uploaded proof-of-payment screenshot (Supabase Storage URL) - attached to the
   // WhatsApp payment notification sent to the party.
   screenshotUrl        String?
+  // Set when this row is the payment-side leg of a party set-off rather than a
+  // real payment. NO cash left the bank: the leg exists so Purchase Dues clears
+  // the bill, and the matching Receipt leg clears the sale invoice. See
+  // PartySetOff.
+  setOffId             String?
+  setOff               PartySetOff?        @relation(fields: [setOffId], references: [id], onDelete: Cascade)
   journalEntryId       String?             @unique
   journalEntry         JournalEntry?       @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt            DateTime            @default(now())
@@ -1115,6 +1123,7 @@ model Payment {
   @@index([brokerId])
   @@index([hamaliVerificationId])
   @@index([journalEntryId])
+  @@index([setOffId])
 }
 
 model Receipt {
@@ -1131,6 +1140,9 @@ model Receipt {
   payer          String? // free-text payer for direct-income receipts (e.g. "gunny bag buyer")
   reference      String?
   description    String?
+  // Receipt-side leg of a party set-off - no money was collected. See PartySetOff.
+  setOffId       String?
+  setOff         PartySetOff?  @relation(fields: [setOffId], references: [id], onDelete: Cascade)
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
@@ -1138,6 +1150,44 @@ model Receipt {
   @@index([partyId])
   @@index([saleDispatchId])
   @@index([journalEntryId])
+  @@index([setOffId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Party set-off (contra / knock-off).
+//
+// A party we both BUY from and SELL to carries a payable and a receivable at the
+// same time, and the two are routinely squared against each other instead of two
+// bank transfers crossing. Recording that as a plain "payment made" posts only
+// ONE leg: Purchase Dues goes quiet, but the sale invoice stays open forever and
+// the party ledger gains a receivable that will never be collected (plus a bank
+// credit for cash that never moved).
+//
+// A set-off is therefore always TWO-LEGGED and cash-free:
+//   • one Payment  leg per purchase bill    (setOffId set) → clears Purchase Dues
+//   • one Receipt  leg per sale invoice     (setOffId set) → clears Sale Dues
+//   • one journal entry: Dr 20100 Accounts Payable / Cr 10100 Accounts Receivable
+//     - NO 10400 Bank/Cash line, because no money moved.
+// The legs are equal and opposite, so the party ledger's running balance is
+// unchanged - which is correct: netting two balances does not alter the net
+// position, it only settles the documents behind it.
+// ─────────────────────────────────────────────────────────────────────────────
+model PartySetOff {
+  id             String        @id @default(cuid())
+  date           DateTime
+  partyId        String
+  party          Party         @relation(fields: [partyId], references: [id])
+  // Total knocked off: equals Σ payment legs and Σ receipt legs (both sides must
+  // match, enforced on create).
+  amount         Decimal       @db.Decimal(12, 2)
+  note           String?
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  payments       Payment[]
+  receipts       Receipt[]
+  createdAt      DateTime      @default(now())
+
+  @@index([partyId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1433,8 +1483,36 @@ model SupportTicket {
   notifiedError  String?
   createdAt      DateTime            @default(now())
   resolvedAt     DateTime?
+  // What the developer wrote when closing the ticket - the reply everyone else
+  // in the company is shown on their next login. Required to resolve, so a
+  // RESOLVED ticket always has something to announce.
+  developerMessage String?
+  resolvedById     String?
+  resolvedByName   String?
+  acks             SupportTicketAck[]
 
   @@index([status, createdAt])
+}
+
+/**
+ * "Yes, checked" - one row per person who has seen a resolved ticket's developer
+ * message. Its absence is what keeps the login popup coming back, so "Let me
+ * check" writes nothing at all and the reply resurfaces on the next refresh.
+ *
+ * `userId` is a plain column for the same reason it is on the ticket: the
+ * acknowledgement is a record of who read what, and outlives the user row.
+ */
+model SupportTicketAck {
+  id        String   @id @default(cuid())
+  ticketId  String
+  userId    String
+  userName  String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@index([userId])
 }
 
 model WhatsAppLog {

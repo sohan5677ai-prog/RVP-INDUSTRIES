@@ -2,20 +2,25 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { Segmented } from '@/components/ui/segmented';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2, LifeBuoy, CheckCircle2, Undo2, ImageOff } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Loader2, LifeBuoy, CheckCircle2, Undo2, ImageOff, MessageSquareReply } from 'lucide-react';
 
 type TicketFilter = 'OPEN' | 'RESOLVED' | 'ALL';
 
 interface SupportTicket {
   id: string;
+  userId: string | null;
   userName: string;
   userRole: string;
   pagePath: string;
@@ -29,6 +34,11 @@ interface SupportTicket {
   notifiedError: string | null;
   createdAt: string;
   resolvedAt: string | null;
+  developerMessage: string | null;
+  resolvedByName: string | null;
+  /** Whether the person looking at this page has ticked the reply off. */
+  acknowledged: boolean;
+  acknowledgedAt: string | null;
 }
 
 function when(iso: string) {
@@ -47,8 +57,15 @@ function when(iso: string) {
  */
 export default function SupportTickets() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  // Only the developer closes tickets, because closing one means writing the
+  // answer the whole company is shown. Everyone else reads and acknowledges.
+  const isDeveloper = user?.role === 'DEVELOPER';
   const [filter, setFilter] = useState<TicketFilter>('OPEN');
   const [viewing, setViewing] = useState<SupportTicket | null>(null);
+  // The ticket being resolved, and the message going out with it.
+  const [resolving, setResolving] = useState<SupportTicket | null>(null);
+  const [reply, setReply] = useState('');
 
   const { data: rows, isLoading } = useQuery({
     queryKey: ['support-tickets', filter],
@@ -59,14 +76,69 @@ export default function SupportTickets() {
   });
 
   const setStatus = useMutation({
-    mutationFn: (v: { id: string; status: 'OPEN' | 'RESOLVED' }) =>
-      api(`/support/tickets/${v.id}`, { method: 'PATCH', body: { status: v.status } }),
+    mutationFn: (v: { id: string; status: 'OPEN' | 'RESOLVED'; developerMessage?: string }) =>
+      api(`/support/tickets/${v.id}`, {
+        method: 'PATCH',
+        body: { status: v.status, developerMessage: v.developerMessage },
+      }),
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['support-tickets'] });
-      toast.success(v.status === 'RESOLVED' ? 'Marked resolved' : 'Reopened');
+      qc.invalidateQueries({ queryKey: ['support-announcements'] });
+      setResolving(null);
+      // The detail dialog may be open behind this one, holding its own copy of
+      // the row; patch it in place rather than closing it - two Radix dialogs
+      // dismissed in the same tick leave the page unclickable.
+      setViewing((prev) =>
+        prev && prev.id === v.id
+          ? {
+              ...prev,
+              status: v.status,
+              developerMessage: v.developerMessage ?? null,
+              resolvedByName: v.status === 'RESOLVED' ? user?.name ?? null : null,
+              resolvedAt: v.status === 'RESOLVED' ? new Date().toISOString() : null,
+              acknowledged: false,
+            }
+          : prev,
+      );
+      toast.success(
+        v.status === 'RESOLVED'
+          ? 'Resolved. Everyone will see your message on their next sign-in.'
+          : 'Reopened - the message and everyone’s acknowledgements were cleared.',
+      );
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
+
+  const acknowledge = useMutation({
+    mutationFn: (id: string) => api(`/support/tickets/${id}/ack`, { method: 'POST' }),
+    onSuccess: (_d, id) => {
+      qc.invalidateQueries({ queryKey: ['support-tickets'] });
+      qc.invalidateQueries({ queryKey: ['support-announcements'] });
+      // The open dialog holds its own copy of the row, so it has to be told.
+      setViewing((prev) => (prev && prev.id === id ? { ...prev, acknowledged: true } : prev));
+      toast.success('Marked as checked');
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  function startResolve(t: SupportTicket) {
+    setReply('');
+    setResolving(t);
+  }
+
+  function submitResolve() {
+    const message = reply.trim();
+    if (!message) {
+      toast.error('Write a message for the team before resolving');
+      return;
+    }
+    if (resolving) setStatus.mutate({ id: resolving.id, status: 'RESOLVED', developerMessage: message });
+  }
+
+  /** What this viewer can do with a row: resolve/reopen for the developer,
+   *  acknowledge for everyone else once there is a reply to acknowledge. */
+  const canAcknowledge = (t: SupportTicket) =>
+    !isDeveloper && t.status === 'RESOLVED' && !!t.developerMessage && !t.acknowledged;
 
   const paged = usePagedRows(rows ?? []);
 
@@ -139,24 +211,35 @@ export default function SupportTickets() {
                       )}
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      {t.status === 'OPEN' ? (
+                      {isDeveloper ? (
+                        t.status === 'OPEN' ? (
+                          <Button size="sm" variant="outline" onClick={() => startResolve(t)}>
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Resolve
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setStatus.mutate({ id: t.id, status: 'OPEN' })}
+                            disabled={setStatus.isPending}
+                          >
+                            <Undo2 className="h-3.5 w-3.5" /> Reopen
+                          </Button>
+                        )
+                      ) : canAcknowledge(t) ? (
                         <Button
                           size="sm"
-                          variant="outline"
-                          onClick={() => setStatus.mutate({ id: t.id, status: 'RESOLVED' })}
-                          disabled={setStatus.isPending}
+                          onClick={() => acknowledge.mutate(t.id)}
+                          disabled={acknowledge.isPending}
                         >
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Resolve
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Checked
                         </Button>
+                      ) : t.acknowledged ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Checked
+                        </span>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setStatus.mutate({ id: t.id, status: 'OPEN' })}
-                          disabled={setStatus.isPending}
-                        >
-                          <Undo2 className="h-3.5 w-3.5" /> Reopen
-                        </Button>
+                        <span className="text-xs text-muted-foreground">Awaiting the developer</span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -183,6 +266,31 @@ export default function SupportTickets() {
               <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
                 {viewing.note}
               </p>
+
+              {viewing.developerMessage && (
+                <div className="space-y-1.5 rounded-lg border border-sky-500/25 bg-sky-500/[0.07] p-3">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-400">
+                    <MessageSquareReply className="h-3.5 w-3.5" />
+                    {viewing.resolvedByName ? `${viewing.resolvedByName} replied` : 'Developer replied'}
+                    {viewing.resolvedAt && <span className="font-normal text-muted-foreground">· {when(viewing.resolvedAt)}</span>}
+                  </div>
+                  <p className="text-sm whitespace-pre-wrap">{viewing.developerMessage}</p>
+                  {canAcknowledge(viewing) ? (
+                    <Button
+                      size="sm"
+                      className="mt-1"
+                      onClick={() => acknowledge.mutate(viewing.id)}
+                      disabled={acknowledge.isPending}
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Yes, checked
+                    </Button>
+                  ) : viewing.acknowledged ? (
+                    <p className="inline-flex items-center gap-1 pt-0.5 text-xs text-emerald-600">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> You have marked this as checked
+                    </p>
+                  ) : null}
+                </div>
+              )}
 
               {viewing.screenshotUrl ? (
                 <a href={viewing.screenshotUrl} target="_blank" rel="noreferrer">
@@ -215,8 +323,71 @@ export default function SupportTickets() {
                   </pre>
                 </div>
               )}
+
+              {isDeveloper && (
+                <DialogFooter>
+                  {viewing.status === 'OPEN' ? (
+                    <Button onClick={() => startResolve(viewing)}>
+                      <CheckCircle2 className="h-4 w-4" /> Resolve…
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={() => setStatus.mutate({ id: viewing.id, status: 'OPEN' })}
+                      disabled={setStatus.isPending}
+                    >
+                      <Undo2 className="h-4 w-4" /> Reopen
+                    </Button>
+                  )}
+                </DialogFooter>
+              )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Resolving is answering: the message written here is what every user and
+          admin is shown on their next sign-in, so there is no way to close a
+          ticket without saying what was done about it. */}
+      <Dialog open={!!resolving} onOpenChange={(v) => { if (!v && !setStatus.isPending) setResolving(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Resolve this ticket</DialogTitle>
+            <DialogDescription>
+              {resolving && <>Reported by {resolving.userName} on {resolving.pageLabel}. </>}
+              Your message goes to everyone as a popup on their next sign-in.
+            </DialogDescription>
+          </DialogHeader>
+
+          {resolving && (
+            <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
+              {resolving.note}
+            </p>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="developer-message">Message to the team</Label>
+            <textarea
+              id="developer-message"
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              rows={4}
+              maxLength={2000}
+              autoFocus
+              placeholder="e.g. Fixed — the total now counts lorries that arrived today. Please reload the page once."
+              className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResolving(null)} disabled={setStatus.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={submitResolve} disabled={setStatus.isPending || !reply.trim()}>
+              {setStatus.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              <CheckCircle2 className="h-4 w-4" /> Resolved
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -5,6 +5,9 @@ import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '.
 import { computeBuyerDues, invoiceListText, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
 import { computeSupplierDues } from '../services/purchaseDues.service.js';
 import { computeProfitLossSummary } from '../controllers/ledger.controller.js';
+import { renderSalesDuesReportPdf } from '../lib/salesDuesPdf.js';
+import { getCompanyProfileRow } from '../controllers/settings.controller.js';
+import { uploadFileToStorage } from '../lib/upload.js';
 
 /**
  * Scheduled WhatsApp jobs (use cases 7, 8, 9, 10). Runs in-process via node-cron
@@ -71,6 +74,32 @@ async function runOwnerDuesDigest(): Promise<string> {
   const dayKey = istDayKey();
   if (await whatsappService.lastSentAt('OWNER_DUES_DIGEST', dayKey)) return `already sent for ${dayKey}`;
   const portfolio = await computeBuyerDues();
+
+  // Best-effort: the digest still sends as text-only if the PDF can't be built
+  // (storage hiccup, missing company profile row) - a report failure must
+  // never suppress the daily figures the owners actually rely on.
+  let document: { url: string; filename: string } | undefined;
+  try {
+    const profile = await getCompanyProfileRow();
+    const buffer = await renderSalesDuesReportPdf(
+      {
+        name: profile.name,
+        address: profile.address,
+        gstin: profile.gstin,
+        contact: profile.contact,
+        stateName: profile.stateName,
+        stateCode: profile.stateCode,
+        pincode: profile.pincode,
+      },
+      portfolio,
+    );
+    const filename = `Outstanding-Sales-Dues-${dayKey}.pdf`;
+    const url = await uploadFileToStorage({ originalname: filename, mimetype: 'application/pdf', buffer } as Express.Multer.File);
+    document = { url, filename };
+  } catch (e) {
+    logger.error('[whatsapp] outstanding sales dues PDF failed', e);
+  }
+
   const res = await whatsappService.sendOwnerDuesDigest(
     {
       asOn: new Date(),
@@ -78,7 +107,8 @@ async function runOwnerDuesDigest(): Promise<string> {
       overdue: portfolio.totalOverdue,
       topPending: topPendingText(portfolio.topPending),
     },
-    dayKey
+    dayKey,
+    document,
   );
   return describeSend(res, dayKey);
 }

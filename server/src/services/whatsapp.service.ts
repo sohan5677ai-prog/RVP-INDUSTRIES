@@ -65,9 +65,9 @@ export type WaTemplateKey =
   | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
-  | 'OWNER_DUES_DIGEST' // rvp_owner_dues: date, total receivable, overdue, top pending
+  | 'OWNER_DUES_DIGEST' // rvp_owner_dues (document header - full outstanding-dues PDF): date, total receivable, overdue, top pending
   | 'OWNER_DUE_TODAY_DIGEST' // rvp_owner_due_today: date, total due today, bill count, itemised list - see docs/whatsapp-owner-due-today-template.md
-  | 'OWNER_BUSINESS_SNAPSHOT' // rvp_owner_snapshot: date, total receivable, overdue receivable, total payable, overdue invoices pending, net profit (closing motivational line is fixed template text, not a variable) - see docs/whatsapp-owner-business-snapshot-template.md
+  | 'OWNER_BUSINESS_SNAPSHOT' // rvp_owner_snapshot: date, total receivable, overdue receivable, total payable, overdue invoices pending, net profit - data-only body, no greeting/sign-off (see docs/whatsapp-owner-business-snapshot-template.md)
   | 'SUPPORT_TICKET' // rvp_support_ticket (image header - the screen capture): reporter, page, note, time
   // rvp_support_ticket_text (no header) - same four variables, used when the
   // browser couldn't capture the screen. Like PAYMENT_SENT_TEXT, its approved
@@ -1191,13 +1191,26 @@ export const whatsappService = {
     );
   },
 
-  /** Owner daily outstanding-sales-dues digest. */
-  async sendOwnerDuesDigest(totals: { asOn: Date; totalReceivable: number; overdue: number; topPending: string }, dayKey: string) {
+  /**
+   * Owner daily outstanding-sales-dues digest. `document`, when supplied, rides
+   * along as the template's document header - the full buyer-grouped aging PDF
+   * (see `renderSalesDuesReportPdf`), so the body's four figures point to a
+   * complete list rather than just the top overdue names. Optional so the
+   * digest still sends (text-only, as before) if the PDF couldn't be built or
+   * the approved template doesn't carry a document header yet.
+   */
+  async sendOwnerDuesDigest(
+    totals: { asOn: Date; totalReceivable: number; overdue: number; topPending: string },
+    dayKey: string,
+    document?: { url: string; filename: string },
+  ) {
     return fanOutToAlertRecipients((to) =>
       sendWhatsAppTemplate({
         templateKey: 'OWNER_DUES_DIGEST',
         to,
         variables: [fmtDate(totals.asOn), fmtInr(totals.totalReceivable), fmtInr(totals.overdue), totals.topPending],
+        mediaUrl: document?.url,
+        documentFilename: document?.filename,
         relatedType: 'OWNER_DUES_DIGEST',
         relatedId: dayKey,
       })

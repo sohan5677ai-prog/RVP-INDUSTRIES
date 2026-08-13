@@ -1,4 +1,4 @@
-import type { WaLanguage } from '@prisma/client';
+import type { SaleProduct, WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { istCalendar } from '../lib/istDate.js';
 
@@ -43,6 +43,17 @@ export interface InvoiceDue {
    *  below that already have their buyer/broker in scope. */
   brokerName: string | null;
   buyerName: string;
+  /** Full billed value (base + GST), whole rupees - lets a caller show "partially paid" vs the outstanding balance. */
+  billAmount: number;
+  billDate: Date;
+  product: SaleProduct;
+  vehicleNumber: string | null;
+  /** Days past due, 0 while `inTransit` (the clock hasn't started) or not yet due. */
+  dueDaysAfter: number;
+  /** The order's credit term (days from delivery) - what an in-transit row's due date will be measured from. */
+  dueDays: number;
+  /** Some, but not all, of the bill has been cleared. */
+  partiallyPaid: boolean;
 }
 
 /** A broker standing behind at least one of a buyer's unsettled invoices. */
@@ -146,6 +157,7 @@ export async function computeBuyerDues(
     const base = d.deliveredDate ?? d.dispatchDate;
     const dueDate = addDays(base, order.dueDays ?? 0);
     const overdue = !inTransit && dueDate.getTime() < asOf.getTime();
+    const dueDaysAfter = overdue ? Math.max(0, Math.ceil((asOf.getTime() - dueDate.getTime()) / 86400000)) : 0;
 
     const buyer = order.buyer;
     let row = byBuyer.get(buyer.id);
@@ -164,6 +176,13 @@ export async function computeBuyerDues(
       brokerId: broker?.id ?? null,
       brokerName: broker?.name ?? null,
       buyerName: buyer.name,
+      billAmount: invoiceValue,
+      billDate: d.dispatchDate,
+      product: order.product,
+      vehicleNumber: d.vehicleNumber ?? null,
+      dueDaysAfter,
+      dueDays: order.dueDays ?? 0,
+      partiallyPaid: cleared > 0.01,
     };
     row.outstanding += invoice.outstanding;
     row.invoices.push(invoice);

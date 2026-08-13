@@ -139,9 +139,8 @@ async function runOwnerDueTodayDigest(): Promise<string> {
 // #12 - Owner daily business snapshot (receivables, overdue receivables,
 // payables, overdue invoices pending, net profit), 06:00 IST alongside the
 // due-today digest. Always sends, like runOwnerDuesDigest - an owner wants
-// this greeting whether the numbers are good or bad. The closing line of
-// motivation is fixed text baked into the approved template body, not a
-// variable - see docs/whatsapp-owner-business-snapshot-template.md.
+// this even on a day with nothing new. Data-only body, no greeting, no
+// sign-off - see docs/whatsapp-owner-business-snapshot-template.md for why.
 // ---------------------------------------------------------------------------
 async function runOwnerBusinessSnapshot(): Promise<string> {
   const dayKey = istDayKey();

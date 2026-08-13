@@ -1240,8 +1240,9 @@ export const whatsappService = {
    * Owner daily business snapshot, 06:00 IST. The one-glance "how are we
    * doing" message: total receivable (everything, due or not), the overdue
    * slice of it, total payable, how many sale invoices are overdue and still
-   * uncleared, and net profit to date. The closing motivational line is fixed
-   * text in the approved template body, not a variable here.
+   * uncleared, and net profit to date. Data-only body (no greeting, no
+   * sign-off) - an earlier draft with a greeting + closing encouragement got
+   * auto-classified as Marketing by Meta instead of Utility.
    */
   async sendOwnerBusinessSnapshot(
     totals: {

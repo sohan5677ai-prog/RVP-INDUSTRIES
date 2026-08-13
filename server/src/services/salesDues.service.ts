@@ -77,7 +77,7 @@ export interface DuesPortfolio {
   buyers: BuyerDues[];
   totalReceivable: number;
   totalOverdue: number;
-  /** Buyers with the largest outstanding, most first. */
+  /** Buyers with the largest OVERDUE (past due date) balance, most first - excludes buyers with nothing yet overdue. */
   topPending: Array<{ name: string; outstanding: number }>;
 }
 
@@ -162,7 +162,11 @@ export async function computeBuyerDues(
   const buyers = [...byBuyer.values()].sort((a, b) => b.outstanding - a.outstanding);
   const totalReceivable = buyers.reduce((s, b) => s + b.outstanding, 0);
   const totalOverdue = buyers.reduce((s, b) => s + b.overdueOutstanding, 0);
-  const topPending = buyers.slice(0, 5).map((b) => ({ name: b.name, outstanding: b.outstanding }));
+  const topPending = buyers
+    .filter((b) => b.overdueOutstanding > 0)
+    .sort((a, b) => b.overdueOutstanding - a.overdueOutstanding)
+    .slice(0, 5)
+    .map((b) => ({ name: b.name, outstanding: b.overdueOutstanding }));
 
   return { asOf, buyers, totalReceivable, totalOverdue, topPending };
 }
@@ -210,8 +214,8 @@ export function invoiceListText(invoices: InvoiceDue[], max = 10): string {
   return shown.join(', ');
 }
 
-/** "Buyer A ₹12.0L · Buyer B ₹8.0L" for the owner digest. */
+/** "Buyer A ₹12.0L · Buyer B ₹8.0L" for the owner digest - overdue buyers only. */
 export function topPendingText(top: Array<{ name: string; outstanding: number }>): string {
-  if (top.length === 0) return 'No pending dues 🎉';
+  if (top.length === 0) return 'No overdue dues 🎉';
   return top.map((t) => `${t.name} ${compactInr(t.outstanding)}`).join(' · ');
 }

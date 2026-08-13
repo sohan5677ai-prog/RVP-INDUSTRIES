@@ -33,5 +33,9 @@ export type UpdatePaymentInput = z.infer<typeof updatePaymentSchema>;
 export const listPaymentsSchema = z.object({
   skip: z.coerce.number().int().nonnegative().optional(),
   take: z.coerce.number().int().positive().optional().default(100),
-  all: z.enum(['true', 'false']).optional()
+  all: z.enum(['true', 'false']).optional(),
+  // Drop the payment-side legs of party set-offs. They are not money leaving the
+  // bank, so the Payments REGISTER hides them - but the dues/FIFO consumers must
+  // keep seeing them, since a leg is what clears its purchase bill.
+  excludeSetOffs: z.enum(['true', 'false']).optional(),
 });

@@ -129,7 +129,9 @@ export default function ReceiptsPage() {
     queryKey: ['receipts', { page, pageSize }],
     queryFn: () =>
       pageSize === Infinity
-        ? api<Receipt[]>('/receipts?all=true').then((rows) => ({ rows, total: rows.length }))
+        // Register view: set-off legs are excluded server-side (no cash was
+        // collected), so "All" and the export match the paged view.
+        ? api<Receipt[]>('/receipts?all=true&excludeSetOffs=true').then((rows) => ({ rows, total: rows.length }))
         : api<{ rows: Receipt[]; total: number }>(`/receipts?skip=${(page - 1) * pageSize}&take=${pageSize}`),
     placeholderData: keepPreviousData,
   });
@@ -557,7 +559,7 @@ export default function ReceiptsPage() {
             title="Receipts Register"
             subtitle={`${total} receipt(s)`}
             columns={RECEIPT_EXPORT_COLUMNS}
-            rows={() => api<Receipt[]>('/receipts?all=true')}
+            rows={() => api<Receipt[]>('/receipts?all=true&excludeSetOffs=true')}
           />
           <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Receipt

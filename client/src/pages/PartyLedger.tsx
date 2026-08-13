@@ -34,6 +34,9 @@ const KIND_META: Record<LedgerKind, { label: string; cls: string }> = {
   CREDIT_NOTE: { label: 'Credit Note', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
   TDS: { label: 'TDS', cls: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20' },
   SHORTAGE: { label: 'Shortage', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
+  // Appears as a matched pair (one Dr, one Cr), so the running balance is
+  // untouched - the knock-off settles the bills, not the net position.
+  SET_OFF: { label: 'Set-off', cls: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' },
 };
 
 const TYPE_LABEL: Record<string, string> = { SUPPLIER: 'Supplier', BUYER: 'Buyer', BOTH: 'Supplier & Buyer' };
@@ -247,6 +250,7 @@ const KIND_FILTERS: { value: string; label: string }[] = [
   { value: 'SALE', label: 'Sales' },
   { value: 'PAYMENT', label: 'Payments' },
   { value: 'RECEIPT', label: 'Receipts' },
+  { value: 'SET_OFF', label: 'Set-offs' },
 ];
 
 function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void }) {
@@ -458,7 +462,21 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
         />
         <KpiCard icon={Scale} label="Lifetime Business" value={rupees(summary.totalBusiness)} tone="neutral" hint={`${summary.transactionCount} transactions`} />
         <KpiCard icon={ReceiptText} label={party.type === 'BUYER' ? 'Total Sold' : 'Total Purchased'} value={rupees(party.type === 'BUYER' ? summary.saleTotal : summary.purchaseTotal)} tone="blue" />
-        <KpiCard icon={Wallet} label={party.type === 'BUYER' ? 'Total Received' : 'Total Paid'} value={rupees(party.type === 'BUYER' ? summary.receivedTotal : summary.paidTotal)} tone="neutral" hint={summary.pendingCount > 0 ? `${summary.pendingCount} awaiting verification` : undefined} />
+        <KpiCard
+          icon={Wallet}
+          label={party.type === 'BUYER' ? 'Total Received' : 'Total Paid'}
+          value={rupees(party.type === 'BUYER' ? summary.receivedTotal : summary.paidTotal)}
+          tone="neutral"
+          // Cash only. A knock-off settles bills without money moving, so it is
+          // called out separately rather than inflating this figure.
+          hint={
+            summary.setOffTotal > 0
+              ? `${rupees(summary.setOffTotal)} settled by set-off`
+              : summary.pendingCount > 0
+                ? `${summary.pendingCount} awaiting verification`
+                : undefined
+          }
+        />
       </div>
 
       {/* filters */}

@@ -318,7 +318,11 @@ export async function listSilos(req: Request, res: Response) {
 // (payable to a supplier).
 // ---------------------------------------------------------------------------
 
-type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE';
+// SET_OFF is a knock-off between this party's own payable and receivable. It
+// appears TWICE - once on the debit side (clearing a purchase bill) and once on
+// the credit side (clearing a sale invoice) - so the running balance is
+// unchanged, which is the point: netting settles documents, not the net position.
+type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE' | 'SET_OFF';
 
 interface LedgerTxn {
   id: string;
@@ -567,25 +571,31 @@ function buildPartyLedger(
   }
 
   // 3. Payments we made to the party (as a supplier) → DEBIT (clears payable).
+  //    A set-off leg sits here too: it clears the same payable, but no money
+  //    moved, so it is narrated as a set-off rather than a payment (and is left
+  //    out of paidTotal below).
   for (const p of payments.filter((x) => x.partyId === partyId)) {
     const linkedPurchase = p.purchaseId ? purchaseMetaById.get(p.purchaseId) : undefined;
     const narration = splitAutoNarration(p.description);
+    const isSetOff = !!p.setOffId;
     txns.push({
       id: `PAY-${p.id}`,
       date: p.date.toISOString(),
-      kind: 'PAYMENT',
-      particulars: narration.note || 'Payment made',
+      kind: isSetOff ? 'SET_OFF' : 'PAYMENT',
+      particulars: isSetOff
+        ? narration.note || 'Set-off - purchase bill squared against sale invoice'
+        : narration.note || 'Payment made',
       invoiceNumber: linkedPurchase?.invoiceNumber ?? narration.invoiceNumber,
       vehicleNumber: p.lorryNumber ?? linkedPurchase?.lorryNumber ?? null,
       reference: p.reference,
-      utr: p.reference,
-      transferredDate: p.date.toISOString(),
+      utr: isSetOff ? null : p.reference,
+      transferredDate: isSetOff ? null : p.date.toISOString(),
       weightKg: null,
       ratePerKg: null,
       product: null,
       debit: round2(Number(p.amount)),
       credit: 0,
-      status: 'PAID',
+      status: isSetOff ? 'SET-OFF' : 'PAID',
     });
   }
 
@@ -603,22 +613,25 @@ function buildPartyLedger(
     // anywhere in the app, so its blank Invoice cell is a fact about the data,
     // not a gap in this report - say so rather than leaving it unexplained.
     const onAccount = !recInvoice;
+    const isSetOff = !!r.setOffId;
     txns.push({
       id: `REC-${r.id}`,
       date: r.date.toISOString(),
-      kind: 'RECEIPT',
-      particulars: narration.note || (onAccount ? 'Receipt collected (on account)' : 'Receipt collected'),
+      kind: isSetOff ? 'SET_OFF' : 'RECEIPT',
+      particulars: isSetOff
+        ? narration.note || 'Set-off - sale invoice squared against purchase bill'
+        : narration.note || (onAccount ? 'Receipt collected (on account)' : 'Receipt collected'),
       invoiceNumber: recInvoice,
       vehicleNumber: recVehicle,
       reference: r.reference,
-      utr: r.reference,
-      transferredDate: r.date.toISOString(),
+      utr: isSetOff ? null : r.reference,
+      transferredDate: isSetOff ? null : r.date.toISOString(),
       weightKg: null,
       ratePerKg: null,
       product: null,
       debit: 0,
       credit: round2(Number(r.amount)),
-      status: 'RECEIVED',
+      status: isSetOff ? 'SET-OFF' : 'RECEIVED',
     });
 
     const rTds = Number(r.tdsAmount ?? 0);
@@ -682,11 +695,17 @@ function buildPartyLedger(
   const saleTotal = round2(
     txns.filter((t) => t.kind === 'SALE').reduce((s, t) => s + t.debit, 0)
   );
+  // Paid / Received are CASH figures, so the set-off legs are excluded from both
+  // and reported on their own line instead - a knock-off settles bills without a
+  // rupee moving, and folding it into "Paid" would overstate what left the bank.
   const paidTotal = round2(
     txns.filter((t) => t.kind === 'PAYMENT').reduce((s, t) => s + t.debit, 0)
   );
   const receivedTotal = round2(
     txns.filter((t) => t.kind === 'RECEIPT').reduce((s, t) => s + t.credit, 0)
+  );
+  const setOffTotal = round2(
+    txns.filter((t) => t.kind === 'SET_OFF').reduce((s, t) => s + t.debit, 0)
   );
   const pendingCount = txns.filter((t) => t.status === 'PENDING').length;
   const lastTxnDate = txns.length ? txns[txns.length - 1].date : null;
@@ -702,6 +721,7 @@ function buildPartyLedger(
       saleTotal,
       paidTotal,
       receivedTotal,
+      setOffTotal,
       totalBusiness: round2(purchaseTotal + saleTotal),
       transactionCount: txns.length,
       pendingCount,
@@ -766,13 +786,21 @@ export async function listPartyLedgers(_req: Request, res: Response) {
       WHERE v.id IS NULL
       GROUP BY po."partyId"
     `,
-    prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
-      SELECT "partyId", SUM(ROUND("amount")) as total, MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
-      FROM "Payment" WHERE "partyId" IS NOT NULL GROUP BY "partyId"
-    `,
-    prisma.$queryRaw<{partyId: string, total: number, tdsTotal: number, shortageTotal: number, lastTxnDate: Date, cnt: number}[]>`
+    // `total` is every debit against the party (it must stay complete or the
+    // balance breaks); `setOffTotal` splits out the cash-free knock-off legs so
+    // the Paid column shows money that actually left the bank, matching
+    // buildPartyLedger's paidTotal.
+    prisma.$queryRaw<{partyId: string, total: number, setOffTotal: number, lastTxnDate: Date, cnt: number}[]>`
       SELECT "partyId",
         SUM(ROUND("amount")) as total,
+        SUM(ROUND("amount")) FILTER (WHERE "setOffId" IS NOT NULL) as "setOffTotal",
+        MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
+      FROM "Payment" WHERE "partyId" IS NOT NULL GROUP BY "partyId"
+    `,
+    prisma.$queryRaw<{partyId: string, total: number, setOffTotal: number, tdsTotal: number, shortageTotal: number, lastTxnDate: Date, cnt: number}[]>`
+      SELECT "partyId",
+        SUM(ROUND("amount")) as total,
+        SUM(ROUND("amount")) FILTER (WHERE "setOffId" IS NOT NULL) as "setOffTotal",
         SUM(ROUND(COALESCE("tdsAmount", 0))) as "tdsTotal",
         SUM(ROUND(COALESCE("shortageAmount", 0))) as "shortageTotal",
         MAX("date") as "lastTxnDate", COUNT(*)::int as cnt
@@ -789,7 +817,7 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     map.set(p.id, {
       ...p,
       totalDebit: 0, totalCredit: 0,
-      purchaseTotal: 0, saleTotal: 0, paidTotal: 0, receivedTotal: 0,
+      purchaseTotal: 0, saleTotal: 0, paidTotal: 0, receivedTotal: 0, setOffTotal: 0,
       transactionCount: 0, pendingCount: 0, lastTxnDate: null
     });
   }
@@ -833,7 +861,9 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     if (!s) continue;
     applyDate(agg.partyId, agg.lastTxnDate);
     const amt = Number(agg.total || 0);
-    s.paidTotal += amt;
+    const setOffAmt = Number(agg.setOffTotal || 0);
+    s.paidTotal += amt - setOffAmt; // cash only
+    s.setOffTotal += setOffAmt;
     s.totalDebit += amt;
     s.transactionCount += Number(agg.cnt);
   }
@@ -843,9 +873,10 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     if (!s) continue;
     applyDate(agg.partyId, agg.lastTxnDate);
     const amt = Number(agg.total || 0);
+    const setOffAmt = Number(agg.setOffTotal || 0);
     const tdsAmt = Number(agg.tdsTotal || 0);
     const shortageAmt = Number(agg.shortageTotal || 0);
-    s.receivedTotal += amt;
+    s.receivedTotal += amt - setOffAmt; // cash only
     s.totalCredit += amt + tdsAmt + shortageAmt;
     s.transactionCount += Number(agg.cnt);
   }
@@ -864,6 +895,7 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     s.saleTotal = round2(s.saleTotal);
     s.paidTotal = round2(s.paidTotal);
     s.receivedTotal = round2(s.receivedTotal);
+    s.setOffTotal = round2(s.setOffTotal);
     s.totalDebit = round2(s.totalDebit);
     s.totalCredit = round2(s.totalCredit);
     const bal = round2(s.totalDebit - s.totalCredit);

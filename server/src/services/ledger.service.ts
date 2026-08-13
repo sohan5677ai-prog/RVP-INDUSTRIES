@@ -949,6 +949,42 @@ export class LedgerService {
   }
 
   /**
+   * Post a party set-off (contra). One party's payable is squared against its own
+   * receivable, so the entry is Dr Accounts Payable / Cr Accounts Receivable with
+   * NO Bank/Cash line - no money moved. This is the only ledger posting a set-off
+   * makes; its Payment / Receipt legs deliberately carry no journal entry of
+   * their own (posting them would credit AND debit the bank for cash that never
+   * left, and double the AP/AR movement).
+   */
+  static async postSetOff(
+    tx: Prisma.TransactionClient,
+    setOffId: string,
+    data: { date: Date; amount: number; partyName: string; note?: string }
+  ) {
+    return this.postJournalEntry(tx, {
+      date: data.date,
+      reference: `SETOFF-${setOffId}`,
+      description:
+        `Set-off (contra) - ${data.partyName}: purchase payable squared against sale receivable.` +
+        (data.note ? ` ${data.note}` : ''),
+      lines: [
+        {
+          accountCode: '20100', // Accounts Payable - Suppliers
+          debit: data.amount,
+          credit: 0,
+          costCenter: data.partyName,
+        },
+        {
+          accountCode: '10100', // Accounts Receivable - Buyers
+          debit: 0,
+          credit: data.amount,
+          costCenter: data.partyName,
+        },
+      ],
+    });
+  }
+
+  /**
    * Create a Payment row + its ledger posting for an entry that originates on a
    * detail page (Gunny Bags, Electricity, Maintenance, Drawings). The journal
    * `reference` is a caller-supplied key (e.g. `GUNNYBAG-<id>`) so the owning

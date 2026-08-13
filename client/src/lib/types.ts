@@ -690,6 +690,9 @@ export interface Payment {
   reference?: string | null;
   description?: string | null;
   hamaliVerificationId?: string | null;
+  // Set when this row is the payment side of a party set-off - the bill was
+  // knocked off against a sale invoice, no cash left the bank.
+  setOffId?: string | null;
 }
 
 export interface OutstandingBalance {
@@ -768,11 +771,45 @@ export interface Receipt {
   description: string | null;
   journalEntryId: string | null;
   createdAt: string;
+  // Set when this row is the collection side of a party set-off - the invoice
+  // was knocked off against a purchase bill, no cash was received.
+  setOffId?: string | null;
+}
+
+// --- Party set-off (contra) -------------------------------------------------
+
+/** One open purchase bill offered to the set-off dialog. */
+export interface SetOffOpenPurchase {
+  kind: 'GRAIN' | 'DUST';
+  id: string;
+  date: string;
+  invoiceNumber: string | null;
+  lorryNumber: string | null;
+  totalAmount: number;
+  outstanding: number;
+}
+
+/** One open sale invoice offered to the set-off dialog. */
+export interface SetOffOpenSale {
+  saleDispatchId: string;
+  date: string;
+  invoiceNumber: string | null;
+  vehicleNumber: string | null;
+  product: string;
+  totalAmount: number;
+  outstanding: number;
+}
+
+export interface SetOffOpenItems {
+  party: { id: string; name: string };
+  purchases: SetOffOpenPurchase[];
+  sales: SetOffOpenSale[];
+  totals: { payable: number; receivable: number };
 }
 
 // --- Party Ledger -----------------------------------------------------------
 
-export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE';
+export type LedgerKind = 'PURCHASE' | 'SALE' | 'PAYMENT' | 'RECEIPT' | 'CREDIT_NOTE' | 'TDS' | 'SHORTAGE' | 'SET_OFF';
 export type BalanceType = 'DR' | 'CR';
 export type BunkerPlace = 'A' | 'B';
 
@@ -785,6 +822,8 @@ export interface PartyLedgerSummary {
   saleTotal: number;
   paidTotal: number;
   receivedTotal: number;
+  /** Knocked off against this party's own bills - settled without cash moving. */
+  setOffTotal: number;
   totalBusiness: number;
   transactionCount: number;
   pendingCount: number;

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingDown, Loader2, ChevronRight, Undo2, IndianRupee } from 'lucide-react';
+import { TrendingDown, Loader2, ChevronRight, Undo2, IndianRupee, ArrowLeftRight } from 'lucide-react';
 import { Fragment } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Segmented } from '@/components/ui/segmented';
@@ -20,6 +20,7 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
 import { ScreenshotUpload } from '@/components/ScreenshotUpload';
+import { SetOffDialog } from '@/components/SetOffDialog';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, Figure, PanelEmpty } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
@@ -93,6 +94,10 @@ export default function PurchaseDuesPage() {
   // the amount and party are already known from the bill being settled).
   const [payProof, setPayProof] = useState<File | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Knock-off against the same party's open sale invoices. `undefined` = closed;
+  // a party id opens it pre-filled from the row that asked for it.
+  const [setOffParty, setSetOffParty] = useState<string | undefined>();
+  const [setOffOpen, setSetOffOpen] = useState(false);
   const [payFilter, setPayFilter] = useState<PayFilter>('ALL');
   const [search, setSearch] = useState('');
   const [fromDate, setFromDate] = useState('');
@@ -426,7 +431,13 @@ export default function PurchaseDuesPage() {
         description="Aging list of raw black seed and dust purchase invoices matching payments via FIFO allocation."
         icon={TrendingDown}
         actions={
-          <ExportButtons
+          <div className="flex items-center gap-2">
+            {/* For parties we both buy from and sell to: square the two off
+                instead of paying cash and leaving the sale invoice open. */}
+            <Button variant="outline" onClick={() => { setSetOffParty(undefined); setSetOffOpen(true); }}>
+              <ArrowLeftRight className="h-4 w-4" /> Set off vs Sales
+            </Button>
+            <ExportButtons
             filename="Purchase_Dues"
             title="Purchase Dues (Aging)"
             subtitle={[
@@ -439,7 +450,8 @@ export default function PurchaseDuesPage() {
             ].join(' · ')}
             columns={PURCHASE_DUES_COLUMNS}
             rows={shownPurchases}
-          />
+            />
+          </div>
         }
       />
 
@@ -601,9 +613,22 @@ export default function PurchaseDuesPage() {
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-2">
                             {bill.status !== 'Paid' && (
-                              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openPayDialog(bill); }}>
-                                Paid
-                              </Button>
+                              <>
+                                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openPayDialog(bill); }}>
+                                  Paid
+                                </Button>
+                                {/* Settle it against this party's own open sale
+                                    invoices instead of paying cash. */}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-sky-600 hover:text-sky-700 dark:text-sky-400"
+                                  title="Set off against this party's sale invoices"
+                                  onClick={(e) => { e.stopPropagation(); setSetOffParty(bill.partyId); setSetOffOpen(true); }}
+                                >
+                                  <ArrowLeftRight className="h-3.5 w-3.5 mr-1" /> Set off
+                                </Button>
+                              </>
                             )}
                             {bill.deletablePaymentIds.length > 0 && (
                               <Button
@@ -661,6 +686,13 @@ export default function PurchaseDuesPage() {
           <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
         </>
       )}
+
+      <SetOffDialog
+        open={setOffOpen}
+        onOpenChange={setSetOffOpen}
+        parties={parties}
+        initialPartyId={setOffParty}
+      />
 
       {/* Pay dialog */}
       <Dialog open={!!payDialog} onOpenChange={(open) => { if (!open) { setPayProof(null); setPayDialog(null); } }}>

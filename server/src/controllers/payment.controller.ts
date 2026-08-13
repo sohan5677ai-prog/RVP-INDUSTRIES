@@ -30,14 +30,17 @@ export async function extractPaymentScreenshot(req: Request, res: Response) {
 }
 
 export async function listPayments(req: Request, res: Response) {
-  const { skip, take, all } = listPaymentsSchema.parse(req.query);
+  const { skip, take, all, excludeSetOffs } = listPaymentsSchema.parse(req.query);
   const include = { party: true, broker: true };
+  // The register is a record of money leaving the bank, so it drops set-off legs
+  // (no cash moved). Dues/FIFO callers pass neither flag and still see them.
+  const where = excludeSetOffs === 'true' ? { setOffId: null } : {};
 
   // all=true → the whole history as a plain array. The Purchase Dues / Payment
   // Planner / ledger pages match payments to bills via FIFO across a supplier's
   // FULL payment history, so they must never be capped. This shape is unchanged.
   if (all === 'true') {
-    const payments = await prisma.payment.findMany({ orderBy: { date: 'desc' }, include });
+    const payments = await prisma.payment.findMany({ where, orderBy: { date: 'desc' }, include });
     res.json(payments);
     return;
   }
@@ -46,8 +49,8 @@ export async function listPayments(req: Request, res: Response) {
   // requested slice plus the grand total, so the page renders a server-driven
   // pager instead of downloading every payment on first load.
   const [rows, total] = await Promise.all([
-    prisma.payment.findMany({ skip, take, orderBy: { date: 'desc' }, include }),
-    prisma.payment.count(),
+    prisma.payment.findMany({ where: { setOffId: null }, skip, take, orderBy: { date: 'desc' }, include }),
+    prisma.payment.count({ where: { setOffId: null } }),
   ]);
   res.json({ rows, total });
 }
@@ -207,6 +210,13 @@ export async function updatePayment(req: Request, res: Response) {
   const existing = await prisma.payment.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new HttpError(404, 'Payment not found');
 
+  // Half of a two-legged knock-off. Editing it here would move the payable side
+  // without the receivable side and re-open exactly the imbalance a set-off
+  // exists to prevent - so corrections go through the set-off itself.
+  if (existing.setOffId) {
+    throw new HttpError(400, 'This is the payment side of a set-off. Reverse the set-off and record it again to change it.');
+  }
+
   const managedIn = MANAGED_ELSEWHERE[existing.type];
   if (managedIn) {
     throw new HttpError(400, `This payment was recorded on the ${managedIn} page. Edit it there so both sides stay in sync.`);
@@ -290,6 +300,13 @@ export async function updatePayment(req: Request, res: Response) {
 export async function deletePayment(req: Request, res: Response) {
   const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
   if (!payment) throw new HttpError(404, 'Payment not found');
+
+  // Deleting one leg would leave the sale invoice cleared and the purchase bill
+  // open again, against a contra entry that still stands. Both legs come out
+  // together, via the set-off.
+  if (payment.setOffId) {
+    throw new HttpError(400, 'This is the payment side of a set-off. Reverse the set-off to remove both sides together.');
+  }
 
   await prisma.$transaction(async (tx) => {
     if (payment.journalEntryId) {

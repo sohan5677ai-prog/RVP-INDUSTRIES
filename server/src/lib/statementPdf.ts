@@ -172,6 +172,7 @@ const KIND_LABEL: Record<LedgerKind, string> = {
   CREDIT_NOTE: 'Credit Note',
   TDS: 'TDS',
   SHORTAGE: 'Shortage',
+  SET_OFF: 'Set-off',
 };
 
 /** Chip fill + ink per voucher kind, matching the printed statement's chips. */
@@ -183,6 +184,7 @@ const KIND_TONE: Record<LedgerKind, [string, string]> = {
   CREDIT_NOTE: ['#fef3c7', '#b45309'],
   TDS: ['#fef3c7', '#b45309'],
   SHORTAGE: ['#fef3c7', '#b45309'],
+  SET_OFF: ['#e0f2fe', '#0369a1'],
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -239,6 +241,14 @@ function narration(t: Txn): string {
     case 'SHORTAGE':
       bits.push('Being shortage / weight difference adjusted');
       if (qty) bits.push(`for ${qty}`);
+      if (t.invoiceNumber) bits.push(`on invoice no. ${t.invoiceNumber}`);
+      break;
+    case 'SET_OFF':
+      bits.push(
+        t.debit > 0
+          ? 'Being purchase payable set off against the sale receivable of the same party'
+          : 'Being sale receivable set off against the purchase payable of the same party'
+      );
       if (t.invoiceNumber) bits.push(`on invoice no. ${t.invoiceNumber}`);
       break;
   }
@@ -723,6 +733,9 @@ export function renderStatementPdf(
       ['Total sales to party', inr(summary.saleTotal)],
       ['Total paid to party', inr(summary.paidTotal)],
       ['Total received from party', inr(summary.receivedTotal)],
+      ...(summary.setOffTotal
+        ? ([['Settled by set-off (no cash)', inr(summary.setOffTotal)]] as [string, string][])
+        : []),
       ['Lifetime business volume', inr(summary.totalBusiness)],
       ['Total transactions on record', numFmt.format(summary.transactionCount)],
     ];

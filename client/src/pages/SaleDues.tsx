@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle } from 'lucide-react';
+import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -24,6 +24,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
+import { SetOffDialog } from '@/components/SetOffDialog';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, Figure, PanelEmpty } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
 import type { ExportColumn, ExportTone } from '@/lib/export';
@@ -227,6 +228,8 @@ export default function SaleDuesPage() {
   // different question: "what falls due in August" vs "what did we bill in August".
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  // Knock a buyer's open invoices off against what we owe them as a supplier.
+  const [setOffOpen, setSetOffOpen] = useState(false);
 
   const { data: parties, isLoading: loadingParties } = useQuery({
     queryKey: ['parties'],
@@ -560,7 +563,13 @@ export default function SaleDuesPage() {
         description="Aging list of outstanding buyer sales invoices. Each one is cleared only by the receipts recorded against it."
         icon={TrendingUp}
         actions={
-          <ExportButtons
+          <div className="flex items-center gap-2">
+            {/* Buyers we also purchase from: square the invoice off against what
+                we owe them, instead of two payments crossing. */}
+            <Button variant="outline" onClick={() => setSetOffOpen(true)}>
+              <ArrowLeftRight className="h-4 w-4" /> Set off vs Purchases
+            </Button>
+            <ExportButtons
             filename="Sale_Dues"
             title="Sale Dues (Aging)"
             subtitle={[
@@ -575,9 +584,12 @@ export default function SaleDuesPage() {
             ].join(' · ')}
             columns={SALE_DUES_COLUMNS}
             rows={dueInvoices}
-          />
+            />
+          </div>
         }
       />
+
+      <SetOffDialog open={setOffOpen} onOpenChange={setSetOffOpen} parties={parties} />
 
       <div className="flex flex-wrap items-center gap-3">
         <Segmented

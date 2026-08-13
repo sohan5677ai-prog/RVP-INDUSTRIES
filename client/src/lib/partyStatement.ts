@@ -72,6 +72,7 @@ const KIND_LABEL: Record<LedgerKind, string> = {
   CREDIT_NOTE: 'Credit Note',
   TDS: 'TDS',
   SHORTAGE: 'Shortage',
+  SET_OFF: 'Set-off',
 };
 
 const KIND_TONE: Record<LedgerKind, string> = {
@@ -82,6 +83,7 @@ const KIND_TONE: Record<LedgerKind, string> = {
   CREDIT_NOTE: 'k-amber',
   TDS: 'k-amber',
   SHORTAGE: 'k-amber',
+  SET_OFF: 'k-blue',
 };
 
 /**
@@ -134,6 +136,16 @@ function narration(t: PartyLedgerTxn): string {
     case 'SHORTAGE':
       bits.push('Being shortage / weight difference adjusted');
       if (qty) bits.push(`for ${qty}`);
+      if (t.invoiceNumber) bits.push(`on invoice no. ${t.invoiceNumber}`);
+      break;
+    case 'SET_OFF':
+      // No cash to cite - the two legs cite each other's document instead, and
+      // the balance is untouched.
+      bits.push(
+        t.debit > 0
+          ? 'Being purchase payable set off against the sale receivable of the same party'
+          : 'Being sale receivable set off against the purchase payable of the same party'
+      );
       if (t.invoiceNumber) bits.push(`on invoice no. ${t.invoiceNumber}`);
       break;
   }
@@ -499,6 +511,7 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
       <div class="stat"><span>Total sales to party</span><span>${amt0(summary.saleTotal)}</span></div>
       <div class="stat"><span>Total paid to party</span><span>${amt0(summary.paidTotal)}</span></div>
       <div class="stat"><span>Total received from party</span><span>${amt0(summary.receivedTotal)}</span></div>
+      ${summary.setOffTotal ? `<div class="stat"><span>Settled by set-off (no cash)</span><span>${amt0(summary.setOffTotal)}</span></div>` : ''}
       <div class="stat"><span>Lifetime business volume</span><span>${amt0(summary.totalBusiness)}</span></div>
       <div class="stat"><span>Total transactions on record</span><span>${numFmt.format(summary.transactionCount)}</span></div>
       ${summary.pendingCount ? `<div class="stat"><span>Loads awaiting weight verification</span><span>${numFmt.format(summary.pendingCount)}</span></div>` : ''}

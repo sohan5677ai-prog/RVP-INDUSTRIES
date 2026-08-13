@@ -46,5 +46,9 @@ export type UpdateReceiptInput = z.infer<typeof updateReceiptSchema>;
 export const listReceiptsSchema = z.object({
   skip: z.coerce.number().int().nonnegative().optional(),
   take: z.coerce.number().int().positive().optional().default(100),
-  all: z.enum(['true', 'false']).optional()
+  all: z.enum(['true', 'false']).optional(),
+  // Drop the collection-side legs of party set-offs - no money was received, so
+  // the Receipts REGISTER hides them. Sale Dues still needs them (a leg is what
+  // clears its invoice), so they stay in the ?all=true feed.
+  excludeSetOffs: z.enum(['true', 'false']).optional(),
 });

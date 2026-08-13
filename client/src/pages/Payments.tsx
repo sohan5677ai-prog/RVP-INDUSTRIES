@@ -110,7 +110,9 @@ export default function PaymentsPage() {
     queryKey: ['payments', { page, pageSize }],
     queryFn: () =>
       pageSize === Infinity
-        ? api<Payment[]>('/payments?all=true').then((rows) => ({ rows, total: rows.length }))
+        // Register view: set-off legs are excluded server-side (no cash moved),
+        // so the "All" page and the export below match the paged view.
+        ? api<Payment[]>('/payments?all=true&excludeSetOffs=true').then((rows) => ({ rows, total: rows.length }))
         : api<{ rows: Payment[]; total: number }>(`/payments?skip=${(page - 1) * pageSize}&take=${pageSize}`),
     // Keep the previous page on screen while the next loads, so paging doesn't flash.
     placeholderData: keepPreviousData,
@@ -284,7 +286,7 @@ export default function PaymentsPage() {
             title="Payments Register"
             subtitle={`${total} payment(s)`}
             columns={PAYMENT_EXPORT_COLUMNS}
-            rows={() => api<Payment[]>('/payments?all=true')}
+            rows={() => api<Payment[]>('/payments?all=true&excludeSetOffs=true')}
           />
           <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Payment

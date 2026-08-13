@@ -24,21 +24,23 @@ export async function extractReceiptScreenshot(req: Request, res: Response) {
 }
 
 export async function listReceipts(req: Request, res: Response) {
-  const { skip, take, all } = listReceiptsSchema.parse(req.query);
+  const { skip, take, all, excludeSetOffs } = listReceiptsSchema.parse(req.query);
   const include = { party: true };
+  // The register records money actually collected, so it drops set-off legs.
+  const where = excludeSetOffs === 'true' ? { setOffId: null } : {};
 
   // all=true → whole history as a plain array (Sale Dues / ledger FIFO matching
   // need the full set uncapped). Shape unchanged for those callers.
   if (all === 'true') {
-    const receipts = await prisma.receipt.findMany({ orderBy: { date: 'desc' }, include });
+    const receipts = await prisma.receipt.findMany({ where, orderBy: { date: 'desc' }, include });
     res.json(receipts);
     return;
   }
 
   // Server-paginated slice + grand total for the Receipts register page.
   const [rows, total] = await Promise.all([
-    prisma.receipt.findMany({ skip, take, orderBy: { date: 'desc' }, include }),
-    prisma.receipt.count(),
+    prisma.receipt.findMany({ where: { setOffId: null }, skip, take, orderBy: { date: 'desc' }, include }),
+    prisma.receipt.count({ where: { setOffId: null } }),
   ]);
   res.json({ rows, total });
 }
@@ -208,6 +210,11 @@ export async function updateReceipt(req: Request, res: Response) {
   const existing = await prisma.receipt.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new HttpError(404, 'Receipt not found');
 
+  // The collection side of a two-legged knock-off - see the payment-side guard.
+  if (existing.setOffId) {
+    throw new HttpError(400, 'This is the collection side of a set-off. Reverse the set-off and record it again to change it.');
+  }
+
   const managedIn = MANAGED_ELSEWHERE[existing.type];
   if (managedIn) {
     throw new HttpError(400, `This receipt was recorded on the ${managedIn} page. Edit it there so both sides stay in sync.`);
@@ -373,6 +380,10 @@ export async function updateReceipt(req: Request, res: Response) {
 export async function deleteReceipt(req: Request, res: Response) {
   const receipt = await prisma.receipt.findUnique({ where: { id: req.params.id } });
   if (!receipt) throw new HttpError(404, 'Receipt not found');
+
+  if (receipt.setOffId) {
+    throw new HttpError(400, 'This is the collection side of a set-off. Reverse the set-off to remove both sides together.');
+  }
 
   await prisma.$transaction(async (tx) => {
     // A receipt raised from "Mark Paid" against a shipment also spins off SEPARATE

@@ -37,6 +37,7 @@ function loadDismissed(): Set<string> {
 
 interface OverdueDueItem {
   dispatchId: string;
+  partyId: string;
   partyName: string;
   product: SaleProduct;
   invoiceNumber: string | null;
@@ -108,6 +109,7 @@ export default function SalesDuesReminders() {
 
         items.push({
           dispatchId: d.id,
+          partyId: b.id,
           partyName: b.name,
           product: o.product,
           invoiceNumber: d.invoiceNumber,
@@ -140,13 +142,16 @@ export default function SalesDuesReminders() {
     localStorage.setItem(DISMISS_KEY, JSON.stringify([...next]));
   };
 
-  // Straight into the Record Receipt dialog for that exact invoice - the popup
-  // already knows which bill is overdue, so landing on the list and hunting for
-  // it again is a wasted step. (The old link pointed at /sales/dues, which is
-  // not a route: it rendered a blank page.)
+  // Straight into Record Receipt on the Receipts page, with the buyer chosen
+  // and this invoice already ticked - the popup knows which bill is overdue, so
+  // landing on a list and hunting for it again is a wasted step. (The old link
+  // pointed at /sales/dues, which is not a route: it rendered a blank page.)
   const collect = (item: OverdueDueItem) => {
     close();
-    navigate(`/reports/sale-dues?collect=${encodeURIComponent(item.dispatchId)}`);
+    navigate(
+      `/transactions/receipts?party=${encodeURIComponent(item.partyId)}`
+      + `&collect=${encodeURIComponent(item.dispatchId)}`,
+    );
   };
 
   const totalDue = dueItems.reduce((s, i) => s + i.netAmount, 0);

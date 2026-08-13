@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
@@ -210,6 +211,55 @@ export default function ReceiptsPage() {
       .filter((s) => s.remaining > 0.5);
   }, [type, partyId, allSaleOrders, allReceipts]);
 
+  // Deep link from the overdue-dues login reminder:
+  //   /transactions/receipts?party=<buyerId>&collect=<saleDispatchId>
+  // opens Record Receipt with that buyer already chosen and that invoice
+  // already ticked, so the collection can be keyed in without hunting for the
+  // bill. Fires once and strips the params, so a refresh doesn't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const collectId = searchParams.get('collect');
+  const collectParty = searchParams.get('party');
+  const collectOpened = useRef(false);
+  const collectTicked = useRef(false);
+  const collectRow = useRef<HTMLTableRowElement | null>(null);
+  // Survives the param being stripped, so the row stays marked while the dialog
+  // is open even after the URL is cleaned up.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!collectId || !collectParty || collectOpened.current) return;
+    collectOpened.current = true;
+    setEditing(null);
+    resetForm();
+    setPartyId(collectParty);
+    setHighlightId(collectId);
+    setOpen(true);
+  }, [collectId, collectParty]);
+
+  // The invoice picker only exists once the dialog's own sale-order and receipt
+  // queries land, so the tick waits for them rather than firing with the dialog.
+  useEffect(() => {
+    if (!collectId || !collectOpened.current || collectTicked.current) return;
+    if (!allSaleOrders || !allReceipts) return;
+    collectTicked.current = true;
+
+    const inv = buyerInvoices.find((i) => i.id === collectId);
+    if (inv) {
+      toggleInvoice(inv, true);
+      // A buyer with a long history can push the overdue bill well down the
+      // picker; bring it into view once it has rendered as ticked.
+      requestAnimationFrame(() => collectRow.current?.scrollIntoView({ block: 'center' }));
+    } else {
+      setHighlightId(null);
+      toast.info('That invoice is already settled.');
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('collect');
+    next.delete('party');
+    setSearchParams(next, { replace: true });
+  }, [collectId, buyerInvoices, allSaleOrders, allReceipts]);
+
   function resetForm() {
     setDate(new Date().toISOString().slice(0, 10));
     setAmount('');
@@ -220,6 +270,7 @@ export default function ReceiptsPage() {
     setDescription('');
     setAllocs({});
     setEnableTds(false);
+    setHighlightId(null);
   }
 
   /** Load a recorded receipt back into the dialog so it can be corrected.
@@ -236,6 +287,7 @@ export default function ReceiptsPage() {
     setDescription(r.description ?? '');
     setAllocs({});
     setEnableTds(false);
+    setHighlightId(null);
     setOpen(true);
   }
 
@@ -663,7 +715,13 @@ export default function ReceiptsPage() {
                               : 0;
                             const balance = round2(inv.remaining - cleared);
                             return (
-                              <tr key={inv.id} className={`border-t ${on ? 'bg-primary/5' : ''}`}>
+                              <tr
+                                key={inv.id}
+                                ref={inv.id === highlightId ? collectRow : undefined}
+                                className={`border-t ${on ? 'bg-primary/5' : ''} ${
+                                  inv.id === highlightId ? 'ring-1 ring-inset ring-primary/40' : ''
+                                }`}
+                              >
                                 <td className="p-2">
                                   <input
                                     type="checkbox"

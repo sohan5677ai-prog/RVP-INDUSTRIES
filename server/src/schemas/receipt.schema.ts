@@ -33,15 +33,13 @@ export const createReceiptSchema = z.object({
 
 export type CreateReceiptInput = z.infer<typeof createReceiptSchema>;
 
-// Correcting a receipt already on the books. The invoice link and its
-// TDS / shortage deductions are NOT re-sent: they stay exactly as recorded, so
-// an edit can never silently re-point a collection at a different bill.
-export const updateReceiptSchema = createReceiptSchema.omit({
-  tdsAmount: true,
-  shortageAmount: true,
-  saleDispatchId: true,
-  allocations: true,
-});
+// Correcting a receipt already on the books. It carries the same invoice /
+// TDS / shortage fields as a fresh collection, so a correction can restate the
+// deductions the buyer actually took - and can apply money that was parked on
+// account to the bill it covers. What it can NEVER do is move an already-applied
+// receipt to a different bill; the controller enforces that. A correction
+// rewrites one row, so there is no multi-invoice split here.
+export const updateReceiptSchema = createReceiptSchema.omit({ allocations: true });
 
 export type UpdateReceiptInput = z.infer<typeof updateReceiptSchema>;
 

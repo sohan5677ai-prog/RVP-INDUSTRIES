@@ -10,7 +10,7 @@ import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { Receipt, Party, ReceiptType, SaleOrder } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { shortageWithGst, saleTds, round2 } from '@/lib/receiptCalc';
+import { shortageWithGst, saleTds, round2, SALE_GST_RATE } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import { Button } from '@/components/ui/button';
 import {
@@ -166,14 +166,15 @@ export default function ReceiptsPage() {
   const { data: allSaleOrders } = useQuery({
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
-    // Editing never re-runs the split, so the heavy invoice data is only pulled
-    // while a NEW collection is being recorded.
-    enabled: open && !editing,
+    // Corrections need the same data - an edit restates the cash, TDS and
+    // shortage against the bill, so it prices off the invoice too. Non-buyer
+    // receipts have no bills, so the heavy pull is skipped for them.
+    enabled: open && type === 'BUYER',
   });
   const { data: allReceipts } = useQuery({
     queryKey: ['receipts', { all: true }],
     queryFn: () => api<Receipt[]>('/receipts?all=true'),
-    enabled: open && !editing,
+    enabled: open && type === 'BUYER',
   });
 
   // Outstanding invoices for the selected buyer. Settlement is invoice-based
@@ -186,6 +187,10 @@ export default function ReceiptsPage() {
     const linked = new Map<string, number>();
     for (const r of allReceipts ?? []) {
       if (r.type !== 'BUYER' || !r.saleDispatchId) continue;
+      // The receipt being corrected is netted out, so its invoice shows the
+      // balance as it stood BEFORE this collection - which is exactly what the
+      // cash / TDS / shortage boxes below are re-splitting.
+      if (editing && r.id === editing.id) continue;
       const clearing = Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
       linked.set(r.saleDispatchId, (linked.get(r.saleDispatchId) ?? 0) + clearing);
     }
@@ -208,8 +213,10 @@ export default function ReceiptsPage() {
           gstExempt: o.gstExempt,
         };
       })
-      .filter((s) => s.remaining > 0.5);
-  }, [type, partyId, allSaleOrders, allReceipts]);
+      // A bill this correction already settled reads as fully cleared once its
+      // own receipt is netted back in, so it is kept regardless.
+      .filter((s) => s.remaining > 0.5 || s.id === editing?.saleDispatchId);
+  }, [type, partyId, allSaleOrders, allReceipts, editing]);
 
   // Deep link from the overdue-dues login reminder:
   //   /transactions/receipts?party=<buyerId>&collect=<saleDispatchId>
@@ -273,9 +280,14 @@ export default function ReceiptsPage() {
     setHighlightId(null);
   }
 
-  /** Load a recorded receipt back into the dialog so it can be corrected.
-   *  The invoice split is NOT reopened - settlement is invoice-based, so an edit
-   *  restates what came in without re-pointing it at a different bill. */
+  // Guards the one-shot restore below, so re-deriving buyerInvoices (or typing
+  // in the row) never overwrites what the user is editing.
+  const editPrefilled = useRef(false);
+
+  /** Load a recorded receipt back into the dialog so it can be corrected, split
+   *  and all: its bill, the cash, the TDS the buyer withheld and the shortage
+   *  they knocked off. The split itself is restored by the effect below, once
+   *  the invoice data the row is priced against has landed. */
   function openEdit(r: Receipt) {
     setEditing(r);
     setDate(r.date.slice(0, 10));
@@ -286,10 +298,35 @@ export default function ReceiptsPage() {
     setReference(r.reference ?? '');
     setDescription(r.description ?? '');
     setAllocs({});
-    setEnableTds(false);
-    setHighlightId(null);
+    setEnableTds(Number(r.tdsAmount ?? 0) > 0);
+    setHighlightId(r.saleDispatchId ?? null);
+    editPrefilled.current = false;
     setOpen(true);
   }
+
+  // Restore the recorded split. It waits for buyerInvoices because the shortage
+  // is STORED GST-inclusive (base + 5%) and only the invoice knows whether that
+  // 5% applies, so the base behind it can't be recovered until then.
+  useEffect(() => {
+    if (!editing || editPrefilled.current) return;
+    if (editing.type !== 'BUYER' || !editing.saleDispatchId) return;
+    const inv = buyerInvoices.find((i) => i.id === editing.saleDispatchId);
+    if (!inv) return;
+    editPrefilled.current = true;
+
+    const gross = Number(editing.shortageAmount ?? 0);
+    const base = gross > 0 ? round2(inv.gstExempt ? gross : gross / (1 + SALE_GST_RATE)) : 0;
+    const tds = Number(editing.tdsAmount ?? 0);
+    setAllocs({
+      [inv.id]: {
+        cash: String(round2(Number(editing.amount))),
+        // No TDS recorded → offer the 0.1% it would come to, exactly as a fresh
+        // collection does; the checkbox above decides whether it counts.
+        tds: String(tds > 0 ? round2(tds) : saleTds(inv.saleBase)),
+        shortage: base > 0 ? String(base) : '',
+      },
+    });
+  }, [editing, buyerInvoices]);
 
   /** Cash expected on one invoice = its balance − shortage(base + 5% GST) − TDS.
    *  Both deductions come OFF the cash, never on top of it. */
@@ -311,6 +348,13 @@ export default function ReceiptsPage() {
   /** Tick / untick an invoice on this collection. */
   function toggleInvoice(inv: BuyerInvoice, on: boolean) {
     setAllocs((prev) => {
+      // A correction rewrites ONE receipt row, so it can only ever sit on a
+      // single bill - and the money already came in, so ticking a bill applies
+      // THAT amount rather than re-deriving what the invoice was expecting.
+      if (editing) {
+        if (!on) return {};
+        return { [inv.id]: { ...defaultAlloc(inv, enableTds), cash: String(round2(Number(amount) || 0)) } };
+      }
       const next = { ...prev };
       if (on) next[inv.id] = defaultAlloc(inv, enableTds);
       else delete next[inv.id];
@@ -392,9 +436,12 @@ export default function ReceiptsPage() {
   const mutation = useMutation({
     mutationFn: () => {
       // Correcting an existing receipt: the server re-posts its ledger entry
-      // from these values and keeps the invoice link, TDS and shortage as
-      // recorded.
+      // from these values. One row, so at most one invoice - it stays on the
+      // bill it was applied to, or picks one up if the money was on account.
       if (editing) {
+        const allocId = allocatedIds[0];
+        const inv = allocId ? buyerInvoices.find((i) => i.id === allocId) : undefined;
+        const a = allocId ? allocs[allocId] : undefined;
         return api<Receipt>(`/receipts/${editing.id}`, {
           method: 'PATCH',
           body: {
@@ -405,6 +452,11 @@ export default function ReceiptsPage() {
             payer: !COLLECTION_TYPES.includes(type) ? payer || null : null,
             reference: reference || null,
             description: description || null,
+            saleDispatchId: allocId ?? null,
+            // Same booking as a fresh collection: shortage goes over as
+            // base + 5% GST, TDS only while the toggle is on.
+            tdsAmount: a && enableTds ? round2(num(a.tds)) : 0,
+            shortageAmount: a ? shortageWithGst(num(a.shortage), inv?.gstExempt ?? false) : 0,
           },
         });
       }
@@ -463,17 +515,32 @@ export default function ReceiptsPage() {
   // Leaving it unallocated credits the party ledger but clears no invoice, so
   // the bill keeps showing Unpaid on Sale Dues and the statement prints a
   // receipt with no invoice against it - the exact mismatch this blocks.
-  // Editing never re-runs the split (the receipt already carries its invoice
-  // link), so the allocation requirement applies to new collections only.
+  // A correction of money already on account is free to stay on account, so the
+  // requirement applies to new collections only.
   const needsAllocation = !editing && type === 'BUYER' && !!partyId && buyerInvoices.length > 0;
   // A receipt stamped with a dispatch id clears that specific bill, so an edit
   // can restate the money but not re-point it at another buyer (the server
   // rejects it too).
   const invoiceLocked = !!editing?.saleDispatchId;
+  // While correcting a receipt that already settles a bill, only that bill is on
+  // the table - the money stays where it was applied.
+  const visibleInvoices = editing?.saleDispatchId
+    ? buyerInvoices.filter((i) => i.id === editing.saleDispatchId)
+    : buyerInvoices;
+  // Its recorded split is not on screen: saving now would post the correction
+  // with the deductions blanked out, so hold the button. Usually the invoice
+  // data is still in flight; once it has landed and the bill is still missing,
+  // the link is broken and only a reverse-and-re-record can fix it.
+  const invoiceDataReady = !!allSaleOrders && !!allReceipts;
+  const editSplitPending = invoiceLocked && !allocs[editing!.saleDispatchId!];
+  // Cash can legitimately be zero once a bill is cleared entirely by a shortage
+  // or TDS write-off, so validity is about what the receipt clears in total.
+  const totalCleared = allocatedIds.length > 0 ? allocatedTotal : Number(amount) || 0;
   const isValid =
-    Number(amount) > 0 &&
+    totalCleared > 0 &&
     (type !== 'BUYER' || partyId) &&
-    (!needsAllocation || allocatedIds.length > 0);
+    (!needsAllocation || allocatedIds.length > 0) &&
+    !editSplitPending;
 
   return (
     <div className="space-y-6">
@@ -538,12 +605,12 @@ export default function ReceiptsPage() {
                   <TableCell className="font-medium">
                     {receivedFromText}
                     {/* Money that credited the ledger but cleared no bill - the
-                        invoice stays Unpaid on Sale Dues until it is re-recorded
-                        against one. */}
+                        invoice stays Unpaid on Sale Dues until the receipt is
+                        applied to one. */}
                     {r.type === 'BUYER' && !r.saleDispatchId && (
                       <span
                         className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-400"
-                        title="Not applied to any invoice - reverse it and re-record it against the invoices it settles"
+                        title="Not applied to any invoice - edit it to tick the bill it settles"
                       >
                         On account
                       </span>
@@ -596,10 +663,12 @@ export default function ReceiptsPage() {
           <div className="space-y-4">
             {editing ? (
               <p className="rounded-md bg-muted/60 px-3 py-2 text-[11px] text-muted-foreground">
-                Saving re-posts this receipt's ledger entry from the corrected values.
+                Saving re-posts this receipt's ledger entry from the corrected values. No new WhatsApp notification is sent.
                 {editing.saleDispatchId
-                  ? ' It stays applied to the same invoice, and its TDS / shortage deduction is left as recorded - to move the money to a different bill, reverse it and record it again.'
-                  : ' No new WhatsApp notification is sent.'}
+                  ? ' Restate the cash, the TDS and the shortage below; the money stays on the same invoice - to move it to a different bill, reverse it and record it again.'
+                  : editing.type === 'BUYER'
+                    ? ' This money settles no invoice yet - tick the bill it covers below to apply it, along with any TDS or shortage the buyer deducted.'
+                    : ''}
               </p>
             ) : (
               <ScreenshotUpload
@@ -670,11 +739,11 @@ export default function ReceiptsPage() {
             {/* Bill-wise allocation. One transfer routinely covers several
                 invoices, and settlement everywhere else is invoice-based, so the
                 collection is split here rather than left sitting on account. */}
-            {type === 'BUYER' && partyId && !editing && (
+            {type === 'BUYER' && partyId && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <Label>Settle Against Invoices</Label>
-                  {buyerInvoices.length > 0 && (
+                  <Label>{invoiceLocked ? 'Invoice Settled' : editing ? 'Apply To Invoice' : 'Settle Against Invoices'}</Label>
+                  {visibleInvoices.length > 0 && (
                     <label className="flex cursor-pointer items-center gap-2">
                       <input
                         type="checkbox"
@@ -687,9 +756,13 @@ export default function ReceiptsPage() {
                   )}
                 </div>
 
-                {buyerInvoices.length === 0 ? (
+                {visibleInvoices.length === 0 ? (
                   <p className="text-[10px] text-muted-foreground">
-                    No outstanding invoices for this buyer - this will be recorded as an advance / on-account receipt.
+                    {!editSplitPending
+                      ? 'No outstanding invoices for this buyer - this will be recorded as an advance / on-account receipt.'
+                      : invoiceDataReady
+                        ? 'The invoice this receipt settles could not be found, so its split cannot be restated here. Reverse the receipt and record it again.'
+                        : 'Loading the invoice this receipt settles…'}
                   </p>
                 ) : (
                   <>
@@ -707,7 +780,7 @@ export default function ReceiptsPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {buyerInvoices.map((inv) => {
+                          {visibleInvoices.map((inv) => {
                             const a = allocs[inv.id];
                             const on = !!a;
                             const cleared = on
@@ -727,6 +800,9 @@ export default function ReceiptsPage() {
                                     type="checkbox"
                                     className="h-4 w-4 accent-primary"
                                     checked={on}
+                                    // The bill an applied receipt sits on is not
+                                    // up for grabs in a correction.
+                                    disabled={invoiceLocked}
                                     onChange={(e) => toggleInvoice(inv, e.target.checked)}
                                   />
                                 </td>
@@ -786,9 +862,11 @@ export default function ReceiptsPage() {
                       </table>
                     </div>
                     <p className="text-[10px] text-muted-foreground">
-                      Tick every invoice this money covers. Shortage is the goods value of the buyer's kata cut
-                      (auto-filled from delivery); 5% GST is added on top. Money left unallocated credits the ledger
-                      but clears no bill, so the invoice would keep reading Unpaid on Sale Dues.
+                      {invoiceLocked
+                        ? "Due is this invoice's balance before this receipt. Shortage is the goods value of the buyer's kata cut; 5% GST is added on top."
+                        : editing
+                          ? "Tick the invoice this money covers - a correction rewrites one receipt, so it can sit on one bill. Shortage is the goods value of the buyer's kata cut (auto-filled from delivery); 5% GST is added on top."
+                          : "Tick every invoice this money covers. Shortage is the goods value of the buyer's kata cut (auto-filled from delivery); 5% GST is added on top. Money left unallocated credits the ledger but clears no bill, so the invoice would keep reading Unpaid on Sale Dues."}
                     </p>
                   </>
                 )}

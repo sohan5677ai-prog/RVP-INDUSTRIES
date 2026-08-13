@@ -198,11 +198,11 @@ const MANAGED_ELSEWHERE: Record<string, string> = {
  * journal entry is re-posted from the new values, so the ledger, the buyer
  * balance and the dues pages follow the correction.
  *
- * The invoice link and its TDS / shortage deductions are deliberately left
- * alone - settlement is invoice-based, so an edit may restate WHAT was received
- * but never re-point the money at a different bill. Reverse and re-record for
- * that. For the same reason the type and the buyer are frozen once a receipt is
- * stamped with a dispatch id.
+ * A correction restates the whole collection the way it was recorded: the cash,
+ * the TDS the buyer withheld and the shortage they knocked off. It may also
+ * apply money that was parked on account to the bill it actually covers. What it
+ * may never do is re-point an already-applied receipt at a DIFFERENT bill or
+ * buyer - settlement is invoice-based, so that stays a reverse-and-re-record.
  */
 export async function updateReceipt(req: Request, res: Response) {
   const existing = await prisma.receipt.findUnique({ where: { id: req.params.id } });
@@ -218,19 +218,37 @@ export async function updateReceipt(req: Request, res: Response) {
     throw new HttpError(400, `${MANAGED_ELSEWHERE[data.type]} receipts are recorded on their own page, not here.`);
   }
 
+  const tdsAmount = data.tdsAmount ?? 0;
+  const shortageAmount = data.shortageAmount ?? 0;
+
+  // The invoice link is one-way: it can be ADDED to a collection that cleared
+  // nothing, but once the money sits on a bill it stays there.
   if (existing.saleDispatchId) {
+    if (data.saleDispatchId && data.saleDispatchId !== existing.saleDispatchId) {
+      throw new HttpError(
+        400,
+        'This receipt settles a specific invoice. Reverse it and re-record it to move the money to a different bill.'
+      );
+    }
     if (data.type !== existing.type || (data.partyId ?? null) !== existing.partyId) {
       throw new HttpError(
         400,
         'This receipt settles a specific invoice. Reverse it and re-record it to move the money to a different buyer.'
       );
     }
-    // The deductions were sized against this invoice's balance, so the cash can
-    // never be raised past what the invoice still had outstanding.
-    const cleared = Number(existing.tdsAmount ?? 0) + Number(existing.shortageAmount ?? 0);
-    if (cleared > 0 && data.amount <= 0) {
-      throw new HttpError(400, 'This receipt carries a TDS / shortage deduction, so its cash amount cannot be zeroed out.');
-    }
+  }
+  const saleDispatchId = existing.saleDispatchId ?? data.saleDispatchId ?? null;
+
+  if (saleDispatchId && (data.type !== 'BUYER' || !data.partyId)) {
+    throw new HttpError(400, 'Only a buyer collection can be applied to a sale invoice');
+  }
+  if (!saleDispatchId && (tdsAmount > 0 || shortageAmount > 0)) {
+    throw new HttpError(400, 'A TDS or shortage deduction belongs to an invoice - pick the bill this collection settles.');
+  }
+  // Cash CAN now be zero (a bill cleared entirely by a shortage / TDS write-off),
+  // but a receipt that clears nothing at all is not a receipt.
+  if (data.amount + tdsAmount + shortageAmount <= 0) {
+    throw new HttpError(400, 'This receipt carries no cash, TDS or shortage - there is nothing to record.');
   }
 
   const receipt = await prisma.$transaction(async (tx) => {
@@ -239,6 +257,18 @@ export async function updateReceipt(req: Request, res: Response) {
       const party = await tx.party.findUnique({ where: { id: data.partyId } });
       if (!party) throw new HttpError(404, 'Party not found');
       partyName = party.name;
+    }
+
+    // Applying an on-account receipt to a bill: it has to be that buyer's bill.
+    if (saleDispatchId && saleDispatchId !== existing.saleDispatchId) {
+      const dispatch = await tx.saleDispatch.findUnique({
+        where: { id: saleDispatchId },
+        include: { saleOrder: { select: { buyerId: true } } },
+      });
+      if (!dispatch) throw new HttpError(404, 'Invoice not found');
+      if (dispatch.saleOrder.buyerId !== data.partyId) {
+        throw new HttpError(400, `Invoice ${dispatch.invoiceNumber ?? dispatch.id} does not belong to this buyer`);
+      }
     }
 
     // Unlink BEFORE deleting: Receipt.journalEntry cascades on delete, so
@@ -254,23 +284,77 @@ export async function updateReceipt(req: Request, res: Response) {
       data: {
         date: data.date,
         amount: data.amount,
+        tdsAmount: tdsAmount > 0 ? tdsAmount : null,
+        shortageAmount: shortageAmount > 0 ? shortageAmount : null,
         type: data.type,
         partyId: data.partyId ?? null,
+        saleDispatchId,
         payer: data.payer ?? null,
         reference: data.reference ?? null,
         description: data.description ?? null,
       },
     });
 
-    await LedgerService.postReceipt(tx, existing.id, {
-      date: data.date,
-      amount: data.amount,
-      type: data.type,
-      partyName,
-      payer: data.payer ?? undefined,
-      reference: data.reference ?? undefined,
-      description: data.description ?? undefined,
-    });
+    // A cash-free settlement has nothing to post to the bank; the deductions
+    // below carry the whole entry.
+    if (data.amount > 0) {
+      await LedgerService.postReceipt(tx, existing.id, {
+        date: data.date,
+        amount: data.amount,
+        type: data.type,
+        partyName,
+        payer: data.payer ?? undefined,
+        reference: data.reference ?? undefined,
+        description: data.description ?? undefined,
+      });
+    }
+
+    // Keep the per-dispatch TDS / shortage postings in step with the corrected
+    // figures. Only entries that ALREADY exist are touched: a collection
+    // recorded on this page never posts them (the deduction reaches the party
+    // ledger and the TDS report straight off the receipt row), while one raised
+    // from "Mark as Paid" does - and leaving that at the old amount would strand
+    // a stale figure in the general ledger. Both references are keyed by
+    // dispatch, so when a sibling receipt on the same shipment also carries a
+    // deduction the posting cannot be attributed to this one and is left alone.
+    if (saleDispatchId) {
+      const siblings = await tx.receipt.findMany({
+        where: { saleDispatchId, id: { not: existing.id } },
+        select: { tdsAmount: true, shortageAmount: true },
+      });
+
+      if (!siblings.some((s) => Number(s.tdsAmount ?? 0) > 0)) {
+        const posted = await tx.journalEntry.findFirst({ where: { reference: `TDS-${saleDispatchId}` } });
+        if (posted) {
+          await tx.journalEntry.deleteMany({ where: { reference: `TDS-${saleDispatchId}` } });
+          if (tdsAmount > 0) {
+            await LedgerService.postSaleTdsDeduction(tx, saleDispatchId, {
+              date: data.date,
+              buyerName: partyName ?? '',
+              tdsAmount,
+            });
+          }
+          await tx.saleDispatch.update({
+            where: { id: saleDispatchId },
+            data: { tdsAmount: tdsAmount > 0 ? tdsAmount : null },
+          });
+        }
+      }
+
+      if (!siblings.some((s) => Number(s.shortageAmount ?? 0) > 0)) {
+        const posted = await tx.journalEntry.findFirst({ where: { reference: `SHORTAGE-${saleDispatchId}` } });
+        if (posted) {
+          await tx.journalEntry.deleteMany({ where: { reference: `SHORTAGE-${saleDispatchId}` } });
+          if (shortageAmount > 0) {
+            await LedgerService.postSaleShortageDeduction(tx, saleDispatchId, {
+              date: data.date,
+              buyerName: partyName ?? '',
+              shortageAmount,
+            });
+          }
+        }
+      }
+    }
 
     const journalEntry = await tx.journalEntry.findFirst({
       where: { reference: `RECEIPT-${existing.id}` },

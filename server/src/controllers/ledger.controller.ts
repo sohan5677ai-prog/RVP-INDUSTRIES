@@ -368,8 +368,12 @@ function loadPurchaseOrders(partyId?: string) {
   });
 }
 function loadSales(buyerId?: string) {
-  return prisma.saleOrder.findMany({ where: buyerId ? { buyerId } : undefined, include: { dispatches: true } });
+  return prisma.saleOrder.findMany({ where: buyerId ? { buyerId } : undefined, include: { dispatches: true, broker: true } });
 }
+
+// A broker literally named "RVP" marks the company's own order, not a real
+// brokered deal - so it's never worth narrating as "through RVP".
+const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
 function loadPayments(partyId?: string) {
   return prisma.payment.findMany({ where: { partyId: partyId ? partyId : { not: null } } });
 }
@@ -526,13 +530,14 @@ function buildPartyLedger(
       const base = round2(d.weightKg * rate);
       const gst = round2(Number(d.gstAmount));
       const invoiceLabel = dispatchMetaById.get(d.id)?.invoiceLabel ?? null;
+      const brokerName = s.broker && !isOwnBroker(s.broker.name) ? s.broker.name : null;
       txns.push({
         id: `SALE-${d.id}`,
         // Ledger sale date = the day the goods left (dispatch date), not the
         // invoice date (invoices are often raised days later).
         date: d.dispatchDate.toISOString(),
         kind: 'SALE',
-        particulars: `Sale - ${s.product}`,
+        particulars: brokerName ? `Sale - ${s.product} (through ${brokerName})` : `Sale - ${s.product}`,
         invoiceNumber: invoiceLabel,
         vehicleNumber: d.vehicleNumber,
         reference: s.destination,

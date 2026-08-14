@@ -283,7 +283,7 @@ export function renderBrokerLedgerPdf(
     use('bold', 10.5, INK).text(broker.name, LEFT + inset, c1, { width: colW });
     c1 = doc.y + 1.5;
     c1 = kv('Phone', broker.phone, LEFT + inset, c1, colW);
-    c1 = kv('Rate', 'Flat per dispatch', LEFT + inset, c1, colW);
+    c1 = kv('Rate', `${inr(broker.brokerageAmount)} / dispatch`, LEFT + inset, c1, colW);
 
     let c2 = panelHeading('Account Status', LEFT + pw + inset, panelTop + 6, colW);
     c2 = kv('Ledger A/C', broker.name, LEFT + pw + inset, c2, colW);

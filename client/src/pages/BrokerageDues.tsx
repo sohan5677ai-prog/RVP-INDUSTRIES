@@ -70,7 +70,8 @@ export default function BrokerageDuesPage() {
 
   brokers?.forEach((b) => {
     if (isOwnBroker(b.name)) return; // own (RVP) orders carry no brokerage
-    // 1. Flat ₹2000 brokerage per dispatched shipment under this broker, oldest first.
+    // 1. This broker's flat brokerage per dispatched shipment, oldest first.
+    const rate = Number(b.brokerageAmount);
     const activeOrders = (saleOrders ?? [])
       .filter((o) => o.brokerId === b.id)
       .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
@@ -81,8 +82,8 @@ export default function BrokerageDuesPage() {
         invoiceNumber: d.invoiceNumber,
         buyerName: o.buyer?.name ?? '-',
         vehicleNumber: d.vehicleNumber,
-        totalBrokerage: 2000,
-        remainingBrokerage: 2000,
+        totalBrokerage: rate,
+        remainingBrokerage: rate,
       }));
 
     activeOrders.forEach((o) => {
@@ -136,7 +137,7 @@ export default function BrokerageDuesPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Brokerage Dues</h1>
-          <p className="text-muted-foreground font-medium">Outstanding commissions list displaying ₹2,000 flat fee per sale order matched with payments via FIFO.</p>
+          <p className="text-muted-foreground font-medium">Outstanding commissions list displaying each broker's flat fee per sale order matched with payments via FIFO.</p>
         </div>
         <ExportButtons
           filename="Brokerage_Dues"

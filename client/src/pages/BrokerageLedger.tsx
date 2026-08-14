@@ -22,10 +22,6 @@ import {
   Wallet, ArrowUpRight, ArrowDownRight, Users, IndianRupee, FileText,
 } from 'lucide-react';
 
-// Flat ₹2,000 brokerage per sale order dispatch. Payments to the broker reduce
-// the payable, exactly like a supplier ledger (brokerage = Cr, payment = Dr).
-const FLAT_BROKERAGE = 2000;
-
 // "RVP" is the company's own-orders marker (not a real commission agent), so no
 // brokerage is due on orders booked under it.
 const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
@@ -137,7 +133,7 @@ function BrokerIndex({ onSelect }: { onSelect: (id: string) => void }) {
         const dispatches = (saleOrders ?? [])
           .filter((o) => o.brokerId === b.id)
           .flatMap((o) => o.dispatches ?? []);
-        const totalDue = dispatches.length * FLAT_BROKERAGE;
+        const totalDue = dispatches.length * Number(b.brokerageAmount);
         const totalPaid = (payments ?? [])
           .filter((p) => p.type === 'BROKER' && p.brokerId === b.id)
           .reduce((s, p) => s + Number(p.amount), 0);
@@ -174,7 +170,7 @@ function BrokerIndex({ onSelect }: { onSelect: (id: string) => void }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Brokerage Report</h1>
-          <p className="text-muted-foreground">A complete account for every broker - dues, payments &amp; balance (₹2,000 flat per dispatched order).</p>
+          <p className="text-muted-foreground">A complete account for every broker - dues, payments &amp; balance (each broker's own flat rate per dispatched order).</p>
         </div>
         <ExportButtons
           filename="Brokerage_Report"
@@ -309,7 +305,7 @@ function BrokerDetail({ brokerId, onBack }: { brokerId: string; onBack: () => vo
             vehicleNumber: d.vehicleNumber,
             reference: null,
             debit: 0,
-            credit: FLAT_BROKERAGE,
+            credit: Number(broker?.brokerageAmount ?? 0),
           });
         });
       });
@@ -337,7 +333,7 @@ function BrokerDetail({ brokerId, onBack }: { brokerId: string; onBack: () => vo
       running += l.debit - l.credit;
       return { ...l, runningBalance: running };
     });
-  }, [saleOrders, payments, brokerId]);
+  }, [saleOrders, payments, brokerId, broker]);
 
   const filtered = useMemo(() => {
     let t = allTxns;
@@ -456,7 +452,7 @@ function BrokerDetail({ brokerId, onBack }: { brokerId: string; onBack: () => vo
         />
         <KpiCard icon={Scale} label="Brokerage Earned" value={rupees(totalDue)} tone="neutral" hint={`${allTxns.filter((t) => t.kind === 'BROKERAGE').length} orders`} />
         <KpiCard icon={ReceiptText} label="Total Paid" value={rupees(totalPaid)} tone="emerald" />
-        <KpiCard icon={IndianRupee} label="Rate" value={`${rupees(FLAT_BROKERAGE)}`} sub="/ order" tone="blue" />
+        <KpiCard icon={IndianRupee} label="Rate" value={`${rupees(Number(broker?.brokerageAmount ?? 0))}`} sub="/ order" tone="blue" />
       </div>
 
       {/* filters */}

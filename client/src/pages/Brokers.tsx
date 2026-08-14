@@ -47,12 +47,14 @@ import type { ExportColumn } from '@/lib/export';
 const BROKER_COLUMNS: ExportColumn<Broker>[] = [
   { header: 'Name', value: (b) => b.name },
   { header: 'Phone', value: (b) => b.phone ?? '' },
+  { header: 'Brokerage / Order', value: (b) => b.brokerageAmount, excel: (b) => Number(b.brokerageAmount), numFmt: '#,##0.00', align: 'right' },
 ];
 
 const brokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().optional(),
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
+  brokerageAmount: z.coerce.number().nonnegative('Must be 0 or more'),
 });
 type BrokerForm = z.infer<typeof brokerSchema>;
 
@@ -68,12 +70,12 @@ export default function Brokers() {
 
   const form = useForm<BrokerForm>({
     resolver: zodResolver(brokerSchema),
-    defaultValues: { name: '', phone: '', waLanguage: 'EN' },
+    defaultValues: { name: '', phone: '', waLanguage: 'EN', brokerageAmount: 2000 },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ name: '', phone: '', waLanguage: 'EN' });
+    form.reset({ name: '', phone: '', waLanguage: 'EN', brokerageAmount: 2000 });
     setOpen(true);
   }
 
@@ -83,6 +85,7 @@ export default function Brokers() {
       name: b.name,
       phone: b.phone ?? '',
       waLanguage: b.waLanguage ?? 'EN',
+      brokerageAmount: Number(b.brokerageAmount),
     });
     setOpen(true);
   }
@@ -137,20 +140,21 @@ export default function Brokers() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
+              <TableHead className="text-right">Brokerage / Order</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-muted-foreground">
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {brokers?.length === 0 && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-muted-foreground">
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
                   No brokers yet.
                 </TableCell>
               </TableRow>
@@ -159,6 +163,7 @@ export default function Brokers() {
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.name}</TableCell>
                 <TableCell>{b.phone ?? '-'}</TableCell>
+                <TableCell className="text-right tabular-nums">₹{Number(b.brokerageAmount).toLocaleString('en-IN')}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(b)}>
@@ -212,6 +217,19 @@ export default function Brokers() {
                     <FormLabel>Phone</FormLabel>
                     <FormControl>
                       <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="brokerageAmount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Brokerage per order (₹)</FormLabel>
+                    <FormControl>
+                      <Input type="number" step="0.01" min="0" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

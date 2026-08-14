@@ -16,8 +16,9 @@ via `POST /whatsapp/brokers/:brokerId/send-ledger`.
 on the **`PARTY_LEDGER`** template key, not a dedicated `BROKER_LEDGER` one.
 A broker's account posts exactly like a supplier's party ledger:
 
-- **Brokerage credited** (one line per dispatch, ₹2,000 flat) = a **Credit**,
-  same as a supplier's purchases increasing what we owe them.
+- **Brokerage credited** (one line per dispatch, at that broker's own
+  `brokerageAmount` rate - configurable per broker, ₹2,000 by default) = a
+  **Credit**, same as a supplier's purchases increasing what we owe them.
 - **Payment made to the broker** = a **Debit**, same as paying a supplier
   reduces what we owe them.
 
@@ -38,9 +39,10 @@ of `PARTY_LEDGER`.
 
 `buildBrokerLedgerData(brokerId)` in `server/src/services/brokerLedger.service.ts`
 - one `BROKERAGE` (credit) line per `SaleDispatch` under the broker's sale
-orders at the flat ₹2,000 rate, one `PAYMENT` (debit) line per `Payment` row
-where `type === 'BROKER'` and `brokerId` matches, sorted chronologically with
-a running balance. This is a server-side port of the same computation
+orders at that broker's `brokerageAmount` rate, one `PAYMENT` (debit) line
+per `Payment` row where `type === 'BROKER'` and `brokerId` matches, sorted
+chronologically with a running balance. This is a server-side port of the
+same computation
 `BrokerageLedger.tsx`'s `allTxns` already does client-side for the on-page
 table, so the WhatsApp figures, the PDF and the page agree to the rupee.
 

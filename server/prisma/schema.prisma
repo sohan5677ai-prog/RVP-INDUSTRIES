@@ -156,6 +156,9 @@ model Broker {
   name       String
   phone      String?
   waLanguage WaLanguage  @default(EN)
+  // Flat brokerage credited per dispatched sale order under this broker -
+  // configurable per broker (was a single hardcoded ₹2,000 for everyone).
+  brokerageAmount Decimal @default(2000) @db.Decimal(12, 2)
   saleOrders SaleOrder[]
   payments   Payment[]
 }

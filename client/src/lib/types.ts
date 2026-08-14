@@ -59,6 +59,8 @@ export interface Broker {
   phone: string | null;
   /** Language the broker's payment-reminder copy is sent in. */
   waLanguage?: WaLanguage;
+  /** Flat brokerage credited per dispatched sale order under this broker. */
+  brokerageAmount: string;
 }
 
 export type POStatus = 'PENDING' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';

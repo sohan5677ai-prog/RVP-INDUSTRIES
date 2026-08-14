@@ -67,9 +67,6 @@ const WASTE_LOADING_PRODUCTS = new Set([
   'WASTE', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
 ]);
 
-// Flat ₹2,000 brokerage per dispatched shipment - same constant as the
-// Brokerage Ledger/Dues reports (client/src/pages/BrokerageLedger.tsx).
-const FLAT_BROKERAGE = 2000;
 // "RVP" is the company's own-orders marker (not a real commission agent).
 const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
 
@@ -246,12 +243,12 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income / Gunny Sales) ──
       prisma.otherIncomeEntry.aggregate({ _sum: { amount: true } }),
       prisma.gunnySaleEntry.aggregate({ _sum: { amount: true } }),
-      // Flat ₹2000-per-dispatch brokerage, RVP (own orders) excluded - mirrors
+      // Per-broker flat brokerage per dispatch, RVP (own orders) excluded - mirrors
       // the Brokerage Ledger/Dues reports exactly, so it only lands here once a
       // shipment actually dispatches (not at order-booking time).
       prisma.saleDispatch.findMany({
         where: { saleOrder: { brokerId: { not: null } } },
-        select: { saleOrder: { select: { broker: { select: { name: true } } } } },
+        select: { saleOrder: { select: { broker: { select: { name: true, brokerageAmount: true } } } } },
       }),
       // LOCKED weight shortages. A buyer's kata slip at delivery only ESTIMATES a
       // shortage - we learn whether they actually cut it when the money arrives, so
@@ -387,9 +384,12 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       Math.round((interestPaidToBank - interestCapitalised) * 100) / 100,
     );
 
-    // Brokerage: one flat ₹2000 per dispatched shipment whose order has a real
-    // (non-RVP) broker - mirrors the Brokerage Ledger/Dues reports exactly.
-    const brokerage = brokerageDispatches.filter((d) => !isOwnBroker(d.saleOrder.broker?.name)).length * FLAT_BROKERAGE;
+    // Brokerage: each broker's own flat rate per dispatched shipment whose
+    // order has a real (non-RVP) broker - mirrors the Brokerage Ledger/Dues
+    // reports exactly.
+    const brokerage = brokerageDispatches
+      .filter((d) => !isOwnBroker(d.saleOrder.broker?.name))
+      .reduce((sum, d) => sum + Number(d.saleOrder.broker?.brokerageAmount ?? 0), 0);
 
     // Locked shortages split into the two lines the business tracks: Pappu, and
     // everything else pooled as Husk. Neither is netted anywhere else - the Pappu

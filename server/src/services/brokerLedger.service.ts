@@ -2,14 +2,10 @@ import { prisma } from '../lib/prisma.js';
 import type { WaLanguage } from '@prisma/client';
 
 /**
- * Flat brokerage per dispatched sale order, and the "RVP" own-orders marker -
- * duplicated from `client/src/pages/BrokerageLedger.tsx` (also mirrored in
- * `dashboard.controller.ts`) rather than shared, matching how this constant
- * already lives in three places across the app. Keep all four in step if the
- * flat rate ever changes.
+ * The "RVP" own-orders marker - duplicated from `client/src/pages/BrokerageLedger.tsx`
+ * (also mirrored in `dashboard.controller.ts`) rather than shared. Keep all
+ * three in step if the own-orders convention ever changes.
  */
-const FLAT_BROKERAGE = 2000;
-
 export const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
 
 export interface BrokerLedgerTxn {
@@ -26,7 +22,7 @@ export interface BrokerLedgerTxn {
 }
 
 export interface BrokerLedgerData {
-  broker: { id: string; name: string; phone: string | null; waLanguage: WaLanguage };
+  broker: { id: string; name: string; phone: string | null; waLanguage: WaLanguage; brokerageAmount: number };
   transactions: BrokerLedgerTxn[];
 }
 
@@ -63,7 +59,7 @@ export async function buildBrokerLedgerData(brokerId: string): Promise<BrokerLed
         vehicleNumber: d.vehicleNumber,
         reference: null,
         debit: 0,
-        credit: FLAT_BROKERAGE,
+        credit: Number(broker.brokerageAmount),
       });
     }
   }
@@ -90,5 +86,14 @@ export async function buildBrokerLedgerData(brokerId: string): Promise<BrokerLed
     return { ...l, runningBalance: running };
   });
 
-  return { broker, transactions };
+  return {
+    broker: {
+      id: broker.id,
+      name: broker.name,
+      phone: broker.phone,
+      waLanguage: broker.waLanguage,
+      brokerageAmount: Number(broker.brokerageAmount),
+    },
+    transactions,
+  };
 }

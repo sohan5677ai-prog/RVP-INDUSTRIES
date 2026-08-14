@@ -62,8 +62,14 @@ export type WaTemplateKey =
   | 'DISPATCH_DRIVER' // driver_industries (LOCATION header - name-addressed POST): driver, lorry, party, destination, load, party phone, maps link
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
-  | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
-  | 'BROKER_LEDGER' // rvp_broker_ledger (document header - brokerage statement PDF): broker, period, total brokerage, total paid, closing bal - see docs/whatsapp-broker-ledger-template.md
+  // rvp_party_ledger (document header - statement PDF): name, period, total debits,
+  // total credits, closing bal. Reused as-is for the Brokerage Report's "WhatsApp
+  // Ledger" send too (sendBrokerLedgerStatement) - a broker's account behaves
+  // exactly like a supplier's (brokerage credited = Credit, payment made = Debit),
+  // so there was no need to submit a separate rvp_broker_ledger template for
+  // Meta to approve. relatedType still records 'BROKER_LEDGER' on those log rows
+  // so WhatsAppLog can tell the two sends apart even though they share a template.
+  | 'PARTY_LEDGER'
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST' // rvp_owner_dues (document header - full outstanding-dues PDF): date, total receivable, overdue, top pending
@@ -111,12 +117,6 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // never collapse to the same id.
   SUPPORT_TICKET: '28539',
   SUPPORT_TICKET_TEXT: '28541',
-  // BROKER_LEDGER (rvp_broker_ledger) has no id yet - not yet submitted to
-  // Fast2SMS for approval. Wording is drafted in
-  // docs/whatsapp-broker-ledger-template.md. Until an id lands here, every
-  // send logs SKIPPED "is not configured" - same state PARTY_LEDGER sat in
-  // before its own template was approved. Set FAST2SMS_TMPL_BROKER_LEDGER
-  // once approved, or add the message_id here.
 };
 
 /**
@@ -1155,9 +1155,13 @@ export const whatsappService = {
    * Brokerage statement → broker, fired by the "WhatsApp Ledger" button on the
    * Brokerage Report detail page: the full statement (every dispatch's
    * brokerage credit and every payment made) rides along as a PDF document
-   * header, exactly like `sendPartyLedgerStatement`. `to` is passed in rather
-   * than read off the broker so the dialog can let the sender type a one-off
-   * number, and the office is copied the same way.
+   * header. Deliberately reuses the PARTY_LEDGER template rather than a
+   * separate broker one - a broker's account posts exactly like a supplier's
+   * (brokerage = Credit, payment = Debit), so `totalPaid` fills the same
+   * "Total Debits" slot a supplier's payments would, and `totalBrokerage`
+   * fills "Total Credits" the same slot that supplier's purchases would. `to`
+   * is passed in rather than read off the broker so the dialog can let the
+   * sender type a one-off number, and the office is copied the same way.
    */
   async sendBrokerLedgerStatement(
     broker: { id: string; name: string; waLanguage?: WaLanguage | null },
@@ -1172,13 +1176,13 @@ export const whatsappService = {
   ) {
     return sendToPartyAndInternal(
       {
-        templateKey: 'BROKER_LEDGER',
+        templateKey: 'PARTY_LEDGER',
         language: broker.waLanguage,
         variables: [
           broker.name,
           statement.period,
-          statement.totalBrokerage,
           statement.totalPaid,
+          statement.totalBrokerage,
           statement.closing,
         ],
         mediaUrl: document.url,

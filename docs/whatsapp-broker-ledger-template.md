@@ -1,55 +1,38 @@
 # Broker brokerage-ledger statement
 
-A new WhatsApp send for the Brokerage Report detail page's "WhatsApp Ledger"
-button (`client/src/pages/BrokerageLedger.tsx`), mirroring the party ledger's
-`rvp_party_ledger` send exactly: the broker's full brokerage statement for a
-chosen period goes out as a PDF document header, with a five-figure summary
-in the approved template body. Built by `buildBrokerLedgerData`
+The Brokerage Report detail page's "WhatsApp Ledger" button
+(`client/src/pages/BrokerageLedger.tsx`) sends a broker's full brokerage
+statement for a chosen period as a PDF document header, with a five-figure
+summary in the template body - the same mechanics as the party ledger's
+`rvp_party_ledger` send. Built by `buildBrokerLedgerData`
 (`server/src/services/brokerLedger.service.ts`) and rendered by
 `renderBrokerLedgerPdf` (`server/src/lib/brokerLedgerPdf.ts`), fired from
 `sendBrokerLedgerWhatsApp` (`server/src/controllers/whatsapp.controller.ts`)
 via `POST /whatsapp/brokers/:brokerId/send-ledger`.
 
-## Not yet approved
+## No separate template - reuses `rvp_party_ledger`
 
-`BROKER_LEDGER` has no Fast2SMS `message_id` yet - it needs to be submitted
-and approved the same way `rvp_party_ledger` was. Until an id is set (via
-`FAST2SMS_TMPL_BROKER_LEDGER` or `DEFAULT_TEMPLATE_IDS` in
-`server/src/services/whatsapp.service.ts`), every send logs `SKIPPED` in
-`WhatsAppLog` and nothing goes out - the button, dialog and PDF are wired and
-idle, waiting on the id. Once approved, also add the
-`FAST2SMS_TMPL_BROKER_LEDGER` row (`sync: false`) already present in
-`render.yaml`.
+`sendBrokerLedgerStatement` (`server/src/services/whatsapp.service.ts`) sends
+on the **`PARTY_LEDGER`** template key, not a dedicated `BROKER_LEDGER` one.
+A broker's account posts exactly like a supplier's party ledger:
 
-## Template to submit on Fast2SMS
+- **Brokerage credited** (one line per dispatch, ₹2,000 flat) = a **Credit**,
+  same as a supplier's purchases increasing what we owe them.
+- **Payment made to the broker** = a **Debit**, same as paying a supplier
+  reduces what we owe them.
 
-Name: `rvp_broker_ledger`. Category: **Utility**. Language: **English**.
-**Document header** (the statement PDF attaches here - Meta rejects the send
-if the media is missing, same as `rvp_party_ledger`).
+So the approved `rvp_party_ledger` template's five slots (name, period, total
+debits, total credits, closing balance) already say exactly the right thing
+for a broker statement with no wording changes - `totalPaid` fills the "Total
+Debits" slot, `totalBrokerage` fills "Total Credits". This means the send
+works the moment `FAST2SMS_TMPL_PARTY_LEDGER` (or `DEFAULT_TEMPLATE_IDS.PARTY_LEDGER`
+in `whatsapp.service.ts`) is set - no new Fast2SMS/Meta submission or
+approval wait, unlike every other "not yet approved" template in this file.
 
-```
-📄 *{{1}}* - Brokerage Statement
-
-Period: {{2}}
-Total Brokerage: {{3}}
-Total Paid: {{4}}
-*Closing Balance: {{5}}*
-
-Full statement attached above.
-```
-
-| Slot | Content | Example |
-|------|---------|---------|
-| `{{1}}` | Broker's name | `Suresh Traders` |
-| `{{2}}` | Date range covered by the statement | `01-Apr-2026 to 14-Aug-2026` |
-| `{{3}}` | Sum of brokerage credited in the period (₹2,000 flat per dispatch) | `₹1,24,000` |
-| `{{4}}` | Sum of BROKER-type payments made in the period | `₹96,000` |
-| `{{5}}` | Closing balance with Dr/Cr marker (Cr = still payable by us) | `₹28,000 Cr` |
-
-Five variables, all short numeric/date strings - no free text and no
-newlines in any slot, matching the same constraint `rvp_party_ledger` sits
-under (template variables cannot contain line breaks, which is why the
-opening balance and the full voucher list live only in the attached PDF).
+`WhatsAppLog` rows from this send still carry `relatedType: 'BROKER_LEDGER'`
+(set in `sendBrokerLedgerStatement`), so the two sends stay distinguishable
+in the log even though they share a template and a `template` column value
+of `PARTY_LEDGER`.
 
 ## Where the numbers come from
 
@@ -75,7 +58,5 @@ send uses.
 ## Language
 
 Sent in the broker's `waLanguage` (falling back to English if that language's
-copy isn't approved yet), same resolution order as every other template - see
-`templateId()` in `whatsapp.service.ts`. No translated copies exist yet;
-add them the same way `PARTY_LEDGER`'s translations were added, if ever
-needed.
+copy of `rvp_party_ledger` isn't approved yet), same resolution order as
+every other template - see `templateId()` in `whatsapp.service.ts`.

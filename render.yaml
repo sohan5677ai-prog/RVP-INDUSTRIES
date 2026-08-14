@@ -86,13 +86,9 @@ services:
         sync: false
       # Party account statement sent from the ledger's "WhatsApp Ledger" button.
       # Document header (the statement PDF) + 5 body variables.
+      # Also reused as-is for the Brokerage Report's "WhatsApp Ledger" send
+      # (broker statement) - see docs/whatsapp-broker-ledger-template.md.
       - key: FAST2SMS_TMPL_PARTY_LEDGER
-        sync: false
-      # Broker brokerage statement sent from the Brokerage Report detail page's
-      # "WhatsApp Ledger" button. Document header (the statement PDF) + 5 body
-      # variables - see docs/whatsapp-broker-ledger-template.md. Not yet
-      # submitted for approval, so unset until a message_id is assigned.
-      - key: FAST2SMS_TMPL_BROKER_LEDGER
         sync: false
       - key: FAST2SMS_TMPL_VERIFICATION_STATEMENT
         sync: false

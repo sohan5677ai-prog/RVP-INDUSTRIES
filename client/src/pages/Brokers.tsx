@@ -54,7 +54,7 @@ const brokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().optional(),
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
-  brokerageAmount: z.coerce.number().nonnegative('Must be 0 or more'),
+  brokerageAmount: z.string().min(1, 'Required').refine((v) => Number(v) >= 0, 'Must be 0 or more'),
 });
 type BrokerForm = z.infer<typeof brokerSchema>;
 
@@ -70,12 +70,12 @@ export default function Brokers() {
 
   const form = useForm<BrokerForm>({
     resolver: zodResolver(brokerSchema),
-    defaultValues: { name: '', phone: '', waLanguage: 'EN', brokerageAmount: 2000 },
+    defaultValues: { name: '', phone: '', waLanguage: 'EN', brokerageAmount: '2000' },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ name: '', phone: '', waLanguage: 'EN', brokerageAmount: 2000 });
+    form.reset({ name: '', phone: '', waLanguage: 'EN', brokerageAmount: '2000' });
     setOpen(true);
   }
 
@@ -85,7 +85,7 @@ export default function Brokers() {
       name: b.name,
       phone: b.phone ?? '',
       waLanguage: b.waLanguage ?? 'EN',
-      brokerageAmount: Number(b.brokerageAmount),
+      brokerageAmount: String(Number(b.brokerageAmount)),
     });
     setOpen(true);
   }
@@ -93,8 +93,8 @@ export default function Brokers() {
   const saveMutation = useMutation({
     mutationFn: (values: BrokerForm) =>
       editing
-        ? api<Broker>(`/brokers/${editing.id}`, { method: 'PUT', body: values })
-        : api<Broker>('/brokers', { method: 'POST', body: values }),
+        ? api<Broker>(`/brokers/${editing.id}`, { method: 'PUT', body: { ...values, brokerageAmount: Number(values.brokerageAmount) } })
+        : api<Broker>('/brokers', { method: 'POST', body: { ...values, brokerageAmount: Number(values.brokerageAmount) } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['brokers'] });
       toast.success(editing ? 'Broker updated' : 'Broker created');

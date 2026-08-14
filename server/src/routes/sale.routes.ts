@@ -22,8 +22,13 @@ import {
   assignLorryReceiptNumber,
   deleteLorryReceipt,
 } from '../controllers/sale.controller.js';
+import { downloadSaleDuesReportPdf } from '../controllers/salesDuesReport.controller.js';
 
 const router = Router();
+
+// Outstanding Sales Dues PDF - same buyer-grouped renderer as the WhatsApp
+// owner digest, filtered to match the Sale Dues page's own filters.
+router.get('/sale-dues/report.pdf', asyncHandler(downloadSaleDuesReportPdf));
 
 router.get('/sale-orders', asyncHandler(listSaleOrders));
 router.get('/sale-orders/:id', asyncHandler(getSaleOrder));

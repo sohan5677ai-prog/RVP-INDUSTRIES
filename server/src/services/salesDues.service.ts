@@ -213,6 +213,101 @@ export async function computeBuyerDues(
   return { asOf, buyers, totalReceivable, totalOverdue, topPending, dueToday, totalDueToday };
 }
 
+// Byproducts share one tab on the Sale Dues page - mirrors
+// client/src/pages/SaleDues.tsx (BYPRODUCT_PRODUCTS / matchesProductFilter).
+const BYPRODUCT_PRODUCTS: SaleProduct[] = ['WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'];
+
+function matchesProductFilter(product: SaleProduct, filter: string): boolean {
+  if (!filter || filter === 'ALL') return true;
+  if (filter === 'BYPRODUCTS') return BYPRODUCT_PRODUCTS.includes(product);
+  return product === filter;
+}
+
+/** A lorry number reduced to its letters and digits - mirrors the page's `plate()`,
+ *  so a search for "AP39T1234" still finds a plate recorded as "AP 39 T 1234". */
+function plate(s: string | null | undefined): string {
+  return (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** IST calendar YYYY-MM for a due date - the "Due Month" filter buckets on this,
+ *  never process-local time (the server runs UTC on Render). */
+function istMonthKey(d: Date): string {
+  const c = istCalendar(d);
+  return `${c.year}-${String(c.month).padStart(2, '0')}`;
+}
+
+/** IST calendar YYYY-MM-DD - sortable/comparable as plain strings. */
+function istDateKey(d: Date): string {
+  const c = istCalendar(d);
+  return `${c.year}-${String(c.month).padStart(2, '0')}-${String(c.day).padStart(2, '0')}`;
+}
+
+export interface DuesFilterOptions {
+  /** SaleProduct enum value, 'BYPRODUCTS', or 'ALL'/undefined for no filter. */
+  product?: string;
+  /** 'YYYY-MM' (IST, matched against due date) or 'ALL'/undefined for every month. */
+  month?: string;
+  /** Buyer name, invoice number, or lorry plate (letters/digits only). */
+  search?: string;
+  /** Bill-date window, inclusive, 'YYYY-MM-DD'. */
+  billFrom?: string;
+  billTo?: string;
+}
+
+/**
+ * Narrows a portfolio to what the Sale Dues page's filters would show, with
+ * every buyer-level total (outstanding/overdue/in-transit) recomputed from the
+ * surviving invoices - so a filtered PDF's group bands and summary strip add
+ * up to the rows actually printed, not the party's full unfiltered book.
+ * Mirrors the page's `matchesProductFilter` / month bucketing / search exactly,
+ * so the "Download PDF" button on that page always matches what's on screen.
+ */
+export function filterDuesPortfolio(portfolio: DuesPortfolio, opts: DuesFilterOptions): DuesPortfolio {
+  const product = opts.product || 'ALL';
+  const month = opts.month || 'ALL';
+  const search = (opts.search || '').trim().toLowerCase();
+  const plateQuery = plate(search);
+
+  const buyers = portfolio.buyers
+    .map((b): BuyerDues | null => {
+      const invoices = b.invoices.filter((inv) => {
+        if (!matchesProductFilter(inv.product, product)) return false;
+        // Same rule as the page: an in-transit invoice has no real due date, so
+        // it drops out under any specific due-month filter (stays under "All").
+        if (month !== 'ALL' && (inv.inTransit || istMonthKey(inv.dueDate) !== month)) return false;
+        if (search) {
+          const hit =
+            b.name.toLowerCase().includes(search) ||
+            inv.invoiceNumber.toLowerCase().includes(search) ||
+            (!!plateQuery && plate(inv.vehicleNumber).includes(plateQuery));
+          if (!hit) return false;
+        }
+        const billKey = istDateKey(inv.billDate);
+        if (opts.billFrom && billKey < opts.billFrom) return false;
+        if (opts.billTo && billKey > opts.billTo) return false;
+        return true;
+      });
+      if (invoices.length === 0) return null;
+      return {
+        ...b,
+        invoices,
+        overdueInvoices: invoices.filter((i) => i.overdue),
+        outstanding: invoices.reduce((s, i) => s + i.outstanding, 0),
+        overdueOutstanding: invoices.filter((i) => i.overdue).reduce((s, i) => s + i.outstanding, 0),
+        inTransitOutstanding: invoices.filter((i) => i.inTransit).reduce((s, i) => s + i.outstanding, 0),
+      };
+    })
+    .filter((b): b is BuyerDues => b !== null)
+    .sort((a, b) => b.outstanding - a.outstanding);
+
+  return {
+    ...portfolio,
+    buyers,
+    totalReceivable: buyers.reduce((s, b) => s + b.outstanding, 0),
+    totalOverdue: buyers.reduce((s, b) => s + b.overdueOutstanding, 0),
+  };
+}
+
 /**
  * One party's unsettled sale invoices, or null when nothing is outstanding.
  * Scoped query - the ledger page asks this per party, not for the whole book.

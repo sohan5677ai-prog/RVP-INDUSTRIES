@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { api } from '@/lib/api';
+import { api, apiBlob } from '@/lib/api';
 import type { Party, SaleOrder, Receipt, SaleProduct } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { settledByDispatch, isDispatchPaid, dispatchTotal } from '@/lib/saleStatus';
@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle, ArrowLeftRight } from 'lucide-react';
+import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle, ArrowLeftRight, FileDown } from 'lucide-react';
 import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -230,6 +230,7 @@ export default function SaleDuesPage() {
   const [toDate, setToDate] = useState('');
   // Knock a buyer's open invoices off against what we owe them as a supplier.
   const [setOffOpen, setSetOffOpen] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const { data: parties, isLoading: loadingParties } = useQuery({
     queryKey: ['parties'],
@@ -556,6 +557,35 @@ export default function SaleDuesPage() {
     });
   }
 
+  // Buyer-grouped Outstanding Sales Dues PDF - same renderer as the WhatsApp
+  // owner digest, scoped server-side to whatever's currently on screen (Due
+  // Month, product tab, search, bill-date window). Deliberately ignores the
+  // Paid/Unpaid tab: the report is inherently about what's still outstanding,
+  // and a paid invoice has nothing left to show in it either way.
+  async function downloadDuesPdf() {
+    setDownloadingPdf(true);
+    try {
+      const params = new URLSearchParams();
+      if (productFilter !== 'ALL') params.set('product', productFilter);
+      if (monthFilter !== ALL_MONTHS) params.set('month', monthFilter);
+      if (search.trim()) params.set('search', search.trim());
+      if (fromDate) params.set('from', fromDate);
+      if (toDate) params.set('to', toDate);
+      const qs = params.toString();
+      const blob = await apiBlob(`/sale-dues/report.pdf${qs ? `?${qs}` : ''}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Outstanding-Sales-Dues-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to generate the dues PDF');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -568,6 +598,14 @@ export default function SaleDuesPage() {
                 we owe them, instead of two payments crossing. */}
             <Button variant="outline" onClick={() => setSetOffOpen(true)}>
               <ArrowLeftRight className="h-4 w-4" /> Set off vs Purchases
+            </Button>
+            {/* Same buyer-grouped PDF as the WhatsApp owner digest, scoped to
+                whatever's currently filtered (product tab, due month, search,
+                bill-date window) - not the Paid/Unpaid tab, since the report is
+                inherently about what's still outstanding. */}
+            <Button variant="outline" onClick={downloadDuesPdf} disabled={downloadingPdf}>
+              {downloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+              Download Dues PDF
             </Button>
             <ExportButtons
             filename="Sale_Dues"

@@ -1,0 +1,446 @@
+// Broker "Statement of Account" - the same printed accounting document as the
+// party statement (letterhead, opening/closing balance, narration, running
+// balance, signature block), scoped to one broker's brokerage ledger instead
+// of a supplier/buyer's purchase-sale ledger. See partyStatement.ts for the
+// full rationale (rendered in-browser so ₹ prints correctly via print-to-PDF).
+
+import type { Broker } from './types';
+import { inr, rupeesInWords } from './invoiceWords';
+import { SIGNATURE_BLOCK_CSS, signatureBlockHtml } from './signatureAssets';
+import type { StatementCompany } from './partyStatement';
+
+export type { StatementCompany };
+
+export interface BrokerStatementTxn {
+  id: string;
+  date: string;
+  kind: 'BROKERAGE' | 'PAYMENT';
+  particulars: string;
+  invoiceNumber: string | null;
+  vehicleNumber: string | null;
+  reference: string | null;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+}
+
+export interface BrokerStatementSummary {
+  totalDue: number;
+  totalPaid: number;
+  orderCount: number;
+  lastActivity: string | null;
+}
+
+export interface BrokerStatementOptions {
+  company: StatementCompany | null | undefined;
+  broker: Broker;
+  summary: BrokerStatementSummary;
+  /** Rows already filtered to the period the user is looking at. */
+  transactions: BrokerStatementTxn[];
+  fromDate?: string;
+  toDate?: string;
+}
+
+/* ------------------------------------------------------------------ formats */
+
+const numFmt = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+const amt = (n: number | null | undefined): string => (n ? inr(n) : '');
+const amt0 = (n: number): string => inr(n);
+const words = (n: number): string => rupeesInWords(Math.abs(n)).replace(/^INR /, 'Rupees ');
+
+function longDate(iso: string | Date): string {
+  const d = typeof iso === 'string' ? new Date(iso) : iso;
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function stamp(): string {
+  return new Date().toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function esc(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function kv(label: string, value: string | null | undefined, mono = false): string {
+  if (!value) return '';
+  return `<div class="kv"><span class="kv-l">${esc(label)}</span><span class="kv-v${mono ? ' mono' : ''}">${esc(value)}</span></div>`;
+}
+
+/** Dr/Cr marker for a signed balance; blank when the account is square. */
+function drcr(n: number): string {
+  return n === 0 ? '' : n > 0 ? 'Dr' : 'Cr';
+}
+
+function balText(n: number): string {
+  const m = drcr(n);
+  return `${amt0(Math.abs(n))}${m ? ` <span class="drcr">${m}</span>` : ''}`;
+}
+
+const KIND_LABEL: Record<BrokerStatementTxn['kind'], string> = {
+  BROKERAGE: 'Brokerage',
+  PAYMENT: 'Payment',
+};
+
+const KIND_TONE: Record<BrokerStatementTxn['kind'], string> = {
+  BROKERAGE: 'k-blue',
+  PAYMENT: 'k-rose',
+};
+
+/** Tally-style narration line ("Being …"), same convention as the party statement. */
+function narration(t: BrokerStatementTxn): string {
+  const bits: string[] = [];
+  if (t.kind === 'BROKERAGE') {
+    bits.push('Being brokerage due on shipment dispatched');
+    if (t.invoiceNumber) bits.push(`vide tax invoice ${t.invoiceNumber}`);
+    if (t.vehicleNumber) bits.push(`in lorry ${t.vehicleNumber}`);
+  } else {
+    bits.push('Being commission paid to the broker');
+    if (t.reference) bits.push(`by ${t.reference}`);
+  }
+  return bits.join(' ') + '.';
+}
+
+/* ------------------------------------------------------------------- html */
+
+export function buildBrokerStatementHtml(o: BrokerStatementOptions): string {
+  const { company, broker, summary, transactions: txns } = o;
+
+  const opening = txns.length ? txns[0].runningBalance - txns[0].debit + txns[0].credit : 0;
+  const closing = txns.length ? txns[txns.length - 1].runningBalance : -(summary.totalDue - summary.totalPaid);
+  const periodDebit = txns.reduce((s, t) => s + t.debit, 0);
+  const periodCredit = txns.reduce((s, t) => s + t.credit, 0);
+
+  const fromLabel = o.fromDate ? longDate(o.fromDate) : txns.length ? longDate(txns[0].date) : '-';
+  const toLabel = o.toDate ? longDate(o.toDate) : txns.length ? longDate(txns[txns.length - 1].date) : '-';
+
+  const companyName = company?.name ?? 'RVP INDUSTRIES';
+  const companyAddr = [company?.address?.replace(/\n/g, ', '), company?.pincode].filter(Boolean).join(' - ');
+  const companyState = [company?.stateName, company?.stateCode ? `(${company.stateCode})` : null].filter(Boolean).join(' ');
+
+  const closingLabel = closing === 0
+    ? 'Account settled - nil balance'
+    : closing > 0
+      ? 'Balance recoverable from broker'
+      : 'Balance payable to broker';
+  const closingWords = closing === 0 ? 'Nil' : words(closing);
+
+  const openingRow = `
+    <tr class="row-opening">
+      <td class="c-date">${esc(fromLabel)}</td>
+      <td class="c-part"><div class="p-title">Opening Balance</div><div class="p-narr">Balance brought forward as on ${esc(fromLabel)}.</div></td>
+      <td class="c-ref"></td>
+      <td class="c-num">${opening > 0 ? amt0(opening) : ''}</td>
+      <td class="c-num">${opening < 0 ? amt0(-opening) : ''}</td>
+      <td class="c-num c-bal">${balText(opening)}</td>
+    </tr>`;
+
+  const bodyRows = txns.map((t, i) => {
+    const ref = t.invoiceNumber || t.reference || '';
+    const sub = [t.invoiceNumber && t.reference ? t.reference : null, t.vehicleNumber].filter(Boolean).join(' · ');
+    return `
+    <tr${i % 2 ? ' class="zebra"' : ''}>
+      <td class="c-date">${esc(longDate(t.date))}</td>
+      <td class="c-part">
+        <div class="p-title"><span class="chip ${KIND_TONE[t.kind]}">${esc(KIND_LABEL[t.kind])}</span>${esc(t.particulars)}</div>
+        <div class="p-narr">${esc(narration(t))}</div>
+      </td>
+      <td class="c-ref">${esc(ref)}${sub ? `<span class="ref-sub">${esc(sub)}</span>` : ''}</td>
+      <td class="c-num">${amt(t.debit)}</td>
+      <td class="c-num">${amt(t.credit)}</td>
+      <td class="c-num c-bal">${balText(t.runningBalance)}</td>
+    </tr>`;
+  }).join('');
+
+  const emptyRow = `<tr><td colspan="6" class="empty">No transactions in this period.</td></tr>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Statement of Account - ${esc(broker.name)}</title>
+<style>
+  :root{
+    --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --hair:#d1d5db;
+    --brand:#ad4f0a; --brand-soft:#fdf6ee; --band:#1f2937;
+    --dr:#047857; --cr:#b91c1c;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    color:var(--ink); background:#eef0f3; font-size:11px; line-height:1.35;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  .sheet{width:210mm; min-height:297mm; margin:14px auto; padding:12mm 11mm 16mm;
+         background:#fff; box-shadow:0 6px 28px rgba(15,23,42,.16);}
+  .mono{font-family:"Consolas","SF Mono",monospace; letter-spacing:.2px;}
+
+  /* ---------- letterhead ---------- */
+  .head{display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
+        border-bottom:2.5px solid var(--brand); padding-bottom:9px;}
+  .co-name{font-size:22px; font-weight:800; letter-spacing:.4px; color:var(--brand); text-transform:uppercase; line-height:1.1;}
+  .co-tag{font-size:9.5px; letter-spacing:2.2px; text-transform:uppercase; color:var(--muted); margin-top:2px;}
+  .co-lines{margin-top:6px; font-size:10px; color:#374151; max-width:105mm;}
+  .co-lines div{margin-top:1px;}
+  .doc{text-align:right; flex:0 0 auto;}
+  .doc-title{font-size:15px; font-weight:800; letter-spacing:2.4px; text-transform:uppercase;}
+  .doc-rule{height:2px; background:var(--band); margin:4px 0 6px;}
+  .doc-meta{font-size:9.5px; color:var(--muted);}
+  .doc-meta b{color:var(--ink); font-weight:600;}
+
+  /* ---------- broker / bank panels ---------- */
+  .panels{display:grid; grid-template-columns:1.15fr 1fr; gap:0; margin-top:10px;
+          border:1px solid var(--hair);}
+  .panel{padding:8px 10px; border-right:1px solid var(--hair);}
+  .panel:last-child{border-right:0;}
+  .panel-h{font-size:8px; letter-spacing:1.6px; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:4px;}
+  .party-name{font-size:14px; font-weight:700; line-height:1.2;}
+  .party-sub{font-size:9.5px; color:var(--muted); margin-top:2px;}
+  .tag{display:inline-block; font-size:8px; font-weight:700; letter-spacing:.8px; text-transform:uppercase;
+       border:1px solid var(--hair); border-radius:99px; padding:1px 7px; color:#374151; margin-left:6px; vertical-align:1px;}
+  .kv{display:flex; gap:6px; font-size:9.5px; margin-top:2px;}
+  .kv-l{color:var(--muted); flex:0 0 62px;}
+  .kv-v{font-weight:600; flex:1;}
+
+  /* ---------- summary strip ---------- */
+  .summary{display:grid; grid-template-columns:repeat(4,1fr); gap:0; margin-top:9px;
+           border:1px solid var(--hair); background:var(--brand-soft);}
+  .sum{padding:7px 10px; border-right:1px solid var(--hair);}
+  .sum:last-child{border-right:0;}
+  .sum-l{font-size:8px; letter-spacing:1.3px; text-transform:uppercase; color:var(--muted); font-weight:700;}
+  .sum-v{font-size:14px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums;}
+  .sum-v small{font-size:9px; font-weight:700; margin-left:3px;}
+  .sum.accent{background:var(--band);}
+  .sum.accent .sum-l{color:#9ca3af;}
+  .sum.accent .sum-v{color:#fff;}
+
+  /* ---------- ledger table ---------- */
+  table{width:100%; border-collapse:collapse; margin-top:10px; table-layout:fixed;}
+  thead th{background:var(--band); color:#fff; font-size:8.5px; font-weight:700;
+           letter-spacing:1.1px; text-transform:uppercase; padding:6px 6px; text-align:left;
+           border-right:1px solid rgba(255,255,255,.14);}
+  thead th:last-child{border-right:0;}
+  thead th.r{text-align:right;}
+  tbody td{padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top;}
+  tbody tr.zebra{background:#fafafa;}
+  tbody tr.row-opening{background:var(--brand-soft);}
+  tbody tr.row-opening .p-title{font-weight:700;}
+  .c-date{font-size:9.5px; color:#374151; white-space:nowrap;}
+  .c-ref{font-size:9px; color:#374151; word-break:break-word;}
+  .ref-sub{display:block; color:var(--muted); font-size:8.5px; margin-top:1px;}
+  .c-num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; font-size:10px;}
+  .c-bal{font-weight:700;}
+  .drcr{font-size:8px; font-weight:700; color:var(--muted); margin-left:2px;}
+  .p-title{font-weight:600; font-size:10.5px;}
+  .p-narr{font-size:8.8px; color:var(--muted); margin-top:1.5px; line-height:1.3;}
+  .chip{display:inline-block; font-size:7.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+        padding:1px 5px; border-radius:3px; margin-right:5px; vertical-align:1px;}
+  .k-blue{background:#e0edff; color:#1d4ed8;}
+  .k-rose{background:#ffe4e6; color:#be123c;}
+  .empty{text-align:center; color:var(--muted); padding:22px 0;}
+  tfoot td{border-top:1.5px solid var(--band); border-bottom:1.5px solid var(--band);
+           padding:6px; font-weight:700; font-size:10.5px; background:#f9fafb;}
+  tr{break-inside:avoid; page-break-inside:avoid;}
+
+  /* ---------- closing ---------- */
+  .closing{display:flex; justify-content:space-between; align-items:center; gap:14px;
+           background:var(--band); color:#fff; padding:9px 12px; margin-top:0;
+           break-inside:avoid; page-break-inside:avoid;}
+  .closing-l{font-size:10px; letter-spacing:1.6px; text-transform:uppercase; font-weight:700;}
+  .closing-v{font-size:19px; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  .closing-v span{font-size:11px; margin-left:4px;}
+  .words{border:1px solid var(--hair); border-top:0; padding:6px 12px; font-size:10px;
+         break-inside:avoid; page-break-inside:avoid;}
+  .words b{font-weight:700;}
+  .words span{color:var(--muted); font-size:8px; letter-spacing:1.4px; text-transform:uppercase; display:block;}
+
+  /* ---------- activity + footer ---------- */
+  .lower{display:grid; grid-template-columns:1.3fr 1fr; gap:12px; margin-top:12px;}
+  .box{border:1px solid var(--hair); padding:8px 10px; break-inside:avoid; page-break-inside:avoid;}
+  .box-h{font-size:8px; letter-spacing:1.6px; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:5px;}
+  .stat{display:flex; justify-content:space-between; font-size:10px; padding:2.5px 0; border-bottom:1px dotted var(--line);}
+  .stat:last-child{border-bottom:0;}
+  .stat span:last-child{font-weight:700; font-variant-numeric:tabular-nums;}
+  .note{font-size:8.8px; color:var(--muted); line-height:1.45;}
+  .sign{margin-top:16px; text-align:right;}
+  ${SIGNATURE_BLOCK_CSS}
+  .sig-for{font-size:10px;}
+  .sig-mark{margin-top:4px;}
+  .sig-caption{border-top-color:var(--hair); font-size:9px; color:var(--muted);}
+  .foot{display:flex; justify-content:space-between; margin-top:14px; padding-top:6px;
+        border-top:1px solid var(--line); font-size:8.5px; color:#9ca3af;}
+
+  /* ---------- print ---------- */
+  @page{size:A4 portrait; margin:11mm 10mm 12mm;}
+  @media print{
+    body{background:#fff;}
+    .sheet{width:auto; min-height:0; margin:0; padding:0; box-shadow:none;}
+    thead{display:table-header-group;}
+    tfoot{display:table-row-group;}
+    .no-print{display:none !important;}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- letterhead -->
+  <div class="head">
+    <div>
+      <div class="co-name">${esc(companyName)}</div>
+      <div class="co-tag">Tamarind Seed Processing</div>
+      <div class="co-lines">
+        ${companyAddr ? `<div>${esc(companyAddr)}</div>` : ''}
+        <div>${[
+          company?.gstin ? `GSTIN: ${company.gstin}` : null,
+          companyState ? `State: ${companyState}` : null,
+        ].filter(Boolean).map(esc).join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>
+        ${company?.contact ? `<div>Phone: ${esc(company.contact)}</div>` : ''}
+      </div>
+    </div>
+    <div class="doc">
+      <div class="doc-title">Brokerage Statement</div>
+      <div class="doc-rule"></div>
+      <div class="doc-meta">
+        <div>Period&nbsp; <b>${esc(fromLabel)} &nbsp;to&nbsp; ${esc(toLabel)}</b></div>
+        <div>Currency&nbsp; <b>INR (₹)</b></div>
+        <div>Generated&nbsp; <b>${esc(stamp())}</b></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- broker / bank -->
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-h">Statement For</div>
+      <div class="party-name">${esc(broker.name)}<span class="tag">Broker</span></div>
+      <div style="margin-top:5px">
+        ${kv('Phone', broker.phone)}
+        ${kv('Orders', String(summary.orderCount))}
+        ${kv('Last Entry', summary.lastActivity ? longDate(summary.lastActivity) : '-')}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-h">Remit Payments To</div>
+      ${company?.bankName || company?.bankAccountNumber
+        ? `${kv('Account', company?.bankAccountName ?? companyName)}${kv('Bank', company?.bankName ?? null)}${kv('A/C No.', company?.bankAccountNumber ?? null, true)}${kv('IFSC', company?.bankBranchIfsc ?? null, true)}`
+        : `<div class="note">Bank details not configured in Settings → Company.</div>`}
+    </div>
+  </div>
+
+  <!-- summary strip -->
+  <div class="summary">
+    <div class="sum">
+      <div class="sum-l">Opening Balance</div>
+      <div class="sum-v">${amt0(Math.abs(opening))}<small>${drcr(opening)}</small></div>
+    </div>
+    <div class="sum">
+      <div class="sum-l">Total Debit</div>
+      <div class="sum-v">${amt0(periodDebit)}</div>
+    </div>
+    <div class="sum">
+      <div class="sum-l">Total Credit</div>
+      <div class="sum-v">${amt0(periodCredit)}</div>
+    </div>
+    <div class="sum accent">
+      <div class="sum-l">Closing Balance</div>
+      <div class="sum-v">${amt0(Math.abs(closing))}<small>${drcr(closing)}</small></div>
+    </div>
+  </div>
+
+  <!-- ledger -->
+  <table>
+    <colgroup>
+      <col style="width:9%"><col style="width:38%"><col style="width:17%">
+      <col style="width:12%"><col style="width:12%"><col style="width:12%">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Particulars &amp; Narration</th>
+        <th>Invoice / Ref</th>
+        <th class="r">Debit (₹)</th>
+        <th class="r">Credit (₹)</th>
+        <th class="r">Balance (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${openingRow}
+      ${txns.length ? bodyRows : emptyRow}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3">Total for the period - ${txns.length} voucher(s)</td>
+        <td class="c-num">${amt0(periodDebit)}</td>
+        <td class="c-num">${amt0(periodCredit)}</td>
+        <td class="c-num">${balText(closing)}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- closing -->
+  <div class="closing">
+    <div class="closing-l">${esc(closingLabel)}</div>
+    <div class="closing-v">₹ ${amt0(Math.abs(closing))}<span>${drcr(closing)}</span></div>
+  </div>
+  <div class="words">
+    <span>Closing balance in words</span>
+    <b>${esc(closingWords)}</b>
+  </div>
+
+  <!-- activity + declaration -->
+  <div class="lower">
+    <div class="box">
+      <div class="box-h">Account Activity (lifetime)</div>
+      <div class="stat"><span>Total brokerage earned</span><span>${amt0(summary.totalDue)}</span></div>
+      <div class="stat"><span>Total paid to broker</span><span>${amt0(summary.totalPaid)}</span></div>
+      <div class="stat"><span>Orders brokered</span><span>${numFmt.format(summary.orderCount)}</span></div>
+    </div>
+    <div class="box">
+      <div class="box-h">Declaration</div>
+      <div class="note">
+        This is a computer-generated Brokerage Statement listing every voucher posted to this broker's ledger
+        for the period stated above. All amounts are in Indian Rupees. Kindly verify these entries against your
+        records and report any discrepancy in writing <b>within 7 days</b> of receipt, after which the balance
+        shown will be treated as confirmed.
+      </div>
+      <div class="sign">
+        ${signatureBlockHtml({ companyName: esc(companyName) })}
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>${esc(companyName)} &nbsp;·&nbsp; Brokerage Statement &nbsp;·&nbsp; ${esc(broker.name)}</span>
+    <span>Computer-generated statement &nbsp;·&nbsp; ${esc(stamp())}</span>
+  </div>
+</div>
+<script>
+  window.onload = function () { window.focus(); ${'setTimeout(function(){ window.print(); }, 250);'} };
+</script>
+</body>
+</html>`;
+}
+
+/**
+ * Opens the statement in a new tab and fires the print dialog (Save as PDF).
+ * Served from a Blob URL rather than document.write so the UTF-8 charset is
+ * honoured - otherwise ₹ arrives as mojibake.
+ */
+export function openBrokerStatement(o: BrokerStatementOptions): void {
+  const html = buildBrokerStatementHtml(o);
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+  const win = window.open(url, '_blank');
+  if (!win) {
+    URL.revokeObjectURL(url);
+    throw new Error('Pop-up blocked - allow pop-ups for this site to download the statement.');
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

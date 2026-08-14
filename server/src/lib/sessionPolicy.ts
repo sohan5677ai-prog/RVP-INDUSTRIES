@@ -7,7 +7,7 @@
  */
 
 /** No activity for this long and the browser signs the user out. */
-export const IDLE_TIMEOUT_MS = 4 * 60 * 1000;
+export const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 
 /**
  * Slack on top of the idle window before the server treats a session as dead.

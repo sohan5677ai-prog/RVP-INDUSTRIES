@@ -3,7 +3,7 @@
  * server/src/lib/sessionPolicy.ts - the server rejects a session that has gone
  * quiet for longer, so a laxer client clock would just produce 401s.
  */
-export const IDLE_TIMEOUT_MS = 4 * 60 * 1000;
+export const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** How often we re-check the idle clock. */
 const CHECK_INTERVAL_MS = 15 * 1000;

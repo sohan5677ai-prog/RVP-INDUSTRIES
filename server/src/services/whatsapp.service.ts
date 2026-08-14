@@ -63,6 +63,7 @@ export type WaTemplateKey =
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   | 'PARTY_LEDGER' // rvp_party_ledger (document header - statement PDF): party, period, total debits, total credits, closing bal
+  | 'BROKER_LEDGER' // rvp_broker_ledger (document header - brokerage statement PDF): broker, period, total brokerage, total paid, closing bal - see docs/whatsapp-broker-ledger-template.md
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST' // rvp_owner_dues (document header - full outstanding-dues PDF): date, total receivable, overdue, top pending
@@ -110,6 +111,12 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // never collapse to the same id.
   SUPPORT_TICKET: '28539',
   SUPPORT_TICKET_TEXT: '28541',
+  // BROKER_LEDGER (rvp_broker_ledger) has no id yet - not yet submitted to
+  // Fast2SMS for approval. Wording is drafted in
+  // docs/whatsapp-broker-ledger-template.md. Until an id lands here, every
+  // send logs SKIPPED "is not configured" - same state PARTY_LEDGER sat in
+  // before its own template was approved. Set FAST2SMS_TMPL_BROKER_LEDGER
+  // once approved, or add the message_id here.
 };
 
 /**
@@ -1139,6 +1146,45 @@ export const whatsappService = {
         documentFilename: document.filename,
         relatedType: 'PARTY_LEDGER',
         relatedId: party.id,
+      },
+      Array.isArray(to) ? to : [to]
+    );
+  },
+
+  /**
+   * Brokerage statement → broker, fired by the "WhatsApp Ledger" button on the
+   * Brokerage Report detail page: the full statement (every dispatch's
+   * brokerage credit and every payment made) rides along as a PDF document
+   * header, exactly like `sendPartyLedgerStatement`. `to` is passed in rather
+   * than read off the broker so the dialog can let the sender type a one-off
+   * number, and the office is copied the same way.
+   */
+  async sendBrokerLedgerStatement(
+    broker: { id: string; name: string; waLanguage?: WaLanguage | null },
+    to: string | string[] | null | undefined,
+    statement: {
+      period: string;
+      totalBrokerage: string;
+      totalPaid: string;
+      closing: string;
+    },
+    document: { url: string; filename: string },
+  ) {
+    return sendToPartyAndInternal(
+      {
+        templateKey: 'BROKER_LEDGER',
+        language: broker.waLanguage,
+        variables: [
+          broker.name,
+          statement.period,
+          statement.totalBrokerage,
+          statement.totalPaid,
+          statement.closing,
+        ],
+        mediaUrl: document.url,
+        documentFilename: document.filename,
+        relatedType: 'BROKER_LEDGER',
+        relatedId: broker.id,
       },
       Array.isArray(to) ? to : [to]
     );

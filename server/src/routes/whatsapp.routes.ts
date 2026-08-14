@@ -6,6 +6,7 @@ import {
   getPartyReminderContext,
   sendPartyPaymentReminder,
   sendPartyLedgerWhatsApp,
+  sendBrokerLedgerWhatsApp,
   listTransportConfirmations,
   lookupLorryConfirmation,
   updateTransportConfirmation,
@@ -27,6 +28,9 @@ router.get('/whatsapp/parties/:partyId/reminder-context', asyncHandler(getPartyR
 // Payment reminder → the buyer, the broker(s) on the due invoices, or both.
 router.post('/whatsapp/parties/:partyId/payment-reminder', asyncHandler(sendPartyPaymentReminder));
 router.post('/whatsapp/parties/:partyId/send-ledger', asyncHandler(sendPartyLedgerWhatsApp));
+// Brokerage statement → broker, fired by the "WhatsApp Ledger" button on the
+// Brokerage Report detail page.
+router.post('/whatsapp/brokers/:brokerId/send-ledger', asyncHandler(sendBrokerLedgerWhatsApp));
 
 // Lorry booking register, fed by the transporter's inbound WhatsApp messages
 // (Freight Dues → Lorry Confirmations).

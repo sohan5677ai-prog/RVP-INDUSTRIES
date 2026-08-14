@@ -16,6 +16,8 @@ import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
+import { renderBrokerLedgerPdf } from '../lib/brokerLedgerPdf.js';
+import { buildBrokerLedgerData, isOwnBroker } from '../services/brokerLedger.service.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { computePartyDues, invoiceListText, type BuyerDues } from '../services/salesDues.service.js';
 
@@ -907,6 +909,127 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
     if (err instanceof HttpError) throw err;
     logger.error('[whatsapp] sendPartyLedgerWhatsApp error', err);
     throw new HttpError(500, err instanceof Error ? err.message : 'Failed to send ledger statement');
+  }
+}
+
+/**
+ * Send a broker's brokerage-ledger statement via WhatsApp for a given date
+ * range, as a PDF document header - the same shape as `sendPartyLedgerWhatsApp`,
+ * fired from the "WhatsApp Ledger" button on the Brokerage Report detail page.
+ *
+ * Not scoped to the page's search filter, for the same reason the party
+ * statement isn't scoped to its kind tab: the running balance has to carry
+ * every voucher in the period or the printed closing figure won't reconcile.
+ */
+export async function sendBrokerLedgerWhatsApp(req: Request, res: Response) {
+  try {
+    const { brokerId } = req.params;
+    const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as { fromDate?: string; toDate?: string; phone?: string };
+    const { fromDate, toDate, phone } = body;
+
+    const ledger = await buildBrokerLedgerData(brokerId);
+    if (!ledger) throw new HttpError(404, 'Broker not found');
+    const { broker, transactions } = ledger;
+
+    if (isOwnBroker(broker.name)) {
+      throw new HttpError(400, `${broker.name} is the own-orders marker, not a real broker - there is nothing to send.`);
+    }
+
+    const targetPhone = phone?.trim() || broker.phone;
+    if (!targetPhone) {
+      throw new HttpError(400, `No valid phone number for ${broker.name}. Please enter one in Brokers or in the prompt.`);
+    }
+
+    let txns = transactions;
+    if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
+    if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
+
+    const firstTxn = txns[0];
+    const lastTxn = txns[txns.length - 1];
+    const opening = firstTxn ? (firstTxn.runningBalance || 0) - (firstTxn.debit || 0) + (firstTxn.credit || 0) : 0;
+    const closing = lastTxn ? (lastTxn.runningBalance || 0) : 0;
+    const totalPaid = txns.reduce((s, t) => s + (t.debit || 0), 0);
+    const totalBrokerage = txns.reduce((s, t) => s + (t.credit || 0), 0);
+
+    const fmtAmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(Math.abs(n || 0)));
+    const drcr = (n: number) => (n === 0 ? '' : n > 0 ? 'Dr' : 'Cr');
+
+    const fromStr = fromDate ? fromDate.slice(0, 10) : firstTxn ? firstTxn.date.slice(0, 10) : 'Start';
+    const toStr = toDate ? toDate.slice(0, 10) : lastTxn ? lastTxn.date.slice(0, 10) : 'As of today';
+    const periodStr = `${fromStr} to ${toStr}`;
+
+    const recentList = txns
+      .slice(-5)
+      .map((t) => `• ${t.date.slice(0, 10)}: ${t.particulars} (₹${fmtAmt(t.debit || t.credit || 0)})`)
+      .join('\n');
+
+    const summaryText = `*Brokerage Statement - ${broker.name}*\nPeriod: ${periodStr}\nOpening Bal: ₹${fmtAmt(opening)} ${drcr(opening)}\nTotal Brokerage: ₹${fmtAmt(totalBrokerage)}\nTotal Paid: ₹${fmtAmt(totalPaid)}\n*Closing Bal: ₹${fmtAmt(closing)} ${drcr(closing)}*\n\nRecent Activity:\n${recentList || 'No transactions in period'}`;
+
+    let document: { url: string; filename: string } | null = null;
+    try {
+      const profile = await getCompanyProfileRow();
+      const buffer = await renderBrokerLedgerPdf(
+        {
+          name: profile.name || 'RVP Industries',
+          address: profile.address,
+          gstin: profile.gstin,
+          contact: profile.contact,
+          stateName: profile.stateName,
+          stateCode: profile.stateCode,
+          pincode: profile.pincode,
+          signatureHeight: profile.signatureHeight,
+          stampSize: profile.stampSize,
+        },
+        { broker, transactions: txns },
+        { opening, from: fromStr, to: toStr }
+      );
+      const slug = (s: string) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
+      const filename = `Brokerage-Statement-${slug(broker.name)}-${slug(fromStr)}-to-${slug(toStr)}.pdf`;
+      const url = await uploadFileToStorage({ originalname: filename, mimetype: 'application/pdf', buffer } as Express.Multer.File);
+      document = { url, filename };
+    } catch (e) {
+      logger.error('[whatsapp] broker ledger statement PDF failed', e);
+    }
+
+    let result: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, error: 'WhatsApp template notification skipped' };
+    if (!document) {
+      result = { ok: false, error: 'Could not prepare the statement PDF, so nothing was sent. Please try again or use WhatsApp Web.' };
+    } else {
+      try {
+        result = await whatsappService.sendBrokerLedgerStatement(
+          { id: broker.id, name: broker.name, waLanguage: broker.waLanguage },
+          targetPhone,
+          {
+            period: periodStr,
+            totalBrokerage: `₹${fmtAmt(totalBrokerage)}`,
+            totalPaid: `₹${fmtAmt(totalPaid)}`,
+            closing: `₹${fmtAmt(closing)} ${drcr(closing)}`.trim(),
+          },
+          document
+        );
+      } catch (e) {
+        logger.error('[whatsapp] sendBrokerLedgerWhatsApp template error', e);
+        result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+
+    res.json({
+      ok: result.ok,
+      skipped: result.skipped ?? false,
+      message: result.ok
+        ? `Statement PDF sent to ${targetPhone}`
+        : result.error || 'WhatsApp send failed',
+      summaryText,
+      documentUrl: document?.url ?? null,
+      targetPhone,
+      period: periodStr,
+      closingBalance: closing,
+      transactionCount: txns.length,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    logger.error('[whatsapp] sendBrokerLedgerWhatsApp error', err);
+    throw new HttpError(500, err instanceof Error ? err.message : 'Failed to send broker ledger statement');
   }
 }
 

@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { requireRole } from '../middleware/auth.js';
 import {
   listWhatsAppLogs,
+  listOwnerWhatsAppJobs,
+  runOwnerWhatsAppJobNow,
   sendPartyReminder,
   getPartyReminderContext,
   sendPartyPaymentReminder,
@@ -19,6 +22,13 @@ import {
 const router = Router();
 
 router.get('/whatsapp/logs', asyncHandler(listWhatsAppLogs));
+
+// Owner daily digests (Settings -> WhatsApp -> Owner Daily Messages): list the
+// 5 toggleable jobs with their current on/off state + last-sent time, and let
+// a privileged user fire one immediately regardless of the toggle.
+const canRunOwnerJobs = requireRole('ADMIN', 'OWNER', 'DEVELOPER');
+router.get('/whatsapp/owner-jobs', asyncHandler(listOwnerWhatsAppJobs));
+router.post('/whatsapp/owner-jobs/:job/run', canRunOwnerJobs, asyncHandler(runOwnerWhatsAppJobNow));
 
 // Pending-loads reminder to a supplier (Party Ledger button). Throttled server-side.
 router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminder));

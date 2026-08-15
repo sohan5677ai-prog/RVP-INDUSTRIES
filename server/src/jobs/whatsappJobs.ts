@@ -10,14 +10,22 @@ import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 
 /**
- * Scheduled WhatsApp jobs (use cases 7, 8, 9, 10). Runs in-process via node-cron
- * in Asia/Kolkata time. Every job is also callable on demand (see runDailyJobs /
- * runWeeklyJobs, exposed as secret-guarded endpoints) so it can be triggered
- * manually or by an external cron - a useful fallback since Render free-tier
- * spins down when idle and an in-process timer can miss its window.
+ * Scheduled WhatsApp jobs (use cases 7-12). Runs in-process via node-cron in
+ * Asia/Kolkata time. Every job is also callable on demand: the CRON_SECRET
+ * fallback endpoint (`/webhooks/whatsapp/jobs/:job`, for an external cron
+ * when Render's free tier is asleep) and the authenticated Settings "Send
+ * Now" button (`OWNER_DIGEST_JOBS`, `JobOpts.force`) both go through
+ * `JOB_RUNNERS`.
+ *
+ * Each of the five owner digests (see `OWNER_DIGEST_JOBS` below) also has an
+ * on/off toggle on `CompanyProfile`, editable in Settings -> WhatsApp. The
+ * cron and the CRON_SECRET fallback both respect it (via `ownerJobEnabled`);
+ * only an explicit "Send Now" click (`force: true`) bypasses it.
  *
  * Idempotency: each owner digest is keyed by day/week in WhatsAppLog, and buyer
  * dues reminders are throttled, so a restart or a double-trigger never spams.
+ * "Send Now" (`force: true`) deliberately bypasses this too, so a manual click
+ * always actually sends even if the automatic run already fired today.
  */
 
 const TZ = 'Asia/Kolkata';
@@ -67,12 +75,32 @@ function describeSend(res: { ok: boolean; skipped?: boolean; error?: string }, w
   return `${res.skipped ? 'skipped' : 'failed'} (${what}): ${res.error ?? 'unknown reason'}`;
 }
 
+/**
+ * Options every owner job runner accepts. `force` is set only by the
+ * authenticated "Send Now" button in Settings - it skips both the
+ * Settings on/off toggle and the "already sent today/this week" dedupe, so a
+ * deliberate manual click always actually sends. The in-process cron and the
+ * CRON_SECRET fallback endpoint never pass this, so the automatic schedule
+ * always respects both.
+ */
+interface JobOpts {
+  force?: boolean;
+}
+
+/** True when `field` is on in Settings, or `opts.force` bypasses the check entirely. */
+async function ownerJobEnabled(opts: JobOpts, field: 'ownerDuesDigestEnabled' | 'ownerDueTodayDigestEnabled' | 'ownerBusinessSnapshotEnabled' | 'ownerWeeklySummaryEnabled' | 'ownerDispatchReminderEnabled'): Promise<boolean> {
+  if (opts.force) return true;
+  const profile = await getCompanyProfileRow();
+  return profile[field];
+}
+
 // ---------------------------------------------------------------------------
 // #10 - Owner daily outstanding-dues digest
 // ---------------------------------------------------------------------------
-async function runOwnerDuesDigest(): Promise<string> {
+async function runOwnerDuesDigest(opts: JobOpts = {}): Promise<string> {
+  if (!(await ownerJobEnabled(opts, 'ownerDuesDigestEnabled'))) return 'disabled in Settings';
   const dayKey = istDayKey();
-  if (await whatsappService.lastSentAt('OWNER_DUES_DIGEST', dayKey)) return `already sent for ${dayKey}`;
+  if (!opts.force && (await whatsappService.lastSentAt('OWNER_DUES_DIGEST', dayKey))) return `already sent for ${dayKey}`;
   const portfolio = await computeBuyerDues();
 
   // Best-effort: the digest still sends as text-only if the PDF can't be built
@@ -118,9 +146,10 @@ async function runOwnerDuesDigest(): Promise<string> {
 // day with nothing due - see the skip below - unlike runOwnerDuesDigest above,
 // which always sends (even a "no overdue dues" summary).
 // ---------------------------------------------------------------------------
-async function runOwnerDueTodayDigest(): Promise<string> {
+async function runOwnerDueTodayDigest(opts: JobOpts = {}): Promise<string> {
+  if (!(await ownerJobEnabled(opts, 'ownerDueTodayDigestEnabled'))) return 'disabled in Settings';
   const dayKey = istDayKey();
-  if (await whatsappService.lastSentAt('OWNER_DUE_TODAY_DIGEST', dayKey)) return `already sent for ${dayKey}`;
+  if (!opts.force && (await whatsappService.lastSentAt('OWNER_DUE_TODAY_DIGEST', dayKey))) return `already sent for ${dayKey}`;
   const portfolio = await computeBuyerDues();
   if (portfolio.dueToday.length === 0) return `no bills due today (${dayKey}) - nothing sent`;
   const res = await whatsappService.sendOwnerDueTodayDigest(
@@ -142,9 +171,10 @@ async function runOwnerDueTodayDigest(): Promise<string> {
 // this even on a day with nothing new. Data-only body, no greeting, no
 // sign-off - see docs/whatsapp-owner-business-snapshot-template.md for why.
 // ---------------------------------------------------------------------------
-async function runOwnerBusinessSnapshot(): Promise<string> {
+async function runOwnerBusinessSnapshot(opts: JobOpts = {}): Promise<string> {
+  if (!(await ownerJobEnabled(opts, 'ownerBusinessSnapshotEnabled'))) return 'disabled in Settings';
   const dayKey = istDayKey();
-  if (await whatsappService.lastSentAt('OWNER_BUSINESS_SNAPSHOT', dayKey)) return `already sent for ${dayKey}`;
+  if (!opts.force && (await whatsappService.lastSentAt('OWNER_BUSINESS_SNAPSHOT', dayKey))) return `already sent for ${dayKey}`;
   const [portfolio, supplierDues, pnl] = await Promise.all([
     computeBuyerDues(),
     computeSupplierDues(),
@@ -200,7 +230,8 @@ async function runBuyerDuesReminders(): Promise<string> {
 // ---------------------------------------------------------------------------
 // #8 - Owner deferred-dispatch reminders
 // ---------------------------------------------------------------------------
-async function runDeferredDispatchReminders(): Promise<string> {
+async function runDeferredDispatchReminders(opts: JobOpts = {}): Promise<string> {
+  if (!(await ownerJobEnabled(opts, 'ownerDispatchReminderEnabled'))) return 'disabled in Settings';
   const todayKey = istDayKey();
   let sent = 0;
   let failed = 0;
@@ -223,7 +254,7 @@ async function runDeferredDispatchReminders(): Promise<string> {
     if (istDayKey(effectiveDate) > maxDayKey) continue;
 
     const last = await whatsappService.lastSentAt('OWNER_DISPATCH_REMINDER', order.id);
-    if (last && istDayKey(last) === todayKey) continue; // already reminded today
+    if (!opts.force && last && istDayKey(last) === todayKey) continue; // already reminded today
 
     const dispatchedKg = order.dispatches.reduce((acc: number, d: { weightKg: number }) => acc + (d.weightKg || 0), 0);
     const remainingKg = Math.max(0, order.tonnageKg - dispatchedKg);
@@ -326,12 +357,13 @@ async function collectWeeklyStats(start: Date): Promise<OwnerWeeklyStats> {
   };
 }
 
-async function runWeeklySummary(): Promise<string> {
+async function runWeeklySummary(opts: JobOpts = {}): Promise<string> {
+  if (!(await ownerJobEnabled(opts, 'ownerWeeklySummaryEnabled'))) return 'disabled in Settings';
   const start = daysAgo(7);
   // Keyed by the week, not by the run date, so a manual trigger later in the
   // same week is a no-op rather than a duplicate summary.
   const weekKey = istWeekKey();
-  if (await whatsappService.lastSentAt('OWNER_WEEKLY_SUMMARY', weekKey)) {
+  if (!opts.force && (await whatsappService.lastSentAt('OWNER_WEEKLY_SUMMARY', weekKey))) {
     return `already sent for week of ${weekKey}`;
   }
   const stats = await collectWeeklyStats(start);
@@ -362,10 +394,20 @@ export async function runDailyJobs() {
   return results;
 }
 
-/** Weekly summary (#9). */
-export async function runWeeklyJobs() {
+/** Just the owner dues digest (#10) - exposed separately from runDailyJobs so Settings' "Send Now" can fire it alone. */
+export async function runDuesDigestJob(opts: JobOpts = {}) {
   try {
-    return { weeklySummary: await runWeeklySummary() };
+    return { ownerDuesDigest: await runOwnerDuesDigest(opts) };
+  } catch (e) {
+    logger.error('[whatsapp-cron] ownerDuesDigest failed', e);
+    return { ownerDuesDigest: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Weekly summary (#9). */
+export async function runWeeklyJobs(opts: JobOpts = {}) {
+  try {
+    return { weeklySummary: await runWeeklySummary(opts) };
   } catch (e) {
     logger.error('[whatsapp-cron] weeklySummary failed', e);
     return { weeklySummary: e instanceof Error ? e.message : String(e) };
@@ -373,9 +415,9 @@ export async function runWeeklyJobs() {
 }
 
 /** Just the owner "due today" digest (#11) - exposed separately since it runs on its own 06:00 schedule, not inside runDailyJobs. */
-export async function runDueTodayJob() {
+export async function runDueTodayJob(opts: JobOpts = {}) {
   try {
-    return { ownerDueTodayDigest: await runOwnerDueTodayDigest() };
+    return { ownerDueTodayDigest: await runOwnerDueTodayDigest(opts) };
   } catch (e) {
     logger.error('[whatsapp-cron] ownerDueTodayDigest failed', e);
     return { ownerDueTodayDigest: e instanceof Error ? e.message : String(e) };
@@ -383,9 +425,9 @@ export async function runDueTodayJob() {
 }
 
 /** Just the owner business snapshot (#12) - exposed separately since it runs on its own 06:00 schedule, not inside runDailyJobs. */
-export async function runBusinessSnapshotJob() {
+export async function runBusinessSnapshotJob(opts: JobOpts = {}) {
   try {
-    return { ownerBusinessSnapshot: await runOwnerBusinessSnapshot() };
+    return { ownerBusinessSnapshot: await runOwnerBusinessSnapshot(opts) };
   } catch (e) {
     logger.error('[whatsapp-cron] ownerBusinessSnapshot failed', e);
     return { ownerBusinessSnapshot: e instanceof Error ? e.message : String(e) };
@@ -393,9 +435,9 @@ export async function runBusinessSnapshotJob() {
 }
 
 /** Just the deferred-dispatch reminders (#8) - exposed separately for testing. */
-export async function runDispatchReminderJob() {
+export async function runDispatchReminderJob(opts: JobOpts = {}) {
   try {
-    return { deferredDispatchReminders: await runDeferredDispatchReminders() };
+    return { deferredDispatchReminders: await runDeferredDispatchReminders(opts) };
   } catch (e) {
     logger.error('[whatsapp-cron] deferredDispatchReminders failed', e);
     return { deferredDispatchReminders: e instanceof Error ? e.message : String(e) };
@@ -497,15 +539,81 @@ async function runCheckTemplates(): Promise<Record<string, unknown>> {
 }
 
 /** Map a job name (from the manual endpoint) to its runner. */
-export const JOB_RUNNERS: Record<string, () => Promise<Record<string, unknown>>> = {
+export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<string, unknown>>> = {
   daily: runDailyJobs,
   weekly: runWeeklyJobs,
   'dispatch-reminders': runDispatchReminderJob,
   'due-today': runDueTodayJob,
   'business-snapshot': runBusinessSnapshotJob,
+  'dues-digest': runDuesDigestJob,
   'check-driver-template': runCheckDriverTemplate,
   'check-templates': runCheckTemplates,
 };
+
+/**
+ * The owner-facing scheduled digests, in the order Settings shows them - the
+ * single source of truth for both the on/off toggle (`enabledField`, a
+ * CompanyProfile column) and the "Send Now" button (`jobKey`, a JOB_RUNNERS
+ * entry) in the Settings WhatsApp tab. Buyer dues reminders (#7) are
+ * deliberately excluded - those go to buyers, not the owners.
+ */
+export interface OwnerDigestJobMeta {
+  jobKey: string;
+  label: string;
+  schedule: string;
+  templateName: string;
+  /** WhatsAppLog.relatedType, for the "last sent" lookup. */
+  relatedType: string;
+  enabledField:
+    | 'ownerDuesDigestEnabled'
+    | 'ownerDueTodayDigestEnabled'
+    | 'ownerBusinessSnapshotEnabled'
+    | 'ownerWeeklySummaryEnabled'
+    | 'ownerDispatchReminderEnabled';
+}
+
+export const OWNER_DIGEST_JOBS: OwnerDigestJobMeta[] = [
+  {
+    jobKey: 'due-today',
+    label: 'Bills Due Today',
+    schedule: '06:00 IST, every day',
+    templateName: 'due_today',
+    relatedType: 'OWNER_DUE_TODAY_DIGEST',
+    enabledField: 'ownerDueTodayDigestEnabled',
+  },
+  {
+    jobKey: 'business-snapshot',
+    label: 'Daily Business Snapshot',
+    schedule: '06:00 IST, every day',
+    templateName: 'rvpdaily',
+    relatedType: 'OWNER_BUSINESS_SNAPSHOT',
+    enabledField: 'ownerBusinessSnapshotEnabled',
+  },
+  {
+    jobKey: 'dues-digest',
+    label: 'Daily Dues Digest',
+    schedule: '09:00 IST, every day',
+    templateName: 'rvp_owner_dues',
+    relatedType: 'OWNER_DUES_DIGEST',
+    enabledField: 'ownerDuesDigestEnabled',
+  },
+  {
+    jobKey: 'dispatch-reminders',
+    label: 'Deferred Dispatch Reminders',
+    schedule: '09:00 IST, every day (only sent when an advance order is overdue to ship)',
+    templateName: 'rvp_owner_dispatch',
+    relatedType: 'OWNER_DISPATCH_REMINDER',
+    enabledField: 'ownerDispatchReminderEnabled',
+  },
+  {
+    jobKey: 'weekly',
+    label: 'Weekly Business Summary',
+    schedule: '08:00 IST, every Monday',
+    templateName: 'rvp_owner_weekly',
+    relatedType: 'OWNER_WEEKLY_SUMMARY',
+    enabledField: 'ownerWeeklySummaryEnabled',
+  },
+];
 
 /**
  * Register the in-process cron schedules. Called once at server start, gated by

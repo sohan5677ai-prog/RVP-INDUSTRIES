@@ -245,6 +245,11 @@ const companyProfileSchema = z.object({
   alertRecipients: z.string().optional().nullable(),
   whatsappTestMode: z.boolean().optional(),
   whatsappTestNumber: z.string().optional().nullable(),
+  ownerDuesDigestEnabled: z.boolean().optional(),
+  ownerDueTodayDigestEnabled: z.boolean().optional(),
+  ownerBusinessSnapshotEnabled: z.boolean().optional(),
+  ownerWeeklySummaryEnabled: z.boolean().optional(),
+  ownerDispatchReminderEnabled: z.boolean().optional(),
   freightRetentionPerTrip: z.coerce.number().nonnegative().optional(),
   // How far under the booked tonnage a final lorry may land and still close the
   // order (% of ordered weight). Capped at 10% - beyond that a short order needs

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal } from 'lucide-react';
+import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal, Bell, Send } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, HamaliRate } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -82,8 +82,9 @@ export default function Settings() {
           <HamaliRatesSection qc={qc} />
         </TabsContent>
 
-        <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0">
+        <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">
           <WhatsAppSection qc={qc} />
+          <OwnerDigestsSection qc={qc} />
         </TabsContent>
 
         <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">
@@ -868,6 +869,120 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               </Button>
             </div>
           </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Owner daily WhatsApp digests: per-message on/off + Send Now ----------------
+
+interface OwnerJobRow {
+  jobKey: string;
+  label: string;
+  schedule: string;
+  templateName: string;
+  enabled: boolean;
+  lastSentAt: string | null;
+}
+
+/** Which CompanyProfile boolean each job's toggle writes to. */
+const OWNER_JOB_ENABLED_FIELD: Record<string, keyof CompanyProfile> = {
+  'due-today': 'ownerDueTodayDigestEnabled',
+  'business-snapshot': 'ownerBusinessSnapshotEnabled',
+  'dues-digest': 'ownerDuesDigestEnabled',
+  'dispatch-reminders': 'ownerDispatchReminderEnabled',
+  weekly: 'ownerWeeklySummaryEnabled',
+};
+
+function OwnerDigestsSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
+  const { data: jobs, isLoading } = useQuery({
+    queryKey: ['whatsapp-owner-jobs'],
+    queryFn: () => api<OwnerJobRow[]>('/whatsapp/owner-jobs'),
+  });
+  // Toggling writes straight to the saved company row (not the WhatsApp
+  // section's in-progress form above), so a flip here never depends on that
+  // other form being saved first.
+  const { data: company } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
+
+  const toggle = useMutation({
+    mutationFn: (job: OwnerJobRow) =>
+      api<CompanyProfile>('/settings/company', {
+        method: 'PUT',
+        body: { ...company, [OWNER_JOB_ENABLED_FIELD[job.jobKey]]: !job.enabled },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['company'] });
+      qc.invalidateQueries({ queryKey: ['whatsapp-owner-jobs'] });
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const sendNow = useMutation({
+    mutationFn: (jobKey: string) =>
+      api<{ job: string; result: Record<string, string> }>(`/whatsapp/owner-jobs/${jobKey}/run`, { method: 'POST' }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['whatsapp-owner-jobs'] });
+      const summary = Object.values(res.result)[0];
+      if (typeof summary === 'string' && /^(sent|already)/.test(summary)) toast.success(summary);
+      else toast.warning(typeof summary === 'string' ? summary : 'Job ran - check WhatsApp logs');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const fmtLastSent = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Never sent yet';
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <Bell className="h-5 w-5 text-green-500" />
+        <CardTitle className="text-base">Owner Daily Messages</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground max-w-2xl">
+          Scheduled WhatsApp updates sent to the recipients above. Switch any one off without touching the others - it still shows up here, it just won't send on its own schedule - or send it right now regardless of the toggle or schedule.
+        </p>
+        {isLoading || !jobs ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <div className="divide-y rounded-lg border">
+            {jobs.map((job) => {
+              const sendingThis = sendNow.isPending && sendNow.variables === job.jobKey;
+              return (
+                <div key={job.jobKey} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-0.5">
+                    <div className="text-sm font-semibold">{job.label}</div>
+                    <p className="text-xs text-muted-foreground">{job.schedule}</p>
+                    <p className="text-[11px] text-muted-foreground">Last sent: {fmtLastSent(job.lastSentAt)}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={sendingThis || !company}
+                      onClick={() => sendNow.mutate(job.jobKey)}
+                    >
+                      <Send className="h-3.5 w-3.5" /> {sendingThis ? 'Sending…' : 'Send Now'}
+                    </Button>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={job.enabled}
+                      aria-label={`${job.enabled ? 'Disable' : 'Enable'} ${job.label}`}
+                      disabled={toggle.isPending || !company}
+                      onClick={() => toggle.mutate(job)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${job.enabled ? 'bg-green-600' : 'bg-muted-foreground/30'}`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${job.enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </CardContent>
     </Card>

@@ -12,7 +12,7 @@ import {
   WAITING_STATES,
   USED_STATES,
 } from '../services/lorryConfirmation.service.js';
-import { JOB_RUNNERS } from '../jobs/whatsappJobs.js';
+import { JOB_RUNNERS, OWNER_DIGEST_JOBS } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
@@ -453,6 +453,48 @@ export async function runWhatsAppJob(req: Request, res: Response) {
 // ---------------------------------------------------------------------------
 // Authenticated endpoints
 // ---------------------------------------------------------------------------
+
+/**
+ * The 5 owner-facing scheduled digests, for the Settings -> WhatsApp
+ * "Owner Daily Messages" panel: each row's on/off state (from CompanyProfile)
+ * and when it last actually sent (from WhatsAppLog), so the toggle and the
+ * "Send Now" button both have something to show.
+ */
+export async function listOwnerWhatsAppJobs(_req: Request, res: Response) {
+  const profile = await getCompanyProfileRow();
+  const rows = await Promise.all(
+    OWNER_DIGEST_JOBS.map(async (job) => {
+      const last = await prisma.whatsAppLog.findFirst({
+        where: { relatedType: job.relatedType, status: 'SENT' },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      return {
+        jobKey: job.jobKey,
+        label: job.label,
+        schedule: job.schedule,
+        templateName: job.templateName,
+        enabled: profile[job.enabledField],
+        lastSentAt: last?.createdAt ?? null,
+      };
+    })
+  );
+  res.json(rows);
+}
+
+/**
+ * "Send Now" - fires one owner digest immediately, bypassing both its
+ * Settings on/off toggle and the "already sent today/this week" dedupe (see
+ * `JobOpts.force` in whatsappJobs.ts). Restricted to the 5 keys in
+ * OWNER_DIGEST_JOBS, not every JOB_RUNNERS entry - the UI must not be able to
+ * trigger the bundled `daily` job or the Fast2SMS diagnostics this way.
+ */
+export async function runOwnerWhatsAppJobNow(req: Request, res: Response) {
+  const job = OWNER_DIGEST_JOBS.find((j) => j.jobKey === req.params.job);
+  if (!job) throw new HttpError(404, `Unknown owner job "${req.params.job}"`);
+  const result = await JOB_RUNNERS[job.jobKey]({ force: true });
+  res.json({ job: job.jobKey, result });
+}
 
 export async function listWhatsAppLogs(req: Request, res: Response) {
   const take = Math.min(Number(req.query.take) || 50, 200);

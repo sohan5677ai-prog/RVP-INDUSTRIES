@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { Party, PartyLedgerRow, PartyLedgerDetail, PartyLedgerTxn, LedgerKind } from '@/lib/types';
@@ -17,11 +17,12 @@ import type { ExportColumn } from '@/lib/export';
 import { openPartyStatement, type StatementCompany } from '@/lib/partyStatement';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import {
   Search, Loader2, ArrowLeft, FileText, Phone, MapPin, Landmark,
   Hash, Wallet, TrendingUp, TrendingDown, Scale, Building2,
   ArrowDownRight, ArrowUpRight, ReceiptText, Copy, Check, Users, IndianRupee,
-  BellRing, AlertTriangle,
+  BellRing, AlertTriangle, CalendarClock, Trash2, Save, X,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ helpers */
@@ -85,6 +86,25 @@ interface PartyReminderContext {
     /** Full per-broker totals across all their invoices (not scoped to overdue). */
     brokers: { id: string; name: string; phone: string | null; invoiceCount: number; outstanding: number }[];
   } | null;
+}
+
+/** Party Ledger "Schedule" option - a fully custom recurring payment reminder for this one party. */
+interface PartyReminderSchedule {
+  id: string;
+  partyId: string;
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  frequency: 'DAILY' | 'WEEKLY' | 'INTERVAL';
+  daysOfWeek: number[];
+  intervalDays: number | null;
+  target: 'PARTY' | 'BROKER' | 'BOTH';
+  stopCondition: 'UNTIL_PAID' | 'UNTIL_DATE' | 'AFTER_COUNT' | 'MANUAL';
+  endDate: string | null;
+  maxSends: number | null;
+  sendsCount: number;
+  lastSentAt: string | null;
+  stoppedReason: 'PAID' | 'DATE_REACHED' | 'COUNT_REACHED' | null;
 }
 
 const LEDGER_COLUMNS: ExportColumn<PartyLedgerTxn>[] = [
@@ -260,6 +280,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   const [to, setTo] = useState('');
   const [waDialogOpen, setWaDialogOpen] = useState(false);
   const [payDialogOpen, setPayDialogOpen] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['party-ledger', partyId],
@@ -296,6 +317,13 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
 
   const pendingLorries = reminderCtx?.pending.lorries ?? 0;
   const dues = reminderCtx?.dues ?? null;
+
+  // Whether this party has a standing automated reminder schedule - drives the
+  // "Schedule" button's badge so it's obvious from the ledger whether one is live.
+  const { data: schedule } = useQuery({
+    queryKey: ['party-reminder-schedule', partyId],
+    queryFn: () => api<PartyReminderSchedule | null>(`/whatsapp/parties/${partyId}/reminder-schedule`),
+  });
 
   const filtered = useMemo(() => {
     let t = data?.transactions ?? [];
@@ -369,6 +397,16 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
               Payment Reminder ({dues.totalInvoiceCount})
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setScheduleDialogOpen(true)}
+            className={`gap-1.5 relative ${schedule?.enabled ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400' : ''}`}
+          >
+            <CalendarClock className="h-4 w-4" />
+            Schedule
+            {schedule?.enabled && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+          </Button>
           <ExportButtons
             filename={`${party.name.replace(/\s+/g, '_')}_Ledger`}
             title={`Party Ledger - ${party.name}`}
@@ -600,6 +638,14 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           dues={dues}
         />
       )}
+
+      <ScheduleReminderDialog
+        open={scheduleDialogOpen}
+        onOpenChange={setScheduleDialogOpen}
+        partyId={partyId}
+        partyName={party.name}
+        schedule={schedule ?? null}
+      />
     </div>
   );
 }
@@ -988,6 +1034,320 @@ function RecipientLine({ name, phone, detail }: { name: string; phone: string | 
         <span className="text-rose-600 dark:text-rose-400 whitespace-nowrap">No phone on file</span>
       )}
     </div>
+  );
+}
+
+/* ============================================= Reminder Schedule Dialog */
+
+const SCHEDULE_DOW_OPTIONS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
+
+const STOP_CONDITION_LABEL: Record<PartyReminderSchedule['stopCondition'], string> = {
+  UNTIL_PAID: 'Until fully paid',
+  UNTIL_DATE: 'Until a specific date',
+  AFTER_COUNT: 'After a number of reminders',
+  MANUAL: "Never - I'll turn it off myself",
+};
+
+const STOPPED_REASON_LABEL: Record<NonNullable<PartyReminderSchedule['stoppedReason']>, string> = {
+  PAID: 'Stopped automatically - the party is fully paid up.',
+  DATE_REACHED: 'Stopped automatically - the end date was reached.',
+  COUNT_REACHED: 'Stopped automatically - the reminder limit was reached.',
+};
+
+/**
+ * Party Ledger "Schedule" option - a fully custom recurring WhatsApp payment
+ * reminder for this one party: time, day/frequency, who gets messaged, and
+ * when it should stop on its own. Fired server-side by the sweep in
+ * whatsappJobs.ts (every 10 min), which always quotes whatever is currently
+ * outstanding - not a fixed invoice list captured here.
+ */
+function ScheduleReminderDialog({
+  open,
+  onOpenChange,
+  partyId,
+  partyName,
+  schedule,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  partyId: string;
+  partyName: string;
+  schedule: PartyReminderSchedule | null;
+}) {
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(true);
+  const [time, setTime] = useState('10:00');
+  const [frequency, setFrequency] = useState<PartyReminderSchedule['frequency']>('DAILY');
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1]);
+  const [intervalDays, setIntervalDays] = useState(3);
+  const [target, setTarget] = useState<PartyReminderSchedule['target']>('PARTY');
+  const [stopCondition, setStopCondition] = useState<PartyReminderSchedule['stopCondition']>('UNTIL_PAID');
+  const [endDate, setEndDate] = useState('');
+  const [maxSends, setMaxSends] = useState(5);
+
+  // Reset from the current schedule (or sensible defaults for a new one) every
+  // time the dialog opens - not on every `schedule` refetch, so mid-edit typing
+  // isn't clobbered by a background refresh.
+  useEffect(() => {
+    if (!open) return;
+    if (schedule) {
+      setEnabled(schedule.enabled);
+      setTime(`${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`);
+      setFrequency(schedule.frequency);
+      setDaysOfWeek(schedule.daysOfWeek.length > 0 ? schedule.daysOfWeek : [1]);
+      setIntervalDays(schedule.intervalDays ?? 3);
+      setTarget(schedule.target);
+      setStopCondition(schedule.stopCondition);
+      setEndDate(schedule.endDate ? schedule.endDate.slice(0, 10) : '');
+      setMaxSends(schedule.maxSends ?? 5);
+    } else {
+      setEnabled(true);
+      setTime('10:00');
+      setFrequency('DAILY');
+      setDaysOfWeek([1]);
+      setIntervalDays(3);
+      setTarget('PARTY');
+      setStopCondition('UNTIL_PAID');
+      setEndDate('');
+      setMaxSends(5);
+    }
+  }, [open, schedule]);
+
+  const toggleDay = (d: number) => setDaysOfWeek((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
+
+  const valid =
+    (frequency !== 'WEEKLY' || daysOfWeek.length > 0) &&
+    (frequency !== 'INTERVAL' || (intervalDays >= 1 && intervalDays <= 365)) &&
+    (stopCondition !== 'UNTIL_DATE' || !!endDate) &&
+    (stopCondition !== 'AFTER_COUNT' || maxSends >= 1);
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['party-reminder-schedule', partyId] });
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const [hStr, mStr] = time.split(':');
+      return api<PartyReminderSchedule>(`/whatsapp/parties/${partyId}/reminder-schedule`, {
+        method: 'PUT',
+        body: {
+          enabled,
+          hour: Number(hStr),
+          minute: Number(mStr),
+          frequency,
+          daysOfWeek: frequency === 'WEEKLY' ? daysOfWeek : [],
+          intervalDays: frequency === 'INTERVAL' ? intervalDays : undefined,
+          target,
+          stopCondition,
+          endDate: stopCondition === 'UNTIL_DATE' ? endDate : undefined,
+          maxSends: stopCondition === 'AFTER_COUNT' ? maxSends : undefined,
+        },
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      toast.success('Reminder schedule saved');
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api(`/whatsapp/parties/${partyId}/reminder-schedule`, { method: 'DELETE' }),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Reminder schedule removed');
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const busy = saveMutation.isPending || deleteMutation.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-emerald-600">
+            <CalendarClock className="h-5 w-5" />
+            Reminder Schedule
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+            <div className="font-semibold text-sm">{partyName}</div>
+            <p className="text-xs text-muted-foreground">
+              Automatically sends the WhatsApp payment reminder on this schedule - always for whatever is outstanding
+              at the time, not a fixed list.
+            </p>
+          </div>
+
+          {schedule && (schedule.lastSentAt || schedule.stoppedReason) && (
+            <div className="rounded-lg border bg-card p-3 space-y-1 text-xs">
+              {schedule.lastSentAt && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Last sent</span>
+                  <span className="font-medium">{new Date(schedule.lastSentAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Reminders sent</span>
+                <span className="font-medium">{schedule.sendsCount}</span>
+              </div>
+              {schedule.stoppedReason && (
+                <p className="text-amber-700 dark:text-amber-400 pt-1">{STOPPED_REASON_LABEL[schedule.stoppedReason]}</p>
+              )}
+            </div>
+          )}
+
+          {/* enabled toggle */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Schedule active</Label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              onClick={() => setEnabled((v) => !v)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-green-600' : 'bg-muted-foreground/30'}`}
+            >
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+
+          {/* time */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Time (IST)</Label>
+            <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-32" />
+          </div>
+
+          {/* frequency */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Frequency</Label>
+            <Select value={frequency} onValueChange={(v) => setFrequency(v as PartyReminderSchedule['frequency'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DAILY">Every day</SelectItem>
+                <SelectItem value="WEEKLY">On specific days of the week</SelectItem>
+                <SelectItem value="INTERVAL">Every N days</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {frequency === 'WEEKLY' && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {SCHEDULE_DOW_OPTIONS.map((d) => (
+                  <button
+                    key={d.value}
+                    type="button"
+                    onClick={() => toggleDay(d.value)}
+                    className={`rounded px-2 py-1 text-xs font-medium ${daysOfWeek.includes(d.value) ? 'bg-green-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted-foreground/20'}`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {frequency === 'WEEKLY' && daysOfWeek.length === 0 && (
+              <p className="text-xs text-rose-600 dark:text-rose-400">Pick at least one day.</p>
+            )}
+
+            {frequency === 'INTERVAL' && (
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-xs text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={intervalDays}
+                  onChange={(e) => setIntervalDays(Number(e.target.value))}
+                  className="h-8 w-20"
+                />
+                <span className="text-xs text-muted-foreground">day(s)</span>
+              </div>
+            )}
+          </div>
+
+          {/* target */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Send to</Label>
+            <Select value={target} onValueChange={(v) => setTarget(v as PartyReminderSchedule['target'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PARTY">Party</SelectItem>
+                <SelectItem value="BROKER">Broker(s) on the due invoices</SelectItem>
+                <SelectItem value="BOTH">Both</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* stop condition */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Stop condition</Label>
+            <Select value={stopCondition} onValueChange={(v) => setStopCondition(v as PartyReminderSchedule['stopCondition'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(STOP_CONDITION_LABEL) as PartyReminderSchedule['stopCondition'][]).map((k) => (
+                  <SelectItem key={k} value={k}>{STOP_CONDITION_LABEL[k]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {stopCondition === 'UNTIL_DATE' && (
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-40" />
+            )}
+            {stopCondition === 'AFTER_COUNT' && (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={maxSends}
+                  onChange={(e) => setMaxSends(Number(e.target.value))}
+                  className="h-8 w-20"
+                />
+                <span className="text-xs text-muted-foreground">reminder(s), then stop</span>
+              </div>
+            )}
+            {stopCondition === 'MANUAL' && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                This will keep sending indefinitely, even after the party has paid, until you switch it off.
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={busy || !valid}
+              className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Schedule
+            </Button>
+            {schedule && (
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  if (confirm(`Remove the reminder schedule for ${partyName}?`)) deleteMutation.mutate();
+                }}
+                className="gap-1.5 border-rose-500/40 text-rose-700 dark:text-rose-400 hover:bg-rose-500/10"
+              >
+                {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              </Button>
+            )}
+            <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)} className="gap-1.5">
+              <X className="h-4 w-4" /> Cancel
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

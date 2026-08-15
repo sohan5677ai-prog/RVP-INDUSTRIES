@@ -2,12 +2,14 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '../services/whatsapp.service.js';
-import { computeBuyerDues, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
+import { computeBuyerDues, computePartyDues, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
 import { computeSupplierDues } from '../services/purchaseDues.service.js';
 import { computeProfitLossSummary } from '../controllers/ledger.controller.js';
 import { renderSalesDuesReportPdf } from '../lib/salesDuesPdf.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { uploadFileToStorage } from '../lib/upload.js';
+import { runPartyPaymentReminderCore } from '../services/partyReminder.service.js';
+import type { PartyReminderSchedule } from '@prisma/client';
 
 /**
  * Scheduled WhatsApp jobs (use cases 8-12; buyer payment reminders, formerly
@@ -514,6 +516,119 @@ async function runCheckTemplates(): Promise<Record<string, unknown>> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Party Ledger "Schedule" option - per-party recurring payment reminders
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether `schedule` is due to fire on this sweep tick. The sweep itself runs
+ * every 10 minutes (see `registerWhatsappCron`), so this is a >= comparison
+ * against the target time rather than an exact-minute match - a missed tick
+ * (a restart, a slow query) still fires on the next one instead of silently
+ * skipping the day.
+ *
+ * DAILY/WEEKLY fire at most once per IST calendar day, gated by `lastSentKey`.
+ * INTERVAL ignores the day-key and instead compares elapsed time since
+ * `lastSentAt` (or "never sent" → eligible today) against `intervalDays`, so
+ * it self-corrects after any gap rather than drifting to a fixed weekday.
+ */
+function scheduleDue(schedule: PartyReminderSchedule, now: Date, todayKey: string): boolean {
+  const ist = new Date(now.getTime() + IST_OFFSET_MS);
+  const nowMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const targetMinutes = schedule.hour * 60 + schedule.minute;
+  if (nowMinutes < targetMinutes) return false;
+
+  if (schedule.frequency === 'INTERVAL') {
+    const days = schedule.intervalDays ?? 1;
+    if (!schedule.lastSentAt) return true; // never sent - eligible once the target time is reached today
+    const daysSince = Math.floor((now.getTime() - schedule.lastSentAt.getTime()) / (24 * 60 * 60 * 1000));
+    return daysSince >= days;
+  }
+
+  if (schedule.lastSentKey === todayKey) return false; // already handled today
+  if (schedule.frequency === 'WEEKLY' && !schedule.daysOfWeek.includes(ist.getUTCDay())) return false;
+  return true;
+}
+
+/**
+ * Sweep every enabled `PartyReminderSchedule` and fire the ones due. Reuses
+ * `runPartyPaymentReminderCore` - the same send the Party Ledger's manual
+ * "Payment Reminder" button uses - so a scheduled message always quotes
+ * whatever is currently outstanding, never a list captured when the schedule
+ * was created.
+ *
+ * Stop conditions are enforced here, not at save time: UNTIL_PAID disables the
+ * schedule the first time this party has nothing outstanding; UNTIL_DATE once
+ * `endDate` (IST calendar day) has passed; AFTER_COUNT once `sendsCount`
+ * reaches `maxSends`. MANUAL never self-disables.
+ */
+export async function runPartyReminderSchedulesSweep(): Promise<Record<string, unknown>> {
+  const now = new Date();
+  const todayKey = istDayKey(now);
+  const schedules = await prisma.partyReminderSchedule.findMany({
+    where: { enabled: true },
+    include: { party: { select: { name: true } } },
+  });
+
+  let fired = 0;
+  let stopped = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const schedule of schedules) {
+    if (!scheduleDue(schedule, now, todayKey)) continue;
+
+    if (schedule.stopCondition === 'UNTIL_DATE' && schedule.endDate && istDayKey(schedule.endDate) < todayKey) {
+      await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'DATE_REACHED' } });
+      stopped += 1;
+      continue;
+    }
+    if (schedule.stopCondition === 'AFTER_COUNT' && schedule.maxSends != null && schedule.sendsCount >= schedule.maxSends) {
+      await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'COUNT_REACHED' } });
+      stopped += 1;
+      continue;
+    }
+
+    const dues = await computePartyDues(schedule.partyId);
+    if (!dues || dues.invoices.length === 0) {
+      if (schedule.stopCondition === 'UNTIL_PAID') {
+        await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'PAID' } });
+        stopped += 1;
+      } else if (schedule.frequency !== 'INTERVAL') {
+        // Nothing to chase today - mark the day handled so a DAILY/WEEKLY
+        // schedule doesn't re-check dues on every tick for the rest of today.
+        await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data: { lastSentKey: todayKey } });
+        skipped += 1;
+      } else {
+        skipped += 1;
+      }
+      continue;
+    }
+
+    try {
+      await runPartyPaymentReminderCore(schedule.partyId, { target: schedule.target });
+      fired += 1;
+      const sendsCount = schedule.sendsCount + 1;
+      const data: { lastSentAt: Date; lastSentKey: string; sendsCount: number; enabled?: boolean; stoppedReason?: string } = {
+        lastSentAt: now,
+        lastSentKey: todayKey,
+        sendsCount,
+      };
+      if (schedule.stopCondition === 'AFTER_COUNT' && schedule.maxSends != null && sendsCount >= schedule.maxSends) {
+        data.enabled = false;
+        data.stoppedReason = 'COUNT_REACHED';
+      }
+      await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`${schedule.party.name}: ${msg}`);
+      logger.error(`[whatsapp-cron] party reminder schedule ${schedule.id} (${schedule.party.name}) failed`, e);
+    }
+  }
+
+  return { checked: schedules.length, fired, stopped, skipped, errors };
+}
+
 /** Map a job name (from the manual endpoint) to its runner. */
 export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<string, unknown>>> = {
   daily: runDailyJobs,
@@ -522,6 +637,7 @@ export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<stri
   'due-today': runDueTodayJob,
   'business-snapshot': runBusinessSnapshotJob,
   'dues-digest': runDuesDigestJob,
+  'party-reminder-sweep': runPartyReminderSchedulesSweep,
   'check-driver-template': runCheckDriverTemplate,
   'check-templates': runCheckTemplates,
 };
@@ -688,5 +804,9 @@ export async function registerWhatsappCron() {
     const cronExpr = (profile[job.cronField] as string | null) || job.defaultCron;
     scheduleJob(job, cronExpr);
   }
-  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST)');
+  // Party Ledger "Schedule" option - per-party payment reminders. One shared
+  // sweep rather than a timer per party: schedules are user-created/edited/
+  // deleted at runtime, unlike the 5 fixed owner digests above.
+  cron.schedule('*/10 * * * *', () => { void runPartyReminderSchedulesSweep(); }, { timezone: TZ });
+  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST) + party reminder sweep (every 10 min)');
 }

@@ -149,6 +149,7 @@ model Party {
   debitNotes        DebitNote[]
   emailLogs         EmailLog[]
   setOffs           PartySetOff[]
+  reminderSchedule  PartyReminderSchedule?
 }
 
 model Broker {
@@ -1585,6 +1586,64 @@ model SupportTicketAck {
 
   @@unique([ticketId, userId])
   @@index([userId])
+}
+
+/**
+ * Party Ledger "Schedule" option - a fully custom recurring WhatsApp payment
+ * reminder for one party, independent of the manual "Payment Reminder" button.
+ * One row per party (the Settings-style on/off + "Send Now" pattern didn't fit
+ * here: each party needs its own time/day/frequency, not one shared toggle).
+ *
+ * Fired by the sweep in whatsappJobs.ts (runPartyReminderSchedulesSweep, every
+ * 10 min under WHATSAPP_CRON_ENABLED), which reuses the same
+ * runPartyPaymentReminderCore the manual button calls - so a scheduled send
+ * always quotes whatever is currently outstanding, never a stale invoice list
+ * captured when the schedule was created.
+ */
+model PartyReminderSchedule {
+  id      String @id @default(cuid())
+  partyId String @unique
+  party   Party  @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  enabled Boolean @default(true)
+
+  // Time of day, IST. hour 0-23, minute 0-59.
+  hour   Int @default(10)
+  minute Int @default(0)
+
+  // DAILY | WEEKLY | INTERVAL
+  frequency String @default("DAILY")
+  // WEEKLY only - 0=Sun..6=Sat.
+  daysOfWeek Int[] @default([])
+  // INTERVAL only - fire every N days, counted from lastSentAt (or from
+  // creation, for the first send).
+  intervalDays Int?
+
+  // Who gets messaged when this fires - PARTY | BROKER | BOTH, same meaning as
+  // the manual dialog's picker. Always the party's/brokers' FULL current dues
+  // (no fixed invoice list), since the whole point is to keep chasing whatever
+  // is outstanding at fire time.
+  target String @default("PARTY")
+
+  // When the schedule stops firing on its own:
+  //  UNTIL_PAID   - disables itself the first time it finds nothing outstanding
+  //  UNTIL_DATE   - disables itself once `endDate` (IST calendar day) has passed
+  //  AFTER_COUNT  - disables itself once `sendsCount` reaches `maxSends`
+  //  MANUAL       - never auto-stops; only a user can disable/delete it
+  stopCondition String    @default("UNTIL_PAID")
+  endDate       DateTime?
+  maxSends      Int?
+
+  sendsCount Int       @default(0)
+  lastSentAt DateTime?
+  // YYYY-MM-DD (IST) of the last fire, so DAILY/WEEKLY never double-send if the
+  // sweep ticks more than once inside the same eligible window.
+  lastSentKey String?
+  // Set when the schedule auto-disables itself - PAID | DATE_REACHED | COUNT_REACHED.
+  stoppedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WhatsAppLog {

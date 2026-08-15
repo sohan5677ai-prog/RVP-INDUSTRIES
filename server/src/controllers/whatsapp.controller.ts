@@ -19,7 +19,8 @@ import { renderStatementPdf } from '../lib/statementPdf.js';
 import { renderBrokerLedgerPdf } from '../lib/brokerLedgerPdf.js';
 import { buildBrokerLedgerData, isOwnBroker } from '../services/brokerLedger.service.js';
 import { uploadFileToStorage } from '../lib/upload.js';
-import { computePartyDues, invoiceListText, type BuyerDues } from '../services/salesDues.service.js';
+import { computePartyDues, invoiceListText } from '../services/salesDues.service.js';
+import { duesScope, runPartyPaymentReminderCore } from '../services/partyReminder.service.js';
 
 // ---------------------------------------------------------------------------
 // Inbound webhook (public - Fast2SMS calls this, no JWT)
@@ -621,35 +622,6 @@ export async function sendPartyReminder(req: Request, res: Response) {
 // --- Party Ledger reminder buttons ------------------------------------------
 
 /**
- * Which invoices a payment reminder should quote. The approved template says
- * "the due date has passed", so overdue invoices are used whenever there are
- * any; a party whose bills are all still inside their credit period is reported
- * as UPCOMING and reminded about the whole outstanding instead - the caller
- * shows that distinction before anything is sent.
- */
-function duesScope(dues: BuyerDues) {
-  if (dues.overdueInvoices.length > 0) {
-    return { scope: 'OVERDUE' as const, invoices: dues.overdueInvoices, amount: dues.overdueOutstanding };
-  }
-  // Nothing overdue → quote the bills still inside their credit period, but
-  // leave out shipments still on the road: the buyer has not received those
-  // goods, so a "please pay" default that includes them is a reminder we would
-  // not want sent. They stay in the picker (the sender can tick them), just not
-  // in the default scope.
-  const upcoming = dues.invoices.filter((i) => !i.inTransit);
-  if (upcoming.length > 0) {
-    return {
-      scope: 'UPCOMING' as const,
-      invoices: upcoming,
-      amount: upcoming.reduce((s, i) => s + i.outstanding, 0),
-    };
-  }
-  // Every unsettled invoice is in transit - there is nothing to chase yet, but
-  // the picker still needs a list to show.
-  return { scope: 'UPCOMING' as const, invoices: dues.invoices, amount: dues.outstanding };
-}
-
-/**
  * What the Party Ledger's two reminder buttons may do for this party. Both are
  * conditional: pending loads only when POs are still to arrive, the payment
  * reminder only when sale invoices are actually outstanding - so the page never
@@ -736,112 +708,149 @@ export async function sendPartyPaymentReminder(req: Request, res: Response) {
     brokerIds?: string[];
     dispatchIds?: string[];
   };
-  const target = (body.target ?? 'PARTY').toUpperCase();
-  if (!['PARTY', 'BROKER', 'BOTH'].includes(target)) {
-    throw new HttpError(400, `Unknown reminder target "${body.target}" - expected PARTY, BROKER or BOTH`);
-  }
-
-  const party = await prisma.party.findUnique({ where: { id: req.params.partyId } });
-  if (!party) throw new HttpError(404, 'Party not found');
-
-  const dues = await computePartyDues(party.id);
-  if (!dues || dues.invoices.length === 0) {
-    throw new HttpError(400, `${party.name} has no outstanding sale invoices - nothing to remind about`);
-  }
-
-  // An explicit dispatchIds list is the ledger's per-invoice picker narrowing
-  // the send; without one (e.g. the scheduled job), fall back to the old
-  // scope default - overdue if any, else the whole outstanding.
-  let active: { invoices: typeof dues.invoices; amount: number };
-  if (body.dispatchIds) {
-    const picked = dues.invoices.filter((i) => body.dispatchIds!.includes(i.dispatchId));
-    if (picked.length === 0) throw new HttpError(400, 'Select at least one invoice to remind about');
-    active = { invoices: picked, amount: picked.reduce((s, i) => s + i.outstanding, 0) };
-  } else {
-    active = duesScope(dues);
-  }
-
-  const sent: Array<{ recipient: string; phone: string | null; amount: number; invoices: number }> = [];
-  const failed: Array<{ recipient: string; error: string }> = [];
-
-  // The office is copied on this reminder, but ONCE per press. A "both" send is
-  // one act of chasing, not two: the first leg to actually go out carries the
-  // internal copy, and the broker legs after it do not repeat it.
-  let internalCopyDone = false;
-
-  if (target === 'PARTY' || target === 'BOTH') {
-    if (!party.phone && !party.phone2) {
-      failed.push({ recipient: party.name, error: 'No phone number on file - add one in Parties first' });
-    } else {
-      const result = await whatsappService.sendPaymentReminder({
-        recipientName: party.name,
-        phones: [party.phone, party.phone2],
-        outstanding: active.amount,
-        invoiceListText: invoiceListText(active.invoices),
-        buyerId: party.id,
-        language: party.waLanguage,
-        internalCopy: true,
-      });
-      internalCopyDone = true;
-      if (result.ok) sent.push({ recipient: party.name, phone: party.phone ?? party.phone2, amount: active.amount, invoices: active.invoices.length });
-      else failed.push({ recipient: party.name, error: result.error ?? 'WhatsApp send failed' });
-    }
-  }
-
-  if (target === 'BROKER' || target === 'BOTH') {
-    // An explicit brokerIds list narrows the copy; without one every broker
-    // behind the due invoices is copied. A broker whose invoices all fall
-    // OUTSIDE the active scope (brokered a bill that isn't overdue yet, while
-    // others are) has nothing to be told about, so drop them here rather than
-    // silently skipping later and reporting an empty failure.
-    const selected = body.brokerIds?.length ? dues.brokers.filter((b) => body.brokerIds!.includes(b.id)) : dues.brokers;
-    const wanted = selected.filter((b) => active.invoices.some((i) => i.brokerId === b.id));
-    if (wanted.length === 0) {
-      const reason = dues.brokers.length === 0
-        ? 'No broker on these invoices (own orders) - send to the party instead'
-        : selected.length === 0
-          ? 'None of the selected brokers are on these invoices'
-          : `No selected invoice is on these brokers' orders`;
-      if (target === 'BROKER') throw new HttpError(400, reason);
-      failed.push({ recipient: 'Broker', error: reason });
-    }
-    for (const broker of wanted) {
-      const theirs = active.invoices.filter((i) => i.brokerId === broker.id);
-      if (!broker.phone) {
-        failed.push({ recipient: broker.name, error: 'No phone number on file for this broker' });
-        continue;
-      }
-      const amount = theirs.reduce((s, i) => s + i.outstanding, 0);
-      const result = await whatsappService.sendPaymentReminder({
-        recipientName: `${broker.name} (for ${party.name})`,
-        phones: [broker.phone],
-        outstanding: amount,
-        invoiceListText: invoiceListText(theirs),
-        buyerId: party.id,
-        // The broker's own language, not the buyer's - it is the broker reading it.
-        language: broker.waLanguage,
-        internalCopy: !internalCopyDone,
-      });
-      internalCopyDone = true;
-      if (result.ok) sent.push({ recipient: broker.name, phone: broker.phone, amount, invoices: theirs.length });
-      else failed.push({ recipient: broker.name, error: result.error ?? 'WhatsApp send failed' });
-    }
-  }
-
-  if (sent.length === 0) {
-    throw new HttpError(502, failed[0]?.error ?? 'WhatsApp send failed');
-  }
-
+  const result = await runPartyPaymentReminderCore(req.params.partyId, body);
   res.json({
     ok: true,
-    amount: active.amount,
-    invoiceCount: active.invoices.length,
-    sent,
-    failed,
-    message: `Payment reminder sent to ${sent.map((s) => s.recipient).join(', ')}${
-      failed.length ? ` (failed: ${failed.map((f) => `${f.recipient} - ${f.error}`).join('; ')})` : ''
+    ...result,
+    message: `Payment reminder sent to ${result.sent.map((s) => s.recipient).join(', ')}${
+      result.failed.length ? ` (failed: ${result.failed.map((f) => `${f.recipient} - ${f.error}`).join('; ')})` : ''
     }`,
   });
+}
+
+// --- Party Ledger reminder schedule ("Schedule" option) ---------------------
+
+const REMINDER_FREQUENCIES = ['DAILY', 'WEEKLY', 'INTERVAL'] as const;
+const REMINDER_TARGETS = ['PARTY', 'BROKER', 'BOTH'] as const;
+const REMINDER_STOP_CONDITIONS = ['UNTIL_PAID', 'UNTIL_DATE', 'AFTER_COUNT', 'MANUAL'] as const;
+
+/** GET - the party's current schedule, or `null` if none has been set up yet. */
+export async function getPartyReminderSchedule(req: Request, res: Response) {
+  const schedule = await prisma.partyReminderSchedule.findUnique({ where: { partyId: req.params.partyId } });
+  res.json(schedule);
+}
+
+/**
+ * PUT - create or fully replace the party's reminder schedule. Every field is
+ * required so the client always sends a complete, self-consistent shape
+ * (e.g. never a WEEKLY with no days, or an AFTER_COUNT with no maxSends) -
+ * see the matching validation on each conditional field below.
+ */
+export async function upsertPartyReminderSchedule(req: Request, res: Response) {
+  const party = await prisma.party.findUnique({ where: { id: req.params.partyId }, select: { id: true } });
+  if (!party) throw new HttpError(404, 'Party not found');
+
+  const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as {
+    enabled?: unknown;
+    hour?: unknown;
+    minute?: unknown;
+    frequency?: unknown;
+    daysOfWeek?: unknown;
+    intervalDays?: unknown;
+    target?: unknown;
+    stopCondition?: unknown;
+    endDate?: unknown;
+    maxSends?: unknown;
+  };
+
+  const enabled = body.enabled !== false;
+  const hour = body.hour;
+  const minute = body.minute;
+  if (!Number.isInteger(hour) || (hour as number) < 0 || (hour as number) > 23) {
+    throw new HttpError(400, 'hour must be an integer 0-23');
+  }
+  if (!Number.isInteger(minute) || (minute as number) < 0 || (minute as number) > 59) {
+    throw new HttpError(400, 'minute must be an integer 0-59');
+  }
+
+  const frequency = body.frequency;
+  if (typeof frequency !== 'string' || !REMINDER_FREQUENCIES.includes(frequency as typeof REMINDER_FREQUENCIES[number])) {
+    throw new HttpError(400, `frequency must be one of ${REMINDER_FREQUENCIES.join(', ')}`);
+  }
+
+  let daysOfWeek: number[] = [];
+  if (frequency === 'WEEKLY') {
+    if (!Array.isArray(body.daysOfWeek) || !body.daysOfWeek.every((d) => Number.isInteger(d) && d >= 0 && d <= 6) || body.daysOfWeek.length === 0) {
+      throw new HttpError(400, 'daysOfWeek must be a non-empty array of integers 0-6 when frequency is WEEKLY');
+    }
+    daysOfWeek = [...new Set(body.daysOfWeek as number[])].sort((a, b) => a - b);
+  }
+
+  let intervalDays: number | null = null;
+  if (frequency === 'INTERVAL') {
+    if (!Number.isInteger(body.intervalDays) || (body.intervalDays as number) < 1 || (body.intervalDays as number) > 365) {
+      throw new HttpError(400, 'intervalDays must be an integer 1-365 when frequency is INTERVAL');
+    }
+    intervalDays = body.intervalDays as number;
+  }
+
+  const target = body.target;
+  if (typeof target !== 'string' || !REMINDER_TARGETS.includes(target as typeof REMINDER_TARGETS[number])) {
+    throw new HttpError(400, `target must be one of ${REMINDER_TARGETS.join(', ')}`);
+  }
+
+  const stopCondition = body.stopCondition;
+  if (typeof stopCondition !== 'string' || !REMINDER_STOP_CONDITIONS.includes(stopCondition as typeof REMINDER_STOP_CONDITIONS[number])) {
+    throw new HttpError(400, `stopCondition must be one of ${REMINDER_STOP_CONDITIONS.join(', ')}`);
+  }
+
+  let endDate: Date | null = null;
+  if (stopCondition === 'UNTIL_DATE') {
+    const parsed = typeof body.endDate === 'string' ? new Date(body.endDate) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) {
+      throw new HttpError(400, 'endDate must be a valid date when stopCondition is UNTIL_DATE');
+    }
+    endDate = parsed;
+  }
+
+  let maxSends: number | null = null;
+  if (stopCondition === 'AFTER_COUNT') {
+    if (!Number.isInteger(body.maxSends) || (body.maxSends as number) < 1) {
+      throw new HttpError(400, 'maxSends must be a positive integer when stopCondition is AFTER_COUNT');
+    }
+    maxSends = body.maxSends as number;
+  }
+
+  const schedule = await prisma.partyReminderSchedule.upsert({
+    where: { partyId: party.id },
+    create: {
+      partyId: party.id,
+      enabled,
+      hour: hour as number,
+      minute: minute as number,
+      frequency,
+      daysOfWeek,
+      intervalDays,
+      target,
+      stopCondition,
+      endDate,
+      maxSends,
+    },
+    update: {
+      enabled,
+      hour: hour as number,
+      minute: minute as number,
+      frequency,
+      daysOfWeek,
+      intervalDays,
+      target,
+      stopCondition,
+      endDate,
+      maxSends,
+      // Re-enabling (or re-saving) a schedule clears any earlier auto-stop and
+      // resets the count - the user is deliberately (re)starting it fresh.
+      stoppedReason: null,
+      sendsCount: 0,
+      lastSentKey: null,
+    },
+  });
+  res.json(schedule);
+}
+
+/** DELETE - remove the party's reminder schedule entirely. */
+export async function deletePartyReminderSchedule(req: Request, res: Response) {
+  await prisma.partyReminderSchedule.deleteMany({ where: { partyId: req.params.partyId } });
+  res.json({ ok: true });
 }
 
 /**

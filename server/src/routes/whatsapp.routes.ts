@@ -9,6 +9,9 @@ import {
   sendPartyReminder,
   getPartyReminderContext,
   sendPartyPaymentReminder,
+  getPartyReminderSchedule,
+  upsertPartyReminderSchedule,
+  deletePartyReminderSchedule,
   sendPartyLedgerWhatsApp,
   sendBrokerLedgerWhatsApp,
   listTransportConfirmations,
@@ -39,6 +42,12 @@ router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminde
 router.get('/whatsapp/parties/:partyId/reminder-context', asyncHandler(getPartyReminderContext));
 // Payment reminder → the buyer, the broker(s) on the due invoices, or both.
 router.post('/whatsapp/parties/:partyId/payment-reminder', asyncHandler(sendPartyPaymentReminder));
+// Party Ledger "Schedule" option - fully custom recurring payment reminder for
+// this one party (time/day/frequency + a stop condition). Fired by the sweep
+// in whatsappJobs.ts, not by these routes - these just edit the row.
+router.get('/whatsapp/parties/:partyId/reminder-schedule', asyncHandler(getPartyReminderSchedule));
+router.put('/whatsapp/parties/:partyId/reminder-schedule', asyncHandler(upsertPartyReminderSchedule));
+router.delete('/whatsapp/parties/:partyId/reminder-schedule', asyncHandler(deletePartyReminderSchedule));
 router.post('/whatsapp/parties/:partyId/send-ledger', asyncHandler(sendPartyLedgerWhatsApp));
 // Brokerage statement → broker, fired by the "WhatsApp Ledger" button on the
 // Brokerage Report detail page.

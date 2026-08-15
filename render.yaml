@@ -102,6 +102,8 @@ services:
         sync: false
       - key: FAST2SMS_TMPL_OWNER_DUES_DIGEST
         sync: false
+      - key: FAST2SMS_TMPL_OWNER_BUSINESS_SNAPSHOT
+        sync: false
       # Scheduled WhatsApp jobs (owner/party reminders): daily 09:00 IST dues
       # digest + buyer dues reminders + 2-day dispatch reminders, weekly Mon
       # 08:00 IST summary. Alerts go to Settings -> WhatsApp alert recipients.

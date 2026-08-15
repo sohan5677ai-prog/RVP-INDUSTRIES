@@ -74,7 +74,7 @@ export type WaTemplateKey =
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST' // rvp_owner_dues (document header - full outstanding-dues PDF): date, total receivable, overdue, top pending
   | 'OWNER_DUE_TODAY_DIGEST' // rvp_owner_due_today: date, total due today, bill count, itemised list - see docs/whatsapp-owner-due-today-template.md
-  | 'OWNER_BUSINESS_SNAPSHOT' // rvp_owner_snapshot: date, total receivable, overdue receivable, total payable, overdue invoices pending, net profit - data-only body, no greeting/sign-off (see docs/whatsapp-owner-business-snapshot-template.md)
+  | 'OWNER_BUSINESS_SNAPSHOT' // rvpdaily: date, total receivable, overdue receivable, total payable, overdue invoices pending, net profit (see docs/whatsapp-owner-business-snapshot-template.md)
   | 'SUPPORT_TICKET' // rvp_support_ticket (image header - the screen capture): reporter, page, note, time
   // rvp_support_ticket_text (no header) - same four variables, used when the
   // browser couldn't capture the screen. Like PAYMENT_SENT_TEXT, its approved
@@ -109,9 +109,12 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // send logs SKIPPED "is not configured" - same state OWNER_DUES_DIGEST and
   // OWNER_WEEKLY_SUMMARY sat in before 2026-08-11. Set FAST2SMS_TMPL_OWNER_DUE_TODAY_DIGEST
   // once approved, or add the message_id here.
-  // OWNER_BUSINESS_SNAPSHOT (rvp_owner_snapshot) also has no id yet - see
-  // docs/whatsapp-owner-business-snapshot-template.md for the wording to submit.
-  // Set FAST2SMS_TMPL_OWNER_BUSINESS_SNAPSHOT once approved, or add it here.
+  // rvpdaily (the business snapshot - see docs/whatsapp-owner-business-snapshot-template.md),
+  // approved 2026-08-15 on the shared KNM number. Submitted under the name
+  // "rvpdaily" rather than the drafted "rvp_owner_snapshot" - the id is what
+  // the code sends on, so the approved NAME only matters for reading the
+  // Fast2SMS panel.
+  OWNER_BUSINESS_SNAPSHOT: '28806',
   // rvp_support_ticket (image header) + rvp_support_ticket_text (no header),
   // approved 2026-08-11. See the guard in notifySupportTicket - these two must
   // never collapse to the same id.

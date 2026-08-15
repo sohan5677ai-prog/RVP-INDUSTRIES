@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { PiggyBank, Plus, Loader2, Trash2 } from 'lucide-react';
+import { PiggyBank, Plus, Loader2, Trash2, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import { PageHeader } from '@/components/PageHeader';
@@ -27,6 +27,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export default function OtherIncome({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), label: '', amount: '', note: '' });
 
   const { data: rows = [], isLoading } = useQuery({
@@ -45,6 +46,23 @@ export default function OtherIncome({ embedded = false }: { embedded?: boolean }
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       setOpen(false);
+      setForm({ date: today(), label: '', amount: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/other-income/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success('Entry updated');
+      qc.invalidateQueries({ queryKey: ['other-income'] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+      qc.invalidateQueries({ queryKey: ['profit-loss'] });
+      qc.invalidateQueries({ queryKey: ['receipts'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      setOpen(false);
+      setEditingId(null);
       setForm({ date: today(), label: '', amount: '', note: '' });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -70,7 +88,21 @@ export default function OtherIncome({ embedded = false }: { embedded?: boolean }
       toast.error('Enter a valid date, label and amount');
       return;
     }
-    createMutation.mutate({ date: form.date, label: form.label.trim(), amount, note: form.note || null });
+    const body = { date: form.date, label: form.label.trim(), amount, note: form.note || null };
+    if (editingId) updateMutation.mutate({ id: editingId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEdit(r: OtherIncomeEntry) {
+    setEditingId(r.id);
+    setForm({ date: r.date.slice(0, 10), label: r.label, amount: String(Number(r.amount)), note: r.note ?? '' });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm({ date: today(), label: '', amount: '', note: '' });
+    setOpen(true);
   }
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
@@ -78,7 +110,7 @@ export default function OtherIncome({ embedded = false }: { embedded?: boolean }
   const actions = (
     <>
       <ExportButtons filename="Other_Income" title="Other Income" subtitle={`${rows.length} entry(s)`} columns={OTHER_INCOME_COLUMNS} rows={rows} />
-      <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+      <Button onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
     </>
   );
 
@@ -126,9 +158,14 @@ export default function OtherIncome({ embedded = false }: { embedded?: boolean }
                 <TableCell className="text-right font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{rupees(r.amount)}</TableCell>
                 <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
                 <TableCell className="text-center">
-                  <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(r)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -136,9 +173,9 @@ export default function OtherIncome({ embedded = false }: { embedded?: boolean }
         </Table>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditingId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record Other Income</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Record'} Other Income</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -159,8 +196,8 @@ export default function OtherIncome({ embedded = false }: { embedded?: boolean }
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ReceiptText, Plus, Loader2, Trash2, Printer } from 'lucide-react';
+import { ReceiptText, Plus, Loader2, Trash2, Printer, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import { PageHeader } from '@/components/PageHeader';
@@ -81,6 +81,7 @@ function SummaryStat({ label, value, tone }: { label: string; value: string; ton
 export default function GunnyBags({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), type: 'PURCHASE' as 'PURCHASE' | 'SALE' | 'PAYMENT', quantity: '', amount: '', note: '' });
 
   const { data: rows = [], isLoading } = useQuery({
@@ -100,6 +101,24 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       setOpen(false);
+      setForm({ date: today(), type: 'PURCHASE', quantity: '', amount: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/gunny-bags/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success('Entry updated');
+      qc.invalidateQueries({ queryKey: ['gunny-bags'] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+      qc.invalidateQueries({ queryKey: ['profit-loss'] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['receipts'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      setOpen(false);
+      setEditingId(null);
       setForm({ date: today(), type: 'PURCHASE', quantity: '', amount: '', note: '' });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -131,7 +150,23 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
       toast.error('Enter a valid quantity for Purchase/Sale');
       return;
     }
-    createMutation.mutate({ date: form.date, type: form.type, quantity, amount, note: form.note || null });
+    const body = { date: form.date, type: form.type, quantity, amount, note: form.note || null };
+    if (editingId) updateMutation.mutate({ id: editingId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEdit(r: LedgerRow) {
+    // PURCHASE credits the Feroz account (creditAmount); SALE/PAYMENT debit it (debitAmount).
+    const amount = r.type === 'PURCHASE' ? r.creditAmount : r.debitAmount;
+    setEditingId(r.id);
+    setForm({ date: r.date.slice(0, 10), type: r.type, quantity: r.quantity != null ? String(r.quantity) : '', amount: String(amount), note: r.note ?? '' });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm({ date: today(), type: 'PURCHASE', quantity: '', amount: '', note: '' });
+    setOpen(true);
   }
 
   // Account-statement style (Party Ledger format): oldest first, running balance carried forward.
@@ -189,7 +224,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
     <>
       <ExportButtons filename="Feroz_Ledger" title="Feroz Ledger - Gunny Bags" subtitle={`${rows.length} entry(s)`} columns={FEROZ_LEDGER_COLUMNS} rows={ledgerRows} showPrint={false} />
       <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-1.5"><Printer className="h-4 w-4" /> Print</Button>
-      <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+      <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
     </>
   );
 
@@ -295,9 +330,14 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
                           <BalanceCell value={t.runningBalance} />
                         </TableCell>
                         <TableCell className="align-top text-center print:hidden">
-                          <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(t.id)} disabled={deleteMutation.isPending} className="h-7 w-7">
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Button size="icon" variant="ghost" onClick={() => openEdit(t)} className="h-7 w-7">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(t.id)} disabled={deleteMutation.isPending} className="h-7 w-7">
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -331,9 +371,9 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
         )}
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditingId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record Feroz Ledger Entry</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Record'} Feroz Ledger Entry</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -372,8 +412,8 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

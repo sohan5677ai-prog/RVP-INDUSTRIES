@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { HandCoins, Plus, Loader2, Trash2 } from 'lucide-react';
+import { HandCoins, Plus, Loader2, Trash2, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import { PageHeader } from '@/components/PageHeader';
@@ -62,6 +62,7 @@ export default function Drawings({ embedded = false }: { embedded?: boolean } = 
 function OwnerPanel({ owner }: { owner: Owner }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), amount: '', note: '' });
   const label = owner === 'SHABRI' ? 'Shabri' : 'Reddy';
 
@@ -80,6 +81,22 @@ function OwnerPanel({ owner }: { owner: Owner }) {
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       setOpen(false);
+      setForm({ date: today(), amount: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/drawings/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success(`Drawing updated for ${label}`);
+      qc.invalidateQueries({ queryKey: ['drawings', owner] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      setOpen(false);
+      setEditingId(null);
       setForm({ date: today(), amount: '', note: '' });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -104,7 +121,21 @@ function OwnerPanel({ owner }: { owner: Owner }) {
       toast.error('Enter a valid date and amount');
       return;
     }
-    createMutation.mutate({ date: form.date, owner, amount, note: form.note || null });
+    const body = { date: form.date, owner, amount, note: form.note || null };
+    if (editingId) updateMutation.mutate({ id: editingId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEdit(r: Drawing) {
+    setEditingId(r.id);
+    setForm({ date: r.date.slice(0, 10), amount: String(Number(r.amount)), note: r.note ?? '' });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm({ date: today(), amount: '', note: '' });
+    setOpen(true);
   }
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
@@ -115,7 +146,7 @@ function OwnerPanel({ owner }: { owner: Owner }) {
         <StatCard label={`${label} - total drawings`} value={rupees(total)} icon={HandCoins} tone="amber" hint="to husk pool" className="flex-1 max-w-xs" />
         <div className="flex items-center gap-2">
           <ExportButtons filename={`Drawings_${label}`} title={`Drawings - ${label}`} columns={DRAWING_COLUMNS} rows={rows} />
-          <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
         </div>
       </div>
 
@@ -140,9 +171,14 @@ function OwnerPanel({ owner }: { owner: Owner }) {
                 <TableCell className="text-right font-mono tabular-nums">{rupees(r.amount)}</TableCell>
                 <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
                 <TableCell className="text-center">
-                  <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(r)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -150,9 +186,9 @@ function OwnerPanel({ owner }: { owner: Owner }) {
         </Table>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditingId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record Drawing - {label}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Record'} Drawing - {label}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -169,8 +205,8 @@ function OwnerPanel({ owner }: { owner: Owner }) {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

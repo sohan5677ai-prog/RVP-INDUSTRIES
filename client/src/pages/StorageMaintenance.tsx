@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Zap, Users, Plus, Loader2, Trash2, type LucideIcon } from 'lucide-react';
+import { Zap, Users, Plus, Loader2, Trash2, Pencil, type LucideIcon } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
@@ -74,6 +74,7 @@ function StorageSection({
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), label: defaultLabel, amount: '', note: '' });
 
   const columns: ExportColumn<StorageEntry>[] = [
@@ -108,6 +109,18 @@ function StorageSection({
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/storage-maintenance/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success(`${title} updated`);
+      invalidate();
+      setOpen(false);
+      setEditingId(null);
+      setForm({ date: today(), label: defaultLabel, amount: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/storage-maintenance/${id}`, { method: 'DELETE' }),
     onSuccess: () => { toast.success('Entry deleted'); invalidate(); },
@@ -120,7 +133,21 @@ function StorageSection({
       toast.error('Enter a valid date and amount');
       return;
     }
-    createMutation.mutate({ date: form.date, kind, label: form.label.trim() || null, amount, note: form.note || null });
+    const body = { date: form.date, kind, label: form.label.trim() || null, amount, note: form.note || null };
+    if (editingId) updateMutation.mutate({ id: editingId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEdit(r: StorageEntry) {
+    setEditingId(r.id);
+    setForm({ date: r.date.slice(0, 10), label: r.label ?? defaultLabel, amount: String(Number(r.amount)), note: r.note ?? '' });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm({ date: today(), label: defaultLabel, amount: '', note: '' });
+    setOpen(true);
   }
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
@@ -134,7 +161,7 @@ function StorageSection({
         </div>
         <div className="flex items-center gap-2">
           <ExportButtons filename={`Storage_${title.replace(/\s+/g, '_')}`} title={`Storage ${title}`} columns={columns} rows={rows} />
-          <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
         </div>
       </div>
 
@@ -163,9 +190,14 @@ function StorageSection({
                 <TableCell className="text-right font-mono tabular-nums">{rupees(r.amount)}</TableCell>
                 <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
                 <TableCell className="text-center">
-                  <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(r)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -173,9 +205,9 @@ function StorageSection({
         </Table>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditingId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record {title}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Record'} {title}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -196,8 +228,8 @@ function StorageSection({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

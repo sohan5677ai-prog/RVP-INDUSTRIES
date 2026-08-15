@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Percent, Plus, Loader2, Trash2, Landmark } from 'lucide-react';
+import { Percent, Plus, Loader2, Trash2, Landmark, Pencil } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import { PageHeader } from '@/components/PageHeader';
@@ -87,6 +87,7 @@ interface PrincipalEntry {
 function PrincipalPanel() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), amount: '', note: '' });
 
   const { data: rows = [], isLoading } = useQuery({
@@ -114,6 +115,18 @@ function PrincipalPanel() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/term-loan-principals/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success('Principal payment updated');
+      invalidate();
+      setOpen(false);
+      setEditingId(null);
+      setForm({ date: today(), amount: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/term-loan-principals/${id}`, { method: 'DELETE' }),
     onSuccess: () => { toast.success('Principal entry deleted'); invalidate(); },
@@ -126,7 +139,21 @@ function PrincipalPanel() {
       toast.error('Enter a valid date and amount');
       return;
     }
-    createMutation.mutate({ date: form.date, amount, note: form.note || null });
+    const body = { date: form.date, amount, note: form.note || null };
+    if (editingId) updateMutation.mutate({ id: editingId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEdit(r: PrincipalEntry) {
+    setEditingId(r.id);
+    setForm({ date: r.date.slice(0, 10), amount: String(Number(r.amount)), note: r.note ?? '' });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm({ date: today(), amount: '', note: '' });
+    setOpen(true);
   }
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
@@ -145,7 +172,7 @@ function PrincipalPanel() {
         </p>
         <div className="flex items-center gap-2">
           <ExportButtons filename="Term_Loan_Principal" title="Term Loan Principal Repayments" columns={AMOUNT_NOTE_COLUMNS} rows={rows} />
-          <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
         </div>
       </div>
 
@@ -170,9 +197,14 @@ function PrincipalPanel() {
                 <TableCell className="text-right font-mono tabular-nums">{rupees(r.amount)}</TableCell>
                 <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
                 <TableCell className="text-center">
-                  <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(r)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -181,9 +213,9 @@ function PrincipalPanel() {
         <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={totalRows} />
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditingId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record principal payment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Record'} principal payment</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -200,8 +232,8 @@ function PrincipalPanel() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -213,6 +245,7 @@ function PrincipalPanel() {
 function InterestPanel({ type, label, hint }: { type: InterestType; label: string; hint: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), amount: '', note: '' });
 
   const { data: rows = [], isLoading } = useQuery({
@@ -240,6 +273,18 @@ function InterestPanel({ type, label, hint }: { type: InterestType; label: strin
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/interest-charges/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success(`${label} updated`);
+      invalidate();
+      setOpen(false);
+      setEditingId(null);
+      setForm({ date: today(), amount: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/interest-charges/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
@@ -255,7 +300,21 @@ function InterestPanel({ type, label, hint }: { type: InterestType; label: strin
       toast.error('Enter a valid date and amount');
       return;
     }
-    createMutation.mutate({ date: form.date, type, amount, note: form.note || null });
+    const body = { date: form.date, type, amount, note: form.note || null };
+    if (editingId) updateMutation.mutate({ id: editingId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEdit(r: InterestCharge) {
+    setEditingId(r.id);
+    setForm({ date: r.date.slice(0, 10), amount: String(Number(r.amount)), note: r.note ?? '' });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm({ date: today(), amount: '', note: '' });
+    setOpen(true);
   }
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
@@ -274,7 +333,7 @@ function InterestPanel({ type, label, hint }: { type: InterestType; label: strin
         </p>
         <div className="flex items-center gap-2">
           <ExportButtons filename={`${label.replace(/\s+/g, '_')}`} title={label} columns={AMOUNT_NOTE_COLUMNS} rows={rows} />
-          <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
+          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" /> Record</Button>
         </div>
       </div>
 
@@ -299,9 +358,14 @@ function InterestPanel({ type, label, hint }: { type: InterestType; label: strin
                 <TableCell className="text-right font-mono tabular-nums">{rupees(r.amount)}</TableCell>
                 <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
                 <TableCell className="text-center">
-                  <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(r)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -310,9 +374,9 @@ function InterestPanel({ type, label, hint }: { type: InterestType; label: strin
         <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={totalRows} />
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditingId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Record {label}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Record'} {label}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Date</Label>
@@ -329,8 +393,8 @@ function InterestPanel({ type, label, hint }: { type: InterestType; label: strin
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

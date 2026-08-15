@@ -79,6 +79,7 @@ export default function SubscriptionExpense() {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<PlanConfig | null>(null);
+  const [editingChargeId, setEditingChargeId] = useState<string | null>(null);
   const [form, setForm] = useState({ date: today(), plan: 'MONTHLY' as Plan, amount: '', dueDate: '', note: '' });
 
   const { data: rows = [], isLoading } = useQuery({
@@ -112,6 +113,18 @@ export default function SubscriptionExpense() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) => api(`/subscription-charges/${id}`, { method: 'PUT', body }),
+    onSuccess: () => {
+      toast.success('Subscription charge updated');
+      invalidate();
+      setAddOpen(false);
+      setEditingChargeId(null);
+      setForm({ date: today(), plan: 'MONTHLY', amount: '', dueDate: '', note: '' });
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/subscription-charges/${id}`, { method: 'DELETE' }),
     onSuccess: () => { toast.success('Charge deleted'); invalidate(); },
@@ -131,13 +144,27 @@ export default function SubscriptionExpense() {
       toast.error('Enter a valid date and amount');
       return;
     }
-    createMutation.mutate({
+    const body = {
       date: form.date,
       plan: form.plan,
       amount,
       dueDate: form.dueDate || form.date,
       note: form.note || null,
-    });
+    };
+    if (editingChargeId) updateMutation.mutate({ id: editingChargeId, body });
+    else createMutation.mutate(body);
+  }
+
+  function openEditCharge(r: SubscriptionCharge) {
+    setEditingChargeId(r.id);
+    setForm({ date: r.date.slice(0, 10), plan: r.plan, amount: String(Number(r.amount)), dueDate: r.dueDate.slice(0, 10), note: r.note ?? '' });
+    setAddOpen(true);
+  }
+
+  function openAddCharge() {
+    setEditingChargeId(null);
+    setForm({ date: today(), plan: 'MONTHLY', amount: '', dueDate: '', note: '' });
+    setAddOpen(true);
   }
 
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
@@ -149,7 +176,7 @@ export default function SubscriptionExpense() {
   const actions = (
     <>
       <ExportButtons filename="Subscription_Charges" title="Subscription Charges" subtitle={`${rows.length} charge(s)`} columns={CHARGE_COLUMNS} rows={rows} />
-      <Button onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" /> Add one-off</Button>
+      <Button onClick={openAddCharge}><Plus className="h-4 w-4 mr-1.5" /> Add one-off</Button>
     </>
   );
 
@@ -247,9 +274,14 @@ export default function SubscriptionExpense() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">{r.note ?? '-'}</TableCell>
                   <TableCell className="text-center">
-                    <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    <div className="flex items-center justify-center gap-1">
+                      <Button size="icon" variant="ghost" onClick={() => openEditCharge(r)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -258,10 +290,10 @@ export default function SubscriptionExpense() {
         </Table>
       </div>
 
-      {/* ── Add a one-off charge ── */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      {/* ── Add / edit a charge ── */}
+      <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) setEditingChargeId(null); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Add Subscription Charge</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingChargeId ? 'Edit' : 'Add'} Subscription Charge</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label>Plan</Label>
@@ -292,8 +324,8 @@ export default function SubscriptionExpense() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={createMutation.isPending}>
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            <Button onClick={submit} disabled={createMutation.isPending || updateMutation.isPending}>
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

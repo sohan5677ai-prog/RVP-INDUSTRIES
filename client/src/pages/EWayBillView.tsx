@@ -123,7 +123,9 @@ export default function EWayBillView() {
 
   const taxInfo = taxRows?.find(t => t.product === order.product);
   const description = taxInfo?.description || PRODUCT_FALLBACK[order.product] || `${order.product} Sale`;
-  const hsn = taxInfo?.hsn || '120799'; // 6 digits minimum - NIC rejects 4-digit HSN (error 2311)
+  // A GST-exempt order shows the alternate no-GST HSN (e.g. husk), same as the
+  // tax invoice / e-invoice payload, falling back to the taxable code.
+  const hsn = (order.gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn) || '120799'; // 6 digits minimum - NIC rejects 4-digit HSN (error 2311)
   
   const weight = dispatch.weightKg;
   const rate = Number(order.ratePerKg);

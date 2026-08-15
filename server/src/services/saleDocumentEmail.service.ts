@@ -32,6 +32,9 @@ export async function buildInvoicePdfData(dispatchId: string) {
   // A GST-exempt order (and every dispatch under it) is billed WITHOUT GST - the
   // invoice/EWB must show a 0% rate regardless of the product's default tax row.
   const gstFraction = order.gstExempt ? 0 : (taxRow?.gstRate != null ? Number(taxRow.gstRate) : 5) / 100;
+  // Same exemption also swaps in the alternate no-GST HSN (e.g. husk), falling
+  // back to the taxable code if no exempt-specific one is configured.
+  const hsn = (order.gstExempt ? taxRow?.hsnExempt || taxRow?.hsn : taxRow?.hsn) || '';
 
   const irn = dispatch.irn
     ? {
@@ -69,7 +72,7 @@ export async function buildInvoicePdfData(dispatchId: string) {
     vehicleNumber: dispatch.vehicleNumber,
     line: {
       description: taxRow?.description || order.product,
-      hsn: taxRow?.hsn || '',
+      hsn,
       quantityKg: dispatch.weightKg,
       ratePerKg: Number(order.ratePerKg),
     },

@@ -385,7 +385,9 @@ export class TaxproService {
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
     const description = taxInfo?.description || `${order.product} Sale`;
-    const hsn = this.requireHsn(taxInfo?.hsn, order.product);
+    // A GST-exempt order files under the alternate no-GST HSN (e.g. husk),
+    // falling back to the taxable code if no exempt-specific one is configured.
+    const hsn = this.requireHsn(order.gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn, order.product);
 
     if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
     if (!buyer.gstin) throw new Error('Buyer GSTIN is not set in Buyer profile');
@@ -696,7 +698,8 @@ export class TaxproService {
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
     const description = taxInfo?.description || `${order.product} Sale`;
-    const hsn = this.requireHsn(taxInfo?.hsn, order.product);
+    // Same exemption swap as the e-invoice payload above.
+    const hsn = this.requireHsn(order.gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn, order.product);
 
     const sellerStateCode = company.gstin?.slice(0, 2) || '';
     const buyerStateCode = buyer.gstin?.slice(0, 2) || '';

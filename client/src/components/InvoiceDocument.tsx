@@ -130,7 +130,9 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
   const buyerPan = buyerGstin && buyerGstin.length >= 12 ? buyerGstin.slice(2, 12) : null;
   const description = tax?.description || PRODUCT_FALLBACK[order.product] || order.product;
-  const hsn = tax?.hsn || '';
+  // A GST-exempt order (e.g. husk without GST) prints the alternate no-GST HSN,
+  // falling back to the taxable code if no exempt-specific one is configured.
+  const hsn = (order.gstExempt ? tax?.hsnExempt || tax?.hsn : tax?.hsn) || '';
   const qtyStr = `${(dispatch.weightKg ?? 0).toLocaleString('en-IN')} Kgs`;
   const c = layout.cols;
   const metaCol = (100 - layout.headerLeftPct) / 4;

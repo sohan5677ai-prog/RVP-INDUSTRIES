@@ -536,7 +536,10 @@ export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<stri
 export interface OwnerDigestJobMeta {
   jobKey: string;
   label: string;
-  schedule: string;
+  /** Fallback cron ("MIN HOUR * * DOW") used only if CompanyProfile's field is blank. */
+  defaultCron: string;
+  /** Extra note appended to the human-readable schedule text, e.g. a "only sent when..." caveat. */
+  note?: string;
   templateName: string;
   /** WhatsAppLog.relatedType, for the "last sent" lookup. */
   relatedType: string;
@@ -546,68 +549,144 @@ export interface OwnerDigestJobMeta {
     | 'ownerBusinessSnapshotEnabled'
     | 'ownerWeeklySummaryEnabled'
     | 'ownerDispatchReminderEnabled';
+  /** CompanyProfile column holding this job's editable cron expression. */
+  cronField:
+    | 'ownerDuesDigestCron'
+    | 'ownerDueTodayDigestCron'
+    | 'ownerBusinessSnapshotCron'
+    | 'ownerWeeklySummaryCron'
+    | 'ownerDispatchReminderCron';
 }
 
 export const OWNER_DIGEST_JOBS: OwnerDigestJobMeta[] = [
   {
     jobKey: 'due-today',
     label: 'Bills Due Today',
-    schedule: '06:00 IST, every day',
+    defaultCron: '0 6 * * *',
     templateName: 'due_today',
     relatedType: 'OWNER_DUE_TODAY_DIGEST',
     enabledField: 'ownerDueTodayDigestEnabled',
+    cronField: 'ownerDueTodayDigestCron',
   },
   {
     jobKey: 'business-snapshot',
     label: 'Daily Business Snapshot',
-    schedule: '06:00 IST, every day',
+    defaultCron: '0 6 * * *',
     templateName: 'rvpdaily',
     relatedType: 'OWNER_BUSINESS_SNAPSHOT',
     enabledField: 'ownerBusinessSnapshotEnabled',
+    cronField: 'ownerBusinessSnapshotCron',
   },
   {
     jobKey: 'dues-digest',
     label: 'Daily Dues Digest',
-    schedule: '09:00 IST, every day',
+    defaultCron: '0 9 * * *',
     templateName: 'rvp_owner_dues',
     relatedType: 'OWNER_DUES_DIGEST',
     enabledField: 'ownerDuesDigestEnabled',
+    cronField: 'ownerDuesDigestCron',
   },
   {
     jobKey: 'dispatch-reminders',
     label: 'Deferred Dispatch Reminders',
-    schedule: '09:00 IST, every day (only sent when an advance order is overdue to ship)',
+    defaultCron: '0 9 * * *',
+    note: 'only sent when an advance order is overdue to ship',
     templateName: 'rvp_owner_dispatch',
     relatedType: 'OWNER_DISPATCH_REMINDER',
     enabledField: 'ownerDispatchReminderEnabled',
+    cronField: 'ownerDispatchReminderCron',
   },
   {
     jobKey: 'weekly',
     label: 'Weekly Business Summary',
-    schedule: '08:00 IST, every Monday',
+    defaultCron: '0 8 * * 1',
     templateName: 'rvp_owner_weekly',
     relatedType: 'OWNER_WEEKLY_SUMMARY',
     enabledField: 'ownerWeeklySummaryEnabled',
+    cronField: 'ownerWeeklySummaryCron',
   },
 ];
 
+const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * Turn a "MIN HOUR * * DOW" cron expression into a human-readable schedule,
+ * e.g. "06:00 IST, every day" or "08:00 IST, every Mon, Wed". Falls back to
+ * the raw expression for anything outside that 5-field day/hour/minute shape
+ * (there's no UI path that produces such a value, but a hand-edited DB row
+ * shouldn't crash the Settings page).
+ */
+export function describeCron(cronExpr: string): string {
+  const parts = cronExpr.trim().split(/\s+/);
+  if (parts.length !== 5) return cronExpr;
+  const [min, hour, dom, mon, dow] = parts;
+  if (dom !== '*' || mon !== '*') return cronExpr;
+  const m = Number(min);
+  const h = Number(hour);
+  if (!Number.isInteger(m) || !Number.isInteger(h) || m < 0 || m > 59 || h < 0 || h > 23) return cronExpr;
+  const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} IST`;
+  if (dow === '*') return `${time}, every day`;
+  const days = dow.split(',').map((d) => Number(d));
+  if (days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) return cronExpr;
+  return `${time}, every ${days.map((d) => DOW_NAMES[d]).join(', ')}`;
+}
+
+/**
+ * Build a "MIN HOUR * * DOW" cron expression from friendly fields. `days` is a
+ * set of 0(Sun)-6(Sat); empty or all 7 means every day (DOW "*").
+ */
+export function buildCron(hour: number, minute: number, days: number[]): string {
+  const uniqueDays = [...new Set(days)].sort((a, b) => a - b);
+  const dow = uniqueDays.length === 0 || uniqueDays.length === 7 ? '*' : uniqueDays.join(',');
+  return `${minute} ${hour} * * ${dow}`;
+}
+
+// In-process ScheduledTask per job, so a schedule change can stop the old
+// timer and start a new one without restarting the server.
+const scheduledTasks = new Map<string, cron.ScheduledTask>();
+
+function scheduleJob(job: OwnerDigestJobMeta, cronExpr: string) {
+  scheduledTasks.get(job.jobKey)?.stop();
+  if (!cron.validate(cronExpr)) {
+    logger.error(`[whatsapp-cron] invalid cron "${cronExpr}" for ${job.jobKey} - not scheduled`);
+    scheduledTasks.delete(job.jobKey);
+    return;
+  }
+  const runner = JOB_RUNNERS[job.jobKey];
+  const task = cron.schedule(cronExpr, () => { void runner(); }, { timezone: TZ });
+  scheduledTasks.set(job.jobKey, task);
+}
+
+/**
+ * Re-read one job's cron expression from CompanyProfile and apply it to the
+ * live scheduler immediately. Called by the Settings "save schedule" endpoint
+ * so a time/day change takes effect without a redeploy or restart.
+ */
+export async function rescheduleOwnerJob(jobKey: string): Promise<void> {
+  if (process.env.WHATSAPP_CRON_ENABLED !== 'true') return;
+  const job = OWNER_DIGEST_JOBS.find((j) => j.jobKey === jobKey);
+  if (!job) return;
+  const profile = await getCompanyProfileRow();
+  const cronExpr = (profile[job.cronField] as string | null) || job.defaultCron;
+  scheduleJob(job, cronExpr);
+}
+
 /**
  * Register the in-process cron schedules. Called once at server start, gated by
- * WHATSAPP_CRON_ENABLED so it stays off until you're ready.
+ * WHATSAPP_CRON_ENABLED so it stays off until you're ready. Each of the 5
+ * owner digests gets its own timer, driven by its CompanyProfile cron column
+ * (falling back to defaultCron when blank) - editable later via
+ * rescheduleOwnerJob without restarting the process.
  */
-export function registerWhatsappCron() {
+export async function registerWhatsappCron() {
   if (process.env.WHATSAPP_CRON_ENABLED !== 'true') {
     logger.info('[whatsapp-cron] disabled (set WHATSAPP_CRON_ENABLED=true to enable)');
     return;
   }
-  // Daily at 06:00 IST - owner "bills due today" digest + business snapshot.
-  // Both are meant to greet the owners before the business day starts, ahead
-  // of the 09:00 bundle below.
-  cron.schedule('0 6 * * *', () => { void runDueTodayJob(); }, { timezone: TZ });
-  cron.schedule('0 6 * * *', () => { void runBusinessSnapshotJob(); }, { timezone: TZ });
-  // Daily at 09:00 IST - owner dues digest + deferred-dispatch reminders.
-  cron.schedule('0 9 * * *', () => { void runDailyJobs(); }, { timezone: TZ });
-  // Weekly on Monday at 08:00 IST - owner business summary.
-  cron.schedule('0 8 * * 1', () => { void runWeeklyJobs(); }, { timezone: TZ });
-  logger.info('[whatsapp-cron] scheduled (due-today + business-snapshot 06:00, daily 09:00, weekly Mon 08:00, IST)');
+  const profile = await getCompanyProfileRow();
+  for (const job of OWNER_DIGEST_JOBS) {
+    const cronExpr = (profile[job.cronField] as string | null) || job.defaultCron;
+    scheduleJob(job, cronExpr);
+  }
+  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST)');
 }

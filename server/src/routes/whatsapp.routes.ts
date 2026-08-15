@@ -5,6 +5,7 @@ import {
   listWhatsAppLogs,
   listOwnerWhatsAppJobs,
   runOwnerWhatsAppJobNow,
+  updateOwnerWhatsAppJobSchedule,
   sendPartyReminder,
   getPartyReminderContext,
   sendPartyPaymentReminder,
@@ -29,6 +30,7 @@ router.get('/whatsapp/logs', asyncHandler(listWhatsAppLogs));
 const canRunOwnerJobs = requireRole('ADMIN', 'OWNER', 'DEVELOPER');
 router.get('/whatsapp/owner-jobs', asyncHandler(listOwnerWhatsAppJobs));
 router.post('/whatsapp/owner-jobs/:job/run', canRunOwnerJobs, asyncHandler(runOwnerWhatsAppJobNow));
+router.put('/whatsapp/owner-jobs/:job/schedule', canRunOwnerJobs, asyncHandler(updateOwnerWhatsAppJobSchedule));
 
 // Pending-loads reminder to a supplier (Party Ledger button). Throttled server-side.
 router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminder));

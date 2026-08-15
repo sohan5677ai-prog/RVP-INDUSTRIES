@@ -12,7 +12,7 @@ import {
   WAITING_STATES,
   USED_STATES,
 } from '../services/lorryConfirmation.service.js';
-import { JOB_RUNNERS, OWNER_DIGEST_JOBS } from '../jobs/whatsappJobs.js';
+import { JOB_RUNNERS, OWNER_DIGEST_JOBS, describeCron, buildCron, rescheduleOwnerJob } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
@@ -469,10 +469,12 @@ export async function listOwnerWhatsAppJobs(_req: Request, res: Response) {
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true },
       });
+      const cronExpr = (profile[job.cronField] as string | null) || job.defaultCron;
       return {
         jobKey: job.jobKey,
         label: job.label,
-        schedule: job.schedule,
+        cron: cronExpr,
+        schedule: describeCron(cronExpr) + (job.note ? ` (${job.note})` : ''),
         templateName: job.templateName,
         enabled: profile[job.enabledField],
         lastSentAt: last?.createdAt ?? null,
@@ -480,6 +482,38 @@ export async function listOwnerWhatsAppJobs(_req: Request, res: Response) {
     })
   );
   res.json(rows);
+}
+
+/**
+ * Save one owner digest's schedule (time + days) and apply it to the live
+ * cron immediately - see rescheduleOwnerJob in whatsappJobs.ts. Body is
+ * `{ hour: 0-23, minute: 0-59, days: number[] }` (0=Sun..6=Sat); an empty or
+ * 7-day `days` means "every day". Restricted to the 5 OWNER_DIGEST_JOBS keys,
+ * same as the "Send Now" endpoint above.
+ */
+export async function updateOwnerWhatsAppJobSchedule(req: Request, res: Response) {
+  const job = OWNER_DIGEST_JOBS.find((j) => j.jobKey === req.params.job);
+  if (!job) throw new HttpError(404, `Unknown owner job "${req.params.job}"`);
+
+  const { hour, minute, days } = req.body as { hour?: unknown; minute?: unknown; days?: unknown };
+  if (!Number.isInteger(hour) || (hour as number) < 0 || (hour as number) > 23) {
+    throw new HttpError(400, 'hour must be an integer 0-23');
+  }
+  if (!Number.isInteger(minute) || (minute as number) < 0 || (minute as number) > 59) {
+    throw new HttpError(400, 'minute must be an integer 0-59');
+  }
+  if (!Array.isArray(days) || !days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
+    throw new HttpError(400, 'days must be an array of integers 0-6');
+  }
+
+  const cronExpr = buildCron(hour as number, minute as number, days as number[]);
+  await getCompanyProfileRow(); // ensure the row exists
+  await prisma.companyProfile.update({
+    where: { id: 'default' },
+    data: { [job.cronField]: cronExpr },
+  });
+  await rescheduleOwnerJob(job.jobKey);
+  res.json({ jobKey: job.jobKey, cron: cronExpr, schedule: describeCron(cronExpr) + (job.note ? ` (${job.note})` : '') });
 }
 
 /**

@@ -1067,6 +1067,9 @@ model PrivateLoan {
   status          PrivateLoanStatus      @default(OPEN)
   closedDate      DateTime?
   notes           String?
+  // Language the WhatsApp statement is sent in - falls back to English when
+  // that language's copy isn't approved yet, same as Party.waLanguage.
+  waLanguage      WaLanguage             @default(EN)
   createdAt       DateTime               @default(now())
   repayments      PrivateLoanRepayment[]
 }

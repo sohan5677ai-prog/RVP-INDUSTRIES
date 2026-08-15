@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, ChevronRight, IndianRupee, MessageCircle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { PrivateLoansResponse, PrivateLoan } from '@/lib/types';
+import type { PrivateLoansResponse, PrivateLoan, WaLanguage } from '@/lib/types';
 import { loanInterest, daysBetween } from '@/lib/calc';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -15,12 +15,22 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ExportButtons } from '@/components/ExportButtons';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, Figure, PanelEmpty } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+// Only the languages the statement template is actually drafted in - see
+// docs/whatsapp-private-loan-statement-template.md. Other WaLanguage values
+// exist elsewhere in the ERP (Party/Broker) but have no copy here yet.
+const STATEMENT_LANGUAGES: { value: WaLanguage; label: string }[] = [
+  { value: 'EN', label: 'English' },
+  { value: 'TE', label: 'తెలుగు (Telugu)' },
+  { value: 'HI', label: 'हिंदी (Hindi)' },
+];
 
 export default function PrivateLoansPage() {
   const qc = useQueryClient();
@@ -55,6 +65,7 @@ export default function PrivateLoansPage() {
   const [startDate, setStartDate] = useState(today());
   const [interestRatePct, setInterestRatePct] = useState('');
   const [notes, setNotes] = useState('');
+  const [waLanguage, setWaLanguage] = useState<WaLanguage>('EN');
 
   function resetLoanForm() {
     setBorrowerName('');
@@ -64,6 +75,7 @@ export default function PrivateLoansPage() {
     setStartDate(today());
     setInterestRatePct('');
     setNotes('');
+    setWaLanguage('EN');
   }
 
   const loanMutation = useMutation({
@@ -78,6 +90,7 @@ export default function PrivateLoansPage() {
           startDate,
           interestRatePct: Number(interestRatePct),
           notes: notes || null,
+          waLanguage,
         },
       }),
     onSuccess: () => {
@@ -243,7 +256,12 @@ export default function PrivateLoansPage() {
                   <TableCell>{shortDate(loan.startDate)}</TableCell>
                   <TableCell>
                     <div className="font-medium text-foreground">{loan.borrowerName}</div>
-                    {loan.phone && <div className="text-xs text-muted-foreground">{loan.phone}</div>}
+                    {loan.phone && (
+                      <div className="text-xs text-muted-foreground">
+                        {loan.phone}
+                        {loan.waLanguage !== 'EN' && ` · ${loan.waLanguage}`}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">{rupees(loan.principal)}</TableCell>
                   <TableCell className="text-right">{Number(loan.interestRatePct)}% /yr</TableCell>
@@ -365,6 +383,19 @@ export default function PrivateLoansPage() {
                 <Label htmlFor="phone2">Phone (alt)</Label>
                 <Input id="phone2" value={phone2} onChange={(e) => setPhone2(e.target.value)} placeholder="optional" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="walang">WhatsApp statement language</Label>
+              <Select value={waLanguage} onValueChange={(v) => setWaLanguage(v as WaLanguage)}>
+                <SelectTrigger id="walang">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATEMENT_LANGUAGES.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">

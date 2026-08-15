@@ -8,6 +8,7 @@ export const createPrivateLoanSchema = z.object({
   startDate: z.coerce.date(),
   interestRatePct: z.coerce.number().nonnegative(),
   notes: z.string().trim().optional().nullable(),
+  waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']).optional(),
 });
 
 export const createPrivateLoanRepaymentSchema = z.object({

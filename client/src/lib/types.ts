@@ -198,6 +198,7 @@ export interface PrivateLoan {
   status: PrivateLoanStatus;
   closedDate: string | null;
   notes: string | null;
+  waLanguage: WaLanguage;
   createdAt: string;
   repayments: PrivateLoanRepayment[];
   // Server-computed

@@ -11,6 +11,10 @@ Six party-facing templates get a copy in Telugu, Tamil, Kannada and Hindi:
 | `PAYMENT_REMINDER` | `payment_reminder` | buyer + broker, sales dues | 3 |
 | `REMINDER` | `rvp_reminder` | supplier, pending loads | 3 |
 
+`PRIVATE_LOAN_STATEMENT` (`rvp_private_loan_statement`, borrower, on-demand
+loan statement, 6 vars) is drafted in EN/TE/HI only (no TA/KN yet) and lives
+in its own doc: `docs/whatsapp-private-loan-statement-template.md`.
+
 Owner/internal templates (`OWNER_*`, `SUPPORT_TICKET`) stay English only — nobody
 in the office needs them translated.
 

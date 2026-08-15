@@ -73,6 +73,7 @@ export async function createPrivateLoan(req: Request, res: Response) {
         startDate: data.startDate,
         interestRatePct: data.interestRatePct,
         notes: data.notes ?? null,
+        waLanguage: data.waLanguage ?? 'EN',
       },
     });
     await LedgerService.postPrivateLoanDisbursement(tx, created.id, {
@@ -189,6 +190,7 @@ export async function sendPrivateLoanStatement(req: Request, res: Response) {
     ratePct: Number(loan.interestRatePct),
     accruedInterest: accruedInterestToDate,
     loanId: loan.id,
+    language: loan.waLanguage,
   });
   if (!result.ok) throw new HttpError(502, result.error ?? 'WhatsApp send failed');
   res.json({ ok: true, outstanding, accruedInterestToDate });

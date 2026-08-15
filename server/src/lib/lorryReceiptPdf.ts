@@ -61,8 +61,8 @@ export interface LorryReceiptPdfData {
 /* an empty masthead.                                                          */
 /* -------------------------------------------------------------------------- */
 const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/assets');
-let assetCache: { ganesha: Buffer | null; balaji: Buffer | null } | undefined;
-function masthead(): { ganesha: Buffer | null; balaji: Buffer | null } {
+let assetCache: { ganesha: Buffer | null; balaji: Buffer | null; suryaSign: Buffer | null } | undefined;
+function masthead(): { ganesha: Buffer | null; balaji: Buffer | null; suryaSign: Buffer | null } {
   const read = (name: string) => {
     try {
       return fs.readFileSync(path.join(ASSET_DIR, name));
@@ -70,7 +70,9 @@ function masthead(): { ganesha: Buffer | null; balaji: Buffer | null } {
       return null;
     }
   };
-  if (!assetCache) assetCache = { ganesha: read('ganesha.png'), balaji: read('balaji.png') };
+  if (!assetCache) {
+    assetCache = { ganesha: read('ganesha.png'), balaji: read('balaji.png'), suryaSign: read('surya-sign.png') };
+  }
   return assetCache;
 }
 
@@ -135,10 +137,9 @@ function bagsFor(weightKg: number, kgPerBag: number): string {
  * matching the on-screen printable copy at client/src/pages/LorryReceiptView.tsx
  * so the WhatsApp bundle, the download, and the physical printout all agree.
  *
- * The stamp and authorised signature are deliberately NOT drawn here - unlike
- * the tax invoice, this document carries no company seal; the transporter's own
- * mark goes on by hand (or a dedicated lorry-receipt signature image, once one
- * is supplied) rather than the invoice's authorised-sign.png/company-stamp.png.
+ * Unlike the tax invoice, this document carries no company seal - only the
+ * transporter's own scanned signature (surya-sign.png), separate from RVP's
+ * authorised-sign.png/company-stamp.png used elsewhere.
  */
 export function renderLorryReceiptPdf(data: LorryReceiptPdfData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -225,7 +226,7 @@ export function renderLorryReceiptPdf(data: LorryReceiptPdfData): Promise<Buffer
     const DASH = '----';
 
     /* ══ MASTHEAD ════════════════════════════════════════════════════════ */
-    const { ganesha, balaji } = masthead();
+    const { ganesha, balaji, suryaSign } = masthead();
     if (ganesha) doc.image(ganesha, ax(14.5), ay(37), { fit: [px(62), px(78)], align: 'center' });
     if (balaji) doc.image(balaji, ax(608), ay(41), { fit: [px(70), px(70)], align: 'center' });
 
@@ -470,6 +471,16 @@ export function renderLorryReceiptPdf(data: LorryReceiptPdfData): Promise<Buffer
 
     T('For Surya Road Lines', sigX, fTop + 8, sigW, { size: 11, font: SERIF_B, align: 'right' });
     const sigLineY = fTop + 46;
+    // The scanned ink sits in the gap between the "For Surya Road Lines" line
+    // and the signature rule, right-aligned like the on-screen copy.
+    if (suryaSign) {
+      const sigBoxY = fTop + 20;
+      doc.image(suryaSign, ax(sigX), ay(sigBoxY), {
+        fit: [px(sigW), px(sigLineY - 2 - sigBoxY)],
+        align: 'right',
+        valign: 'bottom',
+      });
+    }
     hl(sigLineY, sigX, SHEET_W - 8, B_THIN, NAVY_FAINT);
     T('Authorised Signatory', sigX, sigLineY + 3, sigW, { size: 9, align: 'right' });
 

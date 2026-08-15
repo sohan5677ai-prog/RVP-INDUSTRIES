@@ -544,12 +544,21 @@ export default function LorryReceiptView() {
                     <span className="underline">Note :</span> WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.
                   </div>
                 </div>
-                {/* No stamp/signature image here - unlike the tax invoice, this
-                    document carries no company seal; it is signed by hand (or a
-                    lorry-receipt-specific mark can be dropped in here later). */}
+                {/* Scanned Surya Road Lines signature - separate mark from the
+                    company's own authorised-sign.png used on RVP's documents,
+                    since this sheet is the transporter's own stationery. */}
                 <div className="w-[30%] pt-1 text-[11px]">
                   <div className="text-right font-bold">For Surya Road Lines</div>
-                  <div className="mt-6 border-t border-[#1a4a99]/60" />
+                  <div className="relative mt-1 h-6">
+                    <img
+                      src="/surya-sign.png"
+                      alt=""
+                      aria-hidden
+                      className="absolute bottom-0 right-1 h-full w-auto object-contain"
+                      style={{ mixBlendMode: 'multiply', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                    />
+                  </div>
+                  <div className="border-t border-[#1a4a99]/60" />
                   <div className="text-right text-[9px] mt-0.5">Authorised Signatory</div>
                 </div>
               </div>

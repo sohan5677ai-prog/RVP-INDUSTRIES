@@ -111,23 +111,24 @@ export class LedgerService {
     // Ensure new standard accounts exist if referenced
     const requiredCodes = adjustedLines.map((l) => l.accountCode);
     const knownAccounts = {
-      '10400': { name: 'Bank / Cash Account', type: 'ASSET' as const },
-      '20240': { name: 'Brokerage Payable', type: 'LIABILITY' as const },
-      '50070': { name: 'Loading Hamali Expense (Selling)', type: 'EXPENSE' as const },
-      '20280': { name: 'Bank Loan Interest Payable', type: 'LIABILITY' as const },
-      '20290': { name: 'Bank Loan Payable (Principal)', type: 'LIABILITY' as const },
-      '10500': { name: 'TDS Receivable', type: 'ASSET' as const },
-      '50100': { name: 'Sales Shortage & Allowances', type: 'EXPENSE' as const },
-      '12025': { name: 'Private Loans Given', type: 'ASSET' as const },
-      '40130': { name: 'Interest Income', type: 'REVENUE' as const },
+      '10400': { name: 'Bank / Cash Account', type: 'ASSET' as const, group: 'Current Assets' },
+      '20240': { name: 'Brokerage Payable', type: 'LIABILITY' as const, group: 'Current Liabilities' },
+      '50070': { name: 'Loading Hamali Expense (Selling)', type: 'EXPENSE' as const, group: 'Indirect Expenses' },
+      '20280': { name: 'Bank Loan Interest Payable', type: 'LIABILITY' as const, group: 'Current Liabilities' },
+      '20290': { name: 'Bank Loan Payable (Principal)', type: 'LIABILITY' as const, group: 'Current Liabilities' },
+      '10500': { name: 'TDS Receivable', type: 'ASSET' as const, group: 'Current Assets' },
+      '50100': { name: 'Sales Shortage & Allowances', type: 'EXPENSE' as const, group: 'Indirect Expenses' },
+      '12025': { name: 'Private Loans Given', type: 'ASSET' as const, group: 'Loans & Advances (Asset)' },
+      '40130': { name: 'Interest Income', type: 'REVENUE' as const, group: 'Indirect Incomes' },
     };
     for (const code of requiredCodes) {
       if (code in knownAccounts) {
         const val = knownAccounts[code as keyof typeof knownAccounts];
+        const grp = await tx.accountGroup.findUnique({ where: { name: val.group } });
         await tx.account.upsert({
           where: { code },
-          update: {},
-          create: { code, name: val.name, type: val.type }
+          update: grp?.id ? { groupId: grp.id } : {},
+          create: { code, name: val.name, type: val.type, groupId: grp?.id ?? null }
         });
       }
     }

@@ -102,6 +102,8 @@ services:
         sync: false
       - key: FAST2SMS_TMPL_OWNER_DUES_DIGEST
         sync: false
+      - key: FAST2SMS_TMPL_OWNER_DUE_TODAY_DIGEST
+        sync: false
       - key: FAST2SMS_TMPL_OWNER_BUSINESS_SNAPSHOT
         sync: false
       # Scheduled WhatsApp jobs (owner/party reminders): daily 09:00 IST dues

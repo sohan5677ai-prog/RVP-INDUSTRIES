@@ -73,7 +73,7 @@ export type WaTemplateKey =
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST' // rvp_owner_dues (document header - full outstanding-dues PDF): date, total receivable, overdue, top pending
-  | 'OWNER_DUE_TODAY_DIGEST' // rvp_owner_due_today: date, total due today, bill count, itemised list - see docs/whatsapp-owner-due-today-template.md
+  | 'OWNER_DUE_TODAY_DIGEST' // due_today: date, total due today, bill count, itemised list - see docs/whatsapp-owner-due-today-template.md
   | 'OWNER_BUSINESS_SNAPSHOT' // rvpdaily: date, total receivable, overdue receivable, total payable, overdue invoices pending, net profit (see docs/whatsapp-owner-business-snapshot-template.md)
   | 'SUPPORT_TICKET' // rvp_support_ticket (image header - the screen capture): reporter, page, note, time
   // rvp_support_ticket_text (no header) - same four variables, used when the
@@ -103,12 +103,11 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // These two were the last owner templates logging SKIPPED for want of an id.
   OWNER_DUES_DIGEST: '28387',
   OWNER_WEEKLY_SUMMARY: '28393',
-  // OWNER_DUE_TODAY_DIGEST (rvp_owner_due_today) has no id yet - not yet submitted
-  // to Fast2SMS for approval. Wording is drafted in
-  // docs/whatsapp-owner-due-today-template.md. Until an id lands here, every
-  // send logs SKIPPED "is not configured" - same state OWNER_DUES_DIGEST and
-  // OWNER_WEEKLY_SUMMARY sat in before 2026-08-11. Set FAST2SMS_TMPL_OWNER_DUE_TODAY_DIGEST
-  // once approved, or add the message_id here.
+  // due_today (the "bills due today" digest - see
+  // docs/whatsapp-owner-due-today-template.md), approved 2026-08-15 on the
+  // shared KNM number. Submitted under the name "due_today" rather than the
+  // drafted "rvp_owner_due_today".
+  OWNER_DUE_TODAY_DIGEST: '28801',
   // rvpdaily (the business snapshot - see docs/whatsapp-owner-business-snapshot-template.md),
   // approved 2026-08-15 on the shared KNM number. Submitted under the name
   // "rvpdaily" rather than the drafted "rvp_owner_snapshot" - the id is what

@@ -889,3 +889,139 @@ ${text}`;
     return null; // never let a parse failure break the webhook
   }
 }
+
+const WISH_CATEGORY_CONTEXT: Record<string, string> = {
+  HINDU: 'This message is going only to recipients from the Hindu community, so it is fine to reference Hindu customs/imagery for this occasion.',
+  MUSLIM: 'This message is going only to recipients from the Muslim community, so it is fine to reference Islamic customs/imagery for this occasion.',
+  CHRISTIAN: 'This message is going only to recipients from the Christian community, so it is fine to reference Christian customs/imagery for this occasion.',
+  OTHER: 'Keep the wording respectful and not tied to any one specific religious community.',
+};
+
+const WISH_MESSAGE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: { message: { type: Type.STRING } },
+  required: ['message'],
+};
+
+/**
+ * Draft a short WhatsApp-ready wish for `occasion` (e.g. "Diwali",
+ * "Independence Day"), signed as RVP Industries. `category` narrows the
+ * wording for a religion-targeted send (undefined/null = a general occasion
+ * sent to everyone, so the wording stays neutral).
+ *
+ * Returns a single paragraph, no newlines/markdown/emoji-heavy formatting and
+ * no closing signature - the WhatsApp template itself already wraps the
+ * greeting and "RVP Industries" sign-off (see docs/whatsapp-wishes-template.md),
+ * so a signature here would print twice.
+ */
+export async function generateWishMessage(
+  occasion: string,
+  category?: 'HINDU' | 'MUSLIM' | 'CHRISTIAN' | 'OTHER' | null
+): Promise<string> {
+  const ai = getClient();
+  const contextLine = category ? WISH_CATEGORY_CONTEXT[category] : 'This message is going to everyone - suppliers, buyers, drivers and staff - so keep it inclusive and not tied to any one religion.';
+  const prompt = `Write a short, warm WhatsApp greeting for the occasion "${occasion}", sent on behalf of an agro/tamarind-processing business called RVP Industries to its business contacts (suppliers, buyers, transport drivers).
+${contextLine}
+Rules:
+- ONE short paragraph, 2-3 sentences, under 300 characters.
+- Warm and genuine, not salesy - this is a relationship gesture, not a promotion.
+- Do NOT include a greeting like "Dear ..." or a name placeholder - that is added separately.
+- Do NOT sign off with "RVP Industries" or any business name - that is added separately.
+- Do NOT use markdown formatting or line breaks - plain text only.
+- A couple of tasteful emoji are fine, but do not overdo it.
+Return the message as JSON.`;
+
+  let response;
+  let lastErr: Error | unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { responseMimeType: 'application/json', responseSchema: WISH_MESSAGE_SCHEMA },
+      });
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if ((msg.includes('429') || msg.includes('503') || msg.includes('Too Many Requests')) && attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+        continue;
+      }
+      throw new HttpError(502, `Gemini could not draft the wish message: ${msg}`);
+    }
+  }
+  if (!response?.text) {
+    const msg = lastErr instanceof Error ? lastErr.message : 'empty response';
+    throw new HttpError(502, `Gemini could not draft the wish message: ${msg}`);
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(response.text);
+  } catch {
+    throw new HttpError(502, 'Gemini returned an unreadable wish message');
+  }
+  const message = parsed?.message?.toString().replace(/\r\n|\r|\n/g, ' ').trim();
+  if (!message) throw new HttpError(502, 'Gemini returned an empty wish message');
+  return message;
+}
+
+/** A Gemini-generated image, ready to upload. */
+export interface GeneratedImage {
+  buffer: Buffer;
+  mimeType: string;
+}
+
+/**
+ * Generate a festive graphic for `occasion`, branded "RVP Industries", via
+ * Gemini's native image generation (gemini-2.5-flash-image). Returns the raw
+ * image bytes - the caller is responsible for uploading them somewhere
+ * public, since a WhatsApp template's media header needs a fetchable URL,
+ * not inline bytes.
+ */
+export async function generateWishImage(
+  occasion: string,
+  category?: 'HINDU' | 'MUSLIM' | 'CHRISTIAN' | 'OTHER' | null
+): Promise<GeneratedImage> {
+  const ai = getClient();
+  const contextLine = category ? WISH_CATEGORY_CONTEXT[category] : 'Keep the imagery generic/festive rather than tied to one specific religion.';
+  const prompt = `Create a warm, professional festive greeting graphic for the occasion "${occasion}", for an agro/tamarind-processing business called "RVP Industries".
+${contextLine}
+- Prominently and legibly include the text "RVP Industries" somewhere in the image, styled like a business greeting card/banner.
+- Square or portrait orientation, suitable for sharing on WhatsApp.
+- Tasteful, festive, professional - not cluttered, no placeholder or gibberish text elsewhere in the image.`;
+
+  let response;
+  let lastErr: Error | unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      });
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if ((msg.includes('429') || msg.includes('503') || msg.includes('Too Many Requests')) && attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+        continue;
+      }
+      throw new HttpError(502, `Gemini could not generate the wish image: ${msg}`);
+    }
+  }
+  if (!response) {
+    const msg = lastErr instanceof Error ? lastErr.message : 'empty response';
+    throw new HttpError(502, `Gemini could not generate the wish image: ${msg}`);
+  }
+
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = parts.find((p) => p.inlineData?.data);
+  if (!imagePart?.inlineData?.data) {
+    throw new HttpError(502, 'Gemini did not return an image for this occasion');
+  }
+  return {
+    buffer: Buffer.from(imagePart.inlineData.data, 'base64'),
+    mimeType: imagePart.inlineData.mimeType || 'image/png',
+  };
+}

@@ -45,8 +45,8 @@ import { Badge } from '@/components/ui/badge';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { Commodity, FreightRate, WaLanguage } from '@/lib/types';
-import { WA_LANGUAGE_LABELS } from '@/lib/types';
+import type { Commodity, FreightRate, WaLanguage, WishCategory } from '@/lib/types';
+import { WA_LANGUAGE_LABELS, WISH_CATEGORY_LABELS } from '@/lib/types';
 
 const PARTY_EXPORT_COLUMNS: ExportColumn<Party>[] = [
   { header: 'Name', value: (p) => p.name },
@@ -133,6 +133,7 @@ const partySchema = z.object({
   locationLink: z.string().optional(),
   lorryReceiptEnabled: z.boolean(),
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
+  religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
@@ -142,7 +143,7 @@ type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
   name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', city: '', state: '', pincode: '', gstin: '', destination: '',
-  locationLink: '', lorryReceiptEnabled: false, waLanguage: 'EN', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
+  locationLink: '', lorryReceiptEnabled: false, waLanguage: 'EN', religion: 'NONE', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
 export default function Parties() {
@@ -228,6 +229,7 @@ export default function Parties() {
       locationLink: p.locationLink ?? '',
       lorryReceiptEnabled: p.lorryReceiptEnabled ?? false,
       waLanguage: p.waLanguage ?? 'EN',
+      religion: p.religion ?? 'NONE',
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
@@ -237,10 +239,14 @@ export default function Parties() {
   }
 
   const saveMutation = useMutation({
-    mutationFn: (values: PartyForm) =>
-      editing
-        ? api<Party>(`/parties/${editing.id}`, { method: 'PUT', body: values })
-        : api<Party>('/parties', { method: 'POST', body: values }),
+    mutationFn: (values: PartyForm) => {
+      // 'NONE' is a Select-only sentinel (Radix Select can't hold an empty-string
+      // item value) standing in for "not tagged" - the API wants null.
+      const body = { ...values, religion: values.religion === 'NONE' ? null : values.religion };
+      return editing
+        ? api<Party>(`/parties/${editing.id}`, { method: 'PUT', body })
+        : api<Party>('/parties', { method: 'POST', body });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['parties'] });
       toast.success(editing ? 'Party updated' : 'Party created');
@@ -582,6 +588,37 @@ export default function Parties() {
                       <FormDescription>
                         Sends this party's WhatsApp messages in their language. Falls back to English
                         wherever that language's template isn't approved yet.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {/* Used only by Settings -> Wishes to target religion-specific
+                    occasions (Diwali, Eid, Christmas...) - nowhere else reads this. */}
+                <FormField
+                  control={form.control}
+                  name="religion"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Community (for Wishes)</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="NONE">Not tagged</SelectItem>
+                          {(Object.keys(WISH_CATEGORY_LABELS) as WishCategory[]).map((code) => (
+                            <SelectItem key={code} value={code}>
+                              {WISH_CATEGORY_LABELS[code]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Only used to target religion-specific festival wishes. Leave "Not tagged" if unsure -
+                        still included in "Everyone" wishes, just skipped by a filtered one.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

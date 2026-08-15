@@ -59,3 +59,26 @@ export async function uploadFileToStorage(file: Express.Multer.File): Promise<st
   const { data } = supabase.storage.from(bucket).getPublicUrl(objectName);
   return data.publicUrl;
 }
+
+/**
+ * Same as uploadFileToStorage but for a Buffer we generated ourselves (e.g. a
+ * Gemini-generated wish image) rather than one a user uploaded via multer.
+ */
+export async function uploadBufferToStorage(
+  buffer: Buffer,
+  mimeType: string,
+  ext: string
+): Promise<string> {
+  const token = crypto.randomBytes(16).toString('hex');
+  const objectName = `${token}${ext.startsWith('.') ? ext : `.${ext}`}`;
+
+  const supabase = getSupabase();
+  const bucket = storageBucket();
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(objectName, buffer, { contentType: mimeType, upsert: false });
+  if (error) throw new Error(`Supabase upload failed: ${error.message}`);
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(objectName);
+  return data.publicUrl;
+}

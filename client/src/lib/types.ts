@@ -33,6 +33,8 @@ export interface Party {
   // Language this party's WhatsApp messages are sent in. Falls back to the
   // English template when that language's copy isn't approved yet.
   waLanguage?: WaLanguage;
+  // Settings -> Wishes targeting only. Null/undefined = not tagged.
+  religion?: WishCategory | null;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;
@@ -50,6 +52,49 @@ export const WA_LANGUAGE_LABELS: Record<WaLanguage, string> = {
   KN: 'ಕನ್ನಡ (Kannada)',
   HI: 'हिंदी (Hindi)',
 };
+
+export type WishCategory = 'HINDU' | 'MUSLIM' | 'CHRISTIAN' | 'OTHER';
+
+export const WISH_CATEGORY_LABELS: Record<WishCategory, string> = {
+  HINDU: 'Hindu',
+  MUSLIM: 'Muslim',
+  CHRISTIAN: 'Christian',
+  OTHER: 'Other',
+};
+
+/** A manually-maintained KNM lorry driver, kept for the Wishes broadcast. */
+export interface KnmDriver {
+  id: string;
+  name: string;
+  phone: string;
+  religion?: WishCategory | null;
+  active: boolean;
+}
+
+export interface WishRecipient {
+  group: 'PARTY' | 'DRIVER' | 'OWNER';
+  id: string;
+  name: string;
+  phone: string;
+  waLanguage: WaLanguage;
+}
+
+export interface WishBroadcast {
+  id: string;
+  occasion: string;
+  category: WishCategory | null;
+  includeParties: boolean;
+  includeDrivers: boolean;
+  includeOwners: boolean;
+  messageText: string;
+  imageUrl: string | null;
+  recipientCount: number;
+  sentCount: number;
+  failedCount: number;
+  skippedCount: number;
+  sentByName: string | null;
+  createdAt: string;
+}
 
 export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS' | 'PRECLEANER_DUST' | 'NALLA_POKKULU' | 'NALLA_CHINTAPANDU';
 

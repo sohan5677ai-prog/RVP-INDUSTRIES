@@ -86,7 +86,14 @@ export type WaTemplateKey =
   // browser couldn't capture the screen. Like PAYMENT_SENT_TEXT, its approved
   // body must NOT mention an attached screenshot, and it must not share
   // SUPPORT_TICKET's message_id (see the guard in notifySupportTicket).
-  | 'SUPPORT_TICKET_TEXT';
+  | 'SUPPORT_TICKET_TEXT'
+  // rvp_wishes (image header - the Gemini-generated occasion graphic): recipient
+  // name, occasion message body. One generic template covers every occasion
+  // (festival, Independence Day, etc.) - the varying part is the two variables,
+  // not the template itself. See docs/whatsapp-wishes-template.md. Absent from
+  // DEFAULT_TEMPLATE_IDS below until submitted to and approved by Meta - same
+  // "logs SKIPPED until configured" pattern as PRIVATE_LOAN_STATEMENT.
+  | 'WISHES';
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -131,6 +138,10 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // English copy is approved, set its id here (or via
   // FAST2SMS_TMPL_PRIVATE_LOAN_STATEMENT); once TE/HI are approved, add them
   // to LANGUAGE_TEMPLATE_IDS.te / .hi below.
+  //
+  // WISHES (rvp_wishes) is likewise absent on purpose - not yet submitted to
+  // Meta. Every Settings -> Wishes send logs SKIPPED until an id is set here
+  // (or via FAST2SMS_TMPL_WISHES). See docs/whatsapp-wishes-template.md.
 };
 
 /**
@@ -300,6 +311,39 @@ export async function resolveOwnerNumber(): Promise<string | null> {
   } catch {
     return process.env.WHATSAPP_TEST_NUMBER?.trim() || null;
   }
+}
+
+/**
+ * Same list as resolveAlertRecipients, but with the name kept alongside the
+ * number - the Wishes broadcast fans out to "Owners" and wants a name to put
+ * in the message, not just a raw number. Falls back to a bare "Owner" label
+ * when alertRecipients is empty and only ownerWhatsappNumber is set. Never throws.
+ */
+export async function resolveOwnerRecipients(): Promise<Array<{ name: string; phone: string }>> {
+  const out: Array<{ name: string; phone: string }> = [];
+  const push = (name: string | null | undefined, raw: string | null | undefined) => {
+    const n = normalizeWhatsAppNumber(raw);
+    if (n && !out.some((r) => r.phone === n)) out.push({ name: name?.trim() || 'Owner', phone: n });
+  };
+  try {
+    const profile = await prisma.companyProfile.findUnique({
+      where: { id: 'default' },
+      select: { alertRecipients: true, ownerWhatsappNumber: true },
+    });
+    if (profile?.alertRecipients) {
+      try {
+        const parsed = JSON.parse(profile.alertRecipients) as Array<{ name?: string; phone?: string }>;
+        if (Array.isArray(parsed)) for (const r of parsed) push(r?.name, r?.phone);
+      } catch {
+        /* malformed JSON - fall through to fallbacks */
+      }
+    }
+    if (out.length === 0) push('Owner', profile?.ownerWhatsappNumber);
+  } catch {
+    /* DB unreachable - env fallback below */
+  }
+  if (out.length === 0) push('Owner', process.env.WHATSAPP_TEST_NUMBER);
+  return out;
 }
 
 /**

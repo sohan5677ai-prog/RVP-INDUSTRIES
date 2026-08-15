@@ -22,6 +22,18 @@ enum PartyType {
   HAMALI_TEAM
 }
 
+/// Religious community tag used ONLY to target the Settings → Wishes broadcast
+/// (festival/occasion messages) at the right audience - nowhere else in the
+/// app reads this. Unset (null) means "not tagged yet": such a party/driver is
+/// still included in an "Everyone" wish but excluded from any
+/// religion-filtered one, so an untagged record never gets miscategorised.
+enum WishCategory {
+  HINDU
+  MUSLIM
+  CHRISTIAN
+  OTHER
+}
+
 enum POStatus {
   PENDING
   ARRIVED
@@ -106,62 +118,64 @@ model UserSession {
 }
 
 model Party {
-  id                String           @id @default(cuid())
-  name              String
+  id                  String                 @id @default(cuid())
+  name                String
   // Short handle used as the PO-number series key, e.g. "DCS" -> DCS/01/26-27.
-  nickname          String?
-  type              PartyType        @default(SUPPLIER)
-  phone             String?
-  phone2            String?
-  email             String?
-  address           String?
+  nickname            String?
+  type                PartyType              @default(SUPPLIER)
+  phone               String?
+  phone2              String?
+  email               String?
+  address             String?
   // Town/city of the party's premises. The e-invoice (`Loc`) and the E-Way Bill
   // ("Ship To" place) want the CITY, not the state - "Surat", not "Gujarat".
-  city              String?
-  state             String?
-  pincode           String?
-  gstin             String?
+  city                String?
+  state               String?
+  pincode             String?
+  gstin               String?
   // Default delivery destination for this buyer (maps to a freight rate).
-  destination       String?
+  destination         String?
   // Google Maps link to the party's delivery point - sent to the lorry driver
   // on dispatch via WhatsApp.
-  locationLink      String?
+  locationLink        String?
   // Whether this buyer's shipments travel on a Surya Road Lines lorry receipt
   // (GC note). Most do not, so the receipt is offered on a dispatch only when
   // this is switched on for the buyer. Off for everyone until set.
-  lorryReceiptEnabled Boolean        @default(false)
+  lorryReceiptEnabled Boolean                @default(false)
   // Language this party's WhatsApp messages go out in. EN until someone sets it
   // on the party form; an unapproved language falls back to the English copy at
   // send time, so switching this can never stop a message going out.
-  waLanguage        WaLanguage       @default(EN)
-  bankAccountNumber String?
-  bankIfsc          String?
-  bankName          String?
-  commodities       Commodity[]
-  createdAt         DateTime         @default(now())
-  purchaseOrders    PurchaseOrder[]
-  saleOrders        SaleOrder[]
-  payments          Payment[]
-  receipts          Receipt[]
-  dustPurchases     DustPurchase[]
-  tallyLedgerMaps   TallyLedgerMap[]
-  creditNotes       CreditNote[]
-  debitNotes        DebitNote[]
-  emailLogs         EmailLog[]
-  setOffs           PartySetOff[]
-  reminderSchedule  PartyReminderSchedule?
+  waLanguage          WaLanguage             @default(EN)
+  // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
+  religion            WishCategory?
+  bankAccountNumber   String?
+  bankIfsc            String?
+  bankName            String?
+  commodities         Commodity[]
+  createdAt           DateTime               @default(now())
+  purchaseOrders      PurchaseOrder[]
+  saleOrders          SaleOrder[]
+  payments            Payment[]
+  receipts            Receipt[]
+  dustPurchases       DustPurchase[]
+  tallyLedgerMaps     TallyLedgerMap[]
+  creditNotes         CreditNote[]
+  debitNotes          DebitNote[]
+  emailLogs           EmailLog[]
+  setOffs             PartySetOff[]
+  reminderSchedule    PartyReminderSchedule?
 }
 
 model Broker {
-  id         String      @id @default(cuid())
-  name       String
-  phone      String?
-  waLanguage WaLanguage  @default(EN)
+  id              String      @id @default(cuid())
+  name            String
+  phone           String?
+  waLanguage      WaLanguage  @default(EN)
   // Flat brokerage credited per dispatched sale order under this broker -
   // configurable per broker (was a single hardcoded ₹2,000 for everyone).
-  brokerageAmount Decimal @default(2000) @db.Decimal(12, 2)
-  saleOrders SaleOrder[]
-  payments   Payment[]
+  brokerageAmount Decimal     @default(2000) @db.Decimal(12, 2)
+  saleOrders      SaleOrder[]
+  payments        Payment[]
 }
 
 model PurchaseOrder {
@@ -391,33 +405,33 @@ model Purchase {
 }
 
 model WeightVerification {
-  id                String   @id @default(cuid())
-  purchase          Purchase @relation(fields: [purchaseId], references: [id])
-  purchaseId        String   @unique
-  billingWeightKg   Int
-  partyKataKg       Int
-  rvpKataKg         Int
-  referenceKg       Int
-  diffKg            Int
-  exempt            Boolean
-  finalWeightKg     Int
-  pricePerKg        Decimal  @db.Decimal(12, 2)
+  id                 String   @id @default(cuid())
+  purchase           Purchase @relation(fields: [purchaseId], references: [id])
+  purchaseId         String   @unique
+  billingWeightKg    Int
+  partyKataKg        Int
+  rvpKataKg          Int
+  referenceKg        Int
+  diffKg             Int
+  exempt             Boolean
+  finalWeightKg      Int
+  pricePerKg         Decimal  @db.Decimal(12, 2)
   // Net balance payable to the supplier (already net of any self-vehicle hamali
   // and kata recovery below). Seed inventory value = totalAmount + selfVehicleHamali.
-  totalAmount       Decimal  @db.Decimal(14, 2)
+  totalAmount        Decimal  @db.Decimal(14, 2)
   // ₹ deducted from the party's payable because they used their own vehicle
   // (the lorry's ₹80/t hamali share). 0 for third-party lorries.
-  selfVehicleHamali Decimal  @default(0) @db.Decimal(12, 2)
+  selfVehicleHamali  Decimal  @default(0) @db.Decimal(12, 2)
   // ₹ deducted from the party's payable because they used their own vehicle
   // (the full weighbridge/kata fee, normally recovered from the transporter).
   // Recovering it lowers the seed's landed cost. 0 for third-party lorries.
-  selfVehicleKata   Decimal  @default(0) @db.Decimal(12, 2)
+  selfVehicleKata    Decimal  @default(0) @db.Decimal(12, 2)
   // Extra billed-on costs the user itemises at approval (loading, brokerage,
   // misc). Stored as [{ label, amount }]. Each ADDS to the supplier's net
   // payable AND capitalises into the seed's landed cost, so the ledger and the
   // silo MAP stay balanced (both derive from totalAmount, which already
   // includes the addables total).
-  billAddables      Json?
+  billAddables       Json?
   // Deductions the user itemises at approval - the mirror of billAddables.
   // Stored as [{ mode, label, value, amount }] where mode is WEIGHT | PRICE |
   // AMOUNT | EXPENSE | FREIGHT, `value` is what was typed (kg / ₹ per kg / ₹)
@@ -426,7 +440,7 @@ model WeightVerification {
   // computeQualityAdjustments in lib/calc.ts. Null on pre-feature rows, which
   // fall back to Purchase.discountType/discountValue.
   qualityAdjustments Json?
-  createdAt         DateTime @default(now())
+  createdAt          DateTime @default(now())
 
   @@index([purchaseId])
 }
@@ -500,13 +514,13 @@ model SaleOrder {
   // only to orders taken after the change (Surat 2800 -> 3000 leaves every
   // earlier order at 2800). Null on legacy rows = fall back to the live rate.
   // NB: rated PER TONNE (calcSaleFreight takes tonnes), not per kg.
-  freightRatePerTonne Decimal? @db.Decimal(12, 4)
+  freightRatePerTonne Decimal?  @db.Decimal(12, 4)
   // Written once the order is FULLY dispatched: the price bands (and seed kg)
   // that actually backed it. From then on the margin reads this instead of
   // re-running the allocator, so nothing bought or repriced later can move it.
   // Cleared by undo-dispatch, which re-opens the order.
-  seedCostSnapshot Json?
-  costFrozenAt     DateTime?
+  seedCostSnapshot    Json?
+  costFrozenAt        DateTime?
 
   // --- Short close -----------------------------------------------------------
   // tonnageKg is what was BOOKED; the lorry's kata weight is what actually went.
@@ -646,10 +660,10 @@ model SaleDispatch {
   // Part-A/Part-B details as actually submitted to NIC. Stored so the reprint
   // (which is rendered from a payload we rebuild, not fetched from NIC) shows the
   // same mode/vehicle type/document that the live bill carries.
-  ewbTransMode       String? // '1'-Road, '2'-Rail, '3'-Air, '4'-Ship
-  ewbVehicleType     String? // 'R'-Regular, 'O'-ODC
-  ewbTransDocNo      String?
-  ewbTransDocDate    DateTime?
+  ewbTransMode     String? // '1'-Road, '2'-Rail, '3'-Air, '4'-Ship
+  ewbVehicleType   String? // 'R'-Regular, 'O'-ODC
+  ewbTransDocNo    String?
+  ewbTransDocDate  DateTime?
 
   createdAt DateTime @default(now())
 
@@ -867,43 +881,43 @@ model HamaliVerification {
 
 // Single-row seller profile printed on generated tax invoices. Edited in Settings.
 model CompanyProfile {
-  id                      String  @id @default("default")
-  name                    String  @default("RVP INDUSTRIES")
-  address                 String? // multi-line seller address
-  gstin                   String?
-  stateName               String?
-  stateCode               String? // GST state code, e.g. "37"
-  pincode                 String?
-  contact                 String?
+  id                             String  @id @default("default")
+  name                           String  @default("RVP INDUSTRIES")
+  address                        String? // multi-line seller address
+  gstin                          String?
+  stateName                      String?
+  stateCode                      String? // GST state code, e.g. "37"
+  pincode                        String?
+  contact                        String?
   // Bank details printed in the invoice footer.
-  bankAccountName         String?
-  bankName                String?
-  bankAccountNumber       String?
-  bankBranchIfsc          String?
+  bankAccountName                String?
+  bankName                       String?
+  bankAccountNumber              String?
+  bankBranchIfsc                 String?
   // --- E-Way Bill / e-invoice "Dispatch From" block --------------------------
   // The government print has a DISPATCH-FROM address and a *place* (town) that
   // are distinct from the registered address above: the place is what shows in
   // "Dispatch From" and in the vehicle-details "From" column, and NIC measures
   // the auto-calculated distance from dispatchFromPincode. All optional - each
   // one falls back to the registered address/pincode when left blank.
-  dispatchFromPlace       String? // town, e.g. "Punganur"
-  dispatchFromAddress1    String?
-  dispatchFromAddress2    String?
-  dispatchFromPincode     String?
+  dispatchFromPlace              String? // town, e.g. "Punganur"
+  dispatchFromAddress1           String?
+  dispatchFromAddress2           String?
+  dispatchFromPincode            String?
   // Invoice number = invoicePrefix/seq/FY (e.g. RVP/01/2026-27).
-  invoicePrefix           String  @default("RVP")
+  invoicePrefix                  String  @default("RVP")
   // JSON print-layout config (paper size, margins, font, column widths).
-  invoiceLayout           String?
+  invoiceLayout                  String?
   // Comma or newline separated list of company vehicles exempt from kata & hamali
-  companyVehicles         String?
+  companyVehicles                String?
   // ₹ held back from each sale lorry freight until delivery, then paid to Surya
   // Roadlines once the kata slip is received (configurable; default ₹3000).
-  freightRetentionPerTrip Decimal @default(3000) @db.Decimal(12, 2)
+  freightRetentionPerTrip        Decimal @default(3000) @db.Decimal(12, 2)
   // Standard annual bank-loan interest rate (%) used to capitalise the stock's
   // carrying cost on storage→process transfers. Editable in the Loans section.
-  loanInterestRatePct     Decimal @default(0) @db.Decimal(6, 3)
+  loanInterestRatePct            Decimal @default(0) @db.Decimal(6, 3)
   // Buffer percentage (e.g. 80) of expected yield allowed for soft allocation.
-  bufferStockPct          Decimal @default(80) @db.Decimal(5, 2)
+  bufferStockPct                 Decimal @default(80) @db.Decimal(5, 2)
   // --- Sale-order close tolerance -------------------------------------------
   // How far UNDER the booked tonnage a final lorry may land and still close the
   // order (% of the ordered weight). A lorry never weighs exactly what was
@@ -921,19 +935,19 @@ model CompanyProfile {
   // Owner/admin mobile that receives internal WhatsApp alerts (weekly summary,
   // daily dues digest, deferred-dispatch reminders). Falls back to
   // WHATSAPP_TEST_NUMBER when blank. Not printed on invoices.
-  ownerWhatsappNumber     String?
+  ownerWhatsappNumber            String?
   // Internal-alert distribution list - up to 3 members (name + number), stored as
   // a JSON string [{ "name": "...", "phone": "..." }]. These members receive the
   // dispatch reminders, weekly summary and daily dues digest. Falls back to
   // ownerWhatsappNumber, then WHATSAPP_TEST_NUMBER, when empty.
-  alertRecipients         String?
+  alertRecipients                String?
   // WhatsApp test-mode toggle (UI-controlled, no redeploy needed). When ON,
   // every outbound WhatsApp is rerouted to whatsappTestNumber instead of the
   // real party. Defaults ON as a safety net. Overrides the WHATSAPP_TEST_MODE env.
-  whatsappTestMode        Boolean @default(true)
+  whatsappTestMode               Boolean @default(true)
   // Where test-mode messages land. Falls back to WHATSAPP_TEST_NUMBER env, then
   // ownerWhatsappNumber, when blank.
-  whatsappTestNumber      String?
+  whatsappTestNumber             String?
 
   // --- Owner daily WhatsApp digests (Settings -> WhatsApp) --------------------
   // Each owner-facing scheduled message can be switched off independently -
@@ -1275,9 +1289,9 @@ enum GunnyBagDirection {
 }
 
 enum GunnyBagEntryType {
-  PURCHASE  // Bags bought (debit, husk-pool cost)
-  SALE      // Bags sold (credit, gunny-sales income)
-  PAYMENT   // Cash paid (separate payment line, reduces payable)
+  PURCHASE // Bags bought (debit, husk-pool cost)
+  SALE // Bags sold (credit, gunny-sales income)
+  PAYMENT // Cash paid (separate payment line, reduces payable)
 }
 
 // Gunny (bardana) bags bought or sold - the "Feroz Ledger". PURCHASE is a husk-pool
@@ -1311,7 +1325,6 @@ model GunnySaleEntry {
   note      String?
   createdAt DateTime @default(now())
 }
-
 
 // Free-form "Other Income" entries (husk-pool Income tab) - anything that doesn't
 // fit Kata Income, Hamali Company Profit or Gunny Sales. Posts a linked Receipt
@@ -1527,35 +1540,34 @@ enum SupportTicketStatus {
  * An in-app "Contact support" report: whoever hit the problem clicks the button
  * in the topbar, the app captures where they were and what the screen looked
  * like, and they add a sentence about what went wrong.
- *
  * `userId` is a plain column, not a relation: a ticket is evidence about a
  * moment in time and must survive the reporter's user row being deleted, so the
  * name and role are denormalised alongside it rather than joined.
  */
 model SupportTicket {
-  id             String              @id @default(cuid())
-  userId         String?
-  userName       String
-  userRole       String
+  id               String              @id @default(cuid())
+  userId           String?
+  userName         String
+  userRole         String
   // Route the reporter was on, captured automatically: the raw path
   // ("/purchases/orders") plus the sidebar label shown for it ("Purchase Orders").
-  pagePath       String
-  pageLabel      String
-  note           String
+  pagePath         String
+  pageLabel        String
+  note             String
   // Public Supabase Storage URL of the captured screen. Null when the capture
   // failed or the browser blocked it - the ticket still goes out, text-only.
-  screenshotUrl  String?
+  screenshotUrl    String?
   // Free-form diagnostics gathered without asking the reporter: user agent,
   // viewport, and the last few console/network errors seen on the page.
-  browserInfo    String?
-  consoleErrors  String?
-  status         SupportTicketStatus @default(OPEN)
+  browserInfo      String?
+  consoleErrors    String?
+  status           SupportTicketStatus @default(OPEN)
   // Outcome of the WhatsApp alert, so a ticket that never reached a phone is
   // visibly distinct from one that did.
-  notifiedStatus String?
-  notifiedError  String?
-  createdAt      DateTime            @default(now())
-  resolvedAt     DateTime?
+  notifiedStatus   String?
+  notifiedError    String?
+  createdAt        DateTime            @default(now())
+  resolvedAt       DateTime?
   // What the developer wrote when closing the ticket - the reply everyone else
   // in the company is shown on their next login. Required to resolve, so a
   // RESOLVED ticket always has something to announce.
@@ -1571,7 +1583,6 @@ model SupportTicket {
  * "Yes, checked" - one row per person who has seen a resolved ticket's developer
  * message. Its absence is what keeps the login popup coming back, so "Let me
  * check" writes nothing at all and the reply resurfaces on the next refresh.
- *
  * `userId` is a plain column for the same reason it is on the ticket: the
  * acknowledgement is a record of who read what, and outlives the user row.
  */
@@ -1593,7 +1604,6 @@ model SupportTicketAck {
  * reminder for one party, independent of the manual "Payment Reminder" button.
  * One row per party (the Settings-style on/off + "Send Now" pattern didn't fit
  * here: each party needs its own time/day/frequency, not one shared toggle).
- *
  * Fired by the sweep in whatsappJobs.ts (runPartyReminderSchedulesSweep, every
  * 10 min under WHATSAPP_CRON_ENABLED), which reuses the same
  * runPartyPaymentReminderCore the manual button calls - so a scheduled send
@@ -1612,9 +1622,9 @@ model PartyReminderSchedule {
   minute Int @default(0)
 
   // DAILY | WEEKLY | INTERVAL
-  frequency String @default("DAILY")
+  frequency    String @default("DAILY")
   // WEEKLY only - 0=Sun..6=Sat.
-  daysOfWeek Int[] @default([])
+  daysOfWeek   Int[]  @default([])
   // INTERVAL only - fire every N days, counted from lastSentAt (or from
   // creation, for the first send).
   intervalDays Int?
@@ -1634,16 +1644,56 @@ model PartyReminderSchedule {
   endDate       DateTime?
   maxSends      Int?
 
-  sendsCount Int       @default(0)
-  lastSentAt DateTime?
+  sendsCount    Int       @default(0)
+  lastSentAt    DateTime?
   // YYYY-MM-DD (IST) of the last fire, so DAILY/WEEKLY never double-send if the
   // sweep ticks more than once inside the same eligible window.
-  lastSentKey String?
+  lastSentKey   String?
   // Set when the schedule auto-disables itself - PAID | DATE_REACHED | COUNT_REACHED.
   stoppedReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// A manually-maintained directory of KNM lorry drivers, kept ONLY so the
+/// Settings -> Wishes broadcast has a reliable recipient list - drivers are
+/// otherwise just free-text name/phone fields on SaleDispatch/
+/// TransportConfirmation rows and don't form a queryable directory anywhere
+/// else in the app.
+model KnmDriver {
+  id        String        @id @default(cuid())
+  name      String
+  phone     String
+  religion  WishCategory?
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+/// One row per Settings -> Wishes send: what was sent, to whom, and the
+/// outcome tally. Purely a history/audit log - the actual per-recipient
+/// delivery attempts still land in WhatsAppLog (relatedType 'WISH') the same
+/// as every other broadcast in the app.
+model WishBroadcast {
+  id             String        @id @default(cuid())
+  occasion       String
+  // Null = "Everyone" (no religion filter).
+  category       WishCategory?
+  includeParties Boolean       @default(true)
+  includeDrivers Boolean       @default(true)
+  includeOwners  Boolean       @default(true)
+  messageText    String
+  imageUrl       String?
+  recipientCount Int           @default(0)
+  sentCount      Int           @default(0)
+  failedCount    Int           @default(0)
+  skippedCount   Int           @default(0)
+  sentById       String?
+  sentByName     String?
+  createdAt      DateTime      @default(now())
+
+  @@index([createdAt])
 }
 
 model WhatsAppLog {

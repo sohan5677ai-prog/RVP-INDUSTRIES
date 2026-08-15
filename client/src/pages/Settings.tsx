@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { useAuth } from '@/lib/auth';
 import Subscription from '@/pages/Subscription';
 import ArchiveManager from '@/pages/ArchiveManager';
+import Wishes from '@/pages/Wishes';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -60,6 +61,7 @@ export default function Settings() {
           <TabsTrigger value="freight">Freight Rates</TabsTrigger>
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="wishes">Wishes</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
           {isDeveloper && <TabsTrigger value="subscription">Subscription</TabsTrigger>}
           {isDeveloper && <TabsTrigger value="archives">Archives</TabsTrigger>}
@@ -85,6 +87,10 @@ export default function Settings() {
         <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">
           <WhatsAppSection qc={qc} />
           <OwnerDigestsSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="wishes" className="focus-visible:outline-none focus-visible:ring-0">
+          <Wishes />
         </TabsContent>
 
         <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">

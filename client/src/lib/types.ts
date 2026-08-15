@@ -176,6 +176,7 @@ export interface LoansResponse {
 }
 
 export type PrivateLoanStatus = 'OPEN' | 'CLOSED';
+export type InterestPeriod = 'ANNUAL' | 'MONTHLY';
 
 export interface PrivateLoanRepayment {
   id: string;
@@ -194,7 +195,8 @@ export interface PrivateLoan {
   phone2: string | null;
   principal: string;
   startDate: string;
-  interestRatePct: string;
+  interestRatePct: string; // always ANNUAL - see interestPeriod for display unit
+  interestPeriod: InterestPeriod;
   status: PrivateLoanStatus;
   closedDate: string | null;
   notes: string | null;

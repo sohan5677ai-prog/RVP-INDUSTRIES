@@ -1114,7 +1114,8 @@ export const whatsappService = {
     borrowerName: string;
     phones: Array<string | null | undefined>;
     outstanding: number;
-    ratePct: number;
+    /** Pre-formatted, e.g. "12% p.a." or "1% p.m." - already in the loan's language, see formatRateLabel in privateLoan.controller.ts. */
+    rateLabel: string;
     accruedInterest: number;
     loanId: string;
     language?: WaLanguage | null;
@@ -1127,7 +1128,7 @@ export const whatsappService = {
         variables: [
           args.borrowerName,
           fmtInr(args.outstanding),
-          String(args.ratePct),
+          args.rateLabel,
           fmtDate(new Date()),
           fmtInr(args.accruedInterest),
           fmtInr(totalPayable),

@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import type { WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { daysBetween, loanInterest } from '../lib/calc.js';
@@ -14,6 +15,27 @@ import {
 function outstandingOf(loan: { principal: Prisma.Decimal; repayments: { amount: Prisma.Decimal }[] }): number {
   const repaid = loan.repayments.reduce((s, r) => s + Number(r.amount), 0);
   return Math.round((Number(loan.principal) - repaid) * 100) / 100;
+}
+
+/**
+ * "% p.a." / "% p.m." (and translated equivalents), matching whichever
+ * period the loan's rate is displayed in. Baked into a single WhatsApp
+ * variable (see sendPrivateLoanStatement below) rather than a second
+ * approved template per period - same idea as LORRY_WORDS in
+ * whatsapp.controller.ts translating a word inside one variable slot.
+ */
+const RATE_PERIOD_LABELS: Record<WaLanguage, { ANNUAL: string; MONTHLY: string }> = {
+  EN: { ANNUAL: 'p.a.', MONTHLY: 'p.m.' },
+  TE: { ANNUAL: 'వార్షికం', MONTHLY: 'నెలవారీ' },
+  TA: { ANNUAL: 'ஆண்டுக்கு', MONTHLY: 'மாதத்திற்கு' },
+  KN: { ANNUAL: 'ವಾರ್ಷಿಕ', MONTHLY: 'ಮಾಸಿಕ' },
+  HI: { ANNUAL: 'वार्षिक', MONTHLY: 'मासिक' },
+};
+
+/** Rate formatted in the loan's own display period, e.g. "12% p.a." or "1% p.m.". */
+function formatRateLabel(annualRatePct: number, period: 'ANNUAL' | 'MONTHLY', language: WaLanguage): string {
+  const displayRate = period === 'MONTHLY' ? Math.round((annualRatePct / 12) * 1000) / 1000 : annualRatePct;
+  return `${displayRate}% ${RATE_PERIOD_LABELS[language][period]}`;
 }
 
 /**
@@ -72,6 +94,7 @@ export async function createPrivateLoan(req: Request, res: Response) {
         principal: data.principal,
         startDate: data.startDate,
         interestRatePct: data.interestRatePct,
+        interestPeriod: data.interestPeriod ?? 'ANNUAL',
         notes: data.notes ?? null,
         waLanguage: data.waLanguage ?? 'EN',
       },
@@ -183,11 +206,13 @@ export async function sendPrivateLoanStatement(req: Request, res: Response) {
       ? loanInterest(outstanding, Number(loan.interestRatePct), daysBetween(loan.startDate, new Date()))
       : 0;
 
+  const rateLabel = formatRateLabel(Number(loan.interestRatePct), loan.interestPeriod, loan.waLanguage);
+
   const result = await whatsappService.sendPrivateLoanStatement({
     borrowerName: loan.borrowerName,
     phones: [loan.phone, loan.phone2],
     outstanding,
-    ratePct: Number(loan.interestRatePct),
+    rateLabel,
     accruedInterest: accruedInterestToDate,
     loanId: loan.id,
     language: loan.waLanguage,

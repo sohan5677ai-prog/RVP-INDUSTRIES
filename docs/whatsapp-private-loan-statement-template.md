@@ -34,7 +34,7 @@ back to the English copy automatically (the standard ERP-wide rule — see
 | --- | --- | --- |
 | `{{1}}` | Borrower name | `Ramesh Kumar` |
 | `{{2}}` | Outstanding principal (₹, `fmtInr`) | `2,00,000` |
-| `{{3}}` | Interest rate, bare number (% p.a. is in the fixed text) | `12` |
+| `{{3}}` | Interest rate **+ period, one string** (see below) | `12% p.a.` or `1% p.m.` |
 | `{{4}}` | As-on date (`fmtDate`) | `15-Aug-2026` |
 | `{{5}}` | Interest accrued to date (₹, `fmtInr`) | `9,863` |
 | `{{6}}` | Total payable = outstanding + accrued interest (₹, `fmtInr`) | `2,09,863` |
@@ -45,8 +45,38 @@ Matches `sendPrivateLoanStatement` in
 template variable gets a message accepted by Fast2SMS but silently dropped by
 WhatsApp.
 
-Sample values for the approval form: `Ramesh Kumar`, `2,00,000`, `12`,
-`15-Aug-2026`, `9,863`, `2,09,863`.
+### `{{3}}` — rate and period are entered per loan, not fixed in the template
+
+Each `PrivateLoan` carries its own `interestPeriod` (`ANNUAL` or `MONTHLY`,
+picked on the Add Loan dialog next to the rate field, `ANNUAL` by default).
+The engine and the DB always store an **annual** rate (`interestRatePct`);
+`interestPeriod` only controls how it's displayed - both on the Private Loans
+page and in this message.
+
+Because the period can differ loan to loan, the fixed template text can't
+hardcode "% p.a." - a monthly-rate loan would read wrong. Instead
+`formatRateLabel()` in `server/src/controllers/privateLoan.controller.ts`
+builds the **whole** "12% p.a." / "1% p.m." string server-side, in the loan's
+own language, and that whole string is what fills `{{3}}`. This is the same
+technique already used for `REMINDER`'s lorry/lorries word
+(`LORRY_WORDS` in `whatsapp.controller.ts`) - a single word/phrase
+translated inside one variable slot, so one approved template still covers
+every period and every language without doubling the Meta submissions.
+
+`RATE_PERIOD_LABELS` (in `privateLoan.controller.ts`) holds the period word
+per language:
+
+| Language | Annual | Monthly |
+| --- | --- | --- |
+| EN | `p.a.` | `p.m.` |
+| TE | `వార్షికం` | `నెలవారీ` |
+| HI | `वार्षिक` | `मासिक` |
+
+So the template body itself just prints `{{3}}` bare, with no fixed
+"% p.a." suffix of its own - see the bodies below.
+
+Sample values for the approval form: `Ramesh Kumar`, `2,00,000`,
+`12% p.a.`, `15-Aug-2026`, `9,863`, `2,09,863`.
 
 ## Why it reads as a reminder, not a demand
 
@@ -76,7 +106,7 @@ a repayment is actually entered.
 📢 This is a gentle reminder about your loan from *RVP INDUSTRIES* — just an update on the pending amount, no immediate action needed.
 
 💰 Outstanding Principal: *₹{{2}}*
-📊 Interest Rate: *{{3}}% p.a.*
+📊 Interest Rate: *{{3}}*
 📅 Interest Accrued (as on {{4}}): *₹{{5}}*
 🧾 Total Payable: *₹{{6}}*
 
@@ -92,7 +122,7 @@ Please arrange repayment at your convenience. Thank you.
 📢 ఇది *RVP INDUSTRIES* నుండి తీసుకున్న మీ రుణానికి సంబంధించిన మర్యాదపూర్వక గుర్తుచేత — పెండింగ్‌లో ఉన్న మొత్తంపై ఒక అప్‌డేట్ మాత్రమే, వెంటనే ఏమీ చేయవలసిన అవసరం లేదు.
 
 💰 మిగిలిన అసలు మొత్తం: *₹{{2}}*
-📊 వడ్డీ రేటు: *{{3}}% p.a.*
+📊 వడ్డీ రేటు: *{{3}}*
 📅 సంచిత వడ్డీ ({{4}} నాటికి): *₹{{5}}*
 🧾 మొత్తం చెల్లించవలసినది: *₹{{6}}*
 
@@ -108,7 +138,7 @@ Please arrange repayment at your convenience. Thank you.
 📢 यह *RVP INDUSTRIES* से लिए गए आपके ऋण के संबंध में एक सामान्य याद दिलाना है — बकाया राशि पर एक अपडेट मात्र है, तुरंत किसी कार्रवाई की आवश्यकता नहीं है।
 
 💰 बकाया मूलधन: *₹{{2}}*
-📊 ब्याज दर: *{{3}}% प्रति वर्ष*
+📊 ब्याज दर: *{{3}}*
 📅 अर्जित ब्याज ({{4}} तक): *₹{{5}}*
 🧾 कुल देय राशि: *₹{{6}}*
 

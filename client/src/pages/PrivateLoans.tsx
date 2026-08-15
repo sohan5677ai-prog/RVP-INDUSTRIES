@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, ChevronRight, IndianRupee, MessageCircle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { PrivateLoansResponse, PrivateLoan, WaLanguage } from '@/lib/types';
+import type { PrivateLoansResponse, PrivateLoan, WaLanguage, InterestPeriod } from '@/lib/types';
 import { loanInterest, daysBetween } from '@/lib/calc';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,14 @@ const STATEMENT_LANGUAGES: { value: WaLanguage; label: string }[] = [
   { value: 'HI', label: 'हिंदी (Hindi)' },
 ];
 
+// The interest engine and the DB always store an ANNUAL rate (value × rate/100
+// × days/365). interestPeriod just picks which unit the rate is entered/shown
+// in - convert at the UI boundary only, same pattern as Storage Loans.
+const MONTHS_PER_YEAR = 12;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const toMonthly = (annualPct: number) => round2(annualPct / MONTHS_PER_YEAR);
+const toAnnual = (monthlyPct: number) => round2(monthlyPct * MONTHS_PER_YEAR);
+
 export default function PrivateLoansPage() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -46,7 +54,11 @@ export default function PrivateLoansPage() {
     { header: 'Borrower', value: (l) => l.borrowerName },
     { header: 'Phone', value: (l) => l.phone ?? '' },
     { header: 'Principal', value: (l) => rupees(l.principal), excel: (l) => Number(l.principal), numFmt: '#,##0.00', align: 'right' },
-    { header: 'Rate (%/yr)', value: (l) => Number(l.interestRatePct), numFmt: '#,##0.000', align: 'right' },
+    {
+      header: 'Rate',
+      value: (l) => (l.interestPeriod === 'MONTHLY' ? `${toMonthly(Number(l.interestRatePct))}%/mo` : `${Number(l.interestRatePct)}%/yr`),
+      align: 'right',
+    },
     { header: 'Repaid', value: (l) => rupees(l.repaidAmount), excel: (l) => Number(l.repaidAmount), numFmt: '#,##0.00', align: 'right' },
     { header: 'Outstanding', value: (l) => rupees(l.outstanding), excel: (l) => Number(l.outstanding), numFmt: '#,##0.00', align: 'right' },
     { header: 'Accrued Interest', value: (l) => rupees(l.accruedInterestToDate), excel: (l) => Number(l.accruedInterestToDate), numFmt: '#,##0.00', align: 'right' },
@@ -64,6 +76,7 @@ export default function PrivateLoansPage() {
   const [principal, setPrincipal] = useState('');
   const [startDate, setStartDate] = useState(today());
   const [interestRatePct, setInterestRatePct] = useState('');
+  const [interestPeriod, setInterestPeriod] = useState<InterestPeriod>('ANNUAL');
   const [notes, setNotes] = useState('');
   const [waLanguage, setWaLanguage] = useState<WaLanguage>('EN');
 
@@ -74,6 +87,7 @@ export default function PrivateLoansPage() {
     setPrincipal('');
     setStartDate(today());
     setInterestRatePct('');
+    setInterestPeriod('ANNUAL');
     setNotes('');
     setWaLanguage('EN');
   }
@@ -88,7 +102,10 @@ export default function PrivateLoansPage() {
           phone2: phone2 || null,
           principal: Number(principal),
           startDate,
-          interestRatePct: Number(interestRatePct),
+          // Rate is entered in whichever period the user picked; the server
+          // always stores/computes on an ANNUAL basis, so convert here.
+          interestRatePct: interestPeriod === 'MONTHLY' ? toAnnual(Number(interestRatePct)) : Number(interestRatePct),
+          interestPeriod,
           notes: notes || null,
           waLanguage,
         },
@@ -177,10 +194,13 @@ export default function PrivateLoansPage() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // Preview accrued interest in the Add Loan dialog.
+  // Preview accrued interest in the Add Loan dialog. The engine always wants
+  // an annual rate, so convert up when the user entered a monthly one.
+  const effectiveAnnualRate =
+    interestRatePct !== '' ? (interestPeriod === 'MONTHLY' ? toAnnual(Number(interestRatePct)) : Number(interestRatePct)) : 0;
   const previewInterest =
     principal && interestRatePct
-      ? loanInterest(Number(principal), Number(interestRatePct), daysBetween(new Date(startDate), new Date()))
+      ? loanInterest(Number(principal), effectiveAnnualRate, daysBetween(new Date(startDate), new Date()))
       : 0;
 
   return (
@@ -264,7 +284,11 @@ export default function PrivateLoansPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">{rupees(loan.principal)}</TableCell>
-                  <TableCell className="text-right">{Number(loan.interestRatePct)}% /yr</TableCell>
+                  <TableCell className="text-right">
+                    {loan.interestPeriod === 'MONTHLY'
+                      ? `${toMonthly(Number(loan.interestRatePct))}% /mo`
+                      : `${Number(loan.interestRatePct)}% /yr`}
+                  </TableCell>
                   <TableCell className="text-right">{rupees(loan.repaidAmount)}</TableCell>
                   <TableCell className="text-right font-semibold">{rupees(loan.outstanding)}</TableCell>
                   <TableCell className="text-right">{rupees(loan.accruedInterestToDate)}</TableCell>
@@ -403,8 +427,25 @@ export default function PrivateLoansPage() {
                 <Input id="principal" type="number" value={principal} onChange={(e) => setPrincipal(e.target.value)} placeholder="100000" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="rate">Interest rate (% / year)</Label>
-                <Input id="rate" type="number" step="0.001" value={interestRatePct} onChange={(e) => setInterestRatePct(e.target.value)} placeholder="12" />
+                <Label htmlFor="rate">Interest rate</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="rate"
+                    type="number"
+                    step="0.001"
+                    value={interestRatePct}
+                    onChange={(e) => setInterestRatePct(e.target.value)}
+                    placeholder={interestPeriod === 'MONTHLY' ? '1' : '12'}
+                    className="flex-1"
+                  />
+                  <Select value={interestPeriod} onValueChange={(v) => setInterestPeriod(v as InterestPeriod)}>
+                    <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ANNUAL">% p.a.</SelectItem>
+                      <SelectItem value="MONTHLY">% p.m.</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
             <div className="space-y-2">

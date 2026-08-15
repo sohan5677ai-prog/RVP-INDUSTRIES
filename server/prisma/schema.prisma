@@ -945,6 +945,16 @@ model CompanyProfile {
   ownerWeeklySummaryEnabled    Boolean @default(true) // rvp_owner_weekly, Monday 08:00 IST
   ownerDispatchReminderEnabled Boolean @default(true) // rvp_owner_dispatch, 09:00 IST daily (as needed)
 
+  // Each digest's schedule, as a 5-field cron expression ("MIN HOUR * * DOW"),
+  // editable in Settings -> WhatsApp. Defaults match the previously-hardcoded
+  // schedule. Applied live by rescheduleOwnerJob() in whatsappJobs.ts - no
+  // redeploy needed when an admin changes a time/day in Settings.
+  ownerDuesDigestCron       String @default("0 9 * * *")
+  ownerDueTodayDigestCron   String @default("0 6 * * *")
+  ownerBusinessSnapshotCron String @default("0 6 * * *")
+  ownerWeeklySummaryCron    String @default("0 8 * * 1")
+  ownerDispatchReminderCron String @default("0 9 * * *")
+
   // TaxPro GSP configuration
   taxproGspId     String?
   taxproGspSecret String?
@@ -1051,6 +1061,11 @@ enum PrivateLoanStatus {
   CLOSED
 }
 
+enum InterestPeriod {
+  ANNUAL
+  MONTHLY
+}
+
 // A loan WE give to someone else - the mirror of BankLoan (where we borrow).
 // Principal disbursed is an asset (12025 Loans & Advances Given), not a
 // liability. Interest is simple, accrues on the outstanding balance from
@@ -1063,7 +1078,11 @@ model PrivateLoan {
   phone2          String?
   principal       Decimal                @db.Decimal(14, 2)
   startDate       DateTime
+  // ALWAYS annual - the interest engine (loanInterest, days/365) assumes it.
+  // interestPeriod is display-only: which unit the user entered/reads the
+  // rate in, converted at the UI boundary (client) before this is written.
   interestRatePct Decimal                @db.Decimal(6, 3)
+  interestPeriod  InterestPeriod         @default(ANNUAL)
   status          PrivateLoanStatus      @default(OPEN)
   closedDate      DateTime?
   notes           String?

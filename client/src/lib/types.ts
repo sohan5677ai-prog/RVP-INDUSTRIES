@@ -762,6 +762,7 @@ export interface SiloInventory {
 
 export type PaymentType =
   | 'SUPPLIER'
+  | 'TRANSPORTER'
   | 'TRANSPORTER_INWARD'
   | 'TRANSPORTER_OUTWARD'
   | 'BROKER'

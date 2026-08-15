@@ -918,17 +918,23 @@ export async function undoSaleDispatch(req: Request, res: Response) {
 
     // 4. Recompute the order's status from whatever shipments remain, on the
     //    same tolerance the dispatch used - a short-closed order that still has
-    //    its final lorry stays closed, one that just lost it re-opens.
+    //    its final lorry stays closed, one that just lost it re-opens. Mirrors
+    //    the rollup in deliverSaleDispatch: undoing a stray/duplicate dispatch
+    //    must not downgrade an order whose real shipment was already delivered
+    //    back to DISPATCHED.
     const remaining = await tx.saleDispatch.findMany({ where: { saleOrderId: order.id } });
     const dispatchedKg = remaining.reduce((s, d) => s + d.weightKg, 0);
+    const fulfilled = isSaleOrderFulfilled(order.tonnageKg, dispatchedKg, tolerancePct);
     const status = dispatchedKg === 0
       ? 'PENDING'
-      : isSaleOrderFulfilled(order.tonnageKg, dispatchedKg, tolerancePct) ? 'DISPATCHED' : 'PARTIAL';
+      : !fulfilled
+        ? 'PARTIAL'
+        : remaining.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
     // Undoing re-opens the order, so its frozen seed cost no longer describes
     // what shipped. Clear the freeze and let it go back to being computed live;
     // it re-freezes when the order is fully dispatched again. An explicit short
     // close is dropped too - the balance is genuinely back on the order.
-    const reopened = status !== 'DISPATCHED';
+    const reopened = !fulfilled;
     await tx.saleOrder.update({
       where: { id: order.id },
       data: {

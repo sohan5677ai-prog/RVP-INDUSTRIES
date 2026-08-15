@@ -116,7 +116,8 @@ export class LedgerService {
       '20290': { name: 'Bank Loan Payable (Principal)', type: 'LIABILITY' as const },
       '10500': { name: 'TDS Receivable', type: 'ASSET' as const },
       '50100': { name: 'Sales Shortage & Allowances', type: 'EXPENSE' as const },
-      '12025': { name: 'Private Loans Given', type: 'ASSET' as const }
+      '12025': { name: 'Private Loans Given', type: 'ASSET' as const },
+      '40130': { name: 'Interest Income', type: 'REVENUE' as const },
     };
     for (const code of requiredCodes) {
       if (code in knownAccounts) {

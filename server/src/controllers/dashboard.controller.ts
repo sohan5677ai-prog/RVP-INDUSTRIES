@@ -155,6 +155,7 @@ export interface HuskIncome {
   hamaliCompanyProfit: number;
   gunnySales: number;
   otherIncome: number;
+  interestIncome: number;
 }
 
 export const HUSK_INCOME_META: { key: keyof HuskIncome; label: string }[] = [
@@ -162,6 +163,7 @@ export const HUSK_INCOME_META: { key: keyof HuskIncome; label: string }[] = [
   { key: 'hamaliCompanyProfit', label: 'Hamali Company Profit' },
   { key: 'gunnySales',          label: 'Gunny Bag Sales' },
   { key: 'otherIncome',         label: 'Other Income' },
+  { key: 'interestIncome',      label: 'Interest Income (Private Loans)' },
 ];
 
 // Shared husk-pool computation: pooled byproduct revenue + every operating cost,
@@ -196,6 +198,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     interestPaidAgg,
     otherIncomeAgg,
     gunnySalesAgg,
+    privateLoanInterestAgg,
     brokerageDispatches,
     lockedShortageReceipts,
     purchaseKataAgg,
@@ -243,6 +246,9 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       // ── Income-tab sources (Kata Income / Hamali Company Profit / Other Income / Gunny Sales) ──
       prisma.otherIncomeEntry.aggregate({ _sum: { amount: true } }),
       prisma.gunnySaleEntry.aggregate({ _sum: { amount: true } }),
+      // Interest actually received on private loans given out (booked to 40130
+      // the moment a repayment is recorded - see LedgerService.postPrivateLoanRepayment).
+      prisma.privateLoanRepayment.aggregate({ _sum: { interest: true } }),
       // Per-broker flat brokerage per dispatch, RVP (own orders) excluded - mirrors
       // the Brokerage Ledger/Dues reports exactly, so it only lands here once a
       // shipment actually dispatches (not at order-booking time).
@@ -469,6 +475,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       hamaliCompanyProfit,
       gunnySales,
       otherIncome: Number(otherIncomeAgg._sum.amount ?? 0),
+      interestIncome: Number(privateLoanInterestAgg._sum.interest ?? 0),
     };
 
   return { revenue, expenses, income };

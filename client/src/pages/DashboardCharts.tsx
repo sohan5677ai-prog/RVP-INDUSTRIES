@@ -61,6 +61,7 @@ export interface HuskIncome {
   hamaliCompanyProfit: number;
   gunnySales: number;
   otherIncome: number;
+  interestIncome: number;
 }
 export interface HuskPnl {
   revenue: number;
@@ -123,6 +124,7 @@ const HUSK_INCOME_ROWS: { key: keyof HuskIncome; label: string }[] = [
   { key: 'hamaliCompanyProfit', label: 'Hamali Company Profit' },
   { key: 'gunnySales', label: 'Gunny Bag Sales' },
   { key: 'otherIncome', label: 'Other Income' },
+  { key: 'interestIncome', label: 'Interest Income (Private Loans)' },
 ];
 
 // Theme-aware colours - CSS vars adapt automatically to dark mode.

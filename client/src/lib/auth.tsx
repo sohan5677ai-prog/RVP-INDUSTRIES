@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return startIdleWatch({
       onIdle: () => {
         logout();
-        toast.info('Signed out after 4 minutes of inactivity.');
+        toast.info('Signed out after 20 minutes of inactivity.');
       },
       heartbeat: () => {
         api('/auth/heartbeat', { method: 'POST' }).catch(() => {});

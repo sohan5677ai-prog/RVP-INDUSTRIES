@@ -117,6 +117,7 @@ const LEDGERS: LedgerDef[] = [
   { code: '12020', name: 'Loans & Advances (Opening)', type: 'ASSET', group: 'Loans & Advances (Asset)', opening: 6568791.00, sortOrder: 1 },
   { code: '10200', name: 'Transit Loss Claim Receivable', type: 'ASSET', group: 'Loans & Advances (Asset)', sortOrder: 2 },
   { code: '10300', name: 'Hamali Recoverable - Lorry', type: 'ASSET', group: 'Loans & Advances (Asset)', sortOrder: 3 },
+  { code: '12025', name: 'Private Loans Given', type: 'ASSET', group: 'Loans & Advances (Asset)', sortOrder: 4 },
   { code: '12030', name: 'APSPDCL - AP Transco', type: 'ASSET', group: 'Deposits (Asset)', opening: 1844868.95, sortOrder: 1 },
   { code: '12040', name: 'Input Tax Credit', type: 'ASSET', group: 'Current Assets', opening: 305256.00, sortOrder: 1 },
   { code: '12041', name: 'Interest Receivable', type: 'ASSET', group: 'Current Assets', opening: -180000.00, sortOrder: 2 },

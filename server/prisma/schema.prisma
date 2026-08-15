@@ -934,6 +934,17 @@ model CompanyProfile {
   // ownerWhatsappNumber, when blank.
   whatsappTestNumber      String?
 
+  // --- Owner daily WhatsApp digests (Settings -> WhatsApp) --------------------
+  // Each owner-facing scheduled message can be switched off independently -
+  // the cron still fires on schedule, the job just no-ops and logs a
+  // "disabled in Settings" result instead of sending. See OWNER_DIGEST_JOBS in
+  // server/src/jobs/whatsappJobs.ts, which maps each of these to its job key.
+  ownerDuesDigestEnabled       Boolean @default(true) // rvp_owner_dues, 09:00 IST daily
+  ownerDueTodayDigestEnabled   Boolean @default(true) // due_today, 06:00 IST daily
+  ownerBusinessSnapshotEnabled Boolean @default(true) // rvpdaily, 06:00 IST daily
+  ownerWeeklySummaryEnabled    Boolean @default(true) // rvp_owner_weekly, Monday 08:00 IST
+  ownerDispatchReminderEnabled Boolean @default(true) // rvp_owner_dispatch, 09:00 IST daily (as needed)
+
   // TaxPro GSP configuration
   taxproGspId     String?
   taxproGspSecret String?
@@ -1033,6 +1044,42 @@ model LoanRepayment {
   date      DateTime
   reference String?
   createdAt DateTime @default(now())
+}
+
+enum PrivateLoanStatus {
+  OPEN
+  CLOSED
+}
+
+// A loan WE give to someone else - the mirror of BankLoan (where we borrow).
+// Principal disbursed is an asset (12025 Loans & Advances Given), not a
+// liability. Interest is simple, accrues on the outstanding balance from
+// startDate, and is booked as real P&L income (40130) only when actually
+// collected on repayment - unlike BankLoan's capitalised-accrual interest.
+model PrivateLoan {
+  id              String                 @id @default(cuid())
+  borrowerName    String
+  phone           String?
+  phone2          String?
+  principal       Decimal                @db.Decimal(14, 2)
+  startDate       DateTime
+  interestRatePct Decimal                @db.Decimal(6, 3)
+  status          PrivateLoanStatus      @default(OPEN)
+  closedDate      DateTime?
+  notes           String?
+  createdAt       DateTime               @default(now())
+  repayments      PrivateLoanRepayment[]
+}
+
+model PrivateLoanRepayment {
+  id        String      @id @default(cuid())
+  loan      PrivateLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  loanId    String
+  amount    Decimal     @db.Decimal(14, 2) // principal portion - reduces the loan's outstanding
+  interest  Decimal     @default(0) @db.Decimal(14, 2) // interest portion - booked to Interest Income (40130)
+  date      DateTime
+  reference String?
+  createdAt DateTime    @default(now())
 }
 
 // Movement of tamarind shell (a production byproduct) from the factory/process

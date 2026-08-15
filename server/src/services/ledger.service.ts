@@ -115,7 +115,8 @@ export class LedgerService {
       '20280': { name: 'Bank Loan Interest Payable', type: 'LIABILITY' as const },
       '20290': { name: 'Bank Loan Payable (Principal)', type: 'LIABILITY' as const },
       '10500': { name: 'TDS Receivable', type: 'ASSET' as const },
-      '50100': { name: 'Sales Shortage & Allowances', type: 'EXPENSE' as const }
+      '50100': { name: 'Sales Shortage & Allowances', type: 'EXPENSE' as const },
+      '12025': { name: 'Private Loans Given', type: 'ASSET' as const }
     };
     for (const code of requiredCodes) {
       if (code in knownAccounts) {
@@ -547,6 +548,63 @@ export class LedgerService {
     await this.postJournalEntry(tx, {
       date: data.date,
       reference: `LOAN-REPAY-${repaymentId}`,
+      description: desc,
+      lines,
+    });
+  }
+
+  /**
+   * Post a private-loan disbursement: cash goes out, an asset (money owed to
+   * us by the borrower) comes onto the books. Dr Loans & Advances Given / Cr Bank/Cash.
+   */
+  static async postPrivateLoanDisbursement(
+    tx: Prisma.TransactionClient,
+    loanId: string,
+    data: { date: Date; amount: number; borrowerName?: string | null }
+  ) {
+    if (data.amount <= 0) return;
+    await this.postJournalEntry(tx, {
+      date: data.date,
+      reference: `PRIVATE-LOAN-DRAW-${loanId}`,
+      description: `Private loan of ₹${data.amount.toFixed(2)} given${data.borrowerName ? ` to ${data.borrowerName}` : ''}`,
+      lines: [
+        { accountCode: '12025', debit: data.amount, credit: 0 }, // Private Loans Given
+        { accountCode: '10400', debit: 0, credit: data.amount }, // Bank / Cash
+      ],
+    });
+  }
+
+  /**
+   * Post a private-loan repayment received: cash comes in, the principal
+   * portion reduces the asset (Cr 12025) and any interest portion is booked
+   * straight to P&L as income (Cr 40130) - unlike BankLoan's interest, this was
+   * never capitalised elsewhere, so it's recognised the moment it's collected.
+   */
+  static async postPrivateLoanRepayment(
+    tx: Prisma.TransactionClient,
+    repaymentId: string,
+    data: { date: Date; amount: number; interest?: number; reference?: string | null }
+  ) {
+    const interest = data.interest && data.interest > 0 ? data.interest : 0;
+    const cashIn = data.amount + interest;
+    if (cashIn <= 0) return;
+
+    const lines: JournalLineInput[] = [{ accountCode: '10400', debit: cashIn, credit: 0 }]; // Bank / Cash
+    if (data.amount > 0) {
+      lines.push({ accountCode: '12025', debit: 0, credit: data.amount }); // Private Loans Given
+    }
+    if (interest > 0) {
+      lines.push({ accountCode: '40130', debit: 0, credit: interest }); // Interest Income
+    }
+
+    const desc =
+      `Private loan repayment of ₹${data.amount.toFixed(2)}` +
+      (interest > 0 ? ` + interest ₹${interest.toFixed(2)}` : '') +
+      (data.reference ? ` (${data.reference})` : '');
+
+    await this.postJournalEntry(tx, {
+      date: data.date,
+      reference: `PRIVATE-LOAN-REPAY-${repaymentId}`,
       description: desc,
       lines,
     });

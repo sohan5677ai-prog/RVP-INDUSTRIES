@@ -40,6 +40,7 @@ import {
   CreditCard,
   Archive,
   LifeBuoy,
+  HandCoins,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -133,6 +134,7 @@ const sections: NavSection[] = [
     heading: 'Banking',
     items: [
       { to: '/loans', label: 'Storage Loans', icon: Banknote },
+      { to: '/private-loans', label: 'Private Loans', icon: HandCoins },
     ],
   },
   {

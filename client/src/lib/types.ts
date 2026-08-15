@@ -175,6 +175,49 @@ export interface LoansResponse {
   summary: LoanSummary;
 }
 
+export type PrivateLoanStatus = 'OPEN' | 'CLOSED';
+
+export interface PrivateLoanRepayment {
+  id: string;
+  loanId: string;
+  amount: string; // principal portion
+  interest: string; // interest portion (booked to Interest Income)
+  date: string;
+  reference: string | null;
+  createdAt: string;
+}
+
+export interface PrivateLoan {
+  id: string;
+  borrowerName: string;
+  phone: string | null;
+  phone2: string | null;
+  principal: string;
+  startDate: string;
+  interestRatePct: string;
+  status: PrivateLoanStatus;
+  closedDate: string | null;
+  notes: string | null;
+  createdAt: string;
+  repayments: PrivateLoanRepayment[];
+  // Server-computed
+  repaidAmount: number;
+  interestReceived: number;
+  outstanding: number;
+  accruedInterestToDate: number;
+}
+
+export interface PrivateLoanSummary {
+  totalOutstanding: number;
+  totalAccruedInterest: number;
+  totalInterestReceived: number;
+}
+
+export interface PrivateLoansResponse {
+  loans: PrivateLoan[];
+  summary: PrivateLoanSummary;
+}
+
 export interface ShellTransfer {
   id: string;
   fromLocation: string;
@@ -491,6 +534,12 @@ export interface CompanyProfile {
   alertRecipients?: string | null;
   whatsappTestMode?: boolean;
   whatsappTestNumber?: string | null;
+  // Owner daily digest on/off toggles (Settings -> WhatsApp -> Owner Daily Messages).
+  ownerDuesDigestEnabled?: boolean;
+  ownerDueTodayDigestEnabled?: boolean;
+  ownerBusinessSnapshotEnabled?: boolean;
+  ownerWeeklySummaryEnabled?: boolean;
+  ownerDispatchReminderEnabled?: boolean;
   freightRetentionPerTrip?: string | number;
   // How far under the booked tonnage a final lorry may land and still close the
   // sale order (% of ordered weight). Pappu is bagged and lands close; husk and

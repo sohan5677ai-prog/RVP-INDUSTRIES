@@ -59,6 +59,7 @@ const StockByDate = lazyWithPreload('/stock/date', () => import('@/pages/StockBy
 const StockByParty = lazyWithPreload('/stock/party', () => import('@/pages/StockByParty'));
 const StockByPrice = lazyWithPreload('/stock/price', () => import('@/pages/StockByPrice'));
 const BankLoans = lazyWithPreload('/loans', () => import('@/pages/BankLoans'));
+const PrivateLoans = lazyWithPreload('/private-loans', () => import('@/pages/PrivateLoans'));
 const StockByState = lazyWithPreload('/stock/state', () => import('@/pages/StockByState'));
 const SaleOrders = lazyWithPreload('/sale-orders', () => import('@/pages/SaleOrders'));
 const InvoiceView = lazyWithPreload('/sale-dispatches/:id/invoice', () => import('@/pages/InvoiceView'));
@@ -155,6 +156,7 @@ export default function App() {
               <Route path="/stock-by-price" element={<Navigate to="/stock/price" replace />} />
               <Route path="/stock/state" element={<StockByState />} />
               <Route path="/loans" element={<BankLoans />} />
+              <Route path="/private-loans" element={<PrivateLoans />} />
               <Route path="/sale-orders" element={<SaleOrders />} />
               <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
               <Route path="/sales/husk" element={<Husk />} />

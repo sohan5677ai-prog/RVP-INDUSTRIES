@@ -70,6 +70,11 @@ export type WaTemplateKey =
   // Meta to approve. relatedType still records 'BROKER_LEDGER' on those log rows
   // so WhatsAppLog can tell the two sends apart even though they share a template.
   | 'PARTY_LEDGER'
+  // rvp_private_loan_statement (drafted, not yet submitted to Meta - see
+  // docs/whatsapp-private-loan-statement-template.md): borrower, outstanding
+  // principal, rate %, as-on date, accrued interest, total payable. Until an
+  // id is configured below, every send logs SKIPPED rather than failing.
+  | 'PRIVATE_LOAN_STATEMENT'
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
   | 'OWNER_DUES_DIGEST' // rvp_owner_dues (document header - full outstanding-dues PDF): date, total receivable, overdue, top pending
@@ -119,6 +124,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // never collapse to the same id.
   SUPPORT_TICKET: '28539',
   SUPPORT_TICKET_TEXT: '28541',
+  // PRIVATE_LOAN_STATEMENT is absent on purpose, same as DISPATCH_DRIVER above:
+  // rvp_private_loan_statement has not been submitted to Meta yet. Once
+  // approved, set its Fast2SMS message_id here (or via FAST2SMS_TMPL_PRIVATE_LOAN_STATEMENT).
 };
 
 /**
@@ -1091,6 +1099,38 @@ export const whatsappService = {
     return args.internalCopy
       ? sendToPartyAndInternal(message, args.phones)
       : sendWhatsAppTemplate({ ...message, to: args.phones.filter(Boolean) as string[] });
+  },
+
+  /**
+   * Private-loan statement → borrower. Manual "Send Statement" button on the
+   * Private Loans page. Always copies the office, same as a payment reminder,
+   * so there's a record of exactly what figure the borrower was told.
+   */
+  async sendPrivateLoanStatement(args: {
+    borrowerName: string;
+    phones: Array<string | null | undefined>;
+    outstanding: number;
+    ratePct: number;
+    accruedInterest: number;
+    loanId: string;
+  }) {
+    const totalPayable = Math.round((args.outstanding + args.accruedInterest) * 100) / 100;
+    return sendToPartyAndInternal(
+      {
+        templateKey: 'PRIVATE_LOAN_STATEMENT',
+        variables: [
+          args.borrowerName,
+          fmtInr(args.outstanding),
+          String(args.ratePct),
+          fmtDate(new Date()),
+          fmtInr(args.accruedInterest),
+          fmtInr(totalPayable),
+        ],
+        relatedType: 'PRIVATE_LOAN',
+        relatedId: args.loanId,
+      },
+      args.phones
+    );
   },
 
   /**

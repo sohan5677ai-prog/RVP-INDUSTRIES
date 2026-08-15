@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '../services/whatsapp.service.js';
-import { computeBuyerDues, invoiceListText, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
+import { computeBuyerDues, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
 import { computeSupplierDues } from '../services/purchaseDues.service.js';
 import { computeProfitLossSummary } from '../controllers/ledger.controller.js';
 import { renderSalesDuesReportPdf } from '../lib/salesDuesPdf.js';
@@ -10,11 +10,13 @@ import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 
 /**
- * Scheduled WhatsApp jobs (use cases 7-12). Runs in-process via node-cron in
- * Asia/Kolkata time. Every job is also callable on demand: the CRON_SECRET
- * fallback endpoint (`/webhooks/whatsapp/jobs/:job`, for an external cron
- * when Render's free tier is asleep) and the authenticated Settings "Send
- * Now" button (`OWNER_DIGEST_JOBS`, `JobOpts.force`) both go through
+ * Scheduled WhatsApp jobs (use cases 8-12; buyer payment reminders, formerly
+ * #7, are no longer auto-scheduled - see the Party Ledger's "Payment
+ * Reminder" button instead). Runs in-process via node-cron in Asia/Kolkata
+ * time. Every job is also callable on demand: the CRON_SECRET fallback
+ * endpoint (`/webhooks/whatsapp/jobs/:job`, for an external cron when
+ * Render's free tier is asleep) and the authenticated Settings "Send Now"
+ * button (`OWNER_DIGEST_JOBS`, `JobOpts.force`) both go through
  * `JOB_RUNNERS`.
  *
  * Each of the five owner digests (see `OWNER_DIGEST_JOBS` below) also has an
@@ -22,14 +24,13 @@ import { uploadFileToStorage } from '../lib/upload.js';
  * cron and the CRON_SECRET fallback both respect it (via `ownerJobEnabled`);
  * only an explicit "Send Now" click (`force: true`) bypasses it.
  *
- * Idempotency: each owner digest is keyed by day/week in WhatsAppLog, and buyer
- * dues reminders are throttled, so a restart or a double-trigger never spams.
- * "Send Now" (`force: true`) deliberately bypasses this too, so a manual click
- * always actually sends even if the automatic run already fired today.
+ * Idempotency: each owner digest is keyed by day/week in WhatsAppLog, so a
+ * restart or a double-trigger never spams. "Send Now" (`force: true`)
+ * deliberately bypasses this too, so a manual click always actually sends
+ * even if the automatic run already fired today.
  */
 
 const TZ = 'Asia/Kolkata';
-const DUES_THROTTLE_MS = 48 * 60 * 60 * 1000; // don't re-nag a buyer within 48h
 
 /** YYYY-MM-DD in IST for the given instant (used for idempotency keys). */
 function istDayKey(d: Date = new Date()): string {
@@ -198,36 +199,6 @@ async function runOwnerBusinessSnapshot(opts: JobOpts = {}): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// #7 - Buyer sales-dues reminders (only overdue buyers, throttled)
-// ---------------------------------------------------------------------------
-async function runBuyerDuesReminders(): Promise<string> {
-  const portfolio = await computeBuyerDues();
-  let sent = 0;
-  let failed = 0;
-  let throttled = 0;
-  let lastError: string | undefined;
-  for (const buyer of portfolio.buyers) {
-    if (buyer.overdueInvoices.length === 0 || (!buyer.phone && !buyer.phone2)) continue;
-    const last = await whatsappService.lastSentAt('PAYMENT_REMINDER', buyer.buyerId);
-    if (last && Date.now() - last.getTime() < DUES_THROTTLE_MS) {
-      throttled += 1;
-      continue;
-    }
-    const res = await whatsappService.sendSalesDuesReminder(
-      { id: buyer.buyerId, name: buyer.name, phone: buyer.phone, phone2: buyer.phone2, waLanguage: buyer.waLanguage },
-      buyer.overdueOutstanding,
-      invoiceListText(buyer.overdueInvoices)
-    );
-    if (res.ok) sent += 1;
-    else {
-      failed += 1;
-      lastError = res.error;
-    }
-  }
-  return `sent ${sent}, failed ${failed}, throttled ${throttled}${lastError ? ` - last error: ${lastError}` : ''}`;
-}
-
-// ---------------------------------------------------------------------------
 // #8 - Owner deferred-dispatch reminders
 // ---------------------------------------------------------------------------
 async function runDeferredDispatchReminders(opts: JobOpts = {}): Promise<string> {
@@ -376,12 +347,17 @@ async function runWeeklySummary(opts: JobOpts = {}): Promise<string> {
 // Aggregators (also the endpoint targets)
 // ---------------------------------------------------------------------------
 
-/** All daily jobs: owner dues digest (#10) + buyer dues reminders (#7) + deferred-dispatch reminders (#8). */
+/**
+ * All daily jobs: owner dues digest (#10) + deferred-dispatch reminders (#8).
+ * Buyer payment reminders (#7) are no longer auto-sent here - they go out
+ * only from the "Payment Reminder" button on the Party Ledger
+ * (whatsapp.controller.ts `sendPaymentReminder`), which the owner triggers
+ * per party/invoice selection.
+ */
 export async function runDailyJobs() {
   const results: Record<string, string> = {};
   for (const [name, fn] of [
     ['ownerDuesDigest', runOwnerDuesDigest],
-    ['buyerDuesReminders', runBuyerDuesReminders],
     ['deferredDispatchReminders', runDeferredDispatchReminders],
   ] as const) {
     try {
@@ -629,7 +605,7 @@ export function registerWhatsappCron() {
   // of the 09:00 bundle below.
   cron.schedule('0 6 * * *', () => { void runDueTodayJob(); }, { timezone: TZ });
   cron.schedule('0 6 * * *', () => { void runBusinessSnapshotJob(); }, { timezone: TZ });
-  // Daily at 09:00 IST - dues digest, buyer reminders, deferred-dispatch reminders.
+  // Daily at 09:00 IST - owner dues digest + deferred-dispatch reminders.
   cron.schedule('0 9 * * *', () => { void runDailyJobs(); }, { timezone: TZ });
   // Weekly on Monday at 08:00 IST - owner business summary.
   cron.schedule('0 8 * * 1', () => { void runWeeklyJobs(); }, { timezone: TZ });

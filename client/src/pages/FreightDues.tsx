@@ -199,7 +199,7 @@ function FreightTable({
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
-  onPay: (lorry: string, due: number) => void;
+  onPay: (lorry: string, due: number, sourced: FreightRow['sourced']) => void;
   hideDeductions?: boolean;
   paymentsByLorry: Map<string, { date: string, amount: number, reference: string | null }[]>;
 }) {
@@ -310,7 +310,7 @@ function FreightTable({
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     {r.lorry && pay !== 'Paid' ? (
-                      <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due)}>
+                      <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due, r.sourced)}>
                         Pay
                       </Button>
                     ) : null}
@@ -374,20 +374,20 @@ const kindVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
 
 /**
  * Transfer transport payable to KNM Transport (husk / seed / pre-cleaner dust).
- * The whole transport charge is the net due; payment status/due come from the
- * same per-lorry pool as the usual KNM freight (transfers without a lorry number
- * are info-only - no Pay action).
+ * The whole transport charge is the net due. Kept OUT of the shared per-lorry
+ * freight pool on purpose - a lorry that also runs usual freight must never
+ * have transfer legs marked paid by freight payments or vice versa - so these
+ * always read Pending here until a dedicated transfer-payment flow exists;
+ * no Pay action is offered.
  */
 function TransfersTable({
   rows,
   paymentStatusFor,
   dueFor,
-  onPay,
 }: {
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
-  onPay: (lorry: string, due: number) => void;
 }) {
   const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
   const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
@@ -421,16 +421,14 @@ function TransfersTable({
             <TableHead className="text-right">Weight</TableHead>
             <TableHead className="text-right">Transport</TableHead>
             <TableHead>Payment Status</TableHead>
-            <TableHead className="text-right">Action</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {filteredRows.length === 0 && (
-            <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
             const pay = paymentStatusFor(r);
-            const due = dueFor(r);
             return (
               <TableRow key={r.id}>
                 <TableCell>{shortDate(r.date)}</TableCell>
@@ -456,13 +454,6 @@ function TransfersTable({
                     <span className="text-xs text-muted-foreground">No lorry</span>
                   )}
                 </TableCell>
-                <TableCell className="text-right">
-                  {r.lorry && pay !== 'Paid' ? (
-                    <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due)}>
-                      Pay
-                    </Button>
-                  ) : null}
-                </TableCell>
               </TableRow>
             );
           })}
@@ -472,7 +463,7 @@ function TransfersTable({
             <TableRow className="border-t-2 font-bold bg-muted/30">
               <TableCell colSpan={5}>Total</TableCell>
               <TableCell className="text-right">{rupees(totalTransport)}</TableCell>
-              <TableCell colSpan={2} />
+              <TableCell />
             </TableRow>
           </tfoot>
         )}
@@ -492,6 +483,7 @@ export default function FreightDuesPage() {
 
   // Pay dialog state
   const [payLorry, setPayLorry] = useState<string | null>(null);
+  const [payType, setPayType] = useState<'TRANSPORTER_INWARD' | 'TRANSPORTER_OUTWARD'>('TRANSPORTER_OUTWARD');
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
   const [payReference, setPayReference] = useState('');
@@ -653,7 +645,7 @@ export default function FreightDuesPage() {
   const paidByLorry = new Map<string, number>();
   const paymentsByLorry = new Map<string, { date: string, amount: number, reference: string | null }[]>();
   payments?.forEach((p) => {
-    if (p.type === 'TRANSPORT' && p.lorryNumber) {
+    if ((p.type === 'TRANSPORTER' || p.type === 'TRANSPORTER_INWARD' || p.type === 'TRANSPORTER_OUTWARD') && p.lorryNumber) {
       const k = p.lorryNumber.trim().toUpperCase();
       paidByLorry.set(k, (paidByLorry.get(k) ?? 0) + Number(p.amount));
       
@@ -664,8 +656,13 @@ export default function FreightDuesPage() {
   });
   const rowStatus = new Map<string, PaymentStatus>();
   const rowDue = new Map<string, number>();
-  
-  const allRows = [...inwardRows, ...outwardRows, ...knmRows, ...transferRows];
+
+  // Transfer transport is deliberately kept OUT of this pool: a lorry that also
+  // runs husk/seed/dust transfers must never have those legs silently marked
+  // paid by freight payments (or vice versa) just because they share a lorry
+  // number. Transfers fall back to their default Pending/full-due below and
+  // settle through a separate mechanism.
+  const allRows = [...inwardRows, ...outwardRows, ...knmRows];
   const rowsByLorry = new Map<string, FreightRow[]>();
   
   allRows.forEach((r) => {
@@ -712,7 +709,7 @@ export default function FreightDuesPage() {
         body: {
           date: payDate,
           amount: Number(payAmount) || 0,
-          type: 'TRANSPORTER',
+          type: payType,
           lorryNumber: payLorry,
           reference: payReference || null,
           description: `Freight payment - Lorry ${payLorry}`,
@@ -728,8 +725,11 @@ export default function FreightDuesPage() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  function openPay(lorry: string, due: number) {
+  // A row combining a shared lorry's same-day Purchase + Sale freight has no
+  // single inward/outward answer - default it to outward (the common case).
+  function openPay(lorry: string, due: number, sourced: FreightRow['sourced']) {
     setPayLorry(lorry);
+    setPayType(sourced === 'Purchase' ? 'TRANSPORTER_INWARD' : 'TRANSPORTER_OUTWARD');
     setPayDate(new Date().toISOString().slice(0, 10));
     setPayAmount(due > 0 ? String(due) : '');
     setPayReference('');
@@ -848,7 +848,7 @@ export default function FreightDuesPage() {
 
                   <TabsContent value="transfers" className="space-y-2">
                     <p className="text-xs text-muted-foreground">Husk, seed &amp; pre-cleaner dust transport billed to KNM Transport.</p>
-                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} />
+                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} />
                   </TabsContent>
                 </Tabs>
               </TabsContent>

@@ -38,6 +38,8 @@ export const EXPENSE_PAYMENT_ACCOUNTS: Record<
 export const PAYMENT_TYPES = [
   'SUPPLIER',
   'TRANSPORTER',
+  'TRANSPORTER_INWARD',
+  'TRANSPORTER_OUTWARD',
   'BROKER',
   // Crew-settlement payment: debits the Hamali payable (20200) instead of a P&L
   // expense head (the expense was booked at accrual). Routed in postPayment below.
@@ -928,7 +930,7 @@ export class LedgerService {
         debit: data.amount,
         credit: 0,
         costCenter:
-          data.type === 'TRANSPORTER'
+          data.type === 'TRANSPORTER' || data.type === 'TRANSPORTER_INWARD' || data.type === 'TRANSPORTER_OUTWARD'
             ? data.lorryNumber
             : data.type === 'HAMALI'
               ? 'Hamali Team'

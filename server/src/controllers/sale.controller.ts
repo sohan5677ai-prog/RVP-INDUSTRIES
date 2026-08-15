@@ -1134,6 +1134,16 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
     }
   }
 
+  // Delivery is practically impossible before the shipment left - compare
+  // calendar dates (not instants) since both are date-only pickers on the UI.
+  if (data.deliveredDate) {
+    const dispatchDay = dispatch.dispatchDate.toISOString().slice(0, 10);
+    const deliveredDay = data.deliveredDate.toISOString().slice(0, 10);
+    if (deliveredDay < dispatchDay) {
+      throw new HttpError(400, 'Delivered date cannot be before the dispatch date.');
+    }
+  }
+
   const order = dispatch.saleOrder;
   const rate = Number(order.ratePerKg);
   let orderIsFullyShipped = false;

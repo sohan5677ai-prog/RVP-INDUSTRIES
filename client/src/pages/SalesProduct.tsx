@@ -692,6 +692,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const buyerKataKg = Math.round((Number(buyerKataTonnes) || 0) * 1000);
   const deliverShortageKg = deliverDispatch ? Math.max(0, deliverDispatch.dispatch.weightKg - buyerKataKg) : 0;
   const deliverOverweight = deliverDispatch ? buyerKataKg > deliverDispatch.dispatch.weightKg : false;
+  const deliverDateTooEarly = deliverDispatch && deliverDate
+    ? deliverDate < new Date(deliverDispatch.dispatch.dispatchDate).toISOString().slice(0, 10)
+    : false;
 
   const deliverMutation = useMutation({
     mutationFn: () => {
@@ -1986,7 +1989,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Delivered date</Label>
-              <Input type="date" value={deliverDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDeliverDate(e.target.value)} />
+              <Input
+                type="date"
+                value={deliverDate}
+                min={deliverDispatch ? new Date(deliverDispatch.dispatch.dispatchDate).toISOString().slice(0, 10) : undefined}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setDeliverDate(e.target.value)}
+              />
               <p className="text-[11px] text-muted-foreground">The date the buyer received it. Payment due date counts from here.</p>
             </div>
             <div className="space-y-1.5">
@@ -2013,8 +2022,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             {deliverOverweight && (
               <div className="rounded-lg border bg-rose-50/50 p-3 text-sm text-rose-700 font-medium text-center">Buyer weight cannot exceed dispatched weight.</div>
             )}
+            {deliverDateTooEarly && (
+              <div className="rounded-lg border bg-rose-50/50 p-3 text-sm text-rose-700 font-medium text-center">Delivered date cannot be before the dispatch date.</div>
+            )}
             <DialogFooter>
-              <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverOverweight} variant="forest">
+              <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverOverweight || deliverDateTooEarly} variant="forest">
                 <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Update Delivery' : 'Confirm Delivered'}
               </Button>
             </DialogFooter>

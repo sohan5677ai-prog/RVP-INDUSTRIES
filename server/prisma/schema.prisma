@@ -353,6 +353,13 @@ model StockIn {
   // Persisted so edits keep the net as-is instead of recomputing first − second (→ 0).
   directNet         Boolean       @default(false)
   billingWeightKg   Int // invoice tonnage
+  // Rate (Rs/kg) the party actually printed on their GST invoice, when it differs
+  // from the PO price. Some suppliers quote us a DELIVERY (landed) price but bill
+  // at their BASE price, so the taxable value - and therefore the input GST we can
+  // claim - is lower than billingWeightKg x PO price. Null = billed at the PO price.
+  // It moves the TAX BASE ONLY: the payable and the seed's landed cost stay on the
+  // PO price, because we still pay the party the full delivery rate.
+  billingRatePerKg  Decimal?      @db.Decimal(12, 2)
   partyKataKg       Int // party weighbridge
   invoiceFileUrl    String // uploaded invoice
   loadingLocation   String        @default("RVP")
@@ -416,6 +423,10 @@ model WeightVerification {
   exempt             Boolean
   finalWeightKg      Int
   pricePerKg         Decimal  @db.Decimal(12, 2)
+  // Snapshot of StockIn.billingRatePerKg at verification time - the settlement
+  // record has to carry its own tax basis so the statement PDF, the ledger and the
+  // GST report can never drift from what was actually settled. Null = PO price.
+  billingRatePerKg   Decimal? @db.Decimal(12, 2)
   // Net balance payable to the supplier (already net of any self-vehicle hamali
   // and kata recovery below). Seed inventory value = totalAmount + selfVehicleHamali.
   totalAmount        Decimal  @db.Decimal(14, 2)

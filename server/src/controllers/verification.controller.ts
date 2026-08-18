@@ -11,6 +11,7 @@ import {
   computeQualityAdjustments,
   parseQualityAdjustments,
   qualityAdjustmentFreight,
+  purchaseGst,
   type QualityAdjustmentInput,
 } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
@@ -109,6 +110,12 @@ export async function createVerification(req: Request, res: Response) {
   const partyKataKg = purchase.stockIn.partyKataKg;
   const rvpKataKg = purchase.netWeightKg;
   const pricePerKg = Number(purchase.stockIn.purchaseOrder.pricePerKg);
+  // The party may invoice at their BASE rate while the PO is quoted DELIVERY. That
+  // rate moves the GST base only - everything payable below stays on pricePerKg,
+  // because we still pay them the full delivery rate.
+  const billingRatePerKg = purchase.stockIn.billingRatePerKg
+    ? Number(purchase.stockIn.billingRatePerKg)
+    : null;
 
   let { reference, diff, exempt, finalWeight } = crossVerify(
     billingWeightKg,
@@ -133,10 +140,16 @@ export async function createVerification(req: Request, res: Response) {
   const qa = computeQualityAdjustments(adjustmentInputs, finalWeight, pricePerKg);
   const netBaseCost = qa.netBaseCost;
 
-  // GST is charged on the invoice billing amount (billing weight x price), NOT
-  // on our recalculated payable. Gross payable = net base cost + IGST (5%).
-  const billingAmount = billingWeightKg * pricePerKg;
-  const igst = purchase.stockIn.purchaseOrder.hasGst ? Math.round(billingAmount * 0.05 * 100) / 100 : 0;
+  // GST is charged on the invoice's taxable value (billing weight x the rate the
+  // party actually billed), NOT on our recalculated payable. Gross payable = net
+  // base cost + IGST (5%).
+  const gst = purchaseGst({
+    hasGst: purchase.stockIn.purchaseOrder.hasGst,
+    billingWeightKg,
+    pricePerKg,
+    billingRatePerKg,
+  });
+  const igst = gst.amount;
   const grossPayable = netBaseCost + igst;
 
   // Self-vehicle: the party used their own lorry, so the lorry's ₹80/t hamali
@@ -201,6 +214,9 @@ export async function createVerification(req: Request, res: Response) {
         exempt,
         finalWeightKg: finalWeight,
         pricePerKg,
+        // Snapshot the tax basis so the statement, ledger and GST report can never
+        // drift from what was settled here.
+        billingRatePerKg,
         totalAmount,
         selfVehicleHamali,
         selfVehicleKata,
@@ -305,9 +321,12 @@ export async function deleteVerification(req: Request, res: Response) {
     // totalAmount is net of the self-vehicle hamali and kata but still INCLUDES GST:
     // add the hamali back (it stayed in the seed), leave the kata out (it lowered the
     // landed cost), and subtract the IGST (it was parked in Input Tax Credit, not stock).
-    const igst = purchase.stockIn.purchaseOrder.hasGst
-      ? Math.round(Number(verification.billingWeightKg) * Number(verification.pricePerKg) * 0.05 * 100) / 100
-      : 0;
+    const igst = purchaseGst({
+      hasGst: purchase.stockIn.purchaseOrder.hasGst,
+      billingWeightKg: verification.billingWeightKg,
+      pricePerKg: verification.pricePerKg,
+      billingRatePerKg: verification.billingRatePerKg,
+    }).amount;
     const selfHam = Number(verification.selfVehicleHamali);
     // A FREIGHT quality adjustment was added back into the seed at verification
     // (it left the party's payable but never left the landed cost), so it has to

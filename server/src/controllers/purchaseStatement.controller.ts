@@ -3,8 +3,10 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import {
   EXEMPT_KG,
+  PURCHASE_GST_PCT,
   computeQualityAdjustments,
   parseQualityAdjustments,
+  purchaseGst,
   type QualityAdjustmentMode,
 } from '../lib/calc.js';
 import { getCompanyProfileRow } from './settings.controller.js';
@@ -48,12 +50,17 @@ export async function buildPurchaseStatementData(
   const netPayable = Number(verification.totalAmount);
   const pricePerKg = Number(verification.pricePerKg);
 
-  // GST is charged on the invoice billing amount, not on our recalculated
-  // payable - mirrors createVerification.
-  const gstRate = 5;
-  const gstAmount = po.hasGst
-    ? Math.round(verification.billingWeightKg * pricePerKg * (gstRate / 100) * 100) / 100
-    : 0;
+  // GST is charged on the invoice's taxable value, not on our recalculated
+  // payable - mirrors createVerification. When the party billed at their base
+  // rate, the tax basis rate differs from the price we pay them.
+  const gstRate = PURCHASE_GST_PCT;
+  const gst = purchaseGst({
+    hasGst: po.hasGst,
+    billingWeightKg: verification.billingWeightKg,
+    pricePerKg,
+    billingRatePerKg: verification.billingRatePerKg,
+  });
+  const gstAmount = gst.amount;
 
   // Verifications recorded before the multi-row feature only carry the legacy
   // single discountType/discountValue pair - rebuild the equivalent row so the
@@ -107,6 +114,9 @@ export async function buildPurchaseStatementData(
     gstRate,
     gstAmount,
     gstBasisKg: verification.billingWeightKg,
+    // The ₹/kg the tax was computed on - equal to pricePerKg unless the party
+    // invoiced at their base rate.
+    gstBasisRate: gst.ratePerKg,
     selfVehicleHamali: Number(verification.selfVehicleHamali ?? 0),
     selfVehicleKata: Number(verification.selfVehicleKata ?? 0),
     netPayable,

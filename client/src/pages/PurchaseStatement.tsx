@@ -129,7 +129,10 @@ export default function PurchaseStatement() {
   }
 
   const billAddables = (v.billAddables ?? []).filter((a) => a && a.label && Number(a.amount) > 0);
-  const gstAmount = hasGst ? Math.round(v.billingWeightKg * price * 0.05 * 100) / 100 : 0;
+  // Tax basis: the rate the party billed (their base price when it differs from
+  // the PO's delivery price), else the price we pay. Mirrors the server helper.
+  const gstRatePerKg = Number(v.billingRatePerKg ?? 0) || price;
+  const gstAmount = hasGst ? Math.round(v.billingWeightKg * gstRatePerKg * 0.05 * 100) / 100 : 0;
   const selfVehicleHamali = Number(v.selfVehicleHamali ?? 0);
   const selfVehicleKata = Number(v.selfVehicleKata ?? 0);
   const netPayable = Number(v.totalAmount);
@@ -181,7 +184,7 @@ export default function PurchaseStatement() {
   if (gstAmount > 0) {
     rows.push({
       label: t.addIgst,
-      note: t.igstNote(kg(v.billingWeightKg), money(price)),
+      note: t.igstNote(kg(v.billingWeightKg), money(gstRatePerKg)),
       amount: gstAmount,
     });
   }

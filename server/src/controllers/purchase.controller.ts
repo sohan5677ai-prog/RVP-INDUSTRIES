@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createPurchaseSchema } from '../schemas/purchase.schema.js';
-import { calcHamali, calcKataFee, companyHamaliShare } from '../lib/calc.js';
+import { calcHamali, calcKataFee, companyHamaliShare, purchaseGst } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 
 const purchaseInclude = {
@@ -265,9 +265,12 @@ export async function deletePurchase(req: Request, res: Response) {
       // vehicle hamali AND kata but still includes GST: add the hamali back (it stayed
       // in the seed), leave the kata out, and subtract the IGST (parked in Input Tax
       // Credit, not stock).
-      const igst = purchase.stockIn.purchaseOrder.hasGst
-        ? Math.round(Number(purchase.verification.billingWeightKg) * Number(purchase.verification.pricePerKg) * 0.05 * 100) / 100
-        : 0;
+      const igst = purchaseGst({
+        hasGst: purchase.stockIn.purchaseOrder.hasGst,
+        billingWeightKg: purchase.verification.billingWeightKg,
+        pricePerKg: purchase.verification.pricePerKg,
+        billingRatePerKg: purchase.verification.billingRatePerKg,
+      }).amount;
       const selfHam = Number(purchase.verification.selfVehicleHamali);
       const verifiedCost = Number(purchase.verification.totalAmount) + selfHam + ourHamali + freight - igst;
       await InventoryService.updateBlackSeedInventory(

@@ -8,6 +8,7 @@ import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { computeFY, formatPoNumber, releasePoSerial, reservePoSerials } from '../lib/poNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { purchaseGst } from '../lib/calc.js';
 
 /**
  * True when `arrival` falls on a calendar day strictly before `poDate`. Both are
@@ -54,9 +55,12 @@ async function rollbackPurchaseForStockIn(tx: Prisma.TransactionClient, purchase
     // vehicle hamali AND kata but still includes GST: add the hamali back (it stayed
     // in the seed), leave the kata out, and subtract the IGST (parked in Input Tax
     // Credit, not stock).
-    const igst = purchase.stockIn.purchaseOrder.hasGst
-      ? Math.round(Number(purchase.verification.billingWeightKg) * Number(purchase.verification.pricePerKg) * 0.05 * 100) / 100
-      : 0;
+    const igst = purchaseGst({
+      hasGst: purchase.stockIn.purchaseOrder.hasGst,
+      billingWeightKg: purchase.verification.billingWeightKg,
+      pricePerKg: purchase.verification.pricePerKg,
+      billingRatePerKg: purchase.verification.billingRatePerKg,
+    }).amount;
     const selfHam = Number(purchase.verification.selfVehicleHamali);
     const verifiedCost = Number(purchase.verification.totalAmount) + selfHam + ourHamali + freight - igst;
     await InventoryService.updateBlackSeedInventory(
@@ -222,6 +226,8 @@ export async function createStockIn(req: Request, res: Response) {
         rvpSecondWeightKg: data.rvpSecondWeightKg,
         rvpKataKg,
         billingWeightKg: data.billingWeightKg,
+        // Only when the invoice is billed at a different (base) rate; null = PO price.
+        billingRatePerKg: data.billingRatePerKg ?? null,
         partyKataKg: data.partyKataKg,
         invoiceFileUrl,
         loadingLocation: data.loadingLocation,
@@ -272,7 +278,14 @@ export async function createUrpStockIn(req: Request, res: Response) {
     rvpKataKg = rvpSecondWeightKg > 0 ? (data.rvpFirstWeightKg - rvpSecondWeightKg) : 0;
   }
 
-  const gstAmount = data.hasGst ? (rvpKataKg * data.pricePerKg * 0.05) : 0;
+  // URP's PO-level GST estimate. Basis is the arrived net (no separate invoice
+  // tonnage is ordered up front), but the RATE honours a base-billed invoice.
+  const gstAmount = purchaseGst({
+    hasGst: data.hasGst,
+    billingWeightKg: rvpKataKg,
+    pricePerKg: data.pricePerKg,
+    billingRatePerKg: data.billingRatePerKg,
+  }).amount;
 
   // A URP entry captures the net up front (either from both weighments or a
   // direct net entry), so whenever we have a positive net we auto-record the
@@ -332,6 +345,8 @@ export async function createUrpStockIn(req: Request, res: Response) {
         // rather than recomputing first − second (which would zero it out).
         directNet: directNetKg > 0,
         billingWeightKg: data.billingWeightKg,
+        // Only when the invoice is billed at a different (base) rate; null = PO price.
+        billingRatePerKg: data.billingRatePerKg ?? null,
         partyKataKg: data.partyKataKg,
         invoiceFileUrl,
         loadingLocation: data.loadingLocation,
@@ -412,6 +427,8 @@ export async function updateStockIn(req: Request, res: Response) {
         rvpSecondWeightKg,
         rvpKataKg,
         billingWeightKg: data.billingWeightKg,
+        // Only when the invoice is billed at a different (base) rate; null = PO price.
+        billingRatePerKg: data.billingRatePerKg ?? null,
         partyKataKg: data.partyKataKg,
         invoiceFileUrl,
         loadingLocation: data.loadingLocation,

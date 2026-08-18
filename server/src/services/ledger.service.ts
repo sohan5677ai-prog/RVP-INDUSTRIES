@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
-import { companyVehicleNumbers, hamaliSplit, parseQualityAdjustments, qualityAdjustmentFreight } from '../lib/calc.js';
+import { companyVehicleNumbers, hamaliSplit, parseQualityAdjustments, purchaseGst, qualityAdjustmentFreight } from '../lib/calc.js';
 
 export interface JournalLineInput {
   accountCode: string;
@@ -210,9 +210,12 @@ export class LedgerService {
     // the stock. It is carved out of the inventory debit and parked in 12040, so the
     // seed (Closing Stock) is valued EXCLUSIVE of GST. GST still sits in the supplier
     // payable (we owe the supplier the gross, GST included).
-    const igst = p.stockIn.purchaseOrder.hasGst
-      ? Math.round(Number(p.verification.billingWeightKg) * Number(p.verification.pricePerKg) * 0.05 * 100) / 100
-      : 0;
+    const igst = purchaseGst({
+      hasGst: p.stockIn.purchaseOrder.hasGst,
+      billingWeightKg: p.verification.billingWeightKg,
+      pricePerKg: p.verification.pricePerKg,
+      billingRatePerKg: p.verification.billingRatePerKg,
+    }).amount;
     const stockDebit = baseCost - igst; // seed landed value, EXCLUDING GST
     // Arrival hamali profit-centre split: the seed bears its share, the lorry
     // funds the rest, the crew is paid, and the company keeps the margin.

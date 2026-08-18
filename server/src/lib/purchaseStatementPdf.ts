@@ -61,6 +61,13 @@ export interface PurchaseStatementData {
   gstAmount: number;
   /** Weight the IGST is charged on (the invoice tonnage, not our recalc). */
   gstBasisKg: number;
+  /**
+   * ₹/kg the IGST is charged on. Equal to pricePerKg unless the party invoiced at
+   * their base rate while the PO was quoted delivery - then the tax sits on the
+   * lower billed rate even though we pay the delivery rate. Optional for callers
+   * that predate the billed-rate capture.
+   */
+  gstBasisRate?: number;
   selfVehicleHamali: number;
   selfVehicleKata: number;
   /** Net balance payable - the ledger's figure, printed as-is. */
@@ -419,9 +426,11 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
     }
 
     if (data.gstAmount > 0) {
+      // Tax basis rate, which is the price we pay unless the invoice was base-billed.
+      const gstRatePerKg = data.gstBasisRate ?? price;
       rows.push({
         label: t.addIgst,
-        note: t.igstNote(kg(data.gstBasisKg), rate(price)),
+        note: t.igstNote(kg(data.gstBasisKg), rate(gstRatePerKg)),
         amount: data.gstAmount,
       });
     }

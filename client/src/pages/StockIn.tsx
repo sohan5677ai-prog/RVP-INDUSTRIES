@@ -223,6 +223,10 @@ function StockInFormDialog({
   const [loadingLocation, setLoadingLocation] = useState<'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi'>('RVP');
   const [freight, setFreight] = useState('0');
   const [selfVehicle, setSelfVehicle] = useState(false);
+  // The party invoiced at a rate other than the PO price (typically their BASE
+  // price while the PO is quoted DELIVERY). Moves the GST base only.
+  const [billedAtDiffRate, setBilledAtDiffRate] = useState(false);
+  const [billingRatePerKg, setBillingRatePerKg] = useState('');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [extractingKind, setExtractingKind] = useState<DocKind | null>(null);
 
@@ -243,6 +247,8 @@ function StockInFormDialog({
         setLoadingLocation((editing.loadingLocation as any) ?? 'RVP');
         setFreight(String(editing.freightCharge ?? 0));
         setSelfVehicle(editing.selfVehicle ?? false);
+        setBilledAtDiffRate(Number(editing.billingRatePerKg ?? 0) > 0);
+        setBillingRatePerKg(editing.billingRatePerKg ? String(editing.billingRatePerKg) : '');
         setInvoiceFile(null);
         setSharedFreight(false);
         setTotalLorryFreight('');
@@ -258,6 +264,8 @@ function StockInFormDialog({
         setLoadingLocation('RVP');
         setFreight('0');
         setSelfVehicle(false);
+        setBilledAtDiffRate(false);
+        setBillingRatePerKg('');
         setInvoiceFile(null);
         setSharedFreight(false);
         setTotalLorryFreight('');
@@ -341,6 +349,18 @@ function StockInFormDialog({
       if (data.partyKataKg) { setPartyKataKg(String(data.partyKataKg)); filled.push('party kata'); }
       if (data.rvpFirstWeightKg) { setRvpFirstWeightKg(String(data.rvpFirstWeightKg)); filled.push('RVP first weight'); }
 
+      // The rate printed on the invoice is the rate GST is actually charged on. When
+      // it differs materially from the PO price, the party has base-billed us - tick
+      // the option and prefill instead of relying on the operator to notice.
+      if (kind === 'invoice' && data.pricePerKg && poPrice > 0) {
+        const diff = Math.abs(data.pricePerKg - poPrice) / poPrice;
+        if (diff > 0.01) {
+          setBilledAtDiffRate(true);
+          setBillingRatePerKg(String(data.pricePerKg));
+          filled.push(`invoice rate ₹${data.pricePerKg}/kg (differs from PO price)`);
+        }
+      }
+
       if (kind === 'invoice' && !poId && (data.matchedPartyName || data.partyName)) {
         const match = matchPendingPo(data.matchedPartyName, data.partyName, data.pricePerKg);
         if (match.status === 'matched') {
@@ -362,6 +382,16 @@ function StockInFormDialog({
   const priceType = editing?.purchaseOrder?.priceType ?? selectedPo?.priceType;
   const isBase = priceType === 'BASE';
 
+  // GST only matters when the PO was flagged as a GST invoice - with no tax there
+  // is no tax base to move, so the billed-rate option stays hidden.
+  const poHasGst = editing?.purchaseOrder?.hasGst ?? selectedPo?.hasGst ?? false;
+  const poPrice = Number(editing?.purchaseOrder?.pricePerKg ?? selectedPo?.pricePerKg ?? 0);
+  const billedRate = Number(billingRatePerKg) || 0;
+  // GST basis: the billed rate when ticked, else the PO price.
+  const gstRatePerKg = billedAtDiffRate && billedRate > 0 ? billedRate : poPrice;
+  const gstTaxable = Math.round(Number(billingWeightKg) * gstRatePerKg * 100) / 100;
+  const gstAmount = Math.round(gstTaxable * 0.05 * 100) / 100;
+
   // Earliest arrival the picker/guard will accept: the PO's own date. A same-day
   // arrival is fine, but an arrival before the order was placed is not.
   const poDateMin = (editing?.purchaseOrder?.poDate ?? selectedPo?.poDate)?.slice(0, 10);
@@ -381,6 +411,8 @@ function StockInFormDialog({
       const finalFreight = isBase ? (sharedFreight ? computedProratedFreight : (freight || '0')) : '0';
       fd.append('freightCharge', finalFreight);
       fd.append('selfVehicle', selfVehicle ? 'true' : 'false');
+      // Blank clears it server-side (back to "billed at the PO price").
+      fd.append('billingRatePerKg', billedAtDiffRate && billedRate > 0 ? String(billedRate) : '');
       if (invoiceFile) fd.append('invoice', invoiceFile);
 
       const url = editing ? `/stock-in/${editing.id}` : '/stock-in';
@@ -516,6 +548,65 @@ function StockInFormDialog({
               </span>
             </label>
 
+            {poHasGst && (
+              <div className="space-y-3 rounded-lg border bg-muted/30 px-4 py-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-primary"
+                    checked={billedAtDiffRate}
+                    onChange={(e) => {
+                      setBilledAtDiffRate(e.target.checked);
+                      // Start from the PO price so the operator only edits it down.
+                      if (e.target.checked && !billingRatePerKg && poPrice > 0) setBillingRatePerKg(String(poPrice));
+                      if (!e.target.checked) setBillingRatePerKg('');
+                    }}
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-foreground">Invoice billed at a different rate (base price)</span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      Tick when the party's GST invoice is raised at their base price while the PO is
+                      at the delivery price. GST is then charged on the billed rate; we still pay the
+                      full PO price.
+                    </span>
+                  </span>
+                </label>
+
+                {billedAtDiffRate && (
+                  <div className="space-y-2">
+                    <Label htmlFor="billingRate">Invoice rate (₹/kg)</Label>
+                    <Input
+                      id="billingRate"
+                      type="number"
+                      step="0.01"
+                      value={billingRatePerKg}
+                      onChange={(e) => setBillingRatePerKg(e.target.value)}
+                      placeholder="rate printed on the invoice"
+                    />
+                    <div className="rounded-md bg-background/60 px-3 py-2 text-[11px] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Taxable value ({kg(Number(billingWeightKg) || 0)} × {rupees(gstRatePerKg)})</span>
+                        <span className="font-medium">{rupees(gstTaxable)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">GST @ 5%</span>
+                        <span className="font-medium">{rupees(gstAmount)}</span>
+                      </div>
+                      {billedRate > 0 && poPrice > 0 && (
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Payable stays at the PO price {rupees(poPrice)}/kg</span>
+                          <span>difference {rupees(Math.round((poPrice - billedRate) * 100) / 100)}/kg</span>
+                        </div>
+                      )}
+                      {billedRate > poPrice && poPrice > 0 && (
+                        <p className="text-destructive">Billed rate is above the PO price - check the invoice.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {isBase && (
               <div className="space-y-2">
                 <Label htmlFor="freight">Inward freight (₹) - base-priced PO</Label>
@@ -646,6 +737,11 @@ const StockInGroupRow = React.memo(({
                     <Figure label="Billing" value={kg(s.billingWeightKg)} />
                     <Figure label="Party kata" value={kg(s.partyKataKg)} />
                     <Figure label="Price/kg" value={s.purchaseOrder?.pricePerKg ? rupees(s.purchaseOrder.pricePerKg) : '-'} />
+                    {/* Only shown when the invoice was raised at a different (base) rate - that
+                        rate is what GST was charged on, while we still pay the price above. */}
+                    {Number(s.billingRatePerKg ?? 0) > 0 && (
+                      <Figure label="Billed @ (GST basis)" value={rupees(s.billingRatePerKg!)} />
+                    )}
                   </>
                 }
                 actions={

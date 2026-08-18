@@ -273,6 +273,55 @@ export function landedPricePerKg(basePrice: number, freightBasisKg: number, frei
   return Math.round((basePrice + freight / freightBasisKg) * 100) / 100;
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Black-seed purchase GST rate (%). Seed is taxed at 5%. */
+export const PURCHASE_GST_PCT = 5;
+
+/** Anything numeric the DB hands back - a number, a string, or a Prisma Decimal. */
+type NumericLike = number | string | { toString(): string } | null | undefined;
+
+export interface PurchaseGstInput {
+  /** Only a PO/URP flagged as a GST invoice attracts tax. */
+  hasGst: boolean;
+  /** Tonnage the party invoiced (their weighbridge figure), not our verified net. */
+  billingWeightKg: number;
+  /** PO price - the fallback billing rate when the invoice matches the order. */
+  pricePerKg: NumericLike;
+  /** Rate actually printed on the invoice, when the party bills at their base price. */
+  billingRatePerKg?: NumericLike;
+}
+
+export interface PurchaseGst {
+  /** ₹/kg the tax is computed on (the billed rate, else the PO price). */
+  ratePerKg: number;
+  /** Invoice taxable value = billingWeightKg × ratePerKg. */
+  taxableValue: number;
+  /** IGST/CGST+SGST in ₹, 0 when the purchase carries no GST. */
+  amount: number;
+}
+
+/**
+ * The one place purchase GST is computed. A supplier who quotes a DELIVERY (landed)
+ * price but invoices at their BASE price makes the taxable value LOWER than
+ * billingWeightKg × PO price - claiming ITC on the PO price would overstate the
+ * credit and break GSTR-2B matching. `billingRatePerKg` (captured at stock-in,
+ * snapshotted onto the verification) overrides the PO price for the tax base ONLY;
+ * the party's payable and the seed's landed cost stay on the PO price, because we
+ * still pay them the full delivery rate.
+ *
+ * Every consumer - verification payable, statement PDF, party ledger ITC posting,
+ * inventory rollbacks and /reports/gst - must go through this so they agree to the paise.
+ */
+export function purchaseGst(input: PurchaseGstInput): PurchaseGst {
+  const poRate = Number(input.pricePerKg ?? 0);
+  const billed = Number(input.billingRatePerKg ?? 0);
+  const ratePerKg = billed > 0 ? billed : poRate;
+  const taxableValue = round2(input.billingWeightKg * ratePerKg);
+  const amount = input.hasGst ? round2(taxableValue * (PURCHASE_GST_PCT / 100)) : 0;
+  return { ratePerKg, taxableValue, amount };
+}
+
 /** Weighbridge fee (kata fee) based on net weight tonnage. */
 export function calcKataFee(netKg: number, isCompanyVehicle: boolean = false): number {
   if (isCompanyVehicle) return 0;
@@ -288,8 +337,6 @@ export function companyHamaliShare(hamaliCharge: number, isCompanyVehicle: boole
   if (isCompanyVehicle) return hamaliCharge;
   return Math.round(hamaliCharge * COMPANY_HAMALI_SHARE * 100) / 100;
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export interface HamaliSplit {
   total: number; // full charge

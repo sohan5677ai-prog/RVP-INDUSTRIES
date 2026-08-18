@@ -1,6 +1,6 @@
 import type { App } from '@slack/bolt';
 import type { KnownBlock } from '@slack/types';
-import { crossVerify, hamaliSplit } from '../../lib/calc.js';
+import { crossVerify, hamaliSplit, purchaseGst } from '../../lib/calc.js';
 import { resolveErpUser, NOT_LINKED_MESSAGE } from '../users.js';
 import { apiGet, apiPost, ErpApiError, type ErpUser } from '../erpClient.js';
 import { getDraft, setDraft, clearDraft } from '../state.js';
@@ -17,6 +17,8 @@ interface VerifyDraftData {
   partyKataKg: number;
   rvpKataKg: number;
   pricePerKg: number;
+  /** Rate the party invoiced when it differs from the PO price; 0 = same as PO. */
+  billingRatePerKg: number;
   selfVehicleHamali: number;
   selfVehicleKata: number;
   discountType?: DiscountType;
@@ -38,6 +40,8 @@ function toDraftData(purchase: any): VerifyDraftData {
     partyKataKg: so?.partyKataKg ?? 0,
     rvpKataKg: purchase.netWeightKg ?? 0,
     pricePerKg: Number(po?.pricePerKg ?? 0),
+    // Base-billed invoice: GST sits on this rate, the payable stays on the PO price.
+    billingRatePerKg: Number(so?.billingRatePerKg ?? 0),
     // Self vehicle: the lorry's ₹80/t hamali share comes off the party's payable.
     selfVehicleHamali: so?.selfVehicle ? hamaliSplit(Number(purchase.hamaliCharge ?? 0)).lorry : 0,
     // Self vehicle: the party also bears the full weighbridge/kata fee.
@@ -89,8 +93,14 @@ function computeBreakdown(d: VerifyDraftData): VerifyBreakdown {
   else if (d.discountType === 'AMOUNT') discountAmount = d.discountValue;
 
   const netBase = Math.max(0, baseCost - kataDiffDeduction - discountAmount);
-  const billingAmount = d.billingWeightKg * price;
-  const igst = round2(billingAmount * 0.05);
+  const gst = purchaseGst({
+    hasGst: true,
+    billingWeightKg: d.billingWeightKg,
+    pricePerKg: price,
+    billingRatePerKg: d.billingRatePerKg,
+  });
+  const billingAmount = gst.taxableValue;
+  const igst = gst.amount;
   const total = round2(netBase + igst - d.selfVehicleHamali - d.selfVehicleKata);
 
   const shortageKg = d.billingWeightKg - d.rvpKataKg;
@@ -353,7 +363,12 @@ export function registerVerificationFlow(app: App): void {
         draft.user
       );
       await clearDraft(key);
-      const igst = round2(d.billingWeightKg * d.pricePerKg * 0.05);
+      const igst = purchaseGst({
+        hasGst: true,
+        billingWeightKg: d.billingWeightKg,
+        pricePerKg: d.pricePerKg,
+        billingRatePerKg: d.billingRatePerKg,
+      }).amount;
       const blocks: KnownBlock[] = [
         headerBlock('✅ Verification approved'),
         contextBlock(d.label),

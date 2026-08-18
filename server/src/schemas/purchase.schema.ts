@@ -36,6 +36,13 @@ export const createStockInSchema = z.object({
   rvpFirstWeightKg: z.coerce.number().int().positive(), // loaded/gross weight
   rvpSecondWeightKg: z.coerce.number().int().nonnegative().optional().default(0), // empty/tare weight
   billingWeightKg: z.coerce.number().int().positive(),
+  // Rate (₹/kg) printed on the party's GST invoice when they bill at their BASE
+  // price while the PO is quoted at the DELIVERY price. Blank/0 → billed at the PO
+  // price. Drives the GST tax base only; the payable stays on the PO price.
+  billingRatePerKg: z.preprocess(
+    (val) => (val === null || val === undefined || val === '' ? undefined : Number(val)),
+    z.number().positive().optional(),
+  ),
   partyKataKg: z.coerce.number().int().positive(),
   loadingLocation: z.enum(['RVP', 'PGR COLD', 'Murugan', 'KNM Multi']).optional().default('RVP'),
   // Inward freight (₹) to bring BASE-priced stock to our location, captured at
@@ -66,6 +73,13 @@ export const createUrpStockInSchema = z.object({
   // > 0 it is used as the net as-is (overriding first − second).
   rvpNetWeightKg: z.coerce.number().int().nonnegative().optional().default(0),
   billingWeightKg: z.coerce.number().int().positive(),
+  // Rate (₹/kg) printed on the party's GST invoice when they bill at their BASE
+  // price while the PO is quoted at the DELIVERY price. Blank/0 → billed at the PO
+  // price. Drives the GST tax base only; the payable stays on the PO price.
+  billingRatePerKg: z.preprocess(
+    (val) => (val === null || val === undefined || val === '' ? undefined : Number(val)),
+    z.number().positive().optional(),
+  ),
   partyKataKg: z.coerce.number().int().positive(),
   loadingLocation: z.enum(['RVP', 'PGR COLD', 'Murugan', 'KNM Multi']).optional().default('RVP'),
   freightCharge: z.coerce.number().nonnegative().optional().default(0),

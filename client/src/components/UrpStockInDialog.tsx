@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Combobox } from '@/components/ui/combobox';
 import type { Party } from '@/lib/types';
+import { rupees } from '@/lib/format';
 
 interface Props {
   open: boolean;
@@ -43,6 +44,10 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
   const [sameWeight, setSameWeight] = useState(false);
   
   const [hasGst, setHasGst] = useState(false);
+  // The invoice is raised at a rate other than the price we agreed (the party's
+  // base price against a delivery-priced buy). Moves the GST base only.
+  const [billedAtDiffRate, setBilledAtDiffRate] = useState(false);
+  const [billingRatePerKg, setBillingRatePerKg] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [freight, setFreight] = useState('0');
   // Shared lorry: the inward freight covers several parties' stock, so it is spread
@@ -89,6 +94,8 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
     setPartyKataKg('');
     setSameWeight(false);
     setHasGst(false);
+    setBilledAtDiffRate(false);
+    setBillingRatePerKg('');
     setInvoiceNumber('');
     setFreight('0');
     setSharedVehicle(false);
@@ -116,6 +123,8 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
     fd.append('lorryNumber', lorryNumber);
     if (hasGst) {
       fd.append('hasGst', 'true');
+      const billedRate = Number(billingRatePerKg) || 0;
+      if (billedAtDiffRate && billedRate > 0) fd.append('billingRatePerKg', String(billedRate));
       if (invoiceNumber) {
         fd.append('invoiceNumber', invoiceNumber);
       }
@@ -286,6 +295,50 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
             <div className="space-y-2 pb-2">
               <Label htmlFor="invoiceNum">GST Invoice Number</Label>
               <Input id="invoiceNum" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="INV-001" required={hasGst} />
+
+              <div className="flex items-start space-x-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="billedAtDiffRate"
+                  checked={billedAtDiffRate}
+                  onChange={(e) => {
+                    setBilledAtDiffRate(e.target.checked);
+                    // Start from the agreed price so the operator only edits it down.
+                    if (e.target.checked && !billingRatePerKg && Number(pricePerKg) > 0) setBillingRatePerKg(pricePerKg);
+                    if (!e.target.checked) setBillingRatePerKg('');
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <Label htmlFor="billedAtDiffRate" className="cursor-pointer">
+                  Invoice billed at a different rate (base price)?{' '}
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    GST is charged on this rate; the payable stays at {rupees(Number(pricePerKg) || 0)}/kg.
+                  </span>
+                </Label>
+              </div>
+
+              {billedAtDiffRate && (
+                <div className="space-y-1">
+                  <Label htmlFor="billingRate">Invoice rate (₹/kg)</Label>
+                  <Input
+                    id="billingRate"
+                    type="number"
+                    step="0.01"
+                    value={billingRatePerKg}
+                    onChange={(e) => setBillingRatePerKg(e.target.value)}
+                    placeholder="rate printed on the invoice"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    GST @ 5% ={' '}
+                    {rupees(
+                      Math.round(
+                        (Number(sameWeight ? rvpNetWeightKg : billingWeightKg) || 0) *
+                          (Number(billingRatePerKg) || 0) * 0.05 * 100,
+                      ) / 100,
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

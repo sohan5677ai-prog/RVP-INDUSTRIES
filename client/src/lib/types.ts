@@ -121,6 +121,8 @@ export interface WeightVerification {
   exempt: boolean;
   finalWeightKg: number;
   pricePerKg: string;
+  /** Tax basis snapshotted from the stock-in; null = billed at the PO price. */
+  billingRatePerKg?: string | null;
   totalAmount: string;
   selfVehicleHamali?: string;
   selfVehicleKata?: string;
@@ -317,6 +319,10 @@ export interface StockIn {
   // Net typed straight in (spot/URP, no tare weighment): rvpFirstWeightKg = net.
   directNet?: boolean;
   billingWeightKg: number;
+  // Rate the party actually invoiced, when it differs from the PO price (they
+  // billed their base price against a delivery-priced PO). Drives the GST base
+  // only - the payable stays on the PO price. Null/absent = billed at PO price.
+  billingRatePerKg?: string | null;
   partyKataKg: number;
   invoiceFileUrl: string;
   loadingLocation: 'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi';

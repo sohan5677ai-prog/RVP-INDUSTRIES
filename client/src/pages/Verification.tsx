@@ -42,6 +42,8 @@ type PurchaseRow = Purchase & {
     invoiceNumber?: string;
     lorryNumber?: string | null;
     billingWeightKg?: number;
+    /** Rate the party invoiced when it differs from the PO price (base billing). */
+    billingRatePerKg?: string | null;
     partyKataKg?: number;
     selfVehicle?: boolean;
     purchaseOrder?: { poNumber?: string; pricePerKg?: string; hasGst?: boolean; party?: { name: string } };
@@ -76,11 +78,19 @@ function getCalculationDetails(p: PurchaseRow) {
   const displayBaseWeightKg = hasPenalty ? reference : finalWeight;
   const baseCost = displayBaseWeightKg * pricePerKg;
   
-  // GST is charged on the invoice billing amount (billing weight x price), not
-  // on our recalculated payable - and ONLY when the PO/URP was flagged as a GST
-  // invoice (hasGst). No tick = no GST.
+  // GST is charged on the invoice's taxable value (billing weight x the rate the
+  // party actually billed), not on our recalculated payable - and ONLY when the
+  // PO/URP was flagged as a GST invoice (hasGst). No tick = no GST.
+  // A party who bills at their BASE price against a DELIVERY-priced PO gets a
+  // lower tax base; the payable below still runs on the PO price.
   const hasGst = p.stockIn.purchaseOrder.hasGst ?? false;
-  const billingAmount = billingWeightKg * pricePerKg;
+  // Verified rows read their tax basis off the settlement snapshot, exactly like
+  // every other figure above; unverified ones read the live stock-in.
+  const billingRatePerKg =
+    (p.verification
+      ? Number(p.verification.billingRatePerKg ?? 0)
+      : Number(p.stockIn.billingRatePerKg ?? 0)) || pricePerKg;
+  const billingAmount = billingWeightKg * billingRatePerKg;
   const igst = hasGst ? billingAmount * 0.05 : 0;
 
   const kataDiffDeduction = hasPenalty ? (reference - finalWeight) * pricePerKg : 0;
@@ -106,6 +116,7 @@ function getCalculationDetails(p: PurchaseRow) {
     displayBaseWeightKg,
     pricePerKg,
     hasGst,
+    billingRatePerKg,
     baseCost,
     billingAmount,
     igst,
@@ -213,7 +224,7 @@ export default function Verification() {
   // GST is on the invoice billing amount, independent of weight/quality discounts,
   // and only applies when the PO/URP was flagged as a GST invoice.
   const liveHasGst = calc?.hasGst ?? false;
-  const liveBillingAmount = (calc?.billingWeightKg ?? 0) * (calc?.pricePerKg ?? 0);
+  const liveBillingAmount = (calc?.billingWeightKg ?? 0) * (calc?.billingRatePerKg ?? calc?.pricePerKg ?? 0);
   const liveIgst = liveHasGst ? Math.round(liveBillingAmount * 0.05 * 100) / 100 : 0;
   const liveSelfVehicleHamali = calc?.selfVehicleHamali ?? 0;
   const liveSelfVehicleKata = calc?.selfVehicleKata ?? 0;
@@ -689,7 +700,13 @@ export default function Verification() {
                   </div>
                   {liveHasGst && (
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">IGST (5% on invoice billing {rupees(liveBillingAmount)})</span>
+                      <span className="text-muted-foreground">
+                        IGST (5% on invoice billing {rupees(liveBillingAmount)}
+                        {calc && calc.billingRatePerKg !== calc.pricePerKg
+                          ? ` - billed @ ${rupees(calc.billingRatePerKg)}/kg`
+                          : ''}
+                        )
+                      </span>
                       <span>{rupees(liveIgst)}</span>
                     </div>
                   )}

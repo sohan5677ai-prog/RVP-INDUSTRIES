@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { computeFY } from '../lib/poNumber.js';
 import { istFinancialYearStart } from '../lib/istDate.js';
+import { PURCHASE_GST_PCT, purchaseGst } from '../lib/calc.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Statutory reports: GST (input/output for GSTR filing) and TDS (194Q credit
@@ -137,8 +138,9 @@ export async function getGstReport(req: Request, res: Response) {
   const dnLines = debitNotes.map(mapNote);
 
   // ── Input tax: GST paid on purchase (supplier) invoices - the ITC we can
-  //    claim. Computed on the actual stocked-in billing weight × PO price, the
-  //    same basis the purchase statement / verification uses. ─────────────────
+  //    claim. Computed on the actual stocked-in billing weight × the rate the
+  //    party billed (their base rate when it differs from the PO's delivery
+  //    price), the same basis the purchase statement / verification uses. ─────
   const stockIns = await prisma.stockIn.findMany({
     where: {
       arrivalDate: { gte: from, lte: to },
@@ -149,9 +151,14 @@ export async function getGstReport(req: Request, res: Response) {
   });
 
   const purchaseLines = stockIns.map((s) => {
-    const rate = Number(s.purchaseOrder.pricePerKg);
-    const taxable = r2(s.billingWeightKg * rate);
-    const gst = r2(taxable * 0.05); // seed purchase IGST @ 5%
+    // Claiming ITC on the PO price when the invoice was raised at a lower base
+    // rate would overstate the credit and break GSTR-2B matching.
+    const { ratePerKg: rate, taxableValue: taxable, amount: gst } = purchaseGst({
+      hasGst: true,
+      billingWeightKg: s.billingWeightKg,
+      pricePerKg: s.purchaseOrder.pricePerKg,
+      billingRatePerKg: s.billingRatePerKg,
+    });
     const intra = isIntraState(s.purchaseOrder.party.gstin);
     return {
       id: s.id,
@@ -162,8 +169,10 @@ export async function getGstReport(req: Request, res: Response) {
       gstin: s.purchaseOrder.party.gstin,
       stateName: s.purchaseOrder.party.state,
       weightKg: s.billingWeightKg,
+      // The rate the ITC is claimed on - a base-billed invoice sits below the PO price.
+      ratePerKg: rate,
       taxableValue: taxable,
-      gstRate: 5,
+      gstRate: PURCHASE_GST_PCT,
       gstAmount: gst,
       ...splitTax(gst, intra),
       invoiceTotal: r2(taxable + gst),

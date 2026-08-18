@@ -23,6 +23,7 @@ import {
   isSaleOrderFulfilled,
   saleCloseToleranceKg,
   isLooseLoadedProduct,
+  purchaseGst,
 } from './calc';
 
 describe('crossVerify', () => {
@@ -157,6 +158,61 @@ describe('configurable hamali rates', () => {
     // unknown / missing location falls back to the default ₹250/t
     expect(transferTransportCharge(10000, 'Somewhere')).toBe(10 * 250);
     expect(transferTransportCharge(10000, null)).toBe(10 * 250);
+  });
+});
+
+describe('purchaseGst', () => {
+  // The whole point of the feature: a party quotes us a DELIVERY price of ₹52/kg
+  // but raises the invoice at their BASE price of ₹48/kg. GST follows the invoice.
+  it('taxes the billed base rate, not the PO delivery price', () => {
+    const gst = purchaseGst({
+      hasGst: true,
+      billingWeightKg: 24_500,
+      pricePerKg: 52,
+      billingRatePerKg: 48,
+    });
+    expect(gst.ratePerKg).toBe(48);
+    expect(gst.taxableValue).toBe(1_176_000); // 24,500 × 48
+    expect(gst.amount).toBe(58_800); // 5%
+  });
+
+  it('falls back to the PO price when the invoice matches the order', () => {
+    const gst = purchaseGst({ hasGst: true, billingWeightKg: 24_500, pricePerKg: 52 });
+    expect(gst.ratePerKg).toBe(52);
+    expect(gst.taxableValue).toBe(1_274_000);
+    expect(gst.amount).toBe(63_700);
+  });
+
+  it.each([null, undefined, 0, '0'])('treats %s as "billed at the PO price"', (billed) => {
+    const gst = purchaseGst({ hasGst: true, billingWeightKg: 1_000, pricePerKg: 50, billingRatePerKg: billed });
+    expect(gst.ratePerKg).toBe(50);
+    expect(gst.amount).toBe(2_500);
+  });
+
+  it('reads Decimal-like values off the DB', () => {
+    // Prisma hands Decimals back as objects, not numbers.
+    const poPrice = { toString: () => '52.00', valueOf: () => '52.00' };
+    const billed = { toString: () => '48.75', valueOf: () => '48.75' };
+    const gst = purchaseGst({
+      hasGst: true,
+      billingWeightKg: 10_000,
+      pricePerKg: poPrice,
+      billingRatePerKg: billed,
+    });
+    expect(gst.ratePerKg).toBe(48.75);
+    expect(gst.amount).toBe(24_375);
+  });
+
+  it('charges nothing when the PO is not a GST invoice, but still reports the basis', () => {
+    const gst = purchaseGst({ hasGst: false, billingWeightKg: 24_500, pricePerKg: 52, billingRatePerKg: 48 });
+    expect(gst.amount).toBe(0);
+    expect(gst.taxableValue).toBe(1_176_000);
+  });
+
+  it('rounds the tax to paise', () => {
+    const gst = purchaseGst({ hasGst: true, billingWeightKg: 12_345, pricePerKg: 47.37 });
+    expect(gst.taxableValue).toBe(584_782.65);
+    expect(gst.amount).toBe(29_239.13);
   });
 });
 

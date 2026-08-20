@@ -349,11 +349,15 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
   }
 
   const { party, summary } = data;
+  const rawOpening = Number(party.openingBalance || 0);
+  const isDr = party.openingBalanceType === 'DR' || (party.openingBalanceType !== 'CR' && party.type === 'BUYER');
+  const signedMasterOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
+
   const filteredDebit = filtered.reduce((s, t) => s + t.debit, 0);
   const filteredCredit = filtered.reduce((s, t) => s + t.credit, 0);
   // Opening = running balance just before the first row; closing = last row's running balance.
-  const opening = filtered.length ? filtered[0].runningBalance - filtered[0].debit + filtered[0].credit : 0;
-  const closing = filtered.length ? filtered[filtered.length - 1].runningBalance : 0;
+  const opening = filtered.length ? filtered[0].runningBalance - filtered[0].debit + filtered[0].credit : signedMasterOpening;
+  const closing = filtered.length ? filtered[filtered.length - 1].runningBalance : signedMasterOpening;
   const periodText = filtered.length
     ? `${shortDate(filtered[0].date)} – ${shortDate(filtered[filtered.length - 1].date)}`
     : '';
@@ -467,6 +471,15 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
                 )}
                 {(party.address || party.state) && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" /> {[party.address, party.state].filter(Boolean).join(', ')}</span>}
                 {party.gstin && <span className="inline-flex items-center gap-1.5 group font-sans font-medium tracking-wide"><Hash className="h-3.5 w-3.5" /> {party.gstin} <CopyBtn value={party.gstin} /></span>}
+                {Number(party.openingBalance || 0) > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    <span className="text-muted-foreground">Opening:</span>
+                    <span className="font-semibold text-foreground">{rupees(Number(party.openingBalance))}</span>
+                    <span className={`text-[10px] font-semibold ${party.openingBalanceType === 'DR' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                      {party.openingBalanceType ?? (party.type === 'BUYER' ? 'DR' : 'CR')}
+                    </span>
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -576,15 +589,44 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">No transactions for the selected filters.</TableCell></TableRow>
+                signedMasterOpening !== 0 ? (
+                  <>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{from ? shortDate(from) : '-'}</TableCell>
+                      <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>Opening Balance</TableCell>
+                      <TableCell className="text-right border-l border-border/60 bg-muted/20 text-xs tabular-nums font-medium">
+                        {opening > 0 ? rupees(opening) : ''}
+                      </TableCell>
+                      <TableCell className="text-right bg-muted/20 text-xs tabular-nums font-medium">
+                        {opening < 0 ? rupees(Math.abs(opening)) : ''}
+                      </TableCell>
+                      <TableCell className="text-right border-l border-border/60 bg-muted/20"><BalanceCell value={opening} muted /></TableCell>
+                    </TableRow>
+                    <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">{to ? shortDate(to) : '-'}</TableCell>
+                      <TableCell className="text-sm font-semibold" colSpan={2}>Closing Balance</TableCell>
+                      <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums" />
+                      <TableCell className="text-right font-semibold tabular-nums" />
+                      <TableCell className="text-right border-l border-border/60"><BalanceCell value={closing} /></TableCell>
+                    </TableRow>
+                  </>
+                ) : (
+                  <TableRow><TableCell colSpan={6} className="h-28 text-center text-muted-foreground">No transactions for the selected filters.</TableCell></TableRow>
+                )
               ) : (
                 <>
                   {/* opening balance */}
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{shortDate(filtered[0].date)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      {from ? shortDate(from) : shortDate(filtered[0].date)}
+                    </TableCell>
                     <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>Opening Balance</TableCell>
-                    <TableCell className="border-l border-border/60 bg-muted/20" />
-                    <TableCell className="bg-muted/20" />
+                    <TableCell className="text-right border-l border-border/60 bg-muted/20 text-xs tabular-nums font-medium">
+                      {opening > 0 ? rupees(opening) : ''}
+                    </TableCell>
+                    <TableCell className="text-right bg-muted/20 text-xs tabular-nums font-medium">
+                      {opening < 0 ? rupees(Math.abs(opening)) : ''}
+                    </TableCell>
                     <TableCell className="text-right border-l border-border/60 bg-muted/20"><BalanceCell value={opening} muted /></TableCell>
                   </TableRow>
 
@@ -592,7 +634,9 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
 
                   {/* closing balance */}
                   <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">{shortDate(filtered[filtered.length - 1].date)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">
+                      {to ? shortDate(to) : shortDate(filtered[filtered.length - 1].date)}
+                    </TableCell>
                     <TableCell className="text-sm font-semibold" colSpan={2}>Closing Balance</TableCell>
                     <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums">{filteredDebit > 0 ? rupees(filteredDebit) : ''}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{filteredCredit > 0 ? rupees(filteredCredit) : ''}</TableCell>
@@ -1395,8 +1439,12 @@ function SendPartyLedgerWhatsAppDialog({
     return t;
   }, [transactions, fromDate, toDate]);
 
-  const opening = periodTxns.length ? periodTxns[0].runningBalance - periodTxns[0].debit + periodTxns[0].credit : 0;
-  const closing = periodTxns.length ? periodTxns[periodTxns.length - 1].runningBalance : (summary.balanceType === 'DR' ? summary.balance : -summary.balance);
+  const rawOpening = Number(party.openingBalance || 0);
+  const isDr = party.openingBalanceType === 'DR' || (party.openingBalanceType !== 'CR' && party.type === 'BUYER');
+  const signedMasterOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
+
+  const opening = periodTxns.length ? periodTxns[0].runningBalance - periodTxns[0].debit + periodTxns[0].credit : signedMasterOpening;
+  const closing = periodTxns.length ? periodTxns[periodTxns.length - 1].runningBalance : signedMasterOpening;
   const totalDebit = periodTxns.reduce((s, x) => s + x.debit, 0);
   const totalCredit = periodTxns.reduce((s, x) => s + x.credit, 0);
 

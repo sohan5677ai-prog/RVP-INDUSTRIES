@@ -375,12 +375,16 @@ export function renderStatementPdf(
 
     /* -- figures ---------------------------------------------------------- */
 
+    const rawOpening = Number((party as any).openingBalance || 0);
+    const isDr = (party as any).openingBalanceType === 'DR' || ((party as any).openingBalanceType !== 'CR' && party.type === 'BUYER');
+    const signedMasterOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
+
     const opening = period.opening ?? (
-      txns.length ? (txns[0].runningBalance ?? 0) - txns[0].debit + txns[0].credit : 0
+      txns.length ? (txns[0].runningBalance ?? 0) - txns[0].debit + txns[0].credit : signedMasterOpening
     );
     const closing = txns.length
       ? (txns[txns.length - 1].runningBalance ?? 0)
-      : (summary.balanceType === 'DR' ? summary.balance : -summary.balance);
+      : signedMasterOpening;
     const periodDebit = txns.reduce((s, t) => s + t.debit, 0);
     const periodCredit = txns.reduce((s, t) => s + t.credit, 0);
 

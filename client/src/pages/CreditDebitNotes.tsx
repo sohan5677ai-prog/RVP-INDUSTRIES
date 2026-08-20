@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Mail, FileText, FileMinus2, ReceiptText } from 'lucide-react';
+import { Plus, Mail, FileText, FileMinus2, ReceiptText, Trash2 } from 'lucide-react';
 import { api, getErrorMessage, getToken } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
@@ -39,12 +39,16 @@ function NotesTable({
   isLoading,
   onSend,
   sendingId,
+  onDelete,
+  deletingId,
 }: {
   kind: NoteKind;
   notes: (CreditNote | DebitNote)[];
   isLoading: boolean;
   onSend: (id: string) => void;
   sendingId: string | null;
+  onDelete: (id: string, noteNumber: string) => void;
+  deletingId: string | null;
 }) {
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows = [] } = usePagedRows(notes, 50);
 
@@ -83,7 +87,7 @@ function NotesTable({
               <TableCell>
                 <Badge variant={n.status === 'CANCELLED' ? 'destructive' : 'success'}>{n.status}</Badge>
               </TableCell>
-              <TableCell className="text-right space-x-1.5">
+              <TableCell className="text-right space-x-1.5 whitespace-nowrap">
                 <Button size="sm" variant="outline" onClick={() => openNotePdf(kind, n.id)}>
                   <FileText className="h-3.5 w-3.5 mr-1.5" /> PDF
                 </Button>
@@ -95,6 +99,19 @@ function NotesTable({
                   onClick={() => onSend(n.id)}
                 >
                   <Mail className="h-3.5 w-3.5 mr-1.5" /> Send
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  disabled={deletingId === n.id}
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to delete ${kind === 'CREDIT' ? 'credit' : 'debit'} note ${n.noteNumber}?`)) {
+                      onDelete(n.id, n.noteNumber);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
                 </Button>
               </TableCell>
             </TableRow>
@@ -269,6 +286,25 @@ export default function CreditDebitNotes() {
     onSettled: () => setSendingId(null),
   });
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: NoteKind }) =>
+      api(`/${kind === 'CREDIT' ? 'credit-notes' : 'debit-notes'}/${id}`, { method: 'DELETE' }),
+    onMutate: ({ id }) => setDeletingId(id),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: [vars.kind === 'CREDIT' ? 'credit-notes' : 'debit-notes'] });
+      if (vars.kind === 'CREDIT') qc.invalidateQueries({ queryKey: ['credit-notes-pending'] });
+      qc.invalidateQueries({ queryKey: ['party-ledger'] });
+      qc.invalidateQueries({ queryKey: ['party-ledgers'] });
+      qc.invalidateQueries({ queryKey: ['profit-loss'] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success(`${vars.kind === 'CREDIT' ? 'Credit' : 'Debit'} note deleted`);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+    onSettled: () => setDeletingId(null),
+  });
+
   function raiseNote(item: PendingCreditNote) {
     setTab('CREDIT');
     setPartyId(item.partyId);
@@ -326,6 +362,8 @@ export default function CreditDebitNotes() {
             isLoading={loadingCredit}
             sendingId={sendingId}
             onSend={(id) => sendMutation.mutate({ id, kind: 'CREDIT' })}
+            onDelete={(id) => deleteMutation.mutate({ id, kind: 'CREDIT' })}
+            deletingId={deletingId}
           />
         </TabsContent>
         <TabsContent value="DEBIT">
@@ -335,6 +373,8 @@ export default function CreditDebitNotes() {
             isLoading={loadingDebit}
             sendingId={sendingId}
             onSend={(id) => sendMutation.mutate({ id, kind: 'DEBIT' })}
+            onDelete={(id) => deleteMutation.mutate({ id, kind: 'DEBIT' })}
+            deletingId={deletingId}
           />
         </TabsContent>
       </Tabs>

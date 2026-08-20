@@ -45,6 +45,7 @@ import { Badge } from '@/components/ui/badge';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
+import { rupees } from '@/lib/format';
 import type { Commodity, FreightRate, WaLanguage, WishCategory } from '@/lib/types';
 import { WA_LANGUAGE_LABELS, WISH_CATEGORY_LABELS } from '@/lib/types';
 
@@ -58,6 +59,7 @@ const PARTY_EXPORT_COLUMNS: ExportColumn<Party>[] = [
   { header: 'Address', value: (p) => p.address ?? '' },
   { header: 'State', value: (p) => p.state ?? '' },
   { header: 'GSTIN', value: (p) => p.gstin ?? '' },
+  { header: 'Opening Bal', value: (p) => Number(p.openingBalance || 0) > 0 ? `${p.openingBalance} ${p.openingBalanceType ?? (p.type === 'BUYER' ? 'DR' : 'CR')}`.trim() : '-' },
   { header: 'Bank', value: (p) => p.bankName ?? '' },
   { header: 'Bank A/C', value: (p) => p.bankAccountNumber ?? '' },
   { header: 'IFSC', value: (p) => p.bankIfsc ?? '' },
@@ -134,6 +136,8 @@ const partySchema = z.object({
   lorryReceiptEnabled: z.boolean(),
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
   religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']),
+  openingBalance: z.coerce.number().min(0).optional(),
+  openingBalanceType: z.enum(['DR', 'CR']).optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
@@ -143,7 +147,7 @@ type PartyForm = z.infer<typeof partySchema>;
 
 const emptyParty: PartyForm = {
   name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', city: '', state: '', pincode: '', gstin: '', destination: '',
-  locationLink: '', lorryReceiptEnabled: false, waLanguage: 'EN', religion: 'NONE', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
+  locationLink: '', lorryReceiptEnabled: false, waLanguage: 'EN', religion: 'NONE', openingBalance: 0, openingBalanceType: 'CR', bankAccountNumber: '', bankIfsc: '', bankName: '', commodities: [],
 };
 
 export default function Parties() {
@@ -201,7 +205,7 @@ export default function Parties() {
   });
 
   const form = useForm<PartyForm>({
-    resolver: zodResolver(partySchema),
+    resolver: zodResolver(partySchema) as any,
     defaultValues: emptyParty,
   });
 
@@ -230,6 +234,8 @@ export default function Parties() {
       lorryReceiptEnabled: p.lorryReceiptEnabled ?? false,
       waLanguage: p.waLanguage ?? 'EN',
       religion: p.religion ?? 'NONE',
+      openingBalance: p.openingBalance != null ? Number(p.openingBalance) : 0,
+      openingBalanceType: p.openingBalanceType ?? (p.type === 'BUYER' ? 'DR' : 'CR'),
       bankAccountNumber: p.bankAccountNumber ?? '',
       bankIfsc: p.bankIfsc ?? '',
       bankName: p.bankName ?? '',
@@ -242,7 +248,12 @@ export default function Parties() {
     mutationFn: (values: PartyForm) => {
       // 'NONE' is a Select-only sentinel (Radix Select can't hold an empty-string
       // item value) standing in for "not tagged" - the API wants null.
-      const body = { ...values, religion: values.religion === 'NONE' ? null : values.religion };
+      const body = {
+        ...values,
+        religion: values.religion === 'NONE' ? null : values.religion,
+        openingBalance: values.openingBalance ?? 0,
+        openingBalanceType: values.openingBalanceType ?? (values.type === 'BUYER' ? 'DR' : 'CR'),
+      };
       return editing
         ? api<Party>(`/parties/${editing.id}`, { method: 'PUT', body })
         : api<Party>('/parties', { method: 'POST', body });
@@ -369,6 +380,7 @@ export default function Parties() {
               <TableHead>Address</TableHead>
               <TableHead>State</TableHead>
               <TableHead>GSTIN</TableHead>
+              <TableHead>Opening Bal</TableHead>
               <TableHead>Bank Details</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
@@ -376,14 +388,14 @@ export default function Parties() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground">
+                <TableCell colSpan={10} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {filteredParties?.length === 0 && !isLoading && (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground">
+                <TableCell colSpan={10} className="text-center text-muted-foreground">
                   No parties found.
                 </TableCell>
               </TableRow>
@@ -402,6 +414,18 @@ export default function Parties() {
                 <TableCell>{p.address ?? '-'}</TableCell>
                 <TableCell>{p.state ?? '-'}</TableCell>
                 <TableCell className="font-sans text-xs font-medium tracking-wide">{p.gstin ?? '-'}</TableCell>
+                <TableCell className="text-xs">
+                  {Number(p.openingBalance || 0) > 0 ? (
+                    <span className="font-medium tabular-nums">
+                      {rupees(Number(p.openingBalance))}{' '}
+                      <span className={`text-[10px] font-semibold ${p.openingBalanceType === 'DR' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {p.openingBalanceType ?? (p.type === 'BUYER' ? 'DR' : 'CR')}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   {p.bankName || p.bankAccountNumber || p.bankIfsc ? (
                     <div className="text-xs">
@@ -799,6 +823,58 @@ export default function Parties() {
                   </FormItem>
                 )}
               />
+              )}
+
+              {!isHamaliTeam && (
+                <div className="space-y-3 rounded-lg border p-3 bg-muted/20">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Opening Balance (Unpaid Previous Balance)</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="openingBalance"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Opening Amount (₹)</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              {...field}
+                              onChange={(e) => field.onChange(e.target.value === '' ? '' : Number(e.target.value))}
+                            />
+                          </FormControl>
+                          <FormDescription>Unpaid legacy balance brought forward</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="openingBalanceType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Balance Type</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value ?? (form.watch('type') === 'BUYER' ? 'DR' : 'CR')}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="CR">CR – Payable (We owe them)</SelectItem>
+                              <SelectItem value="DR">DR – Receivable (They owe us)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            {form.watch('type') === 'BUYER' ? 'Normally DR (Receivable) for buyers' : 'Normally CR (Payable) for suppliers'}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
               )}
 
               <div className="space-y-3 rounded-lg border p-3 bg-muted/20">

@@ -22,6 +22,12 @@ enum PartyType {
   HAMALI_TEAM
 }
 
+enum BalanceType {
+  DR
+  CR
+}
+
+
 /// Religious community tag used ONLY to target the Settings → Wishes broadcast
 /// (festival/occasion messages) at the right audience - nowhere else in the
 /// app reads this. Unset (null) means "not tagged yet": such a party/driver is
@@ -148,6 +154,9 @@ model Party {
   waLanguage          WaLanguage             @default(EN)
   // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
   religion            WishCategory?
+  // Opening balance brought forward (unpaid legacy balance).
+  openingBalance      Decimal                @default(0) @db.Decimal(14, 2)
+  openingBalanceType  BalanceType            @default(CR)
   bankAccountNumber   String?
   bankIfsc            String?
   bankName            String?

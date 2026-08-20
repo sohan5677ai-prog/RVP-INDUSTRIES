@@ -85,6 +85,34 @@ export function createNote(kind: Kind) {
   };
 }
 
+export function deleteNote(kind: Kind) {
+  return async (req: Request, res: Response) => {
+    const id = req.params.id;
+    const row = await (model(kind) as any).findUnique({
+      where: { id },
+      include: { emailLogs: true },
+    });
+    if (!row) throw new HttpError(404, `${kind === 'CREDIT' ? 'Credit' : 'Debit'} note not found`);
+
+    await prisma.$transaction(async (tx) => {
+      if (row.emailLogs && row.emailLogs.length > 0) {
+        if (kind === 'CREDIT') {
+          await tx.emailLog.deleteMany({ where: { creditNoteId: id } });
+        } else {
+          await tx.emailLog.deleteMany({ where: { debitNoteId: id } });
+        }
+      }
+      if (kind === 'CREDIT') {
+        await tx.creditNote.delete({ where: { id } });
+      } else {
+        await tx.debitNote.delete({ where: { id } });
+      }
+    });
+
+    res.json({ ok: true, message: `${kind === 'CREDIT' ? 'Credit' : 'Debit'} note deleted` });
+  };
+}
+
 async function buildNotePdfData(kind: Kind, id: string) {
   const row = await (model(kind) as any).findUnique({
     where: { id },

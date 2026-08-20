@@ -884,10 +884,14 @@ export async function sendPartyLedgerWhatsApp(req: Request, res: Response) {
     if (fromDate) txns = txns.filter((t) => t.date >= fromDate);
     if (toDate) txns = txns.filter((t) => t.date <= toDate + 'T23:59:59');
 
+    const rawOpening = Number((party as any).openingBalance || 0);
+    const isDr = (party as any).openingBalanceType === 'DR' || ((party as any).openingBalanceType !== 'CR' && party.type === 'BUYER');
+    const signedMasterOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
+
     const firstTxn = txns[0];
     const lastTxn = txns[txns.length - 1];
-    const opening = firstTxn ? (firstTxn.runningBalance || 0) - (firstTxn.debit || 0) + (firstTxn.credit || 0) : 0;
-    const closing = lastTxn ? (lastTxn.runningBalance || 0) : 0;
+    const opening = firstTxn ? (firstTxn.runningBalance || 0) - (firstTxn.debit || 0) + (firstTxn.credit || 0) : signedMasterOpening;
+    const closing = lastTxn ? (lastTxn.runningBalance || 0) : signedMasterOpening;
     const totalDebit = txns.reduce((s, t) => s + (t.debit || 0), 0);
     const totalCredit = txns.reduce((s, t) => s + (t.credit || 0), 0);
 

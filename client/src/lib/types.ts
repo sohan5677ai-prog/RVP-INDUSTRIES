@@ -35,6 +35,8 @@ export interface Party {
   waLanguage?: WaLanguage;
   // Settings -> Wishes targeting only. Null/undefined = not tagged.
   religion?: WishCategory | null;
+  openingBalance?: string | number;
+  openingBalanceType?: BalanceType | null;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankName: string | null;
@@ -953,6 +955,8 @@ export type BalanceType = 'DR' | 'CR';
 export type BunkerPlace = 'A' | 'B';
 
 export interface PartyLedgerSummary {
+  openingBalance?: number;
+  openingBalanceType?: BalanceType;
   totalDebit: number;
   totalCredit: number;
   balance: number; // absolute value

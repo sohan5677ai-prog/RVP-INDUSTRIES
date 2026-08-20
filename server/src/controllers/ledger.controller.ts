@@ -418,7 +418,7 @@ function splitAutoNarration(description: string | null | undefined): {
 }
 
 function buildPartyLedger(
-  partyId: string,
+  party: { id: string; type?: string; openingBalance?: any; openingBalanceType?: any } | string,
   pos: PoWithChain[],
   sales: SaleRow[],
   payments: PaymentRow[],
@@ -426,6 +426,12 @@ function buildPartyLedger(
   dustPurchases: DustPurchaseRow[],
   creditNotes: CreditNoteRow[] = []
 ) {
+  const partyId = typeof party === 'string' ? party : party.id;
+  const rawOpening = typeof party === 'object' ? Number(party.openingBalance || 0) : 0;
+  const isDr = typeof party === 'object'
+    ? party.openingBalanceType === 'DR' || (party.openingBalanceType !== 'CR' && party.type === 'BUYER')
+    : false;
+  const signedOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
   const txns: LedgerTxn[] = [];
 
   // 1. Purchases - supplier supplies stock → we owe them (CREDIT).
@@ -734,7 +740,7 @@ function buildPartyLedger(
 
   // Chronological order, then a running balance (Dr positive / Cr negative).
   txns.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  let running = 0;
+  let running = signedOpening;
   for (const t of txns) {
     running = round2(running + t.debit - t.credit);
     t.runningBalance = running;
@@ -742,7 +748,7 @@ function buildPartyLedger(
 
   const totalDebit = round2(txns.reduce((s, t) => s + t.debit, 0));
   const totalCredit = round2(txns.reduce((s, t) => s + t.credit, 0));
-  const balance = round2(totalDebit - totalCredit);
+  const balance = round2(signedOpening + totalDebit - totalCredit);
 
   const purchaseTotal = round2(
     txns.filter((t) => t.kind === 'PURCHASE').reduce((s, t) => s + t.credit, 0)
@@ -768,6 +774,8 @@ function buildPartyLedger(
   return {
     txns,
     summary: {
+      openingBalance: rawOpening,
+      openingBalanceType: (isDr ? 'DR' : 'CR') as 'DR' | 'CR',
       totalDebit,
       totalCredit,
       balance: Math.abs(balance),
@@ -888,8 +896,14 @@ export async function listPartyLedgers(_req: Request, res: Response) {
 
   const map = new Map<string, any>();
   for (const p of parties) {
+    const rawOpening = Number((p as any).openingBalance || 0);
+    const isDr = (p as any).openingBalanceType === 'DR' || ((p as any).openingBalanceType !== 'CR' && p.type === 'BUYER');
+    const signedOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
     map.set(p.id, {
       ...p,
+      openingBalance: rawOpening,
+      openingBalanceType: isDr ? 'DR' : 'CR',
+      signedOpening,
       totalDebit: 0, totalCredit: 0,
       purchaseTotal: 0, saleTotal: 0, paidTotal: 0, receivedTotal: 0, setOffTotal: 0,
       transactionCount: 0, pendingCount: 0, lastTxnDate: null
@@ -980,7 +994,7 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     s.setOffTotal = round2(s.setOffTotal);
     s.totalDebit = round2(s.totalDebit);
     s.totalCredit = round2(s.totalCredit);
-    const bal = round2(s.totalDebit - s.totalCredit);
+    const bal = round2((s.signedOpening || 0) + s.totalDebit - s.totalCredit);
     s.balance = Math.abs(bal);
     s.balanceType = bal >= 0 ? 'DR' : 'CR';
     s.totalBusiness = round2(s.purchaseTotal + s.saleTotal);
@@ -1008,7 +1022,7 @@ export async function buildPartyStatementData(partyId: string) {
     loadCreditNotes(party.id),
   ]);
 
-  const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases, creditNotes);
+  const { txns, summary } = buildPartyLedger(party, pos, sales, payments, receipts, dustPurchases, creditNotes);
   return { party, transactions: txns, summary };
 }
 

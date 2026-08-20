@@ -190,9 +190,13 @@ function balText(n: number): string {
 export function buildPartyStatementHtml(o: PartyStatementOptions): string {
   const { company, party, summary, transactions: txns } = o;
 
+  const rawOpening = Number(party.openingBalance || 0);
+  const isDr = party.openingBalanceType === 'DR' || (party.openingBalanceType !== 'CR' && party.type === 'BUYER');
+  const signedMasterOpening = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
+
   // Opening = balance just before the first listed row; closing = last row's.
-  const opening = txns.length ? txns[0].runningBalance - txns[0].debit + txns[0].credit : 0;
-  const closing = txns.length ? txns[txns.length - 1].runningBalance : (summary.balanceType === 'DR' ? summary.balance : -summary.balance);
+  const opening = txns.length ? txns[0].runningBalance - txns[0].debit + txns[0].credit : signedMasterOpening;
+  const closing = txns.length ? txns[txns.length - 1].runningBalance : signedMasterOpening;
   const periodDebit = txns.reduce((s, t) => s + t.debit, 0);
   const periodCredit = txns.reduce((s, t) => s + t.credit, 0);
 

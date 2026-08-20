@@ -7,6 +7,8 @@ export const waLanguageEnum = z.enum(['EN', 'TE', 'TA', 'KN', 'HI']);
 export const wishCategoryEnum = z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER']);
 export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SHELL', 'TAMARIND_WASTE', 'TPS_BROKENS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU']);
 
+export const balanceTypeEnum = z.enum(['DR', 'CR']);
+
 export const createPartySchema = z.object({
   name: z.string().min(1, 'Name is required'),
   nickname: z.string().optional(),
@@ -25,6 +27,8 @@ export const createPartySchema = z.object({
   lorryReceiptEnabled: z.boolean().optional(),
   waLanguage: waLanguageEnum.optional(),
   religion: wishCategoryEnum.optional().nullable(),
+  openingBalance: z.coerce.number().min(0).default(0).optional(),
+  openingBalanceType: balanceTypeEnum.default('CR').optional(),
   bankAccountNumber: z.string().optional(),
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),

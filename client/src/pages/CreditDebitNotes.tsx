@@ -247,6 +247,10 @@ export default function CreditDebitNotes() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [tab === 'CREDIT' ? 'credit-notes' : 'debit-notes'] });
       if (tab === 'CREDIT') qc.invalidateQueries({ queryKey: ['credit-notes-pending'] });
+      qc.invalidateQueries({ queryKey: ['party-ledger'] });
+      qc.invalidateQueries({ queryKey: ['party-ledgers'] });
+      qc.invalidateQueries({ queryKey: ['profit-loss'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success(`${tab === 'CREDIT' ? 'Credit' : 'Debit'} note created`);
       setOpen(false);
       resetForm();

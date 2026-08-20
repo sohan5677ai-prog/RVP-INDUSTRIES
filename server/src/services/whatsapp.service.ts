@@ -142,6 +142,17 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // WISHES (rvp_wishes) is likewise absent on purpose - not yet submitted to
   // Meta. Every Settings -> Wishes send logs SKIPPED until an id is set here
   // (or via FAST2SMS_TMPL_WISHES). See docs/whatsapp-wishes-template.md.
+  //
+  // rvp_party_ledger, approved on the shared KNM number. This id was only ever
+  // set as the Render env var FAST2SMS_TMPL_PARTY_LEDGER (sync: false, no repo
+  // fallback) - and at some point that var got set to Fast2SMS's "Template ID"
+  // (1722162119088482, the Meta-side identifier shown in the panel) instead of
+  // its "Message ID" (28223, what `message_id` on the send API actually wants),
+  // same mixup as the OWNER_DISPATCH_REMINDER incident above. Every ledger send
+  // 400'd with "Template ID (message_id) is invalid or not approved" until this
+  // was baked in. Keep the Render var correct too - env still wins over this
+  // default when both are set.
+  PARTY_LEDGER: '28223',
 };
 
 /**

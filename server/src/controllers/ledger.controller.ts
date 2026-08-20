@@ -358,6 +358,7 @@ type SaleRow = Awaited<ReturnType<typeof loadSales>>[number];
 type PaymentRow = Awaited<ReturnType<typeof loadPayments>>[number];
 type ReceiptRow = Awaited<ReturnType<typeof loadReceipts>>[number];
 type DustPurchaseRow = Awaited<ReturnType<typeof loadDustPurchases>>[number];
+type CreditNoteRow = Awaited<ReturnType<typeof loadCreditNotes>>[number];
 
 function loadPurchaseOrders(partyId?: string) {
   return prisma.purchaseOrder.findMany({
@@ -382,6 +383,12 @@ function loadReceipts(partyId?: string) {
 }
 function loadDustPurchases(partyId?: string) {
   return prisma.dustPurchase.findMany({ where: partyId ? { partyId } : undefined });
+}
+function loadCreditNotes(partyId?: string) {
+  return prisma.creditNote.findMany({
+    where: { ...(partyId ? { partyId } : {}), status: 'ISSUED' },
+    include: { saleDispatch: { select: { id: true, invoiceNumber: true } } },
+  });
 }
 
 function round2(n: number): number {
@@ -416,7 +423,8 @@ function buildPartyLedger(
   sales: SaleRow[],
   payments: PaymentRow[],
   receipts: ReceiptRow[],
-  dustPurchases: DustPurchaseRow[]
+  dustPurchases: DustPurchaseRow[],
+  creditNotes: CreditNoteRow[] = []
 ) {
   const txns: LedgerTxn[] = [];
 
@@ -691,6 +699,39 @@ function buildPartyLedger(
     }
   }
 
+  // 5. Credit notes raised manually (or from the pending-shortage workflow).
+  //    A credit note whose saleDispatchId matches a receipt that already booked a
+  //    shortage deduction is the formal GST document for that same deduction - the
+  //    money already hit the ledger through the SHORTAGE line above, so we skip it
+  //    to avoid double-counting. Standalone notes (no dispatch link) and notes for
+  //    dispatches with no receipt shortage are genuine new deductions.
+  const dispatchIdsWithReceiptShortage = new Set(
+    receipts
+      .filter((r) => r.partyId === partyId && r.saleDispatchId && Number(r.shortageAmount ?? 0) > 0)
+      .map((r) => r.saleDispatchId as string)
+  );
+  for (const cn of creditNotes.filter((c) => c.partyId === partyId)) {
+    // Skip if this note formalises a shortage already deducted via a receipt.
+    if (cn.saleDispatchId && dispatchIdsWithReceiptShortage.has(cn.saleDispatchId)) continue;
+    txns.push({
+      id: `CN-${cn.id}`,
+      date: cn.noteDate.toISOString(),
+      kind: 'CREDIT_NOTE',
+      particulars: `Credit Note – ${cn.reason}`,
+      invoiceNumber: cn.saleDispatch?.invoiceNumber ?? null,
+      vehicleNumber: null,
+      reference: cn.noteNumber,
+      utr: null,
+      transferredDate: null,
+      weightKg: null,
+      ratePerKg: null,
+      product: null,
+      debit: 0,
+      credit: round2(Number(cn.totalAmount)),
+      status: 'POSTED',
+    });
+  }
+
   // Chronological order, then a running balance (Dr positive / Cr negative).
   txns.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   let running = 0;
@@ -752,7 +793,8 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     pendingPurchasesAgg,
     payments,
     receipts,
-    dustPurchases
+    dustPurchases,
+    creditNotesAgg
   ] = await Promise.all([
     // The Hamali crew has its own dedicated ledger view (Hamali Report -> Ledger
     // tab), so it's excluded here to avoid duplicating it in the general party list.
@@ -800,8 +842,8 @@ export async function listPartyLedgers(_req: Request, res: Response) {
       WHERE v.id IS NULL
       GROUP BY po."partyId"
     `,
-    // `total` is every debit against the party (it must stay complete or the
-    // balance breaks); `setOffTotal` splits out the cash-free knock-off legs so
+    // \`total\` is every debit against the party (it must stay complete or the
+    // balance breaks); \`setOffTotal\` splits out the cash-free knock-off legs so
     // the Paid column shows money that actually left the bank, matching
     // buildPartyLedger's paidTotal.
     prisma.$queryRaw<{partyId: string, total: number, setOffTotal: number, lastTxnDate: Date, cnt: number}[]>`
@@ -823,6 +865,24 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
       SELECT "partyId", SUM(ROUND("amount")) as total, MAX("purchaseDate") as "lastTxnDate", COUNT(*)::int as cnt
       FROM "DustPurchase" GROUP BY "partyId"
+    `,
+    // Manually raised credit notes - standalone deductions not already covered by
+    // a receipt shortage. Notes whose saleDispatchId matches a receipt with
+    // shortageAmount > 0 are the formal GST document for that same deduction, so
+    // they are excluded here to avoid double-counting.
+    prisma.$queryRaw<{partyId: string, total: number, lastTxnDate: Date, cnt: number}[]>`
+      SELECT "partyId",
+        SUM(ROUND("totalAmount")) as total,
+        MAX("noteDate") as "lastTxnDate",
+        COUNT(*)::int as cnt
+      FROM "CreditNote"
+      WHERE status = 'ISSUED'
+        AND NOT EXISTS (
+          SELECT 1 FROM "Receipt" r
+          WHERE r."saleDispatchId" = "CreditNote"."saleDispatchId"
+            AND COALESCE(r."shortageAmount", 0) > 0
+        )
+      GROUP BY "partyId"
     `
   ]);
 
@@ -903,6 +963,14 @@ export async function listPartyLedgers(_req: Request, res: Response) {
     s.totalCredit += amt;
     s.transactionCount += Number(agg.cnt);
   }
+  for (const agg of creditNotesAgg) {
+    const s = map.get(agg.partyId);
+    if (!s) continue;
+    applyDate(agg.partyId, agg.lastTxnDate);
+    const amt = Number(agg.total || 0);
+    s.totalCredit += amt;
+    s.transactionCount += Number(agg.cnt);
+  }
 
   const rows = Array.from(map.values()).map(s => {
     s.purchaseTotal = round2(s.purchaseTotal);
@@ -931,15 +999,16 @@ export async function buildPartyStatementData(partyId: string) {
   const party = await prisma.party.findUnique({ where: { id: partyId } });
   if (!party) return null;
 
-  const [pos, sales, payments, receipts, dustPurchases] = await Promise.all([
+  const [pos, sales, payments, receipts, dustPurchases, creditNotes] = await Promise.all([
     loadPurchaseOrders(party.id),
     loadSales(party.id),
     loadPayments(party.id),
     loadReceipts(party.id),
     loadDustPurchases(party.id),
+    loadCreditNotes(party.id),
   ]);
 
-  const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases);
+  const { txns, summary } = buildPartyLedger(party.id, pos, sales, payments, receipts, dustPurchases, creditNotes);
   return { party, transactions: txns, summary };
 }
 

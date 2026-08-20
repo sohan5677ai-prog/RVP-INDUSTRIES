@@ -222,7 +222,7 @@ export async function computeProfitLossSummary() {
     computeHuskPool(),
     prisma.saleOrder.findMany({
       where: { product: { not: 'PAPPU' } },
-      include: { dispatches: { select: { weightKg: true } } },
+      include: { dispatches: { select: { weightKg: true, gstAmount: true } } },
     }),
     computePappuOrderMargins(),
   ]);
@@ -233,13 +233,15 @@ export async function computeProfitLossSummary() {
   const lockedMargins = pappuMargins.filter((m) => m.costFrozenAt != null);
   const pappuLockedProfit = r2(lockedMargins.reduce((s, m) => s + m.margin, 0));
 
-  // Byproduct income = actually dispatched non-Pappu sales (GST is pass-through, excluded).
+  // Byproduct income = actually dispatched non-Pappu sales (GST-inclusive).
   const incomeByProduct = new Map<string, number>();
   for (const so of byproductOrders) {
     const rate = Number(so.ratePerKg);
-    const dispatchedKg = so.dispatches.reduce((s, d) => s + d.weightKg, 0);
-    if (dispatchedKg <= 0) continue;
-    incomeByProduct.set(so.product, r2((incomeByProduct.get(so.product) ?? 0) + dispatchedKg * rate));
+    for (const d of so.dispatches) {
+      if (d.weightKg <= 0) continue;
+      const amount = d.weightKg * rate + Number(d.gstAmount || 0);
+      incomeByProduct.set(so.product, r2((incomeByProduct.get(so.product) ?? 0) + amount));
+    }
   }
   const byproducts = [...incomeByProduct.entries()]
     .map(([product, amount]) => ({ product, amount: r2(amount) }))

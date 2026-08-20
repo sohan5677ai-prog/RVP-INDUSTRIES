@@ -175,7 +175,7 @@ export const HUSK_INCOME_META: { key: keyof HuskIncome; label: string }[] = [
 // and by the P&L page's husk pool.
 export async function computeHuskPool(): Promise<{ revenue: number; expenses: HuskExpenses; income: HuskIncome }> {
   const [
-    revAccount,
+    byproductDispatches,
     freightOutwardAccount,
     hamaliIncomeAccount,
     dispatches,
@@ -212,7 +212,14 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     huskTransfersForKata,
     companyProfile,
   ] = await Promise.all([
-      prisma.account.findUnique({ where: { code: '40010' }, select: { id: true } }),
+      prisma.saleDispatch.findMany({
+        where: { saleOrder: { product: { in: POOL_REVENUE_COST_CENTERS as any } } },
+        select: {
+          weightKg: true,
+          gstAmount: true,
+          saleOrder: { select: { ratePerKg: true } },
+        },
+      }),
       prisma.account.findUnique({ where: { code: '50050' }, select: { id: true } }),
       prisma.account.findUnique({ where: { code: '40030' }, select: { id: true } }),
       prisma.$queryRaw<{product: string, weightKg: bigint}[]>`
@@ -299,15 +306,13 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       prisma.companyProfile.findFirst({ select: { companyVehicles: true } }),
     ]);
 
-    // ── Revenue: pooled byproduct sales revenue (net credits on 40010) ──────────
-    let revenue = 0;
-    if (revAccount) {
-      const revLines = await prisma.journalLine.aggregate({
-        _sum: { credit: true, debit: true },
-        where: { accountId: revAccount.id, costCenter: { in: POOL_REVENUE_COST_CENTERS } },
-      });
-      revenue = Number(revLines._sum.credit ?? 0) - Number(revLines._sum.debit ?? 0);
-    }
+    // ── Revenue: pooled byproduct sales revenue (GST-inclusive dispatched sales) ──
+    const revenue = Math.round(
+      byproductDispatches.reduce(
+        (sum, d) => sum + d.weightKg * Number(d.saleOrder.ratePerKg) + Number(d.gstAmount || 0),
+        0,
+      ) * 100,
+    ) / 100;
 
     // ── Outward freight on DELIVERY-priced byproduct sales ──────────────────────
     // Husk & co. are normally quoted BASE (ex-works, on the buyer's lorry), which

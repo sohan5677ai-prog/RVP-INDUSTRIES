@@ -218,60 +218,20 @@ export async function getBalanceSheet(_req: Request, res: Response) {
  * headlines without faking a response object.
  */
 export async function computeProfitLossSummary() {
-  const [huskPool, byproductOrders, pappuMargins, creditNotes] = await Promise.all([
+  const [huskPool, byproductOrders, pappuMargins] = await Promise.all([
     computeHuskPool(),
     prisma.saleOrder.findMany({
       where: { product: { not: 'PAPPU' } },
       include: { dispatches: { select: { weightKg: true } } },
     }),
     computePappuOrderMargins(),
-    // Credit notes reduce sales revenue. We need each note's taxable value
-    // (GST-exclusive, since GST is pass-through) and the product of the linked
-    // sale order (or the party's recent orders) to know whether it hits Pappu P/L
-    // or the Husk Pool.
-    prisma.creditNote.findMany({
-      where: { status: 'ISSUED' },
-      select: {
-        taxableValue: true,
-        partyId: true,
-        party: {
-          select: {
-            saleOrders: {
-              select: { product: true },
-              take: 1,
-              orderBy: { saleDate: 'desc' },
-            },
-          },
-        },
-        saleDispatch: {
-          select: { saleOrder: { select: { product: true } } },
-        },
-      },
-    }),
   ]);
 
-  // Credit note deductions grouped by product bucket.
-  let pappuCreditNoteDeduction = 0;
-  let byproductCreditNoteDeduction = 0;
-  for (const cn of creditNotes) {
-    const amt = r2(Number(cn.taxableValue));
-    const linkedProduct = cn.saleDispatch?.saleOrder?.product;
-    const fallbackProduct = cn.party?.saleOrders?.[0]?.product ?? 'PAPPU';
-    const product = linkedProduct ?? fallbackProduct;
-    if (product === 'PAPPU') {
-      pappuCreditNoteDeduction = r2(pappuCreditNoteDeduction + amt);
-    } else {
-      // Non-PAPPU → deducted from husk pool byproduct income.
-      byproductCreditNoteDeduction = r2(byproductCreditNoteDeduction + amt);
-    }
-  }
-  const totalCreditNoteDeduction = r2(pappuCreditNoteDeduction + byproductCreditNoteDeduction);
-
   // Estimated Pappu P/L = Σ per-order margin (all orders).
-  const pappuEstimatedProfit = r2(pappuMargins.reduce((s, m) => s + m.margin, 0) - pappuCreditNoteDeduction);
+  const pappuEstimatedProfit = r2(pappuMargins.reduce((s, m) => s + m.margin, 0));
   // Locked Pappu P/L = Σ per-order margin (only orders whose costs are frozen/fully dispatched).
   const lockedMargins = pappuMargins.filter((m) => m.costFrozenAt != null);
-  const pappuLockedProfit = r2(lockedMargins.reduce((s, m) => s + m.margin, 0) - pappuCreditNoteDeduction);
+  const pappuLockedProfit = r2(lockedMargins.reduce((s, m) => s + m.margin, 0));
 
   // Byproduct income = actually dispatched non-Pappu sales (GST is pass-through, excluded).
   const incomeByProduct = new Map<string, number>();
@@ -284,7 +244,7 @@ export async function computeProfitLossSummary() {
   const byproducts = [...incomeByProduct.entries()]
     .map(([product, amount]) => ({ product, amount: r2(amount) }))
     .sort((a, b) => b.amount - a.amount);
-  const byproductIncome = r2(byproducts.reduce((s, b) => s + b.amount, 0) - byproductCreditNoteDeduction);
+  const byproductIncome = r2(byproducts.reduce((s, b) => s + b.amount, 0));
 
   // Overhead = the FULL itemized husk-pool operating costs, matching the dashboard
   // recovery card line-for-line - including the pappu-flagged lines (Pappu Loading /
@@ -325,13 +285,6 @@ export async function computeProfitLossSummary() {
       overheadLedgers,
       net: huskPoolNet,
       isDeficit: huskPoolNet < 0,
-    },
-    // Credit notes that reverse part of the invoiced revenue. Shown as a
-    // separate deduction so the user sees exactly what shaved the profit.
-    creditNoteDeductions: {
-      pappu: pappuCreditNoteDeduction,
-      byproduct: byproductCreditNoteDeduction,
-      total: totalCreditNoteDeduction,
     },
     totals: {
       netProfit: lockedNetProfit,

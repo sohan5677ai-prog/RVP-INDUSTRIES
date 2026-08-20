@@ -102,12 +102,6 @@ export default function ProfitLoss() {
                     {rupees(Math.abs(data.pappu.profitLoss))}
                   </span>
                 </div>
-                {data.creditNoteDeductions && data.creditNoteDeductions.pappu > 0 && (
-                  <div className="flex items-baseline justify-between pt-1.5 text-xs text-rose-600 dark:text-rose-400">
-                    <span>Less: Credit Notes (Quality/Shortfall discounts)</span>
-                    <span className="font-mono">({rupees(data.creditNoteDeductions.pappu)})</span>
-                  </div>
-                )}
               </div>
             </Card>
 
@@ -126,9 +120,6 @@ export default function ProfitLoss() {
                 {data.huskPool.byproducts.map((b) => (
                   <Row key={b.product} label={prettyProduct(b.product)} amount={b.amount} muted indent />
                 ))}
-                {data.creditNoteDeductions && data.creditNoteDeductions.byproduct > 0 && (
-                  <Row label="Less: Credit notes on byproducts" amount={-data.creditNoteDeductions.byproduct} muted indent />
-                )}
 
                 {/* Other income streams: Kata Income, Hamali Company Profit, Gunny Sales, Other Income */}
                 <div className="mt-2 border-t pt-2">
@@ -177,11 +168,6 @@ export default function ProfitLoss() {
                 label={data.huskPool.isDeficit ? 'Less: Husk pool deficit' : 'Add: Husk pool surplus'}
                 amount={data.huskPool.net}
               />
-              {data.creditNoteDeductions && data.creditNoteDeductions.total > 0 && (
-                <div className="py-1.5 text-xs text-muted-foreground italic">
-                  * Note: Net profit reflects {rupees(data.creditNoteDeductions.total)} reduction from issued credit notes.
-                </div>
-              )}
               <div className="flex items-baseline justify-between pt-3">
                 <span className="inline-flex items-center gap-1.5 font-bold text-foreground">
                   {isProfit ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}

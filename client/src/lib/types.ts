@@ -720,11 +720,6 @@ export interface ProfitLoss {
     net: number;
     isDeficit: boolean;
   };
-  creditNoteDeductions?: {
-    pappu: number;
-    byproduct: number;
-    total: number;
-  };
   totals: {
     netProfit: number;
     estimatedNetProfit?: number;

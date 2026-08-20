@@ -250,6 +250,7 @@ export default function CreditDebitNotes() {
       qc.invalidateQueries({ queryKey: ['party-ledger'] });
       qc.invalidateQueries({ queryKey: ['party-ledgers'] });
       qc.invalidateQueries({ queryKey: ['profit-loss'] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success(`${tab === 'CREDIT' ? 'Credit' : 'Debit'} note created`);
       setOpen(false);

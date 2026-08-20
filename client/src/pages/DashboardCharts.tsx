@@ -31,6 +31,7 @@ export interface HuskExpenses {
   saleFreight: number;
   pappuShortage: number;
   huskShortage: number;
+  creditNotes: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -90,6 +91,7 @@ const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
   { key: 'saleFreight', label: 'Husk Sale Freight' },
   { key: 'pappuShortage', label: 'Pappu Shortage' },
   { key: 'huskShortage', label: 'Husk Shortage' },
+  { key: 'creditNotes', label: 'Credit Notes' },
   { key: 'pappuLoading', label: 'Pappu Loading' },
   { key: 'pappuRoasting', label: 'Pappu Roasting' },
   { key: 'huskLoading', label: 'Husk Loading' },

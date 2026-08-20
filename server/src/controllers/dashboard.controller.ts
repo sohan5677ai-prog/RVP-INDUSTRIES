@@ -85,6 +85,7 @@ export interface HuskExpenses {
   saleFreight: number;
   pappuShortage: number;
   huskShortage: number;
+  creditNotes: number;
   pappuLoading: number;
   pappuRoasting: number;
   huskLoading: number;
@@ -120,6 +121,7 @@ export const HUSK_EXPENSE_META: { key: keyof HuskExpenses; label: string; pappu:
   { key: 'saleFreight',        label: 'Husk Sale Freight', pappu: false },
   { key: 'pappuShortage',      label: 'Pappu Shortage',       pappu: true  },
   { key: 'huskShortage',       label: 'Husk Shortage',        pappu: false },
+  { key: 'creditNotes',        label: 'Credit Notes',         pappu: false },
   { key: 'pappuLoading',       label: 'Pappu Loading',        pappu: true  },
   { key: 'pappuRoasting',      label: 'Pappu Roasting',       pappu: true  },
   { key: 'huskLoading',        label: 'Husk Loading',         pappu: false },
@@ -201,6 +203,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     privateLoanInterestAgg,
     brokerageDispatches,
     lockedShortageReceipts,
+    issuedCreditNotes,
     purchaseKataAgg,
     dustPurchasesForKata,
     saleDispatchesForKata,
@@ -265,6 +268,26 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
         select: {
           shortageAmount: true,
           saleDispatch: { select: { saleOrder: { select: { product: true } } } },
+        },
+      }),
+      // ISSUED credit notes - to capture manual/quality deductions while avoiding
+      // double-counting formal shortage credit notes whose dispatches already booked
+      // receipt shortages.
+      prisma.creditNote.findMany({
+        where: { status: 'ISSUED' },
+        select: {
+          id: true,
+          taxableValue: true,
+          totalAmount: true,
+          saleDispatchId: true,
+          saleDispatch: {
+            select: {
+              receipts: {
+                where: { shortageAmount: { gt: 0 } },
+                select: { id: true },
+              },
+            },
+          },
         },
       }),
       prisma.purchase.aggregate({ _sum: { kataFee: true } }),
@@ -409,13 +432,27 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       else huskShortage += amount;
     }
 
-    const expenses = {
+    // Manual credit notes (e.g. quality shortfalls, price corrections, trade
+    // discounts). A credit note whose dispatch matches a receipt that already
+    // booked a shortage is the formal document for that same shortage (counted in
+    // pappuShortage / huskShortage above) - we exclude it to avoid double-counting.
+    // Notes for dispatches with no receipt shortage and standalone notes are
+    // genuine additional deductions.
+    let creditNotesTotal = 0;
+    for (const cn of issuedCreditNotes) {
+      const hasReceiptShortage = (cn.saleDispatch?.receipts?.length ?? 0) > 0;
+      if (hasReceiptShortage) continue;
+      creditNotesTotal += Number(cn.taxableValue || cn.totalAmount || 0);
+    }
+
+    const expenses: HuskExpenses = {
       blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
       transferHamali,
       transferTransport,
       saleFreight,
       pappuShortage: Math.round(pappuShortage * 100) / 100,
       huskShortage: Math.round(huskShortage * 100) / 100,
+      creditNotes: Math.round(creditNotesTotal * 100) / 100,
       pappuLoading,
       pappuRoasting,
       huskLoading,

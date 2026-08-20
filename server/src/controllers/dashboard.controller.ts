@@ -447,7 +447,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     for (const cn of issuedCreditNotes) {
       const hasReceiptShortage = (cn.saleDispatch?.receipts?.length ?? 0) > 0;
       if (hasReceiptShortage) continue;
-      creditNotesTotal += Number(cn.taxableValue || cn.totalAmount || 0);
+      creditNotesTotal += Number(cn.totalAmount || cn.taxableValue || 0);
     }
 
     const expenses: HuskExpenses = {

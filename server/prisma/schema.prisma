@@ -903,6 +903,7 @@ enum ManualHamaliType {
   TARBAL_FEE
   MISC
   PAID
+  ADVANCE
 }
 
 model ManualHamaliCost {

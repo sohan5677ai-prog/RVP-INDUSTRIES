@@ -13,6 +13,7 @@ const LABELS: Record<string, string> = {
   TARBAL_FEE: 'Tarbal Fee',
   MISC: 'Hamali Miscellaneous',
   PAID: 'Paid to Hamali',
+  ADVANCE: 'Advance Given',
 };
 
 const isPerBag = (type: string) => (PER_BAG_TYPES as readonly string[]).includes(type);
@@ -26,12 +27,12 @@ export async function listManualHamaliCosts(_req: Request, res: Response) {
  * Record a manually-entered hamali cost that can't be derived from purchases or
  * sales. Two flavours:
  *   - Per-bag charge (bag cutting / pappu net): amount = bags × ratePerBag.
- *   - Flat amount (misc / paid): amount entered directly.
+ *   - Flat amount (misc / paid / advance): amount entered directly.
  *
  * GL posting:
  *   - Charges (bag cutting, pappu net, misc) accrue what we owe the crew:
  *       Dr Factory Labor Expense (50020) / Cr Hamali payable (20200).
- *   - PAID is a cash disbursement that settles that payable:
+ *   - PAID / ADVANCE is a cash disbursement that settles/reduces that payable:
  *       Dr Hamali payable (20200) / Cr Cash-in-Hand (10410).
  */
 export async function createManualHamaliCost(req: Request, res: Response) {
@@ -57,16 +58,16 @@ export async function createManualHamaliCost(req: Request, res: Response) {
       },
     });
 
-    const lines =
-      data.type === 'PAID'
-        ? [
-            { accountCode: '20200', debit: amount, credit: 0, costCenter: 'Hamali Team' }, // settle payable
-            { accountCode: '10410', debit: 0, credit: amount }, // Cash-in-Hand
-          ]
-        : [
-            { accountCode: '50020', debit: amount, credit: 0, costCenter: LABELS[data.type] }, // Factory Labor Expense
-            { accountCode: '20200', debit: 0, credit: amount, costCenter: 'Hamali Team' }, // Hamali payable
-          ];
+    const isDisbursement = data.type === 'PAID' || data.type === 'ADVANCE';
+    const lines = isDisbursement
+      ? [
+          { accountCode: '20200', debit: amount, credit: 0, costCenter: 'Hamali Team' }, // settle/reduce payable
+          { accountCode: '10410', debit: 0, credit: amount }, // Cash-in-Hand
+        ]
+      : [
+          { accountCode: '50020', debit: amount, credit: 0, costCenter: LABELS[data.type] }, // Factory Labor Expense
+          { accountCode: '20200', debit: 0, credit: amount, costCenter: 'Hamali Team' }, // Hamali payable
+        ];
 
     await LedgerService.postJournalEntry(tx, {
       date: data.date,

@@ -59,8 +59,10 @@ const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; d
   { value: 'TARBAL_FEE', label: 'Tarbal Fee', perBag: false },
   { value: 'MISC', label: 'Hamali Miscellaneous', perBag: false },
   { value: 'PAID', label: 'Paid to Hamali', perBag: false },
+  { value: 'ADVANCE', label: 'Advance Given', perBag: false },
 ];
 const manualTypeMeta = (t: ManualHamaliType) => MANUAL_TYPES.find((m) => m.value === t)!;
+const isManualDeduction = (t: ManualHamaliType) => t === 'PAID' || t === 'ADVANCE';
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -549,8 +551,8 @@ export default function HamaliLedger() {
     });
   }, [manualSorted, chargeFilter, chargeSearch, partyType, q, startDate, endDate]);
 
-  const manualFilteredCharged = manualFiltered.filter((c) => c.type !== 'PAID').reduce((s, c) => s + Number(c.amount), 0);
-  const manualFilteredPaid = manualFiltered.filter((c) => c.type === 'PAID').reduce((s, c) => s + Number(c.amount), 0);
+  const manualFilteredCharged = manualFiltered.filter((c) => !isManualDeduction(c.type)).reduce((s, c) => s + Number(c.amount), 0);
+  const manualFilteredPaid = manualFiltered.filter((c) => isManualDeduction(c.type)).reduce((s, c) => s + Number(c.amount), 0);
   const manualFilteredOutstanding = manualFilteredCharged - manualFilteredPaid;
   const chargeFilterActive = chargeFilter !== 'ALL' || chargeSearch.trim() !== '';
 
@@ -581,7 +583,7 @@ export default function HamaliLedger() {
       kind: 'MANUAL' as const,
       date: c.date,
       typeLabel: manualTypeMeta(c.type).label,
-      badgeVariant: (c.type === 'PAID' ? 'default' : 'outline') as UnifiedRow['badgeVariant'],
+      badgeVariant: (isManualDeduction(c.type) ? 'default' : 'outline') as UnifiedRow['badgeVariant'],
       party: '-',
       lorryOrBags: c.bags != null ? String(c.bags) : '-',
       referenceOrNote: c.note ?? '-',
@@ -590,7 +592,7 @@ export default function HamaliLedger() {
       ourShare: null,
       lorryShare: null,
       amount: Number(c.amount),
-      isPaidOut: c.type === 'PAID',
+      isPaidOut: isManualDeduction(c.type),
       pl: null,
       manual: c,
     }));
@@ -646,7 +648,7 @@ export default function HamaliLedger() {
     .reduce((s, e) => s + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0);
   const pendingCrewFromManual = manualSorted
     .filter((c) => inSquareWindow(c.date))
-    .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0);
+    .reduce((s, c) => s + (isManualDeduction(c.type) ? -Number(c.amount) : Number(c.amount)), 0);
   const pendingCrewTotal = Math.round((pendingCrewFromEntries + pendingCrewFromManual) * 100) / 100;
   const squareValid =
     (verifiedThroughDay == null || currentSquareEnd > verifiedThroughDay) &&
@@ -656,15 +658,15 @@ export default function HamaliLedger() {
   // Crew payable across the currently filtered rows (Hamali view metric).
   const includeManualInTile = partyType === 'ALL' && q === '';
   const manualNetInWindow = manualFiltered
-    .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0);
+    .reduce((s, c) => s + (isManualDeduction(c.type) ? -Number(c.amount) : Number(c.amount)), 0);
   const totalCrew = filtered.reduce((acc, e) => acc + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0) + manualNetInWindow;
 
   // Total Hamali Charge (Company tile) - purchases/sale loading plus the
   // Recorded Charges (bag cutting, pappu net, packing, tarbal, misc) that the
-  // crew is also paid for. PAID entries settle a charge rather than being one,
+  // crew is also paid for. PAID / ADVANCE entries settle or reduce a charge rather than being one,
   // so they're excluded here (unlike totalCrew, which nets them off dues).
   const manualChargedInWindow = manualFiltered
-    .filter((c) => c.type !== 'PAID')
+    .filter((c) => !isManualDeduction(c.type))
     .reduce((s, c) => s + Number(c.amount), 0);
   const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0) + manualChargedInWindow;
 
@@ -774,7 +776,7 @@ export default function HamaliLedger() {
         .reduce((s, e) => s + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0) +
         manualSorted
           .filter((c) => sinceCheckpoint(c.date))
-          .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0)) *
+          .reduce((s, c) => s + (isManualDeduction(c.type) ? -Number(c.amount) : Number(c.amount)), 0)) *
         100,
     ) / 100;
 

@@ -855,7 +855,8 @@ export type ManualHamaliType =
   | 'TAMARIND_BYPRODUCTS_PACKING'
   | 'TARBAL_FEE'
   | 'MISC'
-  | 'PAID';
+  | 'PAID'
+  | 'ADVANCE';
 
 export interface ManualHamaliCost {
   id: string;

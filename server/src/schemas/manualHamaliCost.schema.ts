@@ -9,6 +9,7 @@ export const MANUAL_HAMALI_TYPES = [
   'TARBAL_FEE',
   'MISC',
   'PAID',
+  'ADVANCE',
 ] as const;
 
 export const PER_BAG_TYPES = [

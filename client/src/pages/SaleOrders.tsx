@@ -414,11 +414,6 @@ export default function SaleOrders() {
                       {o.poDate && <span className="text-[11px] text-muted-foreground ml-1">({shortDate(o.poDate)})</span>}
                     </div>
                   )}
-                  {(o.buyerCity || o.buyerAddress) && (
-                    <div className="text-[11px] text-muted-foreground truncate max-w-[190px] mt-0.5" title={o.buyerAddress ?? ''}>
-                      📍 {o.buyerCity || o.buyerAddress}
-                    </div>
-                  )}
                 </TableCell>
                 <TableCell>{o.broker?.name ?? '-'}</TableCell>
                 <TableCell>

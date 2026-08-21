@@ -540,7 +540,7 @@ export default function Parties() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Party' : 'New Party'}</DialogTitle>
           </DialogHeader>
@@ -779,8 +779,8 @@ export default function Parties() {
                             : 'border-border bg-card'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-2.5">
-                          <div className="flex items-center gap-2 flex-1">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
                             <Input
                               value={addr.label}
                               onChange={(e) => updateAddress(idx, { label: e.target.value })}
@@ -788,7 +788,7 @@ export default function Parties() {
                               className="h-8 font-medium text-xs max-w-[260px] bg-background"
                             />
                             {addr.isDefault ? (
-                              <Badge variant="default" className="text-[10px] py-0 px-2 flex items-center gap-1">
+                              <Badge variant="default" className="text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0">
                                 <CheckCircle2 className="h-3 w-3" /> Default Address
                               </Badge>
                             ) : (
@@ -797,7 +797,7 @@ export default function Parties() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => setDefaultAddress(idx)}
-                                className="h-6 text-[11px] text-muted-foreground hover:text-foreground px-2"
+                                className="h-6 text-[11px] text-muted-foreground hover:text-foreground px-2 shrink-0"
                               >
                                 Set as Default
                               </Button>
@@ -809,54 +809,73 @@ export default function Parties() {
                               variant="ghost"
                               size="icon"
                               onClick={() => removeAddress(idx)}
-                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                              className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           )}
                         </div>
 
-                        <div className="space-y-2.5">
+                        <div className="space-y-3">
                           <div>
+                            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                              Address / Premises / Area
+                            </label>
                             <Input
                               value={addr.address}
                               onChange={(e) => updateAddress(idx, { address: e.target.value })}
-                              placeholder="Street Address / Premises / Area"
+                              placeholder="Street address, building, industrial area..."
                               className="h-8 text-xs bg-background"
                             />
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                City / Town
+                              </label>
                               <Input
                                 value={addr.city ?? ''}
                                 onChange={(e) => updateAddress(idx, { city: e.target.value })}
-                                placeholder="City / Town (e.g. Surat)"
+                                placeholder="e.g. Surat, Perundurai"
                                 className="h-8 text-xs bg-background"
                               />
                             </div>
                             <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                State
+                              </label>
                               <Combobox
                                 options={INDIAN_STATES}
                                 value={addr.state ?? ''}
                                 onChange={(v) => updateAddress(idx, { state: v })}
                                 placeholder="Select State..."
                                 searchPlaceholder="Search state..."
+                                className="h-8 text-xs w-full min-w-0"
                               />
                             </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                Pincode
+                              </label>
                               <Input
                                 value={addr.pincode ?? ''}
                                 onChange={(e) => updateAddress(idx, { pincode: e.target.value })}
-                                placeholder="Pincode (e.g. 395002)"
+                                placeholder="e.g. 638052"
                                 className="h-8 text-xs bg-background"
                               />
                             </div>
                             <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                Branch GSTIN (Optional)
+                              </label>
                               <Input
                                 value={addr.gstin ?? ''}
                                 onChange={(e) => updateAddress(idx, { gstin: e.target.value.toUpperCase() })}
-                                placeholder="Branch GSTIN (Optional)"
+                                placeholder="e.g. 33AAFCK3..."
                                 className="h-8 text-xs font-mono bg-background uppercase"
                               />
                             </div>

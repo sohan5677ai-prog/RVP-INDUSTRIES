@@ -51,11 +51,11 @@ export const Combobox = forwardRef<HTMLButtonElement, ComboboxProps>(function Co
           aria-label={ariaLabel}
           disabled={disabled}
           className={cn(
-            'glass-thin flex h-10 items-center justify-between gap-2 rounded-lg border border-input px-3 text-sm outline-none transition-[color,box-shadow,border-color] hover:border-ring/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50',
+            'glass-thin flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-input px-3 text-sm outline-none transition-[color,box-shadow,border-color] hover:border-ring/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50',
             className
           )}
         >
-          <span className={cn('truncate', !selected && 'text-muted-foreground')}>{selected ? selected.label : placeholder}</span>
+          <span className={cn('truncate text-left flex-1 min-w-0', !selected && 'text-muted-foreground')}>{selected ? selected.label : placeholder}</span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>

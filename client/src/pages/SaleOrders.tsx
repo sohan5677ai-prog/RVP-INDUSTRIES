@@ -526,7 +526,7 @@ export default function SaleOrders() {
               {buyerId && (() => {
                 const currentBuyer = parties?.find((p) => p.id === buyerId);
                 const buyerAddrs = currentBuyer?.addresses ?? [];
-                if (buyerAddrs.length === 0) return null;
+                if (buyerAddrs.length <= 1) return null;
                 return (
                   <FormField
                     control={form.control}

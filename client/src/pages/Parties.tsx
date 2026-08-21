@@ -210,6 +210,7 @@ export default function Parties() {
   });
 
   const [addresses, setAddresses] = useState<PartyAddress[]>([]);
+  const [hasMultipleAddresses, setHasMultipleAddresses] = useState(false);
 
   function addAddress() {
     setAddresses((prev) => [
@@ -248,6 +249,7 @@ export default function Parties() {
   function openCreate() {
     setEditing(null);
     form.reset(emptyParty);
+    setHasMultipleAddresses(false);
     setAddresses([
       { label: 'Registered Office', address: '', city: '', state: '', pincode: '', gstin: '', destination: '', isDefault: true },
     ]);
@@ -280,6 +282,8 @@ export default function Parties() {
       bankName: p.bankName ?? '',
       commodities: p.commodities ?? [],
     });
+    const isMulti = Boolean(p.addresses && p.addresses.length > 1);
+    setHasMultipleAddresses(isMulti);
     if (p.addresses && p.addresses.length > 0) {
       setAddresses(p.addresses.map((a) => ({ ...a, destination: a.destination ?? p.destination ?? '' })));
     } else {
@@ -303,28 +307,58 @@ export default function Parties() {
     mutationFn: (values: PartyForm) => {
       // 'NONE' is a Select-only sentinel (Radix Select can't hold an empty-string
       // item value) standing in for "not tagged" - the API wants null.
-      const validAddresses = addresses
-        .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim())
-        .map((a) => ({
-          ...a,
-          label: a.label.trim() || 'Address',
-          address: a.address.trim(),
-          city: a.city?.trim() || null,
-          state: a.state?.trim() || null,
-          pincode: a.pincode?.trim() || null,
-          gstin: a.gstin?.trim() || null,
-          destination: a.destination?.trim() || null,
-        }));
-      const defaultAddr = validAddresses.find((a) => a.isDefault) || validAddresses[0];
+      let validAddresses: PartyAddress[] = [];
+      let finalAddress = values.address || '';
+      let finalCity = values.city || '';
+      let finalState = values.state || '';
+      let finalPincode = values.pincode || '';
+      let finalGstin = values.gstin || '';
+      let finalDestination = values.destination || '';
+
+      if (hasMultipleAddresses) {
+        validAddresses = addresses
+          .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim())
+          .map((a) => ({
+            ...a,
+            label: a.label.trim() || 'Address',
+            address: a.address.trim(),
+            city: a.city?.trim() || null,
+            state: a.state?.trim() || null,
+            pincode: a.pincode?.trim() || null,
+            gstin: a.gstin?.trim() || null,
+            destination: a.destination?.trim() || null,
+          }));
+        const defaultAddr = validAddresses.find((a) => a.isDefault) || validAddresses[0];
+        if (defaultAddr) {
+          finalAddress = defaultAddr.address;
+          finalCity = defaultAddr.city || '';
+          finalState = defaultAddr.state || '';
+          finalPincode = defaultAddr.pincode || '';
+          finalGstin = defaultAddr.gstin || finalGstin;
+          finalDestination = defaultAddr.destination || finalDestination;
+        }
+      } else {
+        const addrText = values.address?.trim() || '';
+        validAddresses = addrText ? [{
+          label: 'Registered Office',
+          address: addrText,
+          city: values.city?.trim() || null,
+          state: values.state?.trim() || null,
+          pincode: values.pincode?.trim() || null,
+          gstin: values.gstin?.trim() || null,
+          destination: values.destination?.trim() || null,
+          isDefault: true,
+        }] : [];
+      }
 
       const body = {
         ...values,
-        address: defaultAddr?.address || values.address || '',
-        city: defaultAddr?.city || values.city || '',
-        state: defaultAddr?.state || values.state || '',
-        pincode: defaultAddr?.pincode || values.pincode || '',
-        gstin: defaultAddr?.gstin || values.gstin || '',
-        destination: defaultAddr?.destination || values.destination || '',
+        address: finalAddress,
+        city: finalCity,
+        state: finalState,
+        pincode: finalPincode,
+        gstin: finalGstin,
+        destination: finalDestination,
         addresses: validAddresses,
         religion: values.religion === 'NONE' ? null : values.religion,
         openingBalance: values.openingBalance ?? 0,
@@ -746,176 +780,135 @@ export default function Parties() {
                 </div>
               )}
               {!isHamaliTeam && (
-                <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-1.5 font-medium text-sm">
-                        <MapPin className="h-4 w-4 text-primary" />
-                        <span>Addresses &amp; Delivery Locations</span>
-                        <Badge variant="secondary" className="text-xs font-normal">
-                          {addresses.length} {addresses.length === 1 ? 'address' : 'addresses'}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Add multiple branch offices, factories, or delivery godowns for this party.
-                      </p>
+                <div className="flex flex-row items-center justify-between gap-4 rounded-lg border p-3 bg-muted/20">
+                  <div className="space-y-0.5">
+                    <div className="text-sm font-medium flex items-center gap-1.5">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      <span>Multiple Addresses</span>
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={addAddress}>
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Add Address
-                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      {hasMultipleAddresses
+                        ? 'ON - Manage multiple branch offices, factories, or delivery locations.'
+                        : 'OFF - Single standard address for this party.'}
+                    </p>
                   </div>
-
-                  <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-                    {addresses.map((addr, idx) => (
-                      <div
-                        key={idx}
-                        className={`relative rounded-md border p-3.5 transition-all ${
-                          addr.isDefault
-                            ? 'border-primary/50 bg-primary/5 shadow-xs'
-                            : 'border-border bg-card'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <Input
-                              value={addr.label}
-                              onChange={(e) => updateAddress(idx, { label: e.target.value })}
-                              placeholder="e.g. Registered Office, Plant 2, Surat Godown"
-                              className="h-8 font-medium text-xs max-w-[260px] bg-background"
-                            />
-                            {addr.isDefault ? (
-                              <Badge variant="default" className="text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0">
-                                <CheckCircle2 className="h-3 w-3" /> Default Address
-                              </Badge>
-                            ) : (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setDefaultAddress(idx)}
-                                className="h-6 text-[11px] text-muted-foreground hover:text-foreground px-2 shrink-0"
-                              >
-                                Set as Default
-                              </Button>
-                            )}
-                          </div>
-                          {addresses.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeAddress(idx)}
-                              className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                              Address / Premises / Area
-                            </label>
-                            <Input
-                              value={addr.address}
-                              onChange={(e) => updateAddress(idx, { address: e.target.value })}
-                              placeholder="Street address, building, industrial area..."
-                              className="h-8 text-xs bg-background"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                City / Town
-                              </label>
-                              <Input
-                                value={addr.city ?? ''}
-                                onChange={(e) => updateAddress(idx, { city: e.target.value })}
-                                placeholder="e.g. Surat, Perundurai"
-                                className="h-8 text-xs bg-background"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                State
-                              </label>
-                              <Combobox
-                                options={INDIAN_STATES}
-                                value={addr.state ?? ''}
-                                onChange={(v) => updateAddress(idx, { state: v })}
-                                placeholder="Select State..."
-                                searchPlaceholder="Search state..."
-                                className="h-8 text-xs w-full min-w-0"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                Pincode
-                              </label>
-                              <Input
-                                value={addr.pincode ?? ''}
-                                onChange={(e) => updateAddress(idx, { pincode: e.target.value })}
-                                placeholder="e.g. 638052"
-                                className="h-8 text-xs bg-background"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                Branch GSTIN (Optional)
-                              </label>
-                              <Input
-                                value={addr.gstin ?? ''}
-                                onChange={(e) => updateAddress(idx, { gstin: e.target.value.toUpperCase() })}
-                                placeholder="e.g. 33AAFCK3..."
-                                className="h-8 text-xs font-mono bg-background uppercase"
-                              />
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                              Delivery Destination (Freight Calculation)
-                            </label>
-                            <Combobox
-                              options={destinationOptions}
-                              value={addr.destination ?? ''}
-                              onChange={(v) => updateAddress(idx, { destination: v })}
-                              placeholder="Select destination for freight rate…"
-                              searchPlaceholder="Search destination…"
-                              emptyText="No destinations - add them in Settings → Freight Rates."
-                              className="h-8 text-xs w-full min-w-0"
-                            />
-                            <p className="text-[10px] text-muted-foreground mt-1">
-                              Used to calculate automatic freight rates for orders delivered to this address.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={hasMultipleAddresses}
+                    aria-label="Multiple Addresses"
+                    onClick={() => {
+                      const next = !hasMultipleAddresses;
+                      setHasMultipleAddresses(next);
+                      if (next) {
+                        if (addresses.length <= 1) {
+                          setAddresses([
+                            {
+                              label: 'Registered Office',
+                              address: form.getValues('address') || addresses[0]?.address || '',
+                              city: form.getValues('city') || addresses[0]?.city || '',
+                              state: form.getValues('state') || addresses[0]?.state || '',
+                              pincode: form.getValues('pincode') || addresses[0]?.pincode || '',
+                              gstin: form.getValues('gstin') || addresses[0]?.gstin || '',
+                              destination: form.getValues('destination') || addresses[0]?.destination || '',
+                              isDefault: true,
+                            },
+                          ]);
+                        }
+                      } else {
+                        const def = addresses.find((a) => a.isDefault) || addresses[0];
+                        if (def) {
+                          form.setValue('address', def.address);
+                          form.setValue('city', def.city ?? '');
+                          form.setValue('state', def.state ?? '');
+                          form.setValue('pincode', def.pincode ?? '');
+                          if (def.gstin) form.setValue('gstin', def.gstin);
+                          if (def.destination) form.setValue('destination', def.destination);
+                        }
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${hasMultipleAddresses ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${hasMultipleAddresses ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+                  </button>
                 </div>
               )}
 
-              {!isHamaliTeam && (
-                <div className="grid grid-cols-2 gap-4">
+              {!isHamaliTeam && !hasMultipleAddresses && (
+                <div className="space-y-4">
                   <FormField
                     control={form.control}
-                    name="gstin"
+                    name="address"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Primary GSTIN</FormLabel>
+                        <FormLabel>Address</FormLabel>
                         <FormControl>
-                          <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
+                          <Input placeholder="Street address, premises, area..." {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="city"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>City / Town</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. Surat, Perundurai" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="state"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-col justify-end">
+                          <FormLabel className="mb-1">State</FormLabel>
+                          <Combobox
+                            options={INDIAN_STATES}
+                            value={field.value ?? ''}
+                            onChange={field.onChange}
+                            placeholder="Select state…"
+                            searchPlaceholder="Search states…"
+                          />
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="pincode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Pincode</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. 638052" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="gstin"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Primary GSTIN</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                   {form.watch('type') !== 'SUPPLIER' && (
                     <FormField
                       control={form.control}
@@ -941,6 +934,205 @@ export default function Parties() {
                       }}
                     />
                   )}
+                </div>
+              )}
+
+              {!isHamaliTeam && hasMultipleAddresses && (
+                <div className="space-y-4">
+                  <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-1.5 font-medium text-sm">
+                          <MapPin className="h-4 w-4 text-primary" />
+                          <span>Addresses &amp; Delivery Locations</span>
+                          <Badge variant="secondary" className="text-xs font-normal">
+                            {addresses.length} {addresses.length === 1 ? 'address' : 'addresses'}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Add multiple branch offices, factories, or delivery godowns for this party.
+                        </p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={addAddress}>
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Address
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                      {addresses.map((addr, idx) => (
+                        <div
+                          key={idx}
+                          className={`relative rounded-md border p-3.5 transition-all ${
+                            addr.isDefault
+                              ? 'border-primary/50 bg-primary/5 shadow-xs'
+                              : 'border-border bg-card'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <Input
+                                value={addr.label}
+                                onChange={(e) => updateAddress(idx, { label: e.target.value })}
+                                placeholder="e.g. Registered Office, Plant 2, Surat Godown"
+                                className="h-8 font-medium text-xs max-w-[260px] bg-background"
+                              />
+                              {addr.isDefault ? (
+                                <Badge variant="default" className="text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0">
+                                  <CheckCircle2 className="h-3 w-3" /> Default Address
+                                </Badge>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setDefaultAddress(idx)}
+                                  className="h-6 text-[11px] text-muted-foreground hover:text-foreground px-2 shrink-0"
+                                >
+                                  Set as Default
+                                </Button>
+                              )}
+                            </div>
+                            {addresses.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeAddress(idx)}
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                Address / Premises / Area
+                              </label>
+                              <Input
+                                value={addr.address}
+                                onChange={(e) => updateAddress(idx, { address: e.target.value })}
+                                placeholder="Street address, building, industrial area..."
+                                className="h-8 text-xs bg-background"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                  City / Town
+                                </label>
+                                <Input
+                                  value={addr.city ?? ''}
+                                  onChange={(e) => updateAddress(idx, { city: e.target.value })}
+                                  placeholder="e.g. Surat, Perundurai"
+                                  className="h-8 text-xs bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                  State
+                                </label>
+                                <Combobox
+                                  options={INDIAN_STATES}
+                                  value={addr.state ?? ''}
+                                  onChange={(v) => updateAddress(idx, { state: v })}
+                                  placeholder="Select State..."
+                                  searchPlaceholder="Search state..."
+                                  className="h-8 text-xs w-full min-w-0"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                  Pincode
+                                </label>
+                                <Input
+                                  value={addr.pincode ?? ''}
+                                  onChange={(e) => updateAddress(idx, { pincode: e.target.value })}
+                                  placeholder="e.g. 638052"
+                                  className="h-8 text-xs bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                  Branch GSTIN (Optional)
+                                </label>
+                                <Input
+                                  value={addr.gstin ?? ''}
+                                  onChange={(e) => updateAddress(idx, { gstin: e.target.value.toUpperCase() })}
+                                  placeholder="e.g. 33AAFCK3..."
+                                  className="h-8 text-xs font-mono bg-background uppercase"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                Delivery Destination (Freight Calculation)
+                              </label>
+                              <Combobox
+                                options={destinationOptions}
+                                value={addr.destination ?? ''}
+                                onChange={(v) => updateAddress(idx, { destination: v })}
+                                placeholder="Select destination for freight rate…"
+                                searchPlaceholder="Search destination…"
+                                emptyText="No destinations - add them in Settings → Freight Rates."
+                                className="h-8 text-xs w-full min-w-0"
+                              />
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                Used to calculate automatic freight rates for orders delivered to this address.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="gstin"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Primary GSTIN (Optional)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {form.watch('type') !== 'SUPPLIER' && (
+                      <FormField
+                        control={form.control}
+                        name="destination"
+                        render={({ field }) => {
+                          const opts = field.value && !destinationOptions.some((o) => o.value === field.value)
+                            ? [{ value: field.value, label: field.value }, ...destinationOptions]
+                            : destinationOptions;
+                          return (
+                            <FormItem className="flex flex-col justify-end">
+                              <FormLabel className="mb-1">Default Delivery destination</FormLabel>
+                              <Combobox
+                                options={opts}
+                                value={field.value ?? ''}
+                                onChange={field.onChange}
+                                placeholder="Select destination…"
+                                searchPlaceholder="Search destinations…"
+                                emptyText="No destinations - add them in Settings → Freight Rates."
+                              />
+                              <FormMessage />
+                            </FormItem>
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
               )}
               {/* Buyers only. Most shipments travel without the transporter's GC

@@ -362,6 +362,34 @@ export class TaxproService {
     return code;
   }
 
+  /**
+   * Sanitises and splits a street address so it adheres strictly to NIC schema:
+   * Addr1: 1 to 100 characters
+   * Addr2: optional, 0 to 100 characters
+   */
+  private static formatNICAddress(raw: string | null | undefined, fallback: string = 'Premises'): { addr1: string; addr2?: string } {
+    const cleaned = (raw || '').trim().replace(/\s+/g, ' ');
+    if (!cleaned) return { addr1: fallback.slice(0, 100) };
+    if (cleaned.length <= 100) return { addr1: cleaned };
+
+    let splitIdx = 100;
+    const lastBreak = cleaned.slice(0, 100).search(/[, -][^, -]*$/);
+    if (lastBreak > 30) {
+      splitIdx = lastBreak + 1;
+    }
+    const addr1 = cleaned.slice(0, splitIdx).trim() || cleaned.slice(0, 100);
+    const addr2 = cleaned.slice(splitIdx).trim().slice(0, 100);
+    return {
+      addr1: addr1.slice(0, 100),
+      ...(addr2 ? { addr2: addr2.slice(0, 100) } : {}),
+    };
+  }
+
+  private static formatNICPlace(raw: string | null | undefined, fallback: string = 'Town'): string {
+    const cleaned = (raw || '').trim().replace(/\s+/g, ' ');
+    return (cleaned || fallback).slice(0, 50);
+  }
+
   /** The buyer's SHIP-TO block. Same rule: `Loc` is the town, not the state. */
   private static shipToDetails(buyer: Record<string, any>) {
     return {
@@ -393,17 +421,23 @@ export class TaxproService {
     const hsn = this.requireHsn(rawHsn, order.product);
 
     if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
-    if (!buyer.gstin) throw new Error('Buyer GSTIN is not set in Buyer profile');
+    const effectiveBuyerGstin = (order.buyerGstin || buyer.gstin || '').trim();
+    if (!effectiveBuyerGstin) throw new Error('Buyer GSTIN is not set in Buyer profile or Sale Order');
 
     const dispatchFrom = this.dispatchFromDetails(company as any);
     const shipTo = this.shipToDetails(buyer as any);
+
+    const sellerAddr = this.formatNICAddress(dispatchFrom.addr1, 'Factory premises');
+    const buyerAddr = this.formatNICAddress(order.buyerAddress || buyer.address, 'Buyer address');
+    const sellerLoc = this.formatNICPlace(dispatchFrom.place, 'Punganur');
+    const buyerLoc = this.formatNICPlace(order.buyerCity || shipTo.place, 'Town');
 
     const weight = dispatch.weightKg;
     const rate = Number(order.ratePerKg);
     const baseAmount = Math.round(weight * rate * 100) / 100;
 
     const sellerStateCode = company.gstin.slice(0, 2);
-    const buyerStateCode = buyer.gstin.slice(0, 2);
+    const buyerStateCode = effectiveBuyerGstin.slice(0, 2);
     const isSameState = sellerStateCode === buyerStateCode;
 
     // GST rate is configured per commodity in Settings (ProductTaxInfo.gstRate),
@@ -431,21 +465,22 @@ export class TaxproService {
       },
       SellerDtls: {
         Gstin: company.gstin,
-        LglNm: company.name,
-        Addr1: dispatchFrom.addr1 || 'Factory premises',
-        ...(dispatchFrom.addr2 ? { Addr2: dispatchFrom.addr2 } : {}),
-        Loc: dispatchFrom.place,
+        LglNm: company.name.slice(0, 100),
+        Addr1: sellerAddr.addr1,
+        ...(sellerAddr.addr2 || dispatchFrom.addr2 ? { Addr2: (sellerAddr.addr2 || dispatchFrom.addr2).slice(0, 100) } : {}),
+        Loc: sellerLoc,
         Pin: dispatchFrom.pincode,
         Stcd: sellerStateCode,
       },
       BuyerDtls: {
-        Gstin: order.buyerGstin || buyer.gstin,
-        LglNm: buyer.name,
-        Pos: (order.buyerGstin ? order.buyerGstin.slice(0, 2) : buyerStateCode),
-        Addr1: order.buyerAddress || buyer.address || 'Buyer address',
-        Loc: order.buyerCity || shipTo.place,
+        Gstin: effectiveBuyerGstin,
+        LglNm: buyer.name.slice(0, 100),
+        Pos: buyerStateCode,
+        Addr1: buyerAddr.addr1,
+        ...(buyerAddr.addr2 ? { Addr2: buyerAddr.addr2 } : {}),
+        Loc: buyerLoc,
         Pin: Number(order.buyerPincode) || shipTo.pincode,
-        Stcd: (order.buyerGstin ? order.buyerGstin.slice(0, 2) : buyerStateCode),
+        Stcd: buyerStateCode,
       },
       ItemList: [
         {
@@ -727,6 +762,11 @@ export class TaxproService {
       Math.ceil((dispatch.ewbValidUpto.getTime() - dispatch.ewbDate.getTime()) / (24 * 60 * 60 * 1000)),
     );
 
+    const sellerAddr = this.formatNICAddress(dispatchFrom.addr1, 'Factory premises');
+    const buyerAddr = this.formatNICAddress(order.buyerAddress || buyer.address, 'Buyer address');
+    const sellerLoc = this.formatNICPlace(dispatchFrom.place, 'Punganur');
+    const buyerLoc = this.formatNICPlace(order.buyerCity || shipTo.place, 'Town');
+
     const payload = {
       ewbNo: Number(dispatch.ewbNumber),
       ewayBillDate: this.formatNICDateTime(dispatch.ewbDate),
@@ -738,18 +778,18 @@ export class TaxproService {
       docNo: dispatch.invoiceNumber || `DISP-${dispatch.id.slice(-6)}`,
       docDate: this.formatNICDate(dispatch.invoiceDate || dispatch.dispatchDate),
       fromGstin: company.gstin,
-      fromTrdName: company.name,
-      fromAddr1: dispatchFrom.addr1,
-      fromAddr2: dispatchFrom.addr2,
-      fromPlace: dispatchFrom.place,
+      fromTrdName: company.name.slice(0, 100),
+      fromAddr1: sellerAddr.addr1,
+      fromAddr2: (sellerAddr.addr2 || dispatchFrom.addr2 || '').slice(0, 100),
+      fromPlace: sellerLoc,
       fromPincode: dispatchFrom.pincode,
       fromStateCode: Number(sellerStateCode) || 0,
-      toGstin: buyer.gstin || 'URP',
-      toTrdName: buyer.name,
-      toAddr1: buyer.address || '',
-      toAddr2: '',
-      toPlace: shipTo.place,
-      toPincode: shipTo.pincode,
+      toGstin: (order.buyerGstin || buyer.gstin || 'URP').trim(),
+      toTrdName: buyer.name.slice(0, 100),
+      toAddr1: buyerAddr.addr1,
+      toAddr2: (buyerAddr.addr2 || '').slice(0, 100),
+      toPlace: buyerLoc,
+      toPincode: Number(order.buyerPincode) || shipTo.pincode,
       toStateCode: Number(buyerStateCode) || 0,
       totalValue: baseAmount,
       totInvValue: totalAmount,

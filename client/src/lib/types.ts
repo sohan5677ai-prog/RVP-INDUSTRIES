@@ -20,6 +20,7 @@ export interface PartyAddress {
   state?: string | null;
   pincode?: string | null;
   gstin?: string | null;
+  destination?: string | null;
   isDefault?: boolean;
 }
 

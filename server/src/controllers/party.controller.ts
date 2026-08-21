@@ -40,6 +40,7 @@ export async function createParty(req: Request, res: Response) {
       rest.state = defaultAddr.state ?? rest.state;
       rest.pincode = defaultAddr.pincode ?? rest.pincode;
       rest.gstin = defaultAddr.gstin ?? rest.gstin;
+      rest.destination = defaultAddr.destination ?? rest.destination;
     }
   } else if (rest.address && rest.address.trim()) {
     addressList = [{
@@ -49,6 +50,7 @@ export async function createParty(req: Request, res: Response) {
       state: rest.state ?? null,
       pincode: rest.pincode ?? null,
       gstin: rest.gstin ?? null,
+      destination: rest.destination ?? null,
       isDefault: true,
     }];
   }
@@ -65,6 +67,7 @@ export async function createParty(req: Request, res: Response) {
           state: a.state ?? null,
           pincode: a.pincode ?? null,
           gstin: a.gstin ?? null,
+          destination: a.destination ?? null,
           isDefault: a.isDefault ?? false,
         })),
       },
@@ -96,6 +99,7 @@ export async function updateParty(req: Request, res: Response) {
     rest.state = defaultAddr.state ?? rest.state;
     rest.pincode = defaultAddr.pincode ?? rest.pincode;
     if (defaultAddr.gstin) rest.gstin = defaultAddr.gstin;
+    if (defaultAddr.destination) rest.destination = defaultAddr.destination;
   }
 
   const party = await prisma.$transaction(async (tx) => {
@@ -111,6 +115,7 @@ export async function updateParty(req: Request, res: Response) {
             state: a.state ?? null,
             pincode: a.pincode ?? null,
             gstin: a.gstin ?? null,
+            destination: a.destination ?? null,
             isDefault: a.isDefault ?? false,
           })),
         });

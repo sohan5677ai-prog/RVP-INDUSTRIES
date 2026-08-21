@@ -177,18 +177,19 @@ model Party {
 }
 
 model PartyAddress {
-  id        String   @id @default(cuid())
-  party     Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
-  partyId   String
-  label     String   // e.g. "Head Office", "Surat Warehouse", "Factory Unit 2"
-  address   String
-  city      String?
-  state     String?
-  pincode   String?
-  gstin     String?  // Optional branch-specific GSTIN
-  isDefault Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  party       Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  partyId     String
+  label       String   // e.g. "Head Office", "Surat Warehouse", "Factory Unit 2"
+  address     String
+  city        String?
+  state       String?
+  pincode     String?
+  gstin       String?  // Optional branch-specific GSTIN
+  destination String?  // Optional address-specific freight delivery destination
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([partyId])
 }

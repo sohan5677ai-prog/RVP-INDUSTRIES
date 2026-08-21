@@ -221,6 +221,7 @@ export default function Parties() {
         state: '',
         pincode: '',
         gstin: '',
+        destination: '',
         isDefault: prev.length === 0,
       },
     ]);
@@ -248,7 +249,7 @@ export default function Parties() {
     setEditing(null);
     form.reset(emptyParty);
     setAddresses([
-      { label: 'Registered Office', address: '', city: '', state: '', pincode: '', gstin: '', isDefault: true },
+      { label: 'Registered Office', address: '', city: '', state: '', pincode: '', gstin: '', destination: '', isDefault: true },
     ]);
     setOpen(true);
   }
@@ -280,7 +281,7 @@ export default function Parties() {
       commodities: p.commodities ?? [],
     });
     if (p.addresses && p.addresses.length > 0) {
-      setAddresses(p.addresses.map((a) => ({ ...a })));
+      setAddresses(p.addresses.map((a) => ({ ...a, destination: a.destination ?? p.destination ?? '' })));
     } else {
       setAddresses([
         {
@@ -290,6 +291,7 @@ export default function Parties() {
           state: p.state ?? '',
           pincode: p.pincode ?? '',
           gstin: p.gstin ?? '',
+          destination: p.destination ?? '',
           isDefault: true,
         },
       ]);
@@ -311,6 +313,7 @@ export default function Parties() {
           state: a.state?.trim() || null,
           pincode: a.pincode?.trim() || null,
           gstin: a.gstin?.trim() || null,
+          destination: a.destination?.trim() || null,
         }));
       const defaultAddr = validAddresses.find((a) => a.isDefault) || validAddresses[0];
 
@@ -321,6 +324,7 @@ export default function Parties() {
         state: defaultAddr?.state || values.state || '',
         pincode: defaultAddr?.pincode || values.pincode || '',
         gstin: defaultAddr?.gstin || values.gstin || '',
+        destination: defaultAddr?.destination || values.destination || '',
         addresses: validAddresses,
         religion: values.religion === 'NONE' ? null : values.religion,
         openingBalance: values.openingBalance ?? 0,
@@ -692,10 +696,6 @@ export default function Parties() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormDescription>
-                        Sends this party's WhatsApp messages in their language. Falls back to English
-                        wherever that language's template isn't approved yet.
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -723,10 +723,6 @@ export default function Parties() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormDescription>
-                        Only used to target religion-specific festival wishes. Leave "Not tagged" if unsure -
-                        still included in "Everyone" wishes, just skipped by a filtered one.
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -880,6 +876,24 @@ export default function Parties() {
                               />
                             </div>
                           </div>
+
+                          <div>
+                            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                              Delivery Destination (Freight Calculation)
+                            </label>
+                            <Combobox
+                              options={destinationOptions}
+                              value={addr.destination ?? ''}
+                              onChange={(v) => updateAddress(idx, { destination: v })}
+                              placeholder="Select destination for freight rate…"
+                              searchPlaceholder="Search destination…"
+                              emptyText="No destinations - add them in Settings → Freight Rates."
+                              className="h-8 text-xs w-full min-w-0"
+                            />
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              Used to calculate automatic freight rates for orders delivered to this address.
+                            </p>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -972,11 +986,6 @@ export default function Parties() {
                     <FormControl>
                       <Input placeholder="e.g. https://maps.app.goo.gl/... or 21.132722, 72.833611" {...field} />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">
-                      Sent to the lorry driver on dispatch via WhatsApp, as a map pin. Business-listing
-                      links often carry no coordinates - if the driver message reports a missing pin,
-                      long-press the spot in Google Maps and paste the "lat, lng" numbers here instead.
-                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

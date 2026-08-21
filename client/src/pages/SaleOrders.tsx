@@ -168,13 +168,16 @@ export default function SaleOrders() {
 
   const watchedProduct = form.watch('product');
   const buyerId = form.watch('buyerId');
+  const watchedBuyerAddressId = form.watch('buyerAddressId');
   const tonnes = Number(form.watch('tonnes')) || 0;
   const weightKg = Math.round(tonnes * 1000);
   const rate = Number(form.watch('ratePerKg')) || 0;
   const base = weightKg * rate;
   const gst = gstExempt ? 0 : Math.round(base * GST_RATE * 100) / 100;
   const value = base + gst;
-  const buyerDestination = parties?.find((p) => p.id === buyerId)?.destination || null;
+  const currentBuyer = parties?.find((p) => p.id === buyerId);
+  const activeSelectedAddr = currentBuyer?.addresses?.find((a) => a.id === watchedBuyerAddressId) || currentBuyer?.addresses?.find((a) => a.isDefault) || currentBuyer?.addresses?.[0];
+  const buyerDestination = activeSelectedAddr?.destination || currentBuyer?.destination || null;
 
   function openCreate() {
     setEditing(null);

@@ -80,8 +80,8 @@ function resolvePriceType(priceType: PriceType | undefined, product: string): Pr
  * takes delivered pappu would silently be charged freight on every ex-works
  * husk lorry, and the pool would be billed for a lorry we never hired.
  */
-async function deriveDestinationFreight(buyer: Party, weightKg: number, priceType: PriceType) {
-  const destination = buyer.destination ?? null;
+async function deriveDestinationFreight(buyer: Party, weightKg: number, priceType: PriceType, overrideDestination?: string | null) {
+  const destination = overrideDestination !== undefined ? overrideDestination : (buyer.destination ?? null);
   if (priceType === 'BASE') return { destination, freightCharge: 0 };
   const rate = await getFreightRateForDestination(destination);
   return { destination, freightCharge: calcSaleFreight(weightKg, rate) };
@@ -373,17 +373,16 @@ export async function createSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-
-
-  const priceType = resolvePriceType(data.priceType, data.product);
-  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
-  const gstFraction = await gstFractionForProduct(data.product);
-  const stamps = await currentCostStamps(destination ?? buyer.destination ?? null, priceType);
-
-  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null } | null = null;
+  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null } | null = null;
   if (data.buyerAddressId) {
     selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
   }
+
+  const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
+  const priceType = resolvePriceType(data.priceType, data.product);
+  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType, effectiveDestination);
+  const gstFraction = await gstFractionForProduct(data.product);
+  const stamps = await currentCostStamps(destination ?? effectiveDestination, priceType);
 
   const buyerAddress = data.buyerAddress || selectedAddr?.address || buyer.address || null;
   const buyerCity = data.buyerCity || selectedAddr?.city || buyer.city || null;
@@ -467,15 +466,16 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
 
       await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-      const priceType = resolvePriceType(data.priceType, data.product);
-      const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
-      const gstFraction = await gstFractionForProduct(data.product);
-      const stamps = await currentCostStamps(destination ?? buyer.destination ?? null, priceType);
-
-      let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null } | null = null;
+      let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null } | null = null;
       if (data.buyerAddressId) {
         selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
       }
+
+      const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
+      const priceType = resolvePriceType(data.priceType, data.product);
+      const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType, effectiveDestination);
+      const gstFraction = await gstFractionForProduct(data.product);
+      const stamps = await currentCostStamps(destination ?? effectiveDestination, priceType);
 
       const order = await prisma.saleOrder.create({
         data: {
@@ -526,28 +526,20 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-  const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
-  // Base/delivery is locked once a lorry has gone out: each dispatch already
-  // posted its own freight (or none) to the ledger, and flipping the basis here
-  // would leave the order disagreeing with postings we can no longer reach.
-  const priceType = dispatchedKg > 0 ? order.priceType : resolvePriceType(data.priceType, data.product);
-  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType);
-  const gstFraction = await gstFractionForProduct(data.product);
-
-  // Re-stamp the freight rate while the order is still unshipped. The stamp
-  // exists so a later Settings edit can't re-cost history, but flipping an
-  // order's basis (or moving it to a different buyer) has to move the stamp
-  // with it - otherwise a BASE order switched to DELIVERY keeps the 0 it was
-  // stamped with and the planner costs its pending tonnage at no freight.
-  // Once a lorry has gone out the stamp is history and is left alone.
-  const stamps = dispatchedKg > 0 ? {} : await currentCostStamps(destination, priceType);
-
-  const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
-
-  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null } | null = null;
+  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null } | null = null;
   if (data.buyerAddressId) {
     selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
   }
+
+  const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
+  const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
+  const priceType = dispatchedKg > 0 ? order.priceType : resolvePriceType(data.priceType, data.product);
+  const { destination, freightCharge } = await deriveDestinationFreight(buyer, data.tonnageKg, priceType, effectiveDestination);
+  const gstFraction = await gstFractionForProduct(data.product);
+
+  const stamps = dispatchedKg > 0 ? {} : await currentCostStamps(destination ?? effectiveDestination, priceType);
+
+  const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
   const buyerAddress = data.buyerAddress !== undefined ? data.buyerAddress : (selectedAddr?.address || buyer.address || null);
   const buyerCity = data.buyerCity !== undefined ? data.buyerCity : (selectedAddr?.city || buyer.city || null);

@@ -24,5 +24,8 @@ export const createPrivateLoanRepaymentSchema = z.object({
   closeLoan: z.boolean().optional(),
 });
 
+export const updatePrivateLoanSchema = createPrivateLoanSchema;
+
 export type CreatePrivateLoanInput = z.infer<typeof createPrivateLoanSchema>;
+export type UpdatePrivateLoanInput = z.infer<typeof updatePrivateLoanSchema>;
 export type CreatePrivateLoanRepaymentInput = z.infer<typeof createPrivateLoanRepaymentSchema>;

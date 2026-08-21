@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, ChevronRight, IndianRupee } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, IndianRupee, Pencil } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PrivateLoansResponse, PrivateLoan, WaLanguage, InterestPeriod } from '@/lib/types';
@@ -69,8 +69,9 @@ export default function PrivateLoansPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
 
-  // --- Add loan ----------------------------------------------------------
+  // --- Add / Edit loan ---------------------------------------------------
   const [loanOpen, setLoanOpen] = useState(false);
+  const [editingLoan, setEditingLoan] = useState<PrivateLoan | null>(null);
   const [borrowerName, setBorrowerName] = useState('');
   const [phone, setPhone] = useState('');
   const [phone2, setPhone2] = useState('');
@@ -82,6 +83,7 @@ export default function PrivateLoansPage() {
   const [waLanguage, setWaLanguage] = useState<WaLanguage>('EN');
 
   function resetLoanForm() {
+    setEditingLoan(null);
     setBorrowerName('');
     setPhone('');
     setPhone2('');
@@ -91,6 +93,24 @@ export default function PrivateLoansPage() {
     setInterestPeriod('ANNUAL');
     setNotes('');
     setWaLanguage('EN');
+  }
+
+  function openEdit(loan: PrivateLoan) {
+    setEditingLoan(loan);
+    setBorrowerName(loan.borrowerName);
+    setPhone(loan.phone ?? '');
+    setPhone2(loan.phone2 ?? '');
+    setPrincipal(String(loan.principal));
+    setStartDate(new Date(loan.startDate).toISOString().slice(0, 10));
+    setInterestRatePct(
+      loan.interestPeriod === 'MONTHLY'
+        ? String(toMonthly(Number(loan.interestRatePct)))
+        : String(loan.interestRatePct)
+    );
+    setInterestPeriod(loan.interestPeriod ?? 'ANNUAL');
+    setNotes(loan.notes ?? '');
+    setWaLanguage(loan.waLanguage ?? 'EN');
+    setLoanOpen(true);
   }
 
   const loanMutation = useMutation({
@@ -119,6 +139,42 @@ export default function PrivateLoansPage() {
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
+
+  const updateLoanMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) =>
+      api<PrivateLoan>(`/private-loans/${id}`, {
+        method: 'PUT',
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['private-loans'] });
+      toast.success('Loan updated');
+      setLoanOpen(false);
+      resetLoanForm();
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  function handleSaveLoan() {
+    const payload = {
+      borrowerName,
+      phone: phone || null,
+      phone2: phone2 || null,
+      principal: Number(principal),
+      startDate,
+      interestRatePct: interestPeriod === 'MONTHLY' ? toAnnual(Number(interestRatePct)) : Number(interestRatePct),
+      interestPeriod,
+      notes: notes || null,
+      waLanguage,
+    };
+    if (editingLoan) {
+      updateLoanMutation.mutate({ id: editingLoan.id, body: payload });
+    } else {
+      loanMutation.mutate();
+    }
+  }
+
+  const isSavingLoan = loanMutation.isPending || updateLoanMutation.isPending;
 
   const deleteLoanMutation = useMutation({
     mutationFn: (id: string) => api(`/private-loans/${id}`, { method: 'DELETE' }),
@@ -310,6 +366,14 @@ export default function PrivateLoansPage() {
                       >
                         <WhatsAppIcon className="h-4 w-4 fill-emerald-600" />
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        title="Edit loan"
+                        onClick={() => openEdit(loan)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       {loan.status === 'OPEN' && (
                         <Button
                           size="sm"
@@ -322,6 +386,7 @@ export default function PrivateLoansPage() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        title="Delete loan"
                         onClick={() => {
                           if (confirm('Delete this loan? Only allowed when it has no repayments.')) {
                             deleteLoanMutation.mutate(loan.id);
@@ -385,10 +450,10 @@ export default function PrivateLoansPage() {
         </Table>
       </div>
 
-      {/* Add loan dialog */}
-      <Dialog open={loanOpen} onOpenChange={setLoanOpen}>
+      {/* Add / Edit loan dialog */}
+      <Dialog open={loanOpen} onOpenChange={(o) => { setLoanOpen(o); if (!o) resetLoanForm(); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Private Loan</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingLoan ? 'Edit Private Loan' : 'Add Private Loan'}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -462,10 +527,10 @@ export default function PrivateLoansPage() {
             </div>
             <DialogFooter>
               <Button
-                onClick={() => loanMutation.mutate()}
-                disabled={!borrowerName || !principal || Number(principal) <= 0 || interestRatePct === '' || loanMutation.isPending}
+                onClick={handleSaveLoan}
+                disabled={!borrowerName || !principal || Number(principal) <= 0 || interestRatePct === '' || isSavingLoan}
               >
-                {loanMutation.isPending ? 'Saving…' : 'Save loan'}
+                {isSavingLoan ? 'Saving…' : editingLoan ? 'Update loan' : 'Save loan'}
               </Button>
             </DialogFooter>
           </div>

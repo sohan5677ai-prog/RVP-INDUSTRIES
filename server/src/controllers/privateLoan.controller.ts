@@ -8,6 +8,7 @@ import { LedgerService } from '../services/ledger.service.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import {
   createPrivateLoanSchema,
+  updatePrivateLoanSchema,
   createPrivateLoanRepaymentSchema,
 } from '../schemas/privateLoan.schema.js';
 
@@ -108,6 +109,55 @@ export async function createPrivateLoan(req: Request, res: Response) {
   });
 
   res.status(201).json(loan);
+}
+
+/** Update an existing private loan and adjust the disbursement GL. */
+export async function updatePrivateLoan(req: Request, res: Response) {
+  const data = updatePrivateLoanSchema.parse(req.body);
+  const loan = await prisma.privateLoan.findUnique({
+    where: { id: req.params.id },
+    include: { repayments: true },
+  });
+  if (!loan) throw new HttpError(404, 'Loan not found');
+
+  const repaidAmount = loan.repayments.reduce((s, r) => s + Number(r.amount), 0);
+  if (data.principal < repaidAmount - 0.01) {
+    throw new HttpError(400, `Principal cannot be less than already repaid amount (₹${repaidAmount.toLocaleString('en-IN')})`);
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const newOutstanding = Math.round((data.principal - repaidAmount) * 100) / 100;
+    const newStatus = newOutstanding <= 0.01 ? 'CLOSED' : 'OPEN';
+
+    const upd = await tx.privateLoan.update({
+      where: { id: loan.id },
+      data: {
+        borrowerName: data.borrowerName,
+        phone: data.phone ?? null,
+        phone2: data.phone2 ?? null,
+        principal: data.principal,
+        startDate: data.startDate,
+        interestRatePct: data.interestRatePct,
+        interestPeriod: data.interestPeriod ?? 'ANNUAL',
+        notes: data.notes ?? null,
+        waLanguage: data.waLanguage ?? 'EN',
+        status: newStatus,
+        closedDate: newStatus === 'CLOSED' ? (loan.closedDate ?? new Date()) : null,
+      },
+    });
+
+    // Re-post disbursement journal entry
+    await tx.journalEntry.deleteMany({ where: { reference: `PRIVATE-LOAN-DRAW-${loan.id}` } });
+    await LedgerService.postPrivateLoanDisbursement(tx, loan.id, {
+      date: data.startDate,
+      amount: data.principal,
+      borrowerName: data.borrowerName,
+    });
+
+    return upd;
+  });
+
+  res.json(updated);
 }
 
 /** Delete a loan (only when it has no repayments). Reverses the disbursement GL. */

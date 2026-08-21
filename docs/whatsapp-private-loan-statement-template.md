@@ -1,29 +1,21 @@
-# Private loan statement — drafted templates (EN / TE / HI)
+# Private loan statement — approved templates (EN / TE / HI)
 
 ## Status
 
-**Not yet submitted to Meta.** `PRIVATE_LOAN_STATEMENT` has no Fast2SMS
-`message_id` configured (see `DEFAULT_TEMPLATE_IDS` / `LANGUAGE_TEMPLATE_IDS`
-in `server/src/services/whatsapp.service.ts`), so every send from the Private
-Loans page's "Send Statement" button logs `SKIPPED` in `WhatsAppLog` until
-one is set. Submit the three bodies below on the Fast2SMS WhatsApp panel
-(same shared KNM number used by every other template), wait for Meta
-approval, then wire the ids:
+**Approved and wired (2026-08-21).** All three languages are approved by Meta on
+the shared KNM number (+917207146094) and wired into `whatsapp.service.ts`:
 
-- English → `DEFAULT_TEMPLATE_IDS.PRIVATE_LOAN_STATEMENT` (or
-  `FAST2SMS_TMPL_PRIVATE_LOAN_STATEMENT` on Render for a no-deploy fix)
-- Telugu → `LANGUAGE_TEMPLATE_IDS.TE.PRIVATE_LOAN_STATEMENT` (or
-  `FAST2SMS_TMPL_PRIVATE_LOAN_STATEMENT_TE`)
-- Hindi → `LANGUAGE_TEMPLATE_IDS.HI.PRIVATE_LOAN_STATEMENT` (or
-  `FAST2SMS_TMPL_PRIVATE_LOAN_STATEMENT_HI`)
+- English (`rvp_private_loan_statement`): Fast2SMS message_id **28933** (Meta template ID `1061557026326427`) → `DEFAULT_TEMPLATE_IDS.PRIVATE_LOAN_STATEMENT`
+- Telugu (`rvp_private_loan_statement_telugu`): Fast2SMS message_id **28935** (Meta template ID `1537970847529214`) → `LANGUAGE_TEMPLATE_IDS.TE.PRIVATE_LOAN_STATEMENT`
+- Hindi (`rvp_private_loan_statement_hindi`): Fast2SMS message_id **28936** (Meta template ID `1450108000273720`) → `LANGUAGE_TEMPLATE_IDS.HI.PRIVATE_LOAN_STATEMENT`
 
 Which language a given loan sends in is set per-loan on the Add Loan dialog
 (`PrivateLoan.waLanguage`) — English until changed, same UX as
-`Party.waLanguage`. If a language's copy isn't approved yet, the send falls
-back to the English copy automatically (the standard ERP-wide rule — see
-`docs/whatsapp-multilingual-templates.md`).
+`Party.waLanguage`. If a language's copy isn't approved yet (e.g. Tamil/Kannada),
+the send falls back to the English copy automatically (the standard ERP-wide rule —
+see `docs/whatsapp-multilingual-templates.md`).
 
-## Proposed name
+## Template name
 
 `rvp_private_loan_statement` (no header, category Utility — same shape as
 `payment_reminder` and `rvp_reminder`)

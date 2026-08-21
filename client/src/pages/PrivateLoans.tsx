@@ -1,7 +1,8 @@
 import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, ChevronRight, IndianRupee, MessageCircle } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, IndianRupee } from 'lucide-react';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { PrivateLoansResponse, PrivateLoan, WaLanguage, InterestPeriod } from '@/lib/types';
 import { loanInterest, daysBetween } from '@/lib/calc';
@@ -305,8 +306,9 @@ export default function PrivateLoansPage() {
                         disabled={(!loan.phone && !loan.phone2) || sendStatementMutation.isPending}
                         title={!loan.phone && !loan.phone2 ? 'No phone number on file for this loan' : 'Send outstanding-loan statement on WhatsApp'}
                         onClick={() => sendStatementMutation.mutate(loan.id)}
+                        className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
                       >
-                        <MessageCircle className="h-4 w-4" />
+                        <WhatsAppIcon className="h-4 w-4 fill-emerald-600" />
                       </Button>
                       {loan.status === 'OPEN' && (
                         <Button

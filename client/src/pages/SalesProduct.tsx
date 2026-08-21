@@ -957,16 +957,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // ── Full workflow view ────────────────────────────────────────────────
   const filtersActive = statusFilter !== 'ALL' || partyFilter !== 'ALL' || brokerFilter !== 'ALL' || !!fromDate || !!toDate;
 
-  // ── Metrics (for Husk) ──────────────────────────────────────────────────
-  // Revenue figures are shown GST-inclusive - the amount the buyer actually
-  // pays. GST-exempt orders carry no GST. Weighted-avg price stays the ex-GST
-  // ₹/kg rate.
-  const gstFactor = (o: SaleOrder) => (o.gstExempt ? 1 : 1 + GST_RATE);
+  // ── Metrics ─────────────────────────────────────────────────────────────
+  // Revenue figures are shown GST-exclusive (base sales value).
+  // Weighted-avg price is the ex-GST ₹/kg rate.
   const totalSoldKg = visible.reduce((sum, o) => sum + o.tonnageKg, 0);
   const totalDispatchedKg = visible.reduce((sum, o) => sum + dispatchedKgOf(o), 0);
-  const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg) * gstFactor(o)), 0);
-  const baseRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
-  const wacPrice = totalSoldKg > 0 ? baseRevenue / totalSoldKg : 0;
+  const totalRevenue = visible.reduce((sum, o) => sum + (o.tonnageKg * Number(o.ratePerKg)), 0);
+  const wacPrice = totalSoldKg > 0 ? totalRevenue / totalSoldKg : 0;
   const dispatchedPct = totalSoldKg > 0 ? (totalDispatchedKg / totalSoldKg) * 100 : 0;
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(visible, 50);
 
@@ -996,7 +993,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     { header: 'Dispatched (t)', value: (o) => toTonnes(dispatchedKgOf(o)).toFixed(2), excel: (o) => toTonnes(dispatchedKgOf(o)), numFmt: '#,##0.00', align: 'right' },
     { header: 'Remaining (t)', value: (o) => toTonnes(remainingKgOf(o)).toFixed(2), excel: (o) => toTonnes(remainingKgOf(o)), numFmt: '#,##0.00', align: 'right' },
     { header: 'Price/kg', value: (o) => rupees(o.ratePerKg), excel: (o) => Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
-    { header: 'Revenue (incl. GST)', value: (o) => rupees(o.tonnageKg * Number(o.ratePerKg) * gstFactor(o)), excel: (o) => o.tonnageKg * Number(o.ratePerKg) * gstFactor(o), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Revenue (excl. GST)', value: (o) => rupees(o.tonnageKg * Number(o.ratePerKg)), excel: (o) => o.tonnageKg * Number(o.ratePerKg), numFmt: '#,##0.00', align: 'right' },
   ];
 
   return (
@@ -1048,7 +1045,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-sky-600">{rupees(totalRevenue)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Total revenue · incl. GST</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Total revenue · excl. GST</p>
           </CardContent>
         </Card>
         <Card>

@@ -70,11 +70,10 @@ export type WaTemplateKey =
   // Meta to approve. relatedType still records 'BROKER_LEDGER' on those log rows
   // so WhatsAppLog can tell the two sends apart even though they share a template.
   | 'PARTY_LEDGER'
-  // rvp_private_loan_statement (drafted in EN/TE/HI, not yet submitted to Meta
-  // - see docs/whatsapp-private-loan-statement-template.md): borrower,
+  // rvp_private_loan_statement (approved in EN/TE/HI, 2026-08-21 — see
+  // docs/whatsapp-private-loan-statement-template.md): borrower,
   // outstanding principal, rate %, as-on date, accrued interest, total
-  // payable. Until an id is configured below, every send logs SKIPPED rather
-  // than failing.
+  // payable.
   | 'PRIVATE_LOAN_STATEMENT'
   | 'OWNER_DISPATCH_REMINDER' // rvp_owner_dispatch: buyer, order, dispatch-by date, order ref
   | 'OWNER_WEEKLY_SUMMARY' // rvp_owner_weekly: date range + 3 black-seed lorry counts + 4 figures each for pappu and husk
@@ -132,12 +131,11 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // never collapse to the same id.
   SUPPORT_TICKET: '28539',
   SUPPORT_TICKET_TEXT: '28541',
-  // PRIVATE_LOAN_STATEMENT (and its TE/HI copies in LANGUAGE_TEMPLATE_IDS
-  // below) are absent on purpose, same as DISPATCH_DRIVER above:
-  // rvp_private_loan_statement has not been submitted to Meta yet. Once the
-  // English copy is approved, set its id here (or via
-  // FAST2SMS_TMPL_PRIVATE_LOAN_STATEMENT); once TE/HI are approved, add them
-  // to LANGUAGE_TEMPLATE_IDS.te / .hi below.
+  // rvp_private_loan_statement (6 vars), approved 2026-08-21 on the shared
+  // KNM number (+917207146094). Fast2SMS message_id 28933 (Meta template ID
+  // 1061557026326427). Telugu (28935) and Hindi (28936) wired in
+  // LANGUAGE_TEMPLATE_IDS below.
+  PRIVATE_LOAN_STATEMENT: '28933',
   //
   // WISHES (rvp_wishes) is likewise absent on purpose - not yet submitted to
   // Meta. Every Settings -> Wishes send logs SKIPPED until an id is set here
@@ -169,13 +167,13 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
  * ids, and nothing errors. `whatsappLanguage.test.ts` pins each one.
  */
 const LANGUAGE_TEMPLATE_IDS: Partial<Record<Exclude<WaLanguage, 'EN'>, Partial<Record<WaTemplateKey, string>>>> = {
-  // po_* approved 2026-08-11; stockin_* approved 2026-08-12. Both blocks run
-  // downwards TE → TA → KN → HI, which is exactly the transposition risk the
+  // po_* approved 2026-08-11; stockin_* approved 2026-08-12; private loan statements approved 2026-08-21.
+  // Both blocks run downwards TE → TA → KN → HI, which is exactly the transposition risk the
   // pinned tests exist for.
-  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595' },
+  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595', PRIVATE_LOAN_STATEMENT: '28935' },
   TA: { PO_CREATED: '28598', STOCKIN_CONFIRMED: '28594' },
   KN: { PO_CREATED: '28597', STOCKIN_CONFIRMED: '28593' },
-  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592' },
+  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592', PRIVATE_LOAN_STATEMENT: '28936' },
 };
 
 /**

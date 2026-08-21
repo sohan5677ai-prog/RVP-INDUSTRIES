@@ -29,7 +29,7 @@ const ENV_KEYS = [
   'FAST2SMS_TMPL_PO_CREATED',
   'FAST2SMS_TMPL_PO_CREATED_TA',
   // Cleared so the "no id anywhere" case below reads the source, not a local .env.
-  'FAST2SMS_TMPL_PARTY_LEDGER',
+  'FAST2SMS_TMPL_WISHES',
 ];
 const saved: Record<string, string | undefined> = {};
 
@@ -75,8 +75,8 @@ describe('templateId language resolution', () => {
   });
 
   it('stays undefined when neither copy exists - a clean SKIPPED, not a bad send', () => {
-    // PARTY_LEDGER has no checked-in id in any language: it lives on Render only.
-    expect(templateId('PARTY_LEDGER', 'KN')).toBeUndefined();
+    // WISHES has no checked-in id in any language: it lives on Render or is not yet approved.
+    expect(templateId('WISHES', 'KN')).toBeUndefined();
   });
 
   it('never reports a language for an EN recipient', () => {
@@ -123,6 +123,23 @@ describe('approved language ids', () => {
       expect(resolvedLanguage('PO_CREATED', lang)).toBe(lang);
       expect(resolvedLanguage('STOCKIN_CONFIRMED', lang)).toBe(lang);
     }
+  });
+
+  it('maps each private loan statement language to its own approved message_id', () => {
+    expect(templateId('PRIVATE_LOAN_STATEMENT', 'EN')).toBe('28933');
+    expect(templateId('PRIVATE_LOAN_STATEMENT', 'TE')).toBe('28935');
+    expect(templateId('PRIVATE_LOAN_STATEMENT', 'HI')).toBe('28936');
+    // TA and KN not drafted / approved yet, fall back to English
+    expect(templateId('PRIVATE_LOAN_STATEMENT', 'TA')).toBe('28933');
+    expect(templateId('PRIVATE_LOAN_STATEMENT', 'KN')).toBe('28933');
+  });
+
+  it('reports translated private loan statement languages as themselves, and unapproved as English fallback', () => {
+    expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'EN')).toBe('EN');
+    expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'TE')).toBe('TE');
+    expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'HI')).toBe('HI');
+    expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'TA')).toBe('EN');
+    expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'KN')).toBe('EN');
   });
 
   it('leaves a template with no translations falling back to English', () => {

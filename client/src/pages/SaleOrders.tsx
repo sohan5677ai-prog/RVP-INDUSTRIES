@@ -553,6 +553,7 @@ export default function SaleOrders() {
                               <SelectItem key={a.id} value={a.id!}>
                                 <span className="font-medium">{a.label}</span>
                                 {a.isDefault && <span className="text-muted-foreground ml-1">(Default)</span>}
+                                {a.destination && <span className="text-primary font-medium text-xs ml-1.5">[{a.destination}]</span>}
                                 <span className="text-muted-foreground text-xs ml-2">
                                   - {[a.city, a.state, a.pincode].filter(Boolean).join(', ')}
                                 </span>
@@ -566,7 +567,11 @@ export default function SaleOrders() {
                           return (
                             <div className="text-xs text-muted-foreground bg-muted/40 p-2.5 rounded border mt-1 leading-relaxed">
                               <div className="font-medium text-foreground">{a.label}: {a.address}</div>
-                              <div>{[a.city, a.state, a.pincode].filter(Boolean).join(', ')}{a.gstin ? ` · GSTIN: ${a.gstin}` : ''}</div>
+                              <div>
+                                {[a.city, a.state, a.pincode].filter(Boolean).join(', ')}
+                                {a.gstin ? ` · GSTIN: ${a.gstin}` : ''}
+                                {a.destination ? ` · Freight Destination: ${a.destination}` : ''}
+                              </div>
                             </div>
                           );
                         })()}

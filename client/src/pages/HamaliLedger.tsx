@@ -216,7 +216,8 @@ export default function HamaliLedger() {
   });
 
   // Square-off (reconciliation checkpoint) state
-  const [squareDate, setSquareDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [squareStartDate, setSquareStartDate] = useState('');
+  const [squareDate, setSquareDate] = useState('');
   const [squareNote, setSquareNote] = useState('');
 
   // Payables tab: pay-out dialog + crew-ledger dialog state
@@ -293,6 +294,8 @@ export default function HamaliLedger() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hamali-verifications'] });
       toast.success('Squared off - data cross-verified with crew');
+      setSquareStartDate('');
+      setSquareDate('');
       setSquareNote('');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -609,13 +612,34 @@ export default function HamaliLedger() {
   const verifiedThroughDay = verifSorted[0] ? dayOf(verifSorted[0].asOfDate) : null;
   const isVerified = (dateIso: string) => verifiedThroughDay != null && dayOf(dateIso) <= verifiedThroughDay;
 
-  const allHamaliEntries = [...purchaseEntries, ...saleEntries, ...transferEntries];
-  // Amount pending verification for the picked square-off date: crew dues in the
-  // window (after the last checkpoint, on/before the square-off date).
+  const addDay = (day: string) => {
+    const d = new Date(day + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    return toYMD(d.toISOString());
+  };
+  const daysInclusive = (from: string, to: string) =>
+    Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1);
+
+  const allHamaliEntries = useMemo(() => [...purchaseEntries, ...saleEntries, ...transferEntries], [purchaseEntries, saleEntries, transferEntries]);
+
+  // Earliest dated crew due (for the first period's "from", when nothing precedes it).
+  const allDatedCrew = [...allHamaliEntries.map((e) => dayOf(e.date)), ...manualSorted.map((c) => dayOf(c.date))];
+  const earliestCrewDay = allDatedCrew.length ? allDatedCrew.reduce((m, d) => (d < m ? d : m)) : null;
+
+  // The period start for a NEW square-off = day after the last checkpoint, else
+  // the earliest crew due (so the first period spans from the very beginning).
+  const nextPeriodStart = verifiedThroughDay ? addDay(verifiedThroughDay) : earliestCrewDay;
+
+  const currentSquareStart = squareStartDate || startDate || nextPeriodStart || '';
+  const currentSquareEnd = squareDate || endDate || dayOf(new Date().toISOString());
+
+  // Amount pending verification for the picked square-off date window: crew dues in the
+  // window (after the last checkpoint, on/after currentSquareStart, on/before currentSquareEnd).
   const inSquareWindow = (dateIso: string) => {
     const d = dayOf(dateIso);
     if (verifiedThroughDay != null && d <= verifiedThroughDay) return false;
-    return d <= squareDate;
+    if (currentSquareStart && d < currentSquareStart) return false;
+    return d <= currentSquareEnd;
   };
   const pendingCrewFromEntries = allHamaliEntries
     .filter((e) => inSquareWindow(e.date))
@@ -624,7 +648,10 @@ export default function HamaliLedger() {
     .filter((c) => inSquareWindow(c.date))
     .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0);
   const pendingCrewTotal = Math.round((pendingCrewFromEntries + pendingCrewFromManual) * 100) / 100;
-  const squareValid = (verifiedThroughDay == null || squareDate > verifiedThroughDay) && pendingCrewTotal > 0;
+  const squareValid =
+    (verifiedThroughDay == null || currentSquareEnd > verifiedThroughDay) &&
+    (!currentSquareStart || currentSquareEnd >= currentSquareStart) &&
+    pendingCrewTotal > 0;
 
   // Crew payable across the currently filtered rows (Hamali view metric).
   const includeManualInTile = partyType === 'ALL' && q === '';
@@ -649,16 +676,6 @@ export default function HamaliLedger() {
     if (!p.hamaliVerificationId) continue;
     paidByVerification.set(p.hamaliVerificationId, (paidByVerification.get(p.hamaliVerificationId) ?? 0) + Number(p.amount));
   }
-  const addDay = (day: string) => {
-    const d = new Date(day + 'T00:00:00');
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  };
-  const daysInclusive = (from: string, to: string) =>
-    Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1);
-  // Earliest dated crew due (for the first period's "from", when nothing precedes it).
-  const allDatedCrew = [...allHamaliEntries.map((e) => dayOf(e.date)), ...manualSorted.map((c) => dayOf(c.date))];
-  const earliestCrewDay = allDatedCrew.length ? allDatedCrew.reduce((m, d) => (d < m ? d : m)) : null;
   const verifAsc = [...(verifications ?? [])].sort((a, b) => new Date(a.asOfDate).getTime() - new Date(b.asOfDate).getTime());
   const payableRows: PayableRow[] = verifAsc
     .map((v, i) => {
@@ -677,10 +694,6 @@ export default function HamaliLedger() {
   const payablesTotal = payableRows.reduce((s, r) => s + r.payable, 0);
   const payablesPaid = payableRows.reduce((s, r) => s + r.paid, 0);
   const payablesOutstanding = payableRows.reduce((s, r) => s + r.outstanding, 0);
-
-  // The period start for a NEW square-off = day after the last checkpoint, else
-  // the earliest crew due (so the first period spans from the very beginning).
-  const nextPeriodStart = verifiedThroughDay ? addDay(verifiedThroughDay) : earliestCrewDay;
 
   // ── Crew ledger (Ledger tab) - a party-ledger-style account statement for the
   // hamali crew. Credits are the SQUARED-OFF periods (one line per checkpoint, with
@@ -957,8 +970,26 @@ export default function HamaliLedger() {
               </div>
               <div className="p-5 flex flex-wrap items-end gap-4">
                 <div className="space-y-1.5">
+                  <Label htmlFor="square-start-date" className="text-xs font-semibold">Period from</Label>
+                  <Input
+                    id="square-start-date"
+                    type="date"
+                    value={currentSquareStart}
+                    min={verifiedThroughDay ? addDay(verifiedThroughDay) : undefined}
+                    onChange={(e) => setSquareStartDate(e.target.value)}
+                    className="bg-card"
+                  />
+                </div>
+                <div className="space-y-1.5">
                   <Label htmlFor="square-date" className="text-xs font-semibold">Checked &amp; verified through</Label>
-                  <Input id="square-date" type="date" value={squareDate} min={verifiedThroughDay ?? undefined} onChange={(e) => setSquareDate(e.target.value)} className="bg-card" />
+                  <Input
+                    id="square-date"
+                    type="date"
+                    value={currentSquareEnd}
+                    min={currentSquareStart || (verifiedThroughDay ? addDay(verifiedThroughDay) : undefined)}
+                    onChange={(e) => setSquareDate(e.target.value)}
+                    className="bg-card"
+                  />
                 </div>
                 <div className="space-y-1.5 flex-1 min-w-[180px]">
                   <Label htmlFor="square-note" className="text-xs font-semibold">Note (optional)</Label>
@@ -969,7 +1000,7 @@ export default function HamaliLedger() {
                   <div className="h-9 flex items-center font-bold text-primary">{rupees(pendingCrewTotal)}</div>
                 </div>
                 <Button
-                  onClick={() => createVerification.mutate({ asOfDate: squareDate, periodStart: nextPeriodStart, crewTotal: pendingCrewTotal, note: squareNote || null })}
+                  onClick={() => createVerification.mutate({ asOfDate: currentSquareEnd, periodStart: currentSquareStart || null, crewTotal: pendingCrewTotal, note: squareNote || null })}
                   disabled={!squareValid || createVerification.isPending}
                 >
                   <CheckCircle2 className="h-4 w-4" /> {createVerification.isPending ? 'Squaring off…' : 'Square off'}

@@ -880,6 +880,10 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // only when a driver phone was captured on this dispatch. The broker/buyer
   // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
   // (the invoice/EWB don't exist yet at dispatch time).
+  const selectedAddress = order.buyerAddressId
+    ? await prisma.partyAddress.findUnique({ where: { id: order.buyerAddressId } })
+    : null;
+
   void whatsappService.notifyDispatchDriver(
     {
       id: dispatch.id,
@@ -890,12 +894,12 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     },
     {
       name: order.buyer.name,
-      phone: order.buyer.phone,
-      locationLink: order.buyer.locationLink,
-      address: order.buyer.address,
-      city: order.buyer.city,
+      phone: selectedAddress?.phone || order.buyer.phone,
+      locationLink: selectedAddress?.locationLink || order.buyer.locationLink,
+      address: order.buyerAddress || selectedAddress?.address || order.buyer.address,
+      city: order.buyerCity || selectedAddress?.city || order.buyer.city,
     },
-    { destination: order.destination, product: order.product }
+    { destination: order.destination || selectedAddress?.destination || order.buyer.destination, product: order.product }
   );
 
   res.status(201).json(dispatch);

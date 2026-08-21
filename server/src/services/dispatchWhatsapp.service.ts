@@ -47,6 +47,7 @@ async function renderBundleEwbPdf(
   order: Awaited<ReturnType<typeof buildInvoicePdfData>>['order'],
   company: Awaited<ReturnType<typeof buildInvoicePdfData>>['company'],
   pdfData: Awaited<ReturnType<typeof buildInvoicePdfData>>['pdfData'],
+  selectedAddress?: { pincode?: string | null; city?: string | null } | null,
 ): Promise<Buffer> {
   try {
     return await TaxproService.printEWayBillDetailPdf(dispatch.id);
@@ -57,14 +58,14 @@ async function renderBundleEwbPdf(
     );
     return renderEwbPdf({
       company: { ...pdfData.company, pincode: company.pincode },
-      buyer: { ...pdfData.buyer, pincode: order.buyer.pincode },
+      buyer: { ...pdfData.buyer, pincode: order.buyerPincode || selectedAddress?.pincode || order.buyer.pincode },
       dispatchFrom: {
         place: company.dispatchFromPlace,
         address1: company.dispatchFromAddress1,
         address2: company.dispatchFromAddress2,
         pincode: company.dispatchFromPincode,
       },
-      shipToPlace: order.buyer.city,
+      shipToPlace: order.buyerCity || selectedAddress?.city || order.buyer.city,
       transport: {
         transMode: dispatch.ewbTransMode,
         transDocNo: dispatch.ewbTransDocNo,
@@ -102,6 +103,10 @@ async function renderBundleEwbPdf(
 export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<DispatchWhatsAppResult> {
   const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
 
+  const selectedAddress = order.buyerAddressId
+    ? await prisma.partyAddress.findUnique({ where: { id: order.buyerAddressId } })
+    : null;
+
   // A broker named "RVP" (or no broker) means it's our own order - the buyer is
   // messaged directly with no broker reference; otherwise the buyer's copy names
   // the broker and the broker gets their own greeting copy.
@@ -128,7 +133,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   const pages = [invoiceBuffer];
   const parts = ['Invoice'];
   if (hasEwb) {
-    const ewbBuffer = await renderBundleEwbPdf(dispatch, order, company, pdfData);
+    const ewbBuffer = await renderBundleEwbPdf(dispatch, order, company, pdfData, selectedAddress);
     pages.push(ewbBuffer);
     parts.push('EWB');
   }
@@ -149,12 +154,12 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
         },
         buyer: {
           name: order.buyer.name,
-          address: order.buyer.address,
-          city: order.buyer.city,
-          state: order.buyer.state,
-          pincode: order.buyer.pincode,
+          address: order.buyerAddress || selectedAddress?.address || order.buyer.address,
+          city: order.buyerCity || selectedAddress?.city || order.buyer.city,
+          state: order.buyerState || selectedAddress?.state || order.buyer.state,
+          pincode: order.buyerPincode || selectedAddress?.pincode || order.buyer.pincode,
         },
-        destination: order.destination,
+        destination: order.destination || selectedAddress?.destination || order.buyer.destination,
         product: order.product,
         invoiceNumber: dispatch.invoiceNumber,
         vehicleNumber: dispatch.vehicleNumber,
@@ -188,8 +193,19 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     error: r.ok ? null : r.error ?? null,
   });
 
-  // Party (buyer) - always. Includes the broker reference when there's a real broker.
-  const buyerPhones = [order.buyer.phone, order.buyer.phone2].filter(Boolean) as string[];
+  // Party (buyer) - always. Includes branch-specific phone numbers when present, alongside root buyer numbers.
+  const buyerPhones = Array.from(
+    new Set(
+      [
+        selectedAddress?.phone,
+        selectedAddress?.phone2,
+        order.buyer.phone,
+        order.buyer.phone2,
+      ]
+        .filter(Boolean)
+        .map((p) => p!.trim())
+    )
+  );
   const partyResult = buyerPhones.length > 0
     ? await whatsappService.sendDispatchToParty({
         dispatchId: dispatch.id,

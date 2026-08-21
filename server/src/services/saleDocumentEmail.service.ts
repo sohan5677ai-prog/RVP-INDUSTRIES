@@ -5,6 +5,7 @@ import { renderEwbPdf } from '../lib/ewbPdf.js';
 import { qrPngBuffer } from '../lib/qrcode.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { emailService } from './email.service.js';
+import { resolveProductHsn } from '../lib/calc.js';
 
 /**
  * Loads everything needed to render the tax-invoice PDF for a dispatch
@@ -32,9 +33,9 @@ export async function buildInvoicePdfData(dispatchId: string) {
   // A GST-exempt order (and every dispatch under it) is billed WITHOUT GST - the
   // invoice/EWB must show a 0% rate regardless of the product's default tax row.
   const gstFraction = order.gstExempt ? 0 : (taxRow?.gstRate != null ? Number(taxRow.gstRate) : 5) / 100;
-  // Same exemption also swaps in the alternate no-GST HSN (e.g. husk), falling
-  // back to the taxable code if no exempt-specific one is configured.
-  const hsn = (order.gstExempt ? taxRow?.hsnExempt || taxRow?.hsn : taxRow?.hsn) || '';
+  // Krishi Nutrition Company Pvt Ltd uses constant HSN 11063010; other buyers use
+  // the product's configured HSN (or exempt variant if gstExempt).
+  const hsn = resolveProductHsn(order.buyer, taxRow, order.gstExempt);
 
   const irn = dispatch.irn
     ? {
@@ -60,14 +61,16 @@ export async function buildInvoicePdfData(dispatchId: string) {
     },
     buyer: {
       name: order.buyer.name,
-      address: order.buyer.address,
-      gstin: buyerGstin,
-      stateName: order.buyer.state,
-      stateCode: buyerStateCode,
-      placeOfSupply: order.buyer.state,
+      address: order.buyerAddress || order.buyer.address,
+      gstin: order.buyerGstin || buyerGstin,
+      stateName: order.buyerState || order.buyer.state,
+      stateCode: order.buyerGstin && /^\d{2}/.test(order.buyerGstin) ? order.buyerGstin.slice(0, 2) : buyerStateCode,
+      placeOfSupply: order.buyerState || order.buyer.state,
     },
     invoiceNumber: dispatch.invoiceNumber,
     invoiceDate: dispatch.invoiceDate,
+    poNumber: order.poNumber,
+    poDate: order.poDate,
     destination: order.destination,
     vehicleNumber: dispatch.vehicleNumber,
     line: {

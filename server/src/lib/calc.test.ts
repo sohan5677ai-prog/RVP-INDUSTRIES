@@ -24,6 +24,9 @@ import {
   saleCloseToleranceKg,
   isLooseLoadedProduct,
   purchaseGst,
+  KRISHI_HSN,
+  isKrishiNutritionBuyer,
+  resolveProductHsn,
 } from './calc';
 
 describe('crossVerify', () => {
@@ -441,5 +444,37 @@ describe('sale order close tolerance', () => {
     expect(isLooseLoadedProduct('HUSK')).toBe(true);
     expect(isLooseLoadedProduct('SHELL')).toBe(true);
     expect(isLooseLoadedProduct('PAPPU')).toBe(false);
+  });
+});
+
+describe('Krishi Nutrition HSN code pinning', () => {
+  it('identifies Krishi Nutrition Company Pvt Ltd by name or GSTIN', () => {
+    expect(isKrishiNutritionBuyer('Krishi Nutrition Company Pvt Ltd')).toBe(true);
+    expect(isKrishiNutritionBuyer('Krishi Nutrition Company Private Limited')).toBe(true);
+    expect(isKrishiNutritionBuyer('Krishi')).toBe(true);
+    expect(isKrishiNutritionBuyer({ name: 'Krishi Nutrition Company Pvt Ltd', gstin: '33AAFCK3415K1ZO' })).toBe(true);
+    expect(isKrishiNutritionBuyer({ name: 'Some Name', gstin: '33AAFCK3415K1ZO' })).toBe(true);
+    expect(isKrishiNutritionBuyer({ name: 'DCS Enterprises', gstin: '37AAACD1234E1Z1' })).toBe(false);
+    expect(isKrishiNutritionBuyer(null)).toBe(false);
+    expect(isKrishiNutritionBuyer(undefined)).toBe(false);
+  });
+
+  it('pins HSN to 11063010 only for Krishi Nutrition Company Pvt Ltd', () => {
+    const krishiBuyer = { name: 'Krishi Nutrition Company Pvt Ltd', gstin: '33AAFCK3415K1ZO' };
+    const defaultHuskTax = { hsn: '140490', hsnExempt: '2302' };
+    const defaultPappuTax = { hsn: '120799', hsnExempt: null };
+
+    // Krishi always gets 11063010 regardless of product or tax row or exemption
+    expect(resolveProductHsn(krishiBuyer, defaultHuskTax, false)).toBe(KRISHI_HSN);
+    expect(resolveProductHsn(krishiBuyer, defaultHuskTax, true)).toBe(KRISHI_HSN);
+    expect(resolveProductHsn(krishiBuyer, defaultPappuTax, false)).toBe(KRISHI_HSN);
+    expect(resolveProductHsn('Krishi Nutrition', defaultHuskTax, false)).toBe('11063010');
+
+    // Other buyers use the configured product tax row
+    const otherBuyer = { name: 'SBT Enterprises', gstin: '37ABCFG1234H1Z1' };
+    expect(resolveProductHsn(otherBuyer, defaultHuskTax, false)).toBe('140490');
+    expect(resolveProductHsn(otherBuyer, defaultHuskTax, true)).toBe('2302');
+    expect(resolveProductHsn(otherBuyer, defaultPappuTax, false)).toBe('120799');
+    expect(resolveProductHsn(null, defaultPappuTax, false)).toBe('120799');
   });
 });

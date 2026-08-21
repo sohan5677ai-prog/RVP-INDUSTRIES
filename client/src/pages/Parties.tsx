@@ -4,10 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Users } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, MapPin, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { api } from '@/lib/api';
-import type { Party } from '@/lib/types';
+import type { Party, PartyAddress } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -209,9 +209,47 @@ export default function Parties() {
     defaultValues: emptyParty,
   });
 
+  const [addresses, setAddresses] = useState<PartyAddress[]>([]);
+
+  function addAddress() {
+    setAddresses((prev) => [
+      ...prev,
+      {
+        label: prev.length === 0 ? 'Registered Office' : `Branch / Plant ${prev.length + 1}`,
+        address: '',
+        city: '',
+        state: '',
+        pincode: '',
+        gstin: '',
+        isDefault: prev.length === 0,
+      },
+    ]);
+  }
+
+  function updateAddress(index: number, patch: Partial<PartyAddress>) {
+    setAddresses((prev) => prev.map((a, i) => (i === index ? { ...a, ...patch } : a)));
+  }
+
+  function removeAddress(index: number) {
+    setAddresses((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length > 0 && !next.some((a) => a.isDefault)) {
+        next[0].isDefault = true;
+      }
+      return next;
+    });
+  }
+
+  function setDefaultAddress(index: number) {
+    setAddresses((prev) => prev.map((a, i) => ({ ...a, isDefault: i === index })));
+  }
+
   function openCreate() {
     setEditing(null);
     form.reset(emptyParty);
+    setAddresses([
+      { label: 'Registered Office', address: '', city: '', state: '', pincode: '', gstin: '', isDefault: true },
+    ]);
     setOpen(true);
   }
 
@@ -241,6 +279,21 @@ export default function Parties() {
       bankName: p.bankName ?? '',
       commodities: p.commodities ?? [],
     });
+    if (p.addresses && p.addresses.length > 0) {
+      setAddresses(p.addresses.map((a) => ({ ...a })));
+    } else {
+      setAddresses([
+        {
+          label: 'Registered Office',
+          address: p.address ?? '',
+          city: p.city ?? '',
+          state: p.state ?? '',
+          pincode: p.pincode ?? '',
+          gstin: p.gstin ?? '',
+          isDefault: true,
+        },
+      ]);
+    }
     setOpen(true);
   }
 
@@ -248,8 +301,27 @@ export default function Parties() {
     mutationFn: (values: PartyForm) => {
       // 'NONE' is a Select-only sentinel (Radix Select can't hold an empty-string
       // item value) standing in for "not tagged" - the API wants null.
+      const validAddresses = addresses
+        .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim())
+        .map((a) => ({
+          ...a,
+          label: a.label.trim() || 'Address',
+          address: a.address.trim(),
+          city: a.city?.trim() || null,
+          state: a.state?.trim() || null,
+          pincode: a.pincode?.trim() || null,
+          gstin: a.gstin?.trim() || null,
+        }));
+      const defaultAddr = validAddresses.find((a) => a.isDefault) || validAddresses[0];
+
       const body = {
         ...values,
+        address: defaultAddr?.address || values.address || '',
+        city: defaultAddr?.city || values.city || '',
+        state: defaultAddr?.state || values.state || '',
+        pincode: defaultAddr?.pincode || values.pincode || '',
+        gstin: defaultAddr?.gstin || values.gstin || '',
+        addresses: validAddresses,
         religion: values.religion === 'NONE' ? null : values.religion,
         openingBalance: values.openingBalance ?? 0,
         openingBalanceType: values.openingBalanceType ?? (values.type === 'BUYER' ? 'DR' : 'CR'),
@@ -411,7 +483,18 @@ export default function Parties() {
                   <div>{p.phone ?? '-'}</div>
                   {p.phone2 && <div className="text-muted-foreground">{p.phone2}</div>}
                 </TableCell>
-                <TableCell>{p.address ?? '-'}</TableCell>
+                <TableCell className="max-w-[200px]">
+                  <div className="text-xs truncate" title={p.address ?? ''}>
+                    {p.address ?? '-'}
+                  </div>
+                  {p.addresses && p.addresses.length > 1 && (
+                    <div className="mt-0.5">
+                      <Badge variant="outline" className="text-[10px] py-0 px-1 font-normal text-muted-foreground">
+                        {p.addresses.length} addresses
+                      </Badge>
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell>{p.state ?? '-'}</TableCell>
                 <TableCell className="font-sans text-xs font-medium tracking-wide">{p.gstin ?? '-'}</TableCell>
                 <TableCell className="text-xs">
@@ -667,109 +750,165 @@ export default function Parties() {
                 </div>
               )}
               {!isHamaliTeam && (
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="address"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Address</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="state"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-col justify-end">
-                      <FormLabel className="mb-1">State</FormLabel>
-                      <Combobox
-                        options={INDIAN_STATES}
-                        value={field.value ?? ''}
-                        onChange={field.onChange}
-                        placeholder="Select state..."
-                        searchPlaceholder="Search states..."
-                      />
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+                <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-medium text-sm">
+                        <MapPin className="h-4 w-4 text-primary" />
+                        <span>Addresses &amp; Delivery Locations</span>
+                        <Badge variant="secondary" className="text-xs font-normal">
+                          {addresses.length} {addresses.length === 1 ? 'address' : 'addresses'}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Add multiple branch offices, factories, or delivery godowns for this party.
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={addAddress}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Add Address
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                    {addresses.map((addr, idx) => (
+                      <div
+                        key={idx}
+                        className={`relative rounded-md border p-3.5 transition-all ${
+                          addr.isDefault
+                            ? 'border-primary/50 bg-primary/5 shadow-xs'
+                            : 'border-border bg-card'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-2.5">
+                          <div className="flex items-center gap-2 flex-1">
+                            <Input
+                              value={addr.label}
+                              onChange={(e) => updateAddress(idx, { label: e.target.value })}
+                              placeholder="e.g. Registered Office, Plant 2, Surat Godown"
+                              className="h-8 font-medium text-xs max-w-[260px] bg-background"
+                            />
+                            {addr.isDefault ? (
+                              <Badge variant="default" className="text-[10px] py-0 px-2 flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3" /> Default Address
+                              </Badge>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setDefaultAddress(idx)}
+                                className="h-6 text-[11px] text-muted-foreground hover:text-foreground px-2"
+                              >
+                                Set as Default
+                              </Button>
+                            )}
+                          </div>
+                          {addresses.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeAddress(idx)}
+                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+
+                        <div className="space-y-2.5">
+                          <div>
+                            <Input
+                              value={addr.address}
+                              onChange={(e) => updateAddress(idx, { address: e.target.value })}
+                              placeholder="Street Address / Premises / Area"
+                              className="h-8 text-xs bg-background"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                            <div>
+                              <Input
+                                value={addr.city ?? ''}
+                                onChange={(e) => updateAddress(idx, { city: e.target.value })}
+                                placeholder="City / Town (e.g. Surat)"
+                                className="h-8 text-xs bg-background"
+                              />
+                            </div>
+                            <div>
+                              <Combobox
+                                options={INDIAN_STATES}
+                                value={addr.state ?? ''}
+                                onChange={(v) => updateAddress(idx, { state: v })}
+                                placeholder="Select State..."
+                                searchPlaceholder="Search state..."
+                              />
+                            </div>
+                            <div>
+                              <Input
+                                value={addr.pincode ?? ''}
+                                onChange={(e) => updateAddress(idx, { pincode: e.target.value })}
+                                placeholder="Pincode (e.g. 395002)"
+                                className="h-8 text-xs bg-background"
+                              />
+                            </div>
+                            <div>
+                              <Input
+                                value={addr.gstin ?? ''}
+                                onChange={(e) => updateAddress(idx, { gstin: e.target.value.toUpperCase() })}
+                                placeholder="Branch GSTIN (Optional)"
+                                className="h-8 text-xs font-mono bg-background uppercase"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
+
               {!isHamaliTeam && (
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="city"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>City / Town</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Surat" {...field} />
-                      </FormControl>
-                      <FormDescription>Printed as the “Ship To” place on the E-Way Bill. Falls back to the state when blank.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="pincode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Pincode</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. 517247" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="gstin"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>GSTIN</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                {form.watch('type') !== 'SUPPLIER' && (
+                <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
-                    name="destination"
-                    render={({ field }) => {
-                      // Keep an already-saved destination selectable even if it's no
-                      // longer in the freight-rate list.
-                      const opts = field.value && !destinationOptions.some((o) => o.value === field.value)
-                        ? [{ value: field.value, label: field.value }, ...destinationOptions]
-                        : destinationOptions;
-                      return (
-                        <FormItem className="flex flex-col justify-end">
-                          <FormLabel className="mb-1">Delivery destination</FormLabel>
-                          <Combobox
-                            options={opts}
-                            value={field.value ?? ''}
-                            onChange={field.onChange}
-                            placeholder="Select destination…"
-                            searchPlaceholder="Search destinations…"
-                            emptyText="No destinations - add them in Settings → Freight Rates."
-                          />
-                          <FormMessage />
-                        </FormItem>
-                      );
-                    }}
+                    name="gstin"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Primary GSTIN</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
                   />
-                )}
-              </div>
+                  {form.watch('type') !== 'SUPPLIER' && (
+                    <FormField
+                      control={form.control}
+                      name="destination"
+                      render={({ field }) => {
+                        const opts = field.value && !destinationOptions.some((o) => o.value === field.value)
+                          ? [{ value: field.value, label: field.value }, ...destinationOptions]
+                          : destinationOptions;
+                        return (
+                          <FormItem className="flex flex-col justify-end">
+                            <FormLabel className="mb-1">Default Delivery destination</FormLabel>
+                            <Combobox
+                              options={opts}
+                              value={field.value ?? ''}
+                              onChange={field.onChange}
+                              placeholder="Select destination…"
+                              searchPlaceholder="Search destinations…"
+                              emptyText="No destinations - add them in Settings → Freight Rates."
+                            />
+                            <FormMessage />
+                          </FormItem>
+                        );
+                      }}
+                    />
+                  )}
+                </div>
               )}
               {/* Buyers only. Most shipments travel without the transporter's GC
                   note, so the receipt is offered on a dispatch only for the

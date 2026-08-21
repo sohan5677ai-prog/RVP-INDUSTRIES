@@ -730,4 +730,46 @@ export function parseQualityAdjustments(json: unknown): QualityAdjustmentRow[] {
   );
 }
 
+// --- Product HSN resolution (with buyer-specific overrides) ------------------
+
+/**
+ * Krishi Nutrition Company Pvt Ltd requires HSN code 11063010 constant in all invoices / EWBs.
+ */
+export const KRISHI_HSN = '11063010';
+
+/**
+ * Returns true if the buyer is Krishi Nutrition Company Pvt Ltd (matching by GSTIN or name).
+ */
+export function isKrishiNutritionBuyer(
+  buyer?: { name?: string | null; gstin?: string | null } | null | string,
+): boolean {
+  if (!buyer) return false;
+  if (typeof buyer === 'string') {
+    const s = buyer.toLowerCase().trim();
+    return s.includes('krishi');
+  }
+  const name = (buyer.name || '').toLowerCase().trim();
+  const gstin = (buyer.gstin || '').toUpperCase().trim();
+  if (gstin === '33AAFCK3415K1ZO') return true;
+  return name.includes('krishi');
+}
+
+/**
+ * Resolves the HSN/SAC code to use for a sale/invoice/EWB.
+ * Krishi Nutrition Company Pvt Ltd is pinned to constant 11063010.
+ * Other buyers use the product's configured HSN (or exempt variant if gstExempt).
+ */
+export function resolveProductHsn(
+  buyer?: { name?: string | null; gstin?: string | null } | null | string,
+  taxInfo?: { hsn?: string | null; hsnExempt?: string | null } | null,
+  gstExempt?: boolean | null,
+  fallback: string = '',
+): string {
+  if (isKrishiNutritionBuyer(buyer)) {
+    return KRISHI_HSN;
+  }
+  const code = (gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn) || fallback;
+  return code;
+}
+
 

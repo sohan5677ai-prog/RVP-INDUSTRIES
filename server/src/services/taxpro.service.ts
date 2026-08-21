@@ -3,6 +3,7 @@ import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { istParts } from '../lib/istDate.js';
+import { resolveProductHsn } from '../lib/calc.js';
 
 interface TaxproConfig {
   taxproGspId?: string | null;      // ASP id (aspid)           e.g. 1806883726
@@ -387,7 +388,9 @@ export class TaxproService {
     const description = taxInfo?.description || `${order.product} Sale`;
     // A GST-exempt order files under the alternate no-GST HSN (e.g. husk),
     // falling back to the taxable code if no exempt-specific one is configured.
-    const hsn = this.requireHsn(order.gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn, order.product);
+    // Krishi Nutrition Company Pvt Ltd always uses constant HSN 11063010.
+    const rawHsn = resolveProductHsn(buyer, taxInfo, order.gstExempt);
+    const hsn = this.requireHsn(rawHsn, order.product);
 
     if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
     if (!buyer.gstin) throw new Error('Buyer GSTIN is not set in Buyer profile');
@@ -436,13 +439,13 @@ export class TaxproService {
         Stcd: sellerStateCode,
       },
       BuyerDtls: {
-        Gstin: buyer.gstin,
+        Gstin: order.buyerGstin || buyer.gstin,
         LglNm: buyer.name,
-        Pos: buyerStateCode,
-        Addr1: buyer.address || 'Buyer address',
-        Loc: shipTo.place,
-        Pin: shipTo.pincode,
-        Stcd: buyerStateCode,
+        Pos: (order.buyerGstin ? order.buyerGstin.slice(0, 2) : buyerStateCode),
+        Addr1: order.buyerAddress || buyer.address || 'Buyer address',
+        Loc: order.buyerCity || shipTo.place,
+        Pin: Number(order.buyerPincode) || shipTo.pincode,
+        Stcd: (order.buyerGstin ? order.buyerGstin.slice(0, 2) : buyerStateCode),
       },
       ItemList: [
         {
@@ -698,8 +701,9 @@ export class TaxproService {
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
     const description = taxInfo?.description || `${order.product} Sale`;
-    // Same exemption swap as the e-invoice payload above.
-    const hsn = this.requireHsn(order.gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn, order.product);
+    // Same exemption swap as the e-invoice payload above; Krishi Nutrition uses constant HSN 11063010.
+    const rawHsn = resolveProductHsn(buyer, taxInfo, order.gstExempt);
+    const hsn = this.requireHsn(rawHsn, order.product);
 
     const sellerStateCode = company.gstin?.slice(0, 2) || '';
     const buyerStateCode = buyer.gstin?.slice(0, 2) || '';

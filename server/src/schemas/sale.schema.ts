@@ -16,6 +16,14 @@ export const createSaleOrderSchema = z.object({
   dueDays: z.coerce.number().int().nonnegative().optional().nullable(),
   // Optional dispatch reminder date for advance orders (reminders fire 3 days before).
   reminderDate: z.coerce.date().optional().nullable(),
+  poNumber: z.string().max(100).optional().nullable(),
+  poDate: z.coerce.date().optional().nullable(),
+  buyerAddressId: z.string().optional().nullable(),
+  buyerAddress: z.string().optional().nullable(),
+  buyerCity: z.string().optional().nullable(),
+  buyerState: z.string().optional().nullable(),
+  buyerPincode: z.string().optional().nullable(),
+  buyerGstin: z.string().optional().nullable(),
   marginOverride: z.boolean().optional().default(false),
   // When true, bill this order without GST.
   gstExempt: z.boolean().optional().default(false),

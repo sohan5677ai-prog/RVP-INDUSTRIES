@@ -131,7 +131,7 @@ export async function listSaleOrders(req: Request, res: Response) {
     take: isAll ? undefined : take,
     orderBy: { saleDate: 'desc' },
     include: {
-      buyer: true,
+      buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } },
       broker: true,
       dispatches: {
         orderBy: { dispatchDate: 'asc' },
@@ -152,7 +152,7 @@ export async function listSaleOrders(req: Request, res: Response) {
 export async function getSaleOrder(req: Request, res: Response) {
   const order = await prisma.saleOrder.findUnique({
     where: { id: req.params.id },
-    include: { buyer: true, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
+    include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
   });
   if (!order) throw new HttpError(404, 'Sale order not found');
   res.json(withFulfilment(order));
@@ -162,7 +162,7 @@ export async function getSaleOrder(req: Request, res: Response) {
 export async function getSaleDispatch(req: Request, res: Response) {
   const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: req.params.id },
-    include: { saleOrder: { include: { buyer: true, broker: true } } },
+    include: { saleOrder: { include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true } } },
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
   res.json(dispatch);
@@ -380,6 +380,17 @@ export async function createSaleOrder(req: Request, res: Response) {
   const gstFraction = await gstFractionForProduct(data.product);
   const stamps = await currentCostStamps(destination ?? buyer.destination ?? null, priceType);
 
+  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null } | null = null;
+  if (data.buyerAddressId) {
+    selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
+  }
+
+  const buyerAddress = data.buyerAddress || selectedAddr?.address || buyer.address || null;
+  const buyerCity = data.buyerCity || selectedAddr?.city || buyer.city || null;
+  const buyerState = data.buyerState || selectedAddr?.state || buyer.state || null;
+  const buyerPincode = data.buyerPincode || selectedAddr?.pincode || buyer.pincode || null;
+  const buyerGstin = data.buyerGstin || selectedAddr?.gstin || buyer.gstin || null;
+
   const order = await prisma.saleOrder.create({
     data: {
       saleDate: data.saleDate,
@@ -390,6 +401,14 @@ export async function createSaleOrder(req: Request, res: Response) {
       ratePerKg: data.ratePerKg,
       dueDays: data.dueDays ?? null,
       reminderDate: data.reminderDate ?? null,
+      poNumber: data.poNumber ?? null,
+      poDate: data.poDate ?? null,
+      buyerAddressId: data.buyerAddressId ?? null,
+      buyerAddress,
+      buyerCity,
+      buyerState,
+      buyerPincode,
+      buyerGstin,
       gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
       gstExempt: data.gstExempt || false,
       brokerageRatePerKg: data.brokerageRatePerKg,
@@ -399,7 +418,7 @@ export async function createSaleOrder(req: Request, res: Response) {
       marginOverride: data.marginOverride || false,
       ...stamps,
     },
-    include: { buyer: true, broker: true },
+    include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true },
   });
 
   res.status(201).json(order);
@@ -416,6 +435,9 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
       dueDays?: number;
       gstExempt?: boolean;
       marginOverride?: boolean;
+      poNumber?: string;
+      poDate?: string;
+      buyerAddressId?: string;
     }>;
   };
   if (!Array.isArray(orders) || orders.length === 0) throw new HttpError(400, 'orders array is required');
@@ -434,6 +456,9 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
         dueDays: row.dueDays,
         gstExempt: row.gstExempt ?? false,
         marginOverride: row.marginOverride ?? false,
+        poNumber: row.poNumber,
+        poDate: row.poDate,
+        buyerAddressId: row.buyerAddressId,
         brokerageRatePerKg: 0,
       });
 
@@ -447,6 +472,11 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
       const gstFraction = await gstFractionForProduct(data.product);
       const stamps = await currentCostStamps(destination ?? buyer.destination ?? null, priceType);
 
+      let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null } | null = null;
+      if (data.buyerAddressId) {
+        selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
+      }
+
       const order = await prisma.saleOrder.create({
         data: {
           saleDate: data.saleDate,
@@ -455,6 +485,14 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           tonnageKg: data.tonnageKg,
           ratePerKg: data.ratePerKg,
           dueDays: data.dueDays ?? null,
+          poNumber: data.poNumber ?? null,
+          poDate: data.poDate ?? null,
+          buyerAddressId: data.buyerAddressId ?? null,
+          buyerAddress: data.buyerAddress || selectedAddr?.address || buyer.address || null,
+          buyerCity: data.buyerCity || selectedAddr?.city || buyer.city || null,
+          buyerState: data.buyerState || selectedAddr?.state || buyer.state || null,
+          buyerPincode: data.buyerPincode || selectedAddr?.pincode || buyer.pincode || null,
+          buyerGstin: data.buyerGstin || selectedAddr?.gstin || buyer.gstin || null,
           gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
           gstExempt: data.gstExempt || false,
           brokerageRatePerKg: 0,
@@ -465,8 +503,6 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           ...stamps,
         },
       });
-
-
 
       results.push({ index: i, success: true, id: order.id });
     } catch (err: unknown) {
@@ -508,6 +544,17 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
+  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null } | null = null;
+  if (data.buyerAddressId) {
+    selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
+  }
+
+  const buyerAddress = data.buyerAddress !== undefined ? data.buyerAddress : (selectedAddr?.address || buyer.address || null);
+  const buyerCity = data.buyerCity !== undefined ? data.buyerCity : (selectedAddr?.city || buyer.city || null);
+  const buyerState = data.buyerState !== undefined ? data.buyerState : (selectedAddr?.state || buyer.state || null);
+  const buyerPincode = data.buyerPincode !== undefined ? data.buyerPincode : (selectedAddr?.pincode || buyer.pincode || null);
+  const buyerGstin = data.buyerGstin !== undefined ? data.buyerGstin : (selectedAddr?.gstin || buyer.gstin || null);
+
   const updated = await prisma.saleOrder.update({
     where: { id: req.params.id },
     data: {
@@ -519,6 +566,14 @@ export async function updateSaleOrder(req: Request, res: Response) {
       ratePerKg: data.ratePerKg,
       dueDays: data.dueDays ?? null,
       reminderDate: data.reminderDate ?? null,
+      poNumber: data.poNumber !== undefined ? data.poNumber : order.poNumber,
+      poDate: data.poDate !== undefined ? data.poDate : order.poDate,
+      buyerAddressId: data.buyerAddressId !== undefined ? data.buyerAddressId : order.buyerAddressId,
+      buyerAddress,
+      buyerCity,
+      buyerState,
+      buyerPincode,
+      buyerGstin,
       gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
       gstExempt: data.gstExempt || false,
       brokerageRatePerKg: data.brokerageRatePerKg,
@@ -529,7 +584,7 @@ export async function updateSaleOrder(req: Request, res: Response) {
       status,
       ...stamps,
     },
-    include: { buyer: true, broker: true },
+    include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true },
   });
 
   res.json(updated);

@@ -173,6 +173,24 @@ model Party {
   emailLogs           EmailLog[]
   setOffs             PartySetOff[]
   reminderSchedule    PartyReminderSchedule?
+  addresses           PartyAddress[]
+}
+
+model PartyAddress {
+  id        String   @id @default(cuid())
+  party     Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  partyId   String
+  label     String   // e.g. "Head Office", "Surat Warehouse", "Factory Unit 2"
+  address   String
+  city      String?
+  state     String?
+  pincode   String?
+  gstin     String?  // Optional branch-specific GSTIN
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partyId])
 }
 
 model Broker {
@@ -523,6 +541,19 @@ model SaleOrder {
   // Optional dispatch reminder for advance orders: the date the goods are due to
   // be dispatched. The ERP surfaces a login reminder from 3 days before this date.
   reminderDate       DateTime?
+
+  // Customer PO (Purchase Order) reference
+  poNumber           String?
+  poDate             DateTime?
+
+  // Delivery / Billing address selected at order creation (snapshotted so historical
+  // orders and invoices remain immutable even if the party updates their address book).
+  buyerAddressId     String?
+  buyerAddress       String?
+  buyerCity          String?
+  buyerState         String?
+  buyerPincode       String?
+  buyerGstin         String?
 
   // --- Cost freeze -----------------------------------------------------------
   // The Pappu P&L used to recompute every order from scratch on each page load,

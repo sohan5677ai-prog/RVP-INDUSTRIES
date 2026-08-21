@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { SaleDispatch, SaleOrder, CompanyProfile, ProductTaxInfo } from '@/lib/types';
 import { inr, rupeesInWords } from '@/lib/invoiceWords';
+import { resolveProductHsn } from '@/lib/calc';
 import AuthorisedSignature from '@/components/AuthorisedSignature';
 
 const GST_RATE = 0.05;
@@ -126,13 +127,14 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
 
   const paperW = PAPER_W[layout.paperSize] ?? 210;
   const gstPct = Math.round(gstFraction * 100);
-  const buyerGstin = order.buyer?.gstin ?? null;
+  const buyerGstin = order.buyerGstin || order.buyer?.gstin || null;
+  const buyerState = order.buyerState || order.buyer?.state || null;
   const buyerStateCode = buyerGstin && /^\d{2}/.test(buyerGstin) ? buyerGstin.slice(0, 2) : null;
   const buyerPan = buyerGstin && buyerGstin.length >= 12 ? buyerGstin.slice(2, 12) : null;
   const description = tax?.description || PRODUCT_FALLBACK[order.product] || order.product;
-  // A GST-exempt order (e.g. husk without GST) prints the alternate no-GST HSN,
-  // falling back to the taxable code if no exempt-specific one is configured.
-  const hsn = (order.gstExempt ? tax?.hsnExempt || tax?.hsn : tax?.hsn) || '';
+  // Krishi Nutrition Company Pvt Ltd uses constant HSN 11063010; other buyers use
+  // the product's configured HSN (or exempt variant if gstExempt).
+  const hsn = resolveProductHsn(order.buyer, tax, order.gstExempt);
   const qtyStr = `${(dispatch.weightKg ?? 0).toLocaleString('en-IN')} Kgs`;
   const c = layout.cols;
   const metaCol = (100 - layout.headerLeftPct) / 4;
@@ -213,11 +215,23 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
               <div style={{ padding: '5px 8px' }}>
                 <div className="lbl">Buyer (Bill to)</div>
                 <div style={{ fontWeight: 'bold', fontSize: '1.15em', marginTop: '2px' }}>{order.buyer?.name}</div>
-                {order.buyer?.address && <div className="lbl" style={{ whiteSpace: 'pre-line', marginTop: '2px' }}>{order.buyer.address}</div>}
+                {(order.buyerAddress || order.buyer?.address) && (
+                  <div className="lbl" style={{ whiteSpace: 'pre-line', marginTop: '2px' }}>
+                    {order.buyerAddress || order.buyer?.address}
+                  </div>
+                )}
                 {buyerGstin && <KeyedLine k="GSTIN/UIN" v={buyerGstin} style={{ marginTop: '2px' }} />}
                 {buyerPan && <KeyedLine k="PAN/IT No" v={buyerPan} />}
-                {order.buyer?.state && <KeyedLine k="State Name" v={`${order.buyer.state}${buyerStateCode ? `, Code : ${buyerStateCode}` : ''}`} plain />}
-                {order.buyer?.state && <KeyedLine k="Place of Supply" v={order.buyer.state} plain />}
+                {buyerState && (
+                  <KeyedLine
+                    k="State Name"
+                    v={`${buyerState}${buyerStateCode ? `, Code : ${buyerStateCode}` : ''}`}
+                    plain
+                  />
+                )}
+                {buyerState && (
+                  <KeyedLine k="Place of Supply" v={buyerState} plain />
+                )}
               </div>
             </td>
             <MetaCell label="Invoice No." value={shownNumber} isBold />
@@ -226,9 +240,9 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
           </tr>
           <tr><MetaCell colSpan={2} label="Delivery Note" value="" /><MetaCell colSpan={2} label="Mode/Terms of Payment" value="" /></tr>
           <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell colSpan={2} label="Other References" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Buyer's Order No." value="" /><MetaCell colSpan={2} label="Dated" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Buyer's Order No." value={order.poNumber ?? ''} isBold /><MetaCell colSpan={2} label="Dated" value={order.poDate ? fmtDate(new Date(order.poDate)) : ''} isBold /></tr>
           <tr><MetaCell colSpan={2} label="Dispatch Doc No." value="" /><MetaCell colSpan={2} label="Delivery Note Date" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" isBold /><MetaCell colSpan={2} label="Destination" value={order.destination || order.buyer?.state || ''} isBold /></tr>
+          <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" isBold /><MetaCell colSpan={2} label="Destination" value={order.destination || buyerState || ''} isBold /></tr>
           <tr><MetaCell colSpan={2} label="Bill of Lading/LR-RR No." value="" /><MetaCell colSpan={2} label="Motor Vehicle No." value={dispatch.vehicleNumber ?? ''} isBold /></tr>
           <tr><MetaCell colSpan={4} label="Terms of Delivery" value="" /></tr>
         </tbody>

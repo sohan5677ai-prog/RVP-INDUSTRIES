@@ -9,6 +9,17 @@ export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SH
 
 export const balanceTypeEnum = z.enum(['DR', 'CR']);
 
+export const partyAddressSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().min(1, 'Label is required'),
+  address: z.string().min(1, 'Address is required'),
+  city: z.string().optional().nullable(),
+  state: z.string().optional().nullable(),
+  pincode: z.string().optional().nullable(),
+  gstin: z.string().optional().nullable(),
+  isDefault: z.boolean().optional().default(false),
+});
+
 export const createPartySchema = z.object({
   name: z.string().min(1, 'Name is required'),
   nickname: z.string().optional(),
@@ -33,6 +44,7 @@ export const createPartySchema = z.object({
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
   commodities: z.array(commodityEnum).default([]),
+  addresses: z.array(partyAddressSchema).optional().default([]),
 });
 
 export const updatePartySchema = createPartySchema.partial();

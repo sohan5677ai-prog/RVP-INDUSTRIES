@@ -5,6 +5,7 @@ import { ArrowLeft, Printer, FileText, FileDown, AlertTriangle } from 'lucide-re
 import { toast } from 'sonner';
 import { api, getToken } from '@/lib/api';
 import type { SaleDispatch, CompanyProfile, ProductTaxInfo } from '@/lib/types';
+import { resolveProductHsn } from '@/lib/calc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -123,9 +124,9 @@ export default function EWayBillView() {
 
   const taxInfo = taxRows?.find(t => t.product === order.product);
   const description = taxInfo?.description || PRODUCT_FALLBACK[order.product] || `${order.product} Sale`;
-  // A GST-exempt order shows the alternate no-GST HSN (e.g. husk), same as the
-  // tax invoice / e-invoice payload, falling back to the taxable code.
-  const hsn = (order.gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn) || '120799'; // 6 digits minimum - NIC rejects 4-digit HSN (error 2311)
+  // Krishi Nutrition Company Pvt Ltd uses constant HSN 11063010; other buyers use
+  // the product's configured HSN (or exempt variant if gstExempt).
+  const hsn = resolveProductHsn(buyer, taxInfo, order.gstExempt, '120799');
   
   const weight = dispatch.weightKg;
   const rate = Number(order.ratePerKg);

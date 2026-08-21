@@ -74,6 +74,9 @@ const saleSchema = z.object({
   saleDate: z.string().min(1, 'Date is required'),
   product: z.enum(['PAPPU', 'HUSK', 'WASTE', 'TPS', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU']),
   buyerId: z.string().min(1, 'Party is required'),
+  buyerAddressId: z.string().optional(),
+  poNumber: z.string().optional(),
+  poDate: z.string().optional(),
   brokerId: z.string().optional(),
   tonnes: z.string().min(1, 'Tonnage is required').refine((v) => Number(v) > 0, 'Must be positive'),
   ratePerKg: z.string().min(1, 'Price is required').refine((v) => Number(v) > 0, 'Must be positive'),
@@ -131,6 +134,7 @@ export default function SaleOrders() {
 
   const exportColumns: ExportColumn<SaleOrder>[] = [
     { header: 'Date', value: (o) => shortDate(o.saleDate) },
+    { header: 'PO No.', value: (o) => o.poNumber ?? '' },
     { header: 'Commodity', value: (o) => PRODUCTS.find((p) => p.value === o.product)?.label ?? o.product },
     { header: 'Party', value: (o) => o.buyer?.name ?? '' },
     { header: 'Broker', value: (o) => o.broker?.name ?? '' },
@@ -147,7 +151,19 @@ export default function SaleOrders() {
 
   const form = useForm<SaleForm>({
     resolver: zodResolver(saleSchema),
-    defaultValues: { saleDate: new Date().toISOString().slice(0, 10), product: 'PAPPU', buyerId: '', brokerId: NO_BROKER, tonnes: '', ratePerKg: '', dueDays: '', reminderDate: '' },
+    defaultValues: {
+      saleDate: new Date().toISOString().slice(0, 10),
+      product: 'PAPPU',
+      buyerId: '',
+      buyerAddressId: '',
+      poNumber: '',
+      poDate: '',
+      brokerId: NO_BROKER,
+      tonnes: '',
+      ratePerKg: '',
+      dueDays: '',
+      reminderDate: '',
+    },
   });
 
   const watchedProduct = form.watch('product');
@@ -165,7 +181,19 @@ export default function SaleOrders() {
     setOverride(false);
     setGstExempt(false);
     setPriceType('DELIVERY'); // create always starts on Pappu
-    form.reset({ saleDate: new Date().toISOString().slice(0, 10), product: 'PAPPU', buyerId: '', brokerId: NO_BROKER, tonnes: '', ratePerKg: '', dueDays: '' });
+    form.reset({
+      saleDate: new Date().toISOString().slice(0, 10),
+      product: 'PAPPU',
+      buyerId: '',
+      buyerAddressId: '',
+      poNumber: '',
+      poDate: '',
+      brokerId: NO_BROKER,
+      tonnes: '',
+      ratePerKg: '',
+      dueDays: '',
+      reminderDate: '',
+    });
     setOpen(true);
   }
 
@@ -178,6 +206,9 @@ export default function SaleOrders() {
       saleDate: o.saleDate.slice(0, 10),
       product: o.product,
       buyerId: o.buyerId,
+      buyerAddressId: o.buyerAddressId ?? '',
+      poNumber: o.poNumber ?? '',
+      poDate: o.poDate ? o.poDate.slice(0, 10) : '',
       brokerId: o.brokerId || NO_BROKER,
       tonnes: String(o.tonnageKg / 1000),
       ratePerKg: String(o.ratePerKg),
@@ -191,6 +222,9 @@ export default function SaleOrders() {
     mutationFn: (v: SaleForm) => {
       const url = editing ? `/sale-orders/${editing.id}` : '/sale-orders';
       const method = editing ? 'PUT' : 'POST';
+      const selectedBuyer = parties?.find((p) => p.id === v.buyerId);
+      const selectedAddr = selectedBuyer?.addresses?.find((a) => a.id === v.buyerAddressId);
+
       return api<SaleOrder>(url, {
         method,
         body: {
@@ -202,6 +236,14 @@ export default function SaleOrders() {
           ratePerKg: Number(v.ratePerKg),
           dueDays: v.dueDays ? Number(v.dueDays) : null,
           reminderDate: v.reminderDate ? v.reminderDate : null,
+          poNumber: v.poNumber ? v.poNumber.trim() : null,
+          poDate: v.poDate ? v.poDate : null,
+          buyerAddressId: v.buyerAddressId || null,
+          buyerAddress: selectedAddr?.address || selectedBuyer?.address || null,
+          buyerCity: selectedAddr?.city || selectedBuyer?.city || null,
+          buyerState: selectedAddr?.state || selectedBuyer?.state || null,
+          buyerPincode: selectedAddr?.pincode || selectedBuyer?.pincode || null,
+          buyerGstin: selectedAddr?.gstin || selectedBuyer?.gstin || null,
           marginOverride: override,
           gstExempt,
           priceType,
@@ -361,7 +403,20 @@ export default function SaleOrders() {
               <TableRow key={o.id}>
                 <TableCell>{shortDate(o.saleDate)}</TableCell>
                 <TableCell><Badge variant="outline" className="font-medium">{PRODUCTS.find((p) => p.value === o.product)?.label ?? o.product}</Badge></TableCell>
-                <TableCell className="font-medium">{o.buyer?.name ?? '-'}</TableCell>
+                <TableCell className="font-medium">
+                  <div>{o.buyer?.name ?? '-'}</div>
+                  {o.poNumber && (
+                    <div className="text-xs text-muted-foreground font-sans mt-0.5">
+                      PO: <span className="font-semibold text-foreground">{o.poNumber}</span>
+                      {o.poDate && <span className="text-[11px] text-muted-foreground ml-1">({shortDate(o.poDate)})</span>}
+                    </div>
+                  )}
+                  {(o.buyerCity || o.buyerAddress) && (
+                    <div className="text-[11px] text-muted-foreground truncate max-w-[190px] mt-0.5" title={o.buyerAddress ?? ''}>
+                      📍 {o.buyerCity || o.buyerAddress}
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell>{o.broker?.name ?? '-'}</TableCell>
                 <TableCell>
                   {o.destination ?? '-'}
@@ -444,7 +499,16 @@ export default function SaleOrders() {
                     <Combobox
                       options={(parties ?? []).filter((p) => p.type !== 'SUPPLIER' && p.type !== 'HAMALI_TEAM' && p.commodities?.includes(PRODUCT_TO_COMMODITY[watchedProduct])).map((p) => ({ value: p.id, label: p.name }))}
                       value={field.value}
-                      onChange={field.onChange}
+                      onChange={(val) => {
+                        field.onChange(val);
+                        const b = parties?.find((p) => p.id === val);
+                        if (b?.addresses && b.addresses.length > 0) {
+                          const def = b.addresses.find((a) => a.isDefault) || b.addresses[0];
+                          form.setValue('buyerAddressId', def.id ?? '');
+                        } else {
+                          form.setValue('buyerAddressId', '');
+                        }
+                      }}
                       placeholder="Select buyer"
                       searchPlaceholder="Search buyer…"
                       className="w-full"
@@ -461,6 +525,72 @@ export default function SaleOrders() {
                   <FormMessage />
                 </FormItem>
               )} />
+              {buyerId && (() => {
+                const currentBuyer = parties?.find((p) => p.id === buyerId);
+                const buyerAddrs = currentBuyer?.addresses ?? [];
+                if (buyerAddrs.length === 0) return null;
+                return (
+                  <FormField
+                    control={form.control}
+                    name="buyerAddressId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Delivery / Billing Address</FormLabel>
+                        <Select
+                          value={field.value || (buyerAddrs.find((a) => a.isDefault)?.id ?? buyerAddrs[0]?.id ?? '')}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select delivery address" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {buyerAddrs.map((a) => (
+                              <SelectItem key={a.id} value={a.id!}>
+                                <span className="font-medium">{a.label}</span>
+                                {a.isDefault && <span className="text-muted-foreground ml-1">(Default)</span>}
+                                <span className="text-muted-foreground text-xs ml-2">
+                                  - {[a.city, a.state, a.pincode].filter(Boolean).join(', ')}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {field.value && (() => {
+                          const a = buyerAddrs.find((addr) => addr.id === field.value);
+                          if (!a) return null;
+                          return (
+                            <div className="text-xs text-muted-foreground bg-muted/40 p-2.5 rounded border mt-1 leading-relaxed">
+                              <div className="font-medium text-foreground">{a.label}: {a.address}</div>
+                              <div>{[a.city, a.state, a.pincode].filter(Boolean).join(', ')}{a.gstin ? ` · GSTIN: ${a.gstin}` : ''}</div>
+                            </div>
+                          );
+                        })()}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                );
+              })()}
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={form.control} name="poNumber" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Buyer PO Number (optional)</FormLabel>
+                    <FormControl><Input placeholder="e.g. PO-2026-981" {...field} /></FormControl>
+                    <p className="text-[11px] text-muted-foreground">Printed as Buyer's Order No. on the tax invoice.</p>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="poDate" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Buyer PO Date (optional)</FormLabel>
+                    <FormControl><Input type="date" {...field} /></FormControl>
+                    <p className="text-[11px] text-muted-foreground">Order date printed next to PO number on the invoice.</p>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
               <FormField control={form.control} name="brokerId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Broker (optional)</FormLabel>

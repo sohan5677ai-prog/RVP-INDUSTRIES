@@ -11,6 +11,18 @@ export interface User {
   createdAt?: string;
 }
 
+export interface PartyAddress {
+  id?: string;
+  partyId?: string;
+  label: string; // e.g. "Head Office", "Surat Warehouse", "Factory Unit 2"
+  address: string;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  gstin?: string | null;
+  isDefault?: boolean;
+}
+
 export interface Party {
   id: string;
   name: string;
@@ -41,6 +53,7 @@ export interface Party {
   bankIfsc: string | null;
   bankName: string | null;
   commodities: Commodity[];
+  addresses?: PartyAddress[];
   createdAt: string;
 }
 
@@ -453,6 +466,14 @@ export interface SaleOrder {
   marginOverride: boolean;
   dueDays?: number | null;
   reminderDate?: string | null;
+  poNumber?: string | null;
+  poDate?: string | null;
+  buyerAddressId?: string | null;
+  buyerAddress?: string | null;
+  buyerCity?: string | null;
+  buyerState?: string | null;
+  buyerPincode?: string | null;
+  buyerGstin?: string | null;
   // Set once the order is finished with tonnage still unshipped on paper -
   // either the final lorry landed within the Settings tolerance (24.87 t on a
   // 25 t husk booking) or the user short-closed it. tonnageKg is never rewritten.

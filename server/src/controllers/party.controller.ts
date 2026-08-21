@@ -4,12 +4,18 @@ import { HttpError } from '../lib/httpError.js';
 import { createPartySchema, updatePartySchema } from '../schemas/party.schema.js';
 
 export async function listParties(_req: Request, res: Response) {
-  const parties = await prisma.party.findMany({ orderBy: { createdAt: 'desc' } });
+  const parties = await prisma.party.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: { addresses: { orderBy: { createdAt: 'asc' } } },
+  });
   res.json(parties);
 }
 
 export async function getParty(req: Request, res: Response) {
-  const party = await prisma.party.findUnique({ where: { id: req.params.id } });
+  const party = await prisma.party.findUnique({
+    where: { id: req.params.id },
+    include: { addresses: { orderBy: { createdAt: 'asc' } } },
+  });
   if (!party) throw new HttpError(404, 'Party not found');
   res.json(party);
 }
@@ -20,13 +26,57 @@ export async function createParty(req: Request, res: Response) {
     where: { name: { equals: data.name.trim(), mode: 'insensitive' } },
   });
   if (duplicate) throw new HttpError(409, `A party named "${duplicate.name}" already exists`);
-  const party = await prisma.party.create({ data });
+
+  const { commodities, addresses, ...rest } = data;
+
+  let addressList = addresses ?? [];
+  if (addressList.length > 0) {
+    const hasDefault = addressList.some((a) => a.isDefault);
+    if (!hasDefault) addressList[0].isDefault = true;
+    const defaultAddr = addressList.find((a) => a.isDefault) || addressList[0];
+    if (!rest.address && defaultAddr) {
+      rest.address = defaultAddr.address;
+      rest.city = defaultAddr.city ?? rest.city;
+      rest.state = defaultAddr.state ?? rest.state;
+      rest.pincode = defaultAddr.pincode ?? rest.pincode;
+      rest.gstin = defaultAddr.gstin ?? rest.gstin;
+    }
+  } else if (rest.address && rest.address.trim()) {
+    addressList = [{
+      label: 'Registered Office',
+      address: rest.address.trim(),
+      city: rest.city ?? null,
+      state: rest.state ?? null,
+      pincode: rest.pincode ?? null,
+      gstin: rest.gstin ?? null,
+      isDefault: true,
+    }];
+  }
+
+  const party = await prisma.party.create({
+    data: {
+      ...rest,
+      commodities: commodities ?? [],
+      addresses: {
+        create: addressList.map((a) => ({
+          label: a.label,
+          address: a.address,
+          city: a.city ?? null,
+          state: a.state ?? null,
+          pincode: a.pincode ?? null,
+          gstin: a.gstin ?? null,
+          isDefault: a.isDefault ?? false,
+        })),
+      },
+    },
+    include: { addresses: { orderBy: { createdAt: 'asc' } } },
+  });
   res.status(201).json(party);
 }
 
 export async function updateParty(req: Request, res: Response) {
   const data = updatePartySchema.parse(req.body);
-  const existing = await prisma.party.findUnique({ where: { id: req.params.id } });
+  const existing = await prisma.party.findUnique({ where: { id: req.params.id }, include: { addresses: true } });
   if (!existing) throw new HttpError(404, 'Party not found');
   if (data.name !== undefined) {
     const duplicate = await prisma.party.findFirst({
@@ -34,14 +84,49 @@ export async function updateParty(req: Request, res: Response) {
     });
     if (duplicate) throw new HttpError(409, `A party named "${duplicate.name}" already exists`);
   }
-  const { commodities, ...rest } = data;
-  const party = await prisma.party.update({
-    where: { id: req.params.id },
-    data: {
-      ...rest,
-      ...(commodities !== undefined ? { commodities: { set: commodities } } : {}),
-    },
+  const { commodities, addresses, ...rest } = data;
+
+  const addressList = addresses;
+  if (addressList !== undefined && addressList.length > 0) {
+    const hasDefault = addressList.some((a) => a.isDefault);
+    if (!hasDefault) addressList[0].isDefault = true;
+    const defaultAddr = addressList.find((a) => a.isDefault) || addressList[0];
+    rest.address = defaultAddr.address;
+    rest.city = defaultAddr.city ?? rest.city;
+    rest.state = defaultAddr.state ?? rest.state;
+    rest.pincode = defaultAddr.pincode ?? rest.pincode;
+    if (defaultAddr.gstin) rest.gstin = defaultAddr.gstin;
+  }
+
+  const party = await prisma.$transaction(async (tx) => {
+    if (addressList !== undefined) {
+      await tx.partyAddress.deleteMany({ where: { partyId: existing.id } });
+      if (addressList.length > 0) {
+        await tx.partyAddress.createMany({
+          data: addressList.map((a) => ({
+            partyId: existing.id,
+            label: a.label,
+            address: a.address,
+            city: a.city ?? null,
+            state: a.state ?? null,
+            pincode: a.pincode ?? null,
+            gstin: a.gstin ?? null,
+            isDefault: a.isDefault ?? false,
+          })),
+        });
+      }
+    }
+
+    return tx.party.update({
+      where: { id: req.params.id },
+      data: {
+        ...rest,
+        ...(commodities !== undefined ? { commodities: { set: commodities } } : {}),
+      },
+      include: { addresses: { orderBy: { createdAt: 'asc' } } },
+    });
   });
+
   res.json(party);
 }
 

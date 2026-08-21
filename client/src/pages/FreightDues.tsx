@@ -199,7 +199,7 @@ function FreightTable({
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
-  onPay: (lorry: string, due: number, sourced: FreightRow['sourced']) => void;
+  onPay: (row: FreightRow, due: number) => void;
   hideDeductions?: boolean;
   paymentsByLorry: Map<string, { date: string, amount: number, reference: string | null }[]>;
 }) {
@@ -214,6 +214,7 @@ function FreightTable({
     kata: filteredRows.reduce((s, r) => s + r.kata, 0),
     transport: filteredRows.reduce((s, r) => s + r.transport, 0),
     net: filteredRows.reduce((s, r) => s + r.net, 0),
+    due: filteredRows.reduce((s, r) => s + dueFor(r), 0),
   };
 
   const exportColumns: ExportColumn<FreightRow>[] = [
@@ -232,9 +233,9 @@ function FreightTable({
       { header: 'Transport', value: (r: FreightRow) => (r.transport ? rupees(r.transport) : ''), excel: (r: FreightRow) => r.transport || null, numFmt: '#,##0.00', align: 'right' as const },
     ]),
     { header: 'Net Freight', value: (r) => rupees(r.net), excel: (r) => r.net, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Due', value: (r) => rupees(dueFor(r)), excel: (r) => dueFor(r), numFmt: '#,##0.00', align: 'right' },
     { header: 'Delivery Status', value: (r) => titleCase(r.deliveryStatus) },
     { header: 'Payment Status', value: (r) => paymentStatusFor(r) },
-    { header: 'Due', value: (r) => rupees(dueFor(r)), excel: (r) => dueFor(r), numFmt: '#,##0.00', align: 'right' },
   ];
 
   return (
@@ -257,6 +258,7 @@ function FreightTable({
             {!hideDeductions && <TableHead className="text-right">Kata</TableHead>}
             {!hideDeductions && <TableHead className="text-right">Transport</TableHead>}
             <TableHead className="text-right">Net Freight</TableHead>
+            <TableHead className="text-right">Due</TableHead>
             <TableHead>Delivery Status</TableHead>
             <TableHead>Payment Status</TableHead>
             <TableHead className="text-right">Action</TableHead>
@@ -264,7 +266,7 @@ function FreightTable({
         </TableHeader>
         <TableBody>
           {filteredRows.length === 0 && (
-            <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No records.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={hideDeductions ? 10 : 12} className="text-center text-muted-foreground py-8">No records.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
             const pay = paymentStatusFor(r);
@@ -291,7 +293,10 @@ function FreightTable({
                   {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">{r.hamali ? `−${rupees(r.hamali)}` : '-'}</TableCell>}
                   {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">{r.kata ? `−${rupees(r.kata)}` : '-'}</TableCell>}
                   {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">{r.transport ? `−${rupees(r.transport)}` : '-'}</TableCell>}
-                  <TableCell className="text-right font-bold">{rupees(r.net)}</TableCell>
+                  <TableCell className="text-right font-medium">{rupees(r.net)}</TableCell>
+                  <TableCell className={cn('text-right font-mono tabular-nums', due === 0 ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-rose-600 dark:text-rose-400 font-bold')}>
+                    {rupees(due)}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={deliveryVariant[r.deliveryStatus] ?? 'secondary'}>{titleCase(r.deliveryStatus)}</Badge>
                   </TableCell>
@@ -310,7 +315,7 @@ function FreightTable({
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     {r.lorry && pay !== 'Paid' ? (
-                      <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due, r.sourced)}>
+                      <Button size="sm" variant="outline" onClick={() => onPay(r, due)}>
                         Pay
                       </Button>
                     ) : null}
@@ -319,7 +324,7 @@ function FreightTable({
                 {isExpanded && r.lorry && (() => {
                   const history = paymentsByLorry.get(r.lorry!) ?? [];
                   return (
-                    <ExpandPanel colSpan={11}>
+                    <ExpandPanel colSpan={hideDeductions ? 10 : 12}>
                       <PanelLabel>Payment History for {r.lorry} · {history.length}</PanelLabel>
                       {history.length === 0 ? (
                         <PanelEmpty>No payments recorded.</PanelEmpty>
@@ -356,6 +361,7 @@ function FreightTable({
               {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">−{rupees(t.kata)}</TableCell>}
               {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">−{rupees(t.transport)}</TableCell>}
               <TableCell className="text-right">{rupees(t.net)}</TableCell>
+              <TableCell className="text-right font-bold">{rupees(t.due)}</TableCell>
               <TableCell colSpan={3} />
             </TableRow>
           </tfoot>
@@ -386,7 +392,7 @@ function TransfersTable({
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
-  onPay: (lorry: string, due: number, sourced: FreightRow['sourced']) => void;
+  onPay: (row: FreightRow, due: number) => void;
   paymentsByLorry: Map<string, { date: string; amount: number; reference: string | null }[]>;
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -394,6 +400,7 @@ function TransfersTable({
   const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
   const totalTransport = filteredRows.reduce((s, r) => s + r.net, 0);
+  const totalDue = filteredRows.reduce((s, r) => s + dueFor(r), 0);
 
   const exportColumns: ExportColumn<FreightRow>[] = [
     { header: 'Date', value: (r) => shortDate(r.date) },
@@ -402,8 +409,8 @@ function TransfersTable({
     { header: 'Lorry No', value: (r) => r.lorry ?? '' },
     { header: 'Weight (kg)', value: (r) => r.weightKg ?? 0, numFmt: '#,##0', align: 'right' },
     { header: 'Transport', value: (r) => rupees(r.net), excel: (r) => r.net, numFmt: '#,##0.00', align: 'right' },
-    { header: 'Payment Status', value: (r) => paymentStatusFor(r) },
     { header: 'Due', value: (r) => rupees(dueFor(r)), excel: (r) => dueFor(r), numFmt: '#,##0.00', align: 'right' },
+    { header: 'Payment Status', value: (r) => paymentStatusFor(r) },
   ];
 
   return (
@@ -421,13 +428,14 @@ function TransfersTable({
             <TableHead>Lorry No</TableHead>
             <TableHead className="text-right">Weight</TableHead>
             <TableHead className="text-right">Transport</TableHead>
+            <TableHead className="text-right">Due</TableHead>
             <TableHead>Payment Status</TableHead>
             <TableHead className="text-right">Action</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {filteredRows.length === 0 && (
-            <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
             const pay = paymentStatusFor(r);
@@ -449,7 +457,10 @@ function TransfersTable({
                   <TableCell className="text-sm">{r.destination ?? '-'}</TableCell>
                   <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorry ?? '-'}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">{r.weightKg != null ? `${(r.weightKg / 1000).toFixed(2)} t` : '-'}</TableCell>
-                  <TableCell className="text-right font-bold">{rupees(r.net)}</TableCell>
+                  <TableCell className="text-right font-medium">{rupees(r.net)}</TableCell>
+                  <TableCell className={cn('text-right font-mono tabular-nums', due === 0 ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-rose-600 dark:text-rose-400 font-bold')}>
+                    {rupees(due)}
+                  </TableCell>
                   <TableCell>
                     {r.lorry ? (
                       <span
@@ -469,7 +480,7 @@ function TransfersTable({
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     {r.lorry && pay !== 'Paid' ? (
-                      <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due, r.sourced)}>
+                      <Button size="sm" variant="outline" onClick={() => onPay(r, due)}>
                         Pay
                       </Button>
                     ) : null}
@@ -478,7 +489,7 @@ function TransfersTable({
                 {isExpanded && r.lorry && (() => {
                   const history = paymentsByLorry.get(r.lorry!) ?? [];
                   return (
-                    <ExpandPanel colSpan={8}>
+                    <ExpandPanel colSpan={9}>
                       <PanelLabel>Payment History for {r.lorry} · {history.length}</PanelLabel>
                       {history.length === 0 ? (
                         <PanelEmpty>No payments recorded.</PanelEmpty>
@@ -511,6 +522,7 @@ function TransfersTable({
             <TableRow className="border-t-2 font-bold bg-muted/30">
               <TableCell colSpan={5}>Total</TableCell>
               <TableCell className="text-right">{rupees(totalTransport)}</TableCell>
+              <TableCell className="text-right font-bold">{rupees(totalDue)}</TableCell>
               <TableCell colSpan={2} />
             </TableRow>
           </tfoot>
@@ -519,6 +531,16 @@ function TransfersTable({
       <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
   );
+}
+
+interface PayTarget {
+  id: string;
+  lorry: string;
+  due: number;
+  sourced: FreightRow['sourced'];
+  kind?: 'Husk' | 'Seed' | 'Dust';
+  date: string;
+  destination?: string | null;
 }
 
 export default function FreightDuesPage() {
@@ -530,7 +552,7 @@ export default function FreightDuesPage() {
   const [tab, setTab] = useState('outward');
 
   // Pay dialog state
-  const [payLorry, setPayLorry] = useState<string | null>(null);
+  const [payTarget, setPayTarget] = useState<PayTarget | null>(null);
   const [payType, setPayType] = useState<'TRANSPORTER_INWARD' | 'TRANSPORTER_OUTWARD'>('TRANSPORTER_OUTWARD');
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
@@ -688,56 +710,95 @@ export default function FreightDuesPage() {
     .filter((r) => r.freight > 0)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  // Payment status is settled per lorry (transporter payments aren't tagged to a
-  // single invoice): a lorry's total net freight vs its total transporter paid.
-  const paidByLorry = new Map<string, number>();
+  // Payment matching:
+  // 1. Direct row payments (tagged with [rowId] in description or reference)
+  // 2. Floating payments per lorry, separated into Usual Freight vs Transfer pools
+  const rowStatus = new Map<string, PaymentStatus>();
+  const rowDue = new Map<string, number>();
   const paymentsByLorry = new Map<string, { date: string, amount: number, reference: string | null }[]>();
+
+  const directPaidByRow = new Map<string, number>();
+  const floatingUsualByLorry = new Map<string, number>();
+  const floatingTransferByLorry = new Map<string, number>();
+
   payments?.forEach((p) => {
     if ((p.type === 'TRANSPORTER' || p.type === 'TRANSPORTER_INWARD' || p.type === 'TRANSPORTER_OUTWARD') && p.lorryNumber) {
       const k = p.lorryNumber.trim().toUpperCase();
-      paidByLorry.set(k, (paidByLorry.get(k) ?? 0) + Number(p.amount));
+      const amt = Number(p.amount);
       
       const list = paymentsByLorry.get(k) || [];
-      list.push({ date: p.date, amount: Number(p.amount), reference: p.reference ?? null });
+      list.push({ date: p.date, amount: amt, reference: p.reference ?? null });
       paymentsByLorry.set(k, list);
-    }
-  });
-  const rowStatus = new Map<string, PaymentStatus>();
-  const rowDue = new Map<string, number>();
 
-  // Payment status is settled per lorry (transporter payments aren't tagged to a
-  // single invoice): a lorry's total net freight vs its total transporter paid.
-  // Includes outward freight, inward freight, KNM usual freight, and transfers.
-  const allRows = [...inwardRows, ...outwardRows, ...knmRows, ...transferRows];
-  const rowsByLorry = new Map<string, FreightRow[]>();
-  
-  allRows.forEach((r) => {
-    if (r.lorry) {
-      const list = rowsByLorry.get(r.lorry) || [];
-      list.push(r);
-      rowsByLorry.set(r.lorry, list);
-    }
-  });
+      // Check if description contains direct row tag: e.g. [seed-cmt1gecun0007dq2dkq6urkth]
+      const match = p.description?.match(/\[([a-zA-Z0-9_-]+)\]/);
+      const rowId = match ? match[1] : null;
 
-  for (const [lorry, lorryRows] of rowsByLorry.entries()) {
-    lorryRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    let remainingPaid = paidByLorry.get(lorry) ?? 0;
-    
-    for (const r of lorryRows) {
-      if (remainingPaid <= 0) {
-        rowStatus.set(r.id, 'Pending');
-        rowDue.set(r.id, r.net);
-      } else if (remainingPaid + 0.01 >= r.net) {
-        rowStatus.set(r.id, 'Paid');
-        rowDue.set(r.id, 0);
-        remainingPaid -= r.net;
+      if (rowId) {
+        directPaidByRow.set(rowId, (directPaidByRow.get(rowId) ?? 0) + amt);
+      } else if (p.description?.toLowerCase().includes('transfer')) {
+        floatingTransferByLorry.set(k, (floatingTransferByLorry.get(k) ?? 0) + amt);
       } else {
-        rowStatus.set(r.id, 'Partial');
-        rowDue.set(r.id, round2(r.net - remainingPaid));
-        remainingPaid = 0;
+        floatingUsualByLorry.set(k, (floatingUsualByLorry.get(k) ?? 0) + amt);
+      }
+    }
+  });
+
+  function allocatePool(rows: FreightRow[], floatingByLorry: Map<string, number>) {
+    const remainingDueMap = new Map<string, number>();
+    for (const r of rows) {
+      const direct = directPaidByRow.get(r.id) ?? 0;
+      const rem = round2(Math.max(0, r.net - direct));
+      remainingDueMap.set(r.id, rem);
+    }
+
+    const rowsByLorry = new Map<string, FreightRow[]>();
+    for (const r of rows) {
+      if (r.lorry) {
+        const list = rowsByLorry.get(r.lorry) || [];
+        list.push(r);
+        rowsByLorry.set(r.lorry, list);
+      }
+    }
+
+    for (const [lorry, lorryRows] of rowsByLorry.entries()) {
+      lorryRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      let remainingPaid = floatingByLorry.get(lorry) ?? 0;
+
+      for (const r of lorryRows) {
+        const remAfterDirect = remainingDueMap.get(r.id) ?? r.net;
+        const direct = directPaidByRow.get(r.id) ?? 0;
+
+        if (remAfterDirect <= 0) {
+          rowStatus.set(r.id, 'Paid');
+          rowDue.set(r.id, 0);
+        } else if (remainingPaid <= 0) {
+          if (direct > 0) {
+            rowStatus.set(r.id, 'Partial');
+            rowDue.set(r.id, remAfterDirect);
+          } else {
+            rowStatus.set(r.id, 'Pending');
+            rowDue.set(r.id, r.net);
+          }
+        } else if (remainingPaid + 0.01 >= remAfterDirect) {
+          rowStatus.set(r.id, 'Paid');
+          rowDue.set(r.id, 0);
+          remainingPaid -= remAfterDirect;
+        } else {
+          rowStatus.set(r.id, 'Partial');
+          rowDue.set(r.id, round2(remAfterDirect - remainingPaid));
+          remainingPaid = 0;
+        }
       }
     }
   }
+
+  // Allocate Usual Freight Pool (Outward, Inward, KNM Usual)
+  allocatePool([...inwardRows, ...outwardRows, ...knmRows], floatingUsualByLorry);
+
+  // Allocate Transfer Pool (Husk, Seed, Dust Transfers)
+  allocatePool(transferRows, floatingTransferByLorry);
+
   return { outwardRows, inwardRows, knmRows, transferRows, rowStatus, rowDue, paymentsByLorry };
   }, [saleOrders, purchases, payments, company, huskTransfers, shellTransfers, stockTransfers]);
 
@@ -749,42 +810,62 @@ export default function FreightDuesPage() {
   }
 
   const payMutation = useMutation({
-    mutationFn: () =>
-      api<Payment>('/payments', {
+    mutationFn: () => {
+      if (!payTarget) throw new Error('No trip selected for payment');
+      const desc = payTarget.sourced === 'Transfer'
+        ? `Transfer transport (${payTarget.kind || 'Internal'}) - Lorry ${payTarget.lorry} [${payTarget.id}]`
+        : `Freight payment - Lorry ${payTarget.lorry} [${payTarget.id}]`;
+
+      return api<Payment>('/payments', {
         method: 'POST',
         body: {
           date: payDate,
           amount: Number(payAmount) || 0,
           type: payType,
-          lorryNumber: payLorry,
+          lorryNumber: payTarget.lorry,
           reference: payReference || null,
-          description: `Freight payment - Lorry ${payLorry}`,
+          description: desc,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       toast.success('Freight payment recorded');
-      setPayLorry(null);
+      setPayTarget(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // A row combining a shared lorry's same-day Purchase + Sale freight has no
-  // single inward/outward answer - default it to outward (the common case).
-  function openPay(lorry: string, due: number, sourced: FreightRow['sourced']) {
-    setPayLorry(lorry);
-    setPayType(sourced === 'Purchase' ? 'TRANSPORTER_INWARD' : 'TRANSPORTER_OUTWARD');
-    setPayDate(new Date().toISOString().slice(0, 10));
+  function openPay(row: FreightRow, due: number) {
+    if (!row.lorry) return;
+    setPayTarget({
+      id: row.id,
+      lorry: row.lorry,
+      due,
+      sourced: row.sourced,
+      kind: row.kind,
+      date: row.date,
+      destination: row.destination,
+    });
+    setPayType(row.sourced === 'Purchase' ? 'TRANSPORTER_INWARD' : 'TRANSPORTER_OUTWARD');
+    setPayDate(row.date ? row.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
     setPayAmount(due > 0 ? String(due) : '');
     setPayReference('');
   }
 
   const outwardNet = outwardRows.reduce((s, r) => s + r.net, 0);
+  const outwardDue = outwardRows.reduce((s, r) => s + dueFor(r), 0);
+
   const inwardNet = inwardRows.reduce((s, r) => s + r.net, 0);
+  const inwardDue = inwardRows.reduce((s, r) => s + dueFor(r), 0);
+
   const knmUsualNet = knmRows.reduce((s, r) => s + r.net, 0);
+  const knmUsualDue = knmRows.reduce((s, r) => s + dueFor(r), 0);
+
   const transfersNet = transferRows.reduce((s, r) => s + r.net, 0);
+  const transfersDue = transferRows.reduce((s, r) => s + dueFor(r), 0);
 
   return (
     <div className="space-y-6">
@@ -841,7 +922,10 @@ export default function FreightDuesPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Outward Net Freight</CardTitle>
                   </CardHeader>
-                  <CardContent><div className="text-xl font-bold">{rupees(outwardNet)}</div></CardContent>
+                  <CardContent>
+                    <div className="text-xl font-bold">{rupees(outwardDue)}</div>
+                    <div className="text-xs text-muted-foreground mt-1">Total: {rupees(outwardNet)}</div>
+                  </CardContent>
                 </Card>
                 <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
@@ -851,7 +935,10 @@ export default function FreightDuesPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inward Net Freight</CardTitle>
                   </CardHeader>
-                  <CardContent><div className="text-xl font-bold">{rupees(inwardNet)}</div></CardContent>
+                  <CardContent>
+                    <div className="text-xl font-bold">{rupees(inwardDue)}</div>
+                    <div className="text-xs text-muted-foreground mt-1">Total: {rupees(inwardNet)}</div>
+                  </CardContent>
                 </Card>
                 <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
@@ -860,21 +947,30 @@ export default function FreightDuesPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
                   <Card className="bg-card/50 border shadow-sm">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Usual Freight Net</CardTitle>
+                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Usual Freight Due</CardTitle>
                     </CardHeader>
-                    <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet)}</div></CardContent>
+                    <CardContent>
+                      <div className="text-xl font-bold">{rupees(knmUsualDue)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total: {rupees(knmUsualNet)}</div>
+                    </CardContent>
                   </Card>
                   <Card className="bg-card/50 border shadow-sm">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transfers Payable</CardTitle>
                     </CardHeader>
-                    <CardContent><div className="text-xl font-bold">{rupees(transfersNet)}</div></CardContent>
+                    <CardContent>
+                      <div className="text-xl font-bold">{rupees(transfersDue)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total: {rupees(transfersNet)}</div>
+                    </CardContent>
                   </Card>
                   <Card className="bg-card/50 border shadow-sm">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">KNM Total</CardTitle>
+                      <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">KNM Total Payable</CardTitle>
                     </CardHeader>
-                    <CardContent><div className="text-xl font-bold">{rupees(knmUsualNet + transfersNet)}</div></CardContent>
+                    <CardContent>
+                      <div className="text-xl font-bold">{rupees(knmUsualDue + transfersDue)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total: {rupees(knmUsualNet + transfersNet)}</div>
+                    </CardContent>
                   </Card>
                 </div>
 
@@ -911,12 +1007,29 @@ export default function FreightDuesPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={payLorry !== null} onOpenChange={(o) => { if (!o) setPayLorry(null); }}>
+      <Dialog open={payTarget !== null} onOpenChange={(o) => { if (!o) setPayTarget(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Pay Freight - Lorry {payLorry}</DialogTitle>
+            <DialogTitle>
+              Pay {payTarget?.sourced === 'Transfer' ? `${payTarget.kind || ''} Transfer` : 'Freight'} - Lorry {payTarget?.lorry}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {payTarget && (
+              <div className="rounded-md bg-muted/50 p-3 text-xs space-y-1 text-muted-foreground">
+                <div className="flex justify-between">
+                  <span>Date: <strong className="text-foreground">{shortDate(payTarget.date)}</strong></span>
+                  <span>Type: <strong className="text-foreground">{payTarget.sourced === 'Transfer' ? `${payTarget.kind} Transfer` : payTarget.sourced}</strong></span>
+                </div>
+                {payTarget.destination && (
+                  <div>Route: <strong className="text-foreground">{payTarget.destination}</strong></div>
+                )}
+                <div className="flex justify-between font-medium">
+                  <span>Due Amount:</span>
+                  <span className="text-rose-600 dark:text-rose-400 font-bold">{rupees(payTarget.due)}</span>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="pay-date">Payment Date</Label>

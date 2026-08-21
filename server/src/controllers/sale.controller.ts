@@ -373,9 +373,13 @@ export async function createSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null } | null = null;
+  let selectedAddr: { id: string; label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null; phone?: string | null; phone2?: string | null; locationLink?: string | null } | null = null;
   if (data.buyerAddressId) {
     selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
+  }
+  if (!selectedAddr) {
+    const addrs = await prisma.partyAddress.findMany({ where: { partyId: buyer.id }, orderBy: { createdAt: 'asc' } });
+    selectedAddr = addrs.find((a) => a.isDefault) || addrs[0] || null;
   }
 
   const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
@@ -384,11 +388,15 @@ export async function createSaleOrder(req: Request, res: Response) {
   const gstFraction = await gstFractionForProduct(data.product);
   const stamps = await currentCostStamps(destination ?? effectiveDestination, priceType);
 
+  const buyerAddressId = selectedAddr?.id || data.buyerAddressId || null;
   const buyerAddress = data.buyerAddress || selectedAddr?.address || buyer.address || null;
   const buyerCity = data.buyerCity || selectedAddr?.city || buyer.city || null;
   const buyerState = data.buyerState || selectedAddr?.state || buyer.state || null;
   const buyerPincode = data.buyerPincode || selectedAddr?.pincode || buyer.pincode || null;
   const buyerGstin = data.buyerGstin || selectedAddr?.gstin || buyer.gstin || null;
+  const buyerPhone = data.buyerPhone || selectedAddr?.phone || buyer.phone || null;
+  const buyerPhone2 = data.buyerPhone2 || selectedAddr?.phone2 || buyer.phone2 || null;
+  const buyerLocationLink = data.buyerLocationLink || selectedAddr?.locationLink || buyer.locationLink || null;
 
   const order = await prisma.saleOrder.create({
     data: {
@@ -402,12 +410,15 @@ export async function createSaleOrder(req: Request, res: Response) {
       reminderDate: data.reminderDate ?? null,
       poNumber: data.poNumber ?? null,
       poDate: data.poDate ?? null,
-      buyerAddressId: data.buyerAddressId ?? null,
+      buyerAddressId,
       buyerAddress,
       buyerCity,
       buyerState,
       buyerPincode,
       buyerGstin,
+      buyerPhone,
+      buyerPhone2,
+      buyerLocationLink,
       gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
       gstExempt: data.gstExempt || false,
       brokerageRatePerKg: data.brokerageRatePerKg,
@@ -526,9 +537,13 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-  let selectedAddr: { label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null } | null = null;
+  let selectedAddr: { id: string; label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null; phone?: string | null; phone2?: string | null; locationLink?: string | null } | null = null;
   if (data.buyerAddressId) {
     selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
+  }
+  if (!selectedAddr) {
+    const addrs = await prisma.partyAddress.findMany({ where: { partyId: buyer.id }, orderBy: { createdAt: 'asc' } });
+    selectedAddr = addrs.find((a) => a.isDefault) || addrs[0] || null;
   }
 
   const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
@@ -541,11 +556,15 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
+  const buyerAddressId = data.buyerAddressId !== undefined ? data.buyerAddressId : (selectedAddr?.id || order.buyerAddressId);
   const buyerAddress = data.buyerAddress !== undefined ? data.buyerAddress : (selectedAddr?.address || buyer.address || null);
   const buyerCity = data.buyerCity !== undefined ? data.buyerCity : (selectedAddr?.city || buyer.city || null);
   const buyerState = data.buyerState !== undefined ? data.buyerState : (selectedAddr?.state || buyer.state || null);
   const buyerPincode = data.buyerPincode !== undefined ? data.buyerPincode : (selectedAddr?.pincode || buyer.pincode || null);
   const buyerGstin = data.buyerGstin !== undefined ? data.buyerGstin : (selectedAddr?.gstin || buyer.gstin || null);
+  const buyerPhone = data.buyerPhone !== undefined ? data.buyerPhone : (selectedAddr?.phone || buyer.phone || null);
+  const buyerPhone2 = data.buyerPhone2 !== undefined ? data.buyerPhone2 : (selectedAddr?.phone2 || buyer.phone2 || null);
+  const buyerLocationLink = data.buyerLocationLink !== undefined ? data.buyerLocationLink : (selectedAddr?.locationLink || buyer.locationLink || null);
 
   const updated = await prisma.saleOrder.update({
     where: { id: req.params.id },
@@ -560,12 +579,15 @@ export async function updateSaleOrder(req: Request, res: Response) {
       reminderDate: data.reminderDate ?? null,
       poNumber: data.poNumber !== undefined ? data.poNumber : order.poNumber,
       poDate: data.poDate !== undefined ? data.poDate : order.poDate,
-      buyerAddressId: data.buyerAddressId !== undefined ? data.buyerAddressId : order.buyerAddressId,
+      buyerAddressId,
       buyerAddress,
       buyerCity,
       buyerState,
       buyerPincode,
       buyerGstin,
+      buyerPhone,
+      buyerPhone2,
+      buyerLocationLink,
       gstAmount: data.gstExempt ? 0 : calcGst(data.tonnageKg, Number(data.ratePerKg), gstFraction),
       gstExempt: data.gstExempt || false,
       brokerageRatePerKg: data.brokerageRatePerKg,
@@ -880,9 +902,19 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // only when a driver phone was captured on this dispatch. The broker/buyer
   // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
   // (the invoice/EWB don't exist yet at dispatch time).
-  const selectedAddress = order.buyerAddressId
+  let selectedAddress = order.buyerAddressId
     ? await prisma.partyAddress.findUnique({ where: { id: order.buyerAddressId } })
     : null;
+  if (!selectedAddress && order.buyer?.id) {
+    const addrs = await prisma.partyAddress.findMany({ where: { partyId: order.buyer.id }, orderBy: { createdAt: 'asc' } });
+    selectedAddress = addrs.find((a) => a.isDefault) || addrs[0] || null;
+  }
+
+  const effectivePhone = order.buyerPhone || selectedAddress?.phone || order.buyer.phone || null;
+  const effectiveLocationLink = order.buyerLocationLink || selectedAddress?.locationLink || order.buyer.locationLink || null;
+  const effectiveAddress = order.buyerAddress || selectedAddress?.address || order.buyer.address || null;
+  const effectiveCity = order.buyerCity || selectedAddress?.city || order.buyer.city || null;
+  const effectiveDestination = order.destination || selectedAddress?.destination || order.buyer.destination || null;
 
   void whatsappService.notifyDispatchDriver(
     {
@@ -894,12 +926,12 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     },
     {
       name: order.buyer.name,
-      phone: selectedAddress?.phone || order.buyer.phone,
-      locationLink: selectedAddress?.locationLink || order.buyer.locationLink,
-      address: order.buyerAddress || selectedAddress?.address || order.buyer.address,
-      city: order.buyerCity || selectedAddress?.city || order.buyer.city,
+      phone: effectivePhone,
+      locationLink: effectiveLocationLink,
+      address: effectiveAddress,
+      city: effectiveCity,
     },
-    { destination: order.destination || selectedAddress?.destination || order.buyer.destination, product: order.product }
+    { destination: effectiveDestination, product: order.product }
   );
 
   res.status(201).json(dispatch);

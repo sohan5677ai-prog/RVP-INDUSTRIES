@@ -478,6 +478,9 @@ export interface SaleOrder {
   buyerState?: string | null;
   buyerPincode?: string | null;
   buyerGstin?: string | null;
+  buyerPhone?: string | null;
+  buyerPhone2?: string | null;
+  buyerLocationLink?: string | null;
   // Set once the order is finished with tonnage still unshipped on paper -
   // either the final lorry landed within the Settings tolerance (24.87 t on a
   // 25 t husk booking) or the user short-closed it. tonnageKg is never rewritten.

@@ -558,6 +558,9 @@ model SaleOrder {
   buyerState         String?
   buyerPincode       String?
   buyerGstin         String?
+  buyerPhone         String?
+  buyerPhone2        String?
+  buyerLocationLink  String?
 
   // --- Cost freeze -----------------------------------------------------------
   // The Pappu P&L used to recompute every order from scratch on each page load,

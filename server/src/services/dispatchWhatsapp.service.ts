@@ -103,9 +103,13 @@ async function renderBundleEwbPdf(
 export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<DispatchWhatsAppResult> {
   const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
 
-  const selectedAddress = order.buyerAddressId
+  let selectedAddress = order.buyerAddressId
     ? await prisma.partyAddress.findUnique({ where: { id: order.buyerAddressId } })
     : null;
+  if (!selectedAddress && order.buyer?.id) {
+    const addrs = await prisma.partyAddress.findMany({ where: { partyId: order.buyer.id }, orderBy: { createdAt: 'asc' } });
+    selectedAddress = addrs.find((a) => a.isDefault) || addrs[0] || null;
+  }
 
   // A broker named "RVP" (or no broker) means it's our own order - the buyer is
   // messaged directly with no broker reference; otherwise the buyer's copy names
@@ -197,6 +201,8 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
   const buyerPhones = Array.from(
     new Set(
       [
+        order.buyerPhone,
+        order.buyerPhone2,
         selectedAddress?.phone,
         selectedAddress?.phone2,
         order.buyer.phone,

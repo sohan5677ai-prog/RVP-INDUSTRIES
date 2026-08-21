@@ -226,7 +226,8 @@ export default function SaleOrders() {
       const url = editing ? `/sale-orders/${editing.id}` : '/sale-orders';
       const method = editing ? 'PUT' : 'POST';
       const selectedBuyer = parties?.find((p) => p.id === v.buyerId);
-      const selectedAddr = selectedBuyer?.addresses?.find((a) => a.id === v.buyerAddressId);
+      const effectiveAddrId = v.buyerAddressId || (selectedBuyer?.addresses?.find((a) => a.isDefault)?.id ?? selectedBuyer?.addresses?.[0]?.id ?? null);
+      const selectedAddr = selectedBuyer?.addresses?.find((a) => a.id === effectiveAddrId);
 
       return api<SaleOrder>(url, {
         method,
@@ -241,12 +242,15 @@ export default function SaleOrders() {
           reminderDate: v.reminderDate ? v.reminderDate : null,
           poNumber: v.poNumber ? v.poNumber.trim() : null,
           poDate: v.poDate ? v.poDate : null,
-          buyerAddressId: v.buyerAddressId || null,
+          buyerAddressId: effectiveAddrId,
           buyerAddress: selectedAddr?.address || selectedBuyer?.address || null,
           buyerCity: selectedAddr?.city || selectedBuyer?.city || null,
           buyerState: selectedAddr?.state || selectedBuyer?.state || null,
           buyerPincode: selectedAddr?.pincode || selectedBuyer?.pincode || null,
           buyerGstin: selectedAddr?.gstin || selectedBuyer?.gstin || null,
+          buyerPhone: selectedAddr?.phone || selectedBuyer?.phone || null,
+          buyerPhone2: selectedAddr?.phone2 || selectedBuyer?.phone2 || null,
+          buyerLocationLink: selectedAddr?.locationLink || selectedBuyer?.locationLink || null,
           marginOverride: override,
           gstExempt,
           priceType,

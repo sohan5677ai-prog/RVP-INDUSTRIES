@@ -24,6 +24,9 @@ export const createSaleOrderSchema = z.object({
   buyerState: z.string().optional().nullable(),
   buyerPincode: z.string().optional().nullable(),
   buyerGstin: z.string().optional().nullable(),
+  buyerPhone: z.string().optional().nullable(),
+  buyerPhone2: z.string().optional().nullable(),
+  buyerLocationLink: z.string().optional().nullable(),
   marginOverride: z.boolean().optional().default(false),
   // When true, bill this order without GST.
   gstExempt: z.boolean().optional().default(false),

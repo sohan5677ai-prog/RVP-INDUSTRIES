@@ -374,21 +374,22 @@ const kindVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
 
 /**
  * Transfer transport payable to KNM Transport (husk / seed / pre-cleaner dust).
- * The whole transport charge is the net due. Kept OUT of the shared per-lorry
- * freight pool on purpose - a lorry that also runs usual freight must never
- * have transfer legs marked paid by freight payments or vice versa - so these
- * always read Pending here until a dedicated transfer-payment flow exists;
- * no Pay action is offered.
+ * Billed to KNM Transport per trip / weight and settled per lorry.
  */
 function TransfersTable({
   rows,
   paymentStatusFor,
   dueFor,
+  onPay,
+  paymentsByLorry,
 }: {
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
+  onPay: (lorry: string, due: number, sourced: FreightRow['sourced']) => void;
+  paymentsByLorry: Map<string, { date: string; amount: number; reference: string | null }[]>;
 }) {
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
   const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
@@ -421,40 +422,87 @@ function TransfersTable({
             <TableHead className="text-right">Weight</TableHead>
             <TableHead className="text-right">Transport</TableHead>
             <TableHead>Payment Status</TableHead>
+            <TableHead className="text-right">Action</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {filteredRows.length === 0 && (
-            <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No transfers.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
             const pay = paymentStatusFor(r);
+            const due = dueFor(r);
+            const isExpanded = expandedRow === r.lorry;
             return (
-              <TableRow key={r.id}>
-                <TableCell>{shortDate(r.date)}</TableCell>
-                <TableCell><Badge variant={kindVariant[r.kind ?? ''] ?? 'secondary'}>{r.kind}</Badge></TableCell>
-                <TableCell className="text-sm">{r.destination ?? '-'}</TableCell>
-                <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorry ?? '-'}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{r.weightKg != null ? `${(r.weightKg / 1000).toFixed(2)} t` : '-'}</TableCell>
-                <TableCell className="text-right font-bold">{rupees(r.net)}</TableCell>
-                <TableCell>
-                  {r.lorry ? (
-                    <span
-                      className={`text-xs font-semibold ${
-                        pay === 'Paid'
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : pay === 'Partial'
-                            ? 'text-amber-600 dark:text-amber-400'
-                            : 'text-rose-600 dark:text-rose-400'
-                      }`}
-                    >
-                      {pay}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">No lorry</span>
-                  )}
-                </TableCell>
-              </TableRow>
+              <Fragment key={r.id}>
+                <TableRow
+                  className={cn('transition-colors', r.lorry ? cn('cursor-pointer', isExpanded ? 'bg-accent/40' : 'hover:bg-accent/30') : 'hover:bg-muted/50')}
+                  onClick={() => r.lorry && setExpandedRow(isExpanded ? null : r.lorry)}
+                >
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {r.lorry && <ChevronRight className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200', isExpanded && 'rotate-90 text-primary')} />}
+                      {shortDate(r.date)}
+                    </div>
+                  </TableCell>
+                  <TableCell><Badge variant={kindVariant[r.kind ?? ''] ?? 'secondary'}>{r.kind}</Badge></TableCell>
+                  <TableCell className="text-sm">{r.destination ?? '-'}</TableCell>
+                  <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorry ?? '-'}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{r.weightKg != null ? `${(r.weightKg / 1000).toFixed(2)} t` : '-'}</TableCell>
+                  <TableCell className="text-right font-bold">{rupees(r.net)}</TableCell>
+                  <TableCell>
+                    {r.lorry ? (
+                      <span
+                        className={`text-xs font-semibold ${
+                          pay === 'Paid'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : pay === 'Partial'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {pay}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">No lorry</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    {r.lorry && pay !== 'Paid' ? (
+                      <Button size="sm" variant="outline" onClick={() => onPay(r.lorry!, due, r.sourced)}>
+                        Pay
+                      </Button>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+                {isExpanded && r.lorry && (() => {
+                  const history = paymentsByLorry.get(r.lorry!) ?? [];
+                  return (
+                    <ExpandPanel colSpan={8}>
+                      <PanelLabel>Payment History for {r.lorry} · {history.length}</PanelLabel>
+                      {history.length === 0 ? (
+                        <PanelEmpty>No payments recorded.</PanelEmpty>
+                      ) : (
+                        <PanelStack>
+                          {history.map((pay, i) => (
+                            <PanelCard
+                              key={i}
+                              icon={IndianRupee}
+                              identity={
+                                <PanelTitle>
+                                  <span className="font-mono text-sm font-semibold">{shortDate(pay.date)}</span>
+                                  {pay.reference && <span className="text-xs text-muted-foreground">{pay.reference}</span>}
+                                </PanelTitle>
+                              }
+                              figures={<Figure label="Amount" value={rupees(pay.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
+                            />
+                          ))}
+                        </PanelStack>
+                      )}
+                    </ExpandPanel>
+                  );
+                })()}
+              </Fragment>
             );
           })}
         </TableBody>
@@ -463,7 +511,7 @@ function TransfersTable({
             <TableRow className="border-t-2 font-bold bg-muted/30">
               <TableCell colSpan={5}>Total</TableCell>
               <TableCell className="text-right">{rupees(totalTransport)}</TableCell>
-              <TableCell />
+              <TableCell colSpan={2} />
             </TableRow>
           </tfoot>
         )}
@@ -657,12 +705,10 @@ export default function FreightDuesPage() {
   const rowStatus = new Map<string, PaymentStatus>();
   const rowDue = new Map<string, number>();
 
-  // Transfer transport is deliberately kept OUT of this pool: a lorry that also
-  // runs husk/seed/dust transfers must never have those legs silently marked
-  // paid by freight payments (or vice versa) just because they share a lorry
-  // number. Transfers fall back to their default Pending/full-due below and
-  // settle through a separate mechanism.
-  const allRows = [...inwardRows, ...outwardRows, ...knmRows];
+  // Payment status is settled per lorry (transporter payments aren't tagged to a
+  // single invoice): a lorry's total net freight vs its total transporter paid.
+  // Includes outward freight, inward freight, KNM usual freight, and transfers.
+  const allRows = [...inwardRows, ...outwardRows, ...knmRows, ...transferRows];
   const rowsByLorry = new Map<string, FreightRow[]>();
   
   allRows.forEach((r) => {
@@ -848,7 +894,7 @@ export default function FreightDuesPage() {
 
                   <TabsContent value="transfers" className="space-y-2">
                     <p className="text-xs text-muted-foreground">Husk, seed &amp; pre-cleaner dust transport billed to KNM Transport.</p>
-                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} />
+                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
                   </TabsContent>
                 </Tabs>
               </TabsContent>

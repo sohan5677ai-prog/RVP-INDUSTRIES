@@ -58,9 +58,9 @@ export async function dashboardSummary(_req: Request, res: Response) {
 }
 
 // Non-pappu byproduct revenue pooled into the "Husk" recovery view. Excludes
-// Pappu (its own P&L) and Shell.
+// Pappu (its own P&L).
 const POOL_REVENUE_COST_CENTERS = [
-  'HUSK', 'WASTE', 'TPS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU',
+  'HUSK', 'WASTE', 'TPS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU', 'SHELL',
 ];
 // Products loaded at the ₹/tonne WASTE_LOADING rate (10% pool byproducts).
 const WASTE_LOADING_PRODUCTS = new Set([

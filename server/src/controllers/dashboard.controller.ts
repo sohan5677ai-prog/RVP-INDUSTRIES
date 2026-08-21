@@ -216,7 +216,6 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
         where: { saleOrder: { product: { in: POOL_REVENUE_COST_CENTERS as any } } },
         select: {
           weightKg: true,
-          gstAmount: true,
           saleOrder: { select: { ratePerKg: true } },
         },
       }),
@@ -306,10 +305,10 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       prisma.companyProfile.findFirst({ select: { companyVehicles: true } }),
     ]);
 
-    // ── Revenue: pooled byproduct sales revenue (GST-inclusive dispatched sales) ──
+    // ── Revenue: pooled byproduct sales revenue (dispatched sales, excluding GST) ──
     const revenue = Math.round(
       byproductDispatches.reduce(
-        (sum, d) => sum + d.weightKg * Number(d.saleOrder.ratePerKg) + Number(d.gstAmount || 0),
+        (sum, d) => sum + d.weightKg * Number(d.saleOrder.ratePerKg),
         0,
       ) * 100,
     ) / 100;
@@ -447,7 +446,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     for (const cn of issuedCreditNotes) {
       const hasReceiptShortage = (cn.saleDispatch?.receipts?.length ?? 0) > 0;
       if (hasReceiptShortage) continue;
-      creditNotesTotal += Number(cn.totalAmount || cn.taxableValue || 0);
+      creditNotesTotal += Number(cn.taxableValue || cn.totalAmount || 0);
     }
 
     const expenses: HuskExpenses = {

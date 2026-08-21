@@ -7,7 +7,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { Purchase, SaleOrder, HamaliRate, StockTransfer, ShellTransfer, HuskTransfer, ManualHamaliCost, ManualHamaliType, HamaliVerification, CompanyProfile, Payment, Party } from '@/lib/types';
-import { kg, rupees, shortDate } from '@/lib/format';
+import { kg, rupees, shortDate, toYMD } from '@/lib/format';
 import { hamaliSplit, pappuLoadingHamali, calcHamali, customLoadingHamali, isVehicleExempt } from '@/lib/calc';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -483,37 +483,69 @@ export default function HamaliLedger() {
   return { purchaseEntries, saleEntries, transferEntries };
   }, [purchases, saleOrders, hamaliRates, companyProfile, stockTransfers, shellTransfers, huskTransfers]);
 
+  const dayOf = (d: string) => toYMD(d);
+
   const q = search.trim().toLowerCase();
-  const filtered = [...purchaseEntries, ...saleEntries, ...transferEntries]
-    .filter((e) => {
-      // Purchases are supplier-side hamali, sale loading is buyer-side.
-      if (partyType === 'SUPPLIER' && e.source !== 'PURCHASE') return false;
-      if (partyType === 'BUYER' && e.source !== 'SALE') return false;
-      if (q && !e.partyName.toLowerCase().includes(q)) return false;
-      const d = new Date(e.date).toISOString().slice(0, 10);
-      if (startDate && d < startDate) return false;
-      if (endDate && d > endDate) return false;
-      return true;
-    })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const chargeNote = chargeSearch.trim().toLowerCase();
+
+  const filtered = useMemo(() => {
+    // If a specific manual charge type is filtered, derived entries (purchases/sales/transfers) should not appear
+    if (chargeFilter !== 'ALL') return [];
+
+    return [...purchaseEntries, ...saleEntries, ...transferEntries]
+      .filter((e) => {
+        // Purchases are supplier-side hamali, sale loading is buyer-side.
+        if (partyType === 'SUPPLIER' && e.source !== 'PURCHASE') return false;
+        if (partyType === 'BUYER' && e.source !== 'SALE') return false;
+        if (q && !e.partyName.toLowerCase().includes(q)) return false;
+        if (chargeNote && !(`${e.reference} ${e.label || ''} ${e.partyName}`.toLowerCase().includes(chargeNote))) return false;
+        const d = dayOf(e.date);
+        if (startDate && d < startDate) return false;
+        if (endDate && d > endDate) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const dayB = dayOf(b.date);
+        const dayA = dayOf(a.date);
+        if (dayB !== dayA) return dayB.localeCompare(dayA);
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+  }, [purchaseEntries, saleEntries, transferEntries, partyType, q, chargeFilter, chargeNote, startDate, endDate]);
 
   // Metrics
   const totalPl = filtered.reduce((acc, e) => acc + e.pl, 0);
   const totalTons = filtered.reduce((acc, e) => acc + e.netWeightKg, 0) / 1000;
 
   // Manual costs - charges accrue what we owe the crew; PAID entries settle it.
-  const manualSorted = [...(manualCosts ?? [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const manualSorted = useMemo(
+    () =>
+      [...(manualCosts ?? [])].sort((a, b) => {
+        const dayB = dayOf(b.date);
+        const dayA = dayOf(a.date);
+        if (dayB !== dayA) return dayB.localeCompare(dayA);
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      }),
+    [manualCosts]
+  );
 
   // Rows shown in the Recorded Charges table + their own header totals honor the
-  // type/search filter; the crew-payable metrics above stay on the full set.
+  // type/search filter, party filters, and date range filters.
   const manualFiltered = useMemo(() => {
+    // If party filter is active (BUYER / SUPPLIER) or party search is typed,
+    // manual charges (mill crew charges without a party) should not appear
+    if (partyType !== 'ALL' || q !== '') return [];
+
     const needle = chargeSearch.trim().toLowerCase();
     return manualSorted.filter((c) => {
       if (chargeFilter !== 'ALL' && c.type !== chargeFilter) return false;
       if (needle && !(`${c.note ?? ''} ${manualTypeMeta(c.type).label}`.toLowerCase().includes(needle))) return false;
+      const d = dayOf(c.date);
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
       return true;
     });
-  }, [manualSorted, chargeFilter, chargeSearch]);
+  }, [manualSorted, chargeFilter, chargeSearch, partyType, q, startDate, endDate]);
+
   const manualFilteredCharged = manualFiltered.filter((c) => c.type !== 'PAID').reduce((s, c) => s + Number(c.amount), 0);
   const manualFilteredPaid = manualFiltered.filter((c) => c.type === 'PAID').reduce((s, c) => s + Number(c.amount), 0);
   const manualFilteredOutstanding = manualFilteredCharged - manualFilteredPaid;
@@ -559,7 +591,12 @@ export default function HamaliLedger() {
       pl: null,
       manual: c,
     }));
-    return [...entryRows, ...manualRows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return [...entryRows, ...manualRows].sort((a, b) => {
+      const dayB = dayOf(b.date);
+      const dayA = dayOf(a.date);
+      if (dayB !== dayA) return dayB.localeCompare(dayA);
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
   }, [filtered, manualFiltered, roundedValues]);
 
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(unifiedRows, 50);
@@ -568,7 +605,6 @@ export default function HamaliLedger() {
   // Rows dated on/before the latest checkpoint are cross-verified and locked; the
   // window since is the current, still-to-verify period. Crew total = derived crew
   // shares + manual charges − paid, matching what the crew is actually owed.
-  const dayOf = (d: string) => new Date(d).toISOString().slice(0, 10);
   const verifSorted = [...(verifications ?? [])].sort((a, b) => new Date(b.asOfDate).getTime() - new Date(a.asOfDate).getTime());
   const verifiedThroughDay = verifSorted[0] ? dayOf(verifSorted[0].asOfDate) : null;
   const isVerified = (dateIso: string) => verifiedThroughDay != null && dayOf(dateIso) <= verifiedThroughDay;
@@ -590,35 +626,19 @@ export default function HamaliLedger() {
   const pendingCrewTotal = Math.round((pendingCrewFromEntries + pendingCrewFromManual) * 100) / 100;
   const squareValid = (verifiedThroughDay == null || squareDate > verifiedThroughDay) && pendingCrewTotal > 0;
 
-  // Crew payable across the currently filtered rows (Hamali view metric). This
-  // now also folds in the Recorded Charges (bag cutting, pappu net, misc)
-  // net of amounts already paid to the crew - so the tile reflects the FULL crew
-  // dues, not just the derived purchase/sale/transfer shares. Manual charges carry
-  // no party, so they're only added when no party filter/search is narrowing the
-  // view (otherwise the derived-only figure stays consistent with the filter).
-  const inDateWindow = (dateIso: string) => {
-    const d = dayOf(dateIso);
-    if (startDate && d < startDate) return false;
-    if (endDate && d > endDate) return false;
-    return true;
-  };
+  // Crew payable across the currently filtered rows (Hamali view metric).
   const includeManualInTile = partyType === 'ALL' && q === '';
-  const manualNetInWindow = includeManualInTile
-    ? manualSorted
-        .filter((c) => inDateWindow(c.date))
-        .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0)
-    : 0;
+  const manualNetInWindow = manualFiltered
+    .reduce((s, c) => s + (c.type === 'PAID' ? -Number(c.amount) : Number(c.amount)), 0);
   const totalCrew = filtered.reduce((acc, e) => acc + (roundedValues[e.id] !== undefined ? roundedValues[e.id] : e.crew), 0) + manualNetInWindow;
 
   // Total Hamali Charge (Company tile) - purchases/sale loading plus the
   // Recorded Charges (bag cutting, pappu net, packing, tarbal, misc) that the
   // crew is also paid for. PAID entries settle a charge rather than being one,
   // so they're excluded here (unlike totalCrew, which nets them off dues).
-  const manualChargedInWindow = includeManualInTile
-    ? manualSorted
-        .filter((c) => inDateWindow(c.date) && c.type !== 'PAID')
-        .reduce((s, c) => s + Number(c.amount), 0)
-    : 0;
+  const manualChargedInWindow = manualFiltered
+    .filter((c) => c.type !== 'PAID')
+    .reduce((s, c) => s + Number(c.amount), 0);
   const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0) + manualChargedInWindow;
 
   // ── Payables tab: one row per squared-off period ──────────────────────────

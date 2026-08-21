@@ -52,6 +52,18 @@ export function shortDate(iso: string): string {
   });
 }
 
+/** Convert ISO / date string to YYYY-MM-DD in local time matching shortDate. */
+export function toYMD(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr).slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * Collapsed PO-group label, e.g. a 6-lorry DCS batch -> "DCS/01-06/26-27".
  * Falls back to joining the raw poNumbers when the series fields are missing

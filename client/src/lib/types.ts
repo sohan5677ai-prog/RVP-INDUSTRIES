@@ -21,6 +21,9 @@ export interface PartyAddress {
   pincode?: string | null;
   gstin?: string | null;
   destination?: string | null;
+  phone?: string | null;
+  phone2?: string | null;
+  locationLink?: string | null;
   isDefault?: boolean;
 }
 

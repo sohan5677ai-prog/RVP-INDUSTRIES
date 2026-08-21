@@ -223,6 +223,9 @@ export default function Parties() {
         pincode: '',
         gstin: '',
         destination: '',
+        phone: '',
+        phone2: '',
+        locationLink: '',
         isDefault: prev.length === 0,
       },
     ]);
@@ -251,7 +254,19 @@ export default function Parties() {
     form.reset(emptyParty);
     setHasMultipleAddresses(false);
     setAddresses([
-      { label: 'Registered Office', address: '', city: '', state: '', pincode: '', gstin: '', destination: '', isDefault: true },
+      {
+        label: 'Registered Office',
+        address: '',
+        city: '',
+        state: '',
+        pincode: '',
+        gstin: '',
+        destination: '',
+        phone: '',
+        phone2: '',
+        locationLink: '',
+        isDefault: true,
+      },
     ]);
     setOpen(true);
   }
@@ -285,7 +300,15 @@ export default function Parties() {
     const isMulti = Boolean(p.addresses && p.addresses.length > 1);
     setHasMultipleAddresses(isMulti);
     if (p.addresses && p.addresses.length > 0) {
-      setAddresses(p.addresses.map((a) => ({ ...a, destination: a.destination ?? p.destination ?? '' })));
+      setAddresses(
+        p.addresses.map((a) => ({
+          ...a,
+          destination: a.destination ?? p.destination ?? '',
+          phone: a.phone ?? '',
+          phone2: a.phone2 ?? '',
+          locationLink: a.locationLink ?? '',
+        }))
+      );
     } else {
       setAddresses([
         {
@@ -296,6 +319,9 @@ export default function Parties() {
           pincode: p.pincode ?? '',
           gstin: p.gstin ?? '',
           destination: p.destination ?? '',
+          phone: p.phone ?? '',
+          phone2: p.phone2 ?? '',
+          locationLink: p.locationLink ?? '',
           isDefault: true,
         },
       ]);
@@ -314,10 +340,11 @@ export default function Parties() {
       let finalPincode = values.pincode || '';
       let finalGstin = values.gstin || '';
       let finalDestination = values.destination || '';
+      let finalLocationLink = values.locationLink || '';
 
       if (hasMultipleAddresses) {
         validAddresses = addresses
-          .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim())
+          .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim() || a.phone?.trim())
           .map((a) => ({
             ...a,
             label: a.label.trim() || 'Address',
@@ -327,6 +354,9 @@ export default function Parties() {
             pincode: a.pincode?.trim() || null,
             gstin: a.gstin?.trim() || null,
             destination: a.destination?.trim() || null,
+            phone: a.phone?.trim() || null,
+            phone2: a.phone2?.trim() || null,
+            locationLink: a.locationLink?.trim() || null,
           }));
         const defaultAddr = validAddresses.find((a) => a.isDefault) || validAddresses[0];
         if (defaultAddr) {
@@ -336,19 +366,27 @@ export default function Parties() {
           finalPincode = defaultAddr.pincode || '';
           finalGstin = defaultAddr.gstin || finalGstin;
           finalDestination = defaultAddr.destination || finalDestination;
+          finalLocationLink = defaultAddr.locationLink || finalLocationLink;
         }
       } else {
         const addrText = values.address?.trim() || '';
-        validAddresses = addrText ? [{
-          label: 'Registered Office',
-          address: addrText,
-          city: values.city?.trim() || null,
-          state: values.state?.trim() || null,
-          pincode: values.pincode?.trim() || null,
-          gstin: values.gstin?.trim() || null,
-          destination: values.destination?.trim() || null,
-          isDefault: true,
-        }] : [];
+        validAddresses = addrText
+          ? [
+              {
+                label: 'Registered Office',
+                address: addrText,
+                city: values.city?.trim() || null,
+                state: values.state?.trim() || null,
+                pincode: values.pincode?.trim() || null,
+                gstin: values.gstin?.trim() || null,
+                destination: values.destination?.trim() || null,
+                phone: values.phone?.trim() || null,
+                phone2: values.phone2?.trim() || null,
+                locationLink: values.locationLink?.trim() || null,
+                isDefault: true,
+              },
+            ]
+          : [];
       }
 
       const body = {
@@ -359,6 +397,7 @@ export default function Parties() {
         pincode: finalPincode,
         gstin: finalGstin,
         destination: finalDestination,
+        locationLink: finalLocationLink,
         addresses: validAddresses,
         religion: values.religion === 'NONE' ? null : values.religion,
         openingBalance: values.openingBalance ?? 0,
@@ -1087,6 +1126,43 @@ export default function Parties() {
                                 Used to calculate automatic freight rates for orders delivered to this address.
                               </p>
                             </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                  Branch Phone 1
+                                </label>
+                                <Input
+                                  value={addr.phone ?? ''}
+                                  onChange={(e) => updateAddress(idx, { phone: e.target.value })}
+                                  placeholder="e.g. 98765 43210"
+                                  className="h-8 text-xs bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                  Branch Phone 2 (Optional)
+                                </label>
+                                <Input
+                                  value={addr.phone2 ?? ''}
+                                  onChange={(e) => updateAddress(idx, { phone2: e.target.value })}
+                                  placeholder="e.g. 98765 43211"
+                                  className="h-8 text-xs bg-background"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                                Google Maps Location Link
+                              </label>
+                              <Input
+                                value={addr.locationLink ?? ''}
+                                onChange={(e) => updateAddress(idx, { locationLink: e.target.value })}
+                                placeholder="e.g. https://maps.app.goo.gl/... or GPS / Plus Code"
+                                className="h-8 text-xs bg-background"
+                              />
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -1168,7 +1244,7 @@ export default function Parties() {
                   )}
                 />
               )}
-              {!isHamaliTeam && (
+              {!isHamaliTeam && !hasMultipleAddresses && (
               <FormField
                 control={form.control}
                 name="locationLink"

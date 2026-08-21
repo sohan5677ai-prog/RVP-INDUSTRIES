@@ -186,10 +186,13 @@ model PartyAddress {
   state       String?
   pincode     String?
   gstin       String?  // Optional branch-specific GSTIN
-  destination String?  // Optional address-specific freight delivery destination
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  destination  String?  // Optional address-specific freight delivery destination
+  phone        String?  // Optional branch phone 1
+  phone2       String?  // Optional branch phone 2
+  locationLink String?  // Optional Google Maps / location link for this address
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([partyId])
 }

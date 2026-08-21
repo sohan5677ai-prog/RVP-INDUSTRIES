@@ -41,6 +41,9 @@ export async function createParty(req: Request, res: Response) {
       rest.pincode = defaultAddr.pincode ?? rest.pincode;
       rest.gstin = defaultAddr.gstin ?? rest.gstin;
       rest.destination = defaultAddr.destination ?? rest.destination;
+      if (defaultAddr.phone) rest.phone = defaultAddr.phone;
+      if (defaultAddr.phone2) rest.phone2 = defaultAddr.phone2;
+      if (defaultAddr.locationLink) rest.locationLink = defaultAddr.locationLink;
     }
   } else if (rest.address && rest.address.trim()) {
     addressList = [{
@@ -51,6 +54,9 @@ export async function createParty(req: Request, res: Response) {
       pincode: rest.pincode ?? null,
       gstin: rest.gstin ?? null,
       destination: rest.destination ?? null,
+      phone: rest.phone ?? null,
+      phone2: rest.phone2 ?? null,
+      locationLink: rest.locationLink ?? null,
       isDefault: true,
     }];
   }
@@ -68,6 +74,9 @@ export async function createParty(req: Request, res: Response) {
           pincode: a.pincode ?? null,
           gstin: a.gstin ?? null,
           destination: a.destination ?? null,
+          phone: a.phone ?? null,
+          phone2: a.phone2 ?? null,
+          locationLink: a.locationLink ?? null,
           isDefault: a.isDefault ?? false,
         })),
       },
@@ -100,6 +109,9 @@ export async function updateParty(req: Request, res: Response) {
     rest.pincode = defaultAddr.pincode ?? rest.pincode;
     if (defaultAddr.gstin) rest.gstin = defaultAddr.gstin;
     if (defaultAddr.destination) rest.destination = defaultAddr.destination;
+    if (defaultAddr.phone) rest.phone = defaultAddr.phone;
+    if (defaultAddr.phone2) rest.phone2 = defaultAddr.phone2;
+    if (defaultAddr.locationLink) rest.locationLink = defaultAddr.locationLink;
   }
 
   const party = await prisma.$transaction(async (tx) => {
@@ -116,6 +128,9 @@ export async function updateParty(req: Request, res: Response) {
             pincode: a.pincode ?? null,
             gstin: a.gstin ?? null,
             destination: a.destination ?? null,
+            phone: a.phone ?? null,
+            phone2: a.phone2 ?? null,
+            locationLink: a.locationLink ?? null,
             isDefault: a.isDefault ?? false,
           })),
         });

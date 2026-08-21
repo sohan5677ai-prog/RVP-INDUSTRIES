@@ -18,6 +18,9 @@ export const partyAddressSchema = z.object({
   pincode: z.string().optional().nullable(),
   gstin: z.string().optional().nullable(),
   destination: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  phone2: z.string().optional().nullable(),
+  locationLink: z.string().optional().nullable(),
   isDefault: z.boolean().optional().default(false),
 });
 

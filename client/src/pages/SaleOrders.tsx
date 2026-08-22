@@ -205,11 +205,22 @@ export default function SaleOrders() {
     setOverride(o.marginOverride);
     setGstExempt(o.gstExempt);
     setPriceType(o.priceType ?? 'DELIVERY');
+    const b = parties?.find((p) => p.id === o.buyerId);
+    let effectiveAddrId = o.buyerAddressId ?? '';
+    if (b?.addresses && b.addresses.length > 0) {
+      if (!effectiveAddrId || !b.addresses.some((a) => a.id === effectiveAddrId)) {
+        const matched = b.addresses.find((a) =>
+          (o.buyerAddress && a.address?.trim().toLowerCase() === o.buyerAddress.trim().toLowerCase()) ||
+          (o.buyerAddress && a.label && o.buyerAddress.toLowerCase().includes(a.label.toLowerCase()))
+        );
+        effectiveAddrId = matched?.id ?? b.addresses.find((a) => a.isDefault)?.id ?? b.addresses[0]?.id ?? '';
+      }
+    }
     form.reset({
       saleDate: o.saleDate.slice(0, 10),
       product: o.product,
       buyerId: o.buyerId,
-      buyerAddressId: o.buyerAddressId ?? '',
+      buyerAddressId: effectiveAddrId,
       poNumber: o.poNumber ?? '',
       poDate: o.poDate ? o.poDate.slice(0, 10) : '',
       brokerId: o.brokerId || NO_BROKER,

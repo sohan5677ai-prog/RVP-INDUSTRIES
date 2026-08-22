@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -145,13 +145,94 @@ export default function HamaliLedger() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
-  const [roundedValues, setRoundedValues] = useState<Record<string, number>>(() => {
+  const qc = useQueryClient();
+
+  const { data: serverRoundedValues } = useQuery({
+    queryKey: ['hamali-rounded-values'],
+    queryFn: () => api<Record<string, number>>('/hamali-verifications/rounded-values'),
+  });
+
+  const roundedValues = useMemo(() => serverRoundedValues ?? {}, [serverRoundedValues]);
+
+  // One-time migration of any local browser round-offs to the backend database
+  useEffect(() => {
     try {
       const saved = localStorage.getItem('hamali_rounded_values');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          api('/hamali-verifications/rounded-values/bulk', {
+            method: 'POST',
+            body: { values: parsed },
+          })
+            .then(() => {
+              localStorage.removeItem('hamali_rounded_values');
+              qc.invalidateQueries({ queryKey: ['hamali-rounded-values'] });
+              qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+              qc.invalidateQueries({ queryKey: ['dashboard'] });
+            })
+            .catch((err) => console.error('Failed to sync local hamali rounded values', err));
+        }
+      }
+    } catch (e) {
+      console.error('Error reading localStorage for hamali rounded values', e);
     }
+  }, [qc]);
+
+  const saveRoundedValueMutation = useMutation({
+    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
+      api('/hamali-verifications/rounded-values', {
+        method: 'POST',
+        body: { id, amount },
+      }),
+    onMutate: async ({ id, amount }) => {
+      await qc.cancelQueries({ queryKey: ['hamali-rounded-values'] });
+      const previous = qc.getQueryData<Record<string, number>>(['hamali-rounded-values']);
+      qc.setQueryData<Record<string, number>>(['hamali-rounded-values'], (old = {}) => ({
+        ...old,
+        [id]: amount,
+      }));
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(['hamali-rounded-values'], context.previous);
+      }
+      toast.error('Failed to save rounded value');
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['hamali-rounded-values'] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
+  const deleteRoundedValueMutation = useMutation({
+    mutationFn: (id: string) =>
+      api(`/hamali-verifications/rounded-values/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ['hamali-rounded-values'] });
+      const previous = qc.getQueryData<Record<string, number>>(['hamali-rounded-values']);
+      qc.setQueryData<Record<string, number>>(['hamali-rounded-values'], (old = {}) => {
+        const next = { ...old };
+        delete next[id];
+        return next;
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(['hamali-rounded-values'], context.previous);
+      }
+      toast.error('Failed to reset rounded value');
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['hamali-rounded-values'] });
+      qc.invalidateQueries({ queryKey: ['husk-pnl'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
@@ -191,7 +272,6 @@ export default function HamaliLedger() {
     queryFn: () => api<HuskTransfer[]>('/husk-transfers'),
   });
 
-  const qc = useQueryClient();
   const { data: manualCosts } = useQuery({
     queryKey: ['manual-hamali-costs'],
     queryFn: () => api<ManualHamaliCost[]>('/manual-hamali-costs'),
@@ -1407,16 +1487,14 @@ export default function HamaliLedger() {
                                 onChange={(evt) => {
                                   const valStr = evt.target.value;
                                   const entryId = r.entry!.id;
-                                  setRoundedValues((prev) => {
-                                    const next = { ...prev };
-                                    if (valStr === '') {
-                                      delete next[entryId];
-                                    } else {
-                                      next[entryId] = Number(valStr);
+                                  if (valStr === '') {
+                                    deleteRoundedValueMutation.mutate(entryId);
+                                  } else {
+                                    const parsedNum = Number(valStr);
+                                    if (!isNaN(parsedNum)) {
+                                      saveRoundedValueMutation.mutate({ id: entryId, amount: parsedNum });
                                     }
-                                    localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                    return next;
-                                  });
+                                  }
                                 }}
                               />
                               <Popover>
@@ -1440,11 +1518,7 @@ export default function HamaliLedger() {
                                           className="w-full justify-between h-8 text-xs font-normal hover:bg-primary/10"
                                           onClick={() => {
                                             const entryId = r.entry!.id;
-                                            setRoundedValues((prev) => {
-                                              const next = { ...prev, [entryId]: opt.value };
-                                              localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                              return next;
-                                            });
+                                            saveRoundedValueMutation.mutate({ id: entryId, amount: opt.value });
                                           }}
                                         >
                                           <span className="font-semibold text-primary">{rupees(opt.value)}</span>
@@ -1460,12 +1534,7 @@ export default function HamaliLedger() {
                                           className="w-full justify-center h-7 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 border-t mt-1 pt-1"
                                           onClick={() => {
                                             const entryId = r.entry!.id;
-                                            setRoundedValues((prev) => {
-                                              const next = { ...prev };
-                                              delete next[entryId];
-                                              localStorage.setItem('hamali_rounded_values', JSON.stringify(next));
-                                              return next;
-                                            });
+                                            deleteRoundedValueMutation.mutate(entryId);
                                           }}
                                         >
                                           <RotateCcw className="h-3 w-3 mr-1" /> Reset to Original ({rupees(r.entry.crew)})

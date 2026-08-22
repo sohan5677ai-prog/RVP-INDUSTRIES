@@ -57,3 +57,54 @@ export async function deleteHamaliVerification(req: Request, res: Response) {
   await prisma.hamaliVerification.delete({ where: { id: row.id } });
   res.json({ message: 'Verification checkpoint removed' });
 }
+
+/** Get all persisted rounded values as a dictionary { [id]: amount } */
+export async function listHamaliRoundedValues(_req: Request, res: Response) {
+  const rows = await prisma.hamaliRoundedValue.findMany();
+  const result: Record<string, number> = {};
+  for (const r of rows) {
+    result[r.id] = Number(r.amount);
+  }
+  res.json(result);
+}
+
+/** Save or update a single rounded value */
+export async function setHamaliRoundedValue(req: Request, res: Response) {
+  const { id, amount } = req.body;
+  if (!id || typeof id !== 'string') throw new HttpError(400, 'Invalid entry ID');
+  if (typeof amount !== 'number' || isNaN(amount)) throw new HttpError(400, 'Invalid amount');
+
+  const row = await prisma.hamaliRoundedValue.upsert({
+    where: { id },
+    create: { id, amount },
+    update: { amount },
+  });
+  res.json({ id: row.id, amount: Number(row.amount) });
+}
+
+/** Remove a rounded value (reverting entry to formula default) */
+export async function deleteHamaliRoundedValue(req: Request, res: Response) {
+  const { id } = req.params;
+  if (!id) throw new HttpError(400, 'Invalid entry ID');
+  await prisma.hamaliRoundedValue.deleteMany({ where: { id } });
+  res.json({ success: true });
+}
+
+/** Bulk upsert rounded values (used for initial sync from client localStorage) */
+export async function bulkSetHamaliRoundedValues(req: Request, res: Response) {
+  const { values } = req.body as { values: Record<string, number> };
+  if (!values || typeof values !== 'object') throw new HttpError(400, 'Invalid values payload');
+
+  const entries = Object.entries(values).filter(([, amt]) => typeof amt === 'number' && !isNaN(amt));
+  if (entries.length > 0) {
+    const ops = entries.map(([id, amount]) =>
+      prisma.hamaliRoundedValue.upsert({
+        where: { id },
+        create: { id, amount },
+        update: { amount },
+      }),
+    );
+    await prisma.$transaction(ops);
+  }
+  res.json({ success: true, count: entries.length });
+}

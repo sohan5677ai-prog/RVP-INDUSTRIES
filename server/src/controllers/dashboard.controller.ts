@@ -2,7 +2,7 @@ import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.js';
-import { customLoadingHamali, calcKataFee, isVehicleExempt } from '../lib/calc.js';
+import { customLoadingHamali, calcKataFee, isVehicleExempt, hamaliSplit } from '../lib/calc.js';
 
 import { computeUnifiedStockEngine } from '../services/stockEngine.js';
 
@@ -179,7 +179,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     freightOutwardAccount,
     hamaliIncomeAccount,
     dispatches,
-    blackSeedHamali,
+    purchasesForHamali,
+    hamaliRoundedRows,
     manualByType,
     gunnyByDir,
     electricityAgg,
@@ -227,7 +228,14 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
         JOIN "SaleDispatch" sd ON sd."saleOrderId" = so.id
         GROUP BY so."product"
       `,
-      prisma.purchase.aggregate({ _sum: { hamaliCharge: true } }),
+      prisma.purchase.findMany({
+        select: {
+          id: true,
+          hamaliCharge: true,
+          stockIn: { select: { lorryNumber: true } },
+        },
+      }),
+      prisma.hamaliRoundedValue.findMany(),
       (prisma.manualHamaliCost.groupBy as any)({ by: ['type'], _sum: { amount: true } }),
       // Purchases (debit) vs sales (credit); PAYMENT rows don't affect husk cost.
       // Read rows, not an aggregate: legacy entries have debit/credit = 0 and carry
@@ -449,8 +457,24 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       creditNotesTotal += Number(cn.taxableValue || cn.totalAmount || 0);
     }
 
+    // Black Seed Unloading: exact sum of final crew payments (including any
+    // round-offs configured on the Hamali Report page, matching the crew ledger).
+    const roundedHamaliMap = new Map<string, number>(
+      hamaliRoundedRows.map((r) => [r.id, Number(r.amount)]),
+    );
+    const companyVehiclesList = companyProfile?.companyVehicles;
+    const blackSeedUnloading = Math.round(
+      purchasesForHamali.reduce((sum, p) => {
+        const isCompanyVehicle = isVehicleExempt(p.stockIn?.lorryNumber, companyVehiclesList);
+        const s = hamaliSplit(Number(p.hamaliCharge), isCompanyVehicle);
+        const entryId = `PUR-${p.id}`;
+        const amt = roundedHamaliMap.has(entryId) ? roundedHamaliMap.get(entryId)! : s.crew;
+        return sum + amt;
+      }, 0) * 100,
+    ) / 100;
+
     const expenses: HuskExpenses = {
-      blackSeedUnloading: Number(blackSeedHamali._sum.hamaliCharge ?? 0),
+      blackSeedUnloading,
       transferHamali,
       transferTransport,
       saleFreight,

@@ -906,19 +906,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // only when a driver phone was captured on this dispatch. The broker/buyer
   // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
   // (the invoice/EWB don't exist yet at dispatch time).
-  let selectedAddress = order.buyerAddressId
-    ? await prisma.partyAddress.findUnique({ where: { id: order.buyerAddressId } })
-    : null;
-  if (!selectedAddress && order.buyer?.id) {
-    const addrs = await prisma.partyAddress.findMany({ where: { partyId: order.buyer.id }, orderBy: { createdAt: 'asc' } });
-    selectedAddress = addrs.find((a) => a.isDefault) || addrs[0] || null;
-  }
-
-  const effectivePhone = order.buyerPhone || selectedAddress?.phone || order.buyer.phone || null;
-  const effectiveLocationLink = order.buyerLocationLink || selectedAddress?.locationLink || order.buyer.locationLink || null;
-  const effectiveAddress = order.buyerAddress || selectedAddress?.address || order.buyer.address || null;
-  const effectiveCity = order.buyerCity || selectedAddress?.city || order.buyer.city || null;
-  const effectiveDestination = order.destination || selectedAddress?.destination || order.buyer.destination || null;
+  const details = await resolveOrderEffectiveDetails(order);
 
   void whatsappService.notifyDispatchDriver(
     {
@@ -930,12 +918,12 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     },
     {
       name: order.buyer.name,
-      phone: effectivePhone,
-      locationLink: effectiveLocationLink,
-      address: effectiveAddress,
-      city: effectiveCity,
+      phone: details.effectivePhone,
+      locationLink: details.effectiveLocationLink,
+      address: details.effectiveAddress,
+      city: details.effectiveCity,
     },
-    { destination: effectiveDestination, product: order.product }
+    { destination: details.effectiveDestination, product: order.product }
   );
 
   res.status(201).json(dispatch);

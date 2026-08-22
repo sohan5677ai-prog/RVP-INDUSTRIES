@@ -12,6 +12,7 @@ import { mergePdfs } from '../lib/pdfMerge.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { ensureLorryReceiptAssigned } from '../controllers/sale.controller.js';
 import { clearCache } from '../lib/cache.js';
+import { resolveOrderBuyerAddress, resolveOrderEffectiveDetails } from '../lib/orderAddress.js';
 
 /** One recipient's outcome, plus why it didn't land when it didn't. */
 export type DispatchWhatsAppLeg = {
@@ -103,13 +104,7 @@ async function renderBundleEwbPdf(
 export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<DispatchWhatsAppResult> {
   const { dispatch, order, company, pdfData } = await buildInvoicePdfData(dispatchId);
 
-  let selectedAddress = order.buyerAddressId
-    ? await prisma.partyAddress.findUnique({ where: { id: order.buyerAddressId } })
-    : null;
-  if (!selectedAddress && order.buyer?.id) {
-    const addrs = await prisma.partyAddress.findMany({ where: { partyId: order.buyer.id }, orderBy: { createdAt: 'asc' } });
-    selectedAddress = addrs.find((a) => a.isDefault) || addrs[0] || null;
-  }
+  const { selectedAddress, allBuyerPhones } = await resolveOrderEffectiveDetails(order);
 
   // A broker named "RVP" (or no broker) means it's our own order - the buyer is
   // messaged directly with no broker reference; otherwise the buyer's copy names
@@ -197,21 +192,8 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     error: r.ok ? null : r.error ?? null,
   });
 
-  // Party (buyer) - always. Includes branch-specific phone numbers when present, alongside root buyer numbers.
-  const buyerPhones = Array.from(
-    new Set(
-      [
-        order.buyerPhone,
-        order.buyerPhone2,
-        selectedAddress?.phone,
-        selectedAddress?.phone2,
-        order.buyer.phone,
-        order.buyer.phone2,
-      ]
-        .filter(Boolean)
-        .map((p) => p!.trim())
-    )
-  );
+  // Party (buyer) - always. Includes branch-specific phone numbers alongside root buyer numbers.
+  const buyerPhones = allBuyerPhones;
   const partyResult = buyerPhones.length > 0
     ? await whatsappService.sendDispatchToParty({
         dispatchId: dispatch.id,
@@ -355,12 +337,15 @@ async function driverLegFromLog(dispatchId: string, driverPhone: string | null):
 export async function resendDispatchDriverWhatsApp(dispatchId: string): Promise<DispatchWhatsAppLeg> {
   const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: dispatchId },
-    include: { saleOrder: { include: { buyer: true } } },
+    include: { saleOrder: { include: { buyer: { include: { addresses: true } } } } },
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
   if (!dispatch.driverPhone) throw new HttpError(400, 'This dispatch has no driver phone on file');
 
-  const buyer = dispatch.saleOrder.buyer;
+  const order = dispatch.saleOrder;
+  const buyer = order.buyer;
+  const details = await resolveOrderEffectiveDetails(order);
+
   const result = await whatsappService.notifyDispatchDriver(
     {
       id: dispatch.id,
@@ -369,8 +354,14 @@ export async function resendDispatchDriverWhatsApp(dispatchId: string): Promise<
       driverPhone: dispatch.driverPhone,
       weightKg: dispatch.weightKg,
     },
-    { name: buyer.name, phone: buyer.phone, locationLink: buyer.locationLink, address: buyer.address, city: buyer.city },
-    { destination: dispatch.saleOrder.destination, product: dispatch.saleOrder.product },
+    {
+      name: buyer.name,
+      phone: details.effectivePhone,
+      locationLink: details.effectiveLocationLink,
+      address: details.effectiveAddress,
+      city: details.effectiveCity,
+    },
+    { destination: details.effectiveDestination, product: order.product },
   );
   return {
     status: result?.ok ? 'sent' : result?.skipped ? 'skipped' : 'failed',

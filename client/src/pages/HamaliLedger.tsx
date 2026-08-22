@@ -6,7 +6,7 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { Purchase, SaleOrder, HamaliRate, StockTransfer, ShellTransfer, HuskTransfer, ManualHamaliCost, ManualHamaliType, HamaliVerification, CompanyProfile, Payment, Party } from '@/lib/types';
+import type { Purchase, SaleOrder, HamaliRate, StockTransfer, ShellTransfer, HuskTransfer, ManualHamaliCost, ManualHamaliType, HamaliVerification, CompanyProfile, Payment, Party, LedgerKind } from '@/lib/types';
 import { kg, rupees, shortDate, toYMD } from '@/lib/format';
 import { hamaliSplit, pappuLoadingHamali, calcHamali, customLoadingHamali, isVehicleExempt } from '@/lib/calc';
 import { Input } from '@/components/ui/input';
@@ -19,8 +19,99 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Segmented } from '@/components/ui/segmented';
-import { Loader2, Coins, TrendingUp, Truck, Plus, Trash2, ShieldCheck, Lock, CheckCircle2, ReceiptText, Users, Phone, Landmark, Calculator, RotateCcw } from 'lucide-react';
+import {
+  Loader2, Coins, TrendingUp, TrendingDown, Scale, Truck, Plus, Trash2,
+  ShieldCheck, Lock, CheckCircle2, ReceiptText, Users, Phone, Landmark,
+  Calculator, RotateCcw, Copy, Check, FileText, Search, Wallet,
+} from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger, PopoverClose } from '@/components/ui/popover';
+import { openPartyStatement } from '@/lib/partyStatement';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
+
+/* ------------------------------------------------------------------ helpers */
+
+function CopyBtn({ value }: { value: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => { navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1200); }}
+      className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+      title="Copy"
+    >
+      {done ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+function Info({ label, value, mono, copy }: { label: string; value: string; mono?: boolean; copy?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2 group">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className={`flex items-center gap-1.5 ${mono ? 'font-mono' : ''}`}>
+        {value}
+        {copy && <CopyBtn value={value} />}
+      </span>
+    </div>
+  );
+}
+
+function BalanceCell({ value, muted }: { value: number; muted?: boolean }) {
+  if (value === 0) return <span className="text-muted-foreground tabular-nums">0.00</span>;
+  const isCr = value > 0;
+  return (
+    <span className={`inline-flex items-baseline gap-1.5 tabular-nums ${muted ? 'text-muted-foreground' : `font-semibold ${isCr ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}`}>
+      {rupees(Math.abs(value))}
+      <span className={`text-[9px] font-bold px-1 py-0.5 rounded leading-none ${isCr ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'}`}>
+        {isCr ? 'CR' : 'DR'}
+      </span>
+    </span>
+  );
+}
+
+function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: 'emerald' | 'rose' }) {
+  return (
+    <div className="px-5 py-3.5 text-center">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`text-base font-bold tabular-nums mt-0.5 ${tone ? TONE_RING[tone] : ''}`}>{value}</div>
+    </div>
+  );
+}
+
+type Tone = 'neutral' | 'emerald' | 'rose' | 'blue' | 'amber';
+const TONE_RING: Record<Tone, string> = {
+  neutral: 'text-muted-foreground',
+  emerald: 'text-emerald-600 dark:text-emerald-400',
+  rose: 'text-rose-600 dark:text-rose-400',
+  blue: 'text-blue-600 dark:text-blue-400',
+  amber: 'text-amber-600 dark:text-amber-400',
+};
+
+function KpiCard({ icon: Icon, label, value, hint, sub, tone = 'neutral' }: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string; value: string; hint?: string; sub?: string; tone?: Tone;
+}) {
+  return (
+    <Card className="border shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+          <Icon className={`h-4 w-4 ${TONE_RING[tone]}`} />
+        </div>
+        <div className={`text-xl font-bold ${tone === 'neutral' ? '' : TONE_RING[tone]}`}>
+          {value}{sub && <span className="text-xs font-semibold ml-1">{sub}</span>}
+        </div>
+        {hint && <p className="text-[10px] text-muted-foreground mt-1">{hint}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+const LEDGER_KIND_FILTERS: { value: 'ALL' | 'DUES' | 'PAYMENT'; label: string }[] = [
+  { value: 'ALL', label: 'All' },
+  { value: 'DUES', label: 'Dues' },
+  { value: 'PAYMENT', label: 'Payments' },
+];
 
 function getRoundOptions(amount: number): { label: string; value: number }[] {
   if (!amount || isNaN(amount)) return [];
@@ -136,6 +227,17 @@ interface PayableRow {
   paid: number;
   outstanding: number;
   status: 'PAID' | 'PARTIAL' | 'UNPAID';
+}
+
+interface LedgerLine {
+  id: string;
+  date: string;
+  kind: 'DUES' | 'PAYMENT';
+  particulars: string;
+  period: string | null;
+  reference: string | null;
+  debit: number;
+  credit: number;
 }
 
 export default function HamaliLedger() {
@@ -883,16 +985,17 @@ export default function HamaliLedger() {
   // hamali crew. Credits are the SQUARED-OFF periods (one line per checkpoint, with
   // its date range) - NOT the individual loading/unloading rows. Debits are the
   // settlement payments. Running balance is what we still owe the crew (CR).
-  interface LedgerLine { id: string; date: string; particulars: string; period: string | null; debit: number; credit: number; }
-  const ledgerLines: (LedgerLine & { balance: number })[] = (() => {
+  const ledgerLines: (LedgerLine & { balance: number })[] = useMemo(() => {
     const lines: LedgerLine[] = [];
     // One credit per squared-off period, dated at the period-end (asOfDate).
     for (const r of payableRows) {
       lines.push({
         id: `V-${r.v.id}`,
         date: r.to,
+        kind: 'DUES',
         particulars: 'Crew dues squared off',
         period: `${shortDate(r.from)} – ${shortDate(r.to)}`,
+        reference: r.v.note || null,
         debit: 0,
         credit: r.payable,
       });
@@ -902,8 +1005,10 @@ export default function HamaliLedger() {
       lines.push({
         id: `PY-${p.id}`,
         date: dayOf(p.date),
-        particulars: `Payment to crew${p.reference ? ` · ${p.reference}` : ''}`,
+        kind: 'PAYMENT',
+        particulars: 'Payment to crew',
         period: null,
+        reference: p.reference || (p.description && p.description !== 'Hamali crew settlement' ? p.description : null),
         debit: Number(p.amount),
         credit: 0,
       });
@@ -911,11 +1016,59 @@ export default function HamaliLedger() {
     lines.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.id.localeCompare(b.id));
     let running = 0;
     return lines.map((l) => { running += l.credit - l.debit; return { ...l, balance: Math.round(running * 100) / 100 }; });
-  })();
+  }, [payableRows, hamaliPayments]);
+
+  const [ledgerKind, setLedgerKind] = useState<'ALL' | 'DUES' | 'PAYMENT'>('ALL');
+  const [ledgerQ, setLedgerQ] = useState('');
+  const [ledgerFrom, setLedgerFrom] = useState('');
+  const [ledgerTo, setLedgerTo] = useState('');
+  const [waDialogOpen, setWaDialogOpen] = useState(false);
+
+  const filteredLedgerLines = useMemo(() => {
+    let list = ledgerLines;
+    if (ledgerKind !== 'ALL') {
+      list = list.filter((l) => l.kind === ledgerKind);
+    }
+    if (ledgerFrom) {
+      list = list.filter((l) => l.date >= ledgerFrom);
+    }
+    if (ledgerTo) {
+      list = list.filter((l) => l.date <= ledgerTo);
+    }
+    const term = ledgerQ.trim().toLowerCase();
+    if (term) {
+      list = list.filter((l) =>
+        [l.particulars, l.period, l.reference].some((f) => f?.toLowerCase().includes(term))
+      );
+    }
+    return list;
+  }, [ledgerLines, ledgerKind, ledgerFrom, ledgerTo, ledgerQ]);
+
   const ledgerCredit = ledgerLines.reduce((s, l) => s + l.credit, 0);
   const ledgerDebit = ledgerLines.reduce((s, l) => s + l.debit, 0);
   const ledgerBalance = Math.round((ledgerCredit - ledgerDebit) * 100) / 100;
-  const ledgerOpening = ledgerLines.length ? ledgerLines[0].balance - ledgerLines[0].credit + ledgerLines[0].debit : 0;
+
+  const ledgerFilteredDebit = filteredLedgerLines.reduce((s, l) => s + l.debit, 0);
+  const ledgerFilteredCredit = filteredLedgerLines.reduce((s, l) => s + l.credit, 0);
+  const ledgerOpening = filteredLedgerLines.length
+    ? filteredLedgerLines[0].balance - filteredLedgerLines[0].credit + filteredLedgerLines[0].debit
+    : 0;
+  const ledgerClosing = filteredLedgerLines.length
+    ? filteredLedgerLines[filteredLedgerLines.length - 1].balance
+    : 0;
+  const ledgerPeriodText = filteredLedgerLines.length
+    ? `${shortDate(filteredLedgerLines[0].date)} – ${shortDate(filteredLedgerLines[filteredLedgerLines.length - 1].date)}`
+    : '';
+
+  const LEDGER_EXPORT_COLUMNS: ExportColumn<LedgerLine & { balance: number }>[] = [
+    { header: 'Date', value: (l) => shortDate(l.date) },
+    { header: 'Type', value: (l) => (l.kind === 'DUES' ? 'Dues' : 'Payment') },
+    { header: 'Particulars', value: (l) => l.particulars },
+    { header: 'Reference', value: (l) => (l.period ? `Period: ${l.period}` : (l.reference ?? '')) },
+    { header: 'Debit (Paid)', value: (l) => (l.debit ? rupees(l.debit) : ''), excel: (l) => l.debit || null, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Credit (Dues)', value: (l) => (l.credit ? rupees(l.credit) : ''), excel: (l) => l.credit || null, numFmt: '#,##0.00', align: 'right' },
+    { header: 'Balance', value: (l) => `${rupees(Math.abs(l.balance))} ${l.balance >= 0 ? 'CR' : 'DR'}`, align: 'right' },
+  ];
 
   function openPay(row: PayableRow) {
     setPayVerif(row);
@@ -1268,6 +1421,103 @@ export default function HamaliLedger() {
           {/* Ledger tab - party-ledger-style account statement for the crew */}
           {view === 'ledger' && (
             <div className="space-y-6">
+              {/* toolbar */}
+              <div className="flex items-center justify-between gap-3 print:hidden">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">{teamParty?.name ?? 'Hamali Team'}</h2>
+                  <p className="text-xs text-muted-foreground">Account statement, squared-off dues &amp; settlement history.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ExportButtons
+                    filename={`${(teamParty?.name ?? 'Hamali_Team').replace(/\s+/g, '_')}_Ledger`}
+                    title={`Hamali Crew Ledger - ${teamParty?.name ?? 'Hamali Team'}`}
+                    subtitle={ledgerPeriodText}
+                    columns={LEDGER_EXPORT_COLUMNS}
+                    rows={filteredLedgerLines}
+                    showPdf={false}
+                    showPrint={false}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => {
+                      try {
+                        const effectiveParty: Party = teamParty ?? {
+                          id: 'hamali',
+                          name: 'Hamali Team',
+                          type: 'SUPPLIER',
+                          phone: null,
+                          address: null,
+                          state: null,
+                          gstin: null,
+                          destination: null,
+                          openingBalance: '0',
+                          openingBalanceType: 'CR',
+                          bankAccountNumber: null,
+                          bankIfsc: null,
+                          bankName: null,
+                          commodities: [],
+                          createdAt: new Date().toISOString(),
+                        };
+                        openPartyStatement({
+                          company: companyProfile,
+                          party: effectiveParty,
+                          summary: {
+                            totalDebit: ledgerFilteredDebit,
+                            totalCredit: ledgerFilteredCredit,
+                            balance: Math.abs(ledgerClosing),
+                            balanceType: ledgerClosing >= 0 ? 'CR' : 'DR',
+                            totalBusiness: ledgerFilteredCredit,
+                            purchaseTotal: ledgerFilteredCredit,
+                            saleTotal: 0,
+                            paidTotal: ledgerFilteredDebit,
+                            receivedTotal: 0,
+                            setOffTotal: 0,
+                            transactionCount: filteredLedgerLines.length,
+                            lastTxnDate: filteredLedgerLines.length ? filteredLedgerLines[filteredLedgerLines.length - 1].date : null,
+                            pendingCount: 0,
+                          },
+                          transactions: filteredLedgerLines.map((l) => ({
+                            id: l.id,
+                            partyId: teamParty?.id ?? 'hamali',
+                            date: l.date,
+                            kind: (l.credit > 0 ? 'PURCHASE' : 'PAYMENT') as LedgerKind,
+                            particulars: l.particulars,
+                            invoiceNumber: null,
+                            vehicleNumber: null,
+                            utr: l.reference ?? null,
+                            reference: l.period ? `Period: ${l.period}` : (l.reference ?? null),
+                            weightKg: null,
+                            ratePerKg: null,
+                            debit: l.debit,
+                            credit: l.credit,
+                            runningBalance: -l.balance,
+                            product: null,
+                            transferredDate: l.date,
+                            status: 'VERIFIED' as const,
+                          })),
+                          filterNote: ledgerKind === 'ALL' ? undefined : (ledgerKind === 'DUES' ? 'Crew dues only' : 'Payments only'),
+                          fromDate: ledgerFrom || undefined,
+                          toDate: ledgerTo || undefined,
+                        });
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : 'Could not open the statement.');
+                      }
+                    }}
+                  >
+                    <FileText className="h-4 w-4" /> Statement (PDF)
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm"
+                    onClick={() => setWaDialogOpen(true)}
+                  >
+                    <WhatsAppIcon className="h-4 w-4 fill-white" /> WhatsApp Ledger
+                  </Button>
+                </div>
+              </div>
+
               {/* Profile header (name / contact / bank) - mirrors the Party Ledger */}
               <div className="rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card overflow-hidden">
                 <div className="p-6 flex flex-col lg:flex-row lg:items-start gap-6">
@@ -1281,8 +1531,12 @@ export default function HamaliLedger() {
                         <Badge variant="outline" className="font-medium">Hamali Team</Badge>
                       </div>
                       <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-muted-foreground">
-                        {teamParty?.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {teamParty.phone}</span>}
-                        {!teamParty?.phone && <span className="italic">Add phone & bank details in Parties</span>}
+                        {teamParty?.phone && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Phone className="h-3.5 w-3.5" /> {teamParty.phone}
+                          </span>
+                        )}
+                        {!teamParty?.phone && <span className="italic">Add phone &amp; bank details in Parties</span>}
                       </div>
                     </div>
                   </div>
@@ -1292,9 +1546,9 @@ export default function HamaliLedger() {
                     </div>
                     {teamParty?.bankAccountNumber || teamParty?.bankName || teamParty?.bankIfsc ? (
                       <div className="space-y-1.5 text-sm">
-                        {teamParty?.bankName && <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">Bank</span><span>{teamParty.bankName}</span></div>}
-                        {teamParty?.bankAccountNumber && <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">A/C No</span><span className="font-mono">{teamParty.bankAccountNumber}</span></div>}
-                        {teamParty?.bankIfsc && <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">IFSC</span><span className="font-mono">{teamParty.bankIfsc}</span></div>}
+                        {teamParty?.bankName && <Info label="Bank" value={teamParty.bankName} />}
+                        {teamParty?.bankAccountNumber && <Info label="A/C No" value={teamParty.bankAccountNumber} mono copy />}
+                        {teamParty?.bankIfsc && <Info label="IFSC" value={teamParty.bankIfsc} mono copy />}
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">No bank details on file.</p>
@@ -1303,65 +1557,225 @@ export default function HamaliLedger() {
                 </div>
               </div>
 
+              {/* KPI cards - 4 cards matching Party Ledger */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <KpiCard
+                  icon={TrendingDown}
+                  label="Payable (we owe)"
+                  value={ledgerBalance > 0 ? rupees(ledgerBalance) : 'Settled'}
+                  sub={ledgerBalance > 0 ? 'CR' : undefined}
+                  tone={ledgerBalance === 0 ? 'neutral' : ledgerBalance > 0 ? 'rose' : 'emerald'}
+                  hint="Owed by us to the crew"
+                />
+                <KpiCard
+                  icon={Scale}
+                  label="Total Dues Squared Off"
+                  value={rupees(ledgerCredit)}
+                  tone="neutral"
+                  hint={`${payableRows.length} verified period(s)`}
+                />
+                <KpiCard
+                  icon={Wallet}
+                  label="Total Paid to Crew"
+                  value={rupees(ledgerDebit)}
+                  tone="neutral"
+                  hint={`${hamaliPayments.length} settlement payment(s)`}
+                />
+                <KpiCard
+                  icon={ShieldCheck}
+                  label="Pending Verification"
+                  value={rupees(currentPeriodCrew)}
+                  tone={currentPeriodCrew > 0 ? 'amber' : 'neutral'}
+                  hint="Dues not yet squared off"
+                />
+              </div>
+
+              {/* filters strip - matching Party Ledger */}
+              <div className="flex flex-col lg:flex-row gap-3 print:hidden">
+                <div className="inline-flex rounded-lg border bg-card p-1 self-start">
+                  {LEDGER_KIND_FILTERS.map((f) => (
+                    <button
+                      key={f.value}
+                      onClick={() => setLedgerKind(f.value)}
+                      className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
+                        ledgerKind === f.value
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={ledgerQ}
+                    onChange={(e) => setLedgerQ(e.target.value)}
+                    placeholder="Search particulars, period, reference, UTR…"
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="date"
+                    value={ledgerFrom}
+                    onChange={(e) => setLedgerFrom(e.target.value)}
+                    className="w-40"
+                    title="From date"
+                  />
+                  <span className="text-muted-foreground text-sm">–</span>
+                  <Input
+                    type="date"
+                    value={ledgerTo}
+                    onChange={(e) => setLedgerTo(e.target.value)}
+                    className="w-40"
+                    title="To date"
+                  />
+                </div>
+              </div>
+
               {/* Account statement */}
               <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+                {/* statement header band */}
                 <div className="px-5 py-4 border-b bg-gradient-to-r from-primary/[0.07] via-card to-card flex items-end justify-between gap-4 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <ReceiptText className="h-4 w-4 text-primary" />
-                    <span className="font-semibold tracking-tight">Account Statement</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <ReceiptText className="h-4 w-4 text-primary" />
+                      <span className="font-semibold tracking-tight">Account Statement</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {ledgerPeriodText
+                        ? `${teamParty?.name ?? 'Hamali Team'} · ${ledgerPeriodText}`
+                        : (teamParty?.name ?? 'Hamali Team')}
+                    </p>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Balance Owed</div>
-                    <div className={`text-lg font-bold tabular-nums ${ledgerBalance === 0 ? '' : ledgerBalance > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {ledgerBalance === 0 ? 'Settled' : <>{rupees(Math.abs(ledgerBalance))} <span className="text-xs font-semibold">{ledgerBalance >= 0 ? 'CR' : 'DR'}</span></>}
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Closing Balance</div>
+                    <div className={`text-lg font-bold tabular-nums ${ledgerClosing === 0 ? '' : ledgerClosing > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      {ledgerClosing === 0 ? 'Settled' : <>{rupees(Math.abs(ledgerClosing))} <span className="text-xs font-semibold">{ledgerClosing >= 0 ? 'CR' : 'DR'}</span></>}
                     </div>
                   </div>
                 </div>
+
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="w-28">Date</TableHead>
-                        <TableHead className="min-w-[240px]">Particulars</TableHead>
+                        <TableHead className="min-w-[260px]">Particulars</TableHead>
+                        <TableHead>Reference</TableHead>
                         <TableHead className="text-right border-l border-border/60 bg-secondary">Debit</TableHead>
                         <TableHead className="text-right bg-secondary">Credit</TableHead>
                         <TableHead className="text-right border-l border-border/60 bg-secondary">Balance</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {ledgerLines.length === 0 ? (
-                        <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">No squared-off periods yet. Square off a window in the Hamali tab.</TableCell></TableRow>
+                      {filteredLedgerLines.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
+                            No transactions match the selected filters.
+                          </TableCell>
+                        </TableRow>
                       ) : (
                         <>
+                          {/* opening balance */}
                           <TableRow className="bg-muted/30 hover:bg-muted/30">
-                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{shortDate(ledgerLines[0].date)}</TableCell>
-                            <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>Opening Balance</TableCell>
-                            <TableCell className="bg-muted/20" />
-                            <TableCell className="text-right border-l border-border/60 bg-muted/20 tabular-nums text-muted-foreground">
-                              {ledgerOpening === 0 ? '0.00' : `${rupees(Math.abs(ledgerOpening))} ${ledgerOpening >= 0 ? 'CR' : 'DR'}`}
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                              {ledgerFrom ? shortDate(ledgerFrom) : shortDate(filteredLedgerLines[0].date)}
+                            </TableCell>
+                            <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>
+                              Opening Balance
+                            </TableCell>
+                            <TableCell className="text-right border-l border-border/60 bg-muted/20 text-xs tabular-nums font-medium">
+                              {ledgerOpening < 0 ? rupees(Math.abs(ledgerOpening)) : ''}
+                            </TableCell>
+                            <TableCell className="text-right bg-muted/20 text-xs tabular-nums font-medium">
+                              {ledgerOpening > 0 ? rupees(ledgerOpening) : ''}
+                            </TableCell>
+                            <TableCell className="text-right border-l border-border/60 bg-muted/20">
+                              <BalanceCell value={ledgerOpening} muted />
                             </TableCell>
                           </TableRow>
-                          {ledgerLines.map((l, i) => (
+
+                          {filteredLedgerLines.map((l, i) => (
                             <TableRow key={l.id} className={i % 2 === 1 ? 'bg-muted/[0.18]' : undefined}>
-                              <TableCell className="align-top text-sm whitespace-nowrap text-muted-foreground">{shortDate(l.date)}</TableCell>
-                              <TableCell className="align-top">
-                                <div className="text-[13px] text-foreground/90 leading-snug">{l.particulars}</div>
-                                {l.period && <div className="text-[11px] text-muted-foreground mt-0.5">Period: {l.period}</div>}
+                              <TableCell className="align-top text-sm whitespace-nowrap text-muted-foreground">
+                                {shortDate(l.date)}
                               </TableCell>
-                              <TableCell className="align-top text-right tabular-nums border-l border-border/60">{l.debit > 0 ? <span className="font-semibold">{rupees(l.debit)}</span> : <span className="text-muted-foreground/50">-</span>}</TableCell>
-                              <TableCell className="align-top text-right tabular-nums">{l.credit > 0 ? <span className="font-semibold">{rupees(l.credit)}</span> : <span className="text-muted-foreground/50">-</span>}</TableCell>
-                              <TableCell className="align-top text-right tabular-nums border-l border-border/60 font-medium">
-                                {rupees(Math.abs(l.balance))} <span className="text-[9px] font-bold">{l.balance >= 0 ? 'CR' : 'DR'}</span>
+                              <TableCell className="align-top">
+                                <div className="flex items-center gap-2">
+                                  {l.kind === 'DUES' ? (
+                                    <Badge variant="outline" className="text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
+                                      Dues
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20">
+                                      Payment
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="text-[13px] text-foreground/90 mt-1.5 leading-snug whitespace-normal">
+                                  {l.particulars}
+                                </div>
+                                {l.period && (
+                                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                                    Period: {l.period}
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="align-top">
+                                {l.period || l.reference ? (
+                                  <div className="space-y-0.5">
+                                    {l.period && (
+                                      <div className="flex items-baseline gap-1.5 text-[11px]">
+                                        <span className="text-muted-foreground w-10 shrink-0">Period</span>
+                                        <span className="font-mono text-foreground/80 break-all">{l.period}</span>
+                                      </div>
+                                    )}
+                                    {l.reference && (
+                                      <div className="flex items-baseline gap-1.5 text-[11px]">
+                                        <span className="text-muted-foreground w-7 shrink-0">Ref</span>
+                                        <span className="font-mono text-foreground/80 break-all">{l.reference}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-baseline gap-1.5 text-[11px]">
+                                      <span className="text-muted-foreground w-7 shrink-0">Dt</span>
+                                      <span className="text-muted-foreground">{shortDate(l.date)}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="align-top text-right tabular-nums border-l border-border/60">
+                                {l.debit > 0 ? <span className="font-semibold text-foreground">{rupees(l.debit)}</span> : <span className="text-muted-foreground/50">-</span>}
+                              </TableCell>
+                              <TableCell className="align-top text-right tabular-nums">
+                                {l.credit > 0 ? <span className="font-semibold text-foreground">{rupees(l.credit)}</span> : <span className="text-muted-foreground/50">-</span>}
+                              </TableCell>
+                              <TableCell className="align-top text-right border-l border-border/60">
+                                <BalanceCell value={l.balance} />
                               </TableCell>
                             </TableRow>
                           ))}
+
+                          {/* closing balance */}
                           <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
-                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">{shortDate(ledgerLines[ledgerLines.length - 1].date)}</TableCell>
-                            <TableCell className="text-sm font-semibold" colSpan={2}>Closing Balance</TableCell>
-                            <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums">{ledgerDebit > 0 ? rupees(ledgerDebit) : ''}</TableCell>
-                            <TableCell className="text-right font-semibold tabular-nums">{ledgerCredit > 0 ? rupees(ledgerCredit) : ''}</TableCell>
-                            <TableCell className="text-right border-l border-border/60 font-bold tabular-nums">
-                              {rupees(Math.abs(ledgerBalance))} <span className="text-[9px] font-bold">{ledgerBalance >= 0 ? 'CR' : 'DR'}</span>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">
+                              {ledgerTo ? shortDate(ledgerTo) : shortDate(filteredLedgerLines[filteredLedgerLines.length - 1].date)}
+                            </TableCell>
+                            <TableCell className="text-sm font-semibold" colSpan={2}>
+                              Closing Balance
+                            </TableCell>
+                            <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums">
+                              {ledgerFilteredDebit > 0 ? rupees(ledgerFilteredDebit) : ''}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">
+                              {ledgerFilteredCredit > 0 ? rupees(ledgerFilteredCredit) : ''}
+                            </TableCell>
+                            <TableCell className="text-right border-l border-border/60">
+                              <BalanceCell value={ledgerClosing} />
                             </TableCell>
                           </TableRow>
                         </>
@@ -1369,22 +1783,16 @@ export default function HamaliLedger() {
                     </TableBody>
                   </Table>
                 </div>
-                {ledgerLines.length > 0 && (
+
+                {filteredLedgerLines.length > 0 && (
                   <div className="grid grid-cols-3 divide-x divide-border border-t bg-muted/20 text-center">
-                    <div className="px-5 py-3.5">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total Debit (Paid)</div>
-                      <div className="text-base font-bold tabular-nums mt-0.5">{rupees(ledgerDebit)}</div>
-                    </div>
-                    <div className="px-5 py-3.5">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total Credit (Dues)</div>
-                      <div className="text-base font-bold tabular-nums mt-0.5">{rupees(ledgerCredit)}</div>
-                    </div>
-                    <div className="px-5 py-3.5">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Balance Owed</div>
-                      <div className={`text-base font-bold tabular-nums mt-0.5 ${ledgerBalance > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                        {ledgerBalance === 0 ? 'Settled' : `${rupees(Math.abs(ledgerBalance))} ${ledgerBalance >= 0 ? 'CR' : 'DR'}`}
-                      </div>
-                    </div>
+                    <SummaryStat label="Total Debit (Paid)" value={rupees(ledgerFilteredDebit)} />
+                    <SummaryStat label="Total Credit (Dues)" value={rupees(ledgerFilteredCredit)} />
+                    <SummaryStat
+                      label="Net Balance"
+                      value={ledgerClosing === 0 ? 'Settled' : `${rupees(Math.abs(ledgerClosing))} ${ledgerClosing >= 0 ? 'CR' : 'DR'}`}
+                      tone={ledgerClosing === 0 ? undefined : ledgerClosing > 0 ? 'rose' : 'emerald'}
+                    />
                   </div>
                 )}
               </div>
@@ -1702,6 +2110,243 @@ export default function HamaliLedger() {
           )}
         </DialogContent>
       </Dialog>
+
+      <SendHamaliLedgerWhatsAppDialog
+        open={waDialogOpen}
+        onOpenChange={setWaDialogOpen}
+        party={teamParty}
+        initialFrom={ledgerFrom}
+        initialTo={ledgerTo}
+        ledgerLines={ledgerLines}
+        company={companyProfile}
+      />
     </div>
+  );
+}
+
+/* =================================================== WhatsApp Send Dialog */
+
+function SendHamaliLedgerWhatsAppDialog({
+  open,
+  onOpenChange,
+  party,
+  initialFrom,
+  initialTo,
+  ledgerLines,
+  company,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  party: Party | null | undefined;
+  initialFrom: string;
+  initialTo: string;
+  ledgerLines: (LedgerLine & { balance: number })[];
+  company: CompanyProfile | null | undefined;
+}) {
+  const [fromDate, setFromDate] = useState(initialFrom);
+  const [toDate, setToDate] = useState(initialTo || new Date().toISOString().slice(0, 10));
+  const [phone, setPhone] = useState(party?.phone || party?.phone2 || '');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setFromDate(initialFrom);
+      setToDate(initialTo || new Date().toISOString().slice(0, 10));
+      setPhone(party?.phone || party?.phone2 || '');
+    }
+  }, [open, initialFrom, initialTo, party]);
+
+  const periodLines = useMemo(() => {
+    let t = ledgerLines;
+    if (fromDate) t = t.filter((x) => x.date >= fromDate);
+    if (toDate) t = t.filter((x) => x.date <= toDate);
+    return t;
+  }, [ledgerLines, fromDate, toDate]);
+
+  const opening = periodLines.length ? periodLines[0].balance - (periodLines[0].credit - periodLines[0].debit) : 0;
+  const closing = periodLines.length ? periodLines[periodLines.length - 1].balance : 0;
+  const totalDebit = periodLines.reduce((s, x) => s + x.debit, 0);
+  const totalCredit = periodLines.reduce((s, x) => s + x.credit, 0);
+
+  const teamName = party?.name || 'Hamali Team';
+
+  const handleSendApi = async () => {
+    if (!party?.id) {
+      toast.error('Crew party not loaded');
+      return;
+    }
+    if (!phone.trim()) {
+      toast.error('Please enter a valid phone number');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api<{ ok: boolean; message: string; summaryText: string; transactionCount: number }>(
+        `/whatsapp/parties/${party.id}/send-ledger`,
+        {
+          method: 'POST',
+          body: { fromDate, toDate, phone: phone.trim() },
+        }
+      );
+      if (!res.ok) {
+        toast.error(res.message || 'WhatsApp send failed');
+        return;
+      }
+      toast.success(res.message || 'Hamali ledger statement sent!');
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send WhatsApp message');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenWhatsAppWeb = () => {
+    const rawNumber = phone.trim() || party?.phone || party?.phone2 || '';
+    let num = rawNumber.replace(/\D/g, '');
+    if (num.length === 10) num = `91${num}`;
+
+    const fromStr = fromDate || (periodLines.length ? periodLines[0].date : 'Start');
+    const toStr = toDate || (periodLines.length ? periodLines[periodLines.length - 1].date : 'Today');
+
+    const msg = `*ACCOUNT STATEMENT - ${teamName.toUpperCase()}*\nPeriod: ${fromStr} to ${toStr}\nOpening Bal: ₹${Math.abs(opening).toLocaleString('en-IN')} ${opening >= 0 ? 'Cr' : 'Dr'}\nTotal Debits (Paid): ₹${totalDebit.toLocaleString('en-IN')}\nTotal Credits (Dues): ₹${totalCredit.toLocaleString('en-IN')}\n*Closing Bal: ₹${Math.abs(closing).toLocaleString('en-IN')} ${closing >= 0 ? 'Cr' : 'Dr'}*\n\nThank you,\n*${company?.name || 'RVP INDUSTRIES'}*`;
+
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  const handleOpenPdf = () => {
+    const effectiveParty: Party = party ?? {
+      id: 'hamali',
+      name: teamName,
+      type: 'SUPPLIER',
+      phone: null,
+      address: null,
+      state: null,
+      gstin: null,
+      destination: null,
+      openingBalance: '0',
+      openingBalanceType: 'CR',
+      bankAccountNumber: null,
+      bankIfsc: null,
+      bankName: null,
+      commodities: [],
+      createdAt: new Date().toISOString(),
+    };
+    openPartyStatement({
+      company,
+      party: effectiveParty,
+      summary: {
+        totalDebit,
+        totalCredit,
+        balance: Math.abs(closing),
+        balanceType: closing >= 0 ? 'CR' : 'DR',
+        totalBusiness: totalCredit,
+        purchaseTotal: totalCredit,
+        saleTotal: 0,
+        paidTotal: totalDebit,
+        receivedTotal: 0,
+        setOffTotal: 0,
+        transactionCount: periodLines.length,
+        lastTxnDate: periodLines.length ? periodLines[periodLines.length - 1].date : null,
+        pendingCount: 0,
+      },
+      transactions: periodLines.map((l) => ({
+        id: l.id,
+        partyId: party?.id ?? 'hamali',
+        date: l.date,
+        kind: (l.credit > 0 ? 'PURCHASE' : 'PAYMENT') as LedgerKind,
+        particulars: l.particulars,
+        invoiceNumber: null,
+        vehicleNumber: null,
+        utr: l.reference ?? null,
+        reference: l.period ? `Period: ${l.period}` : (l.reference ?? null),
+        weightKg: null,
+        ratePerKg: null,
+        debit: l.debit,
+        credit: l.credit,
+        runningBalance: -l.balance,
+        product: null,
+        transferredDate: l.date,
+        status: 'VERIFIED' as const,
+      })),
+      fromDate: fromDate || undefined,
+      toDate: toDate || undefined,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-emerald-600">
+            <WhatsAppIcon className="h-5 w-5 fill-emerald-600" />
+            Send Hamali Ledger via WhatsApp
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+            <div className="font-semibold text-sm">{teamName}</div>
+            <div className="text-xs text-muted-foreground">Select period and confirm recipient phone number below.</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">From Date</label>
+              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">To Date</label>
+              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground">Recipient WhatsApp Mobile</label>
+            <Input
+              type="text"
+              placeholder="e.g. 9876543210"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
+
+          {/* Statement Summary Preview */}
+          <div className="rounded-lg border bg-emerald-500/5 p-3 space-y-2 text-xs">
+            <div className="font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider text-[11px]">
+              Statement Summary ({periodLines.length} entries)
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+              <div>Opening: <span className="font-medium text-foreground">₹{Math.abs(opening).toLocaleString('en-IN')} {opening >= 0 ? 'Cr' : 'Dr'}</span></div>
+              <div>Closing: <span className="font-bold text-foreground">₹{Math.abs(closing).toLocaleString('en-IN')} {closing >= 0 ? 'Cr' : 'Dr'}</span></div>
+              <div>Debits (Paid): <span className="font-medium text-foreground">₹{totalDebit.toLocaleString('en-IN')}</span></div>
+              <div>Credits (Dues): <span className="font-medium text-foreground">₹{totalCredit.toLocaleString('en-IN')}</span></div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              onClick={handleSendApi}
+              disabled={loading}
+              className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4 fill-white" />}
+              Send Statement PDF on WhatsApp
+            </Button>
+            <p className="text-[11px] text-muted-foreground text-center -mt-0.5">
+              Attaches the full statement for this period as a PDF.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" size="sm" onClick={handleOpenWhatsAppWeb} className="gap-1.5">
+                <WhatsAppIcon className="h-3.5 w-3.5 fill-emerald-600" /> WhatsApp Web
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleOpenPdf} className="gap-1.5">
+                <FileText className="h-3.5 w-3.5" /> View/Print PDF
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

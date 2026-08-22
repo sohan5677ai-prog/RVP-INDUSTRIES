@@ -1189,30 +1189,6 @@ export default function HamaliLedger() {
                   <CheckCircle2 className="h-4 w-4" /> {createVerification.isPending ? 'Squaring off…' : 'Square off'}
                 </Button>
               </div>
-              {verifSorted.length > 0 && (
-                <div className="border-t px-5 py-3">
-                  <div className="text-xs font-semibold text-muted-foreground mb-2">Verification history</div>
-                  <div className="space-y-1.5">
-                    {verifSorted.map((v) => (
-                      <div key={v.id} className="flex items-center justify-between gap-3 text-sm">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                          <span>Verified through <b>{shortDate(v.asOfDate)}</b></span>
-                          <span className="text-muted-foreground">· {rupees(Number(v.crewTotal))}</span>
-                          {v.note && <span className="text-muted-foreground truncate max-w-xs">- {v.note}</span>}
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => { if (confirm('Remove this checkpoint and reopen the period?')) deleteVerification.mutate(v.id); }}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 

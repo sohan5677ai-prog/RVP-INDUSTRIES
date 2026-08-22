@@ -938,6 +938,15 @@ model HamaliVerification {
   payments    Payment[]
 }
 
+// Persisted round-off overrides for hamali entries (e.g. "PUR-...", "SALE-...-LOAD", "TX-...")
+// configured on the Hamali Report page.
+model HamaliRoundedValue {
+  id        String   @id // Entry ID matching HamaliLedger (e.g. PUR-xxx)
+  amount    Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Single-row seller profile printed on generated tax invoices. Edited in Settings.
 model CompanyProfile {
   id                             String  @id @default("default")

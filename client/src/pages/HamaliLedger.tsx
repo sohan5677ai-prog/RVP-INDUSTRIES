@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Combobox } from '@/components/ui/combobox';
+import { Combobox, type ComboOption } from '@/components/ui/combobox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -239,7 +239,7 @@ export default function HamaliLedger() {
   const [mNote, setMNote] = useState('');
 
   // Recorded-charges table filter: searchable type picker + free-text note search
-  const [chargeFilter, setChargeFilter] = useState<'ALL' | ManualHamaliType>('ALL');
+  const [chargeFilter, setChargeFilter] = useState<string>('ALL');
   const [chargeSearch, setChargeSearch] = useState('');
 
   const mMeta = manualTypeMeta(mType);
@@ -488,22 +488,87 @@ export default function HamaliLedger() {
   return { purchaseEntries, saleEntries, transferEntries };
   }, [purchases, saleOrders, hamaliRates, companyProfile, stockTransfers, shellTransfers, huskTransfers]);
 
+  const allHamaliEntries = useMemo(
+    () => [...purchaseEntries, ...saleEntries, ...transferEntries],
+    [purchaseEntries, saleEntries, transferEntries]
+  );
+
+  const chargeTypeOptions = useMemo<ComboOption[]>(() => {
+    const options: ComboOption[] = [{ value: 'ALL', label: 'All charge types' }];
+    const seen = new Set<string>(['ALL']);
+
+    // Standard derived operations
+    const standardDerived: { value: string; label: string; hint: string }[] = [
+      { value: 'Black Seed Unloading', label: 'Black Seed Unloading', hint: 'Purchase' },
+      { value: 'Pappu Loading', label: 'Pappu Loading', hint: 'Sale' },
+      { value: 'Pappu Roasting', label: 'Pappu Roasting', hint: 'Sale' },
+      { value: 'Husk Loading', label: 'Husk Loading', hint: 'Sale' },
+      { value: 'TPS Loading', label: 'TPS Loading', hint: 'Sale' },
+      { value: 'Waste Loading', label: 'Waste Loading', hint: 'Sale' },
+      { value: 'Stock Transfer', label: 'Stock Transfer', hint: 'Transfer' },
+      { value: 'Shell Transfer', label: 'Shell Transfer', hint: 'Transfer' },
+      { value: 'Husk Transfer', label: 'Husk Transfer', hint: 'Transfer' },
+    ];
+
+    for (const item of standardDerived) {
+      if (!seen.has(item.value)) {
+        seen.add(item.value);
+        options.push(item);
+      }
+    }
+
+    // Dynamic custom rates from settings
+    if (hamaliRates) {
+      for (const r of hamaliRates) {
+        if (r.isCustom && r.label) {
+          const customLabel = `Pappu ${r.label}`;
+          if (!seen.has(customLabel)) {
+            seen.add(customLabel);
+            options.push({ value: customLabel, label: customLabel, hint: 'Sale (Custom)' });
+          }
+        }
+      }
+    }
+
+    // Any other dynamic labels in derived entries
+    for (const e of allHamaliEntries) {
+      const label = e.label || (e.source === 'SALE' ? 'Sale Loading' : e.source === 'TRANSFER' ? 'Transfer' : 'Purchase');
+      if (label && !seen.has(label)) {
+        seen.add(label);
+        const hint = e.source === 'PURCHASE' ? 'Purchase' : e.source === 'SALE' ? 'Sale' : 'Transfer';
+        options.push({ value: label, label, hint });
+      }
+    }
+
+    // Manual charge categories
+    for (const m of MANUAL_TYPES) {
+      if (!seen.has(m.label)) {
+        seen.add(m.label);
+        const hint = isManualDeduction(m.value) ? 'Payout' : 'Manual';
+        options.push({ value: m.label, label: m.label, hint });
+      }
+    }
+
+    return options;
+  }, [allHamaliEntries, hamaliRates]);
+
   const dayOf = (d: string) => toYMD(d);
 
   const q = search.trim().toLowerCase();
   const chargeNote = chargeSearch.trim().toLowerCase();
 
   const filtered = useMemo(() => {
-    // If a specific manual charge type is filtered, derived entries (purchases/sales/transfers) should not appear
-    if (chargeFilter !== 'ALL') return [];
-
-    return [...purchaseEntries, ...saleEntries, ...transferEntries]
+    return allHamaliEntries
       .filter((e) => {
         // Purchases are supplier-side hamali, sale loading is buyer-side.
         if (partyType === 'SUPPLIER' && e.source !== 'PURCHASE') return false;
         if (partyType === 'BUYER' && e.source !== 'SALE') return false;
         if (q && !e.partyName.toLowerCase().includes(q)) return false;
-        if (chargeNote && !(`${e.reference} ${e.label || ''} ${e.partyName}`.toLowerCase().includes(chargeNote))) return false;
+
+        const entryLabel = e.label || (e.source === 'SALE' ? 'Sale Loading' : e.source === 'TRANSFER' ? 'Transfer' : 'Purchase');
+        if (chargeFilter !== 'ALL' && entryLabel !== chargeFilter) return false;
+
+        if (chargeNote && !(`${e.reference} ${entryLabel} ${e.partyName}`.toLowerCase().includes(chargeNote))) return false;
         const d = dayOf(e.date);
         if (startDate && d < startDate) return false;
         if (endDate && d > endDate) return false;
@@ -515,7 +580,7 @@ export default function HamaliLedger() {
         if (dayB !== dayA) return dayB.localeCompare(dayA);
         return new Date(b.date).getTime() - new Date(a.date).getTime();
       });
-  }, [purchaseEntries, saleEntries, transferEntries, partyType, q, chargeFilter, chargeNote, startDate, endDate]);
+  }, [allHamaliEntries, partyType, q, chargeFilter, chargeNote, startDate, endDate]);
 
   // Metrics
   const totalPl = filtered.reduce((acc, e) => acc + e.pl, 0);
@@ -542,19 +607,16 @@ export default function HamaliLedger() {
 
     const needle = chargeSearch.trim().toLowerCase();
     return manualSorted.filter((c) => {
-      if (chargeFilter !== 'ALL' && c.type !== chargeFilter) return false;
-      if (needle && !(`${c.note ?? ''} ${manualTypeMeta(c.type).label}`.toLowerCase().includes(needle))) return false;
+      const meta = manualTypeMeta(c.type);
+      const manualLabel = meta?.label;
+      if (chargeFilter !== 'ALL' && manualLabel !== chargeFilter && c.type !== chargeFilter) return false;
+      if (needle && !(`${c.note ?? ''} ${manualLabel ?? ''}`.toLowerCase().includes(needle))) return false;
       const d = dayOf(c.date);
       if (startDate && d < startDate) return false;
       if (endDate && d > endDate) return false;
       return true;
     });
   }, [manualSorted, chargeFilter, chargeSearch, partyType, q, startDate, endDate]);
-
-  const manualFilteredCharged = manualFiltered.filter((c) => !isManualDeduction(c.type)).reduce((s, c) => s + Number(c.amount), 0);
-  const manualFilteredPaid = manualFiltered.filter((c) => isManualDeduction(c.type)).reduce((s, c) => s + Number(c.amount), 0);
-  const manualFilteredOutstanding = manualFilteredCharged - manualFilteredPaid;
-  const chargeFilterActive = chargeFilter !== 'ALL' || chargeSearch.trim() !== '';
 
   // Combined "Hamali Disbursements & Charges" table - derived entries and
   // manually recorded charges merged into one list, sorted by date, so the
@@ -604,6 +666,21 @@ export default function HamaliLedger() {
     });
   }, [filtered, manualFiltered, roundedValues]);
 
+  const tableCharged = useMemo(() => {
+    return unifiedRows
+      .filter((r) => !r.isPaidOut)
+      .reduce((s, r) => s + (view === 'company' && r.fullCharge != null ? r.fullCharge : r.amount), 0);
+  }, [unifiedRows, view]);
+
+  const tablePaid = useMemo(() => {
+    return unifiedRows
+      .filter((r) => r.isPaidOut)
+      .reduce((s, r) => s + r.amount, 0);
+  }, [unifiedRows]);
+
+  const tableOutstanding = tableCharged - tablePaid;
+  const chargeFilterActive = chargeFilter !== 'ALL' || chargeSearch.trim() !== '';
+
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(unifiedRows, 50);
 
   // --- Reconciliation checkpoints (Hamali view) ---
@@ -621,8 +698,6 @@ export default function HamaliLedger() {
   };
   const daysInclusive = (from: string, to: string) =>
     Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1);
-
-  const allHamaliEntries = useMemo(() => [...purchaseEntries, ...saleEntries, ...transferEntries], [purchaseEntries, saleEntries, transferEntries]);
 
   // Earliest dated crew due (for the first period's "from", when nothing precedes it).
   const allDatedCrew = [...allHamaliEntries.map((e) => dayOf(e.date)), ...manualSorted.map((c) => dayOf(c.date))];
@@ -1243,13 +1318,13 @@ export default function HamaliLedger() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-sm">Hamali Disbursements &amp; Charges</span>
                 <Combobox
-                  className="h-9 w-52"
+                  className="h-9 w-60"
                   ariaLabel="Filter by charge type"
                   placeholder="All charge types"
                   searchPlaceholder="Search charge type…"
                   value={chargeFilter}
-                  onChange={(v) => setChargeFilter(v as 'ALL' | ManualHamaliType)}
-                  options={[{ value: 'ALL', label: 'All charge types' }, ...MANUAL_TYPES.map((m) => ({ value: m.value, label: m.label }))]}
+                  onChange={(v) => setChargeFilter(v)}
+                  options={chargeTypeOptions}
                 />
                 <Input
                   className="h-9 w-44"
@@ -1263,9 +1338,9 @@ export default function HamaliLedger() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="flex gap-4 text-xs">
-                  <span className="text-muted-foreground">Charged: <b className="text-primary">{rupees(manualFilteredCharged)}</b></span>
-                  <span className="text-muted-foreground">Paid: <b className="text-emerald-600 dark:text-emerald-400">{rupees(manualFilteredPaid)}</b></span>
-                  <span className="text-muted-foreground">Outstanding: <b className={manualFilteredOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : ''}>{rupees(manualFilteredOutstanding)}</b></span>
+                  <span className="text-muted-foreground">Charged: <b className="text-primary">{rupees(tableCharged)}</b></span>
+                  <span className="text-muted-foreground">Paid: <b className="text-emerald-600 dark:text-emerald-400">{rupees(tablePaid)}</b></span>
+                  <span className="text-muted-foreground">Outstanding: <b className={tableOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : ''}>{rupees(tableOutstanding)}</b></span>
                 </div>
                 <ExportButtons
                   filename={`Hamali_Report_${view === 'company' ? 'Company' : 'Crew'}`}

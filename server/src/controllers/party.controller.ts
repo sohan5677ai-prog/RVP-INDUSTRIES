@@ -116,24 +116,51 @@ export async function updateParty(req: Request, res: Response) {
 
   const party = await prisma.$transaction(async (tx) => {
     if (addressList !== undefined) {
-      await tx.partyAddress.deleteMany({ where: { partyId: existing.id } });
-      if (addressList.length > 0) {
-        await tx.partyAddress.createMany({
-          data: addressList.map((a) => ({
-            partyId: existing.id,
-            label: a.label,
-            address: a.address,
-            city: a.city ?? null,
-            state: a.state ?? null,
-            pincode: a.pincode ?? null,
-            gstin: a.gstin ?? null,
-            destination: a.destination ?? null,
-            phone: a.phone ?? null,
-            phone2: a.phone2 ?? null,
-            locationLink: a.locationLink ?? null,
-            isDefault: a.isDefault ?? false,
-          })),
-        });
+      const incomingIds = addressList.map((a) => a.id).filter(Boolean) as string[];
+      // Delete addresses that were removed from the incoming list
+      await tx.partyAddress.deleteMany({
+        where: {
+          partyId: existing.id,
+          id: { notIn: incomingIds },
+        },
+      });
+
+      for (const a of addressList) {
+        if (a.id && existing.addresses.some((ea) => ea.id === a.id)) {
+          await tx.partyAddress.update({
+            where: { id: a.id },
+            data: {
+              label: a.label,
+              address: a.address,
+              city: a.city ?? null,
+              state: a.state ?? null,
+              pincode: a.pincode ?? null,
+              gstin: a.gstin ?? null,
+              destination: a.destination ?? null,
+              phone: a.phone ?? null,
+              phone2: a.phone2 ?? null,
+              locationLink: a.locationLink ?? null,
+              isDefault: a.isDefault ?? false,
+            },
+          });
+        } else {
+          await tx.partyAddress.create({
+            data: {
+              partyId: existing.id,
+              label: a.label,
+              address: a.address,
+              city: a.city ?? null,
+              state: a.state ?? null,
+              pincode: a.pincode ?? null,
+              gstin: a.gstin ?? null,
+              destination: a.destination ?? null,
+              phone: a.phone ?? null,
+              phone2: a.phone2 ?? null,
+              locationLink: a.locationLink ?? null,
+              isDefault: a.isDefault ?? false,
+            },
+          });
+        }
       }
     }
 

@@ -43,6 +43,7 @@ import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { findWaitingConfirmation, markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
+import { resolveOrderEffectiveDetails, resolveOrderBuyerAddress } from '../lib/orderAddress.js';
 
 const GST_RATE = 0.05; // fallback IGST fraction (5%) when a commodity has no configured rate
 
@@ -373,13 +374,14 @@ export async function createSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-  let selectedAddr: { id: string; label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null; phone?: string | null; phone2?: string | null; locationLink?: string | null } | null = null;
+  let selectedAddr: { id?: string | null; label?: string | null; address?: string | null; city?: string | null; state?: string | null; pincode?: string | null; gstin?: string | null; destination?: string | null; phone?: string | null; phone2?: string | null; locationLink?: string | null } | null = null;
   if (data.buyerAddressId) {
     selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
   }
   if (!selectedAddr) {
     const addrs = await prisma.partyAddress.findMany({ where: { partyId: buyer.id }, orderBy: { createdAt: 'asc' } });
-    selectedAddr = addrs.find((a) => a.isDefault) || addrs[0] || null;
+    selectedAddr = (data.buyerAddress ? addrs.find((a) => a.address === data.buyerAddress || a.label === data.buyerAddress) : null)
+      || addrs.find((a) => a.isDefault) || addrs[0] || null;
   }
 
   const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
@@ -389,14 +391,14 @@ export async function createSaleOrder(req: Request, res: Response) {
   const stamps = await currentCostStamps(destination ?? effectiveDestination, priceType);
 
   const buyerAddressId = selectedAddr?.id || data.buyerAddressId || null;
-  const buyerAddress = data.buyerAddress || selectedAddr?.address || buyer.address || null;
-  const buyerCity = data.buyerCity || selectedAddr?.city || buyer.city || null;
-  const buyerState = data.buyerState || selectedAddr?.state || buyer.state || null;
-  const buyerPincode = data.buyerPincode || selectedAddr?.pincode || buyer.pincode || null;
-  const buyerGstin = data.buyerGstin || selectedAddr?.gstin || buyer.gstin || null;
-  const buyerPhone = data.buyerPhone || selectedAddr?.phone || buyer.phone || null;
-  const buyerPhone2 = data.buyerPhone2 || selectedAddr?.phone2 || buyer.phone2 || null;
-  const buyerLocationLink = data.buyerLocationLink || selectedAddr?.locationLink || buyer.locationLink || null;
+  const buyerAddress = selectedAddr?.address || data.buyerAddress || buyer.address || null;
+  const buyerCity = selectedAddr?.city || data.buyerCity || buyer.city || null;
+  const buyerState = selectedAddr?.state || data.buyerState || buyer.state || null;
+  const buyerPincode = selectedAddr?.pincode || data.buyerPincode || buyer.pincode || null;
+  const buyerGstin = selectedAddr?.gstin || data.buyerGstin || buyer.gstin || null;
+  const buyerPhone = selectedAddr?.phone || data.buyerPhone || buyer.phone || null;
+  const buyerPhone2 = selectedAddr?.phone2 || data.buyerPhone2 || buyer.phone2 || null;
+  const buyerLocationLink = selectedAddr?.locationLink || data.buyerLocationLink || buyer.locationLink || null;
 
   const order = await prisma.saleOrder.create({
     data: {
@@ -537,13 +539,15 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   await assertPappuMargin(data.product, Number(data.ratePerKg), data.marginOverride);
 
-  let selectedAddr: { id: string; label: string; address: string; city: string | null; state: string | null; pincode: string | null; gstin: string | null; destination?: string | null; phone?: string | null; phone2?: string | null; locationLink?: string | null } | null = null;
+  let selectedAddr: { id?: string | null; label?: string | null; address?: string | null; city?: string | null; state?: string | null; pincode?: string | null; gstin?: string | null; destination?: string | null; phone?: string | null; phone2?: string | null; locationLink?: string | null } | null = null;
   if (data.buyerAddressId) {
     selectedAddr = await prisma.partyAddress.findUnique({ where: { id: data.buyerAddressId } });
   }
   if (!selectedAddr) {
     const addrs = await prisma.partyAddress.findMany({ where: { partyId: buyer.id }, orderBy: { createdAt: 'asc' } });
-    selectedAddr = addrs.find((a) => a.isDefault) || addrs[0] || null;
+    selectedAddr = (data.buyerAddress ? addrs.find((a) => a.address === data.buyerAddress || a.label === data.buyerAddress) : null)
+      || (order.buyerAddress ? addrs.find((a) => a.address === order.buyerAddress || a.label === order.buyerAddress) : null)
+      || addrs.find((a) => a.isDefault) || addrs[0] || null;
   }
 
   const effectiveDestination = selectedAddr?.destination || buyer.destination || null;
@@ -556,15 +560,15 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
 
-  const buyerAddressId = data.buyerAddressId !== undefined ? data.buyerAddressId : (selectedAddr?.id || order.buyerAddressId);
-  const buyerAddress = data.buyerAddress !== undefined ? data.buyerAddress : (selectedAddr?.address || buyer.address || null);
-  const buyerCity = data.buyerCity !== undefined ? data.buyerCity : (selectedAddr?.city || buyer.city || null);
-  const buyerState = data.buyerState !== undefined ? data.buyerState : (selectedAddr?.state || buyer.state || null);
-  const buyerPincode = data.buyerPincode !== undefined ? data.buyerPincode : (selectedAddr?.pincode || buyer.pincode || null);
-  const buyerGstin = data.buyerGstin !== undefined ? data.buyerGstin : (selectedAddr?.gstin || buyer.gstin || null);
-  const buyerPhone = data.buyerPhone !== undefined ? data.buyerPhone : (selectedAddr?.phone || buyer.phone || null);
-  const buyerPhone2 = data.buyerPhone2 !== undefined ? data.buyerPhone2 : (selectedAddr?.phone2 || buyer.phone2 || null);
-  const buyerLocationLink = data.buyerLocationLink !== undefined ? data.buyerLocationLink : (selectedAddr?.locationLink || buyer.locationLink || null);
+  const buyerAddressId = data.buyerAddressId !== undefined ? (selectedAddr?.id || data.buyerAddressId) : (selectedAddr?.id || order.buyerAddressId);
+  const buyerAddress = data.buyerAddress !== undefined ? (selectedAddr?.address || data.buyerAddress) : (order.buyerAddress || selectedAddr?.address || buyer.address || null);
+  const buyerCity = data.buyerCity !== undefined ? (selectedAddr?.city || data.buyerCity) : (order.buyerCity || selectedAddr?.city || buyer.city || null);
+  const buyerState = data.buyerState !== undefined ? (selectedAddr?.state || data.buyerState) : (order.buyerState || selectedAddr?.state || buyer.state || null);
+  const buyerPincode = data.buyerPincode !== undefined ? (selectedAddr?.pincode || data.buyerPincode) : (order.buyerPincode || selectedAddr?.pincode || buyer.pincode || null);
+  const buyerGstin = data.buyerGstin !== undefined ? (selectedAddr?.gstin || data.buyerGstin) : (order.buyerGstin || selectedAddr?.gstin || buyer.gstin || null);
+  const buyerPhone = selectedAddr?.phone || (data.buyerPhone !== undefined ? data.buyerPhone : order.buyerPhone) || buyer.phone || null;
+  const buyerPhone2 = selectedAddr?.phone2 || (data.buyerPhone2 !== undefined ? data.buyerPhone2 : order.buyerPhone2) || buyer.phone2 || null;
+  const buyerLocationLink = selectedAddr?.locationLink || (data.buyerLocationLink !== undefined ? data.buyerLocationLink : order.buyerLocationLink) || buyer.locationLink || null;
 
   const updated = await prisma.saleOrder.update({
     where: { id: req.params.id },

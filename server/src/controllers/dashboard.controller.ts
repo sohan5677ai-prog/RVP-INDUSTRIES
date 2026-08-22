@@ -194,8 +194,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     huskRate,
     wasteRate,
     customRates,
-    shellAgg,
-    huskAgg,
+    shellTransfers,
+    huskTransfers,
     termLoanPrincipalAgg,
     interestCapitalisedAgg,
     interestPaidAgg,
@@ -254,8 +254,8 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       getHamaliRateFull('HUSK_LOADING'),
       getHamaliRateFull('WASTE_LOADING'),
       getCustomHamaliRates(),
-      prisma.shellTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
-      prisma.huskTransfer.aggregate({ _sum: { transportCharge: true, hamaliCharge: true } }),
+      prisma.shellTransfer.findMany({ select: { id: true, transportCharge: true, hamaliCharge: true } }),
+      prisma.huskTransfer.findMany({ select: { id: true, transportCharge: true, hamaliCharge: true } }),
       prisma.termLoanPrincipal.aggregate({ _sum: { amount: true } }),
       // Storage-loan carrying interest: capitalised onto transferred seed vs
       // actually paid to the bank at repayment (see loan reconciliation).
@@ -399,13 +399,25 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     // via COGS. Adding them here too would double-count them. Byproduct income in
     // this pool is gross revenue with no COGS, so shell/husk transfer costs are a
     // real net cost counted exactly once. (Same logic as loanInterestUnabsorbed.)
-    const transferHamali =
-      Number(shellAgg._sum.hamaliCharge || 0) +
-      Number(huskAgg._sum.hamaliCharge || 0);
+    let transferHamali = 0;
+    let transferTransport = 0;
 
-    const transferTransport =
-      Number(shellAgg._sum.transportCharge || 0) +
-      Number(huskAgg._sum.transportCharge || 0);
+    for (const s of shellTransfers) {
+      const entryId = `TX-SHELL-${s.id}`;
+      const baseHamali = Number(s.hamaliCharge || 0);
+      transferHamali += roundedHamaliMap.has(entryId) ? roundedHamaliMap.get(entryId)! : baseHamali;
+      transferTransport += Number(s.transportCharge || 0);
+    }
+
+    for (const h of huskTransfers) {
+      const entryId = `TX-HUSK-${h.id}`;
+      const baseHamali = Number(h.hamaliCharge || 0);
+      transferHamali += roundedHamaliMap.has(entryId) ? roundedHamaliMap.get(entryId)! : baseHamali;
+      transferTransport += Number(h.transportCharge || 0);
+    }
+
+    transferHamali = Math.round(transferHamali * 100) / 100;
+    transferTransport = Math.round(transferTransport * 100) / 100;
 
     // Purchases on Feroz Ledger are a husk-pool cost; standalone gunny sales in Income tab are income
     const gunnyBags = gunnyByDir.reduce((s, r) => {

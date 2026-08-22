@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 
 const data = [
   { date: '2026-04-07', party: 'Gangadhar', lorryNo: 'TN524070', invoice: 'RVP/02/26-27', tons: 12.12, price: 7.00 },
-  { date: '2026-04-13', party: 'SLV Babu', lorryNo: 'TN524070', invoice: 'RVP/06/26-27', tons: 26.50, price: 7.50 },
+  { date: '2026-04-13', party: 'SLV Babu', lorryNo: 'TN524070', invoice: 'RVP/06/26-27', tons: 27.00, price: 7.50 },
   { date: '2026-04-17', party: 'Gangadhar', lorryNo: 'TN524070', invoice: 'RVP/11/26-27', tons: 24.85, price: 7.50 },
   { date: '2026-05-01', party: 'KTC', lorryNo: 'TN52F6431', invoice: 'RVP/12/26-27', tons: 25.03, price: 7.00 },
   { date: '2026-05-09', party: 'Balaji Challakere', lorryNo: 'TN52H8879', invoice: 'RVP/18/26-27', tons: 24.91, price: 6.90 },

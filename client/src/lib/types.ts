@@ -632,6 +632,7 @@ export interface CompanyProfile {
   saleCloseToleranceByproductPct?: string | number;
   // Days a PO may sit PENDING before the arrival-reminder popup nags. 0 = off.
   poReminderDays?: string | number;
+  openingItc?: string | number;
   invoiceLayout?: string | null;
 
   // TaxPro GSP Config
@@ -1101,17 +1102,21 @@ export interface GstReport {
   };
   input: {
     purchases: GstPurchaseLine[];
+    openingItc: number;
     taxableTotal: number;
     igstTotal: number;
     cgstTotal: number;
     sgstTotal: number;
     gstTotal: number;
+    totalItcAvailable: number;
   };
   summary: {
     outputTax: number;
     creditNoteTax: number;
     debitNoteTax: number;
     netOutputTax: number;
+    openingItc: number;
+    currentInputTaxCredit: number;
     inputTaxCredit: number;
     netPayable: number;
   };

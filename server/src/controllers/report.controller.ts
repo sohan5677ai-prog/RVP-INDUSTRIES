@@ -21,15 +21,17 @@ function resolvePeriod(req: Request): { from: Date; to: Date } {
   const now = new Date();
   const fyStartYear = istFinancialYearStart(now); // FY starts 1 Apr, IST
   const defaultFrom = new Date(Date.UTC(fyStartYear, 3, 1, 0, 0, 0));
-  const defaultTo = new Date(Date.UTC(fyStartYear + 1, 2, 31, 23, 59, 59));
+  const defaultTo = new Date(Date.UTC(fyStartYear + 1, 2, 31, 23, 59, 59, 999));
 
   const fromRaw = typeof req.query.from === 'string' ? new Date(req.query.from) : null;
   const toRaw = typeof req.query.to === 'string' ? new Date(req.query.to) : null;
 
   const from = fromRaw && !isNaN(fromRaw.getTime()) ? fromRaw : defaultFrom;
   const to = toRaw && !isNaN(toRaw.getTime()) ? toRaw : defaultTo;
-  // Make the end of the window inclusive of the whole day.
-  to.setHours(23, 59, 59, 999);
+  // If only a date string (YYYY-MM-DD) was passed, make the end inclusive of the day.
+  if (typeof req.query.to === 'string' && req.query.to.length <= 10) {
+    to.setHours(23, 59, 59, 999);
+  }
   return { from, to };
 }
 
@@ -181,12 +183,57 @@ export async function getGstReport(req: Request, res: Response) {
 
   const sum = <T,>(rows: T[], pick: (r: T) => number) => r2(rows.reduce((a, r) => a + pick(r), 0));
 
+  // ── Prior-period ITC & Output Tax: calculate opening ITC brought forward ───
+  const priorStockIns = await prisma.stockIn.findMany({
+    where: {
+      arrivalDate: { lt: from },
+      purchaseOrder: { hasGst: true },
+    },
+    include: { purchaseOrder: true },
+  });
+  const priorPurchasesGst = sum(priorStockIns, (s) => {
+    const { amount: gst } = purchaseGst({
+      hasGst: true,
+      billingWeightKg: s.billingWeightKg,
+      pricePerKg: s.purchaseOrder.pricePerKg,
+      billingRatePerKg: s.billingRatePerKg,
+    });
+    return gst;
+  });
+
+  const priorDispatches = await prisma.saleDispatch.findMany({
+    where: {
+      gstAmount: { gt: 0 },
+      OR: [
+        { invoiceDate: { lt: from } },
+        { AND: [{ invoiceDate: null }, { dispatchDate: { lt: from } }] },
+      ],
+    },
+  });
+  const priorDispatchesGst = sum(priorDispatches, (d) => Number(d.gstAmount));
+
+  const priorCreditNotes = await prisma.creditNote.findMany({
+    where: { status: 'ISSUED', noteDate: { lt: from } },
+  });
+  const priorCnGst = sum(priorCreditNotes, (n) => Number(n.gstAmount));
+
+  const priorDebitNotes = await prisma.debitNote.findMany({
+    where: { status: 'ISSUED', noteDate: { lt: from } },
+  });
+  const priorDnGst = sum(priorDebitNotes, (n) => Number(n.gstAmount));
+
+  const baseOpeningItc = company?.openingItc ? Number(company.openingItc) : 0;
+  const priorTotalItc = r2(baseOpeningItc + priorPurchasesGst);
+  const priorNetOutput = r2(priorDispatchesGst + priorDnGst - priorCnGst);
+  const openingItc = Math.max(0, r2(priorTotalItc - priorNetOutput));
+
   const outputGst = sum(salesLines, (l) => l.gstAmount);
   const dnGst = sum(dnLines, (l) => l.gstAmount);
   const cnGst = sum(cnLines, (l) => l.gstAmount);
-  const inputGst = sum(purchaseLines, (l) => l.gstAmount);
+  const currentInputGst = sum(purchaseLines, (l) => l.gstAmount);
+  const totalInputTaxCredit = r2(openingItc + currentInputGst);
   const netOutputTax = r2(outputGst + dnGst - cnGst);
-  const netPayable = r2(netOutputTax - inputGst);
+  const netPayable = r2(netOutputTax - totalInputTaxCredit);
 
   res.json({
     period: { from: from.toISOString(), to: to.toISOString(), fy: computeFY(from) },
@@ -208,18 +255,22 @@ export async function getGstReport(req: Request, res: Response) {
     },
     input: {
       purchases: purchaseLines,
+      openingItc,
       taxableTotal: sum(purchaseLines, (l) => l.taxableValue),
       igstTotal: sum(purchaseLines, (l) => l.igst),
       cgstTotal: sum(purchaseLines, (l) => l.cgst),
       sgstTotal: sum(purchaseLines, (l) => l.sgst),
-      gstTotal: inputGst,
+      gstTotal: currentInputGst,
+      totalItcAvailable: totalInputTaxCredit,
     },
     summary: {
       outputTax: outputGst,
       creditNoteTax: cnGst,
       debitNoteTax: dnGst,
       netOutputTax,
-      inputTaxCredit: inputGst,
+      openingItc,
+      currentInputTaxCredit: currentInputGst,
+      inputTaxCredit: totalInputTaxCredit,
       netPayable, // > 0 → pay to govt; < 0 → carried-forward ITC
     },
   });

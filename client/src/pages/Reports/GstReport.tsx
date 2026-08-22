@@ -117,11 +117,13 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
           </Card>
 
           {/* Summary KPIs */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard label="Output Tax (Sales)" value={rupees(sum.outputTax)} icon={ArrowUpRight} tone="rose"
               hint={`Taxable ${rupees(out.taxableTotal)}`} />
-            <StatCard label="Input Tax Credit" value={rupees(sum.inputTaxCredit)} icon={ArrowDownLeft} tone="forest"
+            <StatCard label="Input Tax Credit" value={rupees(sum.currentInputTaxCredit)} icon={ArrowDownLeft} tone="forest"
               hint={`Taxable ${rupees(inp.taxableTotal)}`} />
+            <StatCard label="Opening ITC (Brought Fwd)" value={rupees(sum.openingItc)} icon={Scale} tone="forest"
+              hint="Carried over from prior periods" />
             <StatCard label="Net Note Adjustment" value={rupees(sum.debitNoteTax - sum.creditNoteTax)} icon={FileMinus2} tone="gold"
               hint={`CN ${rupees(sum.creditNoteTax)} · DN ${rupees(sum.debitNoteTax)}`} />
             <StatCard
@@ -129,7 +131,7 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
               value={rupees(Math.abs(sum.netPayable))}
               icon={Scale}
               tone={netPayablePositive ? 'clay' : 'forest'}
-              hint={netPayablePositive ? 'Output − Input' : 'Input exceeds output'}
+              hint={netPayablePositive ? 'Output − Total ITC' : 'Total ITC exceeds output'}
             />
           </div>
 
@@ -144,7 +146,14 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
               <ReconRow label="Add: Debit notes (B)" value={sum.debitNoteTax} />
               <ReconRow label="Less: Credit notes (C)" value={-sum.creditNoteTax} />
               <ReconRow label="Net output tax (A + B − C)" value={sum.netOutputTax} strong />
-              <ReconRow label="Less: Input tax credit (D)" value={-sum.inputTaxCredit} />
+              {sum.openingItc > 0 && (
+                <ReconRow label="Less: Opening ITC brought forward" value={-sum.openingItc} />
+              )}
+              <ReconRow label="Less: Current period ITC (D)" value={-sum.currentInputTaxCredit} />
+              <div className="flex items-baseline justify-between py-1.5 text-xs text-muted-foreground font-medium">
+                <span>Total available ITC (Opening + Period ITC)</span>
+                <Num v={sum.inputTaxCredit} />
+              </div>
               <div className="flex items-baseline justify-between pt-3">
                 <span className="font-bold text-foreground">{netPayablePositive ? 'Net GST Payable' : 'ITC Carried Forward'}</span>
                 <span className={'font-mono font-bold tabular-nums text-lg ' + (netPayablePositive ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>

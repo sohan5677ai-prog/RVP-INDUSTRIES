@@ -126,6 +126,7 @@ const emptyCompany: CompanyProfile = {
   saleCloseTolerancePct: 0.5,
   saleCloseToleranceByproductPct: 2,
   poReminderDays: 3,
+  openingItc: 84944.73,
   taxproGspId: '', taxproGspSecret: '', taxproGstUser: '', taxproGstPass: '', taxproSandbox: true,
 };
 
@@ -237,6 +238,18 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               {field('State name', 'stateName', 'Andhra Pradesh')}
               {field('State code', 'stateCode', '37')}
               {field('Pincode', 'pincode', '517247')}
+            </div>
+            <div className="space-y-1.5 max-w-xs">
+              <Label className="text-xs">Opening ITC Balance (₹ brought forward)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={String(form.openingItc ?? 84944.73)}
+                onChange={(e) => setForm((p) => ({ ...p, openingItc: e.target.value }))}
+                placeholder="84944.73"
+              />
+              <p className="text-[10px] text-muted-foreground">Initial opening Input Tax Credit before ERP start date. Carried forward dynamically across GST statutory reports.</p>
             </div>
 
             <div className="flex items-center gap-2 pt-2 border-t">

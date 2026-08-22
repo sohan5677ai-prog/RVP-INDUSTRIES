@@ -251,6 +251,7 @@ const companyProfileSchema = z.object({
   ownerWeeklySummaryEnabled: z.boolean().optional(),
   ownerDispatchReminderEnabled: z.boolean().optional(),
   freightRetentionPerTrip: z.coerce.number().nonnegative().optional(),
+  openingItc: z.coerce.number().min(0).optional(),
   // How far under the booked tonnage a final lorry may land and still close the
   // order (% of ordered weight). Capped at 10% - beyond that a short order needs
   // a deliberate short close, not a blanket rule.

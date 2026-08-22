@@ -919,6 +919,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     {
       name: order.buyer.name,
       phone: details.effectivePhone,
+      phone2: details.effectivePhone2,
       locationLink: details.effectiveLocationLink,
       address: details.effectiveAddress,
       city: details.effectiveCity,

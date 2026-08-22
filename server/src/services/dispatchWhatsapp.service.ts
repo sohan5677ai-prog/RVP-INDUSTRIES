@@ -192,7 +192,8 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     error: r.ok ? null : r.error ?? null,
   });
 
-  // Party (buyer) - always. Includes branch-specific phone numbers alongside root buyer numbers.
+  // Party (buyer) - Phone Number 1 only (Phone Number 2 is reserved as the point of contact for drivers).
+  // Includes branch Phone 1 if a branch address is selected, or root buyer Phone 1.
   const buyerPhones = allBuyerPhones;
   const partyResult = buyerPhones.length > 0
     ? await whatsappService.sendDispatchToParty({
@@ -357,6 +358,7 @@ export async function resendDispatchDriverWhatsApp(dispatchId: string): Promise<
     {
       name: buyer.name,
       phone: details.effectivePhone,
+      phone2: details.effectivePhone2,
       locationLink: details.effectiveLocationLink,
       address: details.effectiveAddress,
       city: details.effectiveCity,

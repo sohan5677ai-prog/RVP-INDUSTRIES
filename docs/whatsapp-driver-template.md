@@ -72,7 +72,7 @@ That is a Fast2SMS approval plus a small branch in `notifyDispatchDriver`.
 | `{{3}}` | Deliver to — buyer name | `Hariom Gum Industries` |
 | `{{4}}` | Destination — order's, else buyer's city | `Surat` |
 | `{{5}}` | Load — product and weight | `PAPPU - 25.00 MT` |
-| `{{6}}` | Party contact | `9876543210` |
+| `{{6}}` | Party contact (Phone 2, fallback to Phone 1) | `9826464461` |
 | `{{7}}` | Maps link | `https://maps.google.com/?q=11.237543,77.55936` |
 
 ### The pin's address line is the coordinates, deliberately

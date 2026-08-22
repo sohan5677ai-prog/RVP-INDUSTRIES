@@ -965,7 +965,7 @@ export const whatsappService = {
       driverPhone: string | null;
       weightKg: number | null;
     },
-    buyer: { name: string; phone: string | null; locationLink: string | null; address?: string | null; city?: string | null },
+    buyer: { name: string; phone: string | null; phone2?: string | null; locationLink: string | null; address?: string | null; city?: string | null },
     order: { destination: string | null; product: string },
   ) {
     if (!dispatch.driverPhone) return null; // no driver captured - nothing to send
@@ -973,13 +973,15 @@ export const whatsappService = {
     const load =
       dispatch.weightKg != null ? `${order.product} - ${fmtWeight(dispatch.weightKg)}` : order.product;
     const coords = await resolveLatLngFromMapsLink(buyer.locationLink);
+    // Point of contact for driver is Phone 2, falling back to Phone 1 if Phone 2 is not set.
+    const buyerContact = buyer.phone2?.trim() || buyer.phone?.trim() || '-';
     const variables = [
       dispatch.driverName?.trim() || 'Driver ji',
       dispatch.vehicleNumber ?? '-',
       buyer.name,
       destination,
       load,
-      buyer.phone ?? '-',
+      buyerContact,
       // Once the coordinates are known, {{7}} is rebuilt as a short `?q=lat,lng`
       // link rather than echoing what is stored: a copied Google Maps place URL
       // runs 300-odd characters and wrapped over eight lines in the driver's

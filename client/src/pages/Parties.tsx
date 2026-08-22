@@ -729,6 +729,9 @@ export default function Parties() {
                       <FormControl>
                         <Input placeholder="e.g. 9876543210" {...field} />
                       </FormControl>
+                      <p className="text-[11px] text-muted-foreground">
+                        For E-Way Bill &amp; E-Invoice WhatsApp bundle
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -738,10 +741,13 @@ export default function Parties() {
                   name="phone2"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone Number 2</FormLabel>
+                      <FormLabel>Phone Number 2 (Driver Contact)</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. 9876543211" {...field} />
                       </FormControl>
+                      <p className="text-[11px] text-muted-foreground">
+                        Point of contact for drivers (sent to driver)
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1130,7 +1136,7 @@ export default function Parties() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                  Branch Phone 1
+                                  Branch Phone 1 (WhatsApp Bundle)
                                 </label>
                                 <Input
                                   value={addr.phone ?? ''}
@@ -1141,7 +1147,7 @@ export default function Parties() {
                               </div>
                               <div>
                                 <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                  Branch Phone 2 (Optional)
+                                  Branch Phone 2 (Driver Contact)
                                 </label>
                                 <Input
                                   value={addr.phone2 ?? ''}

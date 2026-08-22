@@ -146,15 +146,13 @@ export async function resolveOrderEffectiveDetails(order: {
   const effectiveDestination =
     order.destination || selectedAddress?.destination || order.buyer?.destination || null;
 
+  // Phone 1 only: Invoices, E-Way Bills & statements go to Phone 1. Phone 2 is reserved as the point of contact for drivers.
   const allBuyerPhones = Array.from(
     new Set(
       [
         selectedAddress?.phone,
-        selectedAddress?.phone2,
         order.buyerPhone,
-        order.buyerPhone2,
         order.buyer?.phone,
-        order.buyer?.phone2,
       ]
         .filter(Boolean)
         .map((p) => p!.trim())

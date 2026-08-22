@@ -2,7 +2,7 @@ import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.js';
-import { customLoadingHamali, calcKataFee, isVehicleExempt, hamaliSplit } from '../lib/calc.js';
+import { customLoadingHamali, pappuLoadingHamali, calcKataFee, isVehicleExempt, hamaliSplit } from '../lib/calc.js';
 
 import { computeUnifiedStockEngine } from '../services/stockEngine.js';
 
@@ -178,7 +178,7 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     byproductDispatches,
     freightOutwardAccount,
     hamaliIncomeAccount,
-    dispatches,
+    saleDispatchesForHamali,
     purchasesForHamali,
     hamaliRoundedRows,
     manualByType,
@@ -222,12 +222,13 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       }),
       prisma.account.findUnique({ where: { code: '50050' }, select: { id: true } }),
       prisma.account.findUnique({ where: { code: '40030' }, select: { id: true } }),
-      prisma.$queryRaw<{product: string, weightKg: bigint}[]>`
-        SELECT so."product", SUM(sd."weightKg") as "weightKg"
-        FROM "SaleOrder" so
-        JOIN "SaleDispatch" sd ON sd."saleOrderId" = so.id
-        GROUP BY so."product"
-      `,
+      prisma.saleDispatch.findMany({
+        select: {
+          id: true,
+          weightKg: true,
+          saleOrder: { select: { product: true } },
+        },
+      }),
       prisma.purchase.findMany({
         select: {
           id: true,
@@ -340,22 +341,43 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
       saleFreight = Number(freightLines._sum.debit ?? 0) - Number(freightLines._sum.credit ?? 0);
     }
 
-    // ── Dispatched tonnage per product (drives recomputed loading hamali) ───────
-    let pappuKg = 0, huskKg = 0, wasteKg = 0;
-    for (const d of dispatches) {
-      const product = d.product;
-      const weight = Number(d.weightKg || 0);
-      if (product === 'PAPPU') pappuKg += weight;
-      else if (product === 'HUSK') huskKg += weight;
-      else if (WASTE_LOADING_PRODUCTS.has(product)) wasteKg += weight;
+    const roundedHamaliMap = new Map<string, number>(
+      hamaliRoundedRows.map((r) => [r.id, Number(r.amount)]),
+    );
+
+    // ── Dispatched tonnage & crew loading hamali (honoring persisted round-offs) ──
+    let pappuLoading = 0;
+    let pappuRoasting = 0;
+    let huskLoading = 0;
+    let tWasteLoading = 0;
+
+    for (const d of saleDispatchesForHamali) {
+      const product = d.saleOrder?.product;
+      const weightKg = Number(d.weightKg || 0);
+      const entryLoadId = `SALE-${d.id}-LOAD`;
+
+      if (product === 'PAPPU') {
+        const baseCrew = pappuLoadingHamali(weightKg, false, pappuRate.total, pappuRate.lorry, pappuRate.margin).crew;
+        pappuLoading += roundedHamaliMap.has(entryLoadId) ? roundedHamaliMap.get(entryLoadId)! : baseCrew;
+
+        for (const c of customRates) {
+          const entryCustomId = `SALE-${d.id}-${c.key}`;
+          const baseCustomCrew = customLoadingHamali(weightKg, c.total, c.lorry, c.margin).crew;
+          pappuRoasting += roundedHamaliMap.has(entryCustomId) ? roundedHamaliMap.get(entryCustomId)! : baseCustomCrew;
+        }
+      } else if (product === 'HUSK') {
+        const baseCrew = customLoadingHamali(weightKg, huskRate.total, huskRate.lorry, huskRate.margin).crew;
+        huskLoading += roundedHamaliMap.has(entryLoadId) ? roundedHamaliMap.get(entryLoadId)! : baseCrew;
+      } else if (WASTE_LOADING_PRODUCTS.has(product ?? '')) {
+        const baseCrew = customLoadingHamali(weightKg, wasteRate.total, wasteRate.lorry, wasteRate.margin).crew;
+        tWasteLoading += roundedHamaliMap.has(entryLoadId) ? roundedHamaliMap.get(entryLoadId)! : baseCrew;
+      }
     }
 
-    const pappuLoading = customLoadingHamali(pappuKg, pappuRate.total, pappuRate.lorry, pappuRate.margin).company;
-    const pappuRoasting = customRates.reduce(
-      (s, c) => s + customLoadingHamali(pappuKg, c.total, c.lorry, c.margin).company, 0,
-    );
-    const huskLoading = customLoadingHamali(huskKg, huskRate.total, huskRate.lorry, huskRate.margin).company;
-    const tWasteLoading = customLoadingHamali(wasteKg, wasteRate.total, wasteRate.lorry, wasteRate.margin).company;
+    pappuLoading = Math.round(pappuLoading * 100) / 100;
+    pappuRoasting = Math.round(pappuRoasting * 100) / 100;
+    huskLoading = Math.round(huskLoading * 100) / 100;
+    tWasteLoading = Math.round(tWasteLoading * 100) / 100;
 
     // ── Manual hamali costs grouped by type ─────────────────────────────────────
     const manual = Object.fromEntries(
@@ -459,9 +481,6 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
 
     // Black Seed Unloading: exact sum of final crew payments (including any
     // round-offs configured on the Hamali Report page, matching the crew ledger).
-    const roundedHamaliMap = new Map<string, number>(
-      hamaliRoundedRows.map((r) => [r.id, Number(r.amount)]),
-    );
     const companyVehiclesList = companyProfile?.companyVehicles;
     const blackSeedUnloading = Math.round(
       purchasesForHamali.reduce((sum, p) => {

@@ -861,7 +861,6 @@ export default function HamaliLedger() {
     if (!p.hamaliVerificationId) continue;
     paidByVerification.set(p.hamaliVerificationId, (paidByVerification.get(p.hamaliVerificationId) ?? 0) + Number(p.amount));
   }
-  const verifAsc = [...(verifications ?? [])].sort((a, b) => new Date(a.asOfDate).getTime() - new Date(b.asOfDate).getTime());
   const payableRows: PayableRow[] = verifAsc
     .map((v, i) => {
       const to = dayOf(v.asOfDate);

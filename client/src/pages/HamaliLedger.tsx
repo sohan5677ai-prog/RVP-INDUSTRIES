@@ -764,12 +764,18 @@ export default function HamaliLedger() {
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(unifiedRows, 50);
 
   // --- Reconciliation checkpoints (Hamali view) ---
-  // Rows dated on/before the latest checkpoint are cross-verified and locked; the
-  // window since is the current, still-to-verify period. Crew total = derived crew
-  // shares + manual charges − paid, matching what the crew is actually owed.
-  const verifSorted = [...(verifications ?? [])].sort((a, b) => new Date(b.asOfDate).getTime() - new Date(a.asOfDate).getTime());
+  // Checkpoints represent verified date ranges [from, to]. Entries within any
+  // verified range are locked; unverified entries (including historical/backdated
+  // windows) can be squared off in custom date windows.
+  const verifAsc = useMemo(
+    () => [...(verifications ?? [])].sort((a, b) => new Date(a.asOfDate).getTime() - new Date(b.asOfDate).getTime()),
+    [verifications]
+  );
+  const verifSorted = useMemo(
+    () => [...(verifications ?? [])].sort((a, b) => new Date(b.asOfDate).getTime() - new Date(a.asOfDate).getTime()),
+    [verifications]
+  );
   const verifiedThroughDay = verifSorted[0] ? dayOf(verifSorted[0].asOfDate) : null;
-  const isVerified = (dateIso: string) => verifiedThroughDay != null && dayOf(dateIso) <= verifiedThroughDay;
 
   const addDay = (day: string) => {
     const d = new Date(day + 'T00:00:00');
@@ -780,23 +786,45 @@ export default function HamaliLedger() {
     Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1);
 
   // Earliest dated crew due (for the first period's "from", when nothing precedes it).
-  const allDatedCrew = [...allHamaliEntries.map((e) => dayOf(e.date)), ...manualSorted.map((c) => dayOf(c.date))];
+  const allDatedCrew = useMemo(
+    () => [...allHamaliEntries.map((e) => dayOf(e.date)), ...manualSorted.map((c) => dayOf(c.date))],
+    [allHamaliEntries, manualSorted]
+  );
   const earliestCrewDay = allDatedCrew.length ? allDatedCrew.reduce((m, d) => (d < m ? d : m)) : null;
 
-  // The period start for a NEW square-off = day after the last checkpoint, else
+  // Calculate explicit [from, to] interval for each verification checkpoint
+  const verifiedIntervals = useMemo(() => {
+    return verifAsc.map((v, i) => {
+      const to = dayOf(v.asOfDate);
+      const from = v.periodStart
+        ? dayOf(v.periodStart)
+        : i > 0
+          ? addDay(dayOf(verifAsc[i - 1].asOfDate))
+          : earliestCrewDay ?? to;
+      return { id: v.id, from, to };
+    });
+  }, [verifAsc, earliestCrewDay]);
+
+  const isVerified = (dateIso: string) => {
+    const d = dayOf(dateIso);
+    return verifiedIntervals.some((p) => d >= p.from && d <= p.to);
+  };
+
+  // The default period start for a NEW square-off = day after the last checkpoint, else
   // the earliest crew due (so the first period spans from the very beginning).
   const nextPeriodStart = verifiedThroughDay ? addDay(verifiedThroughDay) : earliestCrewDay;
 
   const currentSquareStart = squareStartDate || startDate || nextPeriodStart || '';
   const currentSquareEnd = squareDate || endDate || dayOf(new Date().toISOString());
 
-  // Amount pending verification for the picked square-off date window: crew dues in the
-  // window (after the last checkpoint, on/after currentSquareStart, on/before currentSquareEnd).
+  // Amount pending verification for the picked square-off date window: unverified crew dues
+  // that fall within [currentSquareStart, currentSquareEnd].
   const inSquareWindow = (dateIso: string) => {
     const d = dayOf(dateIso);
-    if (verifiedThroughDay != null && d <= verifiedThroughDay) return false;
+    if (isVerified(dateIso)) return false;
     if (currentSquareStart && d < currentSquareStart) return false;
-    return d <= currentSquareEnd;
+    if (currentSquareEnd && d > currentSquareEnd) return false;
+    return true;
   };
   const pendingCrewFromEntries = allHamaliEntries
     .filter((e) => inSquareWindow(e.date))
@@ -806,8 +834,8 @@ export default function HamaliLedger() {
     .reduce((s, c) => s + (isManualDeduction(c.type) ? -Number(c.amount) : Number(c.amount)), 0);
   const pendingCrewTotal = Math.round((pendingCrewFromEntries + pendingCrewFromManual) * 100) / 100;
   const squareValid =
-    (verifiedThroughDay == null || currentSquareEnd > verifiedThroughDay) &&
-    (!currentSquareStart || currentSquareEnd >= currentSquareStart) &&
+    Boolean(currentSquareStart && currentSquareEnd) &&
+    currentSquareEnd >= currentSquareStart &&
     pendingCrewTotal > 0;
 
   // Crew payable across the currently filtered rows (Hamali view metric).
@@ -916,12 +944,12 @@ export default function HamaliLedger() {
       : [{ header: 'Status', value: (r: UnifiedRow) => (isVerified(r.date) ? 'Verified' : 'Current') }]),
   ];
 
-  // Crew dues accrued since the last checkpoint (through today) - the standing
+  // Crew dues accrued that are not yet verified (through today) - the standing
   // "not yet verified" figure, independent of the square-off date picker.
   const todayDay = new Date().toISOString().slice(0, 10);
   const sinceCheckpoint = (dateIso: string) => {
     const d = dayOf(dateIso);
-    if (verifiedThroughDay != null && d <= verifiedThroughDay) return false;
+    if (isVerified(dateIso)) return false;
     return d <= todayDay;
   };
   const currentPeriodCrew =
@@ -1091,7 +1119,7 @@ export default function HamaliLedger() {
                 <CardContent>
                   <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{rupees(currentPeriodCrew)}</div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Crew dues since {verifiedThroughDay ? shortDate(verifiedThroughDay) : 'the start'} → not yet squared off
+                    Crew dues not yet squared off (across unverified dates)
                   </p>
                 </CardContent>
               </Card>
@@ -1121,7 +1149,7 @@ export default function HamaliLedger() {
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {verifiedThroughDay
-                    ? <>Verified through <b className="text-emerald-600 dark:text-emerald-400">{shortDate(verifiedThroughDay)}</b></>
+                    ? <>Latest verified through <b className="text-emerald-600 dark:text-emerald-400">{shortDate(verifiedThroughDay)}</b></>
                     : 'Nothing verified yet'}
                 </div>
               </div>
@@ -1132,7 +1160,6 @@ export default function HamaliLedger() {
                     id="square-start-date"
                     type="date"
                     value={currentSquareStart}
-                    min={verifiedThroughDay ? addDay(verifiedThroughDay) : undefined}
                     onChange={(e) => setSquareStartDate(e.target.value)}
                     className="bg-card"
                   />
@@ -1143,7 +1170,7 @@ export default function HamaliLedger() {
                     id="square-date"
                     type="date"
                     value={currentSquareEnd}
-                    min={currentSquareStart || (verifiedThroughDay ? addDay(verifiedThroughDay) : undefined)}
+                    min={currentSquareStart || undefined}
                     onChange={(e) => setSquareDate(e.target.value)}
                     className="bg-card"
                   />

@@ -985,7 +985,7 @@ model CompanyProfile {
   // carrying cost on storage→process transfers. Editable in the Loans section.
   loanInterestRatePct            Decimal @default(0) @db.Decimal(6, 3)
   // Opening Input Tax Credit (ITC) brought forward (pre-ERP electronic credit ledger balance).
-  openingItc                     Decimal @default(84944.73) @db.Decimal(14, 2)
+  openingItc                     Decimal @default(1101878) @db.Decimal(14, 2)
   // Buffer percentage (e.g. 80) of expected yield allowed for soft allocation.
   bufferStockPct                 Decimal @default(80) @db.Decimal(5, 2)
   // --- Sale-order close tolerance -------------------------------------------

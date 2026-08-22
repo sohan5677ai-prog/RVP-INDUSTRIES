@@ -142,15 +142,22 @@ export async function getGstReport(req: Request, res: Response) {
   // ── Input tax: GST paid on purchase (supplier) invoices - the ITC we can
   //    claim. Computed on the actual stocked-in billing weight × the rate the
   //    party billed (their base rate when it differs from the PO's delivery
-  //    price), the same basis the purchase statement / verification uses. ─────
-  const stockIns = await prisma.stockIn.findMany({
-    where: {
-      arrivalDate: { gte: from, lte: to },
-      purchaseOrder: { hasGst: true },
-    },
-    include: { purchaseOrder: { include: { party: true } } },
-    orderBy: { arrivalDate: 'asc' },
-  });
+  //    price), the same basis the purchase statement / verification uses.
+  //    Statutory purchase GST tracking in ERP starts from FY 2026-27 (1 Apr 2026);
+  //    FY 2025-26 carries forward the fixed closing ITC of 11,01,878 via openingItc. ──
+  const GST_PURCHASES_START = new Date('2026-04-01T00:00:00.000Z');
+
+  const stockIns =
+    to < GST_PURCHASES_START
+      ? []
+      : await prisma.stockIn.findMany({
+          where: {
+            arrivalDate: { gte: from < GST_PURCHASES_START ? GST_PURCHASES_START : from, lte: to },
+            purchaseOrder: { hasGst: true },
+          },
+          include: { purchaseOrder: { include: { party: true } } },
+          orderBy: { arrivalDate: 'asc' },
+        });
 
   const purchaseLines = stockIns.map((s) => {
     // Claiming ITC on the PO price when the invoice was raised at a lower base
@@ -184,13 +191,16 @@ export async function getGstReport(req: Request, res: Response) {
   const sum = <T,>(rows: T[], pick: (r: T) => number) => r2(rows.reduce((a, r) => a + pick(r), 0));
 
   // ── Prior-period ITC & Output Tax: calculate opening ITC brought forward ───
-  const priorStockIns = await prisma.stockIn.findMany({
-    where: {
-      arrivalDate: { lt: from },
-      purchaseOrder: { hasGst: true },
-    },
-    include: { purchaseOrder: true },
-  });
+  const priorStockIns =
+    from <= GST_PURCHASES_START
+      ? []
+      : await prisma.stockIn.findMany({
+          where: {
+            arrivalDate: { gte: GST_PURCHASES_START, lt: from },
+            purchaseOrder: { hasGst: true },
+          },
+          include: { purchaseOrder: true },
+        });
   const priorPurchasesGst = sum(priorStockIns, (s) => {
     const { amount: gst } = purchaseGst({
       hasGst: true,
@@ -225,7 +235,7 @@ export async function getGstReport(req: Request, res: Response) {
   // The business operations and opening ITC start from FY 2025-26 (Apr 2025 onwards).
   // Prior financial years (FY 2024-25 and earlier) carry zero opening balance.
   const fyStartYear = istFinancialYearStart(from);
-  const baseOpeningItc = (fyStartYear >= 2025 && company?.openingItc) ? Number(company.openingItc) : 0;
+  const baseOpeningItc = fyStartYear >= 2025 && company?.openingItc ? Number(company.openingItc) : 0;
   const priorTotalItc = r2(baseOpeningItc + priorPurchasesGst);
   const priorNetOutput = r2(priorDispatchesGst + priorDnGst - priorCnGst);
   const openingItc = Math.max(0, r2(priorTotalItc - priorNetOutput));

@@ -222,7 +222,10 @@ export async function getGstReport(req: Request, res: Response) {
   });
   const priorDnGst = sum(priorDebitNotes, (n) => Number(n.gstAmount));
 
-  const baseOpeningItc = company?.openingItc ? Number(company.openingItc) : 0;
+  // The business operations and opening ITC start from FY 2025-26 (Apr 2025 onwards).
+  // Prior financial years (FY 2024-25 and earlier) carry zero opening balance.
+  const fyStartYear = istFinancialYearStart(from);
+  const baseOpeningItc = (fyStartYear >= 2025 && company?.openingItc) ? Number(company.openingItc) : 0;
   const priorTotalItc = r2(baseOpeningItc + priorPurchasesGst);
   const priorNetOutput = r2(priorDispatchesGst + priorDnGst - priorCnGst);
   const openingItc = Math.max(0, r2(priorTotalItc - priorNetOutput));

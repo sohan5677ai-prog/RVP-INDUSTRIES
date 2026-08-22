@@ -406,7 +406,6 @@ export default function HamaliLedger() {
 
   // Payables tab: pay-out dialog + crew-ledger dialog state
   const [payOpen, setPayOpen] = useState(false);
-  const [payVerif, setPayVerif] = useState<PayableRow | null>(null);
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
   const [payRef, setPayRef] = useState('');
@@ -494,8 +493,8 @@ export default function HamaliLedger() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // Record a crew-settlement payment against a squared-off period. Books
-  // Dr Hamali payable (20200) / Cr Bank, and shows up on the Payments page.
+  // Record a crew-settlement payment. Books Dr Hamali payable (20200) / Cr Bank,
+  // and shows up on the Payments page and the crew ledger.
   const payCrew = useMutation({
     mutationFn: () =>
       api<Payment>('/payments', {
@@ -505,11 +504,8 @@ export default function HamaliLedger() {
           amount: Number(payAmount),
           type: 'HAMALI',
           partyId: teamParty?.id ?? null,
-          hamaliVerificationId: payVerif?.v.id ?? null,
           reference: payRef || null,
-          description: payVerif
-            ? `Hamali crew settlement ${shortDate(payVerif.from)} – ${shortDate(payVerif.to)}`
-            : 'Hamali crew settlement',
+          description: 'Hamali crew settlement',
         },
       }),
     onSuccess: () => {
@@ -955,31 +951,40 @@ export default function HamaliLedger() {
     .reduce((s, c) => s + Number(c.amount), 0);
   const totalHamali = filtered.reduce((acc, e) => acc + e.fullCharge, 0) + manualChargedInWindow;
 
-  // ── Payables tab: one row per squared-off period ──────────────────────────
-  // Crew-settlement payments (HAMALI) grouped by the period they settle.
-  const hamaliPayments = (payments ?? []).filter((p) => p.type === 'HAMALI');
-  const paidByVerification = new Map<string, number>();
-  for (const p of hamaliPayments) {
-    if (!p.hamaliVerificationId) continue;
-    paidByVerification.set(p.hamaliVerificationId, (paidByVerification.get(p.hamaliVerificationId) ?? 0) + Number(p.amount));
-  }
-  const payableRows: PayableRow[] = verifAsc
-    .map((v, i) => {
-      const to = dayOf(v.asOfDate);
-      const from = v.periodStart
-        ? dayOf(v.periodStart)
-        : i > 0
-          ? addDay(dayOf(verifAsc[i - 1].asOfDate))
-          : earliestCrewDay ?? to;
-      const payable = Number(v.crewTotal);
-      const paid = paidByVerification.get(v.id) ?? 0;
-      const status: PayableRow['status'] = paid >= payable - 0.5 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID';
-      return { v, from, to, days: daysInclusive(from, to), payable, paid, outstanding: Math.max(0, payable - paid), status };
-    })
-    .reverse(); // most-recent period first
-  const payablesTotal = payableRows.reduce((s, r) => s + r.payable, 0);
-  const payablesPaid = payableRows.reduce((s, r) => s + r.paid, 0);
-  const payablesOutstanding = payableRows.reduce((s, r) => s + r.outstanding, 0);
+  // ── Payables tab: one row per squared-off period (FIFO settled) ───────────
+  // Crew-settlement payments (HAMALI) settle squared-off periods in FIFO order
+  // (oldest periods settled first, excess rolls forward).
+  const hamaliPayments = useMemo(() => {
+    return (payments ?? []).filter((p) => p.type === 'HAMALI' || (teamParty && p.partyId === teamParty.id));
+  }, [payments, teamParty]);
+
+  const totalCrewPaid = useMemo(() => {
+    return hamaliPayments.reduce((s, p) => s + Number(p.amount), 0);
+  }, [hamaliPayments]);
+
+  const payableRows: PayableRow[] = useMemo(() => {
+    let unallocatedPayment = totalCrewPaid;
+    return verifAsc
+      .map((v, i) => {
+        const to = dayOf(v.asOfDate);
+        const from = v.periodStart
+          ? dayOf(v.periodStart)
+          : i > 0
+            ? addDay(dayOf(verifAsc[i - 1].asOfDate))
+            : earliestCrewDay ?? to;
+        const payable = Number(v.crewTotal);
+        const paid = Math.min(payable, Math.max(0, unallocatedPayment));
+        unallocatedPayment = Math.max(0, unallocatedPayment - paid);
+        const outstanding = Math.max(0, payable - paid);
+        const status: PayableRow['status'] = paid >= payable - 0.5 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID';
+        return { v, from, to, days: daysInclusive(from, to), payable, paid, outstanding, status };
+      })
+      .reverse(); // most-recent period first
+  }, [verifAsc, earliestCrewDay, totalCrewPaid]);
+
+  const payablesTotal = useMemo(() => payableRows.reduce((s, r) => s + r.payable, 0), [payableRows]);
+  const payablesPaid = totalCrewPaid;
+  const payablesOutstanding = Math.max(0, payablesTotal - payablesPaid);
 
   // ── Crew ledger (Ledger tab) - a party-ledger-style account statement for the
   // hamali crew. Credits are the SQUARED-OFF periods (one line per checkpoint, with
@@ -1070,10 +1075,9 @@ export default function HamaliLedger() {
     { header: 'Balance', value: (l) => `${rupees(Math.abs(l.balance))} ${l.balance >= 0 ? 'CR' : 'DR'}`, align: 'right' },
   ];
 
-  function openPay(row: PayableRow) {
-    setPayVerif(row);
+  function openPay() {
     setPayDate(new Date().toISOString().slice(0, 10));
-    setPayAmount(String(Math.max(0, Math.round(row.outstanding))));
+    setPayAmount(payablesOutstanding > 0 ? String(Math.round(payablesOutstanding)) : '');
     setPayRef('');
     setPayOpen(true);
   }
@@ -1348,11 +1352,21 @@ export default function HamaliLedger() {
           {/* Payables tab: squared-off periods to settle + crew ledger */}
           {view === 'payables' && (
             <div className="rounded-lg border bg-card overflow-x-auto">
-              <div className="px-5 py-4 border-b">
-                <span className="font-semibold text-sm">Crew Payables - Squared-off Periods</span>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {teamParty ? <>Settled against <b>{teamParty.name}</b></> : 'Loading crew party…'}
-                </p>
+              <div className="px-5 py-4 border-b flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="font-semibold text-sm">Crew Payables - Squared-off Periods</span>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {teamParty ? <>Settled against <b>{teamParty.name}</b> · Payments reduce balance across periods</> : 'Loading crew party…'}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  disabled={!teamParty}
+                  onClick={openPay}
+                  className="gap-1.5"
+                >
+                  <Coins className="h-4 w-4" /> Pay Crew
+                </Button>
               </div>
               <Table>
                 <TableHeader>
@@ -1385,30 +1399,20 @@ export default function HamaliLedger() {
                           {r.status === 'PAID' ? (
                             <Badge className="text-[10px] gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"><CheckCircle2 className="h-3 w-3" /> Paid</Badge>
                           ) : r.status === 'PARTIAL' ? (
-                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 dark:text-amber-400">Partial</Badge>
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 dark:text-amber-400">Partial ({rupees(r.outstanding)} left)</Badge>
                           ) : (
                             <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-600 dark:text-rose-400">Unpaid</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={r.status === 'PAID' || !teamParty}
-                              onClick={() => openPay(r)}
-                            >
-                              <Coins className="h-3.5 w-3.5" /> Pay
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Undo this checkpoint (reopens the period)"
-                              onClick={() => { if (confirm('Remove this checkpoint and reopen the period? Any recorded payments stay on the Payments page but unlink from this period.')) deleteVerification.mutate(r.v.id); }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Undo this checkpoint (reopens the period)"
+                            onClick={() => { if (confirm('Remove this checkpoint and reopen the period? Any recorded payments remain in the ledger.')) deleteVerification.mutate(r.v.id); }}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -1428,6 +1432,14 @@ export default function HamaliLedger() {
                   <p className="text-xs text-muted-foreground">Account statement, squared-off dues &amp; settlement history.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    disabled={!teamParty}
+                    onClick={openPay}
+                    className="gap-1.5"
+                  >
+                    <Coins className="h-4 w-4" /> Pay Crew
+                  </Button>
                   <ExportButtons
                     filename={`${(teamParty?.name ?? 'Hamali_Team').replace(/\s+/g, '_')}_Ledger`}
                     title={`Hamali Crew Ledger - ${teamParty?.name ?? 'Hamali Team'}`}
@@ -2053,61 +2065,61 @@ export default function HamaliLedger() {
         </DialogContent>
       </Dialog>
 
-      {/* Pay crew for a squared-off period */}
+      {/* Pay Hamali Crew Dialog */}
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Pay Hamali Crew</DialogTitle>
           </DialogHeader>
-          {payVerif && (
-            <div className="space-y-4">
-              <div className="rounded-md bg-muted/50 px-3 py-2 text-sm space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Period</span>
-                  <span className="font-medium">{shortDate(payVerif.from)} – {shortDate(payVerif.to)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Payable</span>
-                  <span className="font-medium">{rupees(payVerif.payable)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Already paid</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{rupees(payVerif.paid)}</span>
-                </div>
-                <div className="flex items-center justify-between border-t pt-1">
-                  <span className="text-muted-foreground">Outstanding</span>
-                  <span className="font-bold text-primary">{rupees(payVerif.outstanding)}</span>
-                </div>
+          <div className="space-y-4">
+            <div className="rounded-md bg-muted/50 px-3.5 py-2.5 text-sm space-y-1.5 border">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Crew Party</span>
+                <span className="font-semibold text-foreground">{teamParty?.name ?? 'Hamali Team'}</span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Total Squared-off Dues</span>
+                <span className="font-medium">{rupees(payablesTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Total Paid to Date</span>
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">{rupees(payablesPaid)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t pt-1.5">
+                <span className="text-muted-foreground font-medium">Outstanding Balance</span>
+                <span className={`font-bold ${payablesOutstanding > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                  {payablesOutstanding > 0 ? rupees(payablesOutstanding) : 'Settled'}
+                </span>
+              </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="pay-date">Payment Date</Label>
-                  <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pay-amount">Amount (₹)</Label>
-                  <Input id="pay-amount" type="number" step="1" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-                </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="pay-date">Payment Date</Label>
+                <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="pay-ref">Reference (UTR / Cheque / Cash)</Label>
-                <Input id="pay-ref" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="Optional" />
+                <Label htmlFor="pay-amount">Amount (₹)</Label>
+                <Input id="pay-amount" type="number" step="1" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="e.g. 5000" />
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                Records a payment to <b>{teamParty?.name ?? 'the hamali crew'}</b> and posts Dr crew payable / Cr bank. It appears on the Payments page.
-              </p>
-
-              <DialogFooter>
-                <Button
-                  onClick={() => payCrew.mutate()}
-                  disabled={!teamParty || !(Number(payAmount) > 0) || payCrew.isPending}
-                >
-                  {payCrew.isPending ? 'Recording…' : `Pay ${rupees(Number(payAmount) || 0)}`}
-                </Button>
-              </DialogFooter>
             </div>
-          )}
+            <div className="space-y-2">
+              <Label htmlFor="pay-ref">Reference (UTR / Cheque / Cash)</Label>
+              <Input id="pay-ref" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="Optional" />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Records a payment to <b>{teamParty?.name ?? 'the hamali crew'}</b> and posts Dr crew payable (20200) / Cr bank (10400). It settles dues in FIFO order and appears on the Payments page and crew ledger.
+            </p>
+
+            <DialogFooter>
+              <Button
+                onClick={() => payCrew.mutate()}
+                disabled={!teamParty || !(Number(payAmount) > 0) || payCrew.isPending}
+              >
+                {payCrew.isPending ? 'Recording…' : `Pay ${rupees(Number(payAmount) || 0)}`}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

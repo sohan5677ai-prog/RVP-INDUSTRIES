@@ -12,10 +12,17 @@
 
 import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { AlertTriangle, CreditCard, X } from 'lucide-react';
+import { AlertTriangle, CreditCard } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import Paywall from '@/pages/Paywall';
 
 interface SubStatus {
@@ -81,7 +88,13 @@ export default function SubscriptionBoundary() {
   if (mustCheck && !checked) return null;
 
   // Hard lock - no bypass allowed (expired or services stopped).
-  if (locked) return <Paywall />;
+  if (locked) {
+    return (
+      <Paywall
+        onBack={daysLeft !== null && daysLeft > 0 ? () => setLocked(false) : undefined}
+      />
+    );
+  }
 
   const showReminder =
     mustCheck && daysLeft !== null && daysLeft > 0 && daysLeft <= 2 && !reminderDismissed;
@@ -90,51 +103,55 @@ export default function SubscriptionBoundary() {
     <>
       <Outlet />
 
-      {showReminder && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="relative w-full max-w-md rounded-2xl border bg-card/90 backdrop-blur-md p-8 shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200">
-            <button
-              onClick={dismissReminder}
-              className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
+      <Dialog
+        open={showReminder}
+        onOpenChange={(open) => {
+          if (!open) dismissReminder();
+        }}
+      >
+        <DialogContent
+          showCloseButton={true}
+          className="max-w-md p-8 text-center sm:max-w-md"
+        >
+          <DialogHeader className="flex flex-col items-center text-center sm:text-center gap-0">
             <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10">
               <AlertTriangle className="h-7 w-7 text-amber-500" />
             </div>
 
-            <h2 className="text-xl font-semibold">Subscription expiring soon!</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <DialogTitle className="text-xl font-semibold text-center w-full">
+              Subscription expiring soon!
+            </DialogTitle>
+            <DialogDescription className="mt-2 text-sm text-muted-foreground text-center">
               Your subscription expires in{' '}
               <span className="font-semibold text-amber-500">
                 {daysLeft} {daysLeft === 1 ? 'day' : 'days'}
               </span>
               . Please renew to avoid service interruption.
-            </p>
+            </DialogDescription>
+          </DialogHeader>
 
-            {amount > 0 && (
-              <div className="my-5 rounded-xl border bg-muted/40 p-4">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Renewal amount</div>
-                <div className="mt-1 text-2xl font-bold">{rupees(amount)}</div>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-3 mt-6">
-              <Button size="lg" className="w-full" onClick={() => setLocked(true)}>
-                <CreditCard className="mr-2 h-4 w-4" />
-                Renew Now
-              </Button>
-              <button
-                onClick={dismissReminder}
-                className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-colors"
-              >
-                OK, I will pay later
-              </button>
+          {amount > 0 && (
+            <div className="my-5 rounded-xl border bg-muted/40 p-4 text-center">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Renewal amount</div>
+              <div className="mt-1 text-2xl font-bold">{rupees(amount)}</div>
             </div>
+          )}
+
+          <div className="flex flex-col gap-3 mt-6">
+            <Button size="lg" className="w-full" onClick={() => setLocked(true)}>
+              <CreditCard className="mr-2 h-4 w-4" />
+              Renew Now
+            </Button>
+            <button
+              type="button"
+              onClick={dismissReminder}
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-colors cursor-pointer"
+            >
+              OK, I will pay later
+            </button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

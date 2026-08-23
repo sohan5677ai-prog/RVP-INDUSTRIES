@@ -33,7 +33,7 @@ const rupees = (paise: number) =>
     maximumFractionDigits: 2,
   })}`;
 
-export default function Paywall() {
+export default function Paywall({ onBack }: { onBack?: () => void } = {}) {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -139,12 +139,24 @@ export default function Paywall() {
           Secure payment via Razorpay
         </div>
 
-        <button
-          onClick={logout}
-          className="mt-6 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-        >
-          Log out
-        </button>
+        <div className="mt-6 flex flex-col gap-2 items-center">
+          {onBack && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onBack}
+              className="w-full"
+            >
+              Back to app
+            </Button>
+          )}
+          <button
+            onClick={logout}
+            className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
+          >
+            Log out
+          </button>
+        </div>
       </div>
     </div>
   );

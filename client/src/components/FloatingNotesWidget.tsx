@@ -5,14 +5,13 @@ import {
   StickyNote,
   Plus,
   Calendar,
-  CheckCircle2,
-  ExternalLink,
+  Check,
   Trash2,
   Pin,
   Tag,
   Loader2,
+  ArrowRight,
   Clock,
-  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -31,14 +30,20 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
-const STORAGE_KEY = 'rvp_floating_notes_pos_v2';
+const STORAGE_KEY = 'rvp_floating_notes_pos_v3';
 
-const COLOR_OPTIONS = [
-  { id: 'amber', name: 'Amber', bg: 'bg-amber-500/15 border-amber-500/30 text-amber-900 dark:text-amber-200', dot: 'bg-amber-500' },
-  { id: 'sky', name: 'Sky Blue', bg: 'bg-sky-500/15 border-sky-500/30 text-sky-900 dark:text-sky-200', dot: 'bg-sky-500' },
-  { id: 'emerald', name: 'Emerald', bg: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-900 dark:text-emerald-200', dot: 'bg-emerald-500' },
-  { id: 'purple', name: 'Purple', bg: 'bg-purple-500/15 border-purple-500/30 text-purple-900 dark:text-purple-200', dot: 'bg-purple-500' },
-  { id: 'rose', name: 'Rose', bg: 'bg-rose-500/15 border-rose-500/30 text-rose-900 dark:text-rose-200', dot: 'bg-rose-500' },
+const CATEGORY_LABELS: Record<UserNoteCategory, string> = {
+  NOTE: 'Note',
+  REMINDER: 'Reminder',
+  TODO: 'To-Do',
+  COMMENT: 'Comment',
+};
+
+const PRIORITY_OPTIONS: { id: UserNotePriority; label: string }[] = [
+  { id: 'LOW', label: 'Low' },
+  { id: 'MEDIUM', label: 'Medium' },
+  { id: 'HIGH', label: 'High' },
+  { id: 'URGENT', label: 'Urgent' },
 ];
 
 export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }) {
@@ -56,7 +61,6 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
   const [priority, setPriority] = useState<UserNotePriority>('MEDIUM');
   const [isReminder, setIsReminder] = useState(false);
   const [reminderDate, setReminderDate] = useState('');
-  const [color, setColor] = useState('amber');
   const [pinned, setPinned] = useState(false);
 
   // Dragging State
@@ -78,8 +82,8 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
       if (saved) {
         const parsed = JSON.parse(saved);
         if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-          const clampedX = Math.max(16, Math.min(window.innerWidth - 76, parsed.x));
-          const clampedY = Math.max(16, Math.min(window.innerHeight - 76, parsed.y));
+          const clampedX = Math.max(16, Math.min(window.innerWidth - 60, parsed.x));
+          const clampedY = Math.max(16, Math.min(window.innerHeight - 60, parsed.y));
           setPosition({ x: clampedX, y: clampedY });
           return;
         }
@@ -89,19 +93,19 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
     }
     // Default fallback position
     setPosition({
-      x: window.innerWidth - 76,
-      y: window.innerHeight - 90,
+      x: window.innerWidth - 64,
+      y: window.innerHeight - 76,
     });
   }, []);
 
-  // Handle window resizing to keep inside viewport
+  // Handle window resizing
   useEffect(() => {
     const handleResize = () => {
       setPosition((prev) => {
         if (!prev) return null;
         return {
-          x: Math.max(16, Math.min(window.innerWidth - 76, prev.x)),
-          y: Math.max(16, Math.min(window.innerHeight - 76, prev.y)),
+          x: Math.max(16, Math.min(window.innerWidth - 60, prev.x)),
+          y: Math.max(16, Math.min(window.innerHeight - 60, prev.y)),
         };
       });
     };
@@ -123,11 +127,13 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
     return d.getTime() <= Date.now() + 86400000;
   }).length;
 
+  const activeNotesCount = notes?.length ?? 0;
+
   // Create Note Mutation
   const createMutation = useMutation({
     mutationFn: (body: any) => api<UserNote>('/user-notes', { method: 'POST', body }),
     onSuccess: () => {
-      toast.success(isReminder ? 'Reminder created successfully' : 'Note saved successfully');
+      toast.success(isReminder ? 'Reminder created' : 'Note saved');
       qc.invalidateQueries({ queryKey: ['user-notes'] });
       qc.invalidateQueries({ queryKey: ['due-user-notes'] });
       // Reset form
@@ -167,7 +173,7 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
 
   // Pointer drag handlers
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return; // only left click
+    if (e.button !== 0) return;
     if (!position) return;
 
     dragRef.current = {
@@ -187,8 +193,8 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
         dragRef.current.moved = true;
       }
 
-      const nextX = Math.max(16, Math.min(window.innerWidth - 76, dragRef.current.initialX + dx));
-      const nextY = Math.max(16, Math.min(window.innerHeight - 76, dragRef.current.initialY + dy));
+      const nextX = Math.max(16, Math.min(window.innerWidth - 60, dragRef.current.initialX + dx));
+      const nextY = Math.max(16, Math.min(window.innerHeight - 60, dragRef.current.initialY + dy));
 
       setPosition({ x: nextX, y: nextY });
     };
@@ -198,7 +204,6 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
 
-      // Save position to localStorage
       setPosition((finalPos) => {
         if (finalPos) {
           try {
@@ -227,7 +232,7 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
     e.preventDefault();
     const trimmed = content.trim();
     if (!trimmed) {
-      toast.error('Please type your note or comment');
+      toast.error('Please enter note content');
       return;
     }
 
@@ -238,7 +243,6 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
       priority,
       isReminder: isReminder || category === 'REMINDER' || Boolean(reminderDate),
       reminderDate: (isReminder || category === 'REMINDER') && reminderDate ? new Date(reminderDate).toISOString() : null,
-      color,
       pinned,
       pagePath: location.pathname,
       pageLabel,
@@ -247,11 +251,9 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
 
   if (!position) return null;
 
-  const activeNotesCount = notes?.length ?? 0;
-
   return (
     <>
-      {/* ── Draggable Floating Action Button ── */}
+      {/* ── Professional Draggable Floating Action Button ── */}
       <div
         ref={widgetRef}
         data-support-exclude="true"
@@ -264,62 +266,67 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
           touchAction: 'none',
           zIndex: 9999,
         }}
-        title="Quick Notes, Comments & Reminders (Drag anywhere)"
+        title="Notes & Reminders"
+        aria-label="Notes & Reminders"
         className={cn(
-          'group flex h-14 w-14 items-center justify-center rounded-2xl cursor-grab active:cursor-grabbing select-none',
-          'bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 text-white shadow-xl shadow-amber-950/40',
-          'ring-2 ring-amber-300/40 hover:ring-amber-300/80 hover:scale-105 transition-all duration-150',
-          isDragging && 'scale-110 shadow-2xl opacity-90'
+          'group flex h-11 w-11 items-center justify-center rounded-xl cursor-grab active:cursor-grabbing select-none',
+          'border border-border/90 bg-card/95 text-foreground shadow-md backdrop-blur-md',
+          'transition-all duration-150 hover:border-primary/60 hover:shadow-lg hover:text-primary',
+          isDragging && 'scale-105 border-primary shadow-xl opacity-95'
         )}
       >
         <div className="relative flex items-center justify-center">
-          <StickyNote className="h-6 w-6 transition-transform group-hover:rotate-6" />
+          <StickyNote className="h-5 w-5 text-primary transition-transform group-hover:scale-105" />
           {dueNotesCount > 0 ? (
-            <span className="absolute -top-3 -right-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-md animate-pulse ring-2 ring-background">
+            <span className="absolute -top-2.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9.5px] font-mono font-bold text-destructive-foreground ring-2 ring-card">
               {dueNotesCount}
             </span>
           ) : activeNotesCount > 0 ? (
-            <span className="absolute -top-3 -right-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-900 px-1 text-[10px] font-bold text-amber-100 shadow-md ring-2 ring-background">
+            <span className="absolute -top-2.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9.5px] font-mono font-bold text-primary-foreground ring-2 ring-card">
               {activeNotesCount}
             </span>
           ) : null}
         </div>
       </div>
 
-      {/* ── Quick Notes & Reminders Modal Dialog ── */}
+      {/* ── Modal Dialog ── */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent data-support-exclude="true" className="sm:max-w-lg p-0 gap-0 overflow-hidden border-border">
-          <DialogHeader className="p-5 pb-3 border-b border-border/70 bg-muted/20">
+        <DialogContent data-support-exclude="true" className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogHeader className="p-5 pb-3 border-b border-border/80 bg-muted/20">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/25">
-                  <StickyNote className="h-5 w-5" />
-                </span>
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
+                  <StickyNote className="h-4 w-4" />
+                </div>
                 <div>
                   <DialogTitle className="text-base font-semibold">Notes & Reminders</DialogTitle>
                   <DialogDescription className="text-xs">
-                    Capture thoughts, comments or set reminders on the fly
+                    Quick note or scheduled reminder
                   </DialogDescription>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 bg-muted/70 p-0.5 rounded-lg text-xs mr-6">
+              <div className="flex items-center gap-1 bg-muted p-0.5 rounded-lg text-xs mr-6">
                 <button
                   type="button"
                   onClick={() => setActiveTab('create')}
                   className={cn(
-                    'px-2.5 py-1 rounded-md font-medium transition-colors',
-                    activeTab === 'create' ? 'bg-background shadow-xs text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                    activeTab === 'create'
+                      ? 'bg-card text-foreground shadow-xs font-semibold'
+                      : 'text-muted-foreground hover:text-foreground'
                   )}
                 >
-                  <Plus className="h-3.5 w-3.5 inline mr-1" /> New
+                  <Plus className="h-3 w-3 inline mr-1" /> New
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab('list')}
                   className={cn(
-                    'px-2.5 py-1 rounded-md font-medium transition-colors',
-                    activeTab === 'list' ? 'bg-background shadow-xs text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                    activeTab === 'list'
+                      ? 'bg-card text-foreground shadow-xs font-semibold'
+                      : 'text-muted-foreground hover:text-foreground'
                   )}
                 >
                   Active ({activeNotesCount})
@@ -330,17 +337,17 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
 
           {activeTab === 'create' ? (
             <form onSubmit={handleSave} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-              {/* Captured Page Context */}
+              {/* Context Tag */}
               <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Tag className="h-3 w-3 text-amber-500" /> Attached page:
+                <span className="flex items-center gap-1.5">
+                  <Tag className="h-3 w-3 text-primary" /> Current page:
                 </span>
-                <span className="font-medium text-foreground truncate max-w-[240px]">
-                  {pageLabel} <span className="text-muted-foreground font-normal">({location.pathname})</span>
+                <span className="font-medium text-foreground truncate max-w-[220px]">
+                  {pageLabel}
                 </span>
               </div>
 
-              {/* Category / Type Selector */}
+              {/* Type Selector */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Type</Label>
                 <div className="grid grid-cols-4 gap-1.5">
@@ -353,104 +360,83 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
                         if (cat === 'REMINDER') setIsReminder(true);
                       }}
                       className={cn(
-                        'py-1.5 px-2 rounded-lg text-xs font-medium border text-center transition-all',
+                        'py-1.5 px-2 rounded-lg text-xs font-medium border text-center transition-colors',
                         category === cat
-                          ? 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300 font-semibold'
+                          ? 'border-primary bg-primary/10 text-primary font-semibold'
                           : 'border-border bg-card text-muted-foreground hover:bg-muted'
                       )}
                     >
-                      {cat === 'NOTE' ? 'Note' : cat === 'REMINDER' ? 'Reminder' : cat === 'TODO' ? 'To-Do' : 'Comment'}
+                      {CATEGORY_LABELS[cat]}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Title (Optional) */}
+              {/* Optional Title */}
               <div className="space-y-1.5">
-                <Label htmlFor="note-title" className="text-xs font-semibold">
+                <Label htmlFor="quick-note-title" className="text-xs font-semibold">
                   Title <span className="text-muted-foreground font-normal">(Optional)</span>
                 </Label>
                 <Input
-                  id="note-title"
-                  placeholder="e.g. Call broker about moisture discount"
+                  id="quick-note-title"
+                  placeholder="e.g. Follow up on payment or weights"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   maxLength={150}
-                  className="h-9 text-sm"
+                  className="h-9 text-xs"
                 />
               </div>
 
-              {/* Note / Comment Content */}
+              {/* Content */}
               <div className="space-y-1.5">
-                <Label htmlFor="note-content" className="text-xs font-semibold">
-                  Note / Details <span className="text-rose-500">*</span>
+                <Label htmlFor="quick-note-content" className="text-xs font-semibold">
+                  Note <span className="text-destructive">*</span>
                 </Label>
                 <textarea
-                  id="note-content"
+                  id="quick-note-content"
                   required
                   rows={3}
-                  placeholder="Type your note, comment or reminder details here..."
+                  placeholder="Enter details..."
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full resize-y rounded-lg border border-input bg-background p-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                  className="w-full resize-y rounded-lg border border-input bg-background p-2.5 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
                 />
               </div>
 
-              {/* Priority & Color Picker */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Priority</Label>
-                  <select
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value as UserNotePriority)}
-                    className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-xs outline-none"
-                  >
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                    <option value="URGENT">Urgent 🔥</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Color Tag</Label>
-                  <div className="flex items-center gap-2 pt-1.5">
-                    {COLOR_OPTIONS.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setColor(c.id)}
-                        className={cn(
-                          'h-6 w-6 rounded-full border-2 transition-all flex items-center justify-center',
-                          c.dot,
-                          color === c.id ? 'scale-125 border-foreground ring-2 ring-primary/30' : 'border-transparent opacity-70 hover:opacity-100'
-                        )}
-                        title={c.name}
-                      />
-                    ))}
-                  </div>
-                </div>
+              {/* Priority */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Priority</Label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as UserNotePriority)}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-xs outline-none"
+                >
+                  {PRIORITY_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* Reminder Date & Time */}
-              <div className="rounded-xl border border-border/80 bg-muted/20 p-3 space-y-2.5">
+              {/* Reminder Date */}
+              <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="toggle-reminder" className="text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
-                    <Calendar className="h-3.5 w-3.5 text-amber-500" /> Set Reminder Date
+                  <Label htmlFor="quick-toggle-reminder" className="text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
+                    <Calendar className="h-3.5 w-3.5 text-primary" /> Schedule Reminder
                   </Label>
                   <input
-                    id="toggle-reminder"
+                    id="quick-toggle-reminder"
                     type="checkbox"
                     checked={isReminder || category === 'REMINDER'}
                     onChange={(e) => {
                       setIsReminder(e.target.checked);
                       if (!e.target.checked && category === 'REMINDER') setCategory('NOTE');
                       if (e.target.checked && !reminderDate) {
-                        const today = new Date();
-                        setReminderDate(today.toISOString().slice(0, 10));
+                        setReminderDate(new Date().toISOString().slice(0, 10));
                       }
                     }}
-                    className="rounded border-input h-4 w-4 accent-amber-600 cursor-pointer"
+                    className="rounded border-input h-4 w-4 accent-primary cursor-pointer"
                   />
                 </div>
 
@@ -463,35 +449,33 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
                       className="h-9 text-xs"
                     />
                     <p className="text-[11px] text-muted-foreground mt-1">
-                      Will pop up in your daily reminder list on and after this date until marked done.
+                      Surfaces in the daily reminder dialog until marked done.
                     </p>
                   </div>
                 )}
               </div>
 
-              {/* Pinned toggle */}
-              <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+              {/* Pin */}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={pinned}
                     onChange={(e) => setPinned(e.target.checked)}
-                    className="rounded border-input h-4 w-4 accent-amber-600"
+                    className="rounded border-input h-4 w-4 accent-primary"
                   />
-                  <span>Pin to top of notes list</span>
+                  <span>Pin to top</span>
                 </label>
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
                   onClick={() => {
                     setOpen(false);
                     navigate('/notes-comments');
                   }}
-                  className="h-7 text-xs text-amber-600 dark:text-amber-400"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
                 >
-                  View all in settings <ExternalLink className="h-3 w-3 ml-1" />
-                </Button>
+                  All notes <ArrowRight className="h-3 w-3" />
+                </button>
               </div>
 
               {/* Actions */}
@@ -503,112 +487,103 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
                   type="submit"
                   size="sm"
                   disabled={createMutation.isPending}
-                  className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
                 >
-                  {createMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Save Note
+                  {createMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                  Save
                 </Button>
               </div>
             </form>
           ) : (
-            /* ── Tab 2: Active Notes Quick List ── */
+            /* ── Active Notes Tab ── */
             <div className="p-4 space-y-3 max-h-[75vh] overflow-y-auto">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{notes?.length ?? 0} active notes/reminders</span>
-                <Button
-                  size="sm"
-                  variant="link"
+              <div className="flex items-center justify-between text-xs text-muted-foreground pb-1">
+                <span>{activeNotesCount} active items</span>
+                <button
+                  type="button"
                   onClick={() => {
                     setOpen(false);
                     navigate('/notes-comments');
                   }}
-                  className="h-auto p-0 text-xs text-amber-600 dark:text-amber-400"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
                 >
-                  Go to Notes Page <ExternalLink className="h-3 w-3 ml-1" />
-                </Button>
+                  Open Notes Page <ArrowRight className="h-3 w-3" />
+                </button>
               </div>
 
               {isLoading ? (
-                <div className="flex items-center justify-center py-12 text-muted-foreground text-xs">
-                  <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading notes…
+                <div className="flex items-center justify-center py-10 text-muted-foreground text-xs">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading…
                 </div>
-              ) : notes?.length === 0 ? (
+              ) : activeNotesCount === 0 ? (
                 <div className="text-center py-10 space-y-2">
-                  <Sparkles className="h-8 w-8 mx-auto text-amber-500/40" />
-                  <p className="text-xs text-muted-foreground">No active notes right now.</p>
+                  <StickyNote className="h-6 w-6 mx-auto text-muted-foreground/50" />
+                  <p className="text-xs text-muted-foreground">No active notes.</p>
                   <Button size="sm" variant="outline" onClick={() => setActiveTab('create')} className="text-xs">
-                    <Plus className="h-3.5 w-3.5 mr-1" /> Add a note
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Add Note
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {notes?.map((n) => {
-                    const colorStyle = COLOR_OPTIONS.find((c) => c.id === n.color) ?? COLOR_OPTIONS[0];
-
-                    return (
-                      <div
-                        key={n.id}
-                        className={cn(
-                          'rounded-xl border p-3 space-y-2 transition-all',
-                          colorStyle.bg
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {n.pinned && <Pin className="h-3 w-3 text-amber-600 fill-amber-600" />}
-                              {n.title ? (
-                                <h4 className="font-semibold text-xs text-foreground truncate">{n.title}</h4>
-                              ) : (
-                                <Badge variant="outline" className="text-[10px] py-0 uppercase">
-                                  {n.category}
-                                </Badge>
-                              )}
-                              {n.isReminder && n.reminderDate && (
-                                <Badge variant="secondary" className="text-[10px] py-0 flex items-center gap-0.5">
-                                  <Clock className="h-2.5 w-2.5" /> {shortDate(n.reminderDate)}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => toggleStatusMutation.mutate(n.id)}
-                              title="Mark Done"
-                              className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-500/20"
-                            >
-                              <CheckCircle2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => deleteMutation.mutate(n.id)}
-                              title="Delete"
-                              className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-500/20"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                  {notes?.map((n) => (
+                    <div
+                      key={n.id}
+                      className="rounded-xl border border-border bg-card p-3 space-y-2 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {n.pinned && <Pin className="h-3 w-3 text-primary" />}
+                            {n.title ? (
+                              <h4 className="font-semibold text-xs text-foreground truncate">{n.title}</h4>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] py-0 uppercase">
+                                {n.category}
+                              </Badge>
+                            )}
+                            {n.isReminder && n.reminderDate && (
+                              <Badge variant="secondary" className="text-[10px] py-0 flex items-center gap-0.5">
+                                <Clock className="h-2.5 w-2.5" /> {shortDate(n.reminderDate)}
+                              </Badge>
+                            )}
                           </div>
                         </div>
 
-                        <p className="text-xs text-foreground/90 whitespace-pre-wrap line-clamp-3">
-                          {n.content}
-                        </p>
-
-                        <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
-                          <span>By {n.userName}</span>
-                          {n.pageLabel && (
-                            <span className="flex items-center gap-0.5 truncate max-w-[150px]">
-                              <Tag className="h-2.5 w-2.5" /> {n.pageLabel}
-                            </span>
-                          )}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => toggleStatusMutation.mutate(n.id)}
+                            title="Mark Done"
+                            className="h-7 px-2 text-xs text-success border-success/30 hover:bg-success/10"
+                          >
+                            <Check className="h-3.5 w-3.5 mr-1" /> Done
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => deleteMutation.mutate(n.id)}
+                            title="Delete"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </div>
-                    );
-                  })}
+
+                      <p className="text-xs text-foreground/90 whitespace-pre-wrap line-clamp-3">
+                        {n.content}
+                      </p>
+
+                      <div className="flex items-center justify-between text-[10.5px] text-muted-foreground pt-0.5">
+                        <span>{n.userName}</span>
+                        {n.pageLabel && (
+                          <span className="flex items-center gap-0.5 truncate max-w-[150px]">
+                            <Tag className="h-2.5 w-2.5" /> {n.pageLabel}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

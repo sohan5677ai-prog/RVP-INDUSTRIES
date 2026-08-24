@@ -414,10 +414,7 @@ router.put(
     // pushing paidUntil forward without going through Razorpay.
     if (markPaidNow) {
       const sub = await getSubscription();
-      data.paidUntil = nextDueDate(
-        sub.paidUntil && new Date(sub.paidUntil) > new Date() ? new Date(sub.paidUntil) : new Date(),
-        (data.billingDay as number) ?? sub.billingDay
-      );
+      data.paidUntil = advanceFrom(sub, data.billingDay as number | undefined);
     } else if (paidUntil !== undefined) {
       data.paidUntil = paidUntil ? new Date(paidUntil) : null;
     }

@@ -7,6 +7,7 @@
 
 import type { Subscription } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { istCalendar, istEndOfDay, daysInMonth } from '../lib/istDate.js';
 
 /**
  * Fetch the singleton subscription row, creating it (gate OFF) if the database
@@ -35,19 +36,74 @@ export function isLocked(sub: Subscription | null): boolean {
 }
 
 /**
- * The next occurrence of `billingDay` strictly after `from`. Day is clamped to
- * 28 so it always exists in every month (avoids Feb/30/31 edge cases). A
- * payment sets paidUntil to this, so paying always buys access through the next
- * billing day whether paid early or late.
+ * The next occurrence of `billingDay` on or after `from` (end of day IST). Day is
+ * clamped between 1 and 28 so it always exists in every month.
  */
 export function nextDueDate(from: Date, billingDay: number): Date {
   const day = Math.min(Math.max(Number(billingDay) || 1, 1), 28);
-  const base = new Date(from);
-  let due = new Date(base.getFullYear(), base.getMonth(), day, 0, 0, 0, 0);
-  while (due <= base) {
-    due = new Date(due.getFullYear(), due.getMonth() + 1, day, 0, 0, 0, 0);
+  const cal = istCalendar(from);
+  let targetYear = cal.year;
+  let targetMonth = cal.month;
+  if (cal.day >= day) {
+    targetMonth += 1;
+    if (targetMonth > 12) {
+      targetMonth = 1;
+      targetYear += 1;
+    }
   }
-  return due;
+  const maxDays = daysInMonth(targetYear, targetMonth);
+  const targetDay = Math.min(day, maxDays);
+  return istEndOfDay(targetYear, targetMonth, targetDay);
+}
+
+/**
+ * Calculate the next paid-through date when advancing a subscription by 1 monthly cycle.
+ *
+ * Rules:
+ * - If `from` (usually existing paidUntil) is active in the future (`from > now`):
+ *   Advance 1 month from `from` on the configured `billingDay`.
+ *   e.g. paid until 28 Aug -> new paid until 28 Sep.
+ *
+ * - If `from` is null or expired/today:
+ *   Advance to next month's `billingDay` in IST (e.g. paying on 24 Aug with billingDay 28
+ *   sets paidUntil to 28 Sep 23:59:59.999 IST, granting a full month of access).
+ *
+ * All paidUntil timestamps end at 23:59:59.999 IST so access is active throughout the
+ * entire billing day.
+ */
+export function advanceSubscriptionDate(
+  from: Date | null,
+  billingDay: number,
+  now: Date = new Date()
+): Date {
+  const day = Math.min(Math.max(Number(billingDay) || 1, 1), 28);
+
+  // If existing paidUntil is in the future, advance 1 month from that existing date.
+  if (from && new Date(from).getTime() > now.getTime()) {
+    const cal = istCalendar(new Date(from));
+    let targetYear = cal.year;
+    let targetMonth = cal.month + 1;
+    if (targetMonth > 12) {
+      targetMonth = 1;
+      targetYear += 1;
+    }
+    const maxDays = daysInMonth(targetYear, targetMonth);
+    const targetDay = Math.min(day, maxDays);
+    return istEndOfDay(targetYear, targetMonth, targetDay);
+  }
+
+  // Otherwise (expired / new subscription / paying on or before due date):
+  // Paying now grants access through next month's billing day.
+  const nowCal = istCalendar(now);
+  let targetYear = nowCal.year;
+  let targetMonth = nowCal.month + 1;
+  if (targetMonth > 12) {
+    targetMonth = 1;
+    targetYear += 1;
+  }
+  const maxDays = daysInMonth(targetYear, targetMonth);
+  const targetDay = Math.min(day, maxDays);
+  return istEndOfDay(targetYear, targetMonth, targetDay);
 }
 
 /** Whole days remaining until paidUntil (0 if expired / unset). */
@@ -80,12 +136,17 @@ export function statusPayload(sub: Subscription) {
 
 /**
  * The paid-through instant one billing cycle beyond the current one. Paying
- * early stacks onto existing access; paying late starts from now.
+ * early stacks onto existing access; paying when expired starts from now.
  */
-export function advanceFrom(sub: Subscription): Date {
+export function advanceFrom(
+  sub: Subscription,
+  billingDayOverride?: number,
+  now: Date = new Date()
+): Date {
+  const billingDay = billingDayOverride ?? sub.billingDay ?? 1;
   const from =
-    sub.paidUntil && new Date(sub.paidUntil) > new Date()
+    sub.paidUntil && new Date(sub.paidUntil).getTime() > now.getTime()
       ? new Date(sub.paidUntil)
-      : new Date();
-  return nextDueDate(from, sub.billingDay);
+      : null;
+  return advanceSubscriptionDate(from, billingDay, now);
 }

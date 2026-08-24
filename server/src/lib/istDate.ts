@@ -51,6 +51,13 @@ export function istMidnight(year: number, month: number, day: number): Date {
   return new Date(Date.UTC(year, month - 1, day) - IST_OFFSET_MS);
 }
 
+/**
+ * UTC instant of 23:59:59.999 IST on a calendar date. `month` is 1-based.
+ */
+export function istEndOfDay(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - IST_OFFSET_MS);
+}
+
 /** Days in a calendar month. `month` is 1-based. */
 export function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();

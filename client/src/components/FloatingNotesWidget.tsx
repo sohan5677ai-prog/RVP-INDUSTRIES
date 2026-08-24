@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -82,7 +82,7 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
     moved: false,
     rafId: null,
   });
-  const widgetRef = useRef<HTMLDivElement>(null);
+  const widgetRef = useRef<HTMLButtonElement>(null);
 
   // Initialize position from localStorage or default to bottom-right
   useEffect(() => {
@@ -188,7 +188,7 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
-  // High-performance pointer drag handlers
+  // High-performance pointer drag and click handlers
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
 
@@ -203,34 +203,36 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
       moved: false,
       rafId: null,
     };
-    setIsDragging(true);
 
     const onPointerMove = (moveEv: PointerEvent) => {
-      const dx = moveEv.clientX - dragInfoRef.current.startX;
-      const dy = moveEv.clientY - dragInfoRef.current.startY;
+      const dist = Math.hypot(
+        moveEv.clientX - dragInfoRef.current.startX,
+        moveEv.clientY - dragInfoRef.current.startY
+      );
 
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-        dragInfoRef.current.moved = true;
-      }
-
-      const nextX = Math.max(12, Math.min(window.innerWidth - 56, moveEv.clientX - dragInfoRef.current.offsetX));
-      const nextY = Math.max(12, Math.min(window.innerHeight - 56, moveEv.clientY - dragInfoRef.current.offsetY));
-
-      posRef.current = { x: nextX, y: nextY };
-
-      // Direct GPU transform update on animation frame
-      if (dragInfoRef.current.rafId) {
-        cancelAnimationFrame(dragInfoRef.current.rafId);
-      }
-      dragInfoRef.current.rafId = requestAnimationFrame(() => {
-        if (widgetRef.current) {
-          widgetRef.current.style.transform = `translate3d(${nextX}px, ${nextY}px, 0)`;
+      if (dist > 5) {
+        if (!dragInfoRef.current.moved) {
+          dragInfoRef.current.moved = true;
+          setIsDragging(true);
         }
-      });
+
+        const nextX = Math.max(12, Math.min(window.innerWidth - 56, moveEv.clientX - dragInfoRef.current.offsetX));
+        const nextY = Math.max(12, Math.min(window.innerHeight - 56, moveEv.clientY - dragInfoRef.current.offsetY));
+
+        posRef.current = { x: nextX, y: nextY };
+
+        if (dragInfoRef.current.rafId) {
+          cancelAnimationFrame(dragInfoRef.current.rafId);
+        }
+        dragInfoRef.current.rafId = requestAnimationFrame(() => {
+          if (widgetRef.current) {
+            widgetRef.current.style.transform = `translate3d(${nextX}px, ${nextY}px, 0)`;
+          }
+        });
+      }
     };
 
     const onPointerUp = () => {
-      setIsDragging(false);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
 
@@ -238,27 +240,26 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
         cancelAnimationFrame(dragInfoRef.current.rafId);
       }
 
-      const finalPos = posRef.current;
-      setPosition(finalPos);
+      if (dragInfoRef.current.moved) {
+        setIsDragging(false);
+        const finalPos = posRef.current;
+        setPosition(finalPos);
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(finalPos));
-      } catch {
-        /* ignore */
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(finalPos));
+        } catch {
+          /* ignore */
+        }
+      } else {
+        // It was a tap/click!
+        setIsDragging(false);
+        setOpen(true);
       }
     };
 
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('pointerup', onPointerUp);
   };
-
-  const handleWidgetClick = useCallback(() => {
-    if (dragInfoRef.current.moved) {
-      dragInfoRef.current.moved = false;
-      return;
-    }
-    setOpen(true);
-  }, []);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,11 +287,17 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
   return (
     <>
       {/* ── High-Performance Hardware-Accelerated Floating Button ── */}
-      <div
+      <button
+        type="button"
         ref={widgetRef}
         data-support-exclude="true"
         onPointerDown={handlePointerDown}
-        onClick={handleWidgetClick}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
         style={{
           position: 'fixed',
           top: 0,
@@ -300,13 +307,13 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
           touchAction: 'none',
           zIndex: 9999,
         }}
-        title="Notes & Reminders (Drag anywhere)"
+        title="Notes & Reminders"
         aria-label="Notes & Reminders"
         className={cn(
           'group flex h-11 w-11 items-center justify-center rounded-xl select-none',
           'border border-border/90 bg-card/95 text-foreground shadow-md backdrop-blur-md',
-          'hover:border-primary/60 hover:shadow-lg hover:text-primary',
-          isDragging ? 'cursor-grabbing scale-105 border-primary shadow-xl opacity-95 pointer-events-none' : 'cursor-grab transition-shadow transition-colors duration-150'
+          'hover:border-primary/60 hover:shadow-lg hover:text-primary outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          isDragging ? 'cursor-grabbing scale-105 border-primary shadow-xl opacity-95' : 'cursor-grab transition-shadow transition-colors duration-150'
         )}
       >
         <div className="relative flex items-center justify-center pointer-events-none">
@@ -321,7 +328,7 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
             </span>
           ) : null}
         </div>
-      </div>
+      </button>
 
       {/* ── Modal Dialog ── */}
       <Dialog open={open} onOpenChange={setOpen}>

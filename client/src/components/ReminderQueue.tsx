@@ -10,12 +10,12 @@ import {
 // before the next opens, else the body keeps pointer-events:none and the new
 // popup looks dead).
 
-export type ReminderSlotId = 'support-reply' | 'dispatch' | 'sales-dues' | 'purchase-orders';
+export type ReminderSlotId = 'support-reply' | 'user-notes' | 'sales-dues' | 'dispatch' | 'purchase-orders';
 
 // A developer's answer to a reported problem comes first - it may well be the
-// reason a number in the reminders behind it looks different today. Then money,
-// then goods going out, then goods coming in.
-const ORDER: ReminderSlotId[] = ['support-reply', 'sales-dues', 'dispatch', 'purchase-orders'];
+// reason a number in the reminders behind it looks different today. Then custom user notes/reminders,
+// then money, then goods going out, then goods coming in.
+const ORDER: ReminderSlotId[] = ['support-reply', 'user-notes', 'sales-dues', 'dispatch', 'purchase-orders'];
 
 const HANDOVER_MS = 320;
 

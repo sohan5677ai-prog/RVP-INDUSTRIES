@@ -1160,3 +1160,33 @@ export interface TdsReport {
     deductorCount: number;
   };
 }
+
+// --- Notes, Comments & Reminders --------------------------------------------
+
+export type UserNoteCategory = 'NOTE' | 'REMINDER' | 'TODO' | 'COMMENT';
+export type UserNotePriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type UserNoteStatus = 'PENDING' | 'COMPLETED';
+
+export interface UserNote {
+  id: string;
+  title: string | null;
+  content: string;
+  category: UserNoteCategory;
+  priority: UserNotePriority;
+  isReminder: boolean;
+  reminderDate: string | null;
+  status: UserNoteStatus;
+  color: string | null;
+  pinned: boolean;
+  pagePath: string | null;
+  pageLabel: string | null;
+  userId: string | null;
+  userName: string;
+  userRole: string;
+  completedAt: string | null;
+  completedById: string | null;
+  completedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+

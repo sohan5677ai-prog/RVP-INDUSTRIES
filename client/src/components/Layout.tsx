@@ -41,6 +41,7 @@ import {
   Archive,
   LifeBuoy,
   HandCoins,
+  StickyNote,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -48,9 +49,11 @@ import { preloadRoute } from '@/lib/preload';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import SupportButton from '@/components/SupportButton';
 import SupportAnnouncements from '@/components/SupportAnnouncements';
+import UserNoteReminders from '@/components/UserNoteReminders';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
+import FloatingNotesWidget from '@/components/FloatingNotesWidget';
 import { ReminderQueueProvider } from '@/components/ReminderQueue';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
@@ -163,6 +166,7 @@ const sections: NavSection[] = [
       { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard, devOnly: true },
       { to: '/settings?tab=archives', label: 'Archives', icon: Archive, devOnly: true },
       { to: '/support', label: 'Support tickets', icon: LifeBuoy },
+      { to: '/notes-comments', label: 'Notes / Comments', icon: StickyNote },
     ],
   },
 ];
@@ -225,6 +229,7 @@ export default function Layout() {
       {/* One queue, one popup on screen at a time - see ReminderQueue. */}
       <ReminderQueueProvider>
         <SupportAnnouncements />
+        <UserNoteReminders />
         <DispatchReminders />
         <SalesDuesReminders />
         <PurchaseOrderReminders />
@@ -390,6 +395,7 @@ export default function Layout() {
           </div>
         </main>
       </div>
+      <FloatingNotesWidget pageLabel={current?.label ?? 'Home'} />
     </div>
   );
 }

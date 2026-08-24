@@ -40,6 +40,8 @@ export const createSaleOrderSchema = z.object({
   priceType: z.enum(['BASE', 'DELIVERY']).optional(),
 });
 
+const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);
+
 // Multipart on dispatch: confirmed values read off the kata slip. The tax invoice
 // is raised (auto-numbered) as a separate step afterwards.
 export const dispatchSaleOrderSchema = z.object({
@@ -47,10 +49,10 @@ export const dispatchSaleOrderSchema = z.object({
   driverName: z.string().optional().nullable(),
   driverPhone: z.string().optional().nullable(),
   tonnageKg: z.coerce.number().int().positive(),
-  internalWeightKg: z.coerce.number().int().positive().optional().nullable(),
-  dispatchDate: z.coerce.date().optional().nullable(),
+  internalWeightKg: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional().nullable()),
+  dispatchDate: z.preprocess(emptyToUndefined, z.coerce.date().optional().nullable()),
   transportProvider: z.enum(['SURYA', 'KNM', 'OTHER']).optional().default('SURYA'),
-  customRetention: z.coerce.number().nonnegative().optional().nullable(),
+  customRetention: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
   // XS Pappu: how many kg of THIS lorry came from yield surplus above the
   // assumed 60% out-turn. A quantity, not a flag - a shipment can be part-backed
   // and part-surplus. Must cover at least the unbacked shortfall; see the gate
@@ -66,8 +68,6 @@ export const dispatchSaleOrderSchema = z.object({
   // straight off the factory. Pure tag, sent over multipart so "true" has to count.
   fromTransfer: z.preprocess((v) => v === true || v === 'true', z.boolean().optional().default(false)),
 });
-
-const emptyToUndefined = (val: unknown) => (val === '' || val === 'null' || val === 'undefined' ? undefined : val);
 
 export const listSaleOrdersSchema = z.object({
   status: z.preprocess(emptyToUndefined, saleStatusEnum.optional()),

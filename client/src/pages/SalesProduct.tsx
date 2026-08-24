@@ -245,6 +245,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // The WhatsApp booking this lorry number matched, once one is found.
   const [matchedBooking, setMatchedBooking] = useState<LorryConfirmation | null>(null);
   const [dispatchTonnes, setDispatchTonnes] = useState('');
+  const [internalWeightTonnes, setInternalWeightTonnes] = useState('');
   const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [extractingKata, setExtractingKata] = useState(false);
   const [transportProvider, setTransportProvider] = useState<'SURYA' | 'KNM' | 'OTHER'>('SURYA');
@@ -261,6 +262,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
   const dispatchOverflow = dispatchOrder ? Math.round(dispatchTonnesNum * 1000) > dispatchRemaining : false;
+
+  // Default internal weight (tonnes) applying moisture gain reduction if PAPPU
+  const internalWeightDefaultTonnes = useMemo(() => {
+    const wKg = Math.round(dispatchTonnesNum * 1000);
+    if (wKg <= 0) return 0;
+    if (isPappu) {
+      if (wKg >= 35000) return (wKg - 250) / 1000;
+      if (wKg >= 30000) return (wKg - 200) / 1000;
+      if (wKg >= 25000) return (wKg - 150) / 1000;
+      if (wKg >= 15000) return (wKg - 50) / 1000;
+    }
+    return wKg / 1000;
+  }, [dispatchTonnesNum, isPappu]);
 
   // Pappu with no black seed behind it. Available pappu is derived (remaining
   // seed × 60%), so this can be > 0 while the surplus physically exists in the
@@ -331,6 +345,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setDriverPhone('');
     setMatchedBooking(null);
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
+    setInternalWeightTonnes('');
     setDispatchDate(new Date().toISOString().slice(0, 10));
     setTransportProvider('SURYA');
     setCustomRetention('');
@@ -366,6 +381,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (driverName) fd.append('driverName', driverName);
       if (driverPhone) fd.append('driverPhone', driverPhone);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
+      const internalWeightNum = Number(internalWeightTonnes);
+      if (internalWeightTonnes.trim() !== '' && !isNaN(internalWeightNum) && internalWeightNum > 0) {
+        fd.append('internalWeightKg', String(Math.round(internalWeightNum * 1000)));
+      }
       if (dispatchDate) fd.append('dispatchDate', new Date(dispatchDate).toISOString());
       fd.append('transportProvider', transportProvider);
       if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
@@ -1308,6 +1327,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             )}
                                             <span>{d.vehicleNumber ?? 'no vehicle'}</span><span className="opacity-40">·</span>
                                             <span className="font-mono">{toTonnes(d.weightKg).toFixed(2)} t</span>
+                                            {d.internalWeightKg != null && (
+                                              <>
+                                                <span className="opacity-40">·</span>
+                                                <span className="font-mono text-muted-foreground/80" title="Internal weight (internal reference only, without moisture gain)">
+                                                  Int: {toTonnes(d.internalWeightKg).toFixed(2)} t
+                                                </span>
+                                              </>
+                                            )}
                                             {d.kataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.kataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Dispatch kata</a>}
                                             {d.buyerKataFileUrl && <a onClick={(e) => e.stopPropagation()} href={d.buyerKataFileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Buyer kata</a>}
                                           </div>
@@ -1613,6 +1640,36 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   {dispatchShortKg} kg under the booked tonnage - inside the {closeTolerancePct}% tolerance, so this closes the order.
                 </p>
               )}
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">
+                  Internal weight (tonnes) <span className="font-normal text-muted-foreground">(internal purpose only)</span>
+                </Label>
+                {internalWeightDefaultTonnes > 0 && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary hover:underline"
+                    onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
+                  >
+                    Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
+                  </button>
+                )}
+              </div>
+              <Input
+                type="number"
+                step="0.001"
+                value={internalWeightTonnes}
+                onChange={(e) => setInternalWeightTonnes(e.target.value)}
+                placeholder={
+                  internalWeightDefaultTonnes > 0
+                    ? `Auto-calculated default: ${internalWeightDefaultTonnes.toFixed(3)} t`
+                    : 'e.g. 24.85'
+                }
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Internal weight before moisture gain. Leave blank to auto-calculate ({isPappu ? 'tiered moisture scale' : 'same as kata weight'}). Never sent to parties or on invoices.
+              </p>
             </div>
             {offerFromTransfer && (
               <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">

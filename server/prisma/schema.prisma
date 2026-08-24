@@ -1888,3 +1888,54 @@ model SubscriptionPayment {
   periodEnd         DateTime? // paidUntil this payment bought
   createdAt         DateTime  @default(now())
 }
+
+// ---------------------------------------------------------------------------
+// In-app floating notes, comments & reminders.
+// Captured on-the-fly from any page or created in Settings -> Notes / Comments.
+// ---------------------------------------------------------------------------
+enum UserNoteCategory {
+  NOTE
+  REMINDER
+  TODO
+  COMMENT
+}
+
+enum UserNotePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum UserNoteStatus {
+  PENDING
+  COMPLETED
+}
+
+model UserNote {
+  id              String           @id @default(cuid())
+  title           String?
+  content         String
+  category        UserNoteCategory @default(NOTE)
+  priority        UserNotePriority @default(MEDIUM)
+  isReminder      Boolean          @default(false)
+  reminderDate    DateTime?
+  status          UserNoteStatus   @default(PENDING)
+  color           String?          @default("amber") // amber, yellow, emerald, sky, purple, rose
+  pinned          Boolean          @default(false)
+  pagePath        String?
+  pageLabel       String?
+  userId          String?
+  userName        String
+  userRole        String
+  completedAt     DateTime?
+  completedById   String?
+  completedByName String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([status, isReminder, reminderDate])
+  @@index([userId, status])
+  @@index([createdAt])
+}
+

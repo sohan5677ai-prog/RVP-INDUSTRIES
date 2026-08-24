@@ -87,6 +87,10 @@ const ProfitLoss = lazyWithPreload('/accounts/profit-loss', () => import('@/page
 const JournalEntries = lazyWithPreload('/accounts/journal-entries', () => import('@/pages/JournalEntries'));
 const Settings = lazyWithPreload('/settings', () => import('@/pages/Settings'));
 const SupportTickets = lazyWithPreload('/support', () => import('@/pages/SupportTickets'));
+const NotesComments = lazyWithPreload(
+  ['/notes-comments', '/settings/notes-comments'],
+  () => import('@/pages/NotesComments')
+);
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
 const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/Reports/Taxes'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
@@ -193,6 +197,8 @@ export default function App() {
               <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/support" element={<SupportTickets />} />
+              <Route path="/notes-comments" element={<NotesComments />} />
+              <Route path="/settings/notes-comments" element={<Navigate to="/notes-comments" replace />} />
               <Route path="/users" element={<Users />} />
               <Route path="/subscription" element={<Navigate to="/settings?tab=subscription" replace />} />
               <Route path="/archives" element={<Navigate to="/settings?tab=archives" replace />} />

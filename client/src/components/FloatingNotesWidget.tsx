@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
-const STORAGE_KEY = 'rvp_floating_notes_pos_v3';
+const STORAGE_KEY = 'rvp_floating_notes_pos_v4';
 
 const CATEGORY_LABELS: Record<UserNoteCategory, string> = {
   NOTE: 'Note',
@@ -63,51 +63,69 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
   const [reminderDate, setReminderDate] = useState('');
   const [pinned, setPinned] = useState(false);
 
-  // Dragging State
+  // Position State & Ref for 120fps hardware-accelerated dragging
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
+  const posRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startY: number; initialX: number; initialY: number; moved: boolean }>({
+  const dragInfoRef = useRef<{
+    offsetX: number;
+    offsetY: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    rafId: number | null;
+  }>({
+    offsetX: 0,
+    offsetY: 0,
     startX: 0,
     startY: 0,
-    initialX: 0,
-    initialY: 0,
     moved: false,
+    rafId: null,
   });
   const widgetRef = useRef<HTMLDivElement>(null);
 
   // Initialize position from localStorage or default to bottom-right
   useEffect(() => {
+    let initialPos = {
+      x: window.innerWidth - 64,
+      y: window.innerHeight - 76,
+    };
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-          const clampedX = Math.max(16, Math.min(window.innerWidth - 60, parsed.x));
-          const clampedY = Math.max(16, Math.min(window.innerHeight - 60, parsed.y));
-          setPosition({ x: clampedX, y: clampedY });
-          return;
+          const clampedX = Math.max(12, Math.min(window.innerWidth - 56, parsed.x));
+          const clampedY = Math.max(12, Math.min(window.innerHeight - 56, parsed.y));
+          initialPos = { x: clampedX, y: clampedY };
         }
       }
     } catch {
       /* ignore */
     }
-    // Default fallback position
-    setPosition({
-      x: window.innerWidth - 64,
-      y: window.innerHeight - 76,
-    });
+
+    posRef.current = initialPos;
+    setPosition(initialPos);
   }, []);
+
+  // Sync DOM transform whenever position state initializes or updates
+  useEffect(() => {
+    if (position && widgetRef.current) {
+      widgetRef.current.style.transform = `translate3d(${position.x}px, ${position.y}px, 0)`;
+    }
+  }, [position]);
 
   // Handle window resizing
   useEffect(() => {
     const handleResize = () => {
-      setPosition((prev) => {
-        if (!prev) return null;
-        return {
-          x: Math.max(16, Math.min(window.innerWidth - 60, prev.x)),
-          y: Math.max(16, Math.min(window.innerHeight - 60, prev.y)),
-        };
-      });
+      const current = posRef.current;
+      const clampedX = Math.max(12, Math.min(window.innerWidth - 56, current.x));
+      const clampedY = Math.max(12, Math.min(window.innerHeight - 56, current.y));
+      posRef.current = { x: clampedX, y: clampedY };
+      setPosition({ x: clampedX, y: clampedY });
+      if (widgetRef.current) {
+        widgetRef.current.style.transform = `translate3d(${clampedX}px, ${clampedY}px, 0)`;
+      }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -136,7 +154,6 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
       toast.success(isReminder ? 'Reminder created' : 'Note saved');
       qc.invalidateQueries({ queryKey: ['user-notes'] });
       qc.invalidateQueries({ queryKey: ['due-user-notes'] });
-      // Reset form
       setTitle('');
       setContent('');
       setIsReminder(false);
@@ -171,32 +188,45 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
-  // Pointer drag handlers
+  // High-performance pointer drag handlers
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    if (!position) return;
 
-    dragRef.current = {
+    const currentX = posRef.current.x;
+    const currentY = posRef.current.y;
+
+    dragInfoRef.current = {
+      offsetX: e.clientX - currentX,
+      offsetY: e.clientY - currentY,
       startX: e.clientX,
       startY: e.clientY,
-      initialX: position.x,
-      initialY: position.y,
       moved: false,
+      rafId: null,
     };
     setIsDragging(true);
 
     const onPointerMove = (moveEv: PointerEvent) => {
-      const dx = moveEv.clientX - dragRef.current.startX;
-      const dy = moveEv.clientY - dragRef.current.startY;
+      const dx = moveEv.clientX - dragInfoRef.current.startX;
+      const dy = moveEv.clientY - dragInfoRef.current.startY;
 
-      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-        dragRef.current.moved = true;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        dragInfoRef.current.moved = true;
       }
 
-      const nextX = Math.max(16, Math.min(window.innerWidth - 60, dragRef.current.initialX + dx));
-      const nextY = Math.max(16, Math.min(window.innerHeight - 60, dragRef.current.initialY + dy));
+      const nextX = Math.max(12, Math.min(window.innerWidth - 56, moveEv.clientX - dragInfoRef.current.offsetX));
+      const nextY = Math.max(12, Math.min(window.innerHeight - 56, moveEv.clientY - dragInfoRef.current.offsetY));
 
-      setPosition({ x: nextX, y: nextY });
+      posRef.current = { x: nextX, y: nextY };
+
+      // Direct GPU transform update on animation frame
+      if (dragInfoRef.current.rafId) {
+        cancelAnimationFrame(dragInfoRef.current.rafId);
+      }
+      dragInfoRef.current.rafId = requestAnimationFrame(() => {
+        if (widgetRef.current) {
+          widgetRef.current.style.transform = `translate3d(${nextX}px, ${nextY}px, 0)`;
+        }
+      });
     };
 
     const onPointerUp = () => {
@@ -204,25 +234,27 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
 
-      setPosition((finalPos) => {
-        if (finalPos) {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(finalPos));
-          } catch {
-            /* ignore */
-          }
-        }
-        return finalPos;
-      });
+      if (dragInfoRef.current.rafId) {
+        cancelAnimationFrame(dragInfoRef.current.rafId);
+      }
+
+      const finalPos = posRef.current;
+      setPosition(finalPos);
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(finalPos));
+      } catch {
+        /* ignore */
+      }
     };
 
-    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('pointerup', onPointerUp);
   };
 
   const handleWidgetClick = useCallback(() => {
-    if (dragRef.current.moved) {
-      dragRef.current.moved = false;
+    if (dragInfoRef.current.moved) {
+      dragInfoRef.current.moved = false;
       return;
     }
     setOpen(true);
@@ -253,7 +285,7 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
 
   return (
     <>
-      {/* ── Professional Draggable Floating Action Button ── */}
+      {/* ── High-Performance Hardware-Accelerated Floating Button ── */}
       <div
         ref={widgetRef}
         data-support-exclude="true"
@@ -261,21 +293,23 @@ export default function FloatingNotesWidget({ pageLabel }: { pageLabel: string }
         onClick={handleWidgetClick}
         style={{
           position: 'fixed',
-          left: `${position.x}px`,
-          top: `${position.y}px`,
+          top: 0,
+          left: 0,
+          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+          willChange: 'transform',
           touchAction: 'none',
           zIndex: 9999,
         }}
-        title="Notes & Reminders"
+        title="Notes & Reminders (Drag anywhere)"
         aria-label="Notes & Reminders"
         className={cn(
-          'group flex h-11 w-11 items-center justify-center rounded-xl cursor-grab active:cursor-grabbing select-none',
+          'group flex h-11 w-11 items-center justify-center rounded-xl select-none',
           'border border-border/90 bg-card/95 text-foreground shadow-md backdrop-blur-md',
-          'transition-all duration-150 hover:border-primary/60 hover:shadow-lg hover:text-primary',
-          isDragging && 'scale-105 border-primary shadow-xl opacity-95'
+          'hover:border-primary/60 hover:shadow-lg hover:text-primary',
+          isDragging ? 'cursor-grabbing scale-105 border-primary shadow-xl opacity-95 pointer-events-none' : 'cursor-grab transition-shadow transition-colors duration-150'
         )}
       >
-        <div className="relative flex items-center justify-center">
+        <div className="relative flex items-center justify-center pointer-events-none">
           <StickyNote className="h-5 w-5 text-primary transition-transform group-hover:scale-105" />
           {dueNotesCount > 0 ? (
             <span className="absolute -top-2.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9.5px] font-mono font-bold text-destructive-foreground ring-2 ring-card">

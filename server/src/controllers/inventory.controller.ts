@@ -490,9 +490,11 @@ export async function resyncPappuCosts(_req: Request, res: Response) {
   clearCache('pappu_order_margins');
   clearCache('unified_stock_engine');
   const margins = await _computePappuOrderMargins();
-  for (const m of margins) {
-    if (m.costFrozenAt != null || m.seedKg > 0) {
-      await prisma.saleOrder.updateMany({
+  
+  const updates = margins
+    .filter((m) => m.costFrozenAt != null || m.seedKg > 0)
+    .map((m) =>
+      prisma.saleOrder.updateMany({
         where: { id: m.orderId },
         data: {
           seedCostSnapshot: {
@@ -501,12 +503,13 @@ export async function resyncPappuCosts(_req: Request, res: Response) {
             seedBands: m.seedBands,
           },
         },
-      });
-    }
-  }
+      })
+    );
+
+  await Promise.all(updates);
   clearCache('pappu_order_margins');
   clearCache('unified_stock_engine');
-  res.json({ message: 'Seed costs and profit margins re-synchronized successfully', count: margins.length });
+  res.json({ message: `Re-synchronized seed costs across ${margins.length} orders successfully!`, count: margins.length });
 }
 
 

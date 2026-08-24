@@ -87,7 +87,7 @@ export default function PappuProfitLoss() {
       );
       toast.success(res?.message || 'Seed costs and profit margins re-synchronized successfully!');
     },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
+    onError: (e: Error) => toast.error(getErrorMessage(e) || 'Failed to re-sync costs'),
   });
 
   const [profitFilter, setProfitFilter] = useState<ProfitFilter>('ALL');

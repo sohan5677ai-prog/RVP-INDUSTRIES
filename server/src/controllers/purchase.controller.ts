@@ -4,6 +4,7 @@ import { HttpError } from '../lib/httpError.js';
 import { createPurchaseSchema } from '../schemas/purchase.schema.js';
 import { calcHamali, calcKataFee, companyHamaliShare, purchaseGst } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
+import { clearCache } from '../lib/cache.js';
 
 const purchaseInclude = {
   verification: true,
@@ -145,6 +146,8 @@ export async function createPurchase(req: Request, res: Response) {
     return createdPurchase;
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.status(201).json(purchase);
 }
@@ -235,6 +238,8 @@ export async function updatePurchase(req: Request, res: Response) {
     return updatedPurchase;
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.json(updated);
 }
@@ -302,6 +307,9 @@ export async function deletePurchase(req: Request, res: Response) {
       },
     });
   });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.json({ message: 'Purchase deleted' });
 }

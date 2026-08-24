@@ -143,8 +143,9 @@ export default function StockTransferPage() {
         },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['stock-transfers'] });
-      qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
+      ['stock-transfers', 'black-seed-stock', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Stock transfer recorded');
       setOpen(false);
       resetForm();
@@ -155,8 +156,9 @@ export default function StockTransferPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/stock-transfers/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['stock-transfers'] });
-      qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
+      ['stock-transfers', 'black-seed-stock', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Transfer reversed');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),

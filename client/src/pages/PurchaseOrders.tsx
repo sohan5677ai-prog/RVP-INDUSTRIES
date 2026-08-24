@@ -217,7 +217,9 @@ export default function PurchaseOrders() {
             },
           }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      ['purchase-orders', 'stock-in', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success(editing ? 'Purchase order updated' : 'Purchase order created');
       setOpen(false);
       form.reset();
@@ -229,7 +231,9 @@ export default function PurchaseOrders() {
     mutationFn: (id: string) =>
       api(`/purchase-orders/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      ['purchase-orders', 'stock-in', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Purchase order deleted');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -239,7 +243,9 @@ export default function PurchaseOrders() {
     mutationFn: (id: string) =>
       api(`/purchase-orders/${id}/void`, { method: 'POST' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      ['purchase-orders', 'stock-in', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Purchase order voided (Cancelled)');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),

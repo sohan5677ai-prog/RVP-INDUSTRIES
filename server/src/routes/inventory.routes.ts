@@ -8,6 +8,7 @@ import {
   getSilos,
   getCalculatorDefaults,
   getPappuOrderMargins,
+  resyncPappuCosts,
 } from '../controllers/inventory.controller.js';
 import {
   listStockTransfers,
@@ -38,6 +39,7 @@ router.get('/inventory/by-party', asyncHandler(getStockByParty));
 router.get('/inventory/by-state', asyncHandler(getStockByState));
 router.get('/inventory/by-price', asyncHandler(getStockByPrice));
 router.get('/inventory/pappu-margins', asyncHandler(getPappuOrderMargins));
+router.post('/inventory/resync-pappu-costs', asyncHandler(resyncPappuCosts));
 router.get('/inventory/silos', asyncHandler(getSilos));
 router.get('/inventory/calculator-defaults', asyncHandler(getCalculatorDefaults));
 

@@ -14,6 +14,7 @@ import {
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { getEarliestOpenLoanDate } from './loan.controller.js';
+import { clearCache } from '../lib/cache.js';
 
 // The transfer carrying-interest rate is a flat 0.85%/month; we persist it on the
 // transfer row as an annual-equivalent so the client's existing "/12 → %/mo"
@@ -246,6 +247,9 @@ export async function createStockTransfer(req: Request, res: Response) {
     return created;
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.status(201).json(transfer);
 }
 
@@ -282,6 +286,9 @@ export async function deleteStockTransfer(req: Request, res: Response) {
     await tx.journalEntry.deleteMany({ where: { reference: `TRANSFER-${transfer.id}` } });
     await tx.stockTransfer.delete({ where: { id: transfer.id } });
   });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.json({ message: 'Stock transfer reversed' });
 }

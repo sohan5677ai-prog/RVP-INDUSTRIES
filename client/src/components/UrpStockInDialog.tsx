@@ -71,8 +71,9 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
     // FormData body for the future invoice-file upload.
     mutationFn: (data: FormData) => api('/stock-in/urp', { method: 'POST', multipart: true, body: data }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['stock-in'] });
-      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Direct purchase (URP) recorded successfully!');
       onOpenChange(false);
       resetForm();

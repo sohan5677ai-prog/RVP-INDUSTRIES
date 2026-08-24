@@ -258,8 +258,9 @@ export default function Purchases() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/purchases/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['stock-in'] });
+      ['purchases', 'stock-in', 'purchase-orders', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Purchase record deleted');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -425,8 +426,9 @@ export default function Purchases() {
         available={available}
         companyProfile={companyProfile}
         onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['purchases'] });
-          qc.invalidateQueries({ queryKey: ['stock-in'] });
+          ['purchases', 'stock-in', 'purchase-orders', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+            (k) => qc.invalidateQueries({ queryKey: [k] }),
+          );
           toast.success(editing ? 'Purchase updated' : 'Purchase recorded');
           setOpen(false);
           setEditing(null);

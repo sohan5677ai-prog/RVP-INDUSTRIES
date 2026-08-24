@@ -20,6 +20,7 @@ import { whatsappService, resolveInternalCopyRecipients } from '../services/what
 import { buildPurchaseStatementData } from './purchaseStatement.controller.js';
 import { renderPurchaseStatementPdf } from '../lib/purchaseStatementPdf.js';
 import { uploadFileToStorage } from '../lib/upload.js';
+import { clearCache } from '../lib/cache.js';
 
 /**
  * After a lorry is unloaded & weight-verified, WhatsApp the supplier the
@@ -273,6 +274,9 @@ export async function createVerification(req: Request, res: Response) {
     include: verificationInclude,
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.status(201).json({
     ...fullVerification,
     debitNoteAmount: debitNoteAmount > 0 ? debitNoteAmount : null,
@@ -362,6 +366,9 @@ export async function deleteVerification(req: Request, res: Response) {
       where: { reference: `PURCHASE-${purchase.id}` }
     });
   });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.json({ message: 'Verification deleted' });
 }

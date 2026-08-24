@@ -1,21 +1,23 @@
 import { Fragment, useMemo, useState, useRef, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   TrendingUp, TrendingDown, IndianRupee, PackageCheck, Scale, Percent, ChevronRight, Trophy,
   AlertTriangle, Lock, LockOpen, Truck, Wheat, Target, Medal, SlidersHorizontal, RotateCcw,
-  ArrowUpRight, ArrowDownRight, MapPin, Layers,
+  ArrowUpRight, ArrowDownRight, MapPin, Layers, RefreshCw,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, getErrorMessage } from '@/lib/api';
 import { rupees, rupeesShort, shortDate, toTonnes } from '@/lib/format';
 import {
   Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/PageHeader';
 import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 /**
@@ -71,9 +73,21 @@ const SORT_OPTIONS: { label: string; value: SortKey }[] = [
 ];
 
 export default function PappuProfitLoss() {
+  const qc = useQueryClient();
   const { data: margins, isLoading } = useQuery({
     queryKey: ['pappu-margins'],
     queryFn: () => api<PappuMargin[]>('/inventory/pappu-margins'),
+  });
+
+  const resyncMutation = useMutation({
+    mutationFn: () => api<{ message?: string; count?: number }>('/inventory/resync-pappu-costs', { method: 'POST' }),
+    onSuccess: (res) => {
+      ['pappu-margins', 'profit-loss', 'dashboard', 'stock-by-price', 'sale-orders'].forEach((k) =>
+        qc.invalidateQueries({ queryKey: [k] }),
+      );
+      toast.success(res?.message || 'Seed costs and profit margins re-synchronized successfully!');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
   const [profitFilter, setProfitFilter] = useState<ProfitFilter>('ALL');
@@ -222,6 +236,18 @@ export default function PappuProfitLoss() {
         icon={TrendingUp}
         title="Pappu Profit & Loss"
         description="Order-by-order profitability of every Pappu sale - revenue net of freight, less the date-aware black-seed cost and production cost that actually backed each order. Brokerage is booked separately, dispatch-gated, in the Husk Pool overheads."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => resyncMutation.mutate()}
+            disabled={resyncMutation.isPending}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", resyncMutation.isPending && "animate-spin")} />
+            {resyncMutation.isPending ? 'Syncing...' : 'Re-sync Costs'}
+          </Button>
+        }
       />
 
       {/* Headline metrics */}

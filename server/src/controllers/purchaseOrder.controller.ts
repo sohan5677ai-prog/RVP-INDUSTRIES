@@ -8,6 +8,7 @@ import {
 } from '../schemas/purchase.schema.js';
 import { computeFY, derivePartyPrefix, formatPoNumber, normalizeSeriesKey, releasePoSerial, reservePoSerials } from '../lib/poNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { clearCache } from '../lib/cache.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
   const { status, skip, take, all } = listPurchaseOrdersSchema.parse(req.query);
@@ -104,6 +105,9 @@ export async function createPurchaseOrder(req: Request, res: Response) {
     data.sendTonnageInMessage ? data.tonnageKg : null
   );
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.status(201).json(createdPOs[0]);
 }
 
@@ -181,6 +185,9 @@ export async function bulkCreatePurchaseOrders(req: Request, res: Response) {
     }
   }
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json({ results });
 }
 
@@ -218,6 +225,9 @@ export async function updatePurchaseOrder(req: Request, res: Response) {
     include: { party: true },
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json(updated);
 }
 
@@ -239,6 +249,10 @@ export async function deletePurchaseOrder(req: Request, res: Response) {
       await releasePoSerial(tx, po.poSeriesKey, po.poFy);
     }
   });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json({ message: 'Purchase order deleted' });
 }
 
@@ -263,6 +277,9 @@ export async function voidPurchaseOrder(req: Request, res: Response) {
     data: { status: 'CANCELLED' },
     include: { party: true },
   });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.json(updated);
 }

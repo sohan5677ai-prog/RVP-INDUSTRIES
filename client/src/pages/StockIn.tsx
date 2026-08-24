@@ -903,7 +903,7 @@ export default function StockIn() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/stock-in/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
+      ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
         (k) => qc.invalidateQueries({ queryKey: [k] }),
       );
       toast.success('Stock-in deleted');
@@ -1024,7 +1024,7 @@ export default function StockIn() {
         pendingPOs={pendingPOs}
         initialPoId={recordPoId}
         onSuccess={() => {
-          ['stock-in', 'purchase-orders', 'purchases', 'verifications'].forEach(
+          ['stock-in', 'purchase-orders', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
             (k) => qc.invalidateQueries({ queryKey: [k] }),
           );
           toast.success(editing ? 'Stock-in updated' : 'Stock-in recorded');

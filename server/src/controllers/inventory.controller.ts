@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import type { SaleProduct } from '@prisma/client';
-import { withCache } from '../lib/cache.js';
+import { withCache, clearCache } from '../lib/cache.js';
 import { companyHamaliShare, calcSaleFreight, PAPPU_OUT_TURN, seedBackedDemandKg, excessOutKgOf } from '../lib/calc.js';
 import { getFreightRateForDestination } from './settings.controller.js';
 import { InventoryService } from '../services/inventory.service.js';
@@ -412,19 +412,16 @@ async function _computePappuOrderMargins() {
     const freight =
       Math.round((actualFreight + calcSaleFreight(pendingKg, freightRateOf(so))) * 100) / 100;
 
-    // A frozen order still DRAWS from the pool above - it really did consume that
-    // seed, and removing it would hand the seed to someone else and move their
-    // margin. We only stop re-deriving its own cost from the draw.
-    const frozen = so.costFrozenAt != null ? (so.seedCostSnapshot as FrozenSeed | null) : null;
-
     const bandsMap = orderSeed.get(so.id) ?? new Map<string, { price: number; seedKg: number }>();
     const liveBands = [...bandsMap.values()]
       .sort((a, b) => b.price - a.price)
       .map((b) => ({ price: b.price, seedKg: Math.round(b.seedKg), cost: Math.round(b.price * b.seedKg * 100) / 100 }));
 
-    const seedBands = frozen?.seedBands ?? liveBands;
-    const seedKg = frozen?.seedKg ?? liveBands.reduce((s, b) => s + b.seedKg, 0);
-    const seedCost = frozen?.seedCost ?? Math.round(liveBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
+    // Dynamic date-aware allocation: live draw always drives seedBands and seedCost so that
+    // correcting purchase typos (e.g. Base rate vs Delivery rate) accurately recalculates profit.
+    const seedBands = liveBands;
+    const seedKg = liveBands.reduce((s, b) => s + b.seedKg, 0);
+    const seedCost = Math.round(liveBands.reduce((s, b) => s + b.cost, 0) * 100) / 100;
 
     const revenue = Math.round(qty * rate * 100) / 100;
     // Brokerage is deliberately NOT netted here - it is booked once, dispatch-
@@ -484,4 +481,32 @@ export async function computePappuOrderMargins() {
 export async function getPappuOrderMargins(_req: Request, res: Response) {
   res.json(await computePappuOrderMargins());
 }
+
+/**
+ * Re-synchronize seed costs and margin snapshots across all sale orders.
+ * Clears caches and writes updated dynamic allocations to the database.
+ */
+export async function resyncPappuCosts(_req: Request, res: Response) {
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+  const margins = await _computePappuOrderMargins();
+  for (const m of margins) {
+    if (m.costFrozenAt != null || m.seedKg > 0) {
+      await prisma.saleOrder.updateMany({
+        where: { id: m.orderId },
+        data: {
+          seedCostSnapshot: {
+            seedKg: m.seedKg,
+            seedCost: m.seedCost,
+            seedBands: m.seedBands,
+          },
+        },
+      });
+    }
+  }
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+  res.json({ message: 'Seed costs and profit margins re-synchronized successfully', count: margins.length });
+}
+
 

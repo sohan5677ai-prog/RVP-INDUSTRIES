@@ -9,6 +9,7 @@ import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { computeFY, formatPoNumber, releasePoSerial, reservePoSerials } from '../lib/poNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { purchaseGst } from '../lib/calc.js';
+import { clearCache } from '../lib/cache.js';
 
 /**
  * True when `arrival` falls on a calendar day strictly before `poDate`. Both are
@@ -257,6 +258,9 @@ export async function createStockIn(req: Request, res: Response) {
     { name: po.party.name, phone: po.party.phone, phone2: po.party.phone2, waLanguage: po.party.waLanguage }
   );
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json(stockIn);
 }
 
@@ -374,6 +378,9 @@ export async function createUrpStockIn(req: Request, res: Response) {
     return created;
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json(stockIn);
 }
 
@@ -482,6 +489,9 @@ export async function updateStockIn(req: Request, res: Response) {
     return row;
   });
 
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json(updated);
 }
 
@@ -517,6 +527,10 @@ export async function deleteStockIn(req: Request, res: Response) {
       });
     }
   });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
   res.json({ message: 'Stock-in deleted' });
 }
 
@@ -667,6 +681,9 @@ export async function createColdStorageBatch(req: Request, res: Response) {
       results.push({ success: false, error: e instanceof Error ? e.message : 'Failed' });
     }
   }
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
 
   res.json({ results });
 }

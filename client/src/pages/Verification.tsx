@@ -163,8 +163,9 @@ export default function Verification() {
       qualityAdjustments?: { mode: QualityAdjustmentMode; label: string; value: number }[];
     }) => api('/verifications', { method: 'POST', body: args }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['verifications'] });
+      ['purchases', 'verifications', 'stock-in', 'purchase-orders', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos', 'party-ledger', 'party-ledgers'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Approved - balance payable calculated and black seed added to stock');
       setOpen(false);
       setSelectedPurchase(null);
@@ -176,8 +177,9 @@ export default function Verification() {
     mutationFn: (verificationId: string) =>
       api(`/verifications/${verificationId}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['verifications'] });
+      ['purchases', 'verifications', 'stock-in', 'purchase-orders', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos', 'party-ledger', 'party-ledgers'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
       toast.success('Verification removed - you can re-verify');
       setOpen(false);
       setSelectedPurchase(null);

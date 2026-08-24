@@ -108,7 +108,10 @@ export default function SaleOrders() {
   const { data: parties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
   const { data: brokers } = useQuery({ queryKey: ['brokers'], queryFn: () => api<Broker[]>('/brokers') });
   const { data: receipts } = useQuery({ queryKey: ['receipts'], queryFn: () => api<Receipt[]>('/receipts?all=true') });
-  const settled = useMemo(() => settledByDispatch(receipts), [receipts]);
+  const settled = useMemo(
+    () => settledByDispatch(receipts, (orders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.creditNotes ?? [])),
+    [receipts, orders],
+  );
 
   const filtered = (orders ?? []).filter((o) => {
     if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;

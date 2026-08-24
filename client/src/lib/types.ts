@@ -426,6 +426,8 @@ export interface SaleDispatch {
   // Buyer receipts linked to this shipment (embedded by the sales list so the
   // page can show it as Paid once cleared).
   receipts?: Receipt[];
+  // Credit notes linked to this shipment.
+  creditNotes?: CreditNote[];
 
   // E-Invoice (IRN) details
   irn?: string | null;

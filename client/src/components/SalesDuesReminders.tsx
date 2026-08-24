@@ -73,7 +73,10 @@ export default function SalesDuesReminders() {
   const dueItems = useMemo<OverdueDueItem[]>(() => {
     if (!parties || !saleOrders || !receipts) return [];
     const buyers = parties.filter((p) => p.type === 'BUYER' || p.type === 'BOTH');
-    const settled = settledByDispatch(receipts);
+    const settled = settledByDispatch(
+      receipts,
+      (saleOrders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.creditNotes ?? []),
+    );
     const items: OverdueDueItem[] = [];
 
     buyers.forEach((b) => {

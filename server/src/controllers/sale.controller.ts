@@ -136,12 +136,16 @@ export async function listSaleOrders(req: Request, res: Response) {
       broker: true,
       dispatches: {
         orderBy: { dispatchDate: 'asc' },
-        // Buyer receipts let the sales page show a shipment as Paid once
-        // cleared (settledByDispatch sums amount + TDS + shortage).
+        // Buyer receipts and credit notes let the sales page show a shipment as Paid once
+        // cleared (settledByDispatch sums amount + TDS + shortage + credit notes).
         include: {
           receipts: {
             where: { type: 'BUYER' },
             select: { id: true, saleDispatchId: true, type: true, amount: true, tdsAmount: true, shortageAmount: true },
+          },
+          creditNotes: {
+            where: { status: 'ISSUED' },
+            select: { id: true, saleDispatchId: true, totalAmount: true, reason: true, noteNumber: true, status: true },
           },
         },
       },
@@ -153,7 +157,23 @@ export async function listSaleOrders(req: Request, res: Response) {
 export async function getSaleOrder(req: Request, res: Response) {
   const order = await prisma.saleOrder.findUnique({
     where: { id: req.params.id },
-    include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true, dispatches: { orderBy: { dispatchDate: 'asc' } } },
+    include: {
+      buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } },
+      broker: true,
+      dispatches: {
+        orderBy: { dispatchDate: 'asc' },
+        include: {
+          receipts: {
+            where: { type: 'BUYER' },
+            select: { id: true, saleDispatchId: true, type: true, amount: true, tdsAmount: true, shortageAmount: true },
+          },
+          creditNotes: {
+            where: { status: 'ISSUED' },
+            select: { id: true, saleDispatchId: true, totalAmount: true, reason: true, noteNumber: true, status: true },
+          },
+        },
+      },
+    },
   });
   if (!order) throw new HttpError(404, 'Sale order not found');
   res.json(withFulfilment(order));

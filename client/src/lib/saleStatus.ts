@@ -1,4 +1,4 @@
-import type { SaleOrder, SaleDispatch, Receipt } from './types';
+import type { SaleOrder, SaleDispatch, Receipt, CreditNote } from './types';
 import { shortageWithGst, round2 } from './receiptCalc';
 
 /** Lifecycle a sale moves through, with PAID layered on top of the DB status
@@ -35,16 +35,41 @@ export function dispatchTotal(d: SaleDispatch, ratePerKg: number): number {
  *  callers pass either full Receipt rows or the trimmed shape the sales list
  *  embeds on each dispatch. */
 type SettleReceipt = Pick<Receipt, 'type' | 'saleDispatchId' | 'amount' | 'tdsAmount' | 'shortageAmount'>;
+type SettleCreditNote = Pick<CreditNote, 'saleDispatchId' | 'totalAmount'> & { status?: string };
 
 /** Amount cleared against each shipment from its directly-linked buyer receipts
- *  (cash + TDS + shortage all count as clearing, same as Sale Dues FIFO). */
-export function settledByDispatch(receipts: SettleReceipt[] | undefined): Map<string, number> {
+ *  (cash + TDS + shortage) and credit notes (deduplicated vs receipt shortages). */
+export function settledByDispatch(
+  receipts: SettleReceipt[] | undefined,
+  creditNotes?: SettleCreditNote[] | undefined,
+): Map<string, number> {
   const m = new Map<string, number>();
+  const receiptShortageByDispatch = new Map<string, number>();
+
   for (const r of receipts ?? []) {
     if (r.type !== 'BUYER' || !r.saleDispatchId) continue;
     const amt = Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
     m.set(r.saleDispatchId, (m.get(r.saleDispatchId) ?? 0) + amt);
+    if (Number(r.shortageAmount ?? 0) > 0) {
+      receiptShortageByDispatch.set(
+        r.saleDispatchId,
+        (receiptShortageByDispatch.get(r.saleDispatchId) ?? 0) + Number(r.shortageAmount),
+      );
+    }
   }
+
+  for (const cn of creditNotes ?? []) {
+    if (!cn.saleDispatchId || (cn.status && cn.status !== 'ISSUED')) continue;
+    const receiptShortage = receiptShortageByDispatch.get(cn.saleDispatchId) ?? 0;
+    const cnTotal = Number(cn.totalAmount || 0);
+    // Standalone or quality shortfall credit notes clear the invoice directly;
+    // if a note formalizes a shortage already booked on a receipt, avoid double-counting.
+    const cnCredit = Math.max(0, cnTotal - receiptShortage);
+    if (cnCredit > 0) {
+      m.set(cn.saleDispatchId, (m.get(cn.saleDispatchId) ?? 0) + cnCredit);
+    }
+  }
+
   return m;
 }
 

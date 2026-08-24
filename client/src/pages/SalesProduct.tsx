@@ -210,10 +210,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
   const marginById = useMemo(() => new Map((margins ?? []).map((m) => [m.orderId, m])), [margins]);
 
-  // Cleared amount per shipment (from its embedded buyer receipts) → drives the
+  // Cleared amount per shipment (from its embedded buyer receipts and credit notes) → drives the
   // Paid vs Mark Paid action on each delivered dispatch.
   const settled = useMemo(
-    () => settledByDispatch((orders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.receipts ?? [])),
+    () =>
+      settledByDispatch(
+        (orders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.receipts ?? []),
+        (orders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.creditNotes ?? []),
+      ),
     [orders],
   );
 

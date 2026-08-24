@@ -133,6 +133,7 @@ export async function computeBuyerDues(
         },
       },
       receipts: { select: { type: true, amount: true, tdsAmount: true, shortageAmount: true } },
+      creditNotes: { where: { status: 'ISSUED' }, select: { totalAmount: true } },
     },
   });
 
@@ -143,10 +144,16 @@ export async function computeBuyerDues(
     const rate = Number(order.ratePerKg);
     const invoiceValue = Math.round(d.weightKg * rate + Number(d.gstAmount || 0));
 
+    const receiptShortage = d.receipts.reduce((sum, r) => sum + (r.type === 'BUYER' ? Number(r.shortageAmount ?? 0) : 0), 0);
+    const cnTotal = (d.creditNotes ?? []).reduce((sum, c) => sum + Number(c.totalAmount || 0), 0);
+    // Standalone or quality shortfall credit notes clear the invoice directly;
+    // if a note formalizes a shortage already booked on a receipt, avoid double-counting.
+    const cnCredit = Math.max(0, cnTotal - receiptShortage);
+
     const cleared = d.receipts.reduce((sum, r) => {
       if (r.type !== 'BUYER') return sum;
       return sum + Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
-    }, 0);
+    }, 0) + cnCredit;
 
     const outstanding = invoiceValue - cleared;
     if (outstanding <= TOLERANCE) continue; // settled

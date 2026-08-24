@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle, ArrowLeftRight, FileDown } from 'lucide-react';
+import { TrendingUp, Loader2, ChevronRight, Undo2, IndianRupee, AlertTriangle, ArrowLeftRight, FileDown, ReceiptText } from 'lucide-react';
 import { Fragment } from 'react';
 import { Segmented } from '@/components/ui/segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -146,10 +146,11 @@ interface OutstandingInvoice {
   netAmount: number;    // remaining due after FIFO allocation
   totalAmount: number;
   cashReceived: number; // actual cash (excludes TDS/shortage) applied to this invoice
-  // The two non-cash ways a bill gets cleared, kept apart from the cash so the
+  // The non-cash ways a bill gets cleared, kept apart from the cash so the
   // expanded row can show WHY the invoice closed on less money than it billed.
-  tdsDeducted: number;      // TDS withheld by the buyer against this invoice
-  shortageDeducted: number; // shortage/kata claim allowed, GST-inclusive
+  tdsDeducted: number;        // TDS withheld by the buyer against this invoice
+  shortageDeducted: number;   // shortage/kata claim allowed, GST-inclusive
+  creditNoteDeducted: number; // credit notes issued against this invoice
   dueDaysAfter: number;
   status: string;
   // Dispatched but not yet marked delivered. The receivable is real (the ledger
@@ -165,6 +166,13 @@ interface OutstandingInvoice {
     shortage: number;  // GST-inclusive, as booked
     amount: number;    // cash + tds + shortage = what this receipt cleared
     isTdsOrShortage?: boolean;
+  }[];
+  appliedCreditNotes: {
+    id: string;
+    noteNumber: string;
+    reason: string;
+    amount: number;
+    date?: string;
   }[];
   deletableReceiptIds: string[];
 }
@@ -203,6 +211,7 @@ const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
   { header: 'Vehicle No', value: (i) => i.vehicleNumber ?? '' },
   { header: 'Bill Date', value: (i) => shortDate(i.billDate.toISOString()) },
   { header: 'Bill Amount', value: (i) => rupees(i.billAmount), excel: (i) => i.billAmount, numFmt: '#,##0.00', align: 'right', total: true },
+  { header: 'Credit Note', value: (i) => rupees(i.creditNoteDeducted), excel: (i) => i.creditNoteDeducted, numFmt: '#,##0.00', align: 'right', total: true },
   { header: 'Shortage Deducted', value: (i) => rupees(i.shortageDeducted), excel: (i) => i.shortageDeducted, numFmt: '#,##0.00', align: 'right', total: true },
   { header: 'TDS Withheld', value: (i) => rupees(i.tdsDeducted), excel: (i) => i.tdsDeducted, numFmt: '#,##0.00', align: 'right', total: true },
   { header: 'Cash Received', value: (i) => rupees(i.cashReceived), excel: (i) => i.cashReceived, numFmt: '#,##0.00', align: 'right', total: true },
@@ -292,7 +301,10 @@ export default function SaleDuesPage() {
   const today = new Date();
 
   // Single source of truth for "cleared per dispatch", identical to the sales pages.
-  const settled = settledByDispatch(receipts);
+  const settled = settledByDispatch(
+    receipts,
+    (saleOrders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.creditNotes ?? []),
+  );
 
   buyers.forEach((b) => {
     const buyerReceipts = receipts?.filter((r) => r.type === 'BUYER' && r.partyId === b.id) ?? [];
@@ -323,6 +335,19 @@ export default function SaleDuesPage() {
         deletableReceiptIds.push(r.id);
         appliedReceipts.push({ date: r.date, cash, tds, shortage, amount: clearing, isTdsOrShortage: cash === 0 });
       });
+
+      // Credit notes issued against this dispatch.
+      const dispatchCreditNotes = (d.creditNotes ?? []).filter((cn) => cn.status === 'ISSUED');
+      const cnTotal = dispatchCreditNotes.reduce((s, cn) => s + Number(cn.totalAmount || 0), 0);
+      const nonReceiptCnCredit = Math.max(0, cnTotal - shortageDeducted);
+      const creditNoteDeducted = round2(nonReceiptCnCredit);
+      const appliedCreditNotes = dispatchCreditNotes.map((cn) => ({
+        id: cn.id,
+        noteNumber: cn.noteNumber,
+        reason: cn.reason,
+        amount: Number(cn.totalAmount || 0),
+        date: cn.noteDate,
+      }));
 
       const paid = isDispatchPaid(d, rate, settled);
       const remaining = paid ? 0 : Math.max(0, total - cleared);
@@ -372,11 +397,13 @@ export default function SaleDuesPage() {
         cashReceived,
         tdsDeducted: round2(tdsDeducted),
         shortageDeducted: round2(shortageDeducted),
+        creditNoteDeducted,
         dueDaysAfter,
         status,
         inTransit,
         dueDays: o.dueDays || 0,
         appliedReceipts,
+        appliedCreditNotes,
         deletableReceiptIds,
       });
     });
@@ -906,17 +933,25 @@ export default function SaleDuesPage() {
                       {expandedId === inv.id && (
                         <ExpandPanel colSpan={11}>
                           {/* How the bill was settled, broken into its parts: a buyer who
-                              deducts shortage and TDS clears the full invoice while paying
+                              deducts shortage, TDS, or credit notes clears the full invoice while paying
                               less cash, so the lump "amount" alone hid both deductions. */}
                           {(() => {
                             const sh = splitShortage(inv.shortageDeducted, inv.gstExempt);
-                            const settled = round2(inv.cashReceived + inv.tdsDeducted + inv.shortageDeducted);
+                            const settled = round2(inv.cashReceived + inv.tdsDeducted + inv.shortageDeducted + inv.creditNoteDeducted);
                             const balance = round2(inv.billAmount - settled);
                             return (
                               <>
                                 <PanelLabel>Settlement Breakdown</PanelLabel>
-                                <div className="mb-5 grid max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+                                <div className="mb-5 grid max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
                                   <SettleTile label="Bill Amount" value={rupees(inv.billAmount)} />
+                                  {inv.creditNoteDeducted > 0 && (
+                                    <SettleTile
+                                      label="Credit Note"
+                                      value={`-${rupees(inv.creditNoteDeducted)}`}
+                                      tone="amber"
+                                      hint={inv.appliedCreditNotes[0]?.reason || 'Credit note issued'}
+                                    />
+                                  )}
                                   <SettleTile
                                     label="Shortage / Kata"
                                     value={inv.shortageDeducted > 0 ? `-${rupees(inv.shortageDeducted)}` : rupees(0)}
@@ -957,6 +992,30 @@ export default function SaleDuesPage() {
                               </>
                             );
                           })()}
+
+                          {inv.appliedCreditNotes.length > 0 && (
+                            <div className="mb-5 space-y-2">
+                              <PanelLabel>Credit Notes · {inv.appliedCreditNotes.length}</PanelLabel>
+                              <PanelStack>
+                                {inv.appliedCreditNotes.map((cn) => (
+                                  <PanelCard
+                                    key={cn.id}
+                                    icon={ReceiptText}
+                                    className="max-w-4xl"
+                                    identity={
+                                      <PanelTitle>
+                                        <span className="font-mono text-sm font-semibold">{cn.noteNumber}</span>
+                                        <span className="text-xs text-muted-foreground">{cn.reason}</span>
+                                      </PanelTitle>
+                                    }
+                                    figures={
+                                      <Figure label="Credit Amount" value={`-${rupees(cn.amount)}`} valueClass="text-amber-600 dark:text-amber-500" />
+                                    }
+                                  />
+                                ))}
+                              </PanelStack>
+                            </div>
+                          )}
 
                           <PanelLabel>Allocated Receipts · {inv.appliedReceipts.length}</PanelLabel>
                           {inv.appliedReceipts.length > 0 ? (

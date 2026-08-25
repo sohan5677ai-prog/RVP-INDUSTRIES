@@ -691,7 +691,7 @@ export default function StockByPrice() {
             {pagedBands.map((b) => {
               const key = b.blackPricePerKg.toFixed(2);
               const isOpen = expanded.has(key);
-              const isEligible = plan && hasPrice ? b.blackPricePerKg <= plan.ceilingBlackPrice + 1e-6 : false;
+              const isEligible = plan && hasPrice;
               return (
                 <Fragment key={key}>
                   <TableRow

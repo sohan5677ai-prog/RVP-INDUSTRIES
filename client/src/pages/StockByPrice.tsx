@@ -243,6 +243,8 @@ export default function StockByPrice() {
     if ((!hasPrice && !hasTonnage) || bands.length === 0) return null;
     // All bands participate — the sale engine draws top (dearest) to bottom
     // regardless of price, so the planner must match that behaviour.
+    // ceilingBlackPrice is kept as a display-only reference for the "Eligible" badge.
+    const ceilingBlackPrice = hasPrice ? pappuPrice * PAPPU_OUTTURN : Infinity;
     const eligible = bands;
 
     // Two distinct bases - both now use the unified allocation's remaining values:
@@ -296,7 +298,7 @@ export default function StockByPrice() {
     const marginPerKg = hasPrice ? pappuPrice - realizedPappuCost : 0; // pappu sell − dearest-first pappu cost
 
     return {
-      eligibleCount: eligible.length, availableBlackKg,
+      ceilingBlackPrice, eligibleCount: eligible.length, availableBlackKg,
       poolPappu, poolPendingPappu, wacBlack, wacPappuCost, realizedWacBlack, realizedPappuCost,
       askedPappuKg, blackRequiredKg, seedShortfallKg, diff, fulfillmentPct, marginPerKg,
     };
@@ -689,10 +691,11 @@ export default function StockByPrice() {
             {pagedBands.map((b) => {
               const key = b.blackPricePerKg.toFixed(2);
               const isOpen = expanded.has(key);
+              const isEligible = plan && hasPrice ? b.blackPricePerKg <= plan.ceilingBlackPrice + 1e-6 : false;
               return (
                 <Fragment key={key}>
                   <TableRow
-                    className={cn('cursor-pointer font-medium transition-colors', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                    className={cn('cursor-pointer font-medium transition-colors', isEligible && 'bg-primary/5', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
                     onClick={() => toggle(key)}
                   >
                     <TableCell className="p-3 text-center">
@@ -702,6 +705,7 @@ export default function StockByPrice() {
                       <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-xs font-extrabold px-2 py-0.5">
                         {rupees(b.blackPricePerKg)}/kg
                       </Badge>
+                      {isEligible && <Badge className="ml-2 text-[10px]">Eligible</Badge>}
                     </TableCell>
                     <TableCell className="font-semibold text-foreground">{rupees(b.impliedPappuPrice)}/kg</TableCell>
                     <TableCell className="text-right font-medium">{b.lorries}</TableCell>

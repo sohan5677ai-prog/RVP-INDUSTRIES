@@ -120,6 +120,7 @@ export default function StockByPrice() {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [plannerBasis, setPlannerBasis] = useState<'COMMITTED' | 'AVAILABLE'>('COMMITTED');
+  const [plannerMode, setPlannerMode] = useState<'ALL_STOCK' | 'CEILING'>('ALL_STOCK');
 
   const { data, isLoading } = useQuery({
     queryKey: ['stock-by-price'],
@@ -243,9 +244,10 @@ export default function StockByPrice() {
     if ((!hasPrice && !hasTonnage) || bands.length === 0) return null;
     
     // Break-even seed price = sell price × seed→pappu yield (0.6).
+    // In CEILING mode this filters bands; in ALL_STOCK mode it's kept as a reference.
     const ceilingBlackPrice = hasPrice ? pappuPrice * PAPPU_OUTTURN : Infinity;
     
-    const eligible = hasPrice
+    const eligible = hasPrice && plannerMode === 'CEILING'
       ? bands.filter((b) => b.blackPricePerKg <= ceilingBlackPrice + 1e-6)
       : bands;
 
@@ -303,9 +305,9 @@ export default function StockByPrice() {
       ceilingBlackPrice, eligibleCount: eligible.length, availableBlackKg,
       poolPappu, poolPendingPappu, wacBlack, wacPappuCost, realizedWacBlack, realizedPappuCost,
       askedPappuKg, blackRequiredKg, seedShortfallKg, diff, fulfillmentPct, marginPerKg,
-      isAllStock: !hasPrice
+      isAllStock: !hasPrice || plannerMode === 'ALL_STOCK'
     };
-  }, [bands, pappuPrice, tonnage, hasPrice, hasTonnage, plannerBasis]);
+  }, [bands, pappuPrice, tonnage, hasPrice, hasTonnage, plannerBasis, plannerMode]);
 
   function toggle(key: string) {
     setExpanded((prev) => {
@@ -401,7 +403,7 @@ export default function StockByPrice() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 max-w-4xl">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 max-w-5xl">
             <div className="space-y-1">
               <Label htmlFor="pappu-price" className="text-xs text-muted-foreground">Pappu price asked (₹/kg)</Label>
               <Input
@@ -454,6 +456,18 @@ export default function StockByPrice() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="planner-mode" className="text-xs text-muted-foreground">Stock Mode</Label>
+              <Select value={plannerMode} onValueChange={(val: any) => setPlannerMode(val)}>
+                <SelectTrigger id="planner-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL_STOCK">All Stock</SelectItem>
+                  <SelectItem value="CEILING">Break-even Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {hasPrice && freightPerKg > 0 && (
@@ -475,8 +489,18 @@ export default function StockByPrice() {
             <div className="space-y-4">
               {/* Mapping line */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                {plan.isAllStock ? (
+                {!hasPrice ? (
                   <span>Planning against <span className="font-bold text-foreground">ALL</span> available stock (no price limit)</span>
+                ) : plannerMode === 'ALL_STOCK' ? (
+                  <>
+                    <span>Pappu ₹{pappuPrice.toFixed(2)}/kg{freightPerKg > 0 ? ' (net of freight)' : ''}</span>
+                    <ArrowDownRight className="h-4 w-4" />
+                    <span>drawing from <span className="font-bold text-foreground">ALL</span> stock, dearest first</span>
+                    <span className="text-xs">· break-even at ≤</span>
+                    <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 font-bold">
+                      {rupees(plan.ceilingBlackPrice)}/kg
+                    </Badge>
+                  </>
                 ) : (
                   <>
                     <span>Pappu ₹{pappuPrice.toFixed(2)}/kg{freightPerKg > 0 ? ' (net of freight)' : ''}</span>
@@ -506,7 +530,7 @@ export default function StockByPrice() {
                       ? 'Arrived + pending seed left in the eligible bands after existing commitments are drawn off the dearest seed first (price-order). This can differ from the physical Black Seed Remaining, which is arrived-first.'
                       : 'Physical arrived seed left after commitments (arrived-first) - the same Black Seed Remaining shown below. Available Pappu = this seed × 0.6.'}
                   >
-                    from {toTonnes(plan.availableBlackKg).toFixed(2)} MT eligible seed {plannerBasis === 'COMMITTED' ? '(dearest sold first)' : '(physical remaining)'} · {plan.eligibleCount} band{plan.eligibleCount === 1 ? '' : 's'} {plan.isAllStock ? '' : `≤ ${rupees(plan.ceilingBlackPrice)}`}
+                    from {toTonnes(plan.availableBlackKg).toFixed(2)} MT {plannerMode === 'ALL_STOCK' ? 'total' : 'eligible'} seed {plannerBasis === 'COMMITTED' ? '(dearest sold first)' : '(physical remaining)'} · {plan.eligibleCount} band{plan.eligibleCount === 1 ? '' : 's'} {!hasPrice || plannerMode === 'ALL_STOCK' ? '' : `≤ ${rupees(plan.ceilingBlackPrice)}`}
                   </div>
                   {plannerBasis === 'COMMITTED' && plan.poolPendingPappu > 0 && (
                     <span className="text-muted-foreground block text-xs mt-1">
@@ -701,11 +725,17 @@ export default function StockByPrice() {
             {pagedBands.map((b) => {
               const key = b.blackPricePerKg.toFixed(2);
               const isOpen = expanded.has(key);
-              const isEligible = plan && !plan.isAllStock ? b.blackPricePerKg <= plan.ceilingBlackPrice + 1e-6 : false;
+              const isBelowBreakeven = plan && hasPrice ? b.blackPricePerKg <= plan.ceilingBlackPrice + 1e-6 : false;
+              const isAboveBreakeven = plan && hasPrice ? b.blackPricePerKg > plan.ceilingBlackPrice + 1e-6 : false;
               return (
                 <Fragment key={key}>
                   <TableRow
-                    className={cn('cursor-pointer font-medium transition-colors', isEligible && 'bg-primary/5', isOpen ? 'bg-accent/40' : 'hover:bg-accent/30')}
+                    className={cn(
+                      'cursor-pointer font-medium transition-colors',
+                      isBelowBreakeven && 'bg-primary/5',
+                      isAboveBreakeven && 'bg-amber-50/50',
+                      isOpen ? 'bg-accent/40' : 'hover:bg-accent/30'
+                    )}
                     onClick={() => toggle(key)}
                   >
                     <TableCell className="p-3 text-center">
@@ -715,7 +745,8 @@ export default function StockByPrice() {
                       <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-xs font-extrabold px-2 py-0.5">
                         {rupees(b.blackPricePerKg)}/kg
                       </Badge>
-                      {isEligible && <Badge className="ml-2 text-[10px]">Eligible</Badge>}
+                      {isBelowBreakeven && <Badge className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200" variant="outline">✓ Below break-even</Badge>}
+                      {isAboveBreakeven && <Badge className="ml-2 text-[10px] bg-amber-100 text-amber-700 border-amber-200" variant="outline">⚠ Above break-even</Badge>}
                     </TableCell>
                     <TableCell className="font-semibold text-foreground">{rupees(b.impliedPappuPrice)}/kg</TableCell>
                     <TableCell className="text-right font-medium">{b.lorries}</TableCell>

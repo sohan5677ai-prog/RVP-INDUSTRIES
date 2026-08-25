@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox, type ComboOption } from '@/components/ui/combobox';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -132,6 +133,20 @@ export default function StockByPrice() {
   });
   const selectedFreight = freightRates?.find((r) => r.id === freightId);
   const freightPerKg = selectedFreight ? Number(selectedFreight.ratePerTonne) / 1000 : 0;
+
+  const freightOptions = useMemo<ComboOption[]>(() => {
+    const list: ComboOption[] = [{ value: '__none__', label: 'No freight' }];
+    if (freightRates) {
+      for (const r of freightRates) {
+        list.push({
+          value: r.id,
+          label: `${r.destination} - ${rupees(r.ratePerTonne)}/t`,
+          hint: `${rupees(Number(r.ratePerTonne) / 1000)}/kg`,
+        });
+      }
+    }
+    return list;
+  }, [freightRates]);
 
   // Map the server's bands. Pappu figures are CONSUMABLE (sellable) pappu.
   const bands = useMemo<PriceBand[]>(() => {
@@ -421,20 +436,15 @@ export default function StockByPrice() {
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="freight" className="text-xs text-muted-foreground">Freight</Label>
-              <Select value={freightId} onValueChange={setFreightId}>
-                <SelectTrigger id="freight">
-                  <SelectValue placeholder="No freight" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No freight</SelectItem>
-                  {freightRates?.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.destination} - {rupees(r.ratePerTonne)}/t
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs text-muted-foreground">Freight</Label>
+              <Combobox
+                options={freightOptions}
+                value={freightId}
+                onChange={setFreightId}
+                placeholder="No freight"
+                searchPlaceholder="Search destination or rate…"
+                emptyText="No freight destination found."
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="planner-basis" className="text-xs text-muted-foreground">Plan Against</Label>

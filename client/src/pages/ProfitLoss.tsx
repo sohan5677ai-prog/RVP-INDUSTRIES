@@ -49,7 +49,7 @@ export default function ProfitLoss() {
     queryFn: () => api<ProfitLossData>('/reports/profit-loss'),
   });
 
-  const isProfit = (data?.totals.estimatedNetProfit ?? data?.totals.netProfit ?? 0) >= 0;
+  const isProfit = (data?.totals.netProfit ?? 0) >= 0;
 
   return (
     <div className="space-y-6">

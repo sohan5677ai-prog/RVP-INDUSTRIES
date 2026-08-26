@@ -1008,6 +1008,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const exportColumns: ExportColumn<SaleOrder>[] = [
     { header: 'Date', value: (o) => shortDate(o.saleDate) },
+    { header: 'PO No.', value: (o) => o.poNumber ?? '' },
     { header: 'Party', value: (o) => o.buyer?.name ?? '' },
     ...(hasBroker ? [{ header: 'Broker', value: (o: SaleOrder) => o.broker?.name ?? '' }] : []),
     { header: 'Destination', value: (o) => o.destination ?? '' },
@@ -1183,7 +1184,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                         ? <Badge variant="soft">{dispatches.length} shipment{dispatches.length > 1 ? 's' : ''}</Badge>
                         : <span className="text-xs text-muted-foreground">none yet</span>}
                     </TableCell>
-                    <TableCell className="font-medium text-foreground">{o.buyer?.name ?? '-'}</TableCell>
+                    <TableCell className="font-medium text-foreground">
+                      <div>{o.buyer?.name ?? '-'}</div>
+                      {o.poNumber && (
+                        <div className="text-xs text-muted-foreground font-sans mt-0.5 font-normal">
+                          PO: <span className="font-semibold text-foreground">{o.poNumber}</span>
+                          {o.poDate && <span className="text-[11px] text-muted-foreground ml-1">({shortDate(o.poDate)})</span>}
+                        </div>
+                      )}
+                    </TableCell>
                     {hasBroker && <TableCell className="text-muted-foreground">{o.broker?.name ?? '-'}</TableCell>}
                     <TableCell className="text-muted-foreground">{o.destination ?? '-'}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums font-medium">{toTonnes(o.tonnageKg).toFixed(2)} t</TableCell>
@@ -1563,7 +1572,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Dispatch dialog */}
       <Dialog open={!!dispatchOrder} onOpenChange={(v) => !v && setDispatchOrder(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Dispatch - {dispatchOrder?.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Dispatch - {dispatchOrder?.buyer?.name}{dispatchOrder?.poNumber ? ` (PO: ${dispatchOrder.poNumber})` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/40 p-3 text-sm flex justify-between">
               <span className="text-muted-foreground">Remaining on this order</span>
@@ -1763,7 +1772,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Short-close confirmation */}
       <Dialog open={!!closeTarget} onOpenChange={(v) => !v && setCloseTarget(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Close order - {closeTarget?.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Close order - {closeTarget?.buyer?.name}{closeTarget?.poNumber ? ` (PO: ${closeTarget.poNumber})` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
               <div className="flex justify-between">
@@ -1807,7 +1816,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Undo dispatch confirmation */}
       <Dialog open={!!undoTarget} onOpenChange={(v) => !v && setUndoTarget(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Undo dispatch - {undoTarget?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Undo dispatch - {undoTarget?.order.buyer?.name}{undoTarget?.order.poNumber ? ` (PO: ${undoTarget.order.poNumber})` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               This reverses a dispatch made by mistake. The {undoTarget ? toTonnes(undoTarget.dispatch.weightKg).toFixed(2) : 0} t shipment will be removed,
@@ -1830,7 +1839,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Raise Invoice dialog */}
       <Dialog open={!!invoiceDispatch} onOpenChange={(v) => !v && !invoiceActionLoading && setInvoiceDispatch(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Raise Invoice - {invoiceDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Raise Invoice - {invoiceDispatch?.order.buyer?.name}{invoiceDispatch?.order.poNumber ? ` (PO: ${invoiceDispatch.order.poNumber})` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               {invoiceUnregistered
@@ -2030,7 +2039,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       {/* Mark Delivered dialog (buyer kata + shortage) */}
       <Dialog open={!!deliverDispatch} onOpenChange={(v) => !v && setDeliverDispatch(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Edit Delivery' : 'Mark as Delivered'} - {deliverDispatch?.order.buyer?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Edit Delivery' : 'Mark as Delivered'} - {deliverDispatch?.order.buyer?.name}{deliverDispatch?.order.poNumber ? ` (PO: ${deliverDispatch.order.poNumber})` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Confirm the buyer received this shipment. Enter the buyer's kata weight to auto-calculate any shortage &amp; credit note. The payment due date is calculated from the delivered date below.
@@ -2096,7 +2105,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       <Dialog open={!!ewbDispatch} onOpenChange={(v) => !v && setEwbDispatch(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generate E-Way Bill - {ewbDispatch?.order.buyer?.name}</DialogTitle>
+            <DialogTitle>Generate E-Way Bill - {ewbDispatch?.order.buyer?.name}{ewbDispatch?.order.poNumber ? ` (PO: ${ewbDispatch.order.poNumber})` : ''}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/40 p-3 text-sm flex flex-col gap-1">
@@ -2246,7 +2255,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       <Dialog open={!!payDispatch} onOpenChange={(v) => !v && setPayDispatch(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Mark as Paid - {payDispatch?.order.buyer?.name}</DialogTitle>
+            <DialogTitle>Mark as Paid - {payDispatch?.order.buyer?.name}{payDispatch?.order.poNumber ? ` (PO: ${payDispatch.order.poNumber})` : ''}</DialogTitle>
           </DialogHeader>
           
           {payDispatch && (() => {

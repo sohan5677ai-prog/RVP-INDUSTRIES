@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Loader2, Search, Tag, Factory, Wheat, Calculator,
   ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2,
-  ChevronRight, Scale, Truck,
+  ChevronRight, Scale, Truck, Target, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { stockSummary } from '@/lib/calc';
@@ -312,10 +312,84 @@ export default function StockByPrice() {
     const fulfillmentPct = askedPappuKg > 0 ? Math.min(100, (poolPappu / askedPappuKg) * 100) : 100;
     const marginPerKg = hasPrice ? pappuPrice - realizedPappuCost : 0; // pappu sell − dearest-first pappu cost
 
+    // ─── Minimum Profitable Quantity (Break-Even Tonnage) ───────────────────
+    // When selling dearest-first at pappuPrice, earlier kg incur loss if the dearest band
+    // implied cost > pappuPrice. We determine the exact seed & pappu volume required to reach break-even (profit >= 0).
+    type MinProfitStatus = 'ANY_QUANTITY' | 'ACHIEVABLE' | 'NOT_ACHIEVABLE' | 'NO_PRICE';
+    let minProfitStatus: MinProfitStatus = 'NO_PRICE';
+    let minProfitablePappuKg: number | null = null;
+    let minProfitableSeedKg: number | null = null;
+
+    if (hasPrice && pappuPrice > 0) {
+      const sortedEligible = [...eligible]
+        .map((b) => ({
+          blackPricePerKg: b.blackPricePerKg,
+          seedKg: Math.max(0, useCommitted ? b.arrivedRemainingKg + b.pendingBlackKg : b.arrivedRemainingKg),
+          impliedPappuCost: b.blackPricePerKg / PAPPU_OUTTURN,
+        }))
+        .filter((b) => b.seedKg > 0)
+        .sort((a, z) => z.blackPricePerKg - a.blackPricePerKg);
+
+      if (sortedEligible.length === 0) {
+        minProfitStatus = 'NOT_ACHIEVABLE';
+      } else if (sortedEligible[0].impliedPappuCost <= pappuPrice) {
+        // Even the highest-cost band in stock is profitable at this net selling price!
+        minProfitStatus = 'ANY_QUANTITY';
+        minProfitablePappuKg = 0;
+        minProfitableSeedKg = 0;
+      } else {
+        // Dearest band is loss-making. Accumulate through bands to find break-even point.
+        let accumSeed = 0;
+        let accumCost = 0;
+        let foundBreakEven = false;
+
+        for (const band of sortedEligible) {
+          const marginalSeedProfit = (pappuPrice * PAPPU_OUTTURN) - band.blackPricePerKg;
+
+          if (marginalSeedProfit > 0) {
+            // Prior accumulated loss before drawing into this profitable band:
+            const prevLoss = accumCost - (accumSeed * PAPPU_OUTTURN * pappuPrice);
+
+            if (prevLoss <= 1e-6) {
+              // Already broke even
+              minProfitableSeedKg = accumSeed;
+              minProfitablePappuKg = accumSeed * PAPPU_OUTTURN;
+              foundBreakEven = true;
+              break;
+            }
+
+            // Seed needed from current band to offset accumulated loss:
+            const neededSeedFromBand = prevLoss / marginalSeedProfit;
+
+            if (neededSeedFromBand <= band.seedKg + 1e-6) {
+              minProfitableSeedKg = accumSeed + Math.min(neededSeedFromBand, band.seedKg);
+              minProfitablePappuKg = minProfitableSeedKg * PAPPU_OUTTURN;
+              foundBreakEven = true;
+              break;
+            }
+          }
+
+          // Accumulate band
+          accumSeed += band.seedKg;
+          accumCost += band.seedKg * band.blackPricePerKg;
+        }
+
+        if (foundBreakEven) {
+          minProfitStatus = 'ACHIEVABLE';
+        } else {
+          // Even drawing 100% of the pool does not reach break-even
+          minProfitStatus = 'NOT_ACHIEVABLE';
+        }
+      }
+    }
+
+    const orderTotalProfit = hasTonnage && hasPrice ? askedPappuKg * marginPerKg : null;
+
     return {
       ceilingBlackPrice, eligibleCount: eligible.length, availableBlackKg,
       poolPappu, poolPendingPappu, wacBlack, wacPappuCost, realizedWacBlack, realizedPappuCost,
       askedPappuKg, blackRequiredKg, seedShortfallKg, diff, fulfillmentPct, marginPerKg,
+      minProfitStatus, minProfitablePappuKg, minProfitableSeedKg, orderTotalProfit,
     };
   }, [bands, pappuPrice, tonnage, hasPrice, hasTonnage, plannerBasis]);
 
@@ -495,7 +569,7 @@ export default function StockByPrice() {
               </div>
 
               {/* Result tiles */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <div className="rounded-lg border p-3">
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1" title={plannerBasis === 'COMMITTED' ? 'Committed Pappu = sellable pappu from arrived seed + still-coming (pending PO) seed, after existing sale commitments' : 'Available Pappu = sellable pappu from arrived seed only (what can be milled & shipped today)'}>
                     <Wheat className="h-3 w-3" /> {plannerBasis === 'COMMITTED' ? 'Committed Pappu' : 'Available Pappu'}
@@ -522,6 +596,46 @@ export default function StockByPrice() {
                   </div>
                   <div className="text-xl font-bold mt-1">{hasTonnage ? `${tonnage.toFixed(2)} MT` : '-'}</div>
                   <div className="text-[10px] text-muted-foreground">{hasTonnage ? `needs ${toTonnes(plan.blackRequiredKg).toFixed(2)} MT seed` : 'enter tonnage'}</div>
+                </div>
+
+                {/* Min Qty to Profit / Break-Even Tonnage */}
+                <div className={cn(
+                  "rounded-lg border p-3 transition-colors",
+                  hasPrice && plan.minProfitStatus === 'ACHIEVABLE' && hasTonnage && plan.askedPappuKg >= (plan.minProfitablePappuKg ?? 0) && "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20",
+                  hasPrice && plan.minProfitStatus === 'ACHIEVABLE' && hasTonnage && plan.askedPappuKg < (plan.minProfitablePappuKg ?? 0) && "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20",
+                  hasPrice && plan.minProfitStatus === 'NOT_ACHIEVABLE' && "border-rose-200 bg-rose-50/50 dark:bg-rose-950/20"
+                )}>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1" title="Minimum sellable pappu quantity (in MT) needed to break even or make profit after covering dearest stock costs">
+                    <Target className="h-3 w-3 text-primary" /> Min Qty to Profit
+                  </div>
+                  <div className={cn(
+                    "text-xl font-bold mt-1",
+                    !hasPrice && "text-muted-foreground",
+                    hasPrice && plan.minProfitStatus === 'ANY_QUANTITY' && "text-emerald-600",
+                    hasPrice && plan.minProfitStatus === 'ACHIEVABLE' && (hasTonnage && plan.askedPappuKg >= (plan.minProfitablePappuKg ?? 0) ? "text-emerald-600" : "text-amber-600"),
+                    hasPrice && plan.minProfitStatus === 'NOT_ACHIEVABLE' && "text-rose-600 text-lg"
+                  )}>
+                    {!hasPrice ? (
+                      '-'
+                    ) : plan.minProfitStatus === 'ANY_QUANTITY' ? (
+                      '0.00 MT'
+                    ) : plan.minProfitStatus === 'ACHIEVABLE' && plan.minProfitablePappuKg !== null ? (
+                      `${toTonnes(plan.minProfitablePappuKg).toFixed(2)} MT`
+                    ) : (
+                      'Not Viable'
+                    )}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {!hasPrice ? (
+                      'enter pappu price'
+                    ) : plan.minProfitStatus === 'ANY_QUANTITY' ? (
+                      'profitable from 1st kg (all bands viable)'
+                    ) : plan.minProfitStatus === 'ACHIEVABLE' && plan.minProfitableSeedKg !== null ? (
+                      `break-even · needs ${toTonnes(plan.minProfitableSeedKg).toFixed(2)} MT seed`
+                    ) : (
+                      'pool avg cost > sell price'
+                    )}
+                  </div>
                 </div>
 
                 {/* Shortage / Excess - the headline */}
@@ -573,10 +687,73 @@ export default function StockByPrice() {
                     {plan.availableBlackKg === 0 ? '-' : `${plan.marginPerKg >= 0 ? '+' : ''}${rupees(plan.marginPerKg)}/kg`}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
-                    {plan.availableBlackKg > 0 ? `sell − cost ${rupees(plan.realizedPappuCost)}/kg (dearest first)` : 'no eligible stock'}
+                    {plan.availableBlackKg > 0 ? (
+                      hasTonnage && plan.orderTotalProfit !== null ? (
+                        <span className={cn("font-medium", plan.orderTotalProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                          {plan.orderTotalProfit >= 0 ? '+' : ''}{rupees(plan.orderTotalProfit)} total {plan.orderTotalProfit >= 0 ? 'profit' : 'loss'}
+                        </span>
+                      ) : (
+                        `sell − cost ${rupees(plan.realizedPappuCost)}/kg (dearest first)`
+                      )
+                    ) : (
+                      'no eligible stock'
+                    )}
                   </div>
                 </div>
               </div>
+
+              {/* Profitability insight banner */}
+              {hasPrice && (
+                <div className={cn(
+                  "rounded-lg border p-3 text-xs flex items-start gap-2.5 shadow-xs",
+                  plan.minProfitStatus === 'ANY_QUANTITY' && "border-emerald-200 bg-emerald-50/80 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800",
+                  plan.minProfitStatus === 'ACHIEVABLE' && (!hasTonnage || plan.askedPappuKg >= (plan.minProfitablePappuKg ?? 0)) && "border-emerald-200 bg-emerald-50/80 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800",
+                  plan.minProfitStatus === 'ACHIEVABLE' && hasTonnage && plan.askedPappuKg < (plan.minProfitablePappuKg ?? 0) && "border-amber-200 bg-amber-50/80 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800",
+                  plan.minProfitStatus === 'NOT_ACHIEVABLE' && "border-rose-200 bg-rose-50/80 text-rose-900 dark:bg-rose-950/30 dark:text-rose-200 dark:border-rose-800"
+                )}>
+                  {plan.minProfitStatus === 'ANY_QUANTITY' ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold">Fully Profitable at Any Quantity:</span> At {rupees(pappuPrice)}/kg net realization, every black seed band in stock is priced below your sell ceiling.
+                        {hasTonnage && ` Your order of ${tonnage.toFixed(2)} MT yields a net profit of ${rupees(plan.orderTotalProfit ?? 0)} (+${rupees(plan.marginPerKg)}/kg).`}
+                      </div>
+                    </>
+                  ) : plan.minProfitStatus === 'ACHIEVABLE' ? (
+                    hasTonnage ? (
+                      plan.askedPappuKg >= (plan.minProfitablePappuKg ?? 0) ? (
+                        <>
+                          <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold">Order Exceeds Profitable Threshold:</span> Minimum quantity to break even is <span className="font-bold">{toTonnes(plan.minProfitablePappuKg ?? 0).toFixed(2)} MT</span>. Your order of <span className="font-bold">{tonnage.toFixed(2)} MT</span> blends sufficient lower-cost seed to achieve a net profit of <span className="font-bold text-emerald-700 dark:text-emerald-300">+{rupees(plan.orderTotalProfit ?? 0)}</span> (+{rupees(plan.marginPerKg)}/kg).
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <TrendingDown className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold">Below Minimum Profitable Quantity:</span> Drawing dearest seed first means an order of only <span className="font-bold">{tonnage.toFixed(2)} MT</span> incurs a loss of <span className="font-bold text-rose-600">{rupees(Math.abs(plan.orderTotalProfit ?? 0))}</span> ({rupees(plan.marginPerKg)}/kg). Sell at least <span className="font-bold text-amber-950 dark:text-amber-100">{toTonnes(plan.minProfitablePappuKg ?? 0).toFixed(2)} MT</span> (+{toTonnes((plan.minProfitablePappuKg ?? 0) - plan.askedPappuKg).toFixed(2)} MT more) to reach break-even / profit.
+                          </div>
+                        </>
+                      )
+                    ) : (
+                      <>
+                        <Target className="h-4 w-4 text-sky-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-semibold">Minimum Quantity for Profit:</span> Because dearest seed is consumed first, you must sell at least <span className="font-bold text-sky-800 dark:text-sky-300">{toTonnes(plan.minProfitablePappuKg ?? 0).toFixed(2)} MT</span> of pappu ({toTonnes(plan.minProfitableSeedKg ?? 0).toFixed(2)} MT black seed) at {rupees(pappuPrice)}/kg net to absorb high-cost bands and achieve a profitable order.
+                        </div>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold">Unprofitable Price:</span> The overall weighted average cost of the stock pool ({rupees(plan.realizedPappuCost)}/kg) exceeds the net selling price ({rupees(pappuPrice)}/kg). This order cannot make a profit with existing stock at this price point.
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Fulfillment + cumulative hint */}
               {hasTonnage && (
@@ -702,6 +879,7 @@ export default function StockByPrice() {
               const key = b.blackPricePerKg.toFixed(2);
               const isOpen = expanded.has(key);
               const isEligible = plan && hasPrice;
+              const isBandProfitable = hasPrice && b.impliedPappuPrice <= pappuPrice;
               return (
                 <Fragment key={key}>
                   <TableRow
@@ -715,7 +893,17 @@ export default function StockByPrice() {
                       <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-xs font-extrabold px-2 py-0.5">
                         {rupees(b.blackPricePerKg)}/kg
                       </Badge>
-                      {isEligible && <Badge className="ml-2 text-[10px]">Eligible</Badge>}
+                      {hasPrice && (
+                        isBandProfitable ? (
+                          <Badge variant="outline" className="ml-2 text-[9px] h-4 px-1.5 bg-emerald-50 text-emerald-700 border-emerald-200 font-medium rounded-sm shadow-none" title={`Band cost ${rupees(b.impliedPappuPrice)}/kg vs net sell price ${rupees(pappuPrice)}/kg`}>
+                            +₹{(pappuPrice - b.impliedPappuPrice).toFixed(2)}/kg
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="ml-2 text-[9px] h-4 px-1.5 bg-rose-50 text-rose-700 border-rose-200 font-medium rounded-sm shadow-none" title={`Band cost ${rupees(b.impliedPappuPrice)}/kg vs net sell price ${rupees(pappuPrice)}/kg`}>
+                            −₹{(b.impliedPappuPrice - pappuPrice).toFixed(2)}/kg
+                          </Badge>
+                        )
+                      )}
                     </TableCell>
                     <TableCell className="font-semibold text-foreground">{rupees(b.impliedPappuPrice)}/kg</TableCell>
                     <TableCell className="text-right font-medium">{b.lorries}</TableCell>

@@ -12,8 +12,10 @@ import {
   parseQualityAdjustments,
   qualityAdjustmentFreight,
   purchaseGst,
+  isVehicleExempt,
   type QualityAdjustmentInput,
 } from '../lib/calc.js';
+import { getCompanyProfileRow } from './settings.controller.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { LedgerService } from '../services/ledger.service.js';
 import { whatsappService, resolveInternalCopyRecipients } from '../services/whatsapp.service.js';
@@ -102,8 +104,6 @@ export async function createVerification(req: Request, res: Response) {
   // hamali share from, so the seed bears the whole charge. The recording path
   // (purchase.controller) already capitalises the full charge with this flag; we
   // pass it here too so the subtract/add below faithfully mirror that cost.
-  const { getCompanyProfileRow } = await import('./settings.controller.js');
-  const { isVehicleExempt } = await import('../lib/calc.js');
   const companyProfile = await getCompanyProfileRow();
   const isCompanyVehicle = isVehicleExempt(purchase.stockIn.lorryNumber, companyProfile.companyVehicles);
 
@@ -285,11 +285,13 @@ export async function createVerification(req: Request, res: Response) {
 
   // WhatsApp the supplier: lorry unloaded + verified, with their statement attached.
   const notifyParty = purchase.stockIn.purchaseOrder.party;
-  void sendVerificationStatement(
-    { id: notifyParty.id, name: notifyParty.name, phone: notifyParty.phone, phone2: notifyParty.phone2, waLanguage: notifyParty.waLanguage },
-    { lorryNumber: purchase.stockIn.lorryNumber, netWeightKg: finalWeight, amount: totalAmount },
-    verification.id
-  );
+  setImmediate(() => {
+    void sendVerificationStatement(
+      { id: notifyParty.id, name: notifyParty.name, phone: notifyParty.phone, phone2: notifyParty.phone2, waLanguage: notifyParty.waLanguage },
+      { lorryNumber: purchase.stockIn.lorryNumber, netWeightKg: finalWeight, amount: totalAmount },
+      verification.id
+    );
+  });
 }
 
 export async function deleteVerification(req: Request, res: Response) {
@@ -309,8 +311,6 @@ export async function deleteVerification(req: Request, res: Response) {
   });
   if (!verification) throw new HttpError(404, 'Verification not found');
 
-  const { getCompanyProfileRow } = await import('./settings.controller.js');
-  const { isVehicleExempt } = await import('../lib/calc.js');
   const companyProfile = await getCompanyProfileRow();
   const isCompanyVehicle = isVehicleExempt(verification.purchase.stockIn.lorryNumber, companyProfile.companyVehicles);
 

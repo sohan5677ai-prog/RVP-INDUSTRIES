@@ -658,7 +658,7 @@ export default function ReceiptsPage() {
       </div>
 
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Receipt' : 'Record Receipt'}</DialogTitle>
           </DialogHeader>
@@ -772,13 +772,13 @@ export default function ReceiptsPage() {
                       <table className="w-full text-xs">
                         <thead className="bg-muted/60 text-muted-foreground">
                           <tr>
-                            <th className="w-8 p-2" />
-                            <th className="p-2 text-left font-medium">Invoice</th>
-                            <th className="p-2 text-right font-medium">Due</th>
-                            <th className="p-2 text-right font-medium">Cash</th>
-                            {enableTds && <th className="p-2 text-right font-medium">TDS</th>}
-                            <th className="p-2 text-right font-medium">Shortage</th>
-                            <th className="p-2 text-right font-medium">Balance</th>
+                            <th className="w-10 p-2.5" />
+                            <th className="p-2.5 text-left font-medium">Invoice</th>
+                            <th className="p-2.5 text-right font-medium">Due</th>
+                            <th className="p-2.5 text-right font-medium">Cash</th>
+                            {enableTds && <th className="p-2.5 text-right font-medium">TDS</th>}
+                            <th className="p-2.5 text-right font-medium">Shortage</th>
+                            <th className="p-2.5 text-right font-medium">Balance</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -797,7 +797,7 @@ export default function ReceiptsPage() {
                                   inv.id === highlightId ? 'ring-1 ring-inset ring-primary/40' : ''
                                 }`}
                               >
-                                <td className="p-2">
+                                <td className="p-2.5">
                                   <input
                                     type="checkbox"
                                     className="h-4 w-4 accent-primary"
@@ -808,51 +808,51 @@ export default function ReceiptsPage() {
                                     onChange={(e) => toggleInvoice(inv, e.target.checked)}
                                   />
                                 </td>
-                                <td className="p-2">
-                                  <div className="font-medium">{inv.invoiceNumber ?? 'No invoice'}</div>
-                                  <div className="text-[10px] text-muted-foreground">{shortDate(inv.billDate)}</div>
+                                <td className="p-2.5">
+                                  <div className="font-medium text-sm">{inv.invoiceNumber ?? 'No invoice'}</div>
+                                  <div className="text-[11px] text-muted-foreground">{shortDate(inv.billDate)}</div>
                                 </td>
-                                <td className="p-2 text-right whitespace-nowrap">{rupees(inv.remaining)}</td>
-                                <td className="p-2">
+                                <td className="p-2.5 text-right whitespace-nowrap font-medium text-sm">{rupees(inv.remaining)}</td>
+                                <td className="p-2.5">
                                   <Input
                                     type="number"
                                     step="1"
-                                    className="h-8 w-28 text-right"
+                                    className="h-9 w-36 text-right font-mono"
                                     disabled={!on}
                                     value={a?.cash ?? ''}
                                     onChange={(e) => patchAlloc(inv, { cash: e.target.value })}
                                   />
                                 </td>
                                 {enableTds && (
-                                  <td className="p-2">
+                                  <td className="p-2.5">
                                     <Input
                                       type="number"
                                       step="1"
-                                      className="h-8 w-24 text-right"
+                                      className="h-9 w-28 text-right font-mono"
                                       disabled={!on}
                                       value={a?.tds ?? ''}
                                       onChange={(e) => patchAlloc(inv, { tds: e.target.value })}
                                     />
                                   </td>
                                 )}
-                                <td className="p-2">
+                                <td className="p-2.5">
                                   <Input
                                     type="number"
                                     step="1"
-                                    className="h-8 w-24 text-right"
+                                    className="h-9 w-28 text-right font-mono"
                                     disabled={!on}
                                     placeholder="0"
                                     value={a?.shortage ?? ''}
                                     onChange={(e) => patchAlloc(inv, { shortage: e.target.value })}
                                   />
                                 </td>
-                                <td className="p-2 text-right whitespace-nowrap">
+                                <td className="p-2.5 text-right whitespace-nowrap font-medium text-sm">
                                   {!on ? (
                                     <span className="text-muted-foreground">-</span>
                                   ) : Math.abs(balance) < 1 ? (
                                     <span className="font-semibold text-emerald-600 dark:text-emerald-400">Settled</span>
                                   ) : (
-                                    <span className="font-medium text-amber-600 dark:text-amber-500">
+                                    <span className="text-amber-600 dark:text-amber-500">
                                       {balance > 0 ? rupees(balance) : `+${rupees(-balance)}`}
                                     </span>
                                   )}

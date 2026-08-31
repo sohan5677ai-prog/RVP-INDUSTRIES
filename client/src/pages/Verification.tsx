@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clock } from 'lucide-react';
+import { ReceiptText, BadgeCheck, RotateCcw, ShieldCheck, Scale, Calculator, Clock, Loader2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { CompanyProfile, Purchase, WeightVerification } from '@/lib/types';
 import { kg, rupees, shortDate } from '@/lib/format';
@@ -161,8 +161,26 @@ export default function Verification() {
       forceExempt: boolean;
       billAddables?: { label: string; amount: number }[];
       qualityAdjustments?: { mode: QualityAdjustmentMode; label: string; value: number }[];
-    }) => api('/verifications', { method: 'POST', body: args }),
-    onSuccess: () => {
+    }) => api<WeightVerification & { debitNoteAmount?: number | null; debitNoteReason?: string | null }>('/verifications', { method: 'POST', body: args }),
+    onSuccess: (data) => {
+      // 1. Immediately update the purchases query cache so the row status flips instantly
+      qc.setQueryData<PurchaseRow[]>(['purchases'], (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.id === data.purchaseId) {
+            return {
+              ...p,
+              discountType: data.qualityAdjustments && Array.isArray(data.qualityAdjustments) && data.qualityAdjustments.length === 1
+                ? (data.qualityAdjustments[0] as any).mode
+                : p.discountType,
+              verification: data,
+            };
+          }
+          return p;
+        });
+      });
+
+      // 2. Invalidate dependent queries in the background
       ['purchases', 'verifications', 'stock-in', 'purchase-orders', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos', 'party-ledger', 'party-ledgers'].forEach(
         (k) => qc.invalidateQueries({ queryKey: [k] }),
       );
@@ -176,7 +194,22 @@ export default function Verification() {
   const unverifyMutation = useMutation({
     mutationFn: (verificationId: string) =>
       api(`/verifications/${verificationId}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_, verificationId) => {
+      // 1. Immediately update the purchases query cache so the row status flips back instantly
+      qc.setQueryData<PurchaseRow[]>(['purchases'], (old) => {
+        if (!old) return old;
+        return old.map((p) => {
+          if (p.verification?.id === verificationId) {
+            return {
+              ...p,
+              verification: null,
+            };
+          }
+          return p;
+        });
+      });
+
+      // 2. Invalidate dependent queries in the background
       ['purchases', 'verifications', 'stock-in', 'purchase-orders', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos', 'party-ledger', 'party-ledgers'].forEach(
         (k) => qc.invalidateQueries({ queryKey: [k] }),
       );
@@ -745,7 +778,7 @@ export default function Verification() {
               <>
                 {selectedPurchase.verification ? (
                   <div className="flex w-full justify-between items-center gap-2">
-                    <Button asChild variant="outline" size="sm" className="gap-1.5">
+                    <Button asChild variant="outline" size="sm" className="gap-1.5" disabled={unverifyMutation.isPending}>
                       <Link to={`/purchases/${selectedPurchase.id}/statement`}>
                         <ReceiptText className="h-4 w-4" /> Print Statement
                       </Link>
@@ -760,12 +793,20 @@ export default function Verification() {
                       }}
                       disabled={unverifyMutation.isPending}
                     >
-                      <RotateCcw className="h-4 w-4 mr-1.5" /> Remove Approval
+                      {unverifyMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Removing…
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="h-4 w-4 mr-1.5" /> Remove Approval
+                        </>
+                      )}
                     </Button>
                   </div>
                 ) : (
                   <div className="flex w-full justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                    <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={verifyMutation.isPending}>
                       Close
                     </Button>
                     <Button
@@ -783,7 +824,15 @@ export default function Verification() {
                       })}
                       disabled={verifyMutation.isPending}
                     >
-                      <BadgeCheck className="h-4 w-4" /> Approve & Save
+                      {verifyMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" /> Approving…
+                        </>
+                      ) : (
+                        <>
+                          <BadgeCheck className="h-4 w-4" /> Approve & Save
+                        </>
+                      )}
                     </Button>
                   </div>
                 )}

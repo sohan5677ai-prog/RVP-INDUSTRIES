@@ -12,7 +12,7 @@ import type { FreightRate } from '@/lib/types';
 
 export default function PappuCalculator() {
   const [blackSeedPrice, setBlackSeedPrice] = useState('20');
-  const [millingCost, setMillingCost] = useState('1');
+  const [millingCost, setMillingCost] = useState('3');
   const [huskPrice, setHuskPrice] = useState('1.5');
   const [wastePrice, setWastePrice] = useState('1.0');
   const [outTurnPct, setOutTurnPct] = useState('60');

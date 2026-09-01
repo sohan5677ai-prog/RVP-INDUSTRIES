@@ -71,7 +71,7 @@ export default function PappuCalculator() {
     const totalArrivedBlackKg = bands.reduce((sum, b) => sum + b.arrivedBlackKg, 0);
     const totalPendingBlackKg = bands.reduce((sum, b) => sum + b.pendingBlackKg, 0);
     const availHusk = Math.max(0, 0.25 * totalArrivedBlackKg - (byproductData?.huskSoldKg ?? 0));
-    const availWaste = Math.max(0, 0.10 * totalArrivedBlackKg - (byproductData?.wasteSoldKg ?? 0));
+    const availWaste = Math.max(0, 0.02 * totalArrivedBlackKg - (byproductData?.wasteSoldKg ?? 0));
 
     return {
       availablePappuKg: availPappu,
@@ -79,7 +79,7 @@ export default function PappuCalculator() {
       availableHuskKg: availHusk,
       committedHuskKg: availHusk + (0.25 * totalPendingBlackKg),
       availableWasteKg: availWaste,
-      committedWasteKg: availWaste + (0.10 * totalPendingBlackKg)
+      committedWasteKg: availWaste + (0.02 * totalPendingBlackKg)
     };
   }, [stockData, byproductData]);
 
@@ -99,12 +99,12 @@ export default function PappuCalculator() {
   const totalGrossCost = rawSeedCost + rawMillingCost;
 
   // Byproduct yields depend on the out-turn: whatever isn't pappu is shared by
-  // husk / waste / loss in their original 25:10:5 ratio, so the split always sums
+  // husk / waste / loss in their original 25:2:13 ratio, so the split always sums
   // to 100%. Raise the out-turn → less husk & waste → fewer byproduct credits.
   const pappuFrac = yieldPctNum / 100;
   const nonPappuFrac = Math.max(0, 1 - pappuFrac);
   const HUSK_SHARE = 0.25 / 0.40;  // 62.5% of the non-pappu remainder
-  const WASTE_SHARE = 0.10 / 0.40; // 25% of the non-pappu remainder
+  const WASTE_SHARE = 0.02 / 0.40; // 5% of the non-pappu remainder (2% yield)
   const huskWeight = Math.round(inputWeight * nonPappuFrac * HUSK_SHARE);
   const wasteWeight = Math.round(inputWeight * nonPappuFrac * WASTE_SHARE);
   const pappuWeight = Math.round(inputWeight * pappuFrac); // outturn yield

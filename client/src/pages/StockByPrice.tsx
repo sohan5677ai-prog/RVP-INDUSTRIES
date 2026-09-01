@@ -1,9 +1,10 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Loader2, Search, Tag, Factory, Wheat, Calculator,
   ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2,
-  ChevronRight, Scale, Truck, Target, TrendingUp, TrendingDown,
+  ChevronRight, ChevronDown, Scale, Truck, Target, TrendingUp, TrendingDown,
+  Leaf,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { stockSummary } from '@/lib/calc';
@@ -121,6 +122,9 @@ export default function StockByPrice() {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [plannerBasis, setPlannerBasis] = useState<'COMMITTED' | 'AVAILABLE'>('COMMITTED');
+  const [processingChargeInput, setProcessingChargeInput] = useState('');
+  const [huskPriceInput, setHuskPriceInput] = useState('');
+  const [showProcessingSection, setShowProcessingSection] = useState(true);
 
   const { data, isLoading } = useQuery({
     queryKey: ['stock-by-price'],
@@ -147,6 +151,23 @@ export default function StockByPrice() {
     }
     return list;
   }, [freightRates]);
+
+  // Processing & husk defaults - same endpoint PappuCalculator uses
+  const { data: calcDefaults, isSuccess: calcDefaultsLoaded } = useQuery({
+    queryKey: ['calculator-defaults'],
+    queryFn: () => api<{ blackSeedPrice: number; millingCost: number; huskPrice: number; wastePrice: number }>('/inventory/calculator-defaults'),
+  });
+
+  useEffect(() => {
+    if (calcDefaultsLoaded && calcDefaults) {
+      setProcessingChargeInput(String(calcDefaults.millingCost));
+      setHuskPriceInput(String(calcDefaults.huskPrice));
+    }
+  }, [calcDefaultsLoaded, calcDefaults]);
+
+  const processingChargePerKg = Number(processingChargeInput) || 0;
+  const huskPricePerKg = Number(huskPriceInput) || 0;
+  const HUSK_YIELD = 0.25; // 25% of black seed becomes husk
 
   // Map the server's bands. Pappu figures are CONSUMABLE (sellable) pappu.
   const bands = useMemo<PriceBand[]>(() => {
@@ -420,6 +441,30 @@ export default function StockByPrice() {
   // All bands always participate, so the pool WAC matches the overall WAC.
   const displayedWacBlack = overallWacBlack;
   const displayedWacPappu = overallWacPappu;
+  // Adjusted implied pappu cost factoring processing charge + husk recovery
+  const adjustedWacPappu = (overallWacBlack + processingChargePerKg - (HUSK_YIELD * huskPricePerKg)) / PAPPU_OUTTURN;
+
+  // ─── Processing & Husk Recovery breakdown (for tonnage-based calculator) ───
+  const processingBreakdown = useMemo(() => {
+    if (!hasTonnage) return null;
+    const pappuKg = tonnage * 1000;
+    const seedKg = pappuKg / PAPPU_OUTTURN;
+    const huskKg = seedKg * HUSK_YIELD;
+    const huskValue = huskKg * huskPricePerKg;
+    const processingCost = seedKg * processingChargePerKg;
+    // Use the plan's realized WAC (dearest-first) if available, else overall WAC
+    const seedCostPerKg = plan?.realizedWacBlack ?? overallWacBlack;
+    const seedCost = seedKg * seedCostPerKg;
+    const grossCost = seedCost + processingCost;
+    const netCost = Math.max(0, grossCost - huskValue);
+    const effectivePappuPerKg = pappuKg > 0 ? netCost / pappuKg : 0;
+    return {
+      pappuKg, seedKg, huskKg, huskValue,
+      processingCost, seedCostPerKg, seedCost,
+      grossCost, netCost, effectivePappuPerKg,
+    };
+  }, [tonnage, hasTonnage, processingChargePerKg, huskPricePerKg, plan, overallWacBlack]);
+
       
   const q = search.trim().toLowerCase();
   const visible = bands.filter((b) => {
@@ -770,6 +815,140 @@ export default function StockByPrice() {
                   </div>
                 </div>
               )}
+
+              {/* ─── Processing & Husk Recovery ──────────────────────────── */}
+              {hasTonnage && (
+                <div className="rounded-lg border bg-amber-50/30 dark:bg-amber-950/10 border-amber-200/50">
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-between px-4 py-3 text-left"
+                    onClick={() => setShowProcessingSection((v) => !v)}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+                      <Leaf className="h-4 w-4 text-amber-600" />
+                      Processing &amp; Husk Recovery
+                    </span>
+                    <ChevronDown className={cn('h-4 w-4 text-amber-600 transition-transform duration-200', !showProcessingSection && '-rotate-90')} />
+                  </button>
+
+                  {showProcessingSection && (
+                    <div className="px-4 pb-4 space-y-4">
+                      {/* Editable inputs */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-muted-foreground">Processing Charge (₹/kg seed)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={processingChargeInput}
+                            onChange={(e) => setProcessingChargeInput(e.target.value)}
+                            placeholder="e.g. 3"
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-muted-foreground">Husk Price (₹/kg)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={huskPriceInput}
+                            onChange={(e) => setHuskPriceInput(e.target.value)}
+                            placeholder="e.g. 1.5"
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {processingBreakdown && (
+                        <>
+                          {/* Metric tiles */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="rounded-lg border bg-white dark:bg-card p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                                <Factory className="h-3 w-3" /> Seed Required
+                              </div>
+                              <div className="text-lg font-bold mt-1">{toTonnes(processingBreakdown.seedKg).toFixed(2)} MT</div>
+                              <div className="text-[10px] text-muted-foreground">for {tonnage.toFixed(2)} MT pappu @ 60% yield</div>
+                            </div>
+                            <div className="rounded-lg border bg-white dark:bg-card p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                                <Leaf className="h-3 w-3" /> Husk Output
+                              </div>
+                              <div className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-1">{toTonnes(processingBreakdown.huskKg).toFixed(2)} MT</div>
+                              <div className="text-[10px] text-muted-foreground">@ 25% of seed</div>
+                            </div>
+                            <div className="rounded-lg border bg-white dark:bg-card p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                                <ArrowDownRight className="h-3 w-3" /> Husk Value
+                              </div>
+                              <div className="text-lg font-bold text-emerald-600 mt-1">{rupees(processingBreakdown.huskValue)}</div>
+                              <div className="text-[10px] text-muted-foreground">@ {rupees(huskPricePerKg)}/kg recovery</div>
+                            </div>
+                            <div className="rounded-lg border bg-white dark:bg-card p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1">
+                                <ArrowUpRight className="h-3 w-3" /> Processing Cost
+                              </div>
+                              <div className="text-lg font-bold text-rose-600 mt-1">{rupees(processingBreakdown.processingCost)}</div>
+                              <div className="text-[10px] text-muted-foreground">@ {rupees(processingChargePerKg)}/kg seed</div>
+                            </div>
+                          </div>
+
+                          {/* Cost breakdown sheet */}
+                          <div className="rounded-lg border bg-white dark:bg-card overflow-hidden">
+                            <div className="px-4 py-2 border-b bg-muted/30">
+                              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                Net Cost Breakdown — {tonnage.toFixed(2)} MT pappu
+                              </span>
+                            </div>
+                            <div className="px-4 py-3 space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">
+                                  Seed Cost ({toTonnes(processingBreakdown.seedKg).toFixed(2)} MT @ {rupees(processingBreakdown.seedCostPerKg)}/kg)
+                                </span>
+                                <span className="font-semibold tabular-nums">{rupees(processingBreakdown.seedCost)}</span>
+                              </div>
+                              <div className="flex justify-between text-rose-600">
+                                <span>
+                                  + Processing ({toTonnes(processingBreakdown.seedKg).toFixed(2)} MT @ {rupees(processingChargePerKg)}/kg)
+                                </span>
+                                <span className="font-semibold tabular-nums">+ {rupees(processingBreakdown.processingCost)}</span>
+                              </div>
+                              <div className="flex justify-between text-emerald-600">
+                                <span>
+                                  − Husk Recovery ({toTonnes(processingBreakdown.huskKg).toFixed(2)} MT @ {rupees(huskPricePerKg)}/kg)
+                                </span>
+                                <span className="font-semibold tabular-nums">− {rupees(processingBreakdown.huskValue)}</span>
+                              </div>
+                              <div className="border-t pt-2 mt-2 flex justify-between font-bold">
+                                <span>Net Cost</span>
+                                <span className="tabular-nums">{rupees(processingBreakdown.netCost)}</span>
+                              </div>
+                              <div className="flex justify-between text-primary font-bold text-base pt-1">
+                                <span>Effective Pappu Cost</span>
+                                <span className="tabular-nums">{rupees(processingBreakdown.effectivePappuPerKg)}/kg</span>
+                              </div>
+                              {hasPrice && (
+                                <div className={cn(
+                                  'flex justify-between font-semibold pt-1',
+                                  pappuPrice >= processingBreakdown.effectivePappuPerKg ? 'text-emerald-600' : 'text-rose-600'
+                                )}>
+                                  <span>Margin (sell {rupees(pappuPrice)}/kg − cost {rupees(processingBreakdown.effectivePappuPerKg)}/kg)</span>
+                                  <span className="tabular-nums">
+                                    {pappuPrice >= processingBreakdown.effectivePappuPerKg ? '+' : ''}
+                                    {rupees(pappuPrice - processingBreakdown.effectivePappuPerKg)}/kg
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -787,6 +966,11 @@ export default function StockByPrice() {
             <p className="text-[10px] text-muted-foreground mt-1">
               Implies {rupees(displayedWacPappu)}/kg pappu cost
             </p>
+            {(processingChargePerKg > 0 || huskPricePerKg > 0) && (
+              <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium mt-0.5" title="Pappu cost adjusted for processing charge and husk recovery: (seed WAC + processing − husk credit) ÷ 0.60">
+                {rupees(adjustedWacPappu)}/kg with processing &amp; husk
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -905,7 +1089,14 @@ export default function StockByPrice() {
                         )
                       )}
                     </TableCell>
-                    <TableCell className="font-semibold text-foreground">{rupees(b.impliedPappuPrice)}/kg</TableCell>
+                    <TableCell className="font-semibold text-foreground">
+                      <div>{rupees(b.impliedPappuPrice)}/kg</div>
+                      {(processingChargePerKg > 0 || huskPricePerKg > 0) && (
+                        <div className="text-[10px] font-medium text-amber-700 dark:text-amber-400" title="Adjusted: (seed + processing − husk credit) ÷ 0.60">
+                          {rupees((b.blackPricePerKg + processingChargePerKg - (HUSK_YIELD * huskPricePerKg)) / PAPPU_OUTTURN)}/kg adj.
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right font-medium">{b.lorries}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex flex-col items-end gap-1">

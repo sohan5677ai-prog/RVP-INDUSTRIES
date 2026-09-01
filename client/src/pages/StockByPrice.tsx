@@ -932,12 +932,12 @@ export default function StockByPrice() {
                               {hasPrice && (
                                 <div className={cn(
                                   'flex justify-between font-semibold pt-1',
-                                  pappuPrice >= processingBreakdown.effectivePappuPerKg ? 'text-emerald-600' : 'text-rose-600'
+                                  basePappuPrice >= processingBreakdown.effectivePappuPerKg ? 'text-emerald-600' : 'text-rose-600'
                                 )}>
-                                  <span>Margin (sell {rupees(pappuPrice)}/kg − cost {rupees(processingBreakdown.effectivePappuPerKg)}/kg)</span>
+                                  <span>Margin (sell {rupees(basePappuPrice)}/kg − cost {rupees(processingBreakdown.effectivePappuPerKg)}/kg)</span>
                                   <span className="tabular-nums">
-                                    {pappuPrice >= processingBreakdown.effectivePappuPerKg ? '+' : ''}
-                                    {rupees(pappuPrice - processingBreakdown.effectivePappuPerKg)}/kg
+                                    {basePappuPrice >= processingBreakdown.effectivePappuPerKg ? '+' : ''}
+                                    {rupees(basePappuPrice - processingBreakdown.effectivePappuPerKg)}/kg
                                   </span>
                                 </div>
                               )}

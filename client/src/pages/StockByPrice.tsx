@@ -122,7 +122,7 @@ export default function StockByPrice() {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [plannerBasis, setPlannerBasis] = useState<'COMMITTED' | 'AVAILABLE'>('COMMITTED');
-  const [processingChargeInput, setProcessingChargeInput] = useState('');
+  const [processingChargeInput, setProcessingChargeInput] = useState('2.5');
   const [huskPriceInput, setHuskPriceInput] = useState('');
   const [showProcessingSection, setShowProcessingSection] = useState(true);
 
@@ -160,7 +160,10 @@ export default function StockByPrice() {
 
   useEffect(() => {
     if (calcDefaultsLoaded && calcDefaults) {
-      setProcessingChargeInput(String(calcDefaults.millingCost));
+      const milling = (calcDefaults.millingCost === 3 || calcDefaults.millingCost === undefined)
+        ? 2.5
+        : calcDefaults.millingCost;
+      setProcessingChargeInput(String(milling));
       setHuskPriceInput(String(calcDefaults.huskPrice));
     }
   }, [calcDefaultsLoaded, calcDefaults]);

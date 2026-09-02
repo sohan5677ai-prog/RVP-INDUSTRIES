@@ -34,7 +34,10 @@ export default function PappuCalculator() {
   useEffect(() => {
     if (defaultsLoaded && defaults) {
       setBlackSeedPrice(String(defaults.blackSeedPrice));
-      setMillingCost(String(defaults.millingCost));
+      const milling = (defaults.millingCost === 3 || defaults.millingCost === undefined)
+        ? 2.5
+        : defaults.millingCost;
+      setMillingCost(String(milling));
       setHuskPrice(String(defaults.huskPrice));
       setWastePrice(String(defaults.wastePrice));
     }

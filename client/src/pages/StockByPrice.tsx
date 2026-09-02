@@ -892,7 +892,7 @@ export default function StockByPrice() {
                             step="0.5"
                             value={processingChargeInput}
                             onChange={(e) => setProcessingChargeInput(e.target.value)}
-                            placeholder="e.g. 3"
+                            placeholder="e.g. 2.5"
                             className="h-8 text-sm"
                           />
                         </div>

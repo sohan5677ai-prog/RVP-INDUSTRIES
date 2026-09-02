@@ -261,7 +261,7 @@ export async function getCalculatorDefaults(req: Request, res: Response) {
 
   res.json({
     blackSeedPrice,
-    millingCost: 3, // Default processing cost
+    millingCost: 2.5, // Default processing cost
     huskPrice,
     wastePrice,
   });

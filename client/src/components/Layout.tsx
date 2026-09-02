@@ -103,7 +103,7 @@ const sections: NavSection[] = [
   {
     heading: 'Tools',
     items: [
-      { to: '/pappu-calculator', label: 'Pappu Calculator', icon: Calculator },
+      { to: '/pappu-calculator', label: 'Pappu Calculator', icon: Calculator, devOnly: true },
     ],
   },
   {

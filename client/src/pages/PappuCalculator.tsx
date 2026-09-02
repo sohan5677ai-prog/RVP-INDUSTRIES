@@ -1,18 +1,25 @@
 import { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Scale, Calculator, ArrowRightLeft, Percent, Truck, Package, Factory, Leaf } from 'lucide-react';
+import { Scale, Calculator, ArrowRightLeft, Percent, Truck, Package, Factory, Leaf, Wrench, ShieldAlert, ArrowRight } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { rupees, toTonnes } from '@/lib/format';
 import { api } from '@/lib/api';
 import { stockSummary } from '@/lib/calc';
+import { useAuth } from '@/lib/auth';
 import type { FreightRate } from '@/lib/types';
 
 export default function PappuCalculator() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isDeveloper = user?.role === 'DEVELOPER';
+
   const [blackSeedPrice, setBlackSeedPrice] = useState('20');
-  const [millingCost, setMillingCost] = useState('3');
+  const [millingCost, setMillingCost] = useState('2.5');
   const [huskPrice, setHuskPrice] = useState('1.5');
   const [wastePrice, setWastePrice] = useState('1.0');
   const [outTurnPct, setOutTurnPct] = useState('60');
@@ -142,8 +149,52 @@ export default function PappuCalculator() {
   // Net profit = base sale − (gross cost + freight) + byproduct credits
   const netProfit = baseSaleValue - netCostWithFreight;
 
+  // Non-developer users see the Maintenance Mode screen directing them to the Order Planner
+  if (!isDeveloper) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 px-4">
+        <Card className="border-amber-200/80 bg-gradient-to-b from-amber-50/50 to-amber-100/30 dark:from-amber-950/20 dark:to-amber-950/40 shadow-md">
+          <CardHeader className="text-center pb-3">
+            <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 mb-4 shadow-sm">
+              <Wrench className="h-8 w-8" />
+            </div>
+            <CardTitle className="text-2xl font-bold text-foreground">
+              Pappu Calculator is Under Maintenance
+            </CardTitle>
+            <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
+              This standalone calculator is currently undergoing maintenance. Please use the <strong className="text-foreground font-semibold">Order Planner</strong> for live Pappu pricing, seed conversion, byproduct credits, and margin calculations.
+            </p>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center pt-2 pb-6 gap-4">
+            <Button
+              onClick={() => navigate('/stock/price')}
+              className="gap-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white shadow-md font-medium px-6 py-2.5"
+              size="lg"
+            >
+              <Calculator className="h-4 w-4" />
+              Go to Order Planner
+              <ArrowRight className="h-4 w-4 ml-1" />
+            </Button>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/60 dark:bg-background/40 border rounded-lg px-3.5 py-2">
+              <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
+              <span>Access to this standalone calculator is currently restricted to the developer.</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Developer Access Notice */}
+      <div className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300">Developer Access</span>
+          <span>Pappu Calculator is currently in maintenance mode for standard users (redirected to Order Planner).</span>
+        </div>
+      </div>
+
       <div>
         <h1 className="text-2xl font-bold">White Pappu Conversion Calculator</h1>
         <p className="text-muted-foreground">Calculate the effective cost and target selling prices for White Pappu based on raw material costs and byproduct credits</p>

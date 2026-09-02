@@ -90,7 +90,7 @@ export default function Transports() {
   });
 
   const form = useForm<TransportForm>({
-    resolver: zodResolver(transportSchema),
+    resolver: zodResolver(transportSchema) as any,
     defaultValues: {
       name: '',
       code: '',
@@ -223,9 +223,9 @@ export default function Transports() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard title="Total Transports" value={totalTransports} icon={Building2} />
-        <StatCard title="Active Transports" value={activeTransports} icon={Truck} />
-        <StatCard title="Total Dispatches" value={totalDispatches} icon={Wallet} />
+        <StatCard label="Total Transports" value={totalTransports} icon={Building2} tone="amber" />
+        <StatCard label="Active Transports" value={activeTransports} icon={Truck} tone="forest" />
+        <StatCard label="Total Dispatches" value={totalDispatches} icon={Wallet} tone="gold" />
       </div>
 
       {/* Search Bar */}

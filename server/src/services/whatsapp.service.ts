@@ -86,12 +86,11 @@ export type WaTemplateKey =
   // body must NOT mention an attached screenshot, and it must not share
   // SUPPORT_TICKET's message_id (see the guard in notifySupportTicket).
   | 'SUPPORT_TICKET_TEXT'
-  // rvp_wishes (image header - the Gemini-generated occasion graphic): recipient
+  // rvp_wishes / rvp_rema (image header - the Gemini-generated occasion graphic): recipient
   // name, occasion message body. One generic template covers every occasion
   // (festival, Independence Day, etc.) - the varying part is the two variables,
-  // not the template itself. See docs/whatsapp-wishes-template.md. Absent from
-  // DEFAULT_TEMPLATE_IDS below until submitted to and approved by Meta - same
-  // "logs SKIPPED until configured" pattern as PRIVATE_LOAN_STATEMENT.
+  // not the template itself. See docs/whatsapp-wishes-template.md.
+  // Approved under name `rvp_rema` on +917207146094 with Fast2SMS message_id 31089.
   | 'WISHES';
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
@@ -136,10 +135,10 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // 1061557026326427). Telugu (28935) and Hindi (28936) wired in
   // LANGUAGE_TEMPLATE_IDS below.
   PRIVATE_LOAN_STATEMENT: '28933',
-  //
-  // WISHES (rvp_wishes) is likewise absent on purpose - not yet submitted to
-  // Meta. Every Settings -> Wishes send logs SKIPPED until an id is set here
-  // (or via FAST2SMS_TMPL_WISHES). See docs/whatsapp-wishes-template.md.
+  // rvp_rema (Marketing template, image header + 2 vars), approved on the shared
+  // KNM number (+917207146094). Fast2SMS message_id 31089 (Meta template ID
+  // 2139451610260693). See docs/whatsapp-wishes-template.md.
+  WISHES: '31089',
   //
   // rvp_party_ledger, approved on the shared KNM number. This id was only ever
   // set as the Render env var FAST2SMS_TMPL_PARTY_LEDGER (sync: false, no repo
@@ -234,6 +233,7 @@ export interface OwnerWeeklyStats {
 const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
   DISPATCH_DRIVER: 'driver_industries',
+  WISHES: 'rvp_rema',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {

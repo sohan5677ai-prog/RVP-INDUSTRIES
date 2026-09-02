@@ -29,6 +29,7 @@ const ENV_KEYS = [
   'FAST2SMS_TMPL_PO_CREATED',
   'FAST2SMS_TMPL_PO_CREATED_TA',
   // Cleared so the "no id anywhere" case below reads the source, not a local .env.
+  'FAST2SMS_TMPL_PAYMENT_SENT_TEXT',
   'FAST2SMS_TMPL_WISHES',
 ];
 const saved: Record<string, string | undefined> = {};
@@ -75,8 +76,8 @@ describe('templateId language resolution', () => {
   });
 
   it('stays undefined when neither copy exists - a clean SKIPPED, not a bad send', () => {
-    // WISHES has no checked-in id in any language: it lives on Render or is not yet approved.
-    expect(templateId('WISHES', 'KN')).toBeUndefined();
+    // PAYMENT_SENT_TEXT has no checked-in id in any language: it lives on Render or is not yet approved.
+    expect(templateId('PAYMENT_SENT_TEXT', 'KN')).toBeUndefined();
   });
 
   it('never reports a language for an EN recipient', () => {
@@ -140,6 +141,13 @@ describe('approved language ids', () => {
     expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'HI')).toBe('HI');
     expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'TA')).toBe('EN');
     expect(resolvedLanguage('PRIVATE_LOAN_STATEMENT', 'KN')).toBe('EN');
+  });
+
+  it('maps WISHES to approved message_id 31089 and falls back to EN for other languages', () => {
+    expect(templateId('WISHES', 'EN')).toBe('31089');
+    expect(templateId('WISHES', 'TE')).toBe('31089');
+    expect(templateId('WISHES', 'HI')).toBe('31089');
+    expect(resolvedLanguage('WISHES', 'TE')).toBe('EN');
   });
 
   it('leaves a template with no translations falling back to English', () => {

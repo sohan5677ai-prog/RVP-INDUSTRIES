@@ -173,7 +173,7 @@ function WishComposer() {
               rows={5}
               className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
             />
-            <p className="text-[11px] text-muted-foreground">Sent as "Dear &lt;name&gt;, {'{message}'} — Warm regards, RVP Industries".</p>
+            <p className="text-[11px] text-muted-foreground">Sent as "🎉 Dear &lt;name&gt; ," + message body + "Warm regards, RVP INDUSTRIES PUNGANUR".</p>
           </div>
           <div className="space-y-1.5">
             <Label>Image</Label>
@@ -196,8 +196,13 @@ function WishComposer() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-          Sending needs an approved WhatsApp template (rvp_wishes). Until Meta approves it, sends will log as "skipped" - see docs/whatsapp-wishes-template.md.
+        <div className="flex items-center justify-between rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+          <span>
+            Approved WhatsApp template: <span className="font-semibold font-mono">rvp_rema</span> (ID: <span className="font-mono">31089</span>) • Marketing (EN)
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
+            ✓ Active
+          </span>
         </div>
 
         <div className="flex justify-end">

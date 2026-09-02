@@ -1,16 +1,17 @@
-# Wishes broadcast — drafted template (EN)
+# Wishes broadcast — template (EN)
 
 ## Status
 
-**Not yet submitted to Meta.** `WISHES` has no Fast2SMS `message_id`
-configured (see `DEFAULT_TEMPLATE_IDS` in
-`server/src/services/whatsapp.service.ts`), so every send from
-**Settings → Wishes** logs `SKIPPED` in `WhatsAppLog` until one is set.
-Submit the body below on the Fast2SMS WhatsApp panel (same shared KNM
-number used by every other template), wait for Meta approval, then set:
+**APPROVED.** Meta approved under template name `rvp_rema` on the shared KNM
+number (`+917207146094`).
 
-- `DEFAULT_TEMPLATE_IDS.WISHES` in `whatsapp.service.ts` (or
-  `FAST2SMS_TMPL_WISHES` on Render for a no-deploy fix)
+- **Fast2SMS Message ID:** `31089` (wired in `DEFAULT_TEMPLATE_IDS.WISHES` in `server/src/services/whatsapp.service.ts`)
+- **Meta Template ID:** `2139451610260693`
+- **Category:** `Marketing`
+- **Language:** `en`
+- **Sender Number:** `+917207146094`
+
+Env override (optional): `FAST2SMS_TMPL_WISHES`
 
 ## Why one template covers every occasion
 
@@ -28,20 +29,11 @@ separate variable — it is written naturally into `{{2}}` by the drafting
 step (e.g. "Wishing you a joyous Diwali...") so the template body doesn't
 need to know which occasion it is.
 
-## Proposed name
+## Approved Name
 
-`rvp_wishes` (IMAGE header, category Marketing — this is a proactive,
+`rvp_rema` (IMAGE header, category Marketing — this is a proactive,
 non-transactional message, unlike every other template in this app which is
 Utility)
-
-**Marketing-category templates need the recipient's opt-in under Meta's
-policy**, and typically cost more per conversation than Utility templates.
-Consider getting each party/driver to reply "yes" once (any inbound message
-opens a 24-hour session window) or, if Meta's console offers it for this
-business, requesting Utility categorization on the grounds that this is a
-low-frequency (a handful of times a year), business-identity message rather
-than a promotion. Whichever category Meta assigns, the code doesn't change —
-only the id configured above matters.
 
 ## Variable contract — 2 vars, IMAGE header
 
@@ -62,20 +54,17 @@ template variable gets a message accepted by Fast2SMS but silently dropped
 by WhatsApp. The drafting step keeps the generated text to a single
 paragraph for this reason.
 
-Sample values for the approval form: `Ramesh Traders`, `Wishing you and
-your family a joyous Diwali, filled with light, prosperity and happiness.`
-
 ## Body
 
 **EN**
 ```
-🎉 Dear {{1}},
+🎉 Dear {{1}} ,
 
 {{2}}
 
 Warm regards,
-*RVP INDUSTRIES*
-*PUNGANUR*
+RVP INDUSTRIES
+PUNGANUR
 ```
 
 ## Recipients and targeting

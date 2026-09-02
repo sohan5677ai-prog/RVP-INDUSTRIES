@@ -168,6 +168,9 @@ export default function StockByPrice() {
   const processingChargePerKg = Number(processingChargeInput) || 0;
   const huskPricePerKg = Number(huskPriceInput) || 0;
   const HUSK_YIELD = 0.25; // 25% of black seed becomes husk
+  const [includeProcessingHusk, setIncludeProcessingHusk] = useState(false);
+  // Per-kg-of-seed net cost adjustment: processing cost minus husk recovery
+  const seedCostAdj = includeProcessingHusk ? (processingChargePerKg - HUSK_YIELD * huskPricePerKg) : 0;
 
   // Map the server's bands. Pappu figures are CONSUMABLE (sellable) pappu.
   const bands = useMemo<PriceBand[]>(() => {
@@ -300,7 +303,7 @@ export default function StockByPrice() {
       ? b.value + b.pendingValue
       : b.value), 0);
     const wacBlack = availableBlackKg > 0 ? eligibleValue / availableBlackKg : 0; // pool weighted-avg seed cost (valuation only)
-    const wacPappuCost = wacBlack / PAPPU_OUTTURN; // pool weighted-avg cost per sellable kg (valuation only)
+    const wacPappuCost = (wacBlack + seedCostAdj) / PAPPU_OUTTURN; // pool weighted-avg cost per sellable kg (valuation only)
     const askedPappuKg = hasTonnage ? tonnage * 1000 : 0;
 
     // Margin is costed DEAREST-FIRST, exactly like a real sale and the per-order P/L
@@ -322,7 +325,7 @@ export default function StockByPrice() {
       seedLeftToDraw -= take;
     }
     const realizedWacBlack = drawnBlackKg > 0 ? drawnBlackCost / drawnBlackKg : wacBlack;
-    const realizedPappuCost = realizedWacBlack / PAPPU_OUTTURN; // dearest-first cost per sellable kg
+    const realizedPappuCost = (realizedWacBlack + seedCostAdj) / PAPPU_OUTTURN; // dearest-first cost per sellable kg
 
     // How much black seed is needed for the asked tonnage if bought fresh?
     const blackRequiredKg = askedPappuKg / SEED_TO_CONSUMABLE;
@@ -346,7 +349,7 @@ export default function StockByPrice() {
         .map((b) => ({
           blackPricePerKg: b.blackPricePerKg,
           seedKg: Math.max(0, useCommitted ? b.arrivedRemainingKg + b.pendingBlackKg : b.arrivedRemainingKg),
-          impliedPappuCost: b.blackPricePerKg / PAPPU_OUTTURN,
+          impliedPappuCost: (b.blackPricePerKg + seedCostAdj) / PAPPU_OUTTURN,
         }))
         .filter((b) => b.seedKg > 0)
         .sort((a, z) => z.blackPricePerKg - a.blackPricePerKg);
@@ -365,7 +368,7 @@ export default function StockByPrice() {
         let foundBreakEven = false;
 
         for (const band of sortedEligible) {
-          const marginalSeedProfit = (pappuPrice * PAPPU_OUTTURN) - band.blackPricePerKg;
+          const marginalSeedProfit = (pappuPrice * PAPPU_OUTTURN) - band.blackPricePerKg - seedCostAdj;
 
           if (marginalSeedProfit > 0) {
             // Prior accumulated loss before drawing into this profitable band:
@@ -390,9 +393,9 @@ export default function StockByPrice() {
             }
           }
 
-          // Accumulate band
+          // Accumulate band — full cost per kg of seed includes the adjustment
           accumSeed += band.seedKg;
-          accumCost += band.seedKg * band.blackPricePerKg;
+          accumCost += band.seedKg * (band.blackPricePerKg + seedCostAdj);
         }
 
         if (foundBreakEven) {
@@ -412,7 +415,7 @@ export default function StockByPrice() {
       askedPappuKg, blackRequiredKg, seedShortfallKg, diff, fulfillmentPct, marginPerKg,
       minProfitStatus, minProfitablePappuKg, minProfitableSeedKg, orderTotalProfit,
     };
-  }, [bands, pappuPrice, tonnage, hasPrice, hasTonnage, plannerBasis]);
+  }, [bands, pappuPrice, tonnage, hasPrice, hasTonnage, plannerBasis, seedCostAdj]);
 
   function toggle(key: string) {
     setExpanded((prev) => {
@@ -577,6 +580,52 @@ export default function StockByPrice() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* Toggle for Processing & Husk adjustment */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeProcessingHusk}
+                onChange={(e) => setIncludeProcessingHusk(e.target.checked)}
+                className="h-4 w-4 rounded border-amber-400 text-amber-600 accent-amber-600 cursor-pointer"
+              />
+              <span className="text-sm font-medium text-amber-900 dark:text-amber-200">Include Processing &amp; Husk Recovery</span>
+            </label>
+            {includeProcessingHusk && (
+              <div className="flex items-center gap-3 text-xs">
+                <label className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Processing</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={processingChargeInput}
+                    onChange={(e) => setProcessingChargeInput(e.target.value)}
+                    className="h-7 w-20 text-xs"
+                    placeholder="₹/kg"
+                  />
+                  <span className="text-muted-foreground">₹/kg</span>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Husk</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={huskPriceInput}
+                    onChange={(e) => setHuskPriceInput(e.target.value)}
+                    className="h-7 w-20 text-xs"
+                    placeholder="₹/kg"
+                  />
+                  <span className="text-muted-foreground">₹/kg</span>
+                </label>
+                <span className="text-[10px] text-amber-700 dark:text-amber-400 font-medium">
+                  adj. {seedCostAdj >= 0 ? '+' : ''}{rupees(seedCostAdj / PAPPU_OUTTURN)}/kg pappu
+                </span>
+              </div>
+            )}
           </div>
 
           {hasPrice && freightPerKg > 0 && (

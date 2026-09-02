@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -7,7 +7,7 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { SaleOrder, SaleProduct, CompanyProfile } from '@/lib/types';
+import type { SaleOrder, SaleProduct, CompanyProfile, Transport } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { companyVehicleNumbers } from '@/lib/calc';
 import { productDescription } from '@/lib/productNames';
@@ -22,8 +22,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Loader2, Truck, Wallet, Hourglass, FileText, Trash2 } from 'lucide-react';
 
-type TransportTab = 'SURYA' | 'KNM' | 'OTHER';
-
 interface RetentionRow {
   id: string;
   date: string;
@@ -33,7 +31,8 @@ interface RetentionRow {
   destination: string | null;
   amount: number;
   released: boolean;
-  provider: TransportTab;
+  transportKey: string;
+  transportName: string;
   // Lorry receipt (GC note) written for this trip, when one has been issued.
   product: SaleProduct;
   weightKg: number;
@@ -50,11 +49,9 @@ interface RetentionRow {
 export default function SuryaRoadTransport({ embedded = false }: { embedded?: boolean } = {}) {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
-  const [tab, setTab] = useState<TransportTab>('SURYA');
+  const [tab, setTab] = useState<string>('');
 
-  const { data: saleOrders, isLoading } = useQuery({
-    // Full history - /sale-orders is capped at the latest 100 by default, which
-    // would drop older trips (and their retention) off the transport report.
+  const { data: saleOrders, isLoading: loadingSales } = useQuery({
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
   });
@@ -64,58 +61,145 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
     queryFn: () => api<CompanyProfile>('/settings/company'),
   });
 
+  const { data: transportsList, isLoading: loadingTransports } = useQuery({
+    queryKey: ['transports'],
+    queryFn: () => api<Transport[]>('/transports'),
+  });
+
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
-  const knmList = companyVehicleNumbers(company?.companyVehicles);
+  const knmList = useMemo(() => companyVehicleNumbers(company?.companyVehicles), [company?.companyVehicles]);
 
-  /** Infer transport provider for legacy dispatches without the field. */
-  function inferProvider(d: any): TransportTab {
-    if (d.transportProvider) return d.transportProvider as TransportTab;
-    if (d.vehicleNumber && knmList.includes(d.vehicleNumber.trim().toLowerCase())) return 'KNM';
-    return 'SURYA';
+  // Available transport tab configurations
+  const transportTabs = useMemo(() => {
+    const list: { key: string; label: string; name: string; isSurya: boolean; isKnm: boolean; defaultRetention: number }[] = [];
+    (transportsList ?? []).forEach((t) => {
+      const isSurya = t.code === 'SURYA' || t.name.toLowerCase().includes('surya');
+      const isKnm = t.code === 'KNM' || t.name.toLowerCase().includes('knm');
+      list.push({
+        key: t.id,
+        label: t.name,
+        name: t.name,
+        isSurya,
+        isKnm,
+        defaultRetention: Number(t.defaultRetention || 0),
+      });
+    });
+
+    // Add 'OTHER' tab for unassigned or custom trips
+    list.push({
+      key: 'OTHER',
+      label: 'Others / Unassigned',
+      name: 'Others',
+      isSurya: false,
+      isKnm: false,
+      defaultRetention: 0,
+    });
+    return list;
+  }, [transportsList]);
+
+  // Auto-initialize active tab to Surya Road Lines or first transport
+  useEffect(() => {
+    if (!tab && transportTabs.length > 0) {
+      const surya = transportTabs.find((t) => t.isSurya);
+      setTab(surya ? surya.key : transportTabs[0].key);
+    }
+  }, [transportTabs, tab]);
+
+  /** Infer transport provider key for a dispatch. */
+  function resolveTripTransportKey(d: any): string {
+    if (d.transportId) {
+      const match = (transportsList ?? []).find((t) => t.id === d.transportId);
+      if (match) return match.id;
+    }
+    if (d.transportProvider) {
+      const match = (transportsList ?? []).find(
+        (t) =>
+          t.code === d.transportProvider ||
+          t.name.toLowerCase() === d.transportProvider.toLowerCase() ||
+          t.id === d.transportProvider
+      );
+      if (match) return match.id;
+      if (d.transportProvider === 'SURYA') {
+        const surya = (transportsList ?? []).find((t) => t.code === 'SURYA' || t.name.toLowerCase().includes('surya'));
+        if (surya) return surya.id;
+      }
+      if (d.transportProvider === 'KNM') {
+        const knm = (transportsList ?? []).find((t) => t.code === 'KNM' || t.name.toLowerCase().includes('knm'));
+        if (knm) return knm.id;
+      }
+    }
+    if (d.vehicleNumber && knmList.includes(d.vehicleNumber.trim().toLowerCase())) {
+      const knm = (transportsList ?? []).find((t) => t.code === 'KNM' || t.name.toLowerCase().includes('knm'));
+      if (knm) return knm.id;
+    }
+    const surya = (transportsList ?? []).find((t) => t.code === 'SURYA' || t.name.toLowerCase().includes('surya'));
+    return surya ? surya.id : 'OTHER';
   }
 
-  /** Retention amount for a dispatch based on its provider. */
-  function retentionAmount(d: any, provider: TransportTab): number {
-    if (provider === 'SURYA') return retention;
-    if (provider === 'OTHER') return Number(d.customRetention ?? 0);
-    return 0; // KNM
+  /** Retention amount for a dispatch based on its transport. */
+  function retentionAmount(d: any, transportKey: string): number {
+    const t = (transportsList ?? []).find((x) => x.id === transportKey);
+    if (t) {
+      if (t.code === 'KNM' || t.name.toLowerCase().includes('knm')) return 0;
+      if (d.customRetention != null && Number(d.customRetention) >= 0) return Number(d.customRetention);
+      return Number(t.defaultRetention ?? retention);
+    }
+    if (d.customRetention != null && Number(d.customRetention) >= 0) return Number(d.customRetention);
+    return 0;
   }
 
-  const allRows: RetentionRow[] = (saleOrders ?? [])
-    .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
-    .filter(({ d }) => Number(d.freightCharge) > 0)
-    .map(({ o, d }) => {
-      const provider = inferProvider(d);
-      return {
-        id: d.id,
-        date: d.dispatchDate,
-        buyer: o.buyer?.name ?? '-',
-        lorryNumber: d.vehicleNumber ?? null,
-        invoice: d.invoiceNumber ?? null,
-        destination: o.destination ?? null,
-        amount: retentionAmount(d, provider),
-        released: d.status === 'DELIVERED',
-        provider,
-        product: o.product,
-        weightKg: d.weightKg,
-        freight: Number(d.freightCharge ?? 0),
-        driverName: d.driverName ?? null,
-        gcNumber: d.lrNumber ?? null,
-        gcDate: d.lrDate ?? null,
-        bags: d.lrBags ?? null,
-        kgPerBag: d.lrKgPerBag ?? null,
-        gcEnabled: o.buyer?.lorryReceiptEnabled ?? false,
-      };
-    })
-    .filter((r) => {
-      const d = new Date(r.date).toISOString().slice(0, 10);
-      if (startDate && d < startDate) return false;
-      if (endDate && d > endDate) return false;
-      return true;
-    })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const allRows: RetentionRow[] = useMemo(() => {
+    return (saleOrders ?? [])
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+      .filter(({ d }) => Number(d.freightCharge) > 0)
+      .map(({ o, d }) => {
+        const transportKey = resolveTripTransportKey(d);
+        const transportObj = (transportsList ?? []).find((t) => t.id === transportKey);
+        const transportName = transportObj ? transportObj.name : 'Others';
+        return {
+          id: d.id,
+          date: d.dispatchDate,
+          buyer: o.buyer?.name ?? '-',
+          lorryNumber: d.vehicleNumber ?? null,
+          invoice: d.invoiceNumber ?? null,
+          destination: o.destination ?? null,
+          amount: retentionAmount(d, transportKey),
+          released: d.status === 'DELIVERED',
+          transportKey,
+          transportName,
+          product: o.product,
+          weightKg: d.weightKg,
+          freight: Number(d.freightCharge ?? 0),
+          driverName: d.driverName ?? null,
+          gcNumber: d.lrNumber ?? null,
+          gcDate: d.lrDate ?? null,
+          bags: d.lrBags ?? null,
+          kgPerBag: d.lrKgPerBag ?? null,
+          gcEnabled: o.buyer?.lorryReceiptEnabled ?? false,
+        };
+      })
+      .filter((r) => {
+        const d = new Date(r.date).toISOString().slice(0, 10);
+        if (startDate && d < startDate) return false;
+        if (endDate && d > endDate) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [saleOrders, transportsList, knmList, retention, startDate, endDate]);
 
-  const rows = allRows.filter((r) => r.provider === tab);
+  const activeTabInfo = transportTabs.find((t) => t.key === tab) || transportTabs[0] || {
+    key: 'OTHER',
+    label: 'Others',
+    name: 'Others',
+    isSurya: false,
+    isKnm: false,
+    defaultRetention: 0,
+  };
+
+  const rows = useMemo(() => {
+    return allRows.filter((r) => r.transportKey === activeTabInfo.key);
+  }, [allRows, activeTabInfo.key]);
+
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(rows, 50);
 
   const exportColumns: ExportColumn<RetentionRow>[] = [
@@ -124,24 +208,25 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
     { header: 'Lorry No', value: (r) => r.lorryNumber ?? '' },
     { header: 'Invoice No', value: (r) => r.invoice ?? '' },
     { header: 'Destination', value: (r) => r.destination ?? '' },
-    ...(tab !== 'KNM' ? [{ header: 'Retention', value: (r: RetentionRow) => rupees(r.amount), excel: (r: RetentionRow) => r.amount, numFmt: '#,##0.00', align: 'right' as const }] : []),
+    ...(!activeTabInfo.isKnm
+      ? [{ header: 'Retention', value: (r: RetentionRow) => rupees(r.amount), excel: (r: RetentionRow) => r.amount, numFmt: '#,##0.00', align: 'right' as const }]
+      : []),
     { header: 'Status', value: (r) => (r.released ? 'Delivered' : 'In Transit') },
   ];
+
   const totalReleased = rows.filter((r) => r.released).reduce((s, r) => s + r.amount, 0);
   const totalHeld = rows.filter((r) => !r.released).reduce((s, r) => s + r.amount, 0);
   const totalFreightTrips = rows.length;
 
-  const tabLabels: Record<TransportTab, string> = {
-    SURYA: 'Surya Road Lines',
-    KNM: 'K.N.M. Transport',
-    OTHER: 'Others',
-  };
+  const tabCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of transportTabs) {
+      counts[t.key] = allRows.filter((r) => r.transportKey === t.key).length;
+    }
+    return counts;
+  }, [allRows, transportTabs]);
 
-  const tabCounts: Record<TransportTab, number> = {
-    SURYA: allRows.filter((r) => r.provider === 'SURYA').length,
-    KNM: allRows.filter((r) => r.provider === 'KNM').length,
-    OTHER: allRows.filter((r) => r.provider === 'OTHER').length,
-  };
+  const isLoading = loadingSales || loadingTransports;
 
   return (
     <div className="space-y-6">
@@ -149,34 +234,33 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         {!embedded ? (
           <div>
             <h1 className="text-2xl font-bold">Transport Report</h1>
-            <p className="text-muted-foreground">Per-trip freight retention by transport provider - bifurcated view</p>
+            <p className="text-muted-foreground">Per-trip freight retention and trips by transport agency - bifurcated view</p>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Per-trip freight retention by transport provider - bifurcated view</p>
+          <p className="text-sm text-muted-foreground">Per-trip freight retention and trips by transport agency - bifurcated view</p>
         )}
         <ExportButtons
-          filename={`Transport_${tab}`}
-          title={`Transport Report - ${tabLabels[tab]}`}
+          filename={`Transport_${activeTabInfo.name.replace(/\s+/g, '_')}`}
+          title={`Transport Report - ${activeTabInfo.name}`}
           subtitle={`${rows.length} trip(s)`}
           columns={exportColumns}
           rows={rows}
         />
       </div>
 
-      {/* Inbound WhatsApp lorry bookings live in their own register - Freight
-          Dues → Lorry Confirmations - since they describe lorries yet to load
-          rather than the trips reported here. */}
-
       {/* Transport Provider Tabs */}
-      <Segmented
-        value={tab}
-        onValueChange={(v) => setTab(v as TransportTab)}
-        options={[
-          { value: 'SURYA', label: `Surya Road Lines (${tabCounts.SURYA})` },
-          { value: 'KNM',   label: `K.N.M. (${tabCounts.KNM})` },
-          { value: 'OTHER', label: `Others (${tabCounts.OTHER})` },
-        ]}
-      />
+      <div className="overflow-x-auto pb-1">
+        <Segmented
+          value={tab}
+          onValueChange={(v) => setTab(v)}
+          options={transportTabs
+            .filter((t) => t.key !== 'OTHER' || (tabCounts['OTHER'] ?? 0) > 0)
+            .map((t) => ({
+              value: t.key,
+              label: `${t.name} (${tabCounts[t.key] ?? 0})`,
+            }))}
+        />
+      </div>
 
       {/* Filters Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/40 p-4 rounded-lg border">
@@ -194,7 +278,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         <div className="flex items-center justify-center h-48">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      ) : tab === 'SURYA' ? (
+      ) : activeTabInfo.isSurya ? (
         <Tabs defaultValue="retention" className="space-y-6">
           <TabsList className="bg-card border shadow-sm">
             <TabsTrigger value="retention" className="gap-2 text-sm font-semibold">
@@ -238,7 +322,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                 <CardContent>
                   <div className="text-2xl font-bold">{totalFreightTrips} trips</div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    @ {rupees(retention)} retention per trip
+                    @ {rupees(activeTabInfo.defaultRetention || retention)} retention per trip
                   </p>
                 </CardContent>
               </Card>
@@ -299,7 +383,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         <div className="grid gap-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {tab !== 'KNM' && (
+            {!activeTabInfo.isKnm && (
               <Card className="bg-card border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -309,11 +393,11 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalReleased)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Delivered trips · retention owed to {tabLabels[tab]}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Delivered trips · retention owed to {activeTabInfo.name}</p>
                 </CardContent>
               </Card>
             )}
-            {tab !== 'KNM' && (
+            {!activeTabInfo.isKnm && (
               <Card className="bg-card border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Retention Held</CardTitle>
@@ -333,7 +417,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
               <CardContent>
                 <div className="text-2xl font-bold">{totalFreightTrips} trips</div>
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  {tab === 'KNM' ? 'Company-owned vehicles · no retention' : 'Custom retention per trip'}
+                  {activeTabInfo.isKnm ? 'Company-owned vehicles · no retention' : `${rupees(activeTabInfo.defaultRetention)} standard retention per trip`}
                 </p>
               </CardContent>
             </Card>
@@ -342,7 +426,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           {/* Ledger Table */}
           <div className="rounded-lg border bg-card">
             <div className="px-5 py-4 border-b font-semibold text-sm">
-              {tab === 'KNM' ? 'K.N.M. Transport Trips' : 'Freight Retention Movements'}
+              {activeTabInfo.isKnm ? `${activeTabInfo.name} Trips` : `Freight Retention Movements - ${activeTabInfo.name}`}
             </div>
             <Table>
               <TableHeader>
@@ -352,15 +436,15 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                   <TableHead>Lorry No</TableHead>
                   <TableHead>Invoice No</TableHead>
                   <TableHead>Destination</TableHead>
-                  {tab !== 'KNM' && <TableHead className="text-right">Retention</TableHead>}
+                  {!activeTabInfo.isKnm && <TableHead className="text-right">Retention</TableHead>}
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={tab !== 'KNM' ? 7 : 6} className="text-center text-muted-foreground py-8">
-                      No {tabLabels[tab]} trips match selected filters.
+                    <TableCell colSpan={!activeTabInfo.isKnm ? 7 : 6} className="text-center text-muted-foreground py-8">
+                      No {activeTabInfo.name} trips match selected filters.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -371,7 +455,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                       <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorryNumber ?? '-'}</TableCell>
                       <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                       <TableCell>{r.destination ?? '-'}</TableCell>
-                      {tab !== 'KNM' && (
+                      {!activeTabInfo.isKnm && (
                         <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
                       )}
                       <TableCell>

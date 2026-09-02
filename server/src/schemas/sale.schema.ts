@@ -51,7 +51,8 @@ export const dispatchSaleOrderSchema = z.object({
   tonnageKg: z.coerce.number().int().positive(),
   internalWeightKg: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional().nullable()),
   dispatchDate: z.preprocess(emptyToUndefined, z.coerce.date().optional().nullable()),
-  transportProvider: z.enum(['SURYA', 'KNM', 'OTHER']).optional().default('SURYA'),
+  transportId: z.preprocess(emptyToUndefined, z.string().optional().nullable()),
+  transportProvider: z.preprocess(emptyToUndefined, z.string().optional().nullable().default('SURYA')),
   customRetention: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
   // XS Pappu: how many kg of THIS lorry came from yield surplus above the
   // assumed 60% out-turn. A quantity, not a flag - a shipment can be part-backed

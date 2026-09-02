@@ -620,10 +620,10 @@ export default function FreightDuesPage() {
     .map(({ o, d }) => {
       const freight = Number(d.freightCharge);
       const provider = (d as any).transportProvider ?? (d.vehicleNumber && knmList.includes(d.vehicleNumber.trim().toLowerCase()) ? 'KNM' : 'SURYA');
-      const isKnm = provider === 'KNM';
+      const isKnm = provider === 'KNM' || (d.vehicleNumber ? knmList.includes(d.vehicleNumber.trim().toLowerCase()) : false);
       const hamali = isKnm ? 0 : (o.product === 'PAPPU' ? pappuLoadingHamali(d.weightKg).lorry : calcHamali(d.weightKg));
       const kata = isKnm ? 0 : calcKataFee(d.weightKg);
-      const transport = provider === 'SURYA' ? retention : (provider === 'OTHER' ? Number((d as any).customRetention ?? 0) : 0);
+      const transport = (d as any).customRetention != null ? Number((d as any).customRetention) : (provider === 'SURYA' ? retention : 0);
       return {
         id: d.id,
         date: d.dispatchDate,

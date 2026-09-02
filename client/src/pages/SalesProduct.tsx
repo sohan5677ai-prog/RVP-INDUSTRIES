@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
+import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import {
   saleCloseToleranceKg,
@@ -25,6 +25,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/PageHeader';
 import { Segmented } from '@/components/ui/segmented';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
@@ -201,6 +208,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
   const { data: parties, isLoading: loadingParties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
   const { data: brokers, isLoading: loadingBrokers } = useQuery({ queryKey: ['brokers'], queryFn: () => api<Broker[]>('/brokers') });
+  const { data: transportsList } = useQuery({ queryKey: ['transports'], queryFn: () => api<Transport[]>('/transports') });
 
   // Per-order profit/loss margin (Pappu only), keyed by order id.
   const { data: margins } = useQuery({
@@ -248,7 +256,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [internalWeightTonnes, setInternalWeightTonnes] = useState('');
   const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [extractingKata, setExtractingKata] = useState(false);
-  const [transportProvider, setTransportProvider] = useState<'SURYA' | 'KNM' | 'OTHER'>('SURYA');
+  const [selectedTransportId, setSelectedTransportId] = useState<string>('');
+  const [transportProvider, setTransportProvider] = useState<string>('SURYA');
   const [customRetention, setCustomRetention] = useState('');
   // Tonnes of the current lorry declared as XS (excess out). Blank until the
   // user opts in; pre-filled with the shortfall so the common case is one click.
@@ -347,8 +356,16 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
     setInternalWeightTonnes('');
     setDispatchDate(new Date().toISOString().slice(0, 10));
-    setTransportProvider('SURYA');
-    setCustomRetention('');
+    const defaultTransport = (transportsList ?? []).find((t) => t.code === 'SURYA' || t.name.toLowerCase().includes('surya')) || (transportsList ?? [])[0];
+    if (defaultTransport) {
+      setSelectedTransportId(defaultTransport.id);
+      setTransportProvider(defaultTransport.code || defaultTransport.name);
+      setCustomRetention(String(Number(defaultTransport.defaultRetention || 0)));
+    } else {
+      setSelectedTransportId('');
+      setTransportProvider('SURYA');
+      setCustomRetention('3000');
+    }
     setExcessOutTonnes(''); // never sticky - each XS claim must be deliberate
     setFinalDispatch(false); // closing an order short must be deliberate too
     setFromTransfer(false); // never sticky - each dispatch must say so explicitly
@@ -386,8 +403,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         fd.append('internalWeightKg', String(Math.round(internalWeightNum * 1000)));
       }
       if (dispatchDate) fd.append('dispatchDate', new Date(dispatchDate).toISOString());
+      if (selectedTransportId) fd.append('transportId', selectedTransportId);
       fd.append('transportProvider', transportProvider);
-      if (transportProvider === 'OTHER') fd.append('customRetention', customRetention || '0');
+      if (customRetention.trim() !== '') fd.append('customRetention', customRetention);
       if (excessOutKg > 0) fd.append('excessOutKg', String(excessOutKg));
       if (finalDispatch) fd.append('finalDispatch', 'true');
       if (offerFromTransfer && fromTransfer) fd.append('fromTransfer', 'true');
@@ -1614,24 +1632,53 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <div className="space-y-1.5"><Label className="text-xs">Driver Phone</Label><Input value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="e.g. 7207012803" /></div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Transport</Label>
-              <Segmented
-                value={transportProvider}
-                onValueChange={(v) => setTransportProvider(v as 'SURYA' | 'KNM' | 'OTHER')}
-                options={[
-                  { value: 'SURYA', label: 'Surya Road Lines' },
-                  { value: 'KNM',   label: 'K.N.M. Transport' },
-                  { value: 'OTHER', label: 'Other' },
-                ]}
-              />
-            </div>
-            {transportProvider === 'OTHER' && (
-              <div className="space-y-1.5">
-                <Label className="text-xs">Retention Amount (₹)</Label>
-                <Input type="number" step="1" value={customRetention} onChange={(e) => setCustomRetention(e.target.value)} placeholder="e.g. 2000" />
-                <p className="text-[11px] text-muted-foreground">Amount held back from lorry freight as transport retention.</p>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Transport</Label>
+                {selectedTransportId && (
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    Default Retention: {rupees(Number((transportsList ?? []).find((t) => t.id === selectedTransportId)?.defaultRetention || 0))}
+                  </span>
+                )}
               </div>
-            )}
+              <Select
+                value={selectedTransportId || transportProvider}
+                onValueChange={(val) => {
+                  const t = (transportsList ?? []).find((x) => x.id === val);
+                  if (t) {
+                    setSelectedTransportId(t.id);
+                    setTransportProvider(t.code || t.name);
+                    setCustomRetention(String(Number(t.defaultRetention || 0)));
+                  } else {
+                    setSelectedTransportId('');
+                    setTransportProvider(val);
+                    setCustomRetention('');
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select transport" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(transportsList ?? []).filter((t) => t.active).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name} {Number(t.defaultRetention) > 0 ? `(${rupees(t.defaultRetention)} retention)` : ''}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="OTHER">Other / Unlisted Transport</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Retention Amount (₹)</Label>
+              <Input
+                type="number"
+                step="1"
+                value={customRetention}
+                onChange={(e) => setCustomRetention(e.target.value)}
+                placeholder="0"
+              />
+              <p className="text-[11px] text-muted-foreground">Amount held back from lorry freight as transport retention.</p>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Dispatch date</Label>
               <Input type="date" value={dispatchDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDispatchDate(e.target.value)} />

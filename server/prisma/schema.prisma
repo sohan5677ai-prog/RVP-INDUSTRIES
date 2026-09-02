@@ -209,6 +209,29 @@ model Broker {
   payments        Payment[]
 }
 
+model Transport {
+  id               String         @id @default(cuid())
+  name             String         @unique
+  code             String?        @unique
+  phone            String?
+  phone2           String?
+  email            String?
+  address          String?
+  city             String?
+  state            String?
+  pincode          String?
+  gstin            String?
+  contactPerson    String?
+  // Default retention per trip (e.g. ₹3,000 for Surya Road Lines, ₹0 for KNM)
+  defaultRetention Decimal        @default(0) @db.Decimal(12, 2)
+  notes            String?
+  active           Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  saleDispatches   SaleDispatch[]
+}
+
 model PurchaseOrder {
   id               String           @id @default(cuid())
   poNumber         String?          @unique
@@ -641,7 +664,9 @@ model SaleDispatch {
   driverName        String?
   driverPhone       String?
   kataFileUrl       String?
-  transportProvider String? // 'SURYA' | 'KNM' | 'OTHER'
+  transportId       String?
+  transport         Transport? @relation(fields: [transportId], references: [id])
+  transportProvider String? // 'SURYA' | 'KNM' | 'OTHER' or transport name
   customRetention   Decimal?   @db.Decimal(12, 2) // user-entered retention for 'OTHER'
 
   // XS Pappu (excess out). The 60% out-turn is a planning assumption, not a
@@ -732,6 +757,7 @@ model SaleDispatch {
 
   @@unique([invoiceFy, invoiceSeq, invoiceSeries])
   @@index([saleOrderId])
+  @@index([transportId])
 }
 
 model SaleAllocation {

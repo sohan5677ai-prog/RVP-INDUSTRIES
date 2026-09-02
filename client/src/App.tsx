@@ -46,6 +46,7 @@ const Home = lazyWithPreload('/', () => import('@/pages/Home'));
 const Dashboard = lazyWithPreload('/dashboard', () => import('@/pages/Dashboard'));
 const Parties = lazyWithPreload('/parties', () => import('@/pages/Parties'));
 const Brokers = lazyWithPreload('/brokers', () => import('@/pages/Brokers'));
+const Transports = lazyWithPreload('/transports', () => import('@/pages/Transports'));
 const PurchaseOrders = lazyWithPreload('/purchase-orders', () => import('@/pages/PurchaseOrders'));
 const StockIn = lazyWithPreload('/stock-in', () => import('@/pages/StockIn'));
 const Purchases = lazyWithPreload('/purchases', () => import('@/pages/Purchases'));
@@ -144,6 +145,7 @@ export default function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/parties" element={<Parties />} />
               <Route path="/brokers" element={<Brokers />} />
+              <Route path="/transports" element={<Transports />} />
               <Route path="/purchase-orders" element={<PurchaseOrders />} />
               <Route path="/stock-in" element={<StockIn />} />
               <Route path="/purchases" element={<Purchases />} />

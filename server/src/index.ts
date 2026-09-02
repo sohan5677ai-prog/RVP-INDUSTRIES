@@ -129,6 +129,49 @@ app.listen(port, "0.0.0.0", () => {
         update: { name: 'Transport Expense (Internal)', type: 'EXPENSE' },
         create: { code: '50090', name: 'Transport Expense (Internal)', type: 'EXPENSE' },
       });
+
+      // Bootstrap standard Transports
+      const surya = await prisma.transport.upsert({
+        where: { name: 'Surya Road Lines' },
+        update: {},
+        create: {
+          name: 'Surya Road Lines',
+          code: 'SURYA',
+          phone: '9440216173',
+          city: 'Punganur',
+          state: 'Andhra Pradesh',
+          pincode: '517247',
+          gstin: '37AACBS0915N1ZP',
+          contactPerson: 'Jagan',
+          defaultRetention: 3000,
+          active: true,
+        },
+      });
+
+      const knm = await prisma.transport.upsert({
+        where: { name: 'KNM Transport' },
+        update: {},
+        create: {
+          name: 'KNM Transport',
+          code: 'KNM',
+          defaultRetention: 0,
+          active: true,
+        },
+      });
+
+      // Backfill existing SaleDispatch records
+      if (surya) {
+        await prisma.saleDispatch.updateMany({
+          where: { transportId: null, transportProvider: 'SURYA' },
+          data: { transportId: surya.id },
+        });
+      }
+      if (knm) {
+        await prisma.saleDispatch.updateMany({
+          where: { transportId: null, transportProvider: 'KNM' },
+          data: { transportId: knm.id },
+        });
+      }
     } catch(e) {
       logger.error(e);
     }

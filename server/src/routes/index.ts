@@ -9,6 +9,7 @@ import authRoutes from './auth.routes.js';
 import { parseBulkImport } from '../controllers/bulkImport.controller.js';
 import partyRoutes from './party.routes.js';
 import brokerRoutes from './broker.routes.js';
+import transportRoutes from './transport.routes.js';
 import purchaseRoutes from './purchase.routes.js';
 import saleRoutes from './sale.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
@@ -89,6 +90,7 @@ router.post('/bulk-import/parse', bulkImportLimiter, memUpload.single('file'), a
 
 router.use('/parties', partyRoutes);
 router.use('/brokers', brokerRoutes);
+router.use('/transports', transportRoutes);
 router.use('/', purchaseRoutes);
 router.use('/', saleRoutes);
 router.use('/', dashboardRoutes);

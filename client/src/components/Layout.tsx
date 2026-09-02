@@ -77,6 +77,7 @@ const sections: NavSection[] = [
     items: [
       { to: '/parties', label: 'Parties', icon: Users },
       { to: '/brokers', label: 'Brokers', icon: Handshake },
+      { to: '/transports', label: 'Transports', icon: Truck },
     ],
   },
   {

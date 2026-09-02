@@ -127,6 +127,29 @@ export interface Broker {
   brokerageAmount: string;
 }
 
+export interface Transport {
+  id: string;
+  name: string;
+  code?: string | null;
+  phone?: string | null;
+  phone2?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  gstin?: string | null;
+  contactPerson?: string | null;
+  defaultRetention: string | number;
+  notes?: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  _count?: {
+    saleDispatches?: number;
+  };
+}
+
 export type POStatus = 'PENDING' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';
 
 export interface WeightVerification {
@@ -395,7 +418,9 @@ export interface SaleDispatch {
   driverName?: string | null;
   driverPhone?: string | null;
   kataFileUrl?: string | null;
-  transportProvider?: string | null; // 'SURYA' | 'KNM' | 'OTHER'
+  transportId?: string | null;
+  transport?: Transport | null;
+  transportProvider?: string | null; // 'SURYA' | 'KNM' | 'OTHER' or transport name
   customRetention?: string | number | null;
   // XS Pappu: kg of this shipment served from yield surplus above the assumed
   // 60% out-turn. Draws no black seed and carries no seed cost. A quantity, not

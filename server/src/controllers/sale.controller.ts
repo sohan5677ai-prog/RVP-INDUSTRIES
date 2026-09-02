@@ -139,6 +139,7 @@ export async function listSaleOrders(req: Request, res: Response) {
         // Buyer receipts and credit notes let the sales page show a shipment as Paid once
         // cleared (settledByDispatch sums amount + TDS + shortage + credit notes).
         include: {
+          transport: true,
           receipts: {
             where: { type: 'BUYER' },
             select: { id: true, saleDispatchId: true, type: true, amount: true, tdsAmount: true, shortageAmount: true },
@@ -163,6 +164,7 @@ export async function getSaleOrder(req: Request, res: Response) {
       dispatches: {
         orderBy: { dispatchDate: 'asc' },
         include: {
+          transport: true,
           receipts: {
             where: { type: 'BUYER' },
             select: { id: true, saleDispatchId: true, type: true, amount: true, tdsAmount: true, shortageAmount: true },
@@ -740,20 +742,36 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 
   // Lorry freight split (paid by us): destination unloading hamali + kata are
   // auto-computed from the standard rates, a fixed retention is held back until
-  // delivery (released to Surya Roadlines at REACHED), and the remainder is the
+  // delivery (released to transport agency at REACHED), and the remainder is the
   // lorry owner's. Only when there is freight to split.
   const company = await getCompanyProfileRow();
-  const transportProvider = data.transportProvider ?? 'SURYA';
-  const isCompanyVehicle = transportProvider === 'KNM';
+  let transportRecord = null;
+  if (data.transportId) {
+    transportRecord = await prisma.transport.findUnique({ where: { id: data.transportId } });
+  } else if (data.transportProvider) {
+    transportRecord = await prisma.transport.findFirst({
+      where: {
+        OR: [
+          { code: data.transportProvider },
+          { name: data.transportProvider },
+        ],
+      },
+    });
+  }
+
+  const transportProvider = transportRecord?.code || transportRecord?.name || data.transportProvider || 'SURYA';
+  const isCompanyVehicle = transportProvider === 'KNM' || (transportRecord?.name?.toUpperCase().includes('KNM') ?? false);
   const retentionConfig = Number(company.freightRetentionPerTrip ?? 3000);
   const hasFreight = freightCharge > 0;
   const freightKata = calcKataFee(weightKg, isCompanyVehicle);
   let freightRetention = 0;
   if (hasFreight && !isCompanyVehicle) {
-    if (transportProvider === 'SURYA') {
+    if (data.customRetention != null) {
+      freightRetention = Number(data.customRetention);
+    } else if (transportRecord) {
+      freightRetention = Number(transportRecord.defaultRetention ?? 0);
+    } else if (transportProvider === 'SURYA') {
       freightRetention = retentionConfig;
-    } else if (transportProvider === 'OTHER') {
-      freightRetention = data.customRetention != null ? Number(data.customRetention) : 0;
     }
   }
 
@@ -876,8 +894,9 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         driverName: data.driverName ?? null,
         driverPhone: data.driverPhone ?? null,
         kataFileUrl,
+        transportId: transportRecord?.id ?? data.transportId ?? null,
         transportProvider,
-        customRetention: transportProvider === 'OTHER' ? (data.customRetention ?? null) : null,
+        customRetention: freightRetention > 0 ? freightRetention : null,
         excessOutKg,
         excessOutNote: excessOutKg > 0 ? (data.excessOutNote ?? null) : null,
         fromTransfer: order.product !== 'PAPPU' && order.product !== 'TPS' ? data.fromTransfer : false,

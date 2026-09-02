@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { SearchInput } from '@/components/ui/search-input';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { SaleOrder, SaleProduct, CompanyProfile, Transport } from '@/lib/types';
@@ -47,6 +48,7 @@ interface RetentionRow {
 }
 
 export default function SuryaRoadTransport({ embedded = false }: { embedded?: boolean } = {}) {
+  const [search, setSearch] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [tab, setTab] = useState<string>('');
@@ -197,8 +199,21 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
   };
 
   const rows = useMemo(() => {
-    return allRows.filter((r) => r.transportKey === activeTabInfo.key);
-  }, [allRows, activeTabInfo.key]);
+    const tabFiltered = allRows.filter((r) => r.transportKey === activeTabInfo.key);
+    const q = search.trim().toLowerCase();
+    if (!q) return tabFiltered;
+    const qNorm = q.replace(/[^a-z0-9]/g, '');
+    return tabFiltered.filter((r) => {
+      const matchBuyer = r.buyer.toLowerCase().includes(q);
+      const matchLorry = (r.lorryNumber ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.lorryNumber ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchInvoice = (r.invoice ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.invoice ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchDest = (r.destination ?? '').toLowerCase().includes(q);
+      const matchDriver = (r.driverName ?? '').toLowerCase().includes(q);
+      const matchGc = (r.gcNumber ?? '').toLowerCase().includes(q);
+      const matchStatus = (r.released ? 'delivered' : 'in transit').includes(q);
+      return matchBuyer || matchLorry || matchInvoice || matchDest || matchDriver || matchGc || matchStatus;
+    });
+  }, [allRows, activeTabInfo.key, search]);
 
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(rows, 50);
 
@@ -263,14 +278,23 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
       </div>
 
       {/* Filters Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/40 p-4 rounded-lg border">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-muted/40 p-4 rounded-lg border">
+        <div className="space-y-1.5">
+          <Label className="text-xs font-semibold">Search</Label>
+          <SearchInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder="Search lorry, buyer, invoice, destination…"
+            className="h-9 bg-card"
+          />
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="start" className="text-xs font-semibold">From Date</Label>
-          <Input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-card" />
+          <Input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-card h-9" />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="end" className="text-xs font-semibold">To Date</Label>
-          <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-card" />
+          <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-card h-9" />
         </div>
       </div>
 
@@ -485,6 +509,7 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [issuedOnly, setIssuedOnly] = useState(false);
+  const [gcSearch, setGcSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<RetentionRow | null>(null);
 
   const deleteGcMutation = useMutation({
@@ -500,7 +525,23 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
   // Only buyers switched on for the GC note belong in the book - plus any older
   // shipment that already carries a number, so nothing written disappears.
   const gcRows = rows.filter((r) => r.gcEnabled || r.gcNumber);
-  const filtered = issuedOnly ? gcRows.filter((r) => r.gcNumber) : gcRows;
+  const filtered = useMemo(() => {
+    const base = issuedOnly ? gcRows.filter((r) => r.gcNumber) : gcRows;
+    const q = gcSearch.trim().toLowerCase();
+    if (!q) return base;
+    const qNorm = q.replace(/[^a-z0-9]/g, '');
+    return base.filter((r) => {
+      const matchGc = (r.gcNumber ?? '').toLowerCase().includes(q);
+      const matchLorry = (r.lorryNumber ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.lorryNumber ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchInvoice = (r.invoice ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.invoice ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchBuyer = r.buyer.toLowerCase().includes(q);
+      const matchDest = (r.destination ?? '').toLowerCase().includes(q);
+      const matchDriver = (r.driverName ?? '').toLowerCase().includes(q);
+      const matchProd = productDescription(r.product).toLowerCase().includes(q);
+      return matchGc || matchLorry || matchInvoice || matchBuyer || matchDest || matchDriver || matchProd;
+    });
+  }, [gcRows, issuedOnly, gcSearch]);
+
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
   const issuedCount = gcRows.filter((r) => r.gcNumber).length;
 
@@ -531,7 +572,14 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
               {issuedCount} of {gcRows.length} trip(s) issued
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <SearchInput
+              value={gcSearch}
+              onValueChange={setGcSearch}
+              placeholder="Search G.C. no, lorry, invoice, buyer…"
+              containerClassName="w-full sm:w-64"
+              className="h-8 text-xs"
+            />
             <Segmented
               value={issuedOnly ? 'issued' : 'all'}
               onValueChange={(v) => setIssuedOnly(v === 'issued')}

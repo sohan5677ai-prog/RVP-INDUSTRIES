@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
@@ -205,7 +206,25 @@ function FreightTable({
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
-  const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
+  const [search, setSearch] = useState('');
+
+  const filteredRows = useMemo(() => {
+    const payFiltered = filterByPayment(rows, payFilter, paymentStatusFor);
+    const q = search.trim().toLowerCase();
+    if (!q) return payFiltered;
+    const qNorm = q.replace(/[^a-z0-9]/g, '');
+    return payFiltered.filter((r) => {
+      const matchLorry = (r.lorry ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.lorry ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchInvoice = (r.invoice ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.invoice ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchParty = (r.party ?? '').toLowerCase().includes(q);
+      const matchDest = (r.destination ?? '').toLowerCase().includes(q);
+      const matchStatus = r.deliveryStatus.toLowerCase().includes(q);
+      const matchPayment = paymentStatusFor(r).toLowerCase().includes(q);
+      const matchSourced = r.sourced.toLowerCase().includes(q);
+      return matchLorry || matchInvoice || matchParty || matchDest || matchStatus || matchPayment || matchSourced;
+    });
+  }, [rows, payFilter, paymentStatusFor, search]);
+
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
 
   const t = {
@@ -240,8 +259,17 @@ function FreightTable({
 
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
-      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b">
-        <PayFilter value={payFilter} onChange={setPayFilter} />
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 border-b">
+        <div className="flex flex-wrap items-center gap-3">
+          <PayFilter value={payFilter} onChange={setPayFilter} />
+          <SearchInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder="Search lorry no, invoice, party, destination…"
+            containerClassName="w-full sm:w-72"
+            className="h-8 text-xs"
+          />
+        </div>
         <ExportButtons filename={exportName} title={`${freightLabel} Dues`} subtitle={`${filteredRows.length} record(s)`} columns={exportColumns} rows={filteredRows} />
       </div>
       <Table>
@@ -397,7 +425,23 @@ function TransfersTable({
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
-  const filteredRows = filterByPayment(rows, payFilter, paymentStatusFor);
+  const [search, setSearch] = useState('');
+
+  const filteredRows = useMemo(() => {
+    const payFiltered = filterByPayment(rows, payFilter, paymentStatusFor);
+    const q = search.trim().toLowerCase();
+    if (!q) return payFiltered;
+    const qNorm = q.replace(/[^a-z0-9]/g, '');
+    return payFiltered.filter((r) => {
+      const matchLorry = (r.lorry ?? '').toLowerCase().includes(q) || (qNorm !== '' && (r.lorry ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(qNorm));
+      const matchDest = (r.destination ?? '').toLowerCase().includes(q);
+      const matchKind = (r.kind ?? '').toLowerCase().includes(q);
+      const matchParty = (r.party ?? '').toLowerCase().includes(q);
+      const matchPayment = paymentStatusFor(r).toLowerCase().includes(q);
+      return matchLorry || matchDest || matchKind || matchParty || matchPayment;
+    });
+  }, [rows, payFilter, paymentStatusFor, search]);
+
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
   const totalTransport = filteredRows.reduce((s, r) => s + r.net, 0);
   const totalDue = filteredRows.reduce((s, r) => s + dueFor(r), 0);
@@ -415,8 +459,17 @@ function TransfersTable({
 
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
-      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b">
-        <PayFilter value={payFilter} onChange={setPayFilter} />
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 border-b">
+        <div className="flex flex-wrap items-center gap-3">
+          <PayFilter value={payFilter} onChange={setPayFilter} />
+          <SearchInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder="Search lorry no, route, type…"
+            containerClassName="w-full sm:w-72"
+            className="h-8 text-xs"
+          />
+        </div>
         <ExportButtons filename="Freight_Dues_KNM_Transfers" title="KNM Transfer Transport" subtitle={`${filteredRows.length} transfer(s)`} columns={exportColumns} rows={filteredRows} />
       </div>
       <Table>

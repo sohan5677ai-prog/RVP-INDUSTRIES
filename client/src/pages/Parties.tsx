@@ -391,6 +391,10 @@ export default function Parties() {
 
       const body = {
         ...values,
+        nickname: values.type === 'BUYER' || values.type === 'HAMALI_TEAM' ? null : (values.nickname?.trim() || null),
+        bankName: values.type === 'BUYER' ? null : (values.bankName?.trim() || null),
+        bankAccountNumber: values.type === 'BUYER' ? null : (values.bankAccountNumber?.trim() || null),
+        bankIfsc: values.type === 'BUYER' ? null : (values.bankIfsc?.trim() || null),
         address: finalAddress,
         city: finalCity,
         state: finalState,
@@ -451,7 +455,13 @@ export default function Parties() {
   // The Hamali crew ("Bikash and Team") is a labour counterparty, not a trading
   // party - it only needs name, phone and bank details, so the trade-specific
   // fields (nickname, commodities, GST, address, destination) are hidden for it.
-  const isHamaliTeam = form.watch('type') === 'HAMALI_TEAM';
+  const partyType = form.watch('type');
+  const isHamaliTeam = partyType === 'HAMALI_TEAM';
+  const isBuyer = partyType === 'BUYER';
+  const isSupplier = partyType === 'SUPPLIER';
+  const isBoth = partyType === 'BOTH';
+  const showNickname = isSupplier || isBoth;
+  const showBankDetails = partyType !== 'BUYER';
 
   return (
     <div className="space-y-6">
@@ -490,6 +500,7 @@ export default function Parties() {
               <SelectItem value="ALL">All Types</SelectItem>
               <SelectItem value="BUYER">Buyer</SelectItem>
               <SelectItem value="SUPPLIER">Supplier</SelectItem>
+              <SelectItem value="BOTH">Both</SelectItem>
               <SelectItem value="HAMALI_TEAM">Hamali Team</SelectItem>
             </SelectContent>
           </Select>
@@ -626,7 +637,7 @@ export default function Parties() {
               onSubmit={form.handleSubmit(handleSave)}
               className="space-y-4"
             >
-              <div className="grid grid-cols-2 gap-4">
+              <div className={showNickname ? "grid grid-cols-2 gap-4" : "space-y-4"}>
                 <FormField
                   control={form.control}
                   name="name"
@@ -640,7 +651,7 @@ export default function Parties() {
                     </FormItem>
                   )}
                 />
-                {!isHamaliTeam && (
+                {showNickname && (
                   <FormField
                     control={form.control}
                     name="nickname"
@@ -730,7 +741,13 @@ export default function Parties() {
                         <Input placeholder="e.g. 9876543210" {...field} />
                       </FormControl>
                       <p className="text-[11px] text-muted-foreground">
-                        For E-Way Bill &amp; E-Invoice WhatsApp bundle
+                        {isBuyer
+                          ? 'For E-Way Bill & E-Invoice WhatsApp bundle'
+                          : isSupplier
+                          ? 'WhatsApp updates (PO, Stock-in, Payments, Statements)'
+                          : isBoth
+                          ? 'WhatsApp updates & E-Way Bill bundle'
+                          : 'WhatsApp updates & statement notifications'}
                       </p>
                       <FormMessage />
                     </FormItem>
@@ -741,12 +758,20 @@ export default function Parties() {
                   name="phone2"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone Number 2 (Driver Contact)</FormLabel>
+                      <FormLabel>
+                        {isBuyer || isBoth ? 'Phone Number 2 (Driver Contact)' : 'Phone Number 2'}
+                      </FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. 9876543211" {...field} />
                       </FormControl>
                       <p className="text-[11px] text-muted-foreground">
-                        Point of contact for drivers (sent to driver)
+                        {isBuyer
+                          ? 'Point of contact for drivers (sent to driver)'
+                          : isSupplier
+                          ? 'Secondary number (WhatsApp updates sent to both numbers)'
+                          : isBoth
+                          ? 'Point of contact for drivers & secondary WhatsApp number'
+                          : 'Secondary contact number'}
                       </p>
                       <FormMessage />
                     </FormItem>
@@ -1136,7 +1161,7 @@ export default function Parties() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                  Branch Phone 1 (WhatsApp Bundle)
+                                  {isBuyer ? 'Branch Phone 1 (WhatsApp Bundle)' : 'Branch Phone 1'}
                                 </label>
                                 <Input
                                   value={addr.phone ?? ''}
@@ -1147,7 +1172,7 @@ export default function Parties() {
                               </div>
                               <div>
                                 <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                                  Branch Phone 2 (Driver Contact)
+                                  {isBuyer || isBoth ? 'Branch Phone 2 (Driver Contact)' : 'Branch Phone 2'}
                                 </label>
                                 <Input
                                   value={addr.phone2 ?? ''}
@@ -1318,50 +1343,52 @@ export default function Parties() {
                 </div>
               )}
 
-              <div className="space-y-3 rounded-lg border p-3 bg-muted/20">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bank Account Details</p>
-                <FormField
-                  control={form.control}
-                  name="bankName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Bank Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. State Bank of India" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <div className="grid grid-cols-2 gap-4">
+              {showBankDetails && (
+                <div className="space-y-3 rounded-lg border p-3 bg-muted/20">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bank Account Details</p>
                   <FormField
                     control={form.control}
-                    name="bankAccountNumber"
+                    name="bankName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Account Number</FormLabel>
+                        <FormLabel>Bank Name</FormLabel>
                         <FormControl>
-                          <Input {...field} />
+                          <Input placeholder="e.g. State Bank of India" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={form.control}
-                    name="bankIfsc"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>IFSC Code</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. SBIN0001234" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="bankAccountNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Account Number</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="bankIfsc"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>IFSC Code</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. SBIN0001234" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
               <DialogFooter>
                 <Button type="submit" disabled={saveMutation.isPending}>
                   {saveMutation.isPending ? 'Saving…' : 'Save'}

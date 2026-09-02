@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
+import { SearchInput } from '@/components/ui/search-input';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { LorryConfirmation } from '@/lib/types';
@@ -71,13 +72,24 @@ export default function LorryConfirmations() {
   });
 
   const filtered = useMemo(() => {
-    const q = search.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const q = search.trim().toLowerCase();
     if (!q) return rows ?? [];
+    const qNorm = q.replace(/[^a-z0-9]/g, '');
     return (rows ?? []).filter((r) => {
-      const lorry = (r.lorryNumber ?? '').replace(/[^A-Z0-9]/g, '');
-      const driver = (r.driverName ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const lorry = (r.lorryNumber ?? '').toLowerCase();
+      const lorryNorm = lorry.replace(/[^a-z0-9]/g, '');
+      const driver = (r.driverName ?? '').toLowerCase();
       const phone = (r.driverPhone ?? '').replace(/\D/g, '');
-      return lorry.includes(q) || driver.includes(q) || phone.includes(q);
+      const route = `${r.fromPlace ?? ''} ${r.toPlace ?? ''}`.toLowerCase();
+      const buyer = (r.dispatch?.buyer ?? '').toLowerCase();
+      return (
+        lorry.includes(q) ||
+        (qNorm !== '' && lorryNorm.includes(qNorm)) ||
+        driver.includes(q) ||
+        (qNorm !== '' && phone.includes(qNorm)) ||
+        route.includes(q) ||
+        buyer.includes(q)
+      );
     });
   }, [rows, search]);
 
@@ -177,11 +189,12 @@ export default function LorryConfirmations() {
             { value: 'ALL', label: 'All' },
           ]}
         />
-        <Input
+        <SearchInput
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          placeholder="Search lorry no, driver or phone"
-          className="h-9 max-w-xs bg-card"
+          onValueChange={(v) => { setSearch(v); setPage(1); }}
+          placeholder="Search lorry no, driver, phone, route…"
+          containerClassName="w-full sm:w-80"
+          className="h-9"
         />
       </div>
 

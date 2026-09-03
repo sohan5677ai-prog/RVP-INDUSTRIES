@@ -814,13 +814,12 @@ function parseAlertMembers(raw?: string | null): AlertMember[] {
 function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
   const { data, isLoading } = useQuery({ queryKey: ['company'], queryFn: () => api<CompanyProfile>('/settings/company') });
   const [form, setForm] = useState<CompanyProfile>(emptyCompany);
-  // 3 fixed rows so the inputs stay put while typing; empties are dropped on save.
-  const [members, setMembers] = useState<AlertMember[]>([{ name: '', phone: '' }, { name: '', phone: '' }, { name: '', phone: '' }]);
+  const [members, setMembers] = useState<AlertMember[]>([{ name: '', phone: '' }]);
   useEffect(() => {
     if (!data) return;
     setForm({ ...emptyCompany, ...data });
     const parsed = parseAlertMembers(data.alertRecipients);
-    setMembers([0, 1, 2].map((i) => parsed[i] ?? { name: '', phone: '' }));
+    setMembers(parsed.length > 0 ? parsed : [{ name: '', phone: '' }]);
   }, [data]);
 
   const save = useMutation({
@@ -835,6 +834,17 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
 
   const setMember = (i: number, key: keyof AlertMember, value: string) =>
     setMembers((prev) => prev.map((m, j) => (j === i ? { ...m, [key]: value } : m)));
+
+  const addMember = () => {
+    setMembers((prev) => [...prev, { name: '', phone: '' }]);
+  };
+
+  const removeMember = (index: number) => {
+    setMembers((prev) => {
+      const next = prev.filter((_, j) => j !== index);
+      return next.length > 0 ? next : [{ name: '', phone: '' }];
+    });
+  };
 
   const testMode = form.whatsappTestMode ?? true;
 
@@ -880,31 +890,53 @@ function WhatsAppSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               </p>
             </div>
 
-            <div className="space-y-2 rounded-lg border p-4">
+            <div className="space-y-3 rounded-lg border p-4">
               <div className="space-y-0.5">
                 <div className="text-sm font-semibold">Dispatch &amp; alert recipients</div>
                 <p className="text-xs text-muted-foreground max-w-md">
-                  Up to 3 members who receive internal WhatsApp updates - dispatch reminders, the weekly summary and the daily dues digest, plus their own copy of every message sent to a party: purchase orders, stock-ins, unloading statements, payments and the dispatch invoice bundle.
+                  Members who receive internal WhatsApp updates - dispatch reminders, the weekly summary and the daily dues digest, plus their own copy of every message sent to a party: purchase orders, stock-ins, unloading statements, payments and the dispatch invoice bundle.
                 </p>
               </div>
               <div className="space-y-2">
                 {members.map((m, i) => (
-                  <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Input
-                      value={m.name}
-                      onChange={(e) => setMember(i, 'name', e.target.value)}
-                      placeholder={`Member ${i + 1} name`}
-                    />
-                    <Input
-                      value={m.phone}
-                      onChange={(e) => setMember(i, 'phone', e.target.value)}
-                      placeholder="9876543210"
-                    />
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Input
+                        value={m.name}
+                        onChange={(e) => setMember(i, 'name', e.target.value)}
+                        placeholder={`Member ${i + 1} name`}
+                      />
+                      <Input
+                        value={m.phone}
+                        onChange={(e) => setMember(i, 'phone', e.target.value)}
+                        placeholder="9876543210"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeMember(i)}
+                      title="Remove recipient"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 ))}
               </div>
+              <div className="flex items-center justify-between pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addMember}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" /> Add recipient
+                </Button>
+              </div>
               <p className="text-[11px] text-muted-foreground">
-                10-digit Indian mobile (or 91XXXXXXXXXX) per member. Leave a row blank to skip it. While test mode is ON these also reroute to the test number.
+                10-digit Indian mobile (or 91XXXXXXXXXX) per member. Leave blank or remove to skip. While test mode is ON these also reroute to the test number.
               </p>
             </div>
 

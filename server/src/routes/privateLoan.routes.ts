@@ -8,6 +8,9 @@ import {
   createPrivateLoanRepayment,
   deletePrivateLoanRepayment,
   sendPrivateLoanStatement,
+  getPrivateLoanReminderSchedule,
+  upsertPrivateLoanReminderSchedule,
+  deletePrivateLoanReminderSchedule,
 } from '../controllers/privateLoan.controller.js';
 
 const router = Router();
@@ -21,5 +24,9 @@ router.post('/private-loans/:id/repayments', asyncHandler(createPrivateLoanRepay
 router.delete('/private-loan-repayments/:id', asyncHandler(deletePrivateLoanRepayment));
 
 router.post('/private-loans/:id/send-statement', asyncHandler(sendPrivateLoanStatement));
+
+router.get('/private-loans/:id/reminder-schedule', asyncHandler(getPrivateLoanReminderSchedule));
+router.put('/private-loans/:id/reminder-schedule', asyncHandler(upsertPrivateLoanReminderSchedule));
+router.delete('/private-loans/:id/reminder-schedule', asyncHandler(deletePrivateLoanReminderSchedule));
 
 export default router;

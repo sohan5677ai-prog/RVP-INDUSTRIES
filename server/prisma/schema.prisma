@@ -1200,8 +1200,9 @@ model PrivateLoan {
   // Language the WhatsApp statement is sent in - falls back to English when
   // that language's copy isn't approved yet, same as Party.waLanguage.
   waLanguage      WaLanguage             @default(EN)
-  createdAt       DateTime               @default(now())
+  createdAt       DateTime                     @default(now())
   repayments      PrivateLoanRepayment[]
+  reminderSchedule PrivateLoanReminderSchedule?
 }
 
 model PrivateLoanRepayment {
@@ -1733,6 +1734,53 @@ model PartyReminderSchedule {
 
   // When the schedule stops firing on its own:
   //  UNTIL_PAID   - disables itself the first time it finds nothing outstanding
+  //  UNTIL_DATE   - disables itself once `endDate` (IST calendar day) has passed
+  //  AFTER_COUNT  - disables itself once `sendsCount` reaches `maxSends`
+  //  MANUAL       - never auto-stops; only a user can disable/delete it
+  stopCondition String    @default("UNTIL_PAID")
+  endDate       DateTime?
+  maxSends      Int?
+
+  sendsCount    Int       @default(0)
+  lastSentAt    DateTime?
+  // YYYY-MM-DD (IST) of the last fire, so DAILY/WEEKLY never double-send if the
+  // sweep ticks more than once inside the same eligible window.
+  lastSentKey   String?
+  // Set when the schedule auto-disables itself - PAID | DATE_REACHED | COUNT_REACHED.
+  stoppedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/**
+ * Private Loan "Schedule" option - a recurring WhatsApp statement reminder
+ * for one private loan, sent to the borrower.
+ * One row per private loan. Fired by the sweep in whatsappJobs.ts
+ * (runPrivateLoanReminderSchedulesSweep), which sends the private loan statement
+ * via whatsappService.sendPrivateLoanStatement with live accrued interest.
+ */
+model PrivateLoanReminderSchedule {
+  id     String      @id @default(cuid())
+  loanId String      @unique
+  loan   PrivateLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  enabled Boolean @default(true)
+
+  // Time of day, IST. hour 0-23, minute 0-59.
+  hour   Int @default(10)
+  minute Int @default(0)
+
+  // DAILY | WEEKLY | INTERVAL
+  frequency    String @default("DAILY")
+  // WEEKLY only - 0=Sun..6=Sat.
+  daysOfWeek   Int[]  @default([])
+  // INTERVAL only - fire every N days, counted from lastSentAt (or from
+  // creation, for the first send).
+  intervalDays Int?
+
+  // When the schedule stops firing on its own:
+  //  UNTIL_PAID   - disables itself the first time it finds nothing outstanding (or loan CLOSED)
   //  UNTIL_DATE   - disables itself once `endDate` (IST calendar day) has passed
   //  AFTER_COUNT  - disables itself once `sendsCount` reaches `maxSends`
   //  MANUAL       - never auto-stops; only a user can disable/delete it

@@ -13,7 +13,7 @@ import {
 } from '../schemas/privateLoan.schema.js';
 
 /** Outstanding principal of a loan = principal − Σ repayments. */
-function outstandingOf(loan: { principal: Prisma.Decimal; repayments: { amount: Prisma.Decimal }[] }): number {
+export function outstandingOf(loan: { principal: Prisma.Decimal; repayments: { amount: Prisma.Decimal }[] }): number {
   const repaid = loan.repayments.reduce((s, r) => s + Number(r.amount), 0);
   return Math.round((Number(loan.principal) - repaid) * 100) / 100;
 }
@@ -46,7 +46,10 @@ function formatRateLabel(annualRatePct: number, period: 'ANNUAL' | 'MONTHLY', la
 export async function listPrivateLoans(_req: Request, res: Response) {
   const loans = await prisma.privateLoan.findMany({
     orderBy: { startDate: 'asc' },
-    include: { repayments: { orderBy: { date: 'asc' } } },
+    include: {
+      repayments: { orderBy: { date: 'asc' } },
+      reminderSchedule: true,
+    },
   });
 
   const now = new Date();
@@ -239,10 +242,14 @@ export async function deletePrivateLoanRepayment(req: Request, res: Response) {
   res.json({ message: 'Repayment reversed' });
 }
 
-/** Send the borrower a WhatsApp statement of their outstanding loan + accrued interest. */
-export async function sendPrivateLoanStatement(req: Request, res: Response) {
+/**
+ * Core send helper for a private loan's WhatsApp statement. Shared by the manual
+ * button (sendPrivateLoanStatement) and the automated scheduler sweep
+ * (runPrivateLoanReminderSchedulesSweep in whatsappJobs.ts).
+ */
+export async function sendPrivateLoanStatementCore(loanId: string) {
   const loan = await prisma.privateLoan.findUnique({
-    where: { id: req.params.id },
+    where: { id: loanId },
     include: { repayments: true },
   });
   if (!loan) throw new HttpError(404, 'Loan not found');
@@ -268,5 +275,138 @@ export async function sendPrivateLoanStatement(req: Request, res: Response) {
     language: loan.waLanguage,
   });
   if (!result.ok) throw new HttpError(502, result.error ?? 'WhatsApp send failed');
-  res.json({ ok: true, outstanding, accruedInterestToDate });
+  return { ok: true, outstanding, accruedInterestToDate };
 }
+
+/** Send the borrower a WhatsApp statement of their outstanding loan + accrued interest. */
+export async function sendPrivateLoanStatement(req: Request, res: Response) {
+  const result = await sendPrivateLoanStatementCore(req.params.id);
+  res.json(result);
+}
+
+// --- Private Loan reminder schedule ("Schedule" option) ---------------------
+
+const REMINDER_FREQUENCIES = ['DAILY', 'WEEKLY', 'INTERVAL'] as const;
+const REMINDER_STOP_CONDITIONS = ['UNTIL_PAID', 'UNTIL_DATE', 'AFTER_COUNT', 'MANUAL'] as const;
+
+/** GET - the loan's current reminder schedule, or `null` if none set up. */
+export async function getPrivateLoanReminderSchedule(req: Request, res: Response) {
+  const schedule = await prisma.privateLoanReminderSchedule.findUnique({
+    where: { loanId: req.params.id },
+  });
+  res.json(schedule);
+}
+
+/**
+ * PUT - create or replace the loan's reminder schedule.
+ */
+export async function upsertPrivateLoanReminderSchedule(req: Request, res: Response) {
+  const loan = await prisma.privateLoan.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, borrowerName: true },
+  });
+  if (!loan) throw new HttpError(404, 'Loan not found');
+
+  const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as {
+    enabled?: unknown;
+    hour?: unknown;
+    minute?: unknown;
+    frequency?: unknown;
+    daysOfWeek?: unknown;
+    intervalDays?: unknown;
+    stopCondition?: unknown;
+    endDate?: unknown;
+    maxSends?: unknown;
+  };
+
+  const enabled = body.enabled !== false;
+  const hour = body.hour;
+  const minute = body.minute;
+  if (!Number.isInteger(hour) || (hour as number) < 0 || (hour as number) > 23) {
+    throw new HttpError(400, 'hour must be an integer 0-23');
+  }
+  if (!Number.isInteger(minute) || (minute as number) < 0 || (minute as number) > 59) {
+    throw new HttpError(400, 'minute must be an integer 0-59');
+  }
+
+  const frequency = body.frequency;
+  if (typeof frequency !== 'string' || !REMINDER_FREQUENCIES.includes(frequency as typeof REMINDER_FREQUENCIES[number])) {
+    throw new HttpError(400, `frequency must be one of ${REMINDER_FREQUENCIES.join(', ')}`);
+  }
+
+  let daysOfWeek: number[] = [];
+  if (frequency === 'WEEKLY') {
+    if (!Array.isArray(body.daysOfWeek) || !body.daysOfWeek.every((d) => Number.isInteger(d) && d >= 0 && d <= 6) || body.daysOfWeek.length === 0) {
+      throw new HttpError(400, 'daysOfWeek must be a non-empty array of integers 0-6 when frequency is WEEKLY');
+    }
+    daysOfWeek = [...new Set(body.daysOfWeek as number[])].sort((a, b) => a - b);
+  }
+
+  let intervalDays: number | null = null;
+  if (frequency === 'INTERVAL') {
+    if (!Number.isInteger(body.intervalDays) || (body.intervalDays as number) < 1 || (body.intervalDays as number) > 365) {
+      throw new HttpError(400, 'intervalDays must be an integer 1-365 when frequency is INTERVAL');
+    }
+    intervalDays = body.intervalDays as number;
+  }
+
+  const stopCondition = body.stopCondition;
+  if (typeof stopCondition !== 'string' || !REMINDER_STOP_CONDITIONS.includes(stopCondition as typeof REMINDER_STOP_CONDITIONS[number])) {
+    throw new HttpError(400, `stopCondition must be one of ${REMINDER_STOP_CONDITIONS.join(', ')}`);
+  }
+
+  let endDate: Date | null = null;
+  if (stopCondition === 'UNTIL_DATE') {
+    const parsed = typeof body.endDate === 'string' ? new Date(body.endDate) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) {
+      throw new HttpError(400, 'endDate must be a valid date when stopCondition is UNTIL_DATE');
+    }
+    endDate = parsed;
+  }
+
+  let maxSends: number | null = null;
+  if (stopCondition === 'AFTER_COUNT') {
+    if (!Number.isInteger(body.maxSends) || (body.maxSends as number) < 1) {
+      throw new HttpError(400, 'maxSends must be a positive integer when stopCondition is AFTER_COUNT');
+    }
+    maxSends = body.maxSends as number;
+  }
+
+  const schedule = await prisma.privateLoanReminderSchedule.upsert({
+    where: { loanId: loan.id },
+    create: {
+      loanId: loan.id,
+      enabled,
+      hour: hour as number,
+      minute: minute as number,
+      frequency,
+      daysOfWeek,
+      intervalDays,
+      stopCondition,
+      endDate,
+      maxSends,
+    },
+    update: {
+      enabled,
+      hour: hour as number,
+      minute: minute as number,
+      frequency,
+      daysOfWeek,
+      intervalDays,
+      stopCondition,
+      endDate,
+      maxSends,
+      stoppedReason: null,
+      sendsCount: 0,
+      lastSentKey: null,
+    },
+  });
+  res.json(schedule);
+}
+
+/** DELETE - remove the loan's reminder schedule entirely. */
+export async function deletePrivateLoanReminderSchedule(req: Request, res: Response) {
+  await prisma.privateLoanReminderSchedule.deleteMany({ where: { loanId: req.params.id } });
+  res.json({ ok: true });
+}
+

@@ -1,10 +1,10 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, ChevronRight, IndianRupee, Pencil } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, IndianRupee, Pencil, CalendarClock, Save, X, Loader2 } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
-import type { PrivateLoansResponse, PrivateLoan, WaLanguage, InterestPeriod } from '@/lib/types';
+import type { PrivateLoansResponse, PrivateLoan, PrivateLoanReminderSchedule, WaLanguage, InterestPeriod } from '@/lib/types';
 import { loanInterest, daysBetween } from '@/lib/calc';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,42 @@ import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const SCHEDULE_DOW_OPTIONS = [
+  { value: 0, label: 'Sun' },
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+];
+
+const STOP_CONDITION_LABEL: Record<PrivateLoanReminderSchedule['stopCondition'], string> = {
+  UNTIL_PAID: 'Until loan is fully repaid / closed',
+  UNTIL_DATE: 'Until a specific date',
+  AFTER_COUNT: 'After a fixed number of reminders',
+  MANUAL: 'Until manually turned off',
+};
+
+const STOPPED_REASON_LABEL: Record<NonNullable<PrivateLoanReminderSchedule['stoppedReason']>, string> = {
+  PAID: 'Auto-stopped: loan was fully repaid / closed',
+  DATE_REACHED: 'Auto-stopped: end date reached',
+  COUNT_REACHED: 'Auto-stopped: target reminder count reached',
+};
+
+function describeLoanSchedule(schedule: PrivateLoanReminderSchedule): string {
+  const time = `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')} IST`;
+  if (schedule.frequency === 'DAILY') return `${time}, daily`;
+  if (schedule.frequency === 'WEEKLY') {
+    const days = schedule.daysOfWeek.map((d) => SCHEDULE_DOW_OPTIONS.find((o) => o.value === d)?.label).filter(Boolean).join(', ');
+    return `${time}, every ${days || 'week'}`;
+  }
+  if (schedule.frequency === 'INTERVAL') {
+    return `${time}, every ${schedule.intervalDays ?? 1} day(s)`;
+  }
+  return time;
+}
 
 // Only the languages the statement template is actually drafted in - see
 // docs/whatsapp-private-loan-statement-template.md. Other WaLanguage values
@@ -68,6 +104,9 @@ export default function PrivateLoansPage() {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
+
+  // --- WhatsApp Reminder Schedule dialog -----------------------------------
+  const [scheduleLoan, setScheduleLoan] = useState<PrivateLoan | null>(null);
 
   // --- Add / Edit loan ---------------------------------------------------
   const [loanOpen, setLoanOpen] = useState(false);
@@ -369,6 +408,30 @@ export default function PrivateLoansPage() {
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={!loan.phone && !loan.phone2}
+                        title={
+                          !loan.phone && !loan.phone2
+                            ? 'No phone number on file for this loan'
+                            : loan.reminderSchedule?.enabled
+                              ? `WhatsApp schedule active (${describeLoanSchedule(loan.reminderSchedule)})`
+                              : 'Set WhatsApp reminder schedule'
+                        }
+                        onClick={() => setScheduleLoan(loan)}
+                        className={cn(
+                          'gap-1 relative',
+                          loan.reminderSchedule?.enabled
+                            ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <CalendarClock className="h-4 w-4 text-emerald-600" />
+                        {loan.reminderSchedule?.enabled && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
                         title="Edit loan"
                         onClick={() => openEdit(loan)}
                       >
@@ -402,6 +465,58 @@ export default function PrivateLoansPage() {
                   <ExpandPanel colSpan={10}>
                     {loan.notes && (
                       <div className="mb-2 text-sm text-muted-foreground">{loan.notes}</div>
+                    )}
+                    {loan.reminderSchedule && (
+                      <div className="mb-3 rounded-lg border bg-card/60 p-3 text-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                            <CalendarClock className="h-4 w-4" />
+                            <span>WhatsApp Schedule</span>
+                            <span
+                              className={cn(
+                                'rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                                loan.reminderSchedule.enabled
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-muted text-muted-foreground'
+                              )}
+                            >
+                              {loan.reminderSchedule.enabled ? 'Active' : 'Disabled'}
+                            </span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-xs text-primary hover:text-primary/80"
+                            onClick={() => setScheduleLoan(loan)}
+                          >
+                            Configure
+                          </Button>
+                        </div>
+                        <div className="text-muted-foreground">
+                          Schedule:{' '}
+                          <span className="font-medium text-foreground">
+                            {describeLoanSchedule(loan.reminderSchedule)}
+                          </span>
+                        </div>
+                        {loan.reminderSchedule.lastSentAt && (
+                          <div className="text-muted-foreground">
+                            Last sent:{' '}
+                            <span className="font-medium text-foreground">
+                              {new Date(loan.reminderSchedule.lastSentAt).toLocaleString('en-IN', {
+                                dateStyle: 'medium',
+                                timeStyle: 'short',
+                              })}
+                            </span>{' '}
+                            (Sent {loan.reminderSchedule.sendsCount} time
+                            {loan.reminderSchedule.sendsCount === 1 ? '' : 's'})
+                          </div>
+                        )}
+                        {loan.reminderSchedule.stoppedReason && (
+                          <div className="text-amber-700 dark:text-amber-400 font-medium pt-0.5">
+                            {STOPPED_REASON_LABEL[loan.reminderSchedule.stoppedReason]}
+                          </div>
+                        )}
+                      </div>
                     )}
                     <PanelLabel>Repayments · {loan.repayments.length}</PanelLabel>
                     {loan.repayments.length === 0 ? (
@@ -622,6 +737,305 @@ export default function PrivateLoansPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* WhatsApp schedule dialog */}
+      <PrivateLoanScheduleDialog
+        open={!!scheduleLoan}
+        onOpenChange={(o) => !o && setScheduleLoan(null)}
+        loan={scheduleLoan}
+      />
     </div>
+  );
+}
+
+/* =================================================== WhatsApp Schedule Dialog */
+
+function PrivateLoanScheduleDialog({
+  open,
+  onOpenChange,
+  loan,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  loan: PrivateLoan | null;
+}) {
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(true);
+  const [time, setTime] = useState('10:00');
+  const [frequency, setFrequency] = useState<PrivateLoanReminderSchedule['frequency']>('DAILY');
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1]);
+  const [intervalDays, setIntervalDays] = useState(3);
+  const [stopCondition, setStopCondition] = useState<PrivateLoanReminderSchedule['stopCondition']>('UNTIL_PAID');
+  const [endDate, setEndDate] = useState('');
+  const [maxSends, setMaxSends] = useState(5);
+
+  const schedule = loan?.reminderSchedule ?? null;
+
+  useEffect(() => {
+    if (!open || !loan) return;
+    if (loan.reminderSchedule) {
+      const s = loan.reminderSchedule;
+      setEnabled(s.enabled);
+      setTime(`${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`);
+      setFrequency(s.frequency);
+      setDaysOfWeek(s.daysOfWeek.length > 0 ? s.daysOfWeek : [1]);
+      setIntervalDays(s.intervalDays ?? 3);
+      setStopCondition(s.stopCondition);
+      setEndDate(s.endDate ? s.endDate.slice(0, 10) : '');
+      setMaxSends(s.maxSends ?? 5);
+    } else {
+      setEnabled(true);
+      setTime('10:00');
+      setFrequency('DAILY');
+      setDaysOfWeek([1]);
+      setIntervalDays(3);
+      setStopCondition('UNTIL_PAID');
+      setEndDate('');
+      setMaxSends(5);
+    }
+  }, [open, loan]);
+
+  const toggleDay = (d: number) =>
+    setDaysOfWeek((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
+
+  const valid =
+    (frequency !== 'WEEKLY' || daysOfWeek.length > 0) &&
+    (frequency !== 'INTERVAL' || (intervalDays >= 1 && intervalDays <= 365)) &&
+    (stopCondition !== 'UNTIL_DATE' || !!endDate) &&
+    (stopCondition !== 'AFTER_COUNT' || maxSends >= 1);
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      if (!loan) throw new Error('No loan selected');
+      const [hStr, mStr] = time.split(':');
+      return api<PrivateLoanReminderSchedule>(`/private-loans/${loan.id}/reminder-schedule`, {
+        method: 'PUT',
+        body: {
+          enabled,
+          hour: Number(hStr),
+          minute: Number(mStr),
+          frequency,
+          daysOfWeek: frequency === 'WEEKLY' ? daysOfWeek : [],
+          intervalDays: frequency === 'INTERVAL' ? intervalDays : undefined,
+          stopCondition,
+          endDate: stopCondition === 'UNTIL_DATE' ? endDate : undefined,
+          maxSends: stopCondition === 'AFTER_COUNT' ? maxSends : undefined,
+        },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['private-loans'] });
+      toast.success('WhatsApp reminder schedule saved');
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => {
+      if (!loan) throw new Error('No loan selected');
+      return api(`/private-loans/${loan.id}/reminder-schedule`, { method: 'DELETE' });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['private-loans'] });
+      toast.success('WhatsApp reminder schedule removed');
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const busy = saveMutation.isPending || deleteMutation.isPending;
+
+  if (!loan) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-emerald-600">
+            <CalendarClock className="h-5 w-5" />
+            WhatsApp Schedule · {loan.borrowerName}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="font-semibold">{loan.borrowerName}</span>
+              <span className="text-muted-foreground">{loan.phone || loan.phone2 || 'No phone'}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Automatically sends the WhatsApp loan statement (principal, accrued interest to date, and total payable) to the borrower on this schedule.
+            </p>
+          </div>
+
+          {schedule && (schedule.lastSentAt || schedule.stoppedReason) && (
+            <div className="rounded-lg border bg-card p-3 space-y-1 text-xs">
+              {schedule.lastSentAt && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Last sent</span>
+                  <span className="font-medium">
+                    {new Date(schedule.lastSentAt).toLocaleString('en-IN', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Reminders sent</span>
+                <span className="font-medium">{schedule.sendsCount}</span>
+              </div>
+              {schedule.stoppedReason && (
+                <p className="text-amber-700 dark:text-amber-400 pt-1 font-medium">
+                  {STOPPED_REASON_LABEL[schedule.stoppedReason]}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* enabled toggle */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Schedule active</Label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              onClick={() => setEnabled((v) => !v)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                enabled ? 'bg-green-600' : 'bg-muted-foreground/30'
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                  enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* time */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Time (IST)</Label>
+            <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-32" />
+          </div>
+
+          {/* frequency */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Frequency</Label>
+            <Select value={frequency} onValueChange={(v) => setFrequency(v as PrivateLoanReminderSchedule['frequency'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DAILY">Every day</SelectItem>
+                <SelectItem value="WEEKLY">On specific days of the week</SelectItem>
+                <SelectItem value="INTERVAL">Every N days</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {frequency === 'WEEKLY' && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {SCHEDULE_DOW_OPTIONS.map((d) => (
+                  <button
+                    key={d.value}
+                    type="button"
+                    onClick={() => toggleDay(d.value)}
+                    className={`rounded px-2 py-1 text-xs font-medium ${
+                      daysOfWeek.includes(d.value)
+                        ? 'bg-green-600 text-white'
+                        : 'bg-muted text-muted-foreground hover:bg-muted-foreground/20'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {frequency === 'WEEKLY' && daysOfWeek.length === 0 && (
+              <p className="text-xs text-rose-600 dark:text-rose-400">Pick at least one day.</p>
+            )}
+
+            {frequency === 'INTERVAL' && (
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-xs text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={intervalDays}
+                  onChange={(e) => setIntervalDays(Number(e.target.value))}
+                  className="h-8 w-20"
+                />
+                <span className="text-xs text-muted-foreground">day(s)</span>
+              </div>
+            )}
+          </div>
+
+          {/* stop condition */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Stop condition</Label>
+            <Select
+              value={stopCondition}
+              onValueChange={(v) => setStopCondition(v as PrivateLoanReminderSchedule['stopCondition'])}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(STOP_CONDITION_LABEL) as PrivateLoanReminderSchedule['stopCondition'][]).map((k) => (
+                  <SelectItem key={k} value={k}>{STOP_CONDITION_LABEL[k]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {stopCondition === 'UNTIL_DATE' && (
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-40" />
+            )}
+            {stopCondition === 'AFTER_COUNT' && (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={maxSends}
+                  onChange={(e) => setMaxSends(Number(e.target.value))}
+                  className="h-8 w-20"
+                />
+                <span className="text-xs text-muted-foreground">statement(s), then stop</span>
+              </div>
+            )}
+            {stopCondition === 'MANUAL' && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                This will keep sending indefinitely, even after the loan is repaid, until you switch it off.
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={busy || !valid}
+              className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Schedule
+            </Button>
+            {schedule && (
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  if (confirm(`Remove the WhatsApp reminder schedule for ${loan.borrowerName}?`)) {
+                    deleteMutation.mutate();
+                  }
+                }}
+                className="gap-1.5 border-rose-500/40 text-rose-700 dark:text-rose-400 hover:bg-rose-500/10"
+              >
+                {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
+              </Button>
+            )}
+            <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)} className="gap-1.5">
+              <X className="h-4 w-4" /> Cancel
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -291,6 +291,26 @@ export interface PrivateLoanRepayment {
   createdAt: string;
 }
 
+export interface PrivateLoanReminderSchedule {
+  id: string;
+  loanId: string;
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  frequency: 'DAILY' | 'WEEKLY' | 'INTERVAL';
+  daysOfWeek: number[];
+  intervalDays: number | null;
+  stopCondition: 'UNTIL_PAID' | 'UNTIL_DATE' | 'AFTER_COUNT' | 'MANUAL';
+  endDate: string | null;
+  maxSends: number | null;
+  sendsCount: number;
+  lastSentAt: string | null;
+  lastSentKey: string | null;
+  stoppedReason: 'PAID' | 'DATE_REACHED' | 'COUNT_REACHED' | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PrivateLoan {
   id: string;
   borrowerName: string;
@@ -306,6 +326,7 @@ export interface PrivateLoan {
   waLanguage: WaLanguage;
   createdAt: string;
   repayments: PrivateLoanRepayment[];
+  reminderSchedule?: PrivateLoanReminderSchedule | null;
   // Server-computed
   repaidAmount: number;
   interestReceived: number;

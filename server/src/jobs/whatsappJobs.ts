@@ -9,7 +9,8 @@ import { renderSalesDuesReportPdf } from '../lib/salesDuesPdf.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { runPartyPaymentReminderCore } from '../services/partyReminder.service.js';
-import type { PartyReminderSchedule } from '@prisma/client';
+import { sendPrivateLoanStatementCore, outstandingOf } from '../controllers/privateLoan.controller.js';
+import type { PartyReminderSchedule, PrivateLoanReminderSchedule } from '@prisma/client';
 
 /**
  * Scheduled WhatsApp jobs (use cases 8-12; buyer payment reminders, formerly
@@ -532,7 +533,17 @@ async function runCheckTemplates(): Promise<Record<string, unknown>> {
  * `lastSentAt` (or "never sent" → eligible today) against `intervalDays`, so
  * it self-corrects after any gap rather than drifting to a fixed weekday.
  */
-function scheduleDue(schedule: PartyReminderSchedule, now: Date, todayKey: string): boolean {
+interface SchedulableRow {
+  hour: number;
+  minute: number;
+  frequency: string;
+  daysOfWeek: number[];
+  intervalDays?: number | null;
+  lastSentAt?: Date | null;
+  lastSentKey?: string | null;
+}
+
+function scheduleDue(schedule: SchedulableRow, now: Date, todayKey: string): boolean {
   const ist = new Date(now.getTime() + IST_OFFSET_MS);
   const nowMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
   const targetMinutes = schedule.hour * 60 + schedule.minute;
@@ -629,6 +640,81 @@ export async function runPartyReminderSchedulesSweep(): Promise<Record<string, u
   return { checked: schedules.length, fired, stopped, skipped, errors };
 }
 
+/**
+ * Sweep every enabled `PrivateLoanReminderSchedule` and fire the ones due.
+ * Sends the WhatsApp loan statement with current outstanding & accrued interest.
+ */
+export async function runPrivateLoanReminderSchedulesSweep(): Promise<Record<string, unknown>> {
+  const now = new Date();
+  const todayKey = istDayKey(now);
+  const schedules = await prisma.privateLoanReminderSchedule.findMany({
+    where: { enabled: true },
+    include: { loan: { include: { repayments: true } } },
+  });
+
+  let fired = 0;
+  let stopped = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const schedule of schedules) {
+    if (!scheduleDue(schedule, now, todayKey)) continue;
+
+    if (schedule.stopCondition === 'UNTIL_DATE' && schedule.endDate && istDayKey(schedule.endDate) < todayKey) {
+      await prisma.privateLoanReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'DATE_REACHED' } });
+      stopped += 1;
+      continue;
+    }
+    if (schedule.stopCondition === 'AFTER_COUNT' && schedule.maxSends != null && schedule.sendsCount >= schedule.maxSends) {
+      await prisma.privateLoanReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'COUNT_REACHED' } });
+      stopped += 1;
+      continue;
+    }
+
+    const loan = schedule.loan;
+    const outstanding = outstandingOf(loan);
+    if (loan.status === 'CLOSED' || outstanding <= 0.01) {
+      if (schedule.stopCondition === 'UNTIL_PAID') {
+        await prisma.privateLoanReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'PAID' } });
+        stopped += 1;
+      } else if (schedule.frequency !== 'INTERVAL') {
+        await prisma.privateLoanReminderSchedule.update({ where: { id: schedule.id }, data: { lastSentKey: todayKey } });
+        skipped += 1;
+      } else {
+        skipped += 1;
+      }
+      continue;
+    }
+
+    if (!loan.phone && !loan.phone2) {
+      errors.push(`${loan.borrowerName}: No phone number on file`);
+      continue;
+    }
+
+    try {
+      await sendPrivateLoanStatementCore(loan.id);
+      fired += 1;
+      const sendsCount = schedule.sendsCount + 1;
+      const data: { lastSentAt: Date; lastSentKey: string; sendsCount: number; enabled?: boolean; stoppedReason?: string } = {
+        lastSentAt: now,
+        lastSentKey: todayKey,
+        sendsCount,
+      };
+      if (schedule.stopCondition === 'AFTER_COUNT' && schedule.maxSends != null && sendsCount >= schedule.maxSends) {
+        data.enabled = false;
+        data.stoppedReason = 'COUNT_REACHED';
+      }
+      await prisma.privateLoanReminderSchedule.update({ where: { id: schedule.id }, data });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`${loan.borrowerName}: ${msg}`);
+      logger.error(`[whatsapp-cron] private loan reminder schedule ${schedule.id} (${loan.borrowerName}) failed`, e);
+    }
+  }
+
+  return { checked: schedules.length, fired, stopped, skipped, errors };
+}
+
 /** Map a job name (from the manual endpoint) to its runner. */
 export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<string, unknown>>> = {
   daily: runDailyJobs,
@@ -638,6 +724,7 @@ export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<stri
   'business-snapshot': runBusinessSnapshotJob,
   'dues-digest': runDuesDigestJob,
   'party-reminder-sweep': runPartyReminderSchedulesSweep,
+  'private-loan-reminder-sweep': runPrivateLoanReminderSchedulesSweep,
   'check-driver-template': runCheckDriverTemplate,
   'check-templates': runCheckTemplates,
 };
@@ -804,9 +891,12 @@ export async function registerWhatsappCron() {
     const cronExpr = (profile[job.cronField] as string | null) || job.defaultCron;
     scheduleJob(job, cronExpr);
   }
-  // Party Ledger "Schedule" option - per-party payment reminders. One shared
-  // sweep rather than a timer per party: schedules are user-created/edited/
+  // Party Ledger & Private Loans "Schedule" options - per-entity recurring reminders.
+  // Shared sweeps rather than a timer per entity: schedules are user-created/edited/
   // deleted at runtime, unlike the 5 fixed owner digests above.
-  cron.schedule('*/10 * * * *', () => { void runPartyReminderSchedulesSweep(); }, { timezone: TZ });
-  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST) + party reminder sweep (every 10 min)');
+  cron.schedule('*/10 * * * *', () => {
+    void runPartyReminderSchedulesSweep();
+    void runPrivateLoanReminderSchedulesSweep();
+  }, { timezone: TZ });
+  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST) + party & private loan reminder sweeps (every 10 min)');
 }

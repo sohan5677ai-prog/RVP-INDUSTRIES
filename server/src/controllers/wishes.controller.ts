@@ -5,6 +5,7 @@ import { HttpError } from '../lib/httpError.js';
 import { generateWishMessage, generateWishImage } from '../lib/gemini.js';
 import { uploadBufferToStorage } from '../lib/upload.js';
 import * as whatsappService from '../services/whatsapp.service.js';
+import { parseCompanyVehicles } from '../lib/calc.js';
 import {
   createDriverSchema,
   updateDriverSchema,
@@ -101,12 +102,23 @@ export async function resolveWishRecipients(opts: {
   }
 
   if (opts.includeDrivers) {
-    const drivers = await prisma.knmDriver.findMany({
-      where: { active: true, ...(opts.category ? { religion: opts.category } : {}) },
+    const company = await prisma.companyProfile.findFirst({
+      select: { companyVehicles: true },
     });
-    for (const d of drivers) {
-      const phone = d.phone?.trim();
-      if (phone) recipients.push({ group: 'DRIVER', id: d.id, name: d.name, phone, waLanguage: 'EN' });
+    const vehicles = parseCompanyVehicles(company?.companyVehicles);
+    const seenPhones = new Set<string>();
+    for (const v of vehicles) {
+      const phone = v.driverPhone?.trim();
+      if (!phone || seenPhones.has(phone)) continue;
+      if (opts.category && v.religion !== opts.category) continue;
+      seenPhones.add(phone);
+      recipients.push({
+        group: 'DRIVER',
+        id: v.number || phone,
+        name: v.driverName || 'Driver',
+        phone,
+        waLanguage: 'EN',
+      });
     }
   }
 

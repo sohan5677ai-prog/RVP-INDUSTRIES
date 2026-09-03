@@ -4,12 +4,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal, Bell, Send, Pencil, X } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, HamaliRate } from '@/lib/types';
+import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, HamaliRate, WishCategory } from '@/lib/types';
+import { WISH_CATEGORY_LABELS } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PageHeader } from '@/components/PageHeader';
 import { useAuth } from '@/lib/auth';
 import Subscription from '@/pages/Subscription';
@@ -314,7 +316,9 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
  * keystroke would eat the space in "Ravi Kumar" the moment it is typed. The
  * readers trim instead.
  */
-interface VehicleRow { number: string; driverName: string; driverPhone: string }
+interface VehicleRow { number: string; driverName: string; driverPhone: string; religion: WishCategory | 'NONE' }
+
+const VALID_RELIGIONS = new Set<string>(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER']);
 
 function toVehicleRows(raw: string | null | undefined): VehicleRow[] {
   const text = raw ?? '';
@@ -324,19 +328,30 @@ function toVehicleRows(raw: string | null | undefined): VehicleRow[] {
       // Legacy: a bare number, or (older still) a comma-separated list of them.
       // Blank lines survive as one empty row so "Add Vehicle" has something to fill.
       const parts = line.split(',');
-      if (parts.length > 1) return parts.map((n) => ({ number: n, driverName: '', driverPhone: '' }));
-      return [{ number: line, driverName: '', driverPhone: '' }];
+      if (parts.length > 1) return parts.map((n) => ({ number: n, driverName: '', driverPhone: '', religion: 'NONE' as const }));
+      return [{ number: line, driverName: '', driverPhone: '', religion: 'NONE' as const }];
     }
-    const [number = '', driverName = '', driverPhone = ''] = line.split('|');
-    return [{ number, driverName, driverPhone }];
+    const [number = '', driverName = '', driverPhone = '', religionRaw = ''] = line.split('|');
+    const trimmedRel = religionRaw.trim().toUpperCase();
+    const religion = VALID_RELIGIONS.has(trimmedRel) ? (trimmedRel as WishCategory) : 'NONE';
+    return [{ number, driverName, driverPhone, religion }];
   });
 }
 
 function fromVehicleRows(rows: VehicleRow[]): string {
   return rows
-    // Drop the trailing separators when there is no driver on the row, so a
+    // Drop the trailing separators when there is no driver/community on the row, so a
     // number-only list stays as readable as it was before this feature.
-    .map((r) => (r.driverName || r.driverPhone ? `${r.number}|${r.driverName}|${r.driverPhone}` : r.number))
+    .map((r) => {
+      const rel = r.religion && r.religion !== 'NONE' ? r.religion : '';
+      if (rel) {
+        return `${r.number}|${r.driverName}|${r.driverPhone}|${rel}`;
+      }
+      if (r.driverName || r.driverPhone) {
+        return `${r.number}|${r.driverName}|${r.driverPhone}`;
+      }
+      return r.number;
+    })
     .join('\n');
 }
 
@@ -359,22 +374,23 @@ function KnmVehiclesEditor({ value, onChange }: { value?: string | null; onChang
           variant="outline"
           size="sm"
           className="h-6 px-2 text-xs"
-          onClick={() => onChange(fromVehicleRows([...rows, { number: '', driverName: '', driverPhone: '' }]))}
+          onClick={() => onChange(fromVehicleRows([...rows, { number: '', driverName: '', driverPhone: '', religion: 'NONE' }]))}
         >
           <Plus className="mr-1 h-3 w-3" /> Add Vehicle
         </Button>
       </div>
       {rows.length > 0 && (
-        <div className="grid grid-cols-[1fr_1fr_1fr_2rem] gap-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="grid grid-cols-[1fr_1fr_1fr_130px_2rem] gap-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>Vehicle No.</span>
           <span>Driver Name</span>
           <span>Driver Phone</span>
+          <span>Community</span>
           <span />
         </div>
       )}
       <div className="space-y-2">
         {rows.map((r, idx) => (
-          <div key={idx} className="grid grid-cols-[1fr_1fr_1fr_2rem] items-center gap-2">
+          <div key={idx} className="grid grid-cols-[1fr_1fr_1fr_130px_2rem] items-center gap-2">
             <Input
               value={r.number}
               onChange={(e) => update(idx, { number: cleanCell(e.target.value) })}
@@ -394,6 +410,22 @@ function KnmVehiclesEditor({ value, onChange }: { value?: string | null; onChang
               inputMode="tel"
               className="h-8 text-sm"
             />
+            <Select
+              value={r.religion}
+              onValueChange={(v) => update(idx, { religion: v as WishCategory | 'NONE' })}
+            >
+              <SelectTrigger size="sm" className="h-8 text-xs">
+                <SelectValue placeholder="Community" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NONE">Not tagged</SelectItem>
+                {(Object.keys(WISH_CATEGORY_LABELS) as WishCategory[]).map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {WISH_CATEGORY_LABELS[c]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               type="button"
               variant="ghost"
@@ -408,7 +440,7 @@ function KnmVehiclesEditor({ value, onChange }: { value?: string | null; onChang
       </div>
       <p className="text-[10px] text-muted-foreground">
         List vehicle numbers. These will automatically have ₹0 kata fee and ₹0 lorry-share hamali (100% borne by company).
-        The driver name &amp; phone are optional and pre-fill themselves when the lorry is entered on a sale dispatch.
+        The driver name &amp; phone are optional and pre-fill themselves when the lorry is entered on a sale dispatch, and community is used for festival greetings under Wishes.
       </p>
     </div>
   );

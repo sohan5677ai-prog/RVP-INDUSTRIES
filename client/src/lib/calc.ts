@@ -129,32 +129,45 @@ export function crossVerify(
   return { reference, diff: Math.max(0, diff), exempt, finalWeight };
 }
 
+export type WishCategory = 'HINDU' | 'MUSLIM' | 'CHRISTIAN' | 'OTHER';
+
 /** One row of the KNM vehicle directory held in CompanyProfile.companyVehicles. */
 export interface CompanyVehicle {
   number: string;
   driverName: string;
   driverPhone: string;
+  religion?: WishCategory | null;
 }
 
 /**
  * Parse the KNM vehicle directory: one vehicle per line, fields pipe-separated
- * as `AP39UX9105|Ravi|9876543210`. Rows saved before the driver columns existed
+ * as `AP39UX9105|Ravi|9876543210|HINDU`. Rows saved before the driver/community columns existed
  * are plain numbers (historically a comma-separated list was also accepted), so
  * a line with no pipe still parses as number-only vehicles with no driver.
  */
 export function parseCompanyVehicles(companyVehiclesList: string | null | undefined): CompanyVehicle[] {
   if (!companyVehiclesList) return [];
   const out: CompanyVehicle[] = [];
+  const validReligions = new Set<string>(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER']);
   for (const line of companyVehiclesList.split('\n')) {
     if (!line.includes('|')) {
       for (const n of line.split(',')) {
         const number = n.trim();
-        if (number) out.push({ number, driverName: '', driverPhone: '' });
+        if (number) out.push({ number, driverName: '', driverPhone: '', religion: null });
       }
       continue;
     }
-    const [number = '', driverName = '', driverPhone = ''] = line.split('|');
-    if (number.trim()) out.push({ number: number.trim(), driverName: driverName.trim(), driverPhone: driverPhone.trim() });
+    const [number = '', driverName = '', driverPhone = '', religionRaw = ''] = line.split('|');
+    const trimmedRel = religionRaw.trim().toUpperCase();
+    const religion = validReligions.has(trimmedRel) ? (trimmedRel as WishCategory) : null;
+    if (number.trim()) {
+      out.push({
+        number: number.trim(),
+        driverName: driverName.trim(),
+        driverPhone: driverPhone.trim(),
+        religion,
+      });
+    }
   }
   return out;
 }

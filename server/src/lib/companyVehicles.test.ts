@@ -13,8 +13,8 @@ import {
 describe('company vehicle directory', () => {
   it('reads rows saved before the driver columns existed', () => {
     expect(parseCompanyVehicles('AP39UX9105\nTN28BF7423')).toEqual([
-      { number: 'AP39UX9105', driverName: '', driverPhone: '' },
-      { number: 'TN28BF7423', driverName: '', driverPhone: '' },
+      { number: 'AP39UX9105', driverName: '', driverPhone: '', religion: null },
+      { number: 'TN28BF7423', driverName: '', driverPhone: '', religion: null },
     ]);
   });
 
@@ -24,13 +24,20 @@ describe('company vehicle directory', () => {
 
   it('reads number, driver name and phone off a row', () => {
     expect(parseCompanyVehicles('AP39UX9105|Ravi Kumar|9876543210')).toEqual([
-      { number: 'AP39UX9105', driverName: 'Ravi Kumar', driverPhone: '9876543210' },
+      { number: 'AP39UX9105', driverName: 'Ravi Kumar', driverPhone: '9876543210', religion: null },
+    ]);
+  });
+
+  it('reads number, driver name, phone, and community tag', () => {
+    expect(parseCompanyVehicles('AP39UX9105|Nagaraja|8919412955|HINDU\nAP39UX9108|Vijay|9182405899|MUSLIM')).toEqual([
+      { number: 'AP39UX9105', driverName: 'Nagaraja', driverPhone: '8919412955', religion: 'HINDU' },
+      { number: 'AP39UX9108', driverName: 'Vijay', driverPhone: '9182405899', religion: 'MUSLIM' },
     ]);
   });
 
   it('reads a phone recorded without a name', () => {
     expect(parseCompanyVehicles('AP39UX9105||9876543210')).toEqual([
-      { number: 'AP39UX9105', driverName: '', driverPhone: '9876543210' },
+      { number: 'AP39UX9105', driverName: '', driverPhone: '9876543210', religion: null },
     ]);
   });
 

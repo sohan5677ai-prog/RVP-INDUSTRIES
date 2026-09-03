@@ -11,7 +11,6 @@ import {
   Trash2,
   Tags,
   History,
-  Truck,
   AlertCircle,
   Phone,
   PhoneOff,
@@ -22,7 +21,6 @@ import {
 import { api, getErrorMessage } from '@/lib/api';
 import type {
   Party,
-  KnmDriver,
   WishRecipientPreview,
   WishBroadcast,
   WishCategory,
@@ -77,7 +75,6 @@ export default function Wishes() {
     <div className="space-y-4">
       <WishComposer onFilterMissingPhones={handleFilterMissingPhones} />
       <WishHistorySection />
-      <DriverDirectorySection />
       <div ref={partySectionRef} id="party-tagging-section">
         <PartyReligionTaggingSection
           phoneFilter={phoneFilter}
@@ -440,212 +437,7 @@ function WishHistorySection() {
   );
 }
 
-// --- KNM Driver directory --------------------------------------------------------
 
-interface DriverRow {
-  id?: string;
-  name: string;
-  phone: string;
-  religion: WishCategory | 'NONE';
-  active: boolean;
-}
-
-const blankDriverRow: DriverRow = { name: '', phone: '', religion: 'NONE', active: true };
-
-function DriverDirectorySection() {
-  const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
-    queryKey: ['knm-drivers'],
-    queryFn: () => api<KnmDriver[]>('/wishes/drivers'),
-  });
-
-  const [rows, setRows] = useState<DriverRow[]>([]);
-  const [newRow, setNewRow] = useState<DriverRow>(blankDriverRow);
-  useEffect(() => {
-    if (data)
-      setRows(
-        data.map((d) => ({
-          id: d.id,
-          name: d.name,
-          phone: d.phone,
-          religion: d.religion ?? 'NONE',
-          active: d.active,
-        }))
-      );
-  }, [data]);
-
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['knm-drivers'] });
-    qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
-  };
-
-  const create = useMutation({
-    mutationFn: (row: DriverRow) =>
-      api<KnmDriver>('/wishes/drivers', {
-        method: 'POST',
-        body: {
-          name: row.name.trim(),
-          phone: row.phone.trim(),
-          religion: row.religion === 'NONE' ? null : row.religion,
-        },
-      }),
-    onSuccess: () => {
-      invalidate();
-      setNewRow(blankDriverRow);
-      toast.success('Driver added');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-  const update = useMutation({
-    mutationFn: (row: DriverRow) =>
-      api<KnmDriver>(`/wishes/drivers/${row.id}`, {
-        method: 'PUT',
-        body: {
-          name: row.name.trim(),
-          phone: row.phone.trim(),
-          religion: row.religion === 'NONE' ? null : row.religion,
-          active: row.active,
-        },
-      }),
-    onSuccess: () => {
-      invalidate();
-      toast.success('Driver saved');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => api(`/wishes/drivers/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      invalidate();
-      toast.success('Driver removed');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  const setRow = (i: number, patch: Partial<DriverRow>) =>
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-2">
-        <Truck className="h-5 w-5 text-blue-500" />
-        <CardTitle className="text-base">KNM Driver Directory</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Maintained here so Wishes has a reliable driver contact list - dispatches elsewhere in the
-          app still use free-text driver name/phone.
-        </p>
-
-        <div className="grid grid-cols-[1fr_1fr_160px_80px] items-end gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Name</Label>
-            <Input
-              value={newRow.name}
-              onChange={(e) => setNewRow((p) => ({ ...p, name: e.target.value }))}
-              placeholder="Driver name"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Phone</Label>
-            <Input
-              value={newRow.phone}
-              onChange={(e) => setNewRow((p) => ({ ...p, phone: e.target.value }))}
-              placeholder="9876543210"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Community</Label>
-            <ReligionSelect
-              value={newRow.religion}
-              onChange={(v) => setNewRow((p) => ({ ...p, religion: v }))}
-            />
-          </div>
-          <Button
-            size="sm"
-            disabled={!newRow.name.trim() || !newRow.phone.trim() || create.isPending}
-            onClick={() => create.mutate(newRow)}
-          >
-            <Plus className="h-4 w-4" /> Add
-          </Button>
-        </div>
-
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No drivers yet - add one above.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Community</TableHead>
-                <TableHead>Active</TableHead>
-                <TableHead className="w-24" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r, i) => (
-                <TableRow key={r.id}>
-                  <TableCell>
-                    <Input value={r.name} onChange={(e) => setRow(i, { name: e.target.value })} />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      value={r.phone}
-                      onChange={(e) => setRow(i, { phone: e.target.value })}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <ReligionSelect
-                      value={r.religion}
-                      onChange={(v) => setRow(i, { religion: v })}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => setRow(i, { active: !r.active })}
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        r.active
-                          ? 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {r.active ? 'Active' : 'Inactive'}
-                    </button>
-                  </TableCell>
-                  <TableCell className="flex items-center gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => update.mutate(r)}
-                      disabled={update.isPending}
-                      title="Save"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => {
-                        if (r.id && confirm(`Remove driver ${r.name}?`)) remove.mutate(r.id);
-                      }}
-                      title="Delete"
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 function ReligionSelect({
   value,

@@ -28,6 +28,7 @@ export interface InvoicePdfData {
   invoiceDate: Date;
   poNumber?: string | null;
   poDate?: Date | null;
+  otherReferences?: string | null;
   destination?: string | null;
   vehicleNumber?: string | null;
   line: { description: string; hsn: string; quantityKg: number; ratePerKg: number };
@@ -288,7 +289,7 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 
     const pairs: [string, string, string, string, boolean?][] = [
       ['Delivery Note', '', 'Mode/Terms of Payment', ''],
-      ['Reference No. & Date.', '', 'Other References', ''],
+      ['Reference No. & Date.', '', 'Other References', data.otherReferences ?? '', true],
       ["Buyer's Order No.", data.poNumber ?? '', 'Dated', data.poDate ? fmtDate(data.poDate) : ''],
       ['Dispatch Doc No.', '', 'Delivery Note Date', ''],
       ['Dispatched through', 'Road', 'Destination', data.destination ?? '', true],

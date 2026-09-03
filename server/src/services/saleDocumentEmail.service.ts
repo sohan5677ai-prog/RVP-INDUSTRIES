@@ -15,7 +15,7 @@ import { resolveProductHsn } from '../lib/calc.js';
 export async function buildInvoicePdfData(dispatchId: string) {
   const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: dispatchId },
-    include: { saleOrder: { include: { buyer: true } } },
+    include: { saleOrder: { include: { buyer: true, broker: true } } },
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
   if (!dispatch.invoiceNumber || !dispatch.invoiceDate) {
@@ -71,6 +71,7 @@ export async function buildInvoicePdfData(dispatchId: string) {
     invoiceDate: dispatch.invoiceDate,
     poNumber: order.poNumber,
     poDate: order.poDate,
+    otherReferences: order.broker?.name ?? null,
     destination: order.destination,
     vehicleNumber: dispatch.vehicleNumber,
     line: {

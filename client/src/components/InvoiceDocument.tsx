@@ -239,7 +239,7 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
             <MetaCell colSpan={2} label="Dated" value={shownDate} isBold />
           </tr>
           <tr><MetaCell colSpan={2} label="Delivery Note" value="" /><MetaCell colSpan={2} label="Mode/Terms of Payment" value="" /></tr>
-          <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell colSpan={2} label="Other References" value="" /></tr>
+          <tr><MetaCell colSpan={2} label="Reference No. & Date." value="" /><MetaCell colSpan={2} label="Other References" value={order.broker?.name || ''} isBold /></tr>
           <tr><MetaCell colSpan={2} label="Buyer's Order No." value={order.poNumber ?? ''} isBold /><MetaCell colSpan={2} label="Dated" value={order.poDate ? fmtDate(new Date(order.poDate)) : ''} isBold /></tr>
           <tr><MetaCell colSpan={2} label="Dispatch Doc No." value="" /><MetaCell colSpan={2} label="Delivery Note Date" value="" /></tr>
           <tr><MetaCell colSpan={2} label="Dispatched through" value="Road" isBold /><MetaCell colSpan={2} label="Destination" value={order.destination || buyerState || ''} isBold /></tr>

@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee, SlidersHorizontal, Plus, Trash2, RotateCcw, Sparkles } from 'lucide-react';
+import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee, SlidersHorizontal, Plus, Trash2, RotateCcw } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -1368,6 +1368,7 @@ export default function FreightDuesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const initialMainTab = tabParam === 'transport' || tabParam === 'lorries' ? tabParam : 'dues';
+  const [mainTab, setMainTab] = useState(initialMainTab);
   const qc = useQueryClient();
   const [tab, setTab] = useState('outward');
 
@@ -1644,7 +1645,7 @@ export default function FreightDuesPage() {
     }
 
     for (const [lorry, lorryRows] of rowsByLorry.entries()) {
-      lorryRows.sort((a, b) => new Date(a.date).getTime() - new Date(a.date).getTime());
+      lorryRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       let remainingPaid = floatingByLorry.get(lorry) ?? 0;
 
       for (const r of lorryRows) {

@@ -42,7 +42,13 @@ export interface InvoiceDue {
    *  the owner "due today" digest spans every buyer, unlike the per-buyer lists
    *  below that already have their buyer/broker in scope. */
   brokerName: string | null;
+  brokerPhone?: string | null;
+  brokerWaLanguage?: WaLanguage | null;
+  buyerId: string;
   buyerName: string;
+  buyerPhone?: string | null;
+  buyerPhone2?: string | null;
+  buyerWaLanguage?: WaLanguage | null;
   /** Full billed value (base + GST), whole rupees - lets a caller show "partially paid" vs the outstanding balance. */
   billAmount: number;
   billDate: Date;
@@ -182,7 +188,13 @@ export async function computeBuyerDues(
       inTransit,
       brokerId: broker?.id ?? null,
       brokerName: broker?.name ?? null,
+      brokerPhone: broker?.phone ?? null,
+      brokerWaLanguage: broker?.waLanguage ?? null,
+      buyerId: buyer.id,
       buyerName: buyer.name,
+      buyerPhone: buyer.phone ?? null,
+      buyerPhone2: buyer.phone2 ?? null,
+      buyerWaLanguage: buyer.waLanguage ?? null,
       billAmount: invoiceValue,
       billDate: d.dispatchDate,
       product: order.product,

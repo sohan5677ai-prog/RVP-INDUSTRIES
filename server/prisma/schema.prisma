@@ -1075,6 +1075,11 @@ model CompanyProfile {
   ownerWeeklySummaryCron    String @default("0 8 * * 1")
   ownerDispatchReminderCron String @default("0 9 * * *")
 
+  // --- Party & Broker "Dues on this Day" payment reminders (Settings -> Dues on this Day) ---
+  partyDueTodayReminderEnabled Boolean @default(true) // auto-send payment reminders on due date
+  partyDueTodayReminderCron    String  @default("0 9 * * *") // 09:00 IST daily
+  partyDueTodayReminderTarget  String  @default("BOTH") // 'PARTY' | 'BROKER' | 'BOTH'
+
   // TaxPro GSP configuration
   taxproGspId     String?
   taxproGspSecret String?

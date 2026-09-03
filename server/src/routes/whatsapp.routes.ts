@@ -21,6 +21,10 @@ import {
   restoreTransportConfirmation,
   sendDispatchWhatsApp,
   resendDriverWhatsApp,
+  getDuesOnDate,
+  sendDueOnDateSingle,
+  sendDuesOnDateBulk,
+  updatePartyDueTodaySchedule,
 } from '../controllers/whatsapp.controller.js';
 
 const router = Router();
@@ -34,6 +38,12 @@ const canRunOwnerJobs = requireRole('ADMIN', 'OWNER', 'DEVELOPER');
 router.get('/whatsapp/owner-jobs', asyncHandler(listOwnerWhatsAppJobs));
 router.post('/whatsapp/owner-jobs/:job/run', canRunOwnerJobs, asyncHandler(runOwnerWhatsAppJobNow));
 router.put('/whatsapp/owner-jobs/:job/schedule', canRunOwnerJobs, asyncHandler(updateOwnerWhatsAppJobSchedule));
+
+// Party & Broker "Dues on this Day" payment reminders (Settings -> Dues on this Day)
+router.get('/whatsapp/dues-on-date', asyncHandler(getDuesOnDate));
+router.post('/whatsapp/dues-on-date/send-single', asyncHandler(sendDueOnDateSingle));
+router.post('/whatsapp/dues-on-date/send-bulk', asyncHandler(sendDuesOnDateBulk));
+router.put('/whatsapp/dues-on-date/schedule', canRunOwnerJobs, asyncHandler(updatePartyDueTodaySchedule));
 
 // Pending-loads reminder to a supplier (Party Ledger button). Throttled server-side.
 router.post('/whatsapp/parties/:partyId/reminder', asyncHandler(sendPartyReminder));

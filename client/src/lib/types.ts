@@ -699,6 +699,9 @@ export interface CompanyProfile {
   ownerBusinessSnapshotEnabled?: boolean;
   ownerWeeklySummaryEnabled?: boolean;
   ownerDispatchReminderEnabled?: boolean;
+  partyDueTodayReminderEnabled?: boolean;
+  partyDueTodayReminderCron?: string;
+  partyDueTodayReminderTarget?: 'PARTY' | 'BROKER' | 'BOTH';
   freightRetentionPerTrip?: string | number;
   // How far under the booked tonnage a final lorry may land and still close the
   // sale order (% of ordered weight). Pappu is bagged and lands close; husk and
@@ -1262,4 +1265,52 @@ export interface UserNote {
   createdAt: string;
   updatedAt: string;
 }
+
+// --- Dues on this Day (Party & Broker Payment Reminders) -------------------
+
+export interface DueOnDateInvoice {
+  dispatchId: string;
+  invoiceNumber: string;
+  buyerId: string;
+  buyerName: string;
+  buyerPhone: string | null;
+  buyerPhone2?: string | null;
+  buyerWaLanguage?: WaLanguage;
+  brokerId: string | null;
+  brokerName: string | null;
+  brokerPhone: string | null;
+  brokerWaLanguage?: WaLanguage;
+  product: SaleProduct;
+  vehicleNumber: string | null;
+  billAmount: number;
+  outstanding: number;
+  dueDate: string;
+  billDate: string;
+  overdue: boolean;
+  inTransit: boolean;
+  dueDays: number;
+  partiallyPaid: boolean;
+  lastSentAt: string | null;
+  lastSentStatus: string | null;
+}
+
+export interface DuesOnDateResponse {
+  date: string;
+  invoices: DueOnDateInvoice[];
+  stats: {
+    totalInvoices: number;
+    totalAmount: number;
+    buyersCount: number;
+    brokersCount: number;
+    sentTodayCount: number;
+  };
+  schedule: {
+    enabled: boolean;
+    cron: string;
+    schedule: string;
+    target: 'PARTY' | 'BROKER' | 'BOTH';
+    lastSentAt: string | null;
+  };
+}
+
 

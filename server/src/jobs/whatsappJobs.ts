@@ -169,6 +169,80 @@ async function runOwnerDueTodayDigest(opts: JobOpts = {}): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Party & Broker "Dues on this Day" Payment Reminders
+// Messages the party and/or broker on the day their bills are due using the
+// approved PAYMENT_REMINDER template.
+// ---------------------------------------------------------------------------
+export async function runPartyDueTodayReminders(opts: JobOpts = {}): Promise<string> {
+  const profile = await getCompanyProfileRow();
+  if (!opts.force && !profile.partyDueTodayReminderEnabled) return 'disabled in Settings';
+  const dayKey = istDayKey();
+  if (!opts.force && (await whatsappService.lastSentAt('PARTY_DUE_TODAY_REMINDERS_SWEEP', dayKey))) {
+    return `already sent for ${dayKey}`;
+  }
+
+  const portfolio = await computeBuyerDues();
+  if (portfolio.dueToday.length === 0) return `no bills due today (${dayKey}) - nothing sent`;
+
+  // Group dueToday invoices by buyerId
+  const byBuyer = new Map<string, { buyerId: string; dispatchIds: string[] }>();
+  for (const inv of portfolio.dueToday) {
+    let entry = byBuyer.get(inv.buyerId);
+    if (!entry) {
+      entry = { buyerId: inv.buyerId, dispatchIds: [] };
+      byBuyer.set(inv.buyerId, entry);
+    }
+    entry.dispatchIds.push(inv.dispatchId);
+  }
+
+  const target = (profile.partyDueTodayReminderTarget || 'BOTH') as 'PARTY' | 'BROKER' | 'BOTH';
+  let totalSent = 0;
+  let totalFailed = 0;
+  const errors: string[] = [];
+
+  for (const { buyerId, dispatchIds } of byBuyer.values()) {
+    try {
+      const res = await runPartyPaymentReminderCore(buyerId, {
+        target,
+        dispatchIds,
+      });
+      totalSent += res.sent.length;
+      totalFailed += res.failed.length;
+      if (res.failed.length > 0) {
+        errors.push(`${buyerId}: ${res.failed.map((f) => `${f.recipient} (${f.error})`).join(', ')}`);
+      }
+    } catch (err) {
+      totalFailed += 1;
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${buyerId}: ${msg}`);
+      logger.error(`[whatsapp-cron] party due today reminder failed for buyer ${buyerId}`, err);
+    }
+  }
+
+  // Record that the automated sweep ran today
+  if (!opts.force) {
+    try {
+      await prisma.whatsAppLog.create({
+        data: {
+          direction: 'OUTBOUND',
+          template: 'PAYMENT_REMINDER',
+          language: 'EN',
+          body: `Party & Broker Due Today automated sweep: ${totalSent} sent, ${totalFailed} failed across ${byBuyer.size} buyers`,
+          relatedType: 'PARTY_DUE_TODAY_REMINDERS_SWEEP',
+          relatedId: dayKey,
+          status: totalSent > 0 ? 'SENT' : 'SKIPPED',
+        },
+      });
+    } catch (e) {
+      logger.error('[whatsapp-cron] failed to log PARTY_DUE_TODAY_REMINDERS_SWEEP', e);
+    }
+  }
+
+  const summary = `due today reminders (${dayKey}): ${totalSent} sent, ${totalFailed} failed${errors.length ? ` - ${errors.slice(0, 3).join('; ')}` : ''}`;
+  return summary;
+}
+
+// ---------------------------------------------------------------------------
 // #12 - Owner daily business snapshot (receivables, overdue receivables,
 // payables, overdue invoices pending, net profit), 06:00 IST alongside the
 // due-today digest. Always sends, like runOwnerDuesDigest - an owner wants
@@ -723,6 +797,7 @@ export const JOB_RUNNERS: Record<string, (opts?: JobOpts) => Promise<Record<stri
   'due-today': runDueTodayJob,
   'business-snapshot': runBusinessSnapshotJob,
   'dues-digest': runDuesDigestJob,
+  'party-due-today': async (opts) => ({ partyDueTodayReminders: await runPartyDueTodayReminders(opts) }),
   'party-reminder-sweep': runPartyReminderSchedulesSweep,
   'private-loan-reminder-sweep': runPrivateLoanReminderSchedulesSweep,
   'check-driver-template': runCheckDriverTemplate,
@@ -860,6 +935,27 @@ function scheduleJob(job: OwnerDigestJobMeta, cronExpr: string) {
   scheduledTasks.set(job.jobKey, task);
 }
 
+function schedulePartyDueTodayJob(cronExpr: string) {
+  scheduledTasks.get('party-due-today')?.stop();
+  if (!cron.validate(cronExpr)) {
+    logger.error(`[whatsapp-cron] invalid cron "${cronExpr}" for party-due-today - not scheduled`);
+    scheduledTasks.delete('party-due-today');
+    return;
+  }
+  const task = cron.schedule(cronExpr, () => { void runPartyDueTodayReminders(); }, { timezone: TZ });
+  scheduledTasks.set('party-due-today', task);
+}
+
+/**
+ * Re-read party-due-today cron from CompanyProfile and apply to live scheduler.
+ */
+export async function reschedulePartyDueTodayJob(): Promise<void> {
+  if (process.env.WHATSAPP_CRON_ENABLED !== 'true') return;
+  const profile = await getCompanyProfileRow();
+  const cronExpr = profile.partyDueTodayReminderCron || '0 9 * * *';
+  schedulePartyDueTodayJob(cronExpr);
+}
+
 /**
  * Re-read one job's cron expression from CompanyProfile and apply it to the
  * live scheduler immediately. Called by the Settings "save schedule" endpoint
@@ -891,6 +987,10 @@ export async function registerWhatsappCron() {
     const cronExpr = (profile[job.cronField] as string | null) || job.defaultCron;
     scheduleJob(job, cronExpr);
   }
+  // Party & Broker Due Today automated reminders
+  const partyDueCron = profile.partyDueTodayReminderCron || '0 9 * * *';
+  schedulePartyDueTodayJob(partyDueCron);
+
   // Party Ledger & Private Loans "Schedule" options - per-entity recurring reminders.
   // Shared sweeps rather than a timer per entity: schedules are user-created/edited/
   // deleted at runtime, unlike the 5 fixed owner digests above.
@@ -898,5 +998,5 @@ export async function registerWhatsappCron() {
     void runPartyReminderSchedulesSweep();
     void runPrivateLoanReminderSchedulesSweep();
   }, { timezone: TZ });
-  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST) + party & private loan reminder sweeps (every 10 min)');
+  logger.info('[whatsapp-cron] scheduled from CompanyProfile (per-job cron, IST) + party & broker due-today reminders + party & private loan sweeps (every 10 min)');
 }

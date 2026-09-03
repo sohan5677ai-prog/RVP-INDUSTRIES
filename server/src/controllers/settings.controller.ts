@@ -250,6 +250,9 @@ const companyProfileSchema = z.object({
   ownerBusinessSnapshotEnabled: z.boolean().optional(),
   ownerWeeklySummaryEnabled: z.boolean().optional(),
   ownerDispatchReminderEnabled: z.boolean().optional(),
+  partyDueTodayReminderEnabled: z.boolean().optional(),
+  partyDueTodayReminderCron: z.string().optional(),
+  partyDueTodayReminderTarget: z.enum(['PARTY', 'BROKER', 'BOTH']).optional(),
   freightRetentionPerTrip: z.coerce.number().nonnegative().optional(),
   openingItc: z.coerce.number().min(0).optional(),
   // How far under the booked tonnage a final lorry may land and still close the

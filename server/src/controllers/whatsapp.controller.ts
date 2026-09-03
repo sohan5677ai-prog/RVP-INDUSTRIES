@@ -12,14 +12,14 @@ import {
   WAITING_STATES,
   USED_STATES,
 } from '../services/lorryConfirmation.service.js';
-import { JOB_RUNNERS, OWNER_DIGEST_JOBS, describeCron, buildCron, rescheduleOwnerJob } from '../jobs/whatsappJobs.js';
+import { JOB_RUNNERS, OWNER_DIGEST_JOBS, describeCron, buildCron, rescheduleOwnerJob, reschedulePartyDueTodayJob } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
 import { renderBrokerLedgerPdf } from '../lib/brokerLedgerPdf.js';
 import { buildBrokerLedgerData, isOwnBroker } from '../services/brokerLedger.service.js';
 import { uploadFileToStorage } from '../lib/upload.js';
-import { computePartyDues, invoiceListText } from '../services/salesDues.service.js';
+import { computeBuyerDues, computePartyDues, invoiceListText } from '../services/salesDues.service.js';
 import { duesScope, runPartyPaymentReminderCore } from '../services/partyReminder.service.js';
 
 // ---------------------------------------------------------------------------
@@ -1286,3 +1286,267 @@ export async function sendDispatchWhatsApp(req: Request, res: Response) {
 export async function resendDriverWhatsApp(req: Request, res: Response) {
   res.json(await resendDispatchDriverWhatsApp(req.params.id));
 }
+
+// ---------------------------------------------------------------------------
+// Dues on this Day (Party & Broker Payment Reminders)
+// ---------------------------------------------------------------------------
+
+/** Parse a date string YYYY-MM-DD in IST or default to today */
+function parseIstQueryDate(dateStr?: string | null): Date {
+  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  }
+  return new Date();
+}
+
+/**
+ * List all invoices due on a particular date (defaults to today), along with
+ * summary metrics, WhatsApp send statuses for today, and automated schedule configuration.
+ */
+export async function getDuesOnDate(req: Request, res: Response) {
+  const dateStr = typeof req.query.date === 'string' ? req.query.date : undefined;
+  const targetDate = parseIstQueryDate(dateStr);
+  const dateKey = dateStr || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+  const portfolio = await computeBuyerDues(targetDate);
+  const profile = await getCompanyProfileRow();
+
+  // Find invoices due on targetDate
+  const dueInvoices = portfolio.dueToday;
+
+  // Gather unique buyer IDs to check their last sent WhatsApp logs for today
+  const buyerIds = [...new Set(dueInvoices.map((i) => i.buyerId))];
+  const logs = await prisma.whatsAppLog.findMany({
+    where: {
+      relatedType: 'PAYMENT_REMINDER',
+      relatedId: { in: buyerIds },
+      createdAt: {
+        gte: new Date(new Date().setHours(0, 0, 0, 0)),
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { relatedId: true, status: true, createdAt: true },
+  });
+
+  const logByBuyer = new Map<string, { status: string; createdAt: Date }>();
+  for (const l of logs) {
+    if (l.relatedId && !logByBuyer.has(l.relatedId)) {
+      logByBuyer.set(l.relatedId, { status: l.status, createdAt: l.createdAt });
+    }
+  }
+
+  const invoices = dueInvoices.map((inv) => {
+    const log = logByBuyer.get(inv.buyerId);
+    return {
+      dispatchId: inv.dispatchId,
+      invoiceNumber: inv.invoiceNumber,
+      buyerId: inv.buyerId,
+      buyerName: inv.buyerName,
+      buyerPhone: inv.buyerPhone ?? null,
+      buyerPhone2: inv.buyerPhone2 ?? null,
+      buyerWaLanguage: inv.buyerWaLanguage ?? 'EN',
+      brokerId: inv.brokerId ?? null,
+      brokerName: inv.brokerName ?? null,
+      brokerPhone: inv.brokerPhone ?? null,
+      brokerWaLanguage: inv.brokerWaLanguage ?? 'EN',
+      product: inv.product,
+      vehicleNumber: inv.vehicleNumber ?? null,
+      billAmount: inv.billAmount,
+      outstanding: inv.outstanding,
+      dueDate: inv.dueDate.toISOString(),
+      billDate: inv.billDate.toISOString(),
+      overdue: inv.overdue,
+      inTransit: inv.inTransit,
+      dueDays: inv.dueDays,
+      partiallyPaid: inv.partiallyPaid,
+      lastSentAt: log?.createdAt?.toISOString() ?? null,
+      lastSentStatus: log?.status ?? null,
+    };
+  });
+
+  const totalAmount = invoices.reduce((s, i) => s + i.outstanding, 0);
+  const buyersCount = new Set(invoices.map((i) => i.buyerId)).size;
+  const brokersCount = new Set(invoices.map((i) => i.brokerId).filter(Boolean)).size;
+  const sentTodayCount = new Set(invoices.filter((i) => i.lastSentStatus === 'SENT').map((i) => i.buyerId)).size;
+
+  const sweepLog = await prisma.whatsAppLog.findFirst({
+    where: { relatedType: 'PARTY_DUE_TODAY_REMINDERS_SWEEP', relatedId: dateKey },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  });
+
+  const cronExpr = profile.partyDueTodayReminderCron || '0 9 * * *';
+  const scheduleDesc = describeCron(cronExpr);
+
+  res.json({
+    date: dateKey,
+    invoices,
+    stats: {
+      totalInvoices: invoices.length,
+      totalAmount,
+      buyersCount,
+      brokersCount,
+      sentTodayCount,
+    },
+    schedule: {
+      enabled: profile.partyDueTodayReminderEnabled,
+      cron: cronExpr,
+      schedule: scheduleDesc,
+      target: profile.partyDueTodayReminderTarget || 'BOTH',
+      lastSentAt: sweepLog?.createdAt?.toISOString() ?? null,
+    },
+  });
+}
+
+/**
+ * Manually send payment reminder for one buyer / set of dispatches.
+ */
+export async function sendDueOnDateSingle(req: Request, res: Response) {
+  const { buyerId, dispatchIds, target } = req.body as {
+    buyerId?: string;
+    dispatchIds?: string[];
+    target?: string;
+  };
+  if (!buyerId) throw new HttpError(400, 'buyerId is required');
+  const result = await runPartyPaymentReminderCore(buyerId, {
+    target: target || 'BOTH',
+    dispatchIds,
+  });
+  res.json({
+    ok: true,
+    ...result,
+    message: `Payment reminder sent to ${result.sent.map((s) => s.recipient).join(', ')}${
+      result.failed.length ? ` (failed: ${result.failed.map((f) => `${f.recipient} - ${f.error}`).join('; ')})` : ''
+    }`,
+  });
+}
+
+/**
+ * Bulk send payment reminders for selected due items or all items on the date.
+ */
+export async function sendDuesOnDateBulk(req: Request, res: Response) {
+  const { items, target: requestedTarget, date: dateStr } = req.body as {
+    items?: Array<{ buyerId: string; dispatchIds: string[] }>;
+    target?: string;
+    date?: string;
+  };
+
+  const profile = await getCompanyProfileRow();
+  const target = (requestedTarget || profile.partyDueTodayReminderTarget || 'BOTH') as 'PARTY' | 'BROKER' | 'BOTH';
+
+  let toProcess: Array<{ buyerId: string; dispatchIds: string[] }> = [];
+
+  if (items && Array.isArray(items) && items.length > 0) {
+    toProcess = items;
+  } else {
+    const targetDate = parseIstQueryDate(dateStr);
+    const portfolio = await computeBuyerDues(targetDate);
+    const byBuyer = new Map<string, { buyerId: string; dispatchIds: string[] }>();
+    for (const inv of portfolio.dueToday) {
+      let entry = byBuyer.get(inv.buyerId);
+      if (!entry) {
+        entry = { buyerId: inv.buyerId, dispatchIds: [] };
+        byBuyer.set(inv.buyerId, entry);
+      }
+      entry.dispatchIds.push(inv.dispatchId);
+    }
+    toProcess = [...byBuyer.values()];
+  }
+
+  if (toProcess.length === 0) {
+    throw new HttpError(400, 'No due invoices to remind about');
+  }
+
+  const allSent: Array<{ recipient: string; phone: string | null; amount: number; invoices: number }> = [];
+  const allFailed: Array<{ recipient: string; error: string }> = [];
+
+  for (const item of toProcess) {
+    try {
+      const res = await runPartyPaymentReminderCore(item.buyerId, {
+        target,
+        dispatchIds: item.dispatchIds,
+      });
+      allSent.push(...res.sent);
+      allFailed.push(...res.failed);
+    } catch (err) {
+      allFailed.push({
+        recipient: item.buyerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (allSent.length === 0) {
+    throw new HttpError(502, allFailed[0]?.error ?? 'Failed to send reminders');
+  }
+
+  res.json({
+    ok: true,
+    totalBuyers: toProcess.length,
+    sentCount: allSent.length,
+    failedCount: allFailed.length,
+    sent: allSent,
+    failed: allFailed,
+    message: `Sent ${allSent.length} reminder(s)${allFailed.length > 0 ? `, ${allFailed.length} failed` : ''}`,
+  });
+}
+
+/**
+ * Update the automated schedule timing & recipient target for "Dues on this Day" reminders.
+ */
+export async function updatePartyDueTodaySchedule(req: Request, res: Response) {
+  const { enabled, hour, minute, days, target } = req.body as {
+    enabled?: unknown;
+    hour?: unknown;
+    minute?: unknown;
+    days?: unknown;
+    target?: unknown;
+  };
+
+  const updateData: {
+    partyDueTodayReminderEnabled?: boolean;
+    partyDueTodayReminderTarget?: string;
+    partyDueTodayReminderCron?: string;
+  } = {};
+
+  if (typeof enabled === 'boolean') {
+    updateData.partyDueTodayReminderEnabled = enabled;
+  }
+
+  if (target && typeof target === 'string' && ['PARTY', 'BROKER', 'BOTH'].includes(target.toUpperCase())) {
+    updateData.partyDueTodayReminderTarget = target.toUpperCase();
+  }
+
+  if (hour !== undefined && minute !== undefined) {
+    if (!Number.isInteger(hour) || (hour as number) < 0 || (hour as number) > 23) {
+      throw new HttpError(400, 'hour must be an integer 0-23');
+    }
+    if (!Number.isInteger(minute) || (minute as number) < 0 || (minute as number) > 59) {
+      throw new HttpError(400, 'minute must be an integer 0-59');
+    }
+    const daysArr = Array.isArray(days) ? days : [];
+    if (!daysArr.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
+      throw new HttpError(400, 'days must be an array of integers 0-6');
+    }
+    const cronExpr = buildCron(hour as number, minute as number, daysArr as number[]);
+    updateData.partyDueTodayReminderCron = cronExpr;
+  }
+
+  await getCompanyProfileRow();
+  const updated = await prisma.companyProfile.update({
+    where: { id: 'default' },
+    data: updateData,
+  });
+
+  await reschedulePartyDueTodayJob();
+
+  const cronExpr = updated.partyDueTodayReminderCron || '0 9 * * *';
+  res.json({
+    enabled: updated.partyDueTodayReminderEnabled,
+    cron: cronExpr,
+    schedule: describeCron(cronExpr),
+    target: updated.partyDueTodayReminderTarget,
+  });
+}
+

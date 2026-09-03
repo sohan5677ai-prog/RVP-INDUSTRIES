@@ -5,19 +5,31 @@ import { fileURLToPath } from 'node:url';
 import { IST_TZ } from './istDate.js';
 
 /**
- * Surya Road Lines' printed stationery fixed details - mirrors the constant of
- * the same name in client/src/pages/LorryReceiptView.tsx. Keep the two in step;
- * this is the same physical GC book rendered as a real PDF instead of a browser
- * print, so it can be merged into the WhatsApp dispatch bundle.
+ * Transport stationery configurations for PDF generation. Keep in sync with
+ * client/src/pages/LorryReceiptView.tsx.
  */
-const SRL = {
+const SURYA_PROFILE = {
   name: 'SURYA ROAD LINES',
   tagline: 'Transport Contractors & Commission Agents',
+  jurisdiction: 'Subject to Punganur Jurisdiction',
   address: 'M.B.T. Road, PUNGANUR - 517 247, Chittoor Dist., A.P.,',
   phones: 'Jagan : 9440216173, 8019152521, Resi.: 9490830413.',
   pan: 'AACBS0915N',
   labourReg: 'AP-10-37-015-0242317',
   udyam: 'UDAYAM AP-02-0002343',
+  signTitle: 'For Surya Road Lines',
+};
+
+const SHIVA_PROFILE = {
+  name: 'SHIVA ROADLINES',
+  tagline: 'TRANSPORT CONTRACTOR & COMMISSION AGENTS',
+  jurisdiction: 'Subject to Bangalore Jurisdiction',
+  headOffice: '# 164, Main, Behind F.T.I., Next to Micro Labs, Near Kanteerava Studio Signal, Yeshwathpur Industrial Suburb, Bangalore- 560 022.',
+  headOfficePhones: 'Ph.: 23721916, 23721917, 23721918, 28391347',
+  branchOffice: '24th K.M., Near Arishinakunte, Rural Police Station, Tumkur Road, Nelamangala Taluk, Bangalore - 562 123.',
+  branchOfficePhones: 'Ph.: 27728191, 27728192, 27728193',
+  pan: 'AJZPM9901C',
+  signTitle: 'For Shiva Roadlines',
 };
 
 /** Goods description per product, worded as the transporter's book expects it -
@@ -50,6 +62,8 @@ export interface LorryReceiptPdfData {
   gcDate: Date;
   bags?: number | null;
   kgPerBag?: number | null;
+  transportProvider?: string | null;
+  copyType?: string | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -61,8 +75,8 @@ export interface LorryReceiptPdfData {
 /* an empty masthead.                                                          */
 /* -------------------------------------------------------------------------- */
 const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/assets');
-let assetCache: { ganesha: Buffer | null; balaji: Buffer | null; suryaSign: Buffer | null } | undefined;
-function masthead(): { ganesha: Buffer | null; balaji: Buffer | null; suryaSign: Buffer | null } {
+let assetCache: { ganesha: Buffer | null; balaji: Buffer | null; suryaSign: Buffer | null; shiva: Buffer | null } | undefined;
+function masthead(): { ganesha: Buffer | null; balaji: Buffer | null; suryaSign: Buffer | null; shiva: Buffer | null } {
   const read = (name: string) => {
     try {
       return fs.readFileSync(path.join(ASSET_DIR, name));
@@ -71,7 +85,12 @@ function masthead(): { ganesha: Buffer | null; balaji: Buffer | null; suryaSign:
     }
   };
   if (!assetCache) {
-    assetCache = { ganesha: read('ganesha.png'), balaji: read('balaji.png'), suryaSign: read('surya-sign.png') };
+    assetCache = {
+      ganesha: read('ganesha.png'),
+      balaji: read('balaji.png'),
+      suryaSign: read('surya-sign.png'),
+      shiva: read('shiva.png'),
+    };
   }
   return assetCache;
 }
@@ -226,42 +245,72 @@ export function renderLorryReceiptPdf(data: LorryReceiptPdfData): Promise<Buffer
     const DASH = '----';
 
     /* ══ MASTHEAD ════════════════════════════════════════════════════════ */
-    const { ganesha, balaji, suryaSign } = masthead();
-    if (ganesha) doc.image(ganesha, ax(14.5), ay(37), { fit: [px(62), px(78)], align: 'center' });
-    if (balaji) doc.image(balaji, ax(608), ay(41), { fit: [px(70), px(70)], align: 'center' });
+    const { ganesha, balaji, suryaSign, shiva } = masthead();
+    const isShiva = Boolean(data.transportProvider && /shiva/i.test(data.transportProvider));
+    const profile = isShiva ? SHIVA_PROFILE : SURYA_PROFILE;
 
-    const cX = 95;
-    const cW = 498;
+    if (isShiva) {
+      /* SHIVA ROADLINES MASTHEAD */
+      if (shiva) {
+        doc.image(shiva, ax(14), ay(30), { fit: [px(70), px(88)], align: 'center' });
+        doc.image(shiva, ax(604), ay(30), { fit: [px(70), px(88)], align: 'center' });
+      }
+      const cX = 88;
+      const cW = 512;
 
-    // The three devotional marks stamped above the logotype: Om roundel, a
-    // Ganesha roundel, and a saffron swastika. Drawn as vector art - the base-14
-    // PDF fonts carry no Devanagari or CJK glyph for them.
-    const marksW = 15 + 8 + 16 + 8 + 13;
-    let mx = cX + (cW - marksW) / 2;
-    drawOm(mx + 7.5, 19.5, 15);
-    mx += 15 + 8;
-    doc.lineWidth(px(1)).strokeColor(NAVY).circle(ax(mx + 8), ay(19.5), px(8)).stroke();
-    if (ganesha) doc.image(ganesha, ax(mx + 3), ay(13), { fit: [px(10), px(13)], align: 'center' });
-    mx += 16 + 8;
-    drawSwastika(mx + 6.5, 19.5, 12);
+      // Top line: Jurisdiction
+      T(SHIVA_PROFILE.jurisdiction, cX, 18, cW, { size: 10.5, font: SERIF_B, align: 'center' });
 
-    // "SRL" oval + the jurisdiction line, centred as one unit.
-    const jur = 'Subject to Punganur Jurisdiction';
-    const jurW = textW(jur, 10, SERIF_B);
-    let sx = cX + (cW - (36 + 6 + jurW)) / 2;
-    doc.lineWidth(px(1.5)).strokeColor(NAVY).ellipse(ax(sx + 18), ay(39.5), px(18), px(9.5)).stroke();
-    T('SRL', sx, 34.5, 36, { size: 11, font: SERIF_B, align: 'center', charSpacing: 0.5 });
-    T(jur, sx + 42, 35, jurW + 2, { size: 10, font: SERIF_B });
+      // Title: SHIVA ROADLINES in Red
+      T(SHIVA_PROFILE.name, cX, 36, cW, { size: 32, font: SERIF_B, color: RED, align: 'center', charSpacing: 0.5 });
 
-    T(SRL.name, cX, 51, cW, { size: 32, font: SERIF_B, align: 'center', charSpacing: -0.3 });
+      // Tagline box
+      const tagW = textW(SHIVA_PROFILE.tagline, 9.5, SERIF_B) + 20;
+      doc.lineWidth(px(1)).strokeColor(NAVY)
+        .roundedRect(ax(cX + (cW - tagW) / 2), ay(74), px(tagW), px(14), px(6)).stroke();
+      T(SHIVA_PROFILE.tagline, cX, 76.5, cW, { size: 9.5, font: SERIF_B, align: 'center' });
 
-    const tagW = textW(SRL.tagline, 10, SERIF_B) + 24;
-    doc.lineWidth(px(1)).strokeColor(NAVY)
-      .roundedRect(ax(cX + (cW - tagW) / 2), ay(90), px(tagW), px(15), px(7.5)).stroke();
-    T(SRL.tagline, cX, 93.5, cW, { size: 10, font: SERIF_B, align: 'center' });
+      // H.O. and Phone
+      T(SHIVA_PROFILE.headOffice, cX, 94, cW, { size: 8.5, font: SERIF_B, align: 'center' });
+      T(SHIVA_PROFILE.headOfficePhones, cX, 105, cW, { size: 8.5, font: SERIF_B, align: 'center' });
 
-    T(SRL.address, cX, 110, cW, { size: 10, font: SERIF_B, align: 'center' });
-    T(SRL.phones, cX, 123, cW, { size: 9.5, font: SERIF_B, align: 'center' });
+      // B.O. and Phone
+      T(`${SHIVA_PROFILE.branchOffice} ${SHIVA_PROFILE.branchOfficePhones}`, cX, 118, cW, { size: 8, font: SERIF_B, align: 'center' });
+
+    } else {
+      /* SURYA ROAD LINES MASTHEAD */
+      if (ganesha) doc.image(ganesha, ax(14.5), ay(37), { fit: [px(62), px(78)], align: 'center' });
+      if (balaji) doc.image(balaji, ax(608), ay(41), { fit: [px(70), px(70)], align: 'center' });
+
+      const cX = 95;
+      const cW = 498;
+
+      const marksW = 15 + 8 + 16 + 8 + 13;
+      let mx = cX + (cW - marksW) / 2;
+      drawOm(mx + 7.5, 19.5, 15);
+      mx += 15 + 8;
+      doc.lineWidth(px(1)).strokeColor(NAVY).circle(ax(mx + 8), ay(19.5), px(8)).stroke();
+      if (ganesha) doc.image(ganesha, ax(mx + 3), ay(13), { fit: [px(10), px(13)], align: 'center' });
+      mx += 16 + 8;
+      drawSwastika(mx + 6.5, 19.5, 12);
+
+      const jur = SURYA_PROFILE.jurisdiction;
+      const jurW = textW(jur, 10, SERIF_B);
+      let sx = cX + (cW - (36 + 6 + jurW)) / 2;
+      doc.lineWidth(px(1.5)).strokeColor(NAVY).ellipse(ax(sx + 18), ay(39.5), px(18), px(9.5)).stroke();
+      T('SRL', sx, 34.5, 36, { size: 11, font: SERIF_B, align: 'center', charSpacing: 0.5 });
+      T(jur, sx + 42, 35, jurW + 2, { size: 10, font: SERIF_B });
+
+      T(SURYA_PROFILE.name, cX, 51, cW, { size: 32, font: SERIF_B, align: 'center', charSpacing: -0.3 });
+
+      const tagW = textW(SURYA_PROFILE.tagline, 10, SERIF_B) + 24;
+      doc.lineWidth(px(1)).strokeColor(NAVY)
+        .roundedRect(ax(cX + (cW - tagW) / 2), ay(90), px(tagW), px(15), px(7.5)).stroke();
+      T(SURYA_PROFILE.tagline, cX, 93.5, cW, { size: 10, font: SERIF_B, align: 'center' });
+
+      T(SURYA_PROFILE.address, cX, 110, cW, { size: 10, font: SERIF_B, align: 'center' });
+      T(SURYA_PROFILE.phones, cX, 123, cW, { size: 9.5, font: SERIF_B, align: 'center' });
+    }
 
     hl(MAST_H, 0, SHEET_W, B_THICK);
 
@@ -275,59 +324,118 @@ export function renderLorryReceiptPdf(data: LorryReceiptPdfData): Promise<Buffer
     const c3X = c1W + c2W;
     const c3W = SHEET_W - c3X;
 
-    // Col 1 - registrations, then the caution box.
-    let y1 = midTop + 6;
-    for (const l of [
-      `PAN CARD : ${SRL.pan}`,
-      `LABOUR Reg. No. : ${SRL.labourReg}`,
-      `msme UDAYAM Reg. No.: ${SRL.udyam}`,
-    ]) y1 = T(l, c1X + 6, y1, c1W - 12, { size: 8, font: SANS_B }) + 1;
-    const cautTop = y1 + 3;
-    T('CAUTION', c1X + 10, cautTop + 4, c1W - 20, { size: 8.5, font: SERIF_B, align: 'center', charSpacing: 0.5 });
-    let cy = cautTop + 16;
-    for (const l of [
-      'This Consignment will not detained',
-      'Re routed or booked without consignee',
-      'Banks written promission will be',
-      'delivered at the destinaltion',
-    ]) cy = T(l, c1X + 10, cy, c1W - 20, { size: 8.5 });
-    box(c1X + 6, cautTop, c1W - 12, cy - cautTop + 4, B_THIN);
+    const copyLabel = data.copyType || (isShiva ? 'CONSIGNEE COPY' : "CONSIGNOR'S COPY");
 
-    // Col 2 - consignor's copy / owner's risk / insurance blanks.
-    let y2 = midTop + 6;
-    for (const l of ["CONSIGNOR'S COPY", 'AT OWNERS RISK', 'INSURANCE']) {
-      y2 = T(l, c2X + 6, y2, c2W - 12, { size: 9, font: SERIF_B, align: 'center' });
+    if (isShiva) {
+      /* SHIVA SUBHEADER STRIP (matching Image 1) */
+      const stripH = 24;
+      Tmid(copyLabel, c1X, midTop, c1W, stripH, { size: 9.5, font: SERIF_B, align: 'center' });
+      vl(c2X, midTop, midTop + stripH, B_MED);
+
+      const panText = `PAN No.: ${SHIVA_PROFILE.pan}`;
+      Tmid(panText, c2X, midTop, c2W, stripH, { size: 10, font: SANS_B, align: 'center' });
+      vl(c3X, midTop, midTop + stripH, B_MED);
+
+      Tmid('G.C. No.:', c3X + 10, midTop, c3W * 0.45, stripH, { size: 11, font: SERIF_B });
+      Tmid(data.gcNo || DASH, c3X + c3W * 0.45, midTop, c3W * 0.55 - 10, stripH, {
+        size: 18, font: SANS_B, color: RED, align: 'right', charSpacing: 1,
+      });
+
+      hl(midTop + stripH, 0, SHEET_W, B_MED);
+
+      // Lower conditions row
+      const row2Top = midTop + stripH;
+      const row2Bot = midBot;
+
+      // Col 1: Caution
+      const cautTop = row2Top + 6;
+      T('CAUTION', c1X + 10, cautTop + 4, c1W - 20, { size: 8.5, font: SERIF_B, align: 'center', charSpacing: 0.5 });
+      let cy = cautTop + 15;
+      for (const l of [
+        'This Consignment will not detained',
+        'Re routed or booked without consignee',
+        'Banks written permission will be',
+        'delivered at the destination',
+      ]) cy = T(l, c1X + 10, cy, c1W - 20, { size: 8 });
+      box(c1X + 6, cautTop, c1W - 12, cy - cautTop + 4, B_THIN);
+
+      // Col 2: Owner Risk & Insurance
+      let y2 = row2Top + 6;
+      for (const l of ['AT OWNERS RISK', 'INSURANCE']) {
+        y2 = T(l, c2X + 6, y2, c2W - 12, { size: 8.5, font: SERIF_B, align: 'center' });
+      }
+      y2 += 2;
+      hl(y2, c2X + 6, c2X + c2W - 6, B_THIN, NAVY_FAINT);
+      y2 = T(
+        'The Customer has stated that he has not insured the consignment or he has insured the consignment.',
+        c2X + 6, y2 + 3, c2W - 12, { size: 7.5, align: 'justify' },
+      ) + 2;
+      for (const l of [
+        'Company:......................................... Policy No.:......................................',
+        'Amount:............................................ Risk:............................................',
+      ]) y2 = T(l, c2X + 6, y2, c2W - 12, { size: 7.5 }) + 0.5;
+
+      // Col 3: Note
+      T('NOTE : ', c3X + 6, row2Top + 10, c3W - 12, { size: 8, font: SERIF_B, align: 'justify', continued: true });
+      Tc(
+        'Consignment covered by this lorry receipt shall be stored under control of the Transport and delivered to the consignee order without delay.',
+        { size: 8 },
+      );
+
+      vl(c2X, row2Top, row2Bot, B_MED);
+      vl(c3X, row2Top, row2Bot, B_MED);
+
+    } else {
+      /* SURYA 3-COLUMN SECTION */
+      let y1 = midTop + 6;
+      for (const l of [
+        `PAN CARD : ${SURYA_PROFILE.pan}`,
+        `LABOUR Reg. No. : ${SURYA_PROFILE.labourReg}`,
+        `msme UDAYAM Reg. No.: ${SURYA_PROFILE.udyam}`,
+      ]) y1 = T(l, c1X + 6, y1, c1W - 12, { size: 8, font: SANS_B }) + 1;
+      const cautTop = y1 + 3;
+      T('CAUTION', c1X + 10, cautTop + 4, c1W - 20, { size: 8.5, font: SERIF_B, align: 'center', charSpacing: 0.5 });
+      let cy = cautTop + 16;
+      for (const l of [
+        'This Consignment will not detained',
+        'Re routed or booked without consignee',
+        'Banks written promission will be',
+        'delivered at the destinaltion',
+      ]) cy = T(l, c1X + 10, cy, c1W - 20, { size: 8.5 });
+      box(c1X + 6, cautTop, c1W - 12, cy - cautTop + 4, B_THIN);
+
+      let y2 = midTop + 6;
+      for (const l of [copyLabel, 'AT OWNERS RISK', 'INSURANCE']) {
+        y2 = T(l, c2X + 6, y2, c2W - 12, { size: 9, font: SERIF_B, align: 'center' });
+      }
+      y2 += 4;
+      hl(y2, c2X + 6, c2X + c2W - 6, B_THIN, NAVY_FAINT);
+      y2 = T(
+        'The Customer has stated that the has not insurance the consignment or he has insured the consignment.',
+        c2X + 6, y2 + 4, c2W - 12, { size: 8, align: 'justify' },
+      ) + 4;
+      for (const l of [
+        'Company:.........................................',
+        'Policy No.:......................................',
+        'Amount:..........................................',
+        'Risk:............................................',
+      ]) y2 = T(l, c2X + 6, y2, c2W - 12, { size: 8 }) + 0.5;
+
+      T('NOTE : ', c3X + 6, midTop + 6, c3W - 12, { size: 8.5, font: SERIF_B, align: 'justify', continued: true });
+      Tc(
+        'This Consignment covered by this of special lorry receipt from shall be stored at the destination under control of the Transport order and shall be delivered to order of then consignee bank whose name mentioned in the lorry receipt it will under no circumstance be delivered to any one without the written authority from the consignee copy or on a separate letter of Authority.',
+        { size: 8.5 },
+      );
+      const gcTop = midBot - 24;
+      hl(gcTop, c3X + 6, c3X + c3W - 6, B_THIN);
+      T('G.C. No.', c3X + 6, gcTop + 7, c3W * 0.4, { size: 11, font: SERIF_B });
+      T(data.gcNo || DASH, c3X + c3W * 0.45, gcTop + 3, c3W * 0.55 - 6, {
+        size: 20, font: SANS_B, color: RED, align: 'right', charSpacing: 1,
+      });
+
+      vl(c2X, midTop, midBot, B_MED);
+      vl(c3X, midTop, midBot, B_MED);
     }
-    y2 += 4;
-    hl(y2, c2X + 6, c2X + c2W - 6, B_THIN, NAVY_FAINT);
-    y2 = T(
-      'The Customer has stated that the has not insurance the consignment or he has insured the consignment.',
-      c2X + 6, y2 + 4, c2W - 12, { size: 8, align: 'justify' },
-    ) + 4;
-    for (const l of [
-      'Company:.........................................',
-      'Policy No.:......................................',
-      'Amount:..........................................',
-      'Risk:............................................',
-    ]) y2 = T(l, c2X + 6, y2, c2W - 12, { size: 8 }) + 0.5;
-
-    // Col 3 - the carriage note, with the G.C. number pinned to the bottom.
-    T('NOTE : ', c3X + 6, midTop + 6, c3W - 12, { size: 8.5, font: SERIF_B, align: 'justify', continued: true });
-    // The gap after the bold lead-in rides on the lead-in itself - PDFKit's
-    // justifier drops a leading space at the head of a continued run.
-    Tc(
-      'This Consignment covered by this of special lorry receipt from shall be stored at the destination under control of the Transport order and shall be delivered to order of then consignee bank whose name mentioned in the lorry receipt it will under no circumstance be delivered to any one without the written authority from the consignee copy or on a separate letter of Authority.',
-      { size: 8.5 },
-    );
-    const gcTop = midBot - 24;
-    hl(gcTop, c3X + 6, c3X + c3W - 6, B_THIN);
-    T('G.C. No.', c3X + 6, gcTop + 7, c3W * 0.4, { size: 11, font: SERIF_B });
-    T(data.gcNo || DASH, c3X + c3W * 0.45, gcTop + 3, c3W * 0.55 - 6, {
-      size: 20, font: SANS_B, color: RED, align: 'right', charSpacing: 1,
-    });
-
-    vl(c2X, midTop, midBot, B_MED);
-    vl(c3X, midTop, midBot, B_MED);
     hl(midBot, 0, SHEET_W, B_THICK);
 
     /* ══ ADDRESSES & ROUTE ═══════════════════════════════════════════════ */
@@ -469,11 +577,9 @@ export function renderLorryReceiptPdf(data: LorryReceiptPdfData): Promise<Buffer
     T('Note : ', 8, fy, notesW, { size: 8.5, font: SERIF_B, underline: true, continued: true });
     Tc('WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.', { size: 8.5, font: SERIF_B });
 
-    T('For Surya Road Lines', sigX, fTop + 8, sigW, { size: 11, font: SERIF_B, align: 'right' });
+    T(profile.signTitle, sigX, fTop + 8, sigW, { size: 11, font: SERIF_B, align: 'right' });
     const sigLineY = fTop + 46;
-    // The scanned ink sits in the gap between the "For Surya Road Lines" line
-    // and the signature rule, right-aligned like the on-screen copy.
-    if (suryaSign) {
+    if (!isShiva && suryaSign) {
       const sigBoxY = fTop + 20;
       doc.image(suryaSign, ax(sigX), ay(sigBoxY), {
         fit: [px(sigW), px(sigLineY - 2 - sigBoxY)],

@@ -279,6 +279,23 @@ export async function saveLorryReceipt(req: Request, res: Response) {
   const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
 
+  let transportIdUpdate: string | undefined | null = undefined;
+  if (body.transportProvider !== undefined) {
+    if (body.transportProvider) {
+      const match = await prisma.transport.findFirst({
+        where: {
+          OR: [
+            { code: body.transportProvider },
+            { name: { contains: body.transportProvider, mode: 'insensitive' } },
+          ],
+        },
+      });
+      if (match) transportIdUpdate = match.id;
+    } else {
+      transportIdUpdate = null;
+    }
+  }
+
   const updated = await prisma.saleDispatch.update({
     where: { id: req.params.id },
     data: {
@@ -286,6 +303,8 @@ export async function saveLorryReceipt(req: Request, res: Response) {
       lrDate: body.lrDate ? new Date(body.lrDate) : null,
       lrBags: body.lrBags ?? null,
       lrKgPerBag: body.lrKgPerBag ?? null,
+      ...(body.transportProvider !== undefined ? { transportProvider: body.transportProvider || null } : {}),
+      ...(transportIdUpdate !== undefined ? { transportId: transportIdUpdate } : {}),
     },
     include: lorryReceiptInclude,
   });

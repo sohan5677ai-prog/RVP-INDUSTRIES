@@ -102,6 +102,7 @@ export const lorryReceiptSchema = z.object({
   lrDate: z.coerce.date().optional().nullable(),
   lrBags: z.coerce.number().int().nonnegative().optional().nullable(),
   lrKgPerBag: z.coerce.number().int().nonnegative().optional().nullable(),
+  transportProvider: z.string().max(100).optional().nullable(),
 });
 
 // Short-close an order the buyer stopped lifting. The reason is free text; a

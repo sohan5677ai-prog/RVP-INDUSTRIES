@@ -168,6 +168,7 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
         gcDate: lrDispatch.lrDate ?? dispatch.invoiceDate ?? dispatch.dispatchDate,
         bags: lrDispatch.lrBags,
         kgPerBag: lrDispatch.lrKgPerBag,
+        transportProvider: lrDispatch?.transportProvider || dispatch.transportProvider,
       });
       pages.push(lrBuffer);
       parts.push('LR');

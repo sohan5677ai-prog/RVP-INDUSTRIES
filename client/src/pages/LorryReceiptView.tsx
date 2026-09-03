@@ -8,19 +8,80 @@ import type { SaleDispatch, CompanyProfile } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Segmented } from '@/components/ui/segmented';
 import { productDescription } from '@/lib/productNames';
 
 /* -------------------------------------------------------------------------- */
-/* Surya Road Lines' printed stationery fixed details                       */
+/* Transport stationery configurations                                        */
 /* -------------------------------------------------------------------------- */
-const SRL = {
-  name: 'SURYA ROAD LINES',
-  tagline: 'Transport Contractors & Commission Agents',
-  address: 'M.B.T. Road, PUNGANUR - 517 247, Chittoor Dist., A.P.,',
-  phones: 'Jagan : 9440216173, 8019152521, Resi.: 9490830413.',
-  pan: 'AACBS0915N',
-  labourReg: 'AP-10-37-015-0242317',
-  udyam: 'UDAYAM AP-02-0002343',
+export type TransportTemplate = 'SURYA' | 'SHIVA';
+export type CopyType = 'CONSIGNOR' | 'CONSIGNEE' | 'DRIVER' | 'OFFICE';
+
+interface TransportProfile {
+  key: TransportTemplate;
+  label: string;
+  name: string;
+  tagline: string;
+  jurisdiction: string;
+  shortCode?: string;
+  address?: string;
+  phones?: string;
+  headOffice?: string;
+  headOfficePhones?: string;
+  branchOffice?: string;
+  branchOfficePhones?: string;
+  pan: string;
+  labourReg?: string;
+  udyam?: string;
+  leftLogo: string;
+  rightLogo: string;
+  titleColor: string;
+  signTitle: string;
+  signImage?: string;
+}
+
+const TRANSPORT_PROFILES: Record<TransportTemplate, TransportProfile> = {
+  SURYA: {
+    key: 'SURYA',
+    label: 'Surya Road Lines',
+    name: 'SURYA ROAD LINES',
+    tagline: 'Transport Contractors & Commission Agents',
+    jurisdiction: 'Subject to Punganur Jurisdiction',
+    shortCode: 'SRL',
+    address: 'M.B.T. Road, PUNGANUR - 517 247, Chittoor Dist., A.P.,',
+    phones: 'Jagan : 9440216173, 8019152521, Resi.: 9490830413.',
+    pan: 'AACBS0915N',
+    labourReg: 'AP-10-37-015-0242317',
+    udyam: 'UDAYAM AP-02-0002343',
+    leftLogo: '/ganesha.png',
+    rightLogo: '/balaji.png',
+    titleColor: '#1a4a99',
+    signTitle: 'For Surya Road Lines',
+    signImage: '/surya-sign.png',
+  },
+  SHIVA: {
+    key: 'SHIVA',
+    label: 'Shiva Roadlines',
+    name: 'SHIVA ROADLINES',
+    tagline: 'TRANSPORT CONTRACTOR & COMMISSION AGENTS',
+    jurisdiction: 'Subject to Bangalore Jurisdiction',
+    headOffice: '# 164, Main, Behind F.T.I., Next to Micro Labs, Near Kanteerava Studio Signal, Yeshwathpur Industrial Suburb, Bangalore- 560 022.',
+    headOfficePhones: 'Ph.: 23721916, 23721917, 23721918, 28391347',
+    branchOffice: '24th K.M., Near Arishinakunte, Rural Police Station, Tumkur Road, Nelamangala Taluk, Bangalore - 562 123.',
+    branchOfficePhones: 'Ph.: 27728191, 27728192, 27728193',
+    pan: 'AJZPM9901C',
+    leftLogo: '/shiva.png',
+    rightLogo: '/shiva.png',
+    titleColor: '#c22222',
+    signTitle: 'For Shiva Roadlines',
+  },
+};
+
+const COPY_LABELS: Record<CopyType, string> = {
+  CONSIGNOR: "CONSIGNOR'S COPY",
+  CONSIGNEE: 'CONSIGNEE COPY',
+  DRIVER: 'DRIVER COPY',
+  OFFICE: 'OFFICE COPY',
 };
 
 function dmy(d?: string | null): string {
@@ -62,6 +123,8 @@ export default function LorryReceiptView() {
     queryFn: () => api<CompanyProfile>('/settings/company'),
   });
 
+  const [template, setTemplate] = useState<TransportTemplate>('SURYA');
+  const [copyType, setCopyType] = useState<CopyType>('CONSIGNEE');
   const [gcNo, setGcNo] = useState('');
   const [lrDate, setLrDate] = useState('');
   const [bags, setBags] = useState('');
@@ -71,6 +134,15 @@ export default function LorryReceiptView() {
     if (!dispatch) return;
     setGcNo(dispatch.lrNumber ?? '');
     setLrDate(isoDay(dispatch.lrDate ?? dispatch.invoiceDate ?? dispatch.dispatchDate));
+
+    // Auto-detect transporter template from dispatch
+    const provider = (dispatch.transportProvider || dispatch.transport?.code || dispatch.transport?.name || '').toUpperCase();
+    if (provider.includes('SHIVA')) {
+      setTemplate('SHIVA');
+    } else {
+      setTemplate('SURYA');
+    }
+
     // Packing defaults to the dispatched weight in 50 kg bags; a receipt that was
     // saved with its own counts keeps them.
     const perBag = dispatch.lrKgPerBag ?? DEFAULT_KG_PER_BAG;
@@ -119,6 +191,7 @@ export default function LorryReceiptView() {
           lrDate: lrDate || null,
           lrBags: bags === '' ? null : Number(bags),
           lrKgPerBag: kgPerBag === '' ? null : Number(kgPerBag),
+          transportProvider: template,
         },
       }),
     onSuccess: () => {
@@ -165,6 +238,7 @@ export default function LorryReceiptView() {
     );
   }
 
+  const activeProfile = TRANSPORT_PROFILES[template];
   const description = productDescription(order?.product);
   const fromPlace = (company.dispatchFromPlace || company.stateName || 'PUNGANUR').toUpperCase();
   const toPlace = (order?.destination || buyer?.city || buyer?.state || '').toUpperCase();
@@ -229,15 +303,43 @@ export default function LorryReceiptView() {
       `}} />
 
       {/* Toolbar (Screen only) */}
-      <div className="lr-no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b bg-background px-4 py-2 shadow-sm">
-        <div className="flex items-center gap-2">
+      <div className="lr-no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-4 py-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
-          <span className="ml-2 flex items-center gap-1 text-sm font-semibold text-[#1a4a99]">
-            <FileText className="h-4 w-4" /> Surya Road Lines - Lorry Receipt (GC)
-          </span>
+
+          {/* Transporter Template Switcher */}
+          <div className="flex items-center gap-1.5 border-l pl-2">
+            <span className="text-xs font-semibold text-muted-foreground mr-1">Transporter:</span>
+            <Segmented
+              value={template}
+              onValueChange={(val) => setTemplate(val as TransportTemplate)}
+              options={[
+                { value: 'SURYA', label: 'Surya Road Lines' },
+                { value: 'SHIVA', label: 'Shiva Roadlines' },
+              ]}
+              className="h-8"
+            />
+          </div>
+
+          {/* Copy Selector */}
+          <div className="flex items-center gap-1.5 border-l pl-2">
+            <span className="text-xs font-semibold text-muted-foreground mr-1">Copy:</span>
+            <Segmented
+              value={copyType}
+              onValueChange={(val) => setCopyType(val as CopyType)}
+              options={[
+                { value: 'CONSIGNEE', label: 'Consignee' },
+                { value: 'CONSIGNOR', label: 'Consignor' },
+                { value: 'DRIVER', label: 'Driver' },
+                { value: 'OFFICE', label: 'Office' },
+              ]}
+              className="h-8"
+            />
+          </div>
         </div>
+
         <div className="flex items-center gap-2">
           {dispatch.lrNumber && (
             <Button
@@ -289,110 +391,220 @@ export default function LorryReceiptView() {
           {/* Outer Deep Navy Blue Border */}
           <div className="border-[2.5px] border-[#1a4a99] flex flex-col h-full bg-white">
 
-            {/* ── MASTHEAD HEADER (Full Width Top) ────────────────────────── */}
-            <div className="border-b-[2.5px] border-[#1a4a99] p-2 flex items-center justify-between gap-2">
-              {/* Top Left: Ganesha. Transparent PNG, so the paper shows through
-                  and the line art takes the sheet's navy ink. */}
-              <div className="w-[75px] flex justify-center items-center">
-                <img src="/ganesha.png" alt="" aria-hidden className="h-[78px] w-[62px] object-contain lr-emblem" />
-              </div>
-
-              {/* Center Masthead Text */}
-              <div className="flex-1 text-center space-y-0.5">
-                {/* The three devotional marks stamped above the logotype on the
-                    book: Om, a Ganesha roundel, and a saffron swastika. */}
-                <div className="flex items-end justify-center gap-2 pb-0.5">
-                  <span className="lr-ink-fill inline-flex h-[15px] w-[15px] items-center justify-center rounded-full bg-[#1a4a99] text-[10px] leading-none text-white">
-                    ॐ
-                  </span>
-                  <span className="inline-flex h-[16px] w-[16px] items-center justify-center overflow-hidden rounded-full border border-[#1a4a99]">
-                    <img src="/ganesha.png" alt="" aria-hidden className="h-[13px] w-[10px] object-contain lr-emblem" />
-                  </span>
-                  <span className="text-[13px] leading-none text-[#b7410e]">卐</span>
+            {/* ── MASTHEAD HEADER ───────────────────────────────────────── */}
+            {template === 'SURYA' ? (
+              /* SURYA ROAD LINES MASTHEAD */
+              <div className="border-b-[2.5px] border-[#1a4a99] p-2 flex items-center justify-between gap-2">
+                {/* Top Left: Ganesha */}
+                <div className="w-[75px] flex justify-center items-center">
+                  <img src="/ganesha.png" alt="" aria-hidden className="h-[78px] w-[62px] object-contain lr-emblem" />
                 </div>
 
-                <div className="flex items-center justify-center gap-1.5">
-                  <span className="lr-logotype inline-flex h-[19px] w-[36px] items-center justify-center rounded-[50%] border-[1.5px] border-[#1a4a99] text-[11px] tracking-wide">
-                    SRL
-                  </span>
-                  <span className="text-[10px] font-semibold">Subject to Punganur Jurisdiction</span>
-                </div>
-
-                <div className="lr-logotype text-[32px] leading-none text-[#1a4a99] uppercase pt-0.5">
-                  {SRL.name}
-                </div>
-
-                <div className="border border-[#1a4a99] rounded-[9px] px-3 py-[1px] text-[10px] font-bold inline-block">
-                  {SRL.tagline}
-                </div>
-
-                <div className="text-[10px] font-bold leading-tight pt-0.5">
-                  {SRL.address}
-                </div>
-
-                <div className="text-[9.5px] font-bold leading-tight">
-                  {SRL.phones}
-                </div>
-              </div>
-
-              {/* Top Right: Balaji, same treatment as the Ganesha. */}
-              <div className="w-[75px] flex justify-center items-center">
-                <img src="/balaji.png" alt="" aria-hidden className="h-[70px] w-[70px] object-contain lr-emblem" />
-              </div>
-            </div>
-
-            {/* ── 3-COLUMN MIDDLE SECTION ───────────────────────────────── */}
-            <div className="flex border-b-[2.5px] border-[#1a4a99] text-[8.5px] leading-tight">
-              {/* Col 1: Registrations & Caution */}
-              <div className="w-[30%] border-r-[2px] border-[#1a4a99] p-1.5 space-y-1">
-                <div className="lr-fill text-[8px] font-semibold space-y-0.5">
-                  <div>PAN CARD : <span className="font-bold">{SRL.pan}</span></div>
-                  <div>LABOUR Reg. No. : <span className="font-bold">{SRL.labourReg}</span></div>
-                  <div>msme UDAYAM Reg. No.: <span className="font-bold">{SRL.udyam}</span></div>
-                </div>
-
-                <div className="border border-[#1a4a99] p-1 mt-1">
-                  <div className="font-bold text-center uppercase tracking-wider text-[8.5px] mb-0.5">Caution</div>
-                  <div>This Consignment will not detained</div>
-                  <div>Re routed or booked without consignee</div>
-                  <div>Banks written promission will be</div>
-                  <div>delivered at the destinaltion</div>
-                </div>
-              </div>
-
-              {/* Col 2: Consignor Risk & Insurance */}
-              <div className="w-[32%] border-r-[2px] border-[#1a4a99] p-1.5 flex flex-col justify-between">
-                <div>
-                  <div className="text-center font-bold text-[9px] leading-snug">
-                    CONSIGNOR&apos;S COPY<br />
-                    AT OWNERS RISK<br />
-                    INSURANCE
+                {/* Center Masthead Text */}
+                <div className="flex-1 text-center space-y-0.5">
+                  <div className="flex items-end justify-center gap-2 pb-0.5">
+                    <span className="lr-ink-fill inline-flex h-[15px] w-[15px] items-center justify-center rounded-full bg-[#1a4a99] text-[10px] leading-none text-white">
+                      ॐ
+                    </span>
+                    <span className="inline-flex h-[16px] w-[16px] items-center justify-center overflow-hidden rounded-full border border-[#1a4a99]">
+                      <img src="/ganesha.png" alt="" aria-hidden className="h-[13px] w-[10px] object-contain lr-emblem" />
+                    </span>
+                    <span className="text-[13px] leading-none text-[#b7410e]">卐</span>
                   </div>
-                  <div className="mt-1 border-t border-[#1a4a99]/40 pt-1 text-justify text-[8px]">
-                    The Customer has stated that the has not insurance the consignment or he has insured the consignment.
+
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span className="lr-logotype inline-flex h-[19px] w-[36px] items-center justify-center rounded-[50%] border-[1.5px] border-[#1a4a99] text-[11px] tracking-wide">
+                      SRL
+                    </span>
+                    <span className="text-[10px] font-semibold">{activeProfile.jurisdiction}</span>
                   </div>
-                  <div className="mt-1 space-y-0.5 text-[8px]">
-                    <div>Company:.........................................</div>
-                    <div>Policy No.:......................................</div>
-                    <div>Amount:..........................................</div>
-                    <div>Risk:............................................</div>
+
+                  <div className="lr-logotype text-[32px] leading-none text-[#1a4a99] uppercase pt-0.5">
+                    {activeProfile.name}
+                  </div>
+
+                  <div className="border border-[#1a4a99] rounded-[9px] px-3 py-[1px] text-[10px] font-bold inline-block">
+                    {activeProfile.tagline}
+                  </div>
+
+                  <div className="text-[10px] font-bold leading-tight pt-0.5">
+                    {activeProfile.address}
+                  </div>
+
+                  <div className="text-[9.5px] font-bold leading-tight">
+                    {activeProfile.phones}
                   </div>
                 </div>
-              </div>
 
-              {/* Col 3: NOTE Paragraph & GC No */}
-              <div className="w-[38%] p-1.5 flex flex-col justify-between">
-                <div className="text-justify text-[8.5px] leading-snug">
-                  <span className="font-bold">NOTE :</span> This Consignment covered by this of special lorry receipt from shall be stored at the destination under control of the Transport order and shall be delivered to order of then consignee bank whose name mentioned in the lorry receipt it will under no circumstance be delivered to any one without the written authority from the consignee copy or on a separate letter of Authority.
-                </div>
-                <div className="border-t border-[#1a4a99] pt-1 flex items-center justify-between mt-1">
-                  <span className="font-bold text-[11px]">G.C. No.</span>
-                  <span className="text-[20px] font-black text-[#cc1111] tracking-wider leading-none">
-                    {gcNo || '────'}
-                  </span>
+                {/* Top Right: Balaji */}
+                <div className="w-[75px] flex justify-center items-center">
+                  <img src="/balaji.png" alt="" aria-hidden className="h-[70px] w-[70px] object-contain lr-emblem" />
                 </div>
               </div>
-            </div>
+            ) : (
+              /* SHIVA ROADLINES MASTHEAD */
+              <div className="border-b-[2.5px] border-[#1a4a99] p-2 flex flex-col">
+                {/* Top Center Jurisdiction line */}
+                <div className="text-center text-[10.5px] font-bold tracking-wide pb-1 text-[#1a4a99]">
+                  {activeProfile.jurisdiction}
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  {/* Top Left: Lord Shiva Image */}
+                  <div className="w-[85px] flex justify-center items-center flex-shrink-0">
+                    <img
+                      src="/shiva.png"
+                      alt="Lord Shiva"
+                      aria-hidden
+                      className="h-[88px] w-[80px] object-contain lr-emblem"
+                    />
+                  </div>
+
+                  {/* Center Shiva Roadlines Content */}
+                  <div className="flex-1 text-center space-y-0.5 px-1">
+                    <div className="lr-logotype text-[34px] leading-none text-[#c22222] font-black uppercase tracking-tight">
+                      {activeProfile.name}
+                    </div>
+
+                    <div className="border border-[#1a4a99] rounded-[9px] px-3.5 py-[1px] text-[10px] font-black uppercase inline-block my-0.5">
+                      {activeProfile.tagline}
+                    </div>
+
+                    <div className="text-[9px] font-bold leading-tight text-[#1a4a99] max-w-[560px] mx-auto">
+                      {activeProfile.headOffice}
+                    </div>
+
+                    <div className="text-[9px] font-bold leading-tight text-[#1a4a99]">
+                      {activeProfile.headOfficePhones}
+                    </div>
+
+                    <div className="text-[8.5px] font-bold leading-tight text-[#1a4a99] max-w-[560px] mx-auto pt-0.5">
+                      {activeProfile.branchOffice} {activeProfile.branchOfficePhones}
+                    </div>
+                  </div>
+
+                  {/* Top Right: Lord Shiva Image for balanced masthead */}
+                  <div className="w-[85px] flex justify-center items-center flex-shrink-0">
+                    <img
+                      src="/shiva.png"
+                      alt="Lord Shiva"
+                      aria-hidden
+                      className="h-[88px] w-[80px] object-contain lr-emblem transform -scale-x-100"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 3-COLUMN MIDDLE / SUBHEADER SECTION ────────────────────── */}
+            {template === 'SHIVA' ? (
+              /* SHIVA ROADLINES SUBHEADER & CONDITIONS */
+              <div>
+                {/* Horizontal Strip matching Image 1: [ CONSIGNEE COPY ] | [ PAN No. ] | [ G.C. No. ] */}
+                <div className="flex border-b-[2px] border-[#1a4a99] text-center font-bold text-[10px]">
+                  <div className="w-[30%] border-r-[2px] border-[#1a4a99] py-1 tracking-wider uppercase bg-neutral-50/50">
+                    {COPY_LABELS[copyType]}
+                  </div>
+                  <div className="w-[38%] border-r-[2px] border-[#1a4a99] py-1 tracking-wide">
+                    PAN No.: <span className="lr-fill font-black tracking-wider text-[11px] text-[#1a4a99]">{activeProfile.pan}</span>
+                  </div>
+                  <div className="w-[32%] py-1 flex items-center justify-center gap-2">
+                    <span className="text-[11px]">G.C. No.:</span>
+                    <span className="text-[18px] font-black text-[#cc1111] tracking-wider leading-none">
+                      {gcNo || '────'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3-Column Terms and Caution block */}
+                <div className="flex border-b-[2.5px] border-[#1a4a99] text-[8.5px] leading-tight">
+                  <div className="w-[30%] border-r-[2px] border-[#1a4a99] p-1.5 flex flex-col justify-center">
+                    <div className="border border-[#1a4a99] p-1">
+                      <div className="font-bold text-center uppercase tracking-wider text-[8.5px] mb-0.5">Caution</div>
+                      <div>This Consignment will not detained</div>
+                      <div>Re routed or booked without consignee</div>
+                      <div>Banks written permission will be</div>
+                      <div>delivered at the destination</div>
+                    </div>
+                  </div>
+
+                  <div className="w-[38%] border-r-[2px] border-[#1a4a99] p-1.5 flex flex-col justify-between">
+                    <div>
+                      <div className="text-center font-bold text-[9px] leading-snug">
+                        AT OWNERS RISK<br />
+                        INSURANCE
+                      </div>
+                      <div className="mt-1 border-t border-[#1a4a99]/40 pt-0.5 text-justify text-[7.5px]">
+                        The Customer has stated that he has not insured the consignment or he has insured the consignment.
+                      </div>
+                      <div className="mt-0.5 space-y-0.5 text-[7.5px]">
+                        <div>Company:......................................... Policy No.:......................................</div>
+                        <div>Amount:............................................ Risk:............................................</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="w-[32%] p-1.5 flex flex-col justify-center">
+                    <div className="text-justify text-[8px] leading-snug">
+                      <span className="font-bold">NOTE :</span> Consignment covered by this lorry receipt shall be stored under control of the Transport and delivered to the consignee order.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* SURYA ROAD LINES 3-COLUMN SECTION */
+              <div className="flex border-b-[2.5px] border-[#1a4a99] text-[8.5px] leading-tight">
+                {/* Col 1: Registrations & Caution */}
+                <div className="w-[30%] border-r-[2px] border-[#1a4a99] p-1.5 space-y-1">
+                  <div className="lr-fill text-[8px] font-semibold space-y-0.5">
+                    <div>PAN CARD : <span className="font-bold">{activeProfile.pan}</span></div>
+                    <div>LABOUR Reg. No. : <span className="font-bold">{activeProfile.labourReg}</span></div>
+                    <div>msme UDAYAM Reg. No.: <span className="font-bold">{activeProfile.udyam}</span></div>
+                  </div>
+
+                  <div className="border border-[#1a4a99] p-1 mt-1">
+                    <div className="font-bold text-center uppercase tracking-wider text-[8.5px] mb-0.5">Caution</div>
+                    <div>This Consignment will not detained</div>
+                    <div>Re routed or booked without consignee</div>
+                    <div>Banks written promission will be</div>
+                    <div>delivered at the destinaltion</div>
+                  </div>
+                </div>
+
+                {/* Col 2: Consignor Risk & Insurance */}
+                <div className="w-[32%] border-r-[2px] border-[#1a4a99] p-1.5 flex flex-col justify-between">
+                  <div>
+                    <div className="text-center font-bold text-[9px] leading-snug">
+                      {COPY_LABELS[copyType]}<br />
+                      AT OWNERS RISK<br />
+                      INSURANCE
+                    </div>
+                    <div className="mt-1 border-t border-[#1a4a99]/40 pt-1 text-justify text-[8px]">
+                      The Customer has stated that the has not insurance the consignment or he has insured the consignment.
+                    </div>
+                    <div className="mt-1 space-y-0.5 text-[8px]">
+                      <div>Company:.........................................</div>
+                      <div>Policy No.:......................................</div>
+                      <div>Amount:..........................................</div>
+                      <div>Risk:............................................</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Col 3: NOTE Paragraph & GC No */}
+                <div className="w-[38%] p-1.5 flex flex-col justify-between">
+                  <div className="text-justify text-[8.5px] leading-snug">
+                    <span className="font-bold">NOTE :</span> This Consignment covered by this of special lorry receipt from shall be stored at the destination under control of the Transport order and shall be delivered to order of then consignee bank whose name mentioned in the lorry receipt it will under no circumstance be delivered to any one without the written authority from the consignee copy or on a separate letter of Authority.
+                  </div>
+                  <div className="border-t border-[#1a4a99] pt-1 flex items-center justify-between mt-1">
+                    <span className="font-bold text-[11px]">G.C. No.</span>
+                    <span className="text-[20px] font-black text-[#cc1111] tracking-wider leading-none">
+                      {gcNo || '────'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ── ADDRESSES & ROUTE SECTION ─────────────────────────────── */}
             <div className="flex border-b-[2.5px] border-[#1a4a99]">
@@ -544,19 +756,18 @@ export default function LorryReceiptView() {
                     <span className="underline">Note :</span> WE ARE NOT COLLECTING ANY GST AMOUNT TO PARTY.
                   </div>
                 </div>
-                {/* Scanned Surya Road Lines signature - separate mark from the
-                    company's own authorised-sign.png used on RVP's documents,
-                    since this sheet is the transporter's own stationery. */}
                 <div className="w-[30%] pt-1 text-[11px]">
-                  <div className="text-right font-bold">For Surya Road Lines</div>
+                  <div className="text-right font-bold">{activeProfile.signTitle}</div>
                   <div className="relative mt-1 h-6">
-                    <img
-                      src="/surya-sign.png"
-                      alt=""
-                      aria-hidden
-                      className="absolute bottom-0 right-1 h-full w-auto object-contain"
-                      style={{ mixBlendMode: 'multiply', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
-                    />
+                    {activeProfile.signImage && (
+                      <img
+                        src={activeProfile.signImage}
+                        alt=""
+                        aria-hidden
+                        className="absolute bottom-0 right-1 h-full w-auto object-contain"
+                        style={{ mixBlendMode: 'multiply', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                      />
+                    )}
                   </div>
                   <div className="border-t border-[#1a4a99]/60" />
                   <div className="text-right text-[9px] mt-0.5">Authorised Signatory</div>

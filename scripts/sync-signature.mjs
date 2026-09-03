@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FROM = path.join(ROOT, 'client', 'public');
 const TO = path.join(ROOT, 'server', 'src', 'assets');
-const FILES = ['authorised-sign.png', 'company-stamp.png', 'ganesha.png', 'balaji.png', 'surya-sign.png'];
+const FILES = ['authorised-sign.png', 'company-stamp.png', 'ganesha.png', 'balaji.png', 'surya-sign.png', 'shiva.png'];
 
 mkdirSync(TO, { recursive: true });
 

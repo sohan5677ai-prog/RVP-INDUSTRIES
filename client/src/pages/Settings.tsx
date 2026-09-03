@@ -17,6 +17,7 @@ import { useAuth } from '@/lib/auth';
 import Subscription from '@/pages/Subscription';
 import ArchiveManager from '@/pages/ArchiveManager';
 import Wishes from '@/pages/Wishes';
+import DuesOnThisDay from '@/pages/DuesOnThisDay';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -50,8 +51,8 @@ export default function Settings() {
         title="Settings"
         description={
           isDeveloper
-            ? 'Company details, bank, invoice setup, rates, subscription and archives.'
-            : 'Company details, bank, invoice setup and rates.'
+            ? 'Company details, bank, invoice setup, rates, dues on this day, subscription and archives.'
+            : 'Company details, bank, invoice setup, dues on this day, and rates.'
         }
         icon={SlidersHorizontal}
       />
@@ -62,6 +63,7 @@ export default function Settings() {
           <TabsTrigger value="invoice">Invoice Setup</TabsTrigger>
           <TabsTrigger value="freight">Freight Rates</TabsTrigger>
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
+          <TabsTrigger value="dues-today">Dues on this Day</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="wishes">Wishes</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
@@ -84,6 +86,10 @@ export default function Settings() {
 
         <TabsContent value="hamali" className="focus-visible:outline-none focus-visible:ring-0">
           <HamaliRatesSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="dues-today" className="focus-visible:outline-none focus-visible:ring-0">
+          <DuesOnThisDay />
         </TabsContent>
 
         <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">

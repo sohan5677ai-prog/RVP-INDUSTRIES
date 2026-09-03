@@ -198,6 +198,9 @@ export default function App() {
               <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
               <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/due-today" element={<Navigate to="/settings?tab=dues-today" replace />} />
+              <Route path="/settings/dues-today" element={<Navigate to="/settings?tab=dues-today" replace />} />
+              <Route path="/dues-today" element={<Navigate to="/settings?tab=dues-today" replace />} />
               <Route path="/support" element={<SupportTickets />} />
               <Route path="/notes-comments" element={<NotesComments />} />
               <Route path="/settings/notes-comments" element={<Navigate to="/notes-comments" replace />} />

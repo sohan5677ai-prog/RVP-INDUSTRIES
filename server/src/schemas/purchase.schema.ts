@@ -181,6 +181,15 @@ export const createVerificationSchema = z.object({
   qualityAdjustments: z.array(qualityAdjustmentSchema).optional(),
 });
 
+export const updatePurchaseFreightCostsSchema = z.object({
+  freightCharge: z.coerce.number().nonnegative().optional(),
+  customHamali: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  customKata: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  customRetention: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  freightAdditions: z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable(),
+  freightDeductions: z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable(),
+});
+
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;
 export type CreateStockInInput = z.infer<typeof createStockInSchema>;
 export type CreatePurchaseInput = z.infer<typeof createPurchaseSchema>;
@@ -189,3 +198,4 @@ export type CreateStockTransferInput = z.infer<typeof createStockTransferSchema>
 export type CreateShellTransferInput = z.infer<typeof createShellTransferSchema>;
 export type CreateHuskTransferInput = z.infer<typeof createHuskTransferSchema>;
 export type CreateDustPurchaseInput = z.infer<typeof createDustPurchaseSchema>;
+export type UpdatePurchaseFreightCostsInput = z.infer<typeof updatePurchaseFreightCostsSchema>;

@@ -10,6 +10,7 @@ import {
   markPaidSchema,
   lorryReceiptSchema,
   closeSaleOrderSchema,
+  updateFreightCostsSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
@@ -329,6 +330,31 @@ export async function deleteLorryReceipt(req: Request, res: Response) {
       lrKgPerBag: null,
     },
     include: lorryReceiptInclude,
+  });
+
+  clearCache('sale-orders');
+  res.json(updated);
+}
+
+/**
+ * Update freight costs, custom deductions/additions, custom hamali, custom kata, custom retention on a dispatch.
+ */
+export async function updateDispatchFreightCosts(req: Request, res: Response) {
+  const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+  const data = updateFreightCostsSchema.parse(req.body);
+
+  const updated = await prisma.saleDispatch.update({
+    where: { id: req.params.id },
+    data: {
+      ...(data.freightCharge !== undefined ? { freightCharge: data.freightCharge } : {}),
+      ...(data.customHamali !== undefined ? { customHamali: data.customHamali != null ? Number(data.customHamali) : null } : {}),
+      ...(data.customKata !== undefined ? { customKata: data.customKata != null ? Number(data.customKata) : null } : {}),
+      ...(data.customRetention !== undefined ? { customRetention: data.customRetention != null ? Number(data.customRetention) : null } : {}),
+      ...(data.freightAdditions !== undefined ? { freightAdditions: data.freightAdditions === null ? Prisma.JsonNull : (data.freightAdditions as unknown as Prisma.InputJsonValue) } : {}),
+      ...(data.freightDeductions !== undefined ? { freightDeductions: data.freightDeductions === null ? Prisma.JsonNull : (data.freightDeductions as unknown as Prisma.InputJsonValue) } : {}),
+    },
   });
 
   clearCache('sale-orders');
@@ -916,6 +942,10 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         transportId: transportRecord?.id ?? data.transportId ?? null,
         transportProvider,
         customRetention: freightRetention > 0 ? freightRetention : null,
+        customHamali: data.customHamali != null ? Number(data.customHamali) : null,
+        customKata: data.customKata != null ? Number(data.customKata) : null,
+        freightAdditions: data.freightAdditions ? (data.freightAdditions as unknown as Prisma.InputJsonValue) : undefined,
+        freightDeductions: data.freightDeductions ? (data.freightDeductions as unknown as Prisma.InputJsonValue) : undefined,
         excessOutKg,
         excessOutNote: excessOutKg > 0 ? (data.excessOutNote ?? null) : null,
         fromTransfer: order.product !== 'PAPPU' && order.product !== 'TPS' ? data.fromTransfer : false,

@@ -449,20 +449,25 @@ model Purchase {
 
   // Inward freight to bring BASE-priced stock to our location (capitalised into
   // the seed). DELIVERY-priced POs already include freight in the price → 0.
-  freightCharge    Decimal             @default(0) @db.Decimal(12, 2)
+  freightCharge     Decimal             @default(0) @db.Decimal(12, 2)
+  customHamali      Decimal?            @db.Decimal(12, 2)
+  customKata        Decimal?            @db.Decimal(12, 2)
+  customRetention   Decimal?            @db.Decimal(12, 2)
+  freightAdditions  Json?               // itemized extra costs: [{ label, amount }]
+  freightDeductions Json?               // itemized expenses/deductions: [{ label, amount }]
   // Whole-vehicle tonnage (kg) the freight is spread over, for SHARED lorries.
   // Null → single-party lorry, basis falls back to netWeightKg. See StockIn.freightTonnageKg.
-  freightTonnageKg Int?
-  discountType     DiscountType?
-  discountValue    Decimal             @default(0) @db.Decimal(12, 2)
+  freightTonnageKg  Int?
+  discountType      DiscountType?
+  discountValue     Decimal             @default(0) @db.Decimal(12, 2)
   // Operator-settable purchase date (the effective date of the purchase, shown on
   // the Stock-in Detail and Verification pages). Defaults to when the record was
   // created; existing rows fall back to createdAt in the app.
-  purchaseDate     DateTime            @default(now())
-  createdAt        DateTime            @default(now())
-  verification     WeightVerification?
-  payments         Payment[]
-  processing       Processing?
+  purchaseDate      DateTime            @default(now())
+  createdAt         DateTime            @default(now())
+  verification      WeightVerification?
+  payments          Payment[]
+  processing        Processing?
 }
 
 model WeightVerification {
@@ -668,6 +673,10 @@ model SaleDispatch {
   transport         Transport? @relation(fields: [transportId], references: [id])
   transportProvider String? // 'SURYA' | 'KNM' | 'OTHER' or transport name
   customRetention   Decimal?   @db.Decimal(12, 2) // user-entered retention for 'OTHER'
+  customHamali      Decimal?   @db.Decimal(12, 2) // user-entered custom hamali override
+  customKata        Decimal?   @db.Decimal(12, 2) // user-entered custom kata override
+  freightAdditions  Json?      // extra costs: [{ label: string, amount: number }]
+  freightDeductions Json?      // extra deductions/expenses: [{ label: string, amount: number }]
 
   // XS Pappu (excess out). The 60% out-turn is a planning assumption, not a
   // measurement - when the mill actually yields more, that surplus pappu is

@@ -21,6 +21,7 @@ import {
   saveLorryReceipt,
   assignLorryReceiptNumber,
   deleteLorryReceipt,
+  updateDispatchFreightCosts,
 } from '../controllers/sale.controller.js';
 import { downloadSaleDuesReportPdf } from '../controllers/salesDuesReport.controller.js';
 
@@ -84,5 +85,8 @@ router.post('/sale-dispatches/:id/mark-paid', asyncHandler(markDispatchPaid));
 // Undo a dispatch made by mistake (only while still a plain DISPATCHED record):
 // restores inventory, deletes the sale posting + the shipment.
 router.post('/sale-dispatches/:id/undo', asyncHandler(undoSaleDispatch));
+
+// Adjust / customize freight costs, hamali, kata, transport, additions, and expense deductions
+router.patch('/sale-dispatches/:id/freight-costs', asyncHandler(updateDispatchFreightCosts));
 
 export default router;

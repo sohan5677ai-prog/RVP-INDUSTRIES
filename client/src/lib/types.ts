@@ -192,6 +192,10 @@ export interface BillAddable {
   amount: number;
 }
 
+export interface FreightCostItem {
+  label: string;
+  amount: number;
+}
 
 export interface Purchase {
   id: string;
@@ -202,6 +206,11 @@ export interface Purchase {
   kataFee: string;
 
   freightCharge?: string;
+  customHamali?: string | number | null;
+  customKata?: string | number | null;
+  customRetention?: string | number | null;
+  freightAdditions?: FreightCostItem[] | null;
+  freightDeductions?: FreightCostItem[] | null;
   discountType?: DiscountType | null;
   discountValue?: string;
   purchaseDate?: string;
@@ -457,6 +466,10 @@ export interface SaleDispatch {
   transport?: Transport | null;
   transportProvider?: string | null; // 'SURYA' | 'KNM' | 'OTHER' or transport name
   customRetention?: string | number | null;
+  customHamali?: string | number | null;
+  customKata?: string | number | null;
+  freightAdditions?: FreightCostItem[] | null;
+  freightDeductions?: FreightCostItem[] | null;
   // XS Pappu: kg of this shipment served from yield surplus above the assumed
   // 60% out-turn. Draws no black seed and carries no seed cost. A quantity, not
   // a flag - one lorry can be part-backed and part-surplus.

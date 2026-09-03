@@ -1,7 +1,8 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
+import { Prisma } from '@prisma/client';
 import { HttpError } from '../lib/httpError.js';
-import { createPurchaseSchema } from '../schemas/purchase.schema.js';
+import { createPurchaseSchema, updatePurchaseFreightCostsSchema } from '../schemas/purchase.schema.js';
 import { calcHamali, calcKataFee, companyHamaliShare, purchaseGst } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { clearCache } from '../lib/cache.js';
@@ -312,4 +313,31 @@ export async function deletePurchase(req: Request, res: Response) {
   clearCache('unified_stock_engine');
 
   res.json({ message: 'Purchase deleted' });
+}
+
+/**
+ * Update freight costs, custom deductions/additions, custom hamali, custom kata, custom retention on a purchase.
+ */
+export async function updatePurchaseFreightCosts(req: Request, res: Response) {
+  const purchase = await prisma.purchase.findUnique({ where: { id: req.params.id } });
+  if (!purchase) throw new HttpError(404, 'Purchase not found');
+
+  const data = updatePurchaseFreightCostsSchema.parse(req.body);
+
+  const updated = await prisma.purchase.update({
+    where: { id: req.params.id },
+    data: {
+      ...(data.freightCharge !== undefined ? { freightCharge: data.freightCharge } : {}),
+      ...(data.customHamali !== undefined ? { customHamali: data.customHamali != null ? Number(data.customHamali) : null } : {}),
+      ...(data.customKata !== undefined ? { customKata: data.customKata != null ? Number(data.customKata) : null } : {}),
+      ...(data.customRetention !== undefined ? { customRetention: data.customRetention != null ? Number(data.customRetention) : null } : {}),
+      ...(data.freightAdditions !== undefined ? { freightAdditions: data.freightAdditions === null ? Prisma.JsonNull : (data.freightAdditions as unknown as Prisma.InputJsonValue) } : {}),
+      ...(data.freightDeductions !== undefined ? { freightDeductions: data.freightDeductions === null ? Prisma.JsonNull : (data.freightDeductions as unknown as Prisma.InputJsonValue) } : {}),
+    },
+    include: purchaseInclude,
+  });
+
+  clearCache('purchases');
+  clearCache('unified_stock_engine');
+  res.json(updated);
 }

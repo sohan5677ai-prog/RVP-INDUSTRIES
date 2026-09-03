@@ -54,6 +54,16 @@ export const dispatchSaleOrderSchema = z.object({
   transportId: z.preprocess(emptyToUndefined, z.string().optional().nullable()),
   transportProvider: z.preprocess(emptyToUndefined, z.string().optional().nullable().default('SURYA')),
   customRetention: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  customHamali: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  customKata: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  freightAdditions: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? JSON.parse(v) : v),
+    z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable()
+  ),
+  freightDeductions: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? JSON.parse(v) : v),
+    z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable()
+  ),
   // XS Pappu: how many kg of THIS lorry came from yield surplus above the
   // assumed 60% out-turn. A quantity, not a flag - a shipment can be part-backed
   // and part-surplus. Must cover at least the unbacked shortfall; see the gate
@@ -111,7 +121,17 @@ export const closeSaleOrderSchema = z.object({
   reason: z.string().max(200).optional().nullable(),
 });
 
+export const updateFreightCostsSchema = z.object({
+  freightCharge: z.coerce.number().nonnegative().optional(),
+  customHamali: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  customKata: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  customRetention: z.preprocess(emptyToUndefined, z.coerce.number().nonnegative().optional().nullable()),
+  freightAdditions: z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable(),
+  freightDeductions: z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable(),
+});
+
 export type CreateSaleOrderInput = z.infer<typeof createSaleOrderSchema>;
 export type DeliverSaleDispatchInput = z.infer<typeof deliverSaleDispatchSchema>;
 export type DispatchSaleOrderInput = z.infer<typeof dispatchSaleOrderSchema>;
 export type MarkPaidInput = z.infer<typeof markPaidSchema>;
+export type UpdateFreightCostsInput = z.infer<typeof updateFreightCostsSchema>;

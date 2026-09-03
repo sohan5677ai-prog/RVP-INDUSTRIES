@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee } from 'lucide-react';
+import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee, SlidersHorizontal, Plus, Trash2, RotateCcw, Sparkles } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -52,6 +52,34 @@ function inwardFreightOf(p: PurchaseRow): number {
 
 type PaymentStatus = 'Paid' | 'Partial' | 'Pending';
 
+export interface FreightCostItem {
+  label: string;
+  amount: number;
+}
+
+export interface TripCostRecord {
+  id: string; // dispatch or purchase id
+  sourced: 'Purchase' | 'Sale' | 'Transfer';
+  lorry: string;
+  invoice: string | null;
+  date: string;
+  party: string | null;
+  destination: string | null;
+  weightKg?: number;
+  freight: number;
+  defaultHamali: number;
+  customHamali: number | null;
+  defaultKata: number;
+  customKata: number | null;
+  defaultTransport: number;
+  customRetention: number | null;
+  additions: FreightCostItem[];
+  deductions: FreightCostItem[];
+  totalAdditions: number;
+  totalOtherDeductions: number;
+  net: number;
+}
+
 interface FreightRow {
   id: string;
   date: string;
@@ -59,8 +87,18 @@ interface FreightRow {
   invoice: string | null;
   freight: number;
   hamali: number;
+  defaultHamali?: number;
+  customHamali?: number | null;
   kata: number;
+  defaultKata?: number;
+  customKata?: number | null;
   transport: number;
+  defaultTransport?: number;
+  customRetention?: number | null;
+  additions: FreightCostItem[];
+  deductions: FreightCostItem[];
+  totalAdditions: number;
+  totalOtherDeductions: number;
   net: number;
   deliveryStatus: string;
   sourced: 'Purchase' | 'Sale' | 'Transfer';
@@ -68,6 +106,9 @@ interface FreightRow {
   party: string | null;
   kind?: 'Husk' | 'Seed' | 'Dust';
   weightKg?: number;
+  rawDispatchId?: string;
+  rawPurchaseId?: string;
+  rawItems?: TripCostRecord[];
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -104,10 +145,37 @@ function combineSharedLorryRows(rows: FreightRow[]): FreightRow[] {
     const totalHamali = round2(list.reduce((s, x) => s + x.hamali, 0));
     const totalKata = round2(list.reduce((s, x) => s + x.kata, 0));
     const totalTransport = round2(list.reduce((s, x) => s + x.transport, 0));
+    const allAdditions = list.flatMap((x) => x.additions);
+    const allDeductions = list.flatMap((x) => x.deductions);
+    const totalAdditions = round2(list.reduce((s, x) => s + (x.totalAdditions || 0), 0));
+    const totalOtherDeductions = round2(list.reduce((s, x) => s + (x.totalOtherDeductions || 0), 0));
     const totalNet = round2(list.reduce((s, x) => s + x.net, 0));
     const totalWeight = list.reduce((s, x) => s + (x.weightKg ?? 0), 0);
 
     const isReceived = list.some((x) => x.deliveryStatus === 'RECEIVED' || x.deliveryStatus === 'DELIVERED');
+
+    const rawItems: TripCostRecord[] = list.map((x) => ({
+      id: x.rawDispatchId || x.rawPurchaseId || x.id,
+      sourced: x.sourced,
+      lorry: x.lorry || '',
+      invoice: x.invoice,
+      date: x.date,
+      party: x.party,
+      destination: x.destination,
+      weightKg: x.weightKg,
+      freight: x.freight,
+      defaultHamali: x.defaultHamali ?? x.hamali,
+      customHamali: x.customHamali ?? null,
+      defaultKata: x.defaultKata ?? x.kata,
+      customKata: x.customKata ?? null,
+      defaultTransport: x.defaultTransport ?? x.transport,
+      customRetention: x.customRetention ?? null,
+      additions: x.additions,
+      deductions: x.deductions,
+      totalAdditions: x.totalAdditions,
+      totalOtherDeductions: x.totalOtherDeductions,
+      net: x.net,
+    }));
 
     result.push({
       id: `comb-${list[0].lorry}-${list[0].date.slice(0, 10)}`,
@@ -118,6 +186,10 @@ function combineSharedLorryRows(rows: FreightRow[]): FreightRow[] {
       hamali: totalHamali,
       kata: totalKata,
       transport: totalTransport,
+      additions: allAdditions,
+      deductions: allDeductions,
+      totalAdditions,
+      totalOtherDeductions,
       net: totalNet,
       deliveryStatus: isReceived ? 'RECEIVED' : list[0].deliveryStatus,
       sourced,
@@ -125,6 +197,7 @@ function combineSharedLorryRows(rows: FreightRow[]): FreightRow[] {
       party: parties || null,
       kind: kind || undefined,
       weightKg: totalWeight || undefined,
+      rawItems,
     });
   }
 
@@ -185,6 +258,535 @@ function PayFilter({ value, onChange }: { value: PayFilterValue; onChange: (v: P
   );
 }
 
+const PRESET_ADDITIONS = [
+  'Halting Charges',
+  'Detention Fee',
+  'Multi-point Drop',
+  'Driver Incentive',
+  'Extra Loading',
+  'Extra Freight Adjustment',
+];
+
+const PRESET_DEDUCTIONS = [
+  'Diesel Advance',
+  'Driver Expense / Advance',
+  'TDS / Tax',
+  'Toll / RTO Charges',
+  'Shortage / Weight Penalty',
+  'Unloading Fee',
+  'Damages / Claim',
+  'Brokerage Deduction',
+];
+
+function AdjustFreightCostsDialog({
+  open,
+  onOpenChange,
+  target,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  target: FreightRow | null;
+}) {
+  const qc = useQueryClient();
+
+  const trips: TripCostRecord[] = useMemo(() => {
+    if (!target) return [];
+    if (target.rawItems && target.rawItems.length > 0) {
+      return target.rawItems;
+    }
+    return [
+      {
+        id: target.rawDispatchId || target.rawPurchaseId || target.id,
+        sourced: target.sourced,
+        lorry: target.lorry || '',
+        invoice: target.invoice,
+        date: target.date,
+        party: target.party,
+        destination: target.destination,
+        weightKg: target.weightKg,
+        freight: target.freight,
+        defaultHamali: target.defaultHamali ?? target.hamali,
+        customHamali: target.customHamali ?? null,
+        defaultKata: target.defaultKata ?? target.kata,
+        customKata: target.customKata ?? null,
+        defaultTransport: target.defaultTransport ?? target.transport,
+        customRetention: target.customRetention ?? null,
+        additions: target.additions || [],
+        deductions: target.deductions || [],
+        totalAdditions: target.totalAdditions || 0,
+        totalOtherDeductions: target.totalOtherDeductions || 0,
+        net: target.net,
+      },
+    ];
+  }, [target]);
+
+  const [activeTripIdx, setActiveTripIdx] = useState(0);
+  const activeTrip = trips[activeTripIdx] || trips[0];
+
+  const [freightCharge, setFreightCharge] = useState('');
+  const [customHamali, setCustomHamali] = useState('');
+  const [useCustomHamali, setUseCustomHamali] = useState(false);
+  const [customKata, setCustomKata] = useState('');
+  const [useCustomKata, setUseCustomKata] = useState(false);
+  const [customRetention, setCustomRetention] = useState('');
+  const [useCustomRetention, setUseCustomRetention] = useState(false);
+  const [additions, setAdditions] = useState<{ id: string; label: string; amount: string }[]>([]);
+  const [deductions, setDeductions] = useState<{ id: string; label: string; amount: string }[]>([]);
+
+  useEffect(() => {
+    if (!activeTrip || !open) return;
+    setFreightCharge(String(activeTrip.freight || 0));
+    setUseCustomHamali(activeTrip.customHamali != null);
+    setCustomHamali(activeTrip.customHamali != null ? String(activeTrip.customHamali) : '');
+    setUseCustomKata(activeTrip.customKata != null);
+    setCustomKata(activeTrip.customKata != null ? String(activeTrip.customKata) : '');
+    setUseCustomRetention(activeTrip.customRetention != null);
+    setCustomRetention(activeTrip.customRetention != null ? String(activeTrip.customRetention) : '');
+    setAdditions((activeTrip.additions || []).map((a, i) => ({ id: `add-${i}-${Date.now()}`, label: a.label, amount: String(a.amount) })));
+    setDeductions((activeTrip.deductions || []).map((d, i) => ({ id: `ded-${i}-${Date.now()}`, label: d.label, amount: String(d.amount) })));
+  }, [activeTrip, open]);
+
+  useEffect(() => {
+    setActiveTripIdx(0);
+  }, [target]);
+
+  const calcGross = Number(freightCharge) || 0;
+  const calcHamaliVal = useCustomHamali ? (customHamali.trim() !== '' ? Number(customHamali) || 0 : 0) : (activeTrip?.defaultHamali || 0);
+  const calcKataVal = useCustomKata ? (customKata.trim() !== '' ? Number(customKata) || 0 : 0) : (activeTrip?.defaultKata || 0);
+  const calcRetentionVal = useCustomRetention ? (customRetention.trim() !== '' ? Number(customRetention) || 0 : 0) : (activeTrip?.defaultTransport || 0);
+  const calcAdditionsTotal = additions.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  const calcDeductionsTotal = deductions.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const calcStandardDeductions = calcHamaliVal + calcKataVal + calcRetentionVal;
+  const calcNet = round2(calcGross + calcAdditionsTotal - (calcStandardDeductions + calcDeductionsTotal));
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeTrip) throw new Error('No trip selected');
+      const payload = {
+        freightCharge: calcGross,
+        customHamali: useCustomHamali ? (customHamali.trim() !== '' ? Number(customHamali) : null) : null,
+        customKata: useCustomKata ? (customKata.trim() !== '' ? Number(customKata) : null) : null,
+        customRetention: useCustomRetention ? (customRetention.trim() !== '' ? Number(customRetention) : null) : null,
+        freightAdditions: additions.filter((a) => a.label.trim() && Number(a.amount) > 0).map((a) => ({ label: a.label.trim(), amount: Number(a.amount) })),
+        freightDeductions: deductions.filter((d) => d.label.trim() && Number(d.amount) > 0).map((d) => ({ label: d.label.trim(), amount: Number(d.amount) })),
+      };
+
+      if (activeTrip.sourced === 'Sale') {
+        return api(`/sale-dispatches/${activeTrip.id}/freight-costs`, { method: 'PATCH', body: payload });
+      } else if (activeTrip.sourced === 'Purchase') {
+        return api(`/purchases/${activeTrip.id}/freight-costs`, { method: 'PATCH', body: payload });
+      }
+      throw new Error('Cost adjustment only supported for Sale dispatches and Purchases.');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      qc.invalidateQueries({ queryKey: ['purchases'] });
+      qc.invalidateQueries({ queryKey: ['pappu-margins'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Freight costs and deductions updated');
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  if (!target || !activeTrip) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <SlidersHorizontal className="h-5 w-5 text-primary" />
+            <span>Adjust Freight Costs &amp; Deductions</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {trips.length > 1 && (
+          <div className="space-y-1.5 border-b pb-3">
+            <Label className="text-xs text-muted-foreground">Select Trip / Invoice for {target.lorry}</Label>
+            <div className="flex flex-wrap gap-2">
+              {trips.map((t, idx) => (
+                <Button
+                  key={t.id}
+                  size="sm"
+                  type="button"
+                  variant={activeTripIdx === idx ? 'default' : 'outline'}
+                  onClick={() => setActiveTripIdx(idx)}
+                  className="h-8 text-xs font-medium"
+                >
+                  {t.invoice || `Trip #${idx + 1}`} ({rupees(t.freight)})
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Trip Banner */}
+        <div className="rounded-lg bg-muted/40 p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2 border">
+          <div><span className="text-muted-foreground">Lorry No:</span> <strong className="block text-foreground">{activeTrip.lorry || '-'}</strong></div>
+          <div><span className="text-muted-foreground">Date:</span> <strong className="block text-foreground">{shortDate(activeTrip.date)}</strong></div>
+          <div><span className="text-muted-foreground">Invoice:</span> <strong className="block text-foreground">{activeTrip.invoice || '-'}</strong></div>
+          <div><span className="text-muted-foreground">Party:</span> <strong className="block text-foreground truncate">{activeTrip.party || '-'}</strong></div>
+          {activeTrip.weightKg != null && (
+            <div><span className="text-muted-foreground">Weight:</span> <strong className="block text-foreground">{(activeTrip.weightKg / 1000).toFixed(2)} t</strong></div>
+          )}
+          {activeTrip.destination && (
+            <div className="col-span-2"><span className="text-muted-foreground">Destination:</span> <strong className="block text-foreground truncate">{activeTrip.destination}</strong></div>
+          )}
+        </div>
+
+        <div className="space-y-5 py-2">
+          {/* Gross Freight */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="freight-gross" className="text-sm font-semibold">
+                Gross {activeTrip.sourced === 'Purchase' ? 'Inward' : 'Outward'} Freight (₹)
+              </Label>
+              <span className="text-xs text-muted-foreground">Agreed trip freight before deductions</span>
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-muted-foreground font-semibold">₹</span>
+              <Input
+                id="freight-gross"
+                type="number"
+                step="0.01"
+                value={freightCharge}
+                onChange={(e) => setFreightCharge(e.target.value)}
+                placeholder="e.g. 56000"
+                className="pl-7 font-mono font-medium"
+              />
+            </div>
+          </div>
+
+          {/* Standard Trip Deductions */}
+          <div className="space-y-3 rounded-lg border p-3.5 bg-card/60">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <span>Standard Trip Deductions</span>
+              </div>
+              <span className="text-xs text-muted-foreground">Default calculated amounts can be customized</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Hamali */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium">Hamali</Label>
+                  {useCustomHamali && (
+                    <button
+                      type="button"
+                      onClick={() => { setUseCustomHamali(false); setCustomHamali(''); }}
+                      className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+                    >
+                      <RotateCcw className="h-2.5 w-2.5" /> Reset ({rupees(activeTrip.defaultHamali)})
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-2 text-xs text-muted-foreground">₹</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={useCustomHamali ? customHamali : activeTrip.defaultHamali}
+                    onChange={(e) => {
+                      setUseCustomHamali(true);
+                      setCustomHamali(e.target.value);
+                    }}
+                    placeholder={String(activeTrip.defaultHamali)}
+                    className={cn('h-8 pl-6 text-xs font-mono', useCustomHamali ? 'border-primary font-bold' : 'text-muted-foreground')}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground block">
+                  {useCustomHamali ? 'Custom overridden' : `Default: ${rupees(activeTrip.defaultHamali)}`}
+                </span>
+              </div>
+
+              {/* Kata Fee */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium">Kata Fee</Label>
+                  {useCustomKata && (
+                    <button
+                      type="button"
+                      onClick={() => { setUseCustomKata(false); setCustomKata(''); }}
+                      className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+                    >
+                      <RotateCcw className="h-2.5 w-2.5" /> Reset ({rupees(activeTrip.defaultKata)})
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-2 text-xs text-muted-foreground">₹</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={useCustomKata ? customKata : activeTrip.defaultKata}
+                    onChange={(e) => {
+                      setUseCustomKata(true);
+                      setCustomKata(e.target.value);
+                    }}
+                    placeholder={String(activeTrip.defaultKata)}
+                    className={cn('h-8 pl-6 text-xs font-mono', useCustomKata ? 'border-primary font-bold' : 'text-muted-foreground')}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground block">
+                  {useCustomKata ? 'Custom overridden' : `Default: ${rupees(activeTrip.defaultKata)}`}
+                </span>
+              </div>
+
+              {/* Transport Retention */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium">Transport Retention</Label>
+                  {useCustomRetention && (
+                    <button
+                      type="button"
+                      onClick={() => { setUseCustomRetention(false); setCustomRetention(''); }}
+                      className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+                    >
+                      <RotateCcw className="h-2.5 w-2.5" /> Reset ({rupees(activeTrip.defaultTransport)})
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-2 text-xs text-muted-foreground">₹</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={useCustomRetention ? customRetention : activeTrip.defaultTransport}
+                    onChange={(e) => {
+                      setUseCustomRetention(true);
+                      setCustomRetention(e.target.value);
+                    }}
+                    placeholder={String(activeTrip.defaultTransport)}
+                    className={cn('h-8 pl-6 text-xs font-mono', useCustomRetention ? 'border-primary font-bold' : 'text-muted-foreground')}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground block">
+                  {useCustomRetention ? 'Custom overridden' : `Default: ${rupees(activeTrip.defaultTransport)}`}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Extra Costs & Additions (+) */}
+          <div className="space-y-3 rounded-lg border p-3.5 bg-emerald-50/30 dark:bg-emerald-950/10 border-emerald-200/50 dark:border-emerald-900/50">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                <span>Extra Costs &amp; Additions (+)</span>
+              </div>
+              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                Total: +{rupees(calcAdditionsTotal)}
+              </span>
+            </div>
+
+            {/* Presets */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground mr-1">Quick Add:</span>
+              {PRESET_ADDITIONS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setAdditions((prev) => [...prev, { id: `add-${Date.now()}-${Math.random()}`, label: preset, amount: '' }])}
+                  className="rounded-full bg-background border px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:border-emerald-500 transition-colors"
+                >
+                  + {preset}
+                </button>
+              ))}
+            </div>
+
+            {additions.length === 0 ? (
+              <div className="text-xs text-muted-foreground py-2 italic text-center">No extra costs added.</div>
+            ) : (
+              <div className="space-y-2">
+                {additions.map((item, idx) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    <Input
+                      placeholder="e.g. Halting Charges, Multi-point delivery"
+                      value={item.label}
+                      onChange={(e) => {
+                        const next = [...additions];
+                        next[idx].label = e.target.value;
+                        setAdditions(next);
+                      }}
+                      className="h-8 text-xs flex-1 bg-background"
+                    />
+                    <div className="relative w-32 shrink-0">
+                      <span className="absolute left-2.5 top-2 text-xs text-muted-foreground">₹</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Amount"
+                        value={item.amount}
+                        onChange={(e) => {
+                          const next = [...additions];
+                          next[idx].amount = e.target.value;
+                          setAdditions(next);
+                        }}
+                        className="h-8 pl-6 text-xs font-mono bg-background text-right"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => setAdditions(additions.filter((_, i) => i !== idx))}
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => setAdditions((prev) => [...prev, { id: `add-${Date.now()}`, label: '', amount: '' }])}
+              className="h-7 text-xs gap-1 border-dashed"
+            >
+              <Plus className="h-3 w-3" /> Add Extra Cost
+            </Button>
+          </div>
+
+          {/* Other Deductions & Expenses (−) */}
+          <div className="space-y-3 rounded-lg border p-3.5 bg-amber-50/30 dark:bg-amber-950/10 border-amber-200/50 dark:border-amber-900/50">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Other Deductions &amp; Expenses (−)</span>
+              </div>
+              <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                Total: −{rupees(calcDeductionsTotal)}
+              </span>
+            </div>
+
+            {/* Presets */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground mr-1">Quick Add:</span>
+              {PRESET_DEDUCTIONS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setDeductions((prev) => [...prev, { id: `ded-${Date.now()}-${Math.random()}`, label: preset, amount: '' }])}
+                  className="rounded-full bg-background border px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:border-amber-500 transition-colors"
+                >
+                  + {preset}
+                </button>
+              ))}
+            </div>
+
+            {deductions.length === 0 ? (
+              <div className="text-xs text-muted-foreground py-2 italic text-center">No other expense deductions added.</div>
+            ) : (
+              <div className="space-y-2">
+                {deductions.map((item, idx) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    <Input
+                      placeholder="e.g. Diesel Advance, Driver Expense, TDS"
+                      value={item.label}
+                      onChange={(e) => {
+                        const next = [...deductions];
+                        next[idx].label = e.target.value;
+                        setDeductions(next);
+                      }}
+                      className="h-8 text-xs flex-1 bg-background"
+                    />
+                    <div className="relative w-32 shrink-0">
+                      <span className="absolute left-2.5 top-2 text-xs text-muted-foreground">₹</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Amount"
+                        value={item.amount}
+                        onChange={(e) => {
+                          const next = [...deductions];
+                          next[idx].amount = e.target.value;
+                          setDeductions(next);
+                        }}
+                        className="h-8 pl-6 text-xs font-mono bg-background text-right"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => setDeductions(deductions.filter((_, i) => i !== idx))}
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => setDeductions((prev) => [...prev, { id: `ded-${Date.now()}`, label: '', amount: '' }])}
+              className="h-7 text-xs gap-1 border-dashed"
+            >
+              <Plus className="h-3 w-3" /> Add Deduction / Expense
+            </Button>
+          </div>
+
+          {/* Live Calculation Summary */}
+          <div className="rounded-lg border bg-muted/50 p-4 space-y-2 text-xs">
+            <div className="font-semibold text-foreground border-b pb-1.5 flex items-center justify-between">
+              <span>Freight Calculation Breakdown</span>
+              <span className="font-mono text-sm font-bold text-primary">{rupees(calcNet)}</span>
+            </div>
+            <div className="space-y-1 text-muted-foreground">
+              <div className="flex justify-between">
+                <span>Gross Freight</span>
+                <span className="font-mono text-foreground font-medium">{rupees(calcGross)}</span>
+              </div>
+              <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                <span>Standard Deductions (Hamali {rupees(calcHamaliVal)} + Kata {rupees(calcKataVal)} + Transport {rupees(calcRetentionVal)})</span>
+                <span className="font-mono">−{rupees(calcStandardDeductions)}</span>
+              </div>
+              {calcAdditionsTotal > 0 && (
+                <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                  <span>Extra Costs &amp; Additions ({additions.filter((a) => Number(a.amount) > 0).length} item{additions.filter((a) => Number(a.amount) > 0).length > 1 ? 's' : ''})</span>
+                  <span className="font-mono">+{rupees(calcAdditionsTotal)}</span>
+                </div>
+              )}
+              {calcDeductionsTotal > 0 && (
+                <div className="flex justify-between text-amber-600 dark:text-amber-400 font-medium">
+                  <span>Other Deductions &amp; Expenses ({deductions.filter((d) => Number(d.amount) > 0).length} item{deductions.filter((d) => Number(d.amount) > 0).length > 1 ? 's' : ''})</span>
+                  <span className="font-mono">−{rupees(calcDeductionsTotal)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t pt-2 font-bold text-foreground text-sm">
+                <span>Net Lorry Freight Payable</span>
+                <span className="font-mono text-primary">{rupees(calcNet)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? 'Saving…' : 'Save Freight Costs'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function FreightTable({
   freightLabel,
   exportName,
@@ -192,6 +794,7 @@ function FreightTable({
   paymentStatusFor,
   dueFor,
   onPay,
+  onAdjust,
   hideDeductions = false,
   paymentsByLorry,
 }: {
@@ -201,6 +804,7 @@ function FreightTable({
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
   onPay: (row: FreightRow, due: number) => void;
+  onAdjust: (row: FreightRow) => void;
   hideDeductions?: boolean;
   paymentsByLorry: Map<string, { date: string, amount: number, reference: string | null }[]>;
 }) {
@@ -232,9 +836,15 @@ function FreightTable({
     hamali: filteredRows.reduce((s, r) => s + r.hamali, 0),
     kata: filteredRows.reduce((s, r) => s + r.kata, 0),
     transport: filteredRows.reduce((s, r) => s + r.transport, 0),
+    otherDeductions: filteredRows.reduce((s, r) => s + (r.totalOtherDeductions || 0), 0),
+    additions: filteredRows.reduce((s, r) => s + (r.totalAdditions || 0), 0),
     net: filteredRows.reduce((s, r) => s + r.net, 0),
     due: filteredRows.reduce((s, r) => s + dueFor(r), 0),
   };
+
+  const hasAnyCustomCosts = useMemo(() => {
+    return rows.some((r) => (r.totalOtherDeductions > 0) || (r.totalAdditions > 0));
+  }, [rows]);
 
   const exportColumns: ExportColumn<FreightRow>[] = [
     { header: 'Date', value: (r) => shortDate(r.date) },
@@ -250,12 +860,16 @@ function FreightTable({
       { header: 'Hamali', value: (r: FreightRow) => (r.hamali ? rupees(r.hamali) : ''), excel: (r: FreightRow) => r.hamali || null, numFmt: '#,##0.00', align: 'right' as const },
       { header: 'Kata', value: (r: FreightRow) => (r.kata ? rupees(r.kata) : ''), excel: (r: FreightRow) => r.kata || null, numFmt: '#,##0.00', align: 'right' as const },
       { header: 'Transport', value: (r: FreightRow) => (r.transport ? rupees(r.transport) : ''), excel: (r: FreightRow) => r.transport || null, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Other Deductions', value: (r: FreightRow) => (r.totalOtherDeductions ? rupees(r.totalOtherDeductions) : ''), excel: (r: FreightRow) => r.totalOtherDeductions || null, numFmt: '#,##0.00', align: 'right' as const },
+      { header: 'Extra Costs', value: (r: FreightRow) => (r.totalAdditions ? rupees(r.totalAdditions) : ''), excel: (r: FreightRow) => r.totalAdditions || null, numFmt: '#,##0.00', align: 'right' as const },
     ]),
     { header: 'Net Freight', value: (r) => rupees(r.net), excel: (r) => r.net, numFmt: '#,##0.00', align: 'right' },
     { header: 'Due', value: (r) => rupees(dueFor(r)), excel: (r) => dueFor(r), numFmt: '#,##0.00', align: 'right' },
     { header: 'Delivery Status', value: (r) => titleCase(r.deliveryStatus) },
     { header: 'Payment Status', value: (r) => paymentStatusFor(r) },
   ];
+
+  const colSpanCount = hideDeductions ? 10 : (hasAnyCustomCosts ? 14 : 12);
 
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
@@ -285,6 +899,8 @@ function FreightTable({
             {!hideDeductions && <TableHead className="text-right">Hamali</TableHead>}
             {!hideDeductions && <TableHead className="text-right">Kata</TableHead>}
             {!hideDeductions && <TableHead className="text-right">Transport</TableHead>}
+            {!hideDeductions && hasAnyCustomCosts && <TableHead className="text-right">Other Ded.</TableHead>}
+            {!hideDeductions && hasAnyCustomCosts && <TableHead className="text-right">Extra Costs</TableHead>}
             <TableHead className="text-right">Net Freight</TableHead>
             <TableHead className="text-right">Due</TableHead>
             <TableHead>Delivery Status</TableHead>
@@ -294,12 +910,14 @@ function FreightTable({
         </TableHeader>
         <TableBody>
           {filteredRows.length === 0 && (
-            <TableRow><TableCell colSpan={hideDeductions ? 10 : 12} className="text-center text-muted-foreground py-8">No records.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={colSpanCount} className="text-center text-muted-foreground py-8">No records.</TableCell></TableRow>
           )}
           {(pageRows ?? []).map((r) => {
             const pay = paymentStatusFor(r);
             const due = dueFor(r);
             const isExpanded = expandedRow === r.lorry;
+            const canAdjust = r.sourced === 'Sale' || r.sourced === 'Purchase' || (r.rawItems && r.rawItems.length > 0);
+
             return (
               <Fragment key={r.id}>
                 <TableRow
@@ -318,9 +936,54 @@ function FreightTable({
                   {hideDeductions && <TableCell>{r.destination ?? '-'}</TableCell>}
                   {hideDeductions && <TableCell>{r.party ?? '-'}</TableCell>}
                   <TableCell className="text-right font-medium">{rupees(r.freight)}</TableCell>
-                  {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">{r.hamali ? `−${rupees(r.hamali)}` : '-'}</TableCell>}
-                  {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">{r.kata ? `−${rupees(r.kata)}` : '-'}</TableCell>}
-                  {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">{r.transport ? `−${rupees(r.transport)}` : '-'}</TableCell>}
+                  {!hideDeductions && (
+                    <TableCell className="text-right text-amber-600 dark:text-amber-400">
+                      {r.hamali ? (
+                        <span>
+                          −{rupees(r.hamali)}
+                          {r.customHamali != null && <span className="text-[10px] text-primary ml-1" title="Custom Hamali override">*</span>}
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                  )}
+                  {!hideDeductions && (
+                    <TableCell className="text-right text-amber-600 dark:text-amber-400">
+                      {r.kata ? (
+                        <span>
+                          −{rupees(r.kata)}
+                          {r.customKata != null && <span className="text-[10px] text-primary ml-1" title="Custom Kata override">*</span>}
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                  )}
+                  {!hideDeductions && (
+                    <TableCell className="text-right text-amber-600 dark:text-amber-400">
+                      {r.transport ? (
+                        <span>
+                          −{rupees(r.transport)}
+                          {r.customRetention != null && <span className="text-[10px] text-primary ml-1" title="Custom Retention override">*</span>}
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                  )}
+                  {!hideDeductions && hasAnyCustomCosts && (
+                    <TableCell className="text-right text-amber-600 dark:text-amber-400 font-medium">
+                      {r.totalOtherDeductions > 0 ? (
+                        <span title={r.deductions.map(d => `${d.label}: ₹${d.amount}`).join(', ')}>
+                          −{rupees(r.totalOtherDeductions)}
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                  )}
+                  {!hideDeductions && hasAnyCustomCosts && (
+                    <TableCell className="text-right text-emerald-600 dark:text-emerald-400 font-medium">
+                      {r.totalAdditions > 0 ? (
+                        <span title={r.additions.map(a => `${a.label}: ₹${a.amount}`).join(', ')}>
+                          +{rupees(r.totalAdditions)}
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                  )}
                   <TableCell className="text-right font-medium">{rupees(r.net)}</TableCell>
                   <TableCell className={cn('text-right font-mono tabular-nums', due === 0 ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-rose-600 dark:text-rose-400 font-bold')}>
                     {rupees(due)}
@@ -342,37 +1005,140 @@ function FreightTable({
                     </span>
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                    {r.lorry && pay !== 'Paid' ? (
-                      <Button size="sm" variant="outline" onClick={() => onPay(r, due)}>
-                        Pay
-                      </Button>
-                    ) : null}
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      {canAdjust && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs gap-1"
+                          onClick={() => onAdjust(r)}
+                          title="Adjust Freight Costs &amp; Deductions"
+                        >
+                          <SlidersHorizontal className="h-3 w-3" />
+                          <span className="hidden sm:inline">Costs</span>
+                        </Button>
+                      )}
+                      {r.lorry && pay !== 'Paid' ? (
+                        <Button size="sm" variant="default" className="h-7 px-2.5 text-xs" onClick={() => onPay(r, due)}>
+                          Pay
+                        </Button>
+                      ) : null}
+                    </div>
                   </TableCell>
                 </TableRow>
                 {isExpanded && r.lorry && (() => {
                   const history = paymentsByLorry.get(r.lorry!) ?? [];
                   return (
-                    <ExpandPanel colSpan={hideDeductions ? 10 : 12}>
-                      <PanelLabel>Payment History for {r.lorry} · {history.length}</PanelLabel>
-                      {history.length === 0 ? (
-                        <PanelEmpty>No payments recorded.</PanelEmpty>
-                      ) : (
-                        <PanelStack>
-                          {history.map((pay, i) => (
-                            <PanelCard
-                              key={i}
-                              icon={IndianRupee}
-                              identity={
-                                <PanelTitle>
-                                  <span className="font-mono text-sm font-semibold">{shortDate(pay.date)}</span>
-                                  {pay.reference && <span className="text-xs text-muted-foreground">{pay.reference}</span>}
-                                </PanelTitle>
-                              }
-                              figures={<Figure label="Amount" value={rupees(pay.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
-                            />
-                          ))}
-                        </PanelStack>
-                      )}
+                    <ExpandPanel colSpan={colSpanCount}>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Freight Cost & Deductions Breakdown */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <PanelLabel>Freight Cost &amp; Deduction Breakdown</PanelLabel>
+                            {canAdjust && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-[11px] gap-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAdjust(r);
+                                }}
+                              >
+                                <SlidersHorizontal className="h-3 w-3" /> Adjust Costs
+                              </Button>
+                            )}
+                          </div>
+                          <div className="rounded-lg border bg-card p-3 space-y-2 text-xs">
+                            <div className="grid grid-cols-2 gap-2 pb-2 border-b">
+                              <div>
+                                <span className="text-muted-foreground block text-[11px]">Gross Freight:</span>
+                                <strong className="font-mono text-foreground font-semibold">{rupees(r.freight)}</strong>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground block text-[11px]">Net Payable:</span>
+                                <strong className="font-mono text-primary font-bold">{rupees(r.net)}</strong>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1 text-muted-foreground">
+                              <div className="flex justify-between">
+                                <span>Hamali Deducted:</span>
+                                <span className="font-mono text-amber-600 dark:text-amber-400">
+                                  {r.hamali ? `−${rupees(r.hamali)}` : '₹0.00'}
+                                  {r.customHamali != null && <Badge variant="outline" className="ml-1 text-[9px] py-0 h-4">custom</Badge>}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Kata Fee Deducted:</span>
+                                <span className="font-mono text-amber-600 dark:text-amber-400">
+                                  {r.kata ? `−${rupees(r.kata)}` : '₹0.00'}
+                                  {r.customKata != null && <Badge variant="outline" className="ml-1 text-[9px] py-0 h-4">custom</Badge>}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Transport Retention:</span>
+                                <span className="font-mono text-amber-600 dark:text-amber-400">
+                                  {r.transport ? `−${rupees(r.transport)}` : '₹0.00'}
+                                  {r.customRetention != null && <Badge variant="outline" className="ml-1 text-[9px] py-0 h-4">custom</Badge>}
+                                </span>
+                              </div>
+
+                              {r.additions && r.additions.length > 0 && (
+                                <div className="pt-1.5 border-t space-y-1">
+                                  <span className="font-medium text-emerald-700 dark:text-emerald-400 block text-[11px]">
+                                    Extra Costs &amp; Additions (+):
+                                  </span>
+                                  {r.additions.map((a, idx) => (
+                                    <div key={idx} className="flex justify-between pl-2 text-emerald-600 dark:text-emerald-400 font-medium">
+                                      <span>• {a.label}</span>
+                                      <span className="font-mono">+{rupees(Number(a.amount) || 0)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {r.deductions && r.deductions.length > 0 && (
+                                <div className="pt-1.5 border-t space-y-1">
+                                  <span className="font-medium text-amber-700 dark:text-amber-400 block text-[11px]">
+                                    Other Deductions &amp; Expenses (−):
+                                  </span>
+                                  {r.deductions.map((d, idx) => (
+                                    <div key={idx} className="flex justify-between pl-2 text-amber-600 dark:text-amber-400 font-medium">
+                                      <span>• {d.label}</span>
+                                      <span className="font-mono">−{rupees(Number(d.amount) || 0)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Payment History */}
+                        <div className="space-y-2">
+                          <PanelLabel>Payment History for {r.lorry} · {history.length}</PanelLabel>
+                          {history.length === 0 ? (
+                            <PanelEmpty>No payments recorded.</PanelEmpty>
+                          ) : (
+                            <PanelStack>
+                              {history.map((pay, i) => (
+                                <PanelCard
+                                  key={i}
+                                  icon={IndianRupee}
+                                  identity={
+                                    <PanelTitle>
+                                      <span className="font-mono text-sm font-semibold">{shortDate(pay.date)}</span>
+                                      {pay.reference && <span className="text-xs text-muted-foreground">{pay.reference}</span>}
+                                    </PanelTitle>
+                                  }
+                                  figures={<Figure label="Amount" value={rupees(pay.amount)} valueClass="text-emerald-600 dark:text-emerald-400" />}
+                                />
+                              ))}
+                            </PanelStack>
+                          )}
+                        </div>
+                      </div>
                     </ExpandPanel>
                   );
                 })()}
@@ -388,6 +1154,8 @@ function FreightTable({
               {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">−{rupees(t.hamali)}</TableCell>}
               {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">−{rupees(t.kata)}</TableCell>}
               {!hideDeductions && <TableCell className="text-right text-amber-600 dark:text-amber-400">−{rupees(t.transport)}</TableCell>}
+              {!hideDeductions && hasAnyCustomCosts && <TableCell className="text-right text-amber-600 dark:text-amber-400">−{rupees(t.otherDeductions)}</TableCell>}
+              {!hideDeductions && hasAnyCustomCosts && <TableCell className="text-right text-emerald-600 dark:text-emerald-400">+{rupees(t.additions)}</TableCell>}
               <TableCell className="text-right">{rupees(t.net)}</TableCell>
               <TableCell className="text-right font-bold">{rupees(t.due)}</TableCell>
               <TableCell colSpan={3} />
@@ -600,7 +1368,6 @@ export default function FreightDuesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const initialMainTab = tabParam === 'transport' || tabParam === 'lorries' ? tabParam : 'dues';
-  const [mainTab, setMainTab] = useState(initialMainTab);
   const qc = useQueryClient();
   const [tab, setTab] = useState('outward');
 
@@ -610,6 +1377,9 @@ export default function FreightDuesPage() {
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
   const [payReference, setPayReference] = useState('');
+
+  // Cost Adjust dialog state
+  const [adjustTarget, setAdjustTarget] = useState<FreightRow | null>(null);
 
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases'],
@@ -674,9 +1444,24 @@ export default function FreightDuesPage() {
       const freight = Number(d.freightCharge);
       const provider = (d as any).transportProvider ?? (d.vehicleNumber && knmList.includes(d.vehicleNumber.trim().toLowerCase()) ? 'KNM' : 'SURYA');
       const isKnm = provider === 'KNM' || (d.vehicleNumber ? knmList.includes(d.vehicleNumber.trim().toLowerCase()) : false);
-      const hamali = isKnm ? 0 : (o.product === 'PAPPU' ? pappuLoadingHamali(d.weightKg).lorry : calcHamali(d.weightKg));
-      const kata = isKnm ? 0 : calcKataFee(d.weightKg);
-      const transport = (d as any).customRetention != null ? Number((d as any).customRetention) : (provider === 'SURYA' ? retention : 0);
+      const defaultHamali = isKnm ? 0 : (o.product === 'PAPPU' ? pappuLoadingHamali(d.weightKg).lorry : calcHamali(d.weightKg));
+      const customHamali = (d as any).customHamali != null ? Number((d as any).customHamali) : null;
+      const hamali = customHamali != null ? customHamali : defaultHamali;
+
+      const defaultKata = isKnm ? 0 : calcKataFee(d.weightKg);
+      const customKata = (d as any).customKata != null ? Number((d as any).customKata) : null;
+      const kata = customKata != null ? customKata : defaultKata;
+
+      const defaultTransport = (provider === 'SURYA' ? retention : 0);
+      const customRetention = (d as any).customRetention != null ? Number((d as any).customRetention) : null;
+      const transport = customRetention != null ? customRetention : defaultTransport;
+
+      const additions: FreightCostItem[] = Array.isArray((d as any).freightAdditions) ? (d as any).freightAdditions : [];
+      const deductions: FreightCostItem[] = Array.isArray((d as any).freightDeductions) ? (d as any).freightDeductions : [];
+      const totalAdditions = round2(additions.reduce((s, a) => s + (Number(a.amount) || 0), 0));
+      const totalOtherDeductions = round2(deductions.reduce((s, a) => s + (Number(a.amount) || 0), 0));
+      const net = round2(freight + totalAdditions - (hamali + kata + transport + totalOtherDeductions));
+
       return {
         id: d.id,
         date: d.dispatchDate,
@@ -684,13 +1469,25 @@ export default function FreightDuesPage() {
         invoice: d.invoiceNumber ?? null,
         freight,
         hamali,
+        defaultHamali,
+        customHamali,
         kata,
+        defaultKata,
+        customKata,
         transport,
-        net: round2(freight - hamali - kata - transport),
+        defaultTransport,
+        customRetention,
+        additions,
+        deductions,
+        totalAdditions,
+        totalOtherDeductions,
+        net,
         deliveryStatus: d.status as SaleStatus,
         sourced: 'Sale',
         destination: o.destination ?? null,
         party: o.buyer?.name ?? null,
+        weightKg: d.weightKg,
+        rawDispatchId: d.id,
       };
     });
 
@@ -702,9 +1499,25 @@ export default function FreightDuesPage() {
       const freight = round2(inwardFreightOf(p));
       const lorry = p.stockIn?.lorryNumber;
       const isKnm = lorry ? knmList.includes(lorry.trim().toLowerCase()) : false;
-      // For KNM vehicles, hamali and kata lorry shares are 0. (The backend stores the total hamali in p.hamaliCharge)
-      const hamali = isKnm ? 0 : Number(p.hamaliCharge ?? 0);
-      const kata = isKnm ? 0 : Number(p.kataFee ?? 0);
+      
+      const defaultHamali = isKnm ? 0 : Number(p.hamaliCharge ?? 0);
+      const customHamali = (p as any).customHamali != null ? Number((p as any).customHamali) : null;
+      const hamali = customHamali != null ? customHamali : defaultHamali;
+
+      const defaultKata = isKnm ? 0 : Number(p.kataFee ?? 0);
+      const customKata = (p as any).customKata != null ? Number((p as any).customKata) : null;
+      const kata = customKata != null ? customKata : defaultKata;
+
+      const defaultTransport = 0;
+      const customRetention = (p as any).customRetention != null ? Number((p as any).customRetention) : null;
+      const transport = customRetention != null ? customRetention : defaultTransport;
+
+      const additions: FreightCostItem[] = Array.isArray((p as any).freightAdditions) ? (p as any).freightAdditions : [];
+      const deductions: FreightCostItem[] = Array.isArray((p as any).freightDeductions) ? (p as any).freightDeductions : [];
+      const totalAdditions = round2(additions.reduce((s, a) => s + (Number(a.amount) || 0), 0));
+      const totalOtherDeductions = round2(deductions.reduce((s, a) => s + (Number(a.amount) || 0), 0));
+      const net = round2(freight + totalAdditions - (hamali + kata + transport + totalOtherDeductions));
+
       return {
         id: p.id,
         date: p.stockIn?.arrivalDate ?? p.createdAt,
@@ -712,13 +1525,25 @@ export default function FreightDuesPage() {
         invoice: p.stockIn?.invoiceNumber ?? null,
         freight,
         hamali,
+        defaultHamali,
+        customHamali,
         kata,
-        transport: 0,
-        net: round2(freight - hamali - kata),
+        defaultKata,
+        customKata,
+        transport,
+        defaultTransport,
+        customRetention,
+        additions,
+        deductions,
+        totalAdditions,
+        totalOtherDeductions,
+        net,
         deliveryStatus: 'RECEIVED',
         sourced: 'Purchase',
         destination: p.stockIn?.loadingLocation ?? null,
         party: p.stockIn?.purchaseOrder?.party?.name ?? null,
+        weightKg: p.netWeightKg,
+        rawPurchaseId: p.id,
       };
     });
 
@@ -746,6 +1571,10 @@ export default function FreightDuesPage() {
       hamali: 0,
       kata: 0,
       transport: 0,
+      additions: [],
+      deductions: [],
+      totalAdditions: 0,
+      totalOtherDeductions: 0,
       net: freight,
       deliveryStatus: 'RECEIVED',
       sourced: 'Transfer',
@@ -815,7 +1644,7 @@ export default function FreightDuesPage() {
     }
 
     for (const [lorry, lorryRows] of rowsByLorry.entries()) {
-      lorryRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      lorryRows.sort((a, b) => new Date(a.date).getTime() - new Date(a.date).getTime());
       let remainingPaid = floatingByLorry.get(lorry) ?? 0;
 
       for (const r of lorryRows) {
@@ -980,7 +1809,7 @@ export default function FreightDuesPage() {
                     <div className="text-xs text-muted-foreground mt-1">Total: {rupees(outwardNet)}</div>
                   </CardContent>
                 </Card>
-                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
+                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
               <TabsContent value="inward" className="space-y-4">
@@ -993,7 +1822,7 @@ export default function FreightDuesPage() {
                     <div className="text-xs text-muted-foreground mt-1">Total: {rupees(inwardNet)}</div>
                   </CardContent>
                 </Card>
-                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
+                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
               <TabsContent value="knm" className="space-y-6">
@@ -1038,7 +1867,7 @@ export default function FreightDuesPage() {
                   </TabsList>
 
                   <TabsContent value="usual">
-                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
                   </TabsContent>
 
                   <TabsContent value="transfers" className="space-y-2">
@@ -1060,6 +1889,14 @@ export default function FreightDuesPage() {
         </TabsContent>
       </Tabs>
 
+      {/* Adjust Freight Costs & Deductions Dialog */}
+      <AdjustFreightCostsDialog
+        open={adjustTarget !== null}
+        onOpenChange={(o) => { if (!o) setAdjustTarget(null); }}
+        target={adjustTarget}
+      />
+
+      {/* Pay Dialog */}
       <Dialog open={payTarget !== null} onOpenChange={(o) => { if (!o) setPayTarget(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>

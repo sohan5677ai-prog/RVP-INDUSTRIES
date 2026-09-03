@@ -26,6 +26,7 @@ import {
   listPurchases,
   updatePurchase,
   deletePurchase,
+  updatePurchaseFreightCosts,
 } from '../controllers/purchase.controller.js';
 import {
   listVerifications,
@@ -62,6 +63,7 @@ router.get('/purchases/:id', asyncHandler(getPurchase));
 router.post('/purchases', asyncHandler(createPurchase));
 router.put('/purchases/:id', asyncHandler(updatePurchase));
 router.delete('/purchases/:id', asyncHandler(deletePurchase));
+router.patch('/purchases/:id/freight-costs', asyncHandler(updatePurchaseFreightCosts));
 
 // Weight verification (separate step from recording a purchase)
 router.get('/verifications', asyncHandler(listVerifications));

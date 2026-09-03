@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import type { SaleProduct } from '@prisma/client';
 import { withCache, clearCache } from '../lib/cache.js';
-import { companyHamaliShare, calcSaleFreight, PAPPU_OUT_TURN, seedBackedDemandKg, excessOutKgOf } from '../lib/calc.js';
+import { companyHamaliShare, calcSaleFreight, PAPPU_OUT_TURN, PAPPU_CONSUMABLE, seedBackedDemandKg, excessOutKgOf } from '../lib/calc.js';
 import { getFreightRateForDestination } from './settings.controller.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computeUnifiedStockEngine } from '../services/stockEngine.js';
@@ -287,14 +287,23 @@ type FrozenSeed = {
 };
 
 async function _computePappuOrderMargins() {
-  const EPS = 1e-6;
+  // Use the authoritative unified stock engine for seed allocation:
+  const stockResult = await computeUnifiedStockEngine('MOST_EXPENSIVE_FIRST');
 
-  // Arrived-at-process seed timeline (real RVP lorries + transferred-in, repriced).
-  const rows = await InventoryService.computeBlackSeedRows();
-  type Ref = { price: number; date: Date; remainingKg: number };
-  const refs: Ref[] = rows
-    .filter((r) => r.location === 'RVP' && r.rvpNetWeightKg > 0)
-    .map((r) => ({ price: r.pricePerKg, date: r.date, remainingKg: r.rvpNetWeightKg }));
+  // Per order → the price bands (and seed kg) that backed it across arrived and pending lots.
+  const orderSeedMap = new Map<string, Map<string, { price: number; seedKg: number }>>();
+  for (const b of stockResult.bands) {
+    for (const lot of b.lots) {
+      for (const c of (lot.consumedBy || [])) {
+        let m = orderSeedMap.get(c.orderId);
+        if (!m) { m = new Map(); orderSeedMap.set(c.orderId, m); }
+        const key = lot.pricePerKg.toFixed(2);
+        const e = m.get(key) ?? { price: lot.pricePerKg, seedKg: 0 };
+        e.seedKg += c.seedKg;
+        m.set(key, e);
+      }
+    }
+  }
 
   const orders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
@@ -333,66 +342,10 @@ async function _computePappuOrderMargins() {
       ? Number(so.freightRatePerTonne)
       : (liveFreightRateByDest.get(destOf(so) ?? '') ?? 0);
 
-  // Per order → the price bands (and seed kg) that backed it.
-  const orderSeed = new Map<string, Map<string, { price: number; seedKg: number }>>();
-  const recordDraw = (orderId: string, price: number, seedKg: number) => {
-    let m = orderSeed.get(orderId);
-    if (!m) { m = new Map(); orderSeed.set(orderId, m); }
-    const key = price.toFixed(2);
-    const e = m.get(key) ?? { price, seedKg: 0 };
-    e.seedKg += seedKg;
-    m.set(key, e);
-  };
-
-  type AllocEvent =
-    | { t: number; kind: 'arrive'; ref: Ref }
-    | { t: number; kind: 'sale'; orderId: string; seedNeed: number };
-  // Stable insertion index, so same-timestamp events keep the deterministic
-  // order they were built in rather than whatever Array.sort happens to do.
-  const events: AllocEvent[] = [];
-  for (const r of refs) events.push({ t: r.date.getTime(), kind: 'arrive', ref: r });
-  // XS (excess-out) tonnage is dropped from demand, so it draws no seed and never
-  // queues in the backlog to be paid for by black seed arriving later at RVP.
   const committedOf = new Map<string, number>();
   for (const so of orders) {
     const committed = seedBackedDemandKg(so.tonnageKg, so.dispatches, so.closedAt != null);
     committedOf.set(so.id, committed);
-    if (committed > 0) events.push({ t: so.saleDate.getTime(), kind: 'sale', orderId: so.id, seedNeed: committed / PAPPU_OUT_TURN });
-  }
-  events.sort(
-    (a, z) =>
-      a.t - z.t ||
-      (a.kind === 'arrive' ? -1 : 1) - (z.kind === 'arrive' ? -1 : 1) ||
-      (a.kind === 'sale' && z.kind === 'sale' ? a.orderId.localeCompare(z.orderId) : 0),
-  );
-
-  const pool: Ref[] = [];
-  const draw = (orderId: string, needSeed: number): number => {
-    if (needSeed <= EPS) return 0;
-    pool.sort((a, z) => (z.price - a.price) || (a.date.getTime() - z.date.getTime()));
-    for (const r of pool) {
-      if (needSeed <= EPS) break;
-      if (r.remainingKg <= EPS) continue;
-      const take = Math.min(needSeed, r.remainingKg);
-      r.remainingKg -= take;
-      recordDraw(orderId, r.price, take);
-      needSeed -= take;
-    }
-    return needSeed;
-  };
-  const backlog: { orderId: string; seedNeed: number }[] = [];
-  for (const ev of events) {
-    if (ev.kind === 'arrive') {
-      pool.push(ev.ref);
-      while (backlog.length > 0) {
-        const left = draw(backlog[0].orderId, backlog[0].seedNeed);
-        if (left > EPS) { backlog[0].seedNeed = left; break; }
-        backlog.shift();
-      }
-    } else {
-      const left = draw(ev.orderId, ev.seedNeed);
-      if (left > EPS) backlog.push({ orderId: ev.orderId, seedNeed: left });
-    }
   }
 
   const result = orders.map((so) => {
@@ -412,7 +365,7 @@ async function _computePappuOrderMargins() {
     const freight =
       Math.round((actualFreight + calcSaleFreight(pendingKg, freightRateOf(so))) * 100) / 100;
 
-    const bandsMap = orderSeed.get(so.id) ?? new Map<string, { price: number; seedKg: number }>();
+    const bandsMap = orderSeedMap.get(so.id) ?? new Map<string, { price: number; seedKg: number }>();
     const liveBands = [...bandsMap.values()]
       .sort((a, b) => b.price - a.price)
       .map((b) => ({ price: b.price, seedKg: Math.round(b.seedKg), cost: Math.round(b.price * b.seedKg * 100) / 100 }));

@@ -78,6 +78,10 @@ const ByproductSales = lazyWithPreload(
   () => import('@/pages/ByproductSales')
 );
 const PappuProfitLoss = lazyWithPreload('/sales/profit-loss', () => import('@/pages/PappuProfitLoss'));
+const DuesOnThisDay = lazyWithPreload(
+  ['/sales/dues-today', '/sales/dues-on-this-day'],
+  () => import('@/pages/DuesOnThisDay')
+);
 const PurchaseStatement = lazyWithPreload('/purchases/:purchaseId/statement', () => import('@/pages/PurchaseStatement'));
 const PartyLedger = lazyWithPreload('/accounts/party-ledger', () => import('@/pages/PartyLedger'));
 const HamaliLedger = lazyWithPreload('/accounts/hamali-ledger', () => import('@/pages/HamaliLedger'));
@@ -172,6 +176,8 @@ export default function App() {
               <Route path="/sales/shell" element={<ByproductSales />} />
               <Route path="/sales/waste" element={<ByproductSales />} />
               <Route path="/sales/profit-loss" element={<PappuProfitLoss />} />
+              <Route path="/sales/dues-today" element={<DuesOnThisDay />} />
+              <Route path="/sales/dues-on-this-day" element={<DuesOnThisDay />} />
               <Route path="/accounts/party-ledger" element={<PartyLedger />} />
               <Route path="/accounts/hamali-ledger" element={<HamaliLedger />} />
               <Route path="/accounts/surya-road-transport" element={<Navigate to="/reports/freight-dues?tab=transport" replace />} />
@@ -198,9 +204,10 @@ export default function App() {
               <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
               <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
               <Route path="/settings" element={<Settings />} />
-              <Route path="/settings/due-today" element={<Navigate to="/settings?tab=dues-today" replace />} />
-              <Route path="/settings/dues-today" element={<Navigate to="/settings?tab=dues-today" replace />} />
-              <Route path="/dues-today" element={<Navigate to="/settings?tab=dues-today" replace />} />
+              <Route path="/settings/due-today" element={<Navigate to="/sales/dues-today" replace />} />
+              <Route path="/settings/dues-today" element={<Navigate to="/sales/dues-today" replace />} />
+              <Route path="/dues-today" element={<Navigate to="/sales/dues-today" replace />} />
+              <Route path="/sales/due-today" element={<Navigate to="/sales/dues-today" replace />} />
               <Route path="/support" element={<SupportTickets />} />
               <Route path="/notes-comments" element={<NotesComments />} />
               <Route path="/settings/notes-comments" element={<Navigate to="/notes-comments" replace />} />

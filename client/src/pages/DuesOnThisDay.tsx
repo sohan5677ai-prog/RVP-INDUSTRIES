@@ -24,7 +24,7 @@ import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { PageHeader } from '@/components/PageHeader';
 import { toast } from 'sonner';
 
 const DOW_OPTIONS = [
@@ -258,90 +259,72 @@ export default function DuesOnThisDay() {
 
   return (
     <div className="space-y-6">
-      {/* Header & Automation Config Card */}
-      <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-50/40 to-card dark:from-emerald-950/10">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                  <CalendarClock className="h-6 w-6" />
-                </div>
-                <div>
-                  <CardTitle className="text-xl flex items-center gap-2">
-                    Dues on this Day
-                    <Badge variant="outline" className="text-xs border-emerald-500/40 text-emerald-700 dark:text-emerald-300">
-                      Payment Reminders
-                    </Badge>
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    Notify Party (Buyer) and Broker automatically or manually on the exact day payments are due.
-                  </CardDescription>
-                </div>
+      <PageHeader
+        title="Dues on this Day"
+        description="Notify Party (Buyer) and Broker automatically or manually on the exact day payments are due."
+        icon={CalendarClock}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 bg-background border rounded-lg px-3 py-1.5 shadow-sm">
+              <div className="flex flex-col text-right">
+                <span className="text-xs font-semibold">Auto-Reminders</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {data?.schedule?.enabled ? 'Active' : 'Paused'}
+                </span>
               </div>
-            </div>
-
-            {/* Quick Actions & Automation Switch */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 bg-background/80 border rounded-lg px-3 py-1.5 shadow-sm">
-                <div className="flex flex-col text-right">
-                  <span className="text-xs font-semibold">Auto-Reminders</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {data?.schedule?.enabled ? 'Active' : 'Paused'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={data?.schedule?.enabled}
-                  aria-label="Toggle auto-send daily reminders"
-                  disabled={updateScheduleMutation.isPending || !data}
-                  onClick={() =>
-                    updateScheduleMutation.mutate({ enabled: !data?.schedule?.enabled })
-                  }
-                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                    data?.schedule?.enabled ? 'bg-emerald-600' : 'bg-muted-foreground/30'
+              <button
+                type="button"
+                role="switch"
+                aria-checked={data?.schedule?.enabled}
+                aria-label="Toggle auto-send daily reminders"
+                disabled={updateScheduleMutation.isPending || !data}
+                onClick={() =>
+                  updateScheduleMutation.mutate({ enabled: !data?.schedule?.enabled })
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                  data?.schedule?.enabled ? 'bg-emerald-600' : 'bg-muted-foreground/30'
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                    data?.schedule?.enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
                   }`}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                      data?.schedule?.enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  initSchedule();
-                  setShowScheduleEditor(!showScheduleEditor);
-                }}
-                className="gap-1.5"
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                {showScheduleEditor ? 'Hide Timing' : 'Schedule & Timing'}
-              </Button>
-
-              <Button
-                size="sm"
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                onClick={() => {
-                  setBulkTarget(data?.schedule?.target || 'BOTH');
-                  setShowBulkConfirm(true);
-                }}
-                disabled={!data || data.invoices.length === 0 || sendBulkMutation.isPending}
-              >
-                <Send className="h-3.5 w-3.5" />
-                Send All Due on Date
-              </Button>
+                />
+              </button>
             </div>
-          </div>
-        </CardHeader>
 
-        <CardContent className="space-y-4">
-          {/* Schedule Summary Banner */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                initSchedule();
+                setShowScheduleEditor(!showScheduleEditor);
+              }}
+              className="gap-1.5"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              {showScheduleEditor ? 'Hide Timing' : 'Schedule & Timing'}
+            </Button>
+
+            <Button
+              size="sm"
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => {
+                setBulkTarget(data?.schedule?.target || 'BOTH');
+                setShowBulkConfirm(true);
+              }}
+              disabled={!data || data.invoices.length === 0 || sendBulkMutation.isPending}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Send All Due on Date
+            </Button>
+          </div>
+        }
+      />
+
+      {/* Schedule Summary Banner & Timing Editor */}
+      <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-50/40 to-card dark:from-emerald-950/10">
+        <CardContent className="p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs bg-muted/40 p-3 rounded-lg border">
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-1.5">

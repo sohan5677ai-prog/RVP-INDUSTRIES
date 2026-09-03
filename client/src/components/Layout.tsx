@@ -42,6 +42,7 @@ import {
   LifeBuoy,
   HandCoins,
   StickyNote,
+  CalendarClock,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -118,6 +119,7 @@ const sections: NavSection[] = [
       { to: '/sales/tps', label: 'TPS (Brokens)', icon: Wheat },
       { to: '/sales/byproducts', label: 'Tamarind Byproducts', icon: Recycle },
       { to: '/sales/notes', label: 'Credit/Debit Notes', icon: FileMinus2 },
+      { to: '/sales/dues-today', label: 'Dues on this Day', icon: CalendarClock },
     ],
   },
   {

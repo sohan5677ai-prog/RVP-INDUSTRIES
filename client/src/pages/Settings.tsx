@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal, Bell, Send, Pencil, X } from 'lucide-react';
@@ -17,7 +17,6 @@ import { useAuth } from '@/lib/auth';
 import Subscription from '@/pages/Subscription';
 import ArchiveManager from '@/pages/ArchiveManager';
 import Wishes from '@/pages/Wishes';
-import DuesOnThisDay from '@/pages/DuesOnThisDay';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -41,6 +40,11 @@ export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isDeveloper = user?.role === 'DEVELOPER';
   const requested = searchParams.get('tab') || 'company';
+
+  if (requested === 'dues-today') {
+    return <Navigate to="/sales/dues-today" replace />;
+  }
+
   // Someone who types /settings?tab=archives without the role lands on Company
   // rather than an empty tab strip.
   const activeTab = !isDeveloper && DEV_ONLY_TABS.includes(requested) ? 'company' : requested;
@@ -51,8 +55,8 @@ export default function Settings() {
         title="Settings"
         description={
           isDeveloper
-            ? 'Company details, bank, invoice setup, rates, dues on this day, subscription and archives.'
-            : 'Company details, bank, invoice setup, dues on this day, and rates.'
+            ? 'Company details, bank, invoice setup, rates, WhatsApp, subscription and archives.'
+            : 'Company details, bank, invoice setup, and rates.'
         }
         icon={SlidersHorizontal}
       />
@@ -63,7 +67,6 @@ export default function Settings() {
           <TabsTrigger value="invoice">Invoice Setup</TabsTrigger>
           <TabsTrigger value="freight">Freight Rates</TabsTrigger>
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
-          <TabsTrigger value="dues-today">Dues on this Day</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="wishes">Wishes</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
@@ -86,10 +89,6 @@ export default function Settings() {
 
         <TabsContent value="hamali" className="focus-visible:outline-none focus-visible:ring-0">
           <HamaliRatesSection qc={qc} />
-        </TabsContent>
-
-        <TabsContent value="dues-today" className="focus-visible:outline-none focus-visible:ring-0">
-          <DuesOnThisDay />
         </TabsContent>
 
         <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">

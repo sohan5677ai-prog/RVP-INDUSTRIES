@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -8,7 +9,6 @@ import {
   RefreshCw,
   Users,
   Plus,
-  Trash2,
   Tags,
   History,
   AlertCircle,
@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { FESTIVALS, type FestivalItem } from '@/lib/festivals';
 import type {
   Party,
   WishRecipientPreview,
@@ -89,8 +90,39 @@ export default function Wishes() {
 
 function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => void }) {
   const qc = useQueryClient();
-  const [occasion, setOccasion] = useState('');
-  const [category, setCategory] = useState<CategoryFilter>('ALL');
+  const [searchParams] = useSearchParams();
+  const [occasion, setOccasion] = useState(() => searchParams.get('occasion') || '');
+  const [category, setCategory] = useState<CategoryFilter>(() => {
+    const cat = searchParams.get('category') as CategoryFilter | null;
+    return cat && ['ALL', 'HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER'].includes(cat) ? cat : 'ALL';
+  });
+
+  useEffect(() => {
+    const occ = searchParams.get('occasion');
+    const cat = searchParams.get('category') as CategoryFilter | null;
+    if (occ) setOccasion(occ);
+    if (cat && ['ALL', 'HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER'].includes(cat)) {
+      setCategory(cat);
+    }
+  }, [searchParams]);
+
+  const uniqueFestivals = useMemo<FestivalItem[]>(() => {
+    const map = new Map<string, FestivalItem>();
+    FESTIVALS.forEach((f: FestivalItem) => {
+      if (!map.has(f.name)) map.set(f.name, f);
+    });
+    return Array.from(map.values());
+  }, []);
+
+  function handleSelectPreset(festName: string) {
+    const found = uniqueFestivals.find((f: FestivalItem) => f.name === festName);
+    if (found) {
+      setOccasion(found.name);
+      setCategory(found.category);
+      toast.info(`Selected preset: ${found.name}`);
+    }
+  }
+
   const [includeParties, setIncludeParties] = useState(true);
   const [includeDrivers, setIncludeDrivers] = useState(true);
   const [includeOwners, setIncludeOwners] = useState(true);
@@ -182,9 +214,25 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center gap-2">
-        <Sparkles className="h-5 w-5 text-pink-500" />
-        <CardTitle className="text-base">Send Wishes</CardTitle>
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-pink-500" />
+          <CardTitle className="text-base">Send Wishes</CardTitle>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select onValueChange={handleSelectPreset}>
+            <SelectTrigger className="h-8 w-[220px] text-xs">
+              <SelectValue placeholder="🎉 Quick festival preset…" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[300px]">
+              {uniqueFestivals.map((f: FestivalItem) => (
+                <SelectItem key={f.name} value={f.name} className="text-xs">
+                  {f.name} ({f.category === 'ALL' ? 'Everyone' : WISH_CATEGORY_LABELS[f.category]})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">

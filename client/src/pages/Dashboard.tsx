@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
+import FestivalCalendarWidget from '@/components/FestivalCalendarWidget';
 import type { ProfitLoss, PurchaseOrder, SaleOrder } from '@/lib/types';
 import type { Summary, HuskPnl, PurchaseRow } from './DashboardCharts';
 
@@ -82,6 +83,9 @@ export default function Dashboard() {
             <StatCard label="Pending sales" value={data.pendingSales} icon={ShoppingCart} tone="rose" hint="awaiting dispatch" />
             <StatCard label="Payable" value={rupees(data.supplierPayable)} icon={Wallet} tone="taupe" hint="to suppliers" />
           </div>
+
+          {/* Festival & Holiday Reminder Calendar */}
+          <FestivalCalendarWidget />
 
           <Suspense fallback={<ChartsSkeleton />}>
             <DashboardCharts data={data} pnl={pnl} purchases={purchases} poAll={poAll} saleAll={saleAll} huskPnl={huskPnl} />

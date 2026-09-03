@@ -53,6 +53,17 @@ export async function bulkTagPartyReligion(req: Request, res: Response) {
   res.json({ updated: result.count });
 }
 
+export async function updatePartyPhone(req: Request, res: Response) {
+  const existing = await prisma.party.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new HttpError(404, 'Party not found');
+  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() || null : null;
+  const updated = await prisma.party.update({
+    where: { id: req.params.id },
+    data: { phone },
+  });
+  res.json(updated);
+}
+
 // --- Recipient resolution ----------------------------------------------------
 
 export interface WishRecipient {
@@ -80,11 +91,11 @@ export async function resolveWishRecipients(opts: {
 
   if (opts.includeParties) {
     const parties = await prisma.party.findMany({
-      where: { phone: { not: null }, ...(opts.category ? { religion: opts.category } : {}) },
+      where: opts.category ? { religion: opts.category } : {},
       select: { id: true, name: true, phone: true, phone2: true, waLanguage: true },
     });
     for (const p of parties) {
-      const phone = p.phone?.trim();
+      const phone = p.phone?.trim() || p.phone2?.trim();
       if (phone) recipients.push({ group: 'PARTY', id: p.id, name: p.name, phone, waLanguage: p.waLanguage });
     }
   }
@@ -94,14 +105,16 @@ export async function resolveWishRecipients(opts: {
       where: { active: true, ...(opts.category ? { religion: opts.category } : {}) },
     });
     for (const d of drivers) {
-      recipients.push({ group: 'DRIVER', id: d.id, name: d.name, phone: d.phone, waLanguage: 'EN' });
+      const phone = d.phone?.trim();
+      if (phone) recipients.push({ group: 'DRIVER', id: d.id, name: d.name, phone, waLanguage: 'EN' });
     }
   }
 
   if (opts.includeOwners) {
     const owners = await whatsappService.resolveOwnerRecipients();
     for (const o of owners) {
-      recipients.push({ group: 'OWNER', id: o.phone, name: o.name, phone: o.phone, waLanguage: 'EN' });
+      const phone = o.phone?.trim();
+      if (phone) recipients.push({ group: 'OWNER', id: o.phone, name: o.name, phone: o.phone, waLanguage: 'EN' });
     }
   }
 
@@ -116,7 +129,29 @@ export async function previewRecipients(req: Request, res: Response) {
     includeOwners: req.query.includeOwners !== 'false',
   });
   const recipients = await resolveWishRecipients(parsed);
-  res.json({ count: recipients.length, recipients });
+
+  const totalParties = parsed.includeParties
+    ? await prisma.party.count({
+        where: parsed.category ? { religion: parsed.category } : {},
+      })
+    : 0;
+  const partiesWithPhone = recipients.filter((r) => r.group === 'PARTY').length;
+  const partiesMissingPhone = Math.max(0, totalParties - partiesWithPhone);
+
+  const driversCount = recipients.filter((r) => r.group === 'DRIVER').length;
+  const ownersCount = recipients.filter((r) => r.group === 'OWNER').length;
+
+  res.json({
+    count: recipients.length,
+    breakdown: {
+      partiesTotal: totalParties,
+      partiesWithPhone,
+      partiesMissingPhone,
+      driversCount,
+      ownersCount,
+    },
+    recipients,
+  });
 }
 
 // --- Generation (Gemini) -----------------------------------------------------

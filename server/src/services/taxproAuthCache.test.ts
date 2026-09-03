@@ -149,4 +149,78 @@ describe('TaxPro AuthToken cache', () => {
     await callInvoice();
     expect(auths).toBe(4);
   });
+
+  it('retries E-Way Bill generation with Distance: 0 when NIC rejects with distance error', async () => {
+    const { getCompanyProfileRow } = await import('../controllers/settings.controller.js');
+    const { prisma } = await import('../lib/prisma.js');
+
+    (getCompanyProfileRow as any).mockResolvedValue(CONFIG);
+    (prisma as any).saleDispatch = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: 'disp-1',
+        irn: 'test-irn',
+        vehicleNumber: 'MH18BH5986',
+      }),
+    };
+
+    let ewbCalls = 0;
+    let distancePassedInCalls: number[] = [];
+
+    globalThis.fetch = (async (url: string, init: any) => {
+      if (String(url).includes('/auth')) {
+        auths++;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ Status: 1, Data: { AuthToken: `tok-${auths}`, TokenExpiry: tokenExpiry } }),
+        };
+      }
+      if (String(url).includes('/ewaybill')) {
+        ewbCalls++;
+        const parsedBody = JSON.parse(init.body);
+        distancePassedInCalls.push(parsedBody.Distance);
+
+        if (ewbCalls === 1) {
+          // First call rejects with NIC distance range error
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              Status: '0',
+              ErrorDetails: [{ ErrorCode: '238', ErrorMessage: 'Distance between these two pincodes is not in range' }],
+            }),
+          };
+        }
+
+        // Second call with Distance: 0 succeeds
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            Status: '1',
+            Data: {
+              EwbNo: 112233445566,
+              EwbDt: '2026-09-03 11:30:00',
+              EwbValidTill: '2026-09-08 23:59:00',
+              Distance: 820,
+            },
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ Status: '1' }) };
+    }) as unknown as typeof fetch;
+
+    const res = await TaxproService.generateEWayBill('disp-1', {
+      transDistance: 893,
+      transMode: '1',
+      vehicleNumber: 'MH18BH5986',
+      vehicleType: 'R',
+    });
+
+    expect(ewbCalls).toBe(2);
+    expect(distancePassedInCalls).toEqual([893, 0]);
+    expect(res.success).toBe(true);
+    expect(res.ewbNumber).toBe('112233445566');
+    expect(res.distance).toBe(820);
+  });
 });

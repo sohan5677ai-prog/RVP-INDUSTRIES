@@ -98,6 +98,20 @@ export interface WishRecipient {
   waLanguage: WaLanguage;
 }
 
+export interface WishRecipientBreakdown {
+  partiesTotal: number;
+  partiesWithPhone: number;
+  partiesMissingPhone: number;
+  driversCount: number;
+  ownersCount: number;
+}
+
+export interface WishRecipientPreview {
+  count: number;
+  breakdown: WishRecipientBreakdown;
+  recipients: WishRecipient[];
+}
+
 export interface WishBroadcast {
   id: string;
   occasion: string;

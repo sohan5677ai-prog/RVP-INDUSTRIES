@@ -154,43 +154,25 @@ router.post(
     if (!dispatch.irn) throw new HttpError(400, 'E-Invoice IRN must be generated before E-Way Bill');
     if (dispatch.ewbNumber) throw new HttpError(400, 'E-Way Bill already generated for this dispatch');
 
-    // Worked out here rather than asked for: reused from this buyer's last bill,
-    // or routed from the dispatch-from PIN code to the buyer's.
+    // Worked out here for local record / preview / WhatsApp / PDF print:
+    // reused from this buyer's last bill, or routed from dispatch-from PIN code to buyer's.
     const distance = await resolveEwbDistance(id, data.transDistance);
-    if (!distance) {
-      throw new HttpError(
-        400,
-        'Could not work out the approx distance for this E-Way Bill. Check that the buyer has a PIN code on file ' +
-        '(Parties) and that Settings → Invoice Setup has a Dispatch-From PIN code, or enter the distance yourself ' +
-        'in the E-Way Bill dialog.',
-      );
-    }
+
+    // If the operator entered a specific distance manually (data.transDistance > 0),
+    // send that; otherwise pass 0 so NIC auto-calculates from its official PIN database.
+    const transDistanceToSend = (data.transDistance && data.transDistance > 0) ? data.transDistance : 0;
 
     const result = await runTaxpro(async () => {
-      try {
-        return await TaxproService.generateEWayBill(id, {
-          transporterId: data.transporterId,
-          transporterName: data.transporterName,
-          transDistance: distance.km,
-          transMode: data.transMode,
-          vehicleNumber: data.vehicleNumber || dispatch.vehicleNumber || '',
-          vehicleType: data.vehicleType,
-          transDocNo: data.transDocNo,
-          transDocDt: data.transDocDt,
-        });
-      } catch (err) {
-        // NIC rejects a distance that overshoots its own PIN-to-PIN figure by
-        // more than 10%. Ours comes from OpenStreetMap routing, so on an odd
-        // route it can land outside that band - say so plainly, with the way out.
-        const message = err instanceof Error ? err.message : String(err);
-        if (distance.source === 'calculated' && /distance/i.test(message)) {
-          throw new Error(
-            `NIC rejected the calculated distance of ${distance.km} km - ${message}. ` +
-            `Use "Gen EWB" and type the distance the portal shows instead.`,
-          );
-        }
-        throw err;
-      }
+      return await TaxproService.generateEWayBill(id, {
+        transporterId: data.transporterId,
+        transporterName: data.transporterName,
+        transDistance: transDistanceToSend,
+        transMode: data.transMode,
+        vehicleNumber: data.vehicleNumber || dispatch.vehicleNumber || '',
+        vehicleType: data.vehicleType,
+        transDocNo: data.transDocNo,
+        transDocDt: data.transDocDt,
+      });
     });
 
     const updated = await prisma.saleDispatch.update({
@@ -204,7 +186,7 @@ router.post(
         // print renders as "Approx Distance", so it must never be left empty.
         ewbDistance: result.distance && result.distance > 0
           ? Math.round(result.distance)
-          : distance.km,
+          : (distance?.km ?? null),
         ewbTransMode: data.transMode,
         ewbVehicleType: data.vehicleType,
         ewbTransDocNo: data.transDocNo || null,

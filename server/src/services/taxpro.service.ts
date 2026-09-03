@@ -698,6 +698,49 @@ export class TaxproService {
         message: 'E-Way Bill generated successfully',
       };
     } catch (err: any) {
+      // If NIC rejected a non-zero distance because it deviates from its internal
+      // PIN-to-PIN database, automatically retry with Distance: 0 so NIC auto-calculates it.
+      const isDistanceError =
+        /distance/i.test(err?.message || '') ||
+        (Array.isArray(err?.errorDetails) &&
+          err.errorDetails.some(
+            (e: any) =>
+              ['238', '239', '700', '5003'].includes(String(e?.ErrorCode)) ||
+              /distance/i.test(e?.ErrorMessage || ''),
+          ));
+
+      if (payload.Distance !== 0 && isDistanceError) {
+        logger.warn(
+          `[taxpro] NIC rejected distance ${payload.Distance} km (${err.message}). Retrying with Distance: 0 (NIC PIN-to-PIN auto-calculation)...`,
+        );
+        try {
+          const retryPayload = { ...payload, Distance: 0 };
+          const retryJson = await this.withAuth(company, company.gstin || '', (token) =>
+            this.request(company.taxproSandbox, '/eiewb/dec/v1.03/ewaybill', {
+              method: 'POST',
+              headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+              body: JSON.stringify(retryPayload),
+            }),
+          );
+          const retryData = this.parseData(retryJson.Data) || {};
+          const nicDistance = Number(retryData.Distance ?? retryData.distance);
+          const distance = Number.isFinite(nicDistance) && nicDistance > 0
+            ? Math.round(nicDistance)
+            : (Number(transportDetails.transDistance) || null);
+          return {
+            success: true,
+            ewbNumber: String(retryData.EwbNo),
+            ewbDate: this.parseNicDate(retryData.EwbDt),
+            ewbValidUpto: this.parseNicDate(retryData.EwbValidTill),
+            distance,
+            message: 'E-Way Bill generated successfully (NIC auto-calculated distance)',
+          };
+        } catch (retryErr: any) {
+          logger.error('TaxPro EWB Generation Retry Error:', retryErr);
+          throw new Error(`TaxPro GSP Error: ${retryErr.message}`);
+        }
+      }
+
       logger.error('TaxPro EWB Generation Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }

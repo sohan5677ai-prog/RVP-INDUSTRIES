@@ -102,15 +102,25 @@ export async function apiBlob(path: string): Promise<Blob> {
 export function getErrorMessage(err: unknown): string {
   if (err instanceof ApiError && err.details) {
     const details = err.details as any;
-    if (details.fieldErrors) {
+    if (details.fieldErrors && typeof details.fieldErrors === 'object') {
       const messages = Object.entries(details.fieldErrors)
+        .filter(([_, errors]) => Array.isArray(errors) && errors.length > 0)
         .map(([field, errors]) => {
           const fieldName = field.replace(/([A-Z])/g, ' $1').toLowerCase();
           const cleanErrors = (errors as string[]).join(', ');
           return `${fieldName}: ${cleanErrors}`;
         })
         .join('; ');
-      return `${err.message}: ${messages}`;
+      if (messages) return `${err.message}: ${messages}`;
+    }
+    if (Array.isArray(details.formErrors) && details.formErrors.length > 0) {
+      return `${err.message}: ${details.formErrors.join(', ')}`;
+    }
+    if (Array.isArray(details) && details.length > 0) {
+      const messages = details
+        .map((d: any) => `${d.path ? d.path.join('.') : 'field'}: ${d.message}`)
+        .join('; ');
+      if (messages) return `${err.message}: ${messages}`;
     }
   }
   return err instanceof Error ? err.message : String(err);

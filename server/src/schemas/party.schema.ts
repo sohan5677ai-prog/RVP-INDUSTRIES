@@ -10,9 +10,9 @@ export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SH
 export const balanceTypeEnum = z.enum(['DR', 'CR']);
 
 export const partyAddressSchema = z.object({
-  id: z.string().optional(),
-  label: z.string().min(1, 'Label is required'),
-  address: z.string().min(1, 'Address is required'),
+  id: z.string().optional().nullable(),
+  label: z.string().optional().nullable().transform((v) => (v && v.trim()) || 'Registered Office'),
+  address: z.string().optional().nullable().transform((v) => (v && v.trim()) || ''),
   city: z.string().optional().nullable(),
   state: z.string().optional().nullable(),
   pincode: z.string().optional().nullable(),
@@ -26,28 +26,34 @@ export const partyAddressSchema = z.object({
 
 export const createPartySchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  nickname: z.string().optional(),
+  nickname: z.string().optional().nullable(),
   type: partyTypeEnum.default('SUPPLIER'),
-  phone: z.string().optional(),
-  phone2: z.string().optional(),
-  email: z.string().email('Invalid email address').optional().or(z.literal('')),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  pincode: z.string().optional(),
-  gstin: z.string().optional(),
-  destination: z.string().optional(),
-  locationLink: z.string().optional(),
+  phone: z.string().optional().nullable(),
+  phone2: z.string().optional().nullable(),
+  email: z.string().email('Invalid email address').optional().nullable().or(z.literal('')).or(z.literal(null)),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  state: z.string().optional().nullable(),
+  pincode: z.string().optional().nullable(),
+  gstin: z.string().optional().nullable(),
+  destination: z.string().optional().nullable(),
+  locationLink: z.string().optional().nullable(),
   // Buyers only - turns the Surya Road Lines lorry receipt (GC) on for their shipments.
-  lorryReceiptEnabled: z.boolean().optional(),
-  waLanguage: waLanguageEnum.optional(),
+  lorryReceiptEnabled: z.boolean().optional().default(false),
+  waLanguage: waLanguageEnum.optional().default('EN'),
   religion: wishCategoryEnum.optional().nullable(),
-  openingBalance: z.coerce.number().min(0).default(0).optional(),
-  openingBalanceType: balanceTypeEnum.default('CR').optional(),
-  bankAccountNumber: z.string().optional(),
-  bankIfsc: z.string().optional(),
-  bankName: z.string().optional(),
-  commodities: z.array(commodityEnum).default([]),
+  openingBalance: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? 0 : val),
+    z.coerce.number().min(0).default(0)
+  ).optional(),
+  openingBalanceType: z.preprocess(
+    (val) => (val === null || val === undefined || val === '' ? 'CR' : val),
+    balanceTypeEnum.default('CR')
+  ).optional(),
+  bankAccountNumber: z.string().optional().nullable(),
+  bankIfsc: z.string().optional().nullable(),
+  bankName: z.string().optional().nullable(),
+  commodities: z.array(commodityEnum).optional().default([]),
   addresses: z.array(partyAddressSchema).optional().default([]),
 });
 

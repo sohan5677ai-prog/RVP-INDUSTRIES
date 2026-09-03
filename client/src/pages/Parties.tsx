@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, Users, MapPin, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
-import { api } from '@/lib/api';
+import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PartyAddress } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -344,7 +344,7 @@ export default function Parties() {
 
       if (hasMultipleAddresses) {
         validAddresses = addresses
-          .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim() || a.phone?.trim())
+          .filter((a) => a.address.trim() || a.city?.trim() || a.label.trim() || a.phone?.trim() || a.state?.trim() || a.gstin?.trim() || a.destination?.trim() || a.locationLink?.trim())
           .map((a) => ({
             ...a,
             label: a.label.trim() || 'Address',
@@ -370,7 +370,8 @@ export default function Parties() {
         }
       } else {
         const addrText = values.address?.trim() || '';
-        validAddresses = addrText
+        const hasAnyAddrData = Boolean(addrText || values.city?.trim() || values.state?.trim() || values.pincode?.trim() || values.gstin?.trim() || values.destination?.trim() || values.locationLink?.trim());
+        validAddresses = hasAnyAddrData
           ? [
               {
                 label: 'Registered Office',
@@ -395,13 +396,16 @@ export default function Parties() {
         bankName: values.type === 'BUYER' ? null : (values.bankName?.trim() || null),
         bankAccountNumber: values.type === 'BUYER' ? null : (values.bankAccountNumber?.trim() || null),
         bankIfsc: values.type === 'BUYER' ? null : (values.bankIfsc?.trim() || null),
-        address: finalAddress,
-        city: finalCity,
-        state: finalState,
-        pincode: finalPincode,
-        gstin: finalGstin,
-        destination: finalDestination,
-        locationLink: finalLocationLink,
+        phone: values.phone?.trim() || null,
+        phone2: values.phone2?.trim() || null,
+        email: values.email?.trim() || null,
+        address: finalAddress || null,
+        city: finalCity || null,
+        state: finalState || null,
+        pincode: finalPincode || null,
+        gstin: finalGstin || null,
+        destination: finalDestination || null,
+        locationLink: finalLocationLink || null,
         addresses: validAddresses,
         religion: values.religion === 'NONE' ? null : values.religion,
         openingBalance: values.openingBalance ?? 0,
@@ -416,7 +420,7 @@ export default function Parties() {
       toast.success(editing ? 'Party updated' : 'Party created');
       setOpen(false);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
   function handleSave(values: PartyForm) {
@@ -449,7 +453,7 @@ export default function Parties() {
       qc.invalidateQueries({ queryKey: ['parties'] });
       toast.success('Party deleted');
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
   // The Hamali crew ("Bikash and Team") is a labour counterparty, not a trading

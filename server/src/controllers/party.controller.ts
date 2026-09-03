@@ -45,10 +45,10 @@ export async function createParty(req: Request, res: Response) {
       if (defaultAddr.phone2) rest.phone2 = defaultAddr.phone2;
       if (defaultAddr.locationLink) rest.locationLink = defaultAddr.locationLink;
     }
-  } else if (rest.address && rest.address.trim()) {
+  } else if ((rest.address && rest.address.trim()) || rest.city || rest.state || rest.pincode || rest.gstin || rest.destination || rest.locationLink) {
     addressList = [{
       label: 'Registered Office',
-      address: rest.address.trim(),
+      address: (rest.address && rest.address.trim()) || '',
       city: rest.city ?? null,
       state: rest.state ?? null,
       pincode: rest.pincode ?? null,

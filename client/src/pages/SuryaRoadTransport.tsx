@@ -52,6 +52,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [tab, setTab] = useState<string>('');
+  const [subTab, setSubTab] = useState<string>('retention');
 
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
     queryKey: ['sale-orders', { all: true }],
@@ -302,8 +303,8 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         <div className="flex items-center justify-center h-48">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      ) : activeTabInfo.isSurya ? (
-        <Tabs defaultValue="retention" className="space-y-6">
+      ) : (
+        <Tabs value={subTab} onValueChange={setSubTab} className="space-y-6">
           <TabsList className="bg-card border shadow-sm">
             <TabsTrigger value="retention" className="gap-2 text-sm font-semibold">
               <Wallet className="h-4 w-4" /> Freight Retention
@@ -316,28 +317,34 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           <TabsContent value="retention" className="space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card className="bg-card border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Released to Surya (Payable)
-                  </CardTitle>
-                  <Wallet className="h-4 w-4 text-emerald-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalReleased)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Delivered trips · retention owed to Surya Road Lines</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-card border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Retention Held</CardTitle>
-                  <Hourglass className="h-4 w-4 text-amber-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{rupees(totalHeld)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Dispatched but not yet delivered</p>
-                </CardContent>
-              </Card>
+              {!activeTabInfo.isKnm && (
+                <Card className="bg-card border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {activeTabInfo.isSurya ? 'Released to Surya (Payable)' : 'Released (Payable)'}
+                    </CardTitle>
+                    <Wallet className="h-4 w-4 text-emerald-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalReleased)}</div>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Delivered trips · retention owed to {activeTabInfo.name}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+              {!activeTabInfo.isKnm && (
+                <Card className="bg-card border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Retention Held</CardTitle>
+                    <Hourglass className="h-4 w-4 text-amber-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{rupees(totalHeld)}</div>
+                    <p className="text-[10px] text-muted-foreground mt-1">Dispatched but not yet delivered</p>
+                  </CardContent>
+                </Card>
+              )}
               <Card className="bg-card border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Trips</CardTitle>
@@ -346,7 +353,11 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                 <CardContent>
                   <div className="text-2xl font-bold">{totalFreightTrips} trips</div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    @ {rupees(activeTabInfo.defaultRetention || retention)} retention per trip
+                    {activeTabInfo.isKnm
+                      ? 'Company-owned vehicles · no retention'
+                      : activeTabInfo.isSurya
+                      ? `@ ${rupees(activeTabInfo.defaultRetention || retention)} retention per trip`
+                      : `${rupees(activeTabInfo.defaultRetention)} standard retention per trip`}
                   </p>
                 </CardContent>
               </Card>
@@ -355,7 +366,11 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
             {/* Ledger Table */}
             <div className="rounded-lg border bg-card">
               <div className="px-5 py-4 border-b font-semibold text-sm">
-                Freight Retention Movements
+                {activeTabInfo.isKnm
+                  ? `${activeTabInfo.name} Trips`
+                  : activeTabInfo.isSurya
+                  ? 'Freight Retention Movements'
+                  : `Freight Retention Movements - ${activeTabInfo.name}`}
               </div>
               <Table>
                 <TableHeader>
@@ -365,15 +380,15 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                     <TableHead>Lorry No</TableHead>
                     <TableHead>Invoice No</TableHead>
                     <TableHead>Destination</TableHead>
-                    <TableHead className="text-right">Retention</TableHead>
+                    {!activeTabInfo.isKnm && <TableHead className="text-right">Retention</TableHead>}
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                        No Surya Road Lines trips match selected filters.
+                      <TableCell colSpan={!activeTabInfo.isKnm ? 7 : 6} className="text-center text-muted-foreground py-8">
+                        No {activeTabInfo.name} trips match selected filters.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -384,7 +399,9 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                         <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorryNumber ?? '-'}</TableCell>
                         <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
                         <TableCell>{r.destination ?? '-'}</TableCell>
-                        <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
+                        {!activeTabInfo.isKnm && (
+                          <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
+                        )}
                         <TableCell>
                           <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
                             {r.released ? 'Delivered' : 'In Transit'}
@@ -400,101 +417,9 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           </TabsContent>
 
           <TabsContent value="gc-notes">
-            <LorryReceiptRegister rows={rows} />
+            <LorryReceiptRegister rows={rows} transportName={activeTabInfo.name} />
           </TabsContent>
         </Tabs>
-      ) : (
-        <div className="grid gap-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {!activeTabInfo.isKnm && (
-              <Card className="bg-card border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Released (Payable)
-                  </CardTitle>
-                  <Wallet className="h-4 w-4 text-emerald-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalReleased)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Delivered trips · retention owed to {activeTabInfo.name}</p>
-                </CardContent>
-              </Card>
-            )}
-            {!activeTabInfo.isKnm && (
-              <Card className="bg-card border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Retention Held</CardTitle>
-                  <Hourglass className="h-4 w-4 text-amber-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{rupees(totalHeld)}</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Dispatched but not yet delivered</p>
-                </CardContent>
-              </Card>
-            )}
-            <Card className="bg-card border shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Trips</CardTitle>
-                <Truck className="h-4 w-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{totalFreightTrips} trips</div>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  {activeTabInfo.isKnm ? 'Company-owned vehicles · no retention' : `${rupees(activeTabInfo.defaultRetention)} standard retention per trip`}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Ledger Table */}
-          <div className="rounded-lg border bg-card">
-            <div className="px-5 py-4 border-b font-semibold text-sm">
-              {activeTabInfo.isKnm ? `${activeTabInfo.name} Trips` : `Freight Retention Movements - ${activeTabInfo.name}`}
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Buyer</TableHead>
-                  <TableHead>Lorry No</TableHead>
-                  <TableHead>Invoice No</TableHead>
-                  <TableHead>Destination</TableHead>
-                  {!activeTabInfo.isKnm && <TableHead className="text-right">Retention</TableHead>}
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={!activeTabInfo.isKnm ? 7 : 6} className="text-center text-muted-foreground py-8">
-                      No {activeTabInfo.name} trips match selected filters.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  visible.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>{shortDate(r.date)}</TableCell>
-                      <TableCell className="font-semibold">{r.buyer}</TableCell>
-                      <TableCell className="font-sans text-xs font-medium text-foreground/80">{r.lorryNumber ?? '-'}</TableCell>
-                      <TableCell className="font-sans text-xs font-medium text-muted-foreground">{r.invoice ?? '-'}</TableCell>
-                      <TableCell>{r.destination ?? '-'}</TableCell>
-                      {!activeTabInfo.isKnm && (
-                        <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
-                      )}
-                      <TableCell>
-                        <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
-                          {r.released ? 'Delivered' : 'In Transit'}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
-          </div>
-        </div>
       )}
     </div>
   );
@@ -505,12 +430,16 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
 /* shown above, so the book can be read back without opening each shipment.   */
 /* ------------------------------------------------------------------------- */
 
-function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
+function LorryReceiptRegister({ rows, transportName }: { rows: RetentionRow[]; transportName?: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [issuedOnly, setIssuedOnly] = useState(false);
   const [gcSearch, setGcSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<RetentionRow | null>(null);
+
+  const displayName = transportName || 'Transport';
+  const exportFilename = `Lorry_Receipts_${displayName.replace(/\s+/g, '_')}`;
+  const exportTitle = `Lorry Receipts - ${displayName}`;
 
   const deleteGcMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/lorry-receipt`, { method: 'DELETE' }),
@@ -589,8 +518,8 @@ function LorryReceiptRegister({ rows }: { rows: RetentionRow[] }) {
               ]}
             />
             <ExportButtons
-              filename="Lorry_Receipts_Surya"
-              title="Lorry Receipts - Surya Road Lines"
+              filename={exportFilename}
+              title={exportTitle}
               subtitle={`${filtered.length} receipt(s)`}
               columns={exportColumns}
               rows={filtered}

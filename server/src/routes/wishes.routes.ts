@@ -8,8 +8,10 @@ import {
   deleteDriver,
   bulkTagPartyReligion,
   bulkTagBrokerReligion,
+  bulkTagTransportReligion,
   updatePartyPhone,
   updateBrokerPhone,
+  updateTransportPhone,
   previewRecipients,
   generateWishText,
   generateWishImageEndpoint,
@@ -32,6 +34,8 @@ router.post('/wishes/parties/bulk-religion', canManage, asyncHandler(bulkTagPart
 router.patch('/wishes/parties/:id/phone', canManage, asyncHandler(updatePartyPhone));
 router.post('/wishes/brokers/bulk-religion', canManage, asyncHandler(bulkTagBrokerReligion));
 router.patch('/wishes/brokers/:id/phone', canManage, asyncHandler(updateBrokerPhone));
+router.post('/wishes/transports/bulk-religion', canManage, asyncHandler(bulkTagTransportReligion));
+router.patch('/wishes/transports/:id/phone', canManage, asyncHandler(updateTransportPhone));
 
 router.get('/wishes/recipients', asyncHandler(previewRecipients));
 router.post('/wishes/generate/text', asyncHandler(generateWishText));

@@ -2,12 +2,18 @@
 
 Dedicated multilingual WhatsApp templates for Lorry Freight payments. This template provides a complete, all-around breakdown of the transport trip including Gross Freight, Kata (weighbridge) expense, Hamali (loading/unloading) expense, other deductions/expenses, net freight payable, amount paid in the transaction, payment reference/mode, remaining balance, destination, and lorry vehicle number.
 
-## Template Keys & Meta/Fast2SMS Name
+## Template Keys & Meta/Fast2SMS Information
 
-- **Template Name**: `rvp_lorry_payment` (Utility category)
-- **Image Header Template (optional with payment screenshot)**: `rvp_lorry_payment`
-- **Text Only Template (no header)**: `rvp_lorry_payment_text`
 - **Internal Service Key**: `LORRY_PAYMENT` / `LORRY_PAYMENT_TEXT`
+- **Sender Number**: `+917207146094` (KNM Group)
+- **Category**: Utility
+
+| Language | Template Name in Fast2SMS | Meta Template ID | Fast2SMS Message ID |
+|---|---|---|---|
+| **English (EN)** | `lorry_english` | `1081272931051099` | **`31369`** |
+| **Telugu (TE)** | `lorry_telugu11` | `1606762657701490` | **`31377`** |
+| **Hindi (HI)** | `lorry_hindi` | `1606377644202160` | **`31378`** |
+| **Tamil (TA)** | `lorry_tamil` | `950202474059177` | **`31379`** |
 
 ## Variable Contract (11 Variables, Identical Positional Order in All Languages)
 

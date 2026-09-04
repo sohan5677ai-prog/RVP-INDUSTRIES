@@ -23,6 +23,7 @@ import { FESTIVALS, type FestivalItem } from '@/lib/festivals';
 import type {
   Party,
   Broker,
+  Transport,
   WishRecipientPreview,
   WishBroadcast,
   WishCategory,
@@ -67,10 +68,10 @@ const CATEGORY_OPTIONS: { label: string; value: CategoryFilter }[] = [
 
 export default function Wishes() {
   const [phoneFilter, setPhoneFilter] = useState<PhoneFilter>('ALL');
-  const [activeTab, setActiveTab] = useState<'parties' | 'brokers'>('parties');
+  const [activeTab, setActiveTab] = useState<'parties' | 'brokers' | 'transports'>('parties');
   const directorySectionRef = useRef<HTMLDivElement>(null);
 
-  function handleFilterMissingPhones(target: 'parties' | 'brokers' = 'parties') {
+  function handleFilterMissingPhones(target: 'parties' | 'brokers' | 'transports' = 'parties') {
     setActiveTab(target);
     setPhoneFilter('MISSING');
     directorySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -97,7 +98,7 @@ export default function Wishes() {
 function WishComposer({
   onFilterMissingPhones,
 }: {
-  onFilterMissingPhones: (target: 'parties' | 'brokers') => void;
+  onFilterMissingPhones: (target: 'parties' | 'brokers' | 'transports') => void;
 }) {
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
@@ -135,6 +136,7 @@ function WishComposer({
 
   const [includeParties, setIncludeParties] = useState(true);
   const [includeBrokers, setIncludeBrokers] = useState(true);
+  const [includeTransports, setIncludeTransports] = useState(true);
   const [includeDrivers, setIncludeDrivers] = useState(true);
   const [includeOwners, setIncludeOwners] = useState(true);
   const [messageText, setMessageText] = useState('');
@@ -148,6 +150,7 @@ function WishComposer({
       wireCategory,
       includeParties,
       includeBrokers,
+      includeTransports,
       includeDrivers,
       includeOwners,
     ],
@@ -155,6 +158,7 @@ function WishComposer({
       const params = new URLSearchParams({
         includeParties: String(includeParties),
         includeBrokers: String(includeBrokers),
+        includeTransports: String(includeTransports),
         includeDrivers: String(includeDrivers),
         includeOwners: String(includeOwners),
       });
@@ -200,6 +204,7 @@ function WishComposer({
           category: wireCategory,
           includeParties,
           includeBrokers,
+          includeTransports,
           includeDrivers,
           includeOwners,
           messageText,
@@ -276,7 +281,7 @@ function WishComposer({
             </div>
             <p className="text-[11px] text-muted-foreground">
               "Everyone" reaches every recipient regardless of tag. A religion filters to only
-              parties/brokers/drivers tagged with that community.
+              parties/brokers/transports/drivers tagged with that community.
             </p>
           </div>
         </div>
@@ -301,6 +306,16 @@ function WishComposer({
               }
             />
             <GroupToggle
+              label="Transports"
+              active={includeTransports}
+              onClick={() => setIncludeTransports((v) => !v)}
+              badge={
+                breakdown
+                  ? `${breakdown.transportsWithPhone}/${breakdown.transportsTotal}`
+                  : undefined
+              }
+            />
+            <GroupToggle
               label="KNM Drivers"
               active={includeDrivers}
               onClick={() => setIncludeDrivers((v) => !v)}
@@ -321,7 +336,7 @@ function WishComposer({
             </span>
             {breakdown && (
               <span className="text-muted-foreground">
-                ({breakdown.partiesWithPhone} parties with phone + {breakdown.brokersWithPhone} brokers + {breakdown.driversCount} drivers
+                ({breakdown.partiesWithPhone} parties with phone + {breakdown.brokersWithPhone} brokers + {breakdown.transportsWithPhone} transports + {breakdown.driversCount} drivers
                 + {breakdown.ownersCount} owners)
               </span>
             )}
@@ -359,6 +374,24 @@ function WishComposer({
                 className="font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
               >
                 View &amp; add phone numbers ({breakdown.brokersMissingPhone}) ↓
+              </button>
+            </div>
+          )}
+
+          {includeTransports && breakdown && breakdown.transportsMissingPhone > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>
+                  <strong>{breakdown.transportsMissingPhone} of {breakdown.transportsTotal} transports</strong> are missing a phone number and won't receive WhatsApp wishes.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onFilterMissingPhones('transports')}
+                className="font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
+              >
+                View &amp; add phone numbers ({breakdown.transportsMissingPhone}) ↓
               </button>
             </div>
           )}
@@ -557,7 +590,7 @@ function ReligionSelect({
   );
 }
 
-// --- Directory & Community Tagging (Parties & Brokers) ----------------------------
+// --- Directory & Community Tagging (Parties, Brokers & Transports) ----------------------------
 
 function DirectoryTaggingSection({
   activeTab,
@@ -565,8 +598,8 @@ function DirectoryTaggingSection({
   phoneFilter,
   onPhoneFilterChange,
 }: {
-  activeTab: 'parties' | 'brokers';
-  onTabChange: (tab: 'parties' | 'brokers') => void;
+  activeTab: 'parties' | 'brokers' | 'transports';
+  onTabChange: (tab: 'parties' | 'brokers' | 'transports') => void;
   phoneFilter: PhoneFilter;
   onPhoneFilterChange: (f: PhoneFilter) => void;
 }) {
@@ -578,9 +611,14 @@ function DirectoryTaggingSection({
     queryKey: ['brokers'],
     queryFn: () => api<Broker[]>('/brokers'),
   });
+  const { data: transports } = useQuery({
+    queryKey: ['transports'],
+    queryFn: () => api<Transport[]>('/transports'),
+  });
 
   const partiesTotal = parties?.length ?? 0;
   const brokersTotal = brokers?.length ?? 0;
+  const transportsTotal = transports?.length ?? 0;
 
   return (
     <Card>
@@ -596,7 +634,7 @@ function DirectoryTaggingSection({
         </div>
         <Tabs
           value={activeTab}
-          onValueChange={(v) => onTabChange(v as 'parties' | 'brokers')}
+          onValueChange={(v) => onTabChange(v as 'parties' | 'brokers' | 'transports')}
         >
           <TabsList className="h-8">
             <TabsTrigger value="parties" className="text-xs px-3">
@@ -605,19 +643,30 @@ function DirectoryTaggingSection({
             <TabsTrigger value="brokers" className="text-xs px-3">
               Brokers ({brokersTotal})
             </TabsTrigger>
+            <TabsTrigger value="transports" className="text-xs px-3">
+              Transports ({transportsTotal})
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </CardHeader>
       <CardContent className="pt-4 space-y-4">
-        {activeTab === 'parties' ? (
+        {activeTab === 'parties' && (
           <PartyReligionTaggingTab
             parties={parties ?? []}
             phoneFilter={phoneFilter}
             onPhoneFilterChange={onPhoneFilterChange}
           />
-        ) : (
+        )}
+        {activeTab === 'brokers' && (
           <BrokerReligionTaggingTab
             brokers={brokers ?? []}
+            phoneFilter={phoneFilter}
+            onPhoneFilterChange={onPhoneFilterChange}
+          />
+        )}
+        {activeTab === 'transports' && (
+          <TransportReligionTaggingTab
+            transports={transports ?? []}
             phoneFilter={phoneFilter}
             onPhoneFilterChange={onPhoneFilterChange}
           />
@@ -908,15 +957,14 @@ function PartyReligionTaggingTab({
                       <Select
                         value={p.religion || 'NONE'}
                         onValueChange={(val) => {
-                          bulkTag.mutateAsync &&
-                            api<{ updated: number }>('/wishes/parties/bulk-religion', {
-                              method: 'POST',
-                              body: { partyIds: [p.id], religion: val === 'NONE' ? null : (val as WishCategory) },
-                            }).then(() => {
-                              qc.invalidateQueries({ queryKey: ['parties'] });
-                              qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
-                              toast.success(`Updated community for ${p.name}`);
-                            }).catch((e: Error) => toast.error(getErrorMessage(e)));
+                          api<{ updated: number }>('/wishes/parties/bulk-religion', {
+                            method: 'POST',
+                            body: { partyIds: [p.id], religion: val === 'NONE' ? null : (val as WishCategory) },
+                          }).then(() => {
+                            qc.invalidateQueries({ queryKey: ['parties'] });
+                            qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+                            toast.success(`Updated community for ${p.name}`);
+                          }).catch((e: Error) => toast.error(getErrorMessage(e)));
                         }}
                       >
                         <SelectTrigger className="h-7 w-[125px] text-xs">
@@ -1242,6 +1290,335 @@ function BrokerReligionTaggingTab({
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       ₹{Number(b.brokerageAmount).toLocaleString('en-IN')}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          <PaginationBar
+            page={page}
+            setPage={setPage}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            totalPages={totalPages}
+            total={total}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function TransportReligionTaggingTab({
+  transports,
+  phoneFilter,
+  onPhoneFilterChange,
+}: {
+  transports: Transport[];
+  phoneFilter: PhoneFilter;
+  onPhoneFilterChange: (f: PhoneFilter) => void;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [tagAs, setTagAs] = useState<WishCategory | 'NONE'>('NONE');
+
+  // Inline editing of transport phone
+  const [editingTransportId, setEditingTransportId] = useState<string | null>(null);
+  const [editingPhoneVal, setEditingPhoneVal] = useState('');
+
+  const totalCount = transports.length;
+  const missingPhoneCount = transports.filter((t) => !t.phone?.trim() && !t.phone2?.trim()).length;
+  const hasPhoneCount = transports.filter((t) => Boolean(t.phone?.trim() || t.phone2?.trim())).length;
+  const untaggedCount = transports.filter((t) => !t.religion).length;
+
+  const filtered = transports.filter((t) => {
+    const hasPhone = Boolean(t.phone?.trim() || t.phone2?.trim());
+    if (phoneFilter === 'MISSING' && hasPhone) return false;
+    if (phoneFilter === 'HAS_PHONE' && !hasPhone) return false;
+    if (phoneFilter === 'UNTAGGED' && t.religion) return false;
+
+    if (search) {
+      const q = search.toLowerCase();
+      const matchName = t.name.toLowerCase().includes(q);
+      const matchCode = (t.code ?? '').toLowerCase().includes(q);
+      const matchContact = (t.contactPerson ?? '').toLowerCase().includes(q);
+      const matchPhone = (t.phone ?? '').includes(q) || (t.phone2 ?? '').includes(q);
+      const matchCity = (t.city ?? '').toLowerCase().includes(q);
+      if (!matchName && !matchCode && !matchContact && !matchPhone && !matchCity) return false;
+    }
+    return true;
+  });
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(
+    filtered,
+    25
+  );
+
+  const bulkTag = useMutation({
+    mutationFn: () =>
+      api<{ updated: number }>('/wishes/transports/bulk-religion', {
+        method: 'POST',
+        body: { transportIds: Array.from(selected), religion: tagAs === 'NONE' ? null : tagAs },
+      }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['transports'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+      setSelected(new Set());
+      toast.success(`Tagged ${r.updated} transport${r.updated === 1 ? '' : 's'}`);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const updatePhoneMutation = useMutation({
+    mutationFn: ({ id, phone }: { id: string; phone: string }) =>
+      api<Transport>(`/wishes/transports/${id}/phone`, {
+        method: 'PATCH',
+        body: { phone },
+      }),
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['transports'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+      setEditingTransportId(null);
+      toast.success(`Phone saved for ${updated.name}`);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  function startEditPhone(t: Transport) {
+    setEditingTransportId(t.id);
+    setEditingPhoneVal(t.phone ?? '');
+  }
+
+  function handleSavePhone(id: string) {
+    updatePhoneMutation.mutate({ id, phone: editingPhoneVal.trim() });
+  }
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const visibleIds = (pageRows ?? []).map((t) => t.id);
+      const allSelected = visibleIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      for (const id of visibleIds) allSelected ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filter pills */}
+      <div className="flex flex-wrap items-center gap-2 border-b pb-3">
+        <FilterPill
+          label={`All Transports (${totalCount})`}
+          active={phoneFilter === 'ALL'}
+          onClick={() => onPhoneFilterChange('ALL')}
+        />
+        <FilterPill
+          label={`Missing Phone (${missingPhoneCount})`}
+          active={phoneFilter === 'MISSING'}
+          onClick={() => onPhoneFilterChange('MISSING')}
+          warning={missingPhoneCount > 0}
+          icon={PhoneOff}
+        />
+        <FilterPill
+          label={`Has Phone (${hasPhoneCount})`}
+          active={phoneFilter === 'HAS_PHONE'}
+          onClick={() => onPhoneFilterChange('HAS_PHONE')}
+          icon={Phone}
+        />
+        <FilterPill
+          label={`Untagged Community (${untaggedCount})`}
+          active={phoneFilter === 'UNTAGGED'}
+          onClick={() => onPhoneFilterChange('UNTAGGED')}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search transport name, contact, phone…"
+          containerClassName="w-64"
+        />
+
+        {selected.size > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+            <ReligionSelect value={tagAs} onChange={setTagAs} />
+            <Button size="sm" onClick={() => bulkTag.mutate()} disabled={bulkTag.isPending}>
+              Tag selected
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          No transports match the selected filter.
+        </div>
+      ) : (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input"
+                    checked={
+                      (pageRows ?? []).length > 0 &&
+                      (pageRows ?? []).every((t) => selected.has(t.id))
+                    }
+                    onChange={toggleAllVisible}
+                  />
+                </TableHead>
+                <TableHead>Transport Name</TableHead>
+                <TableHead>Contact Person</TableHead>
+                <TableHead>WhatsApp Phone</TableHead>
+                <TableHead>Community</TableHead>
+                <TableHead>City / State</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(pageRows ?? []).map((t) => {
+                const isEditingPhone = editingTransportId === t.id;
+                const hasPhone = Boolean(t.phone?.trim() || t.phone2?.trim());
+                return (
+                  <TableRow key={t.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={selected.has(t.id)}
+                        onChange={() => toggle(t.id)}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        {t.name}
+                        {t.code && (
+                          <Badge variant="outline" className="text-[10px] font-mono px-1 py-0">
+                            {t.code}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {t.contactPerson || '-'}
+                    </TableCell>
+                    <TableCell>
+                      {isEditingPhone ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={editingPhoneVal}
+                            onChange={(e) => setEditingPhoneVal(e.target.value)}
+                            placeholder="10-digit mobile"
+                            inputMode="tel"
+                            className="h-7 w-36 text-xs"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSavePhone(t.id);
+                              if (e.key === 'Escape') setEditingTransportId(null);
+                            }}
+                          />
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-green-600 hover:text-green-700"
+                            onClick={() => handleSavePhone(t.id)}
+                            disabled={updatePhoneMutation.isPending}
+                            title="Save phone"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => setEditingTransportId(null)}
+                            title="Cancel"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : hasPhone ? (
+                        <div className="flex items-center gap-2 group">
+                          <div className="text-xs font-mono">
+                            {t.phone || t.phone2 || '-'}
+                            {t.phone && t.phone2 && (
+                              <span className="text-muted-foreground">, {t.phone2}</span>
+                            )}
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                            onClick={() => startEditPhone(t)}
+                            title="Edit phone number"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-normal dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+                          >
+                            No phone
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[11px] font-medium"
+                            onClick={() => startEditPhone(t)}
+                          >
+                            <Plus className="mr-0.5 h-3 w-3" /> Add phone
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={t.religion || 'NONE'}
+                        onValueChange={(val) => {
+                          api<{ updated: number }>('/wishes/transports/bulk-religion', {
+                            method: 'POST',
+                            body: { transportIds: [t.id], religion: val === 'NONE' ? null : (val as WishCategory) },
+                          })
+                            .then(() => {
+                              qc.invalidateQueries({ queryKey: ['transports'] });
+                              qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+                              toast.success(`Updated community for ${t.name}`);
+                            })
+                            .catch((e: Error) => toast.error(getErrorMessage(e)));
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-[125px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="NONE">Not tagged</SelectItem>
+                          {(Object.keys(WISH_CATEGORY_LABELS) as WishCategory[]).map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {WISH_CATEGORY_LABELS[c]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {[t.city, t.state].filter(Boolean).join(', ') || '-'}
                     </TableCell>
                   </TableRow>
                 );

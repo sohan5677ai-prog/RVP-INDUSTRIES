@@ -227,6 +227,8 @@ model Transport {
   // Default retention per trip (e.g. ₹3,000 for Surya Road Lines, ₹0 for KNM)
   defaultRetention Decimal        @default(0) @db.Decimal(12, 2)
   notes            String?
+  // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
+  religion         WishCategory?
   active           Boolean        @default(true)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -1840,9 +1842,10 @@ model WishBroadcast {
   occasion       String
   // Null = "Everyone" (no religion filter).
   category       WishCategory?
-  includeParties Boolean       @default(true)
-  includeBrokers Boolean       @default(true)
-  includeDrivers Boolean       @default(true)
+  includeParties    Boolean       @default(true)
+  includeBrokers    Boolean       @default(true)
+  includeTransports Boolean       @default(true)
+  includeDrivers    Boolean       @default(true)
   includeOwners  Boolean       @default(true)
   messageText    String
   imageUrl       String?

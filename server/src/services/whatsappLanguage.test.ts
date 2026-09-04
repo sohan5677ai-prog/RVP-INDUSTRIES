@@ -217,13 +217,34 @@ describe('approved language ids', () => {
     expect(vars[10]).toBe('19,750');
   });
 
+  it('maps each lorry payment language to its own approved message_id', () => {
+    expect(templateId('LORRY_PAYMENT', 'EN')).toBe('31369');
+    expect(templateId('LORRY_PAYMENT', 'TE')).toBe('31377');
+    expect(templateId('LORRY_PAYMENT', 'HI')).toBe('31378');
+    expect(templateId('LORRY_PAYMENT', 'TA')).toBe('31379');
+    // KN not created yet, falls back to English (31369)
+    expect(templateId('LORRY_PAYMENT', 'KN')).toBe('31369');
+  });
+
+  it('reports translated lorry payment languages as themselves, and unapproved as English fallback', () => {
+    expect(resolvedLanguage('LORRY_PAYMENT', 'EN')).toBe('EN');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'TE')).toBe('TE');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'HI')).toBe('HI');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'TA')).toBe('TA');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'KN')).toBe('EN');
+  });
+
   it('supports LORRY_PAYMENT environment variable configuration and fallback', () => {
     process.env.FAST2SMS_TMPL_LORRY_PAYMENT = '40001';
     process.env.FAST2SMS_TMPL_LORRY_PAYMENT_TE = '40002';
+    process.env.FAST2SMS_TMPL_LORRY_PAYMENT_HI = '40003';
     expect(templateId('LORRY_PAYMENT', 'EN')).toBe('40001');
     expect(templateId('LORRY_PAYMENT', 'TE')).toBe('40002');
-    expect(templateId('LORRY_PAYMENT', 'HI')).toBe('40001');
+    expect(templateId('LORRY_PAYMENT', 'HI')).toBe('40003');
+    // KN has no language copy, falls back to the English env override (40001)
+    expect(templateId('LORRY_PAYMENT', 'KN')).toBe('40001');
     expect(resolvedLanguage('LORRY_PAYMENT', 'TE')).toBe('TE');
-    expect(resolvedLanguage('LORRY_PAYMENT', 'HI')).toBe('EN');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'HI')).toBe('HI');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'KN')).toBe('EN');
   });
 });

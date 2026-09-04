@@ -36,15 +36,28 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import { rupees } from '@/lib/format';
+import { WISH_CATEGORY_LABELS } from '@/lib/types';
+import type { WishCategory } from '@/lib/types';
 
 const TRANSPORT_COLUMNS: ExportColumn<Transport>[] = [
   { header: 'Transport Name', value: (t) => t.name },
   { header: 'Code', value: (t) => t.code ?? '' },
   { header: 'Contact Person', value: (t) => t.contactPerson ?? '' },
   { header: 'Phone', value: (t) => t.phone ?? '' },
+  {
+    header: 'Community',
+    value: (t) => (t.religion ? WISH_CATEGORY_LABELS[t.religion] : 'Not tagged'),
+  },
   { header: 'City', value: (t) => t.city ?? '' },
   { header: 'State', value: (t) => t.state ?? '' },
   { header: 'GSTIN', value: (t) => t.gstin ?? '' },
@@ -73,6 +86,7 @@ const transportSchema = z.object({
   gstin: z.string().trim().optional(),
   defaultRetention: z.string().min(0).default('0'),
   notes: z.string().trim().optional(),
+  religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']).default('NONE'),
   active: z.boolean().default(true),
 });
 
@@ -105,6 +119,7 @@ export default function Transports() {
       gstin: '',
       defaultRetention: '0',
       notes: '',
+      religion: 'NONE',
       active: true,
     },
   });
@@ -125,6 +140,7 @@ export default function Transports() {
       gstin: '',
       defaultRetention: '0',
       notes: '',
+      religion: 'NONE',
       active: true,
     });
     setOpen(true);
@@ -146,6 +162,7 @@ export default function Transports() {
       gstin: t.gstin ?? '',
       defaultRetention: String(Number(t.defaultRetention || 0)),
       notes: t.notes ?? '',
+      religion: t.religion ?? 'NONE',
       active: t.active,
     });
     setOpen(true);
@@ -156,6 +173,7 @@ export default function Transports() {
       const payload = {
         ...values,
         defaultRetention: Number(values.defaultRetention) || 0,
+        religion: values.religion === 'NONE' ? null : values.religion,
       };
       return editing
         ? api<Transport>(`/transports/${editing.id}`, { method: 'PUT', body: payload })
@@ -163,6 +181,7 @@ export default function Transports() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transports'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
       toast.success(editing ? 'Transport updated successfully' : 'Transport created successfully');
       setOpen(false);
       form.reset();
@@ -246,6 +265,7 @@ export default function Transports() {
             <TableRow>
               <TableHead>Transport Name</TableHead>
               <TableHead>Contact & Phone</TableHead>
+              <TableHead>Community</TableHead>
               <TableHead>City / State</TableHead>
               <TableHead>GSTIN / Transporter ID</TableHead>
               <TableHead className="text-right">Default Retention</TableHead>
@@ -257,13 +277,13 @@ export default function Transports() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   Loading transports...
                 </TableCell>
               </TableRow>
             ) : filteredTransports.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   No transports found. Click &quot;Add Transport&quot; to create one.
                 </TableCell>
               </TableRow>
@@ -290,6 +310,13 @@ export default function Transports() {
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {t.religion ? (
+                      <Badge variant="soft">{WISH_CATEGORY_LABELS[t.religion]}</Badge>
+                    ) : (
+                      <Badge variant="outline">Not tagged</Badge>
                     )}
                   </TableCell>
                   <TableCell>
@@ -423,6 +450,36 @@ export default function Transports() {
 
                 <FormField
                   control={form.control}
+                  name="religion"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Community (for Wishes)</FormLabel>
+                      <Select
+                        value={field.value || 'NONE'}
+                        onValueChange={(v) => field.onChange(v as WishCategory | 'NONE')}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select community" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="NONE">Not tagged (Everyone only)</SelectItem>
+                          <SelectItem value="HINDU">Hindu</SelectItem>
+                          <SelectItem value="MUSLIM">Muslim</SelectItem>
+                          <SelectItem value="CHRISTIAN">Christian</SelectItem>
+                          <SelectItem value="OTHER">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
                   name="phone"
                   render={({ field }) => (
                     <FormItem>
@@ -434,9 +491,7 @@ export default function Transports() {
                     </FormItem>
                   )}
                 />
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
                 <FormField
                   control={form.control}
                   name="phone2"
@@ -450,6 +505,7 @@ export default function Transports() {
                     </FormItem>
                   )}
                 />
+              </div>
 
                 <FormField
                   control={form.control}
@@ -464,7 +520,6 @@ export default function Transports() {
                     </FormItem>
                   )}
                 />
-              </div>
 
               <FormField
                 control={form.control}

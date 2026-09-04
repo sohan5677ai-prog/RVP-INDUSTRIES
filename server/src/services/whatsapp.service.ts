@@ -142,6 +142,11 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // KNM number (+917207146094). Fast2SMS message_id 31089 (Meta template ID
   // 2139451610260693). See docs/whatsapp-wishes-template.md.
   WISHES: '31089',
+  // lorry_english (Utility template, 11 vars), created on the shared KNM
+  // number (+917207146094). Fast2SMS message_id 31369 (Meta template ID
+  // 1081272931051099). See docs/whatsapp-lorry-payment-template.md.
+  LORRY_PAYMENT: '31369',
+  LORRY_PAYMENT_TEXT: '31369',
   //
   // rvp_party_ledger, approved on the shared KNM number. This id was only ever
   // set as the Render env var FAST2SMS_TMPL_PARTY_LEDGER (sync: false, no repo
@@ -169,13 +174,12 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
  * ids, and nothing errors. `whatsappLanguage.test.ts` pins each one.
  */
 const LANGUAGE_TEMPLATE_IDS: Partial<Record<Exclude<WaLanguage, 'EN'>, Partial<Record<WaTemplateKey, string>>>> = {
-  // po_* approved 2026-08-11; stockin_* approved 2026-08-12; private loan statements approved 2026-08-21.
-  // Both blocks run downwards TE → TA → KN → HI, which is exactly the transposition risk the
-  // pinned tests exist for.
-  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595', PRIVATE_LOAN_STATEMENT: '28935' },
-  TA: { PO_CREATED: '28598', STOCKIN_CONFIRMED: '28594' },
+  // po_* approved 2026-08-11; stockin_* approved 2026-08-12; private loan statements approved 2026-08-21;
+  // lorry_* (EN 31369, TE 31377, HI 31378, TA 31379) created 2026-09-04 on +917207146094.
+  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595', PRIVATE_LOAN_STATEMENT: '28935', LORRY_PAYMENT: '31377', LORRY_PAYMENT_TEXT: '31377' },
+  TA: { PO_CREATED: '28598', STOCKIN_CONFIRMED: '28594', LORRY_PAYMENT: '31379', LORRY_PAYMENT_TEXT: '31379' },
   KN: { PO_CREATED: '28597', STOCKIN_CONFIRMED: '28593' },
-  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592', PRIVATE_LOAN_STATEMENT: '28936' },
+  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592', PRIVATE_LOAN_STATEMENT: '28936', LORRY_PAYMENT: '31378', LORRY_PAYMENT_TEXT: '31378' },
 };
 
 /**

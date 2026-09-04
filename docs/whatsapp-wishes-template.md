@@ -71,9 +71,9 @@ PUNGANUR
 
 Not every occasion goes to everyone. Independence Day, New Year etc. go to
 **all** recipients; a religious festival (Diwali, Eid, Christmas...) goes
-only to parties/brokers/drivers tagged with the matching `WishCategory`
+only to parties/brokers/transports/drivers tagged with the matching `WishCategory`
 (`HINDU` / `MUSLIM` / `CHRISTIAN` / `OTHER`) on the Wishes page. Untagged
-parties/brokers/drivers are included in "Everyone" sends but skipped by a
+parties/brokers/transports/drivers are included in "Everyone" sends but skipped by a
 category-filtered one — see `WishCategory` in `schema.prisma`. "Owners"
 (the Settings → WhatsApp alert-recipient list) has no religion tag and is
 just an on/off group, since it is typically the same small family/ownership

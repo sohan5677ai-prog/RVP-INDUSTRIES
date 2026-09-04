@@ -91,7 +91,7 @@ export interface KnmDriver {
 }
 
 export interface WishRecipient {
-  group: 'PARTY' | 'BROKER' | 'DRIVER' | 'OWNER';
+  group: 'PARTY' | 'BROKER' | 'TRANSPORT' | 'DRIVER' | 'OWNER';
   id: string;
   name: string;
   phone: string;
@@ -106,6 +106,10 @@ export interface WishRecipientBreakdown {
   brokersWithPhone: number;
   brokersMissingPhone: number;
   brokersCount: number;
+  transportsTotal: number;
+  transportsWithPhone: number;
+  transportsMissingPhone: number;
+  transportsCount: number;
   driversCount: number;
   ownersCount: number;
 }
@@ -122,6 +126,7 @@ export interface WishBroadcast {
   category: WishCategory | null;
   includeParties: boolean;
   includeBrokers: boolean;
+  includeTransports: boolean;
   includeDrivers: boolean;
   includeOwners: boolean;
   messageText: string;
@@ -163,6 +168,8 @@ export interface Transport {
   contactPerson?: string | null;
   defaultRetention: string | number;
   notes?: string | null;
+  /** Settings -> Wishes targeting only. Null/undefined = not tagged. */
+  religion?: WishCategory | null;
   active: boolean;
   createdAt: string;
   updatedAt?: string;

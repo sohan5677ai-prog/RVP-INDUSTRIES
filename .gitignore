@@ -25,6 +25,7 @@ server/uploads/*
 /extracted_data*.js
 /chhaya_logs.txt
 /user_inputs.jsonl
+*.xlsx
 server/.devlog*
 server/*.txt
 server/by_price*.json

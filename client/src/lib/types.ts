@@ -91,7 +91,7 @@ export interface KnmDriver {
 }
 
 export interface WishRecipient {
-  group: 'PARTY' | 'DRIVER' | 'OWNER';
+  group: 'PARTY' | 'BROKER' | 'DRIVER' | 'OWNER';
   id: string;
   name: string;
   phone: string;
@@ -102,6 +102,10 @@ export interface WishRecipientBreakdown {
   partiesTotal: number;
   partiesWithPhone: number;
   partiesMissingPhone: number;
+  brokersTotal: number;
+  brokersWithPhone: number;
+  brokersMissingPhone: number;
+  brokersCount: number;
   driversCount: number;
   ownersCount: number;
 }
@@ -117,6 +121,7 @@ export interface WishBroadcast {
   occasion: string;
   category: WishCategory | null;
   includeParties: boolean;
+  includeBrokers: boolean;
   includeDrivers: boolean;
   includeOwners: boolean;
   messageText: string;
@@ -137,6 +142,8 @@ export interface Broker {
   phone: string | null;
   /** Language the broker's payment-reminder copy is sent in. */
   waLanguage?: WaLanguage;
+  /** Settings -> Wishes targeting only. Null/undefined = not tagged. */
+  religion?: WishCategory | null;
   /** Flat brokerage credited per dispatched sale order under this broker. */
   brokerageAmount: string;
 }

@@ -65,6 +65,9 @@ const MASTERS: ArchiveModel[] = [
   { name: 'User', delegate: 'user', cls: 'MASTER', order: 10, omit: ['password'],
     note: 'Password hashes never leave the building; mount re-links users by username.' },
   { name: 'Party', delegate: 'party', cls: 'MASTER', order: 20 },
+  { name: 'PartyAddress', delegate: 'partyAddress', cls: 'MASTER', order: 22 },
+  { name: 'Transport', delegate: 'transport', cls: 'MASTER', order: 25 },
+  { name: 'KnmDriver', delegate: 'knmDriver', cls: 'MASTER', order: 28 },
   { name: 'Broker', delegate: 'broker', cls: 'MASTER', order: 30 },
   { name: 'AccountGroup', delegate: 'accountGroup', cls: 'MASTER', order: 40,
     note: 'Self-referential tree - insert parents before children on mount.' },
@@ -115,11 +118,15 @@ const TABLES: ArchiveModel[] = [
   // A drawdown spans years by design - stamping it would hide an open loan from
   // the new year. Snapshotted whole; only its repayments are date-sliced.
   { name: 'BankLoan', delegate: 'bankLoan', cls: 'SPANNING', order: 130 },
+  { name: 'PrivateLoan', delegate: 'privateLoan', cls: 'SPANNING', order: 135 },
   { name: 'LoanRepayment', delegate: 'loanRepayment', cls: 'TXN', order: 140, dateField: 'date' },
+  { name: 'PrivateLoanRepayment', delegate: 'privateLoanRepayment', cls: 'TXN', order: 145, dateField: 'paymentDate' },
 
   { name: 'HamaliVerification', delegate: 'hamaliVerification', cls: 'TXN', order: 150, dateField: 'asOfDate' },
+  { name: 'HamaliRoundedValue', delegate: 'hamaliRoundedValue', cls: 'SPANNING', order: 155 },
   { name: 'Payment', delegate: 'payment', cls: 'TXN', order: 160, dateField: 'date' },
   { name: 'Receipt', delegate: 'receipt', cls: 'TXN', order: 170, dateField: 'date' },
+  { name: 'PartySetOff', delegate: 'partySetOff', cls: 'TXN', order: 175, dateField: 'date' },
 
   { name: 'DustPurchase', delegate: 'dustPurchase', cls: 'TXN', order: 180, dateField: 'purchaseDate' },
   { name: 'StockTransfer', delegate: 'stockTransfer', cls: 'TXN', order: 190, dateField: 'transferDate' },
@@ -148,6 +155,7 @@ const TABLES: ArchiveModel[] = [
   { name: 'EmailLog', delegate: 'emailLog', cls: 'LOG', order: 350, dateField: 'sentAt' },
   { name: 'WhatsAppLog', delegate: 'whatsAppLog', cls: 'LOG', order: 360, dateField: 'createdAt' },
   { name: 'TransportConfirmation', delegate: 'transportConfirmation', cls: 'LOG', order: 370, dateField: 'createdAt' },
+  { name: 'WishBroadcast', delegate: 'wishBroadcast', cls: 'LOG', order: 380, dateField: 'createdAt' },
 ];
 
 // ── Class C: FY-keyed counters ──────────────────────────────────────────────
@@ -175,6 +183,12 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Who has read which developer reply. Follows SupportTicket out of the archive.' },
   { name: 'UserSession', delegate: 'userSession', cls: 'EXCLUDED', order: 0,
     note: 'Live sign-in state for the device cap. Worthless once exported and it carries IP/user-agent, so it never leaves the building.' },
+  { name: 'PartyReminderSchedule', delegate: 'partyReminderSchedule', cls: 'EXCLUDED', order: 0,
+    note: 'WhatsApp reminder config / cadence.' },
+  { name: 'PrivateLoanReminderSchedule', delegate: 'privateLoanReminderSchedule', cls: 'EXCLUDED', order: 0,
+    note: 'WhatsApp reminder config for private loans.' },
+  { name: 'UserNote', delegate: 'userNote', cls: 'EXCLUDED', order: 0,
+    note: 'Floating workspace sticky notes.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

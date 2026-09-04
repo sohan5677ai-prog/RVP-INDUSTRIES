@@ -7,7 +7,8 @@ import { createPaymentSchema, listPaymentsSchema, updatePaymentSchema } from '..
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 import { uploadFileToStorage } from '../lib/upload.js';
-import { whatsappService } from '../services/whatsapp.service.js';
+import { whatsappService, type LorryPaymentDetails } from '../services/whatsapp.service.js';
+import { calcKataFee, calcHamali, pappuLoadingHamali } from '../lib/calc.js';
 
 /**
  * Read an uploaded payment screenshot (bank/UPI/cheque) with Gemini and return
@@ -53,6 +54,170 @@ export async function listPayments(req: Request, res: Response) {
     prisma.payment.count({ where: { setOffId: null } }),
   ]);
   res.json({ rows, total });
+}
+
+async function resolveLorryPaymentDetails(data: {
+  date: Date;
+  amount: number;
+  reference?: string | null;
+  lorryNumber?: string | null;
+  description?: string | null;
+  purchaseId?: string | null;
+  screenshotUrl?: string | null;
+}): Promise<{ details: LorryPaymentDetails; phone: string | null; name: string } | null> {
+  const lorryNo = data.lorryNumber?.trim() || null;
+  if (!lorryNo) return null;
+
+  // Try extracting tripId from description [tripId] or purchaseId
+  let tripId: string | null = data.purchaseId || null;
+  if (!tripId && data.description) {
+    const m = data.description.match(/\[([a-zA-Z0-9_\-]+)\]/);
+    if (m) tripId = m[1];
+  }
+
+  let grossFreight = 0;
+  let kata = 0;
+  let hamali = 0;
+  let otherDeductions = 0;
+  let netPayable = 0;
+  let destination = '-';
+  let phone: string | null = null;
+  let name = `Transporter (Lorry ${lorryNo})`;
+
+  let foundTrip = false;
+
+  // 1. Try SaleDispatch by ID
+  if (tripId && !tripId.startsWith('husk-') && !tripId.startsWith('seed-') && !tripId.startsWith('dust-')) {
+    const dispatch = await prisma.saleDispatch.findUnique({
+      where: { id: tripId },
+      include: { saleOrder: { include: { buyer: true } }, transport: true },
+    }).catch(() => null);
+
+    if (dispatch) {
+      foundTrip = true;
+      grossFreight = Number(dispatch.freightCharge || 0);
+      const isCompany = false;
+      const defaultKata = calcKataFee(dispatch.weightKg, isCompany);
+      kata = dispatch.customKata != null ? Number(dispatch.customKata) : defaultKata;
+
+      const isPappu = dispatch.saleOrder?.product === 'PAPPU';
+      const defaultHamali = isPappu ? pappuLoadingHamali(dispatch.weightKg).lorry : calcHamali(dispatch.weightKg);
+      hamali = dispatch.customHamali != null ? Number(dispatch.customHamali) : defaultHamali;
+
+      const transportRet = dispatch.customRetention != null ? Number(dispatch.customRetention) : (dispatch.transportProvider === 'SURYA' ? 3000 : 0);
+      const deductions = Array.isArray(dispatch.freightDeductions)
+        ? (dispatch.freightDeductions as any[]).reduce((s, d) => s + (Number(d.amount) || 0), 0)
+        : 0;
+      const additions = Array.isArray(dispatch.freightAdditions)
+        ? (dispatch.freightAdditions as any[]).reduce((s, a) => s + (Number(a.amount) || 0), 0)
+        : 0;
+
+      otherDeductions = Math.max(0, transportRet + deductions - additions);
+      netPayable = Math.round((grossFreight + additions - (kata + hamali + transportRet + deductions)) * 100) / 100;
+      destination = dispatch.saleOrder?.destination || dispatch.saleOrder?.buyer?.city || '-';
+      phone = dispatch.driverPhone || dispatch.saleOrder?.buyer?.phone || null;
+      if (dispatch.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
+    }
+  }
+
+  // 2. Try Purchase by ID or if not found
+  if (!foundTrip) {
+    let purchase = tripId ? await prisma.purchase.findUnique({
+      where: { id: tripId },
+      include: { stockIn: { include: { purchaseOrder: { include: { party: true } } } }, verification: true },
+    }).catch(() => null) : null;
+
+    if (!purchase && lorryNo) {
+      purchase = await prisma.purchase.findFirst({
+        where: { stockIn: { lorryNumber: { equals: lorryNo, mode: 'insensitive' } } },
+        include: { stockIn: { include: { purchaseOrder: { include: { party: true } } } }, verification: true },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    if (purchase) {
+      foundTrip = true;
+      const rawFreight = Number(purchase.freightCharge ?? 0);
+      const basis = Number(purchase.freightTonnageKg ?? purchase.stockIn?.freightTonnageKg ?? 0);
+      const net = Number(purchase.netWeightKg ?? 0);
+      grossFreight = basis > 0 && net > 0 ? (rawFreight * net) / basis : rawFreight;
+      kata = purchase.customKata != null ? Number(purchase.customKata) : Number(purchase.kataFee || 0);
+      hamali = purchase.customHamali != null ? Number(purchase.customHamali) : Number(purchase.hamaliCharge || 0);
+      const ret = purchase.customRetention != null ? Number(purchase.customRetention) : 0;
+      const deductions = Array.isArray(purchase.freightDeductions)
+        ? (purchase.freightDeductions as any[]).reduce((s, d) => s + (Number(d.amount) || 0), 0)
+        : 0;
+      const additions = Array.isArray(purchase.freightAdditions)
+        ? (purchase.freightAdditions as any[]).reduce((s, a) => s + (Number(a.amount) || 0), 0)
+        : 0;
+      otherDeductions = Math.max(0, ret + deductions - additions);
+      netPayable = Math.round((grossFreight + additions - (kata + hamali + ret + deductions)) * 100) / 100;
+      destination = purchase.stockIn?.loadingLocation || 'Punganur';
+      phone = purchase.stockIn?.purchaseOrder?.party?.phone || null;
+    }
+  }
+
+  // 3. Try SaleDispatch latest if still not found
+  if (!foundTrip && lorryNo) {
+    const dispatch = await prisma.saleDispatch.findFirst({
+      where: { vehicleNumber: { equals: lorryNo, mode: 'insensitive' } },
+      include: { saleOrder: { include: { buyer: true } }, transport: true },
+      orderBy: { dispatchDate: 'desc' },
+    });
+    if (dispatch) {
+      foundTrip = true;
+      grossFreight = Number(dispatch.freightCharge || 0);
+      kata = dispatch.customKata != null ? Number(dispatch.customKata) : calcKataFee(dispatch.weightKg, false);
+      const isPappu = dispatch.saleOrder?.product === 'PAPPU';
+      hamali = dispatch.customHamali != null ? Number(dispatch.customHamali) : (isPappu ? pappuLoadingHamali(dispatch.weightKg).lorry : calcHamali(dispatch.weightKg));
+      const transportRet = dispatch.customRetention != null ? Number(dispatch.customRetention) : (dispatch.transportProvider === 'SURYA' ? 3000 : 0);
+      const deductions = Array.isArray(dispatch.freightDeductions)
+        ? (dispatch.freightDeductions as any[]).reduce((s, d) => s + (Number(d.amount) || 0), 0)
+        : 0;
+      const additions = Array.isArray(dispatch.freightAdditions)
+        ? (dispatch.freightAdditions as any[]).reduce((s, a) => s + (Number(a.amount) || 0), 0)
+        : 0;
+      otherDeductions = Math.max(0, transportRet + deductions - additions);
+      netPayable = Math.round((grossFreight + additions - (kata + hamali + transportRet + deductions)) * 100) / 100;
+      destination = dispatch.saleOrder?.destination || dispatch.saleOrder?.buyer?.city || '-';
+      phone = dispatch.driverPhone || dispatch.saleOrder?.buyer?.phone || null;
+      if (dispatch.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
+    }
+  }
+
+  // 4. If still no trip found, fallback cleanly
+  if (!foundTrip) {
+    grossFreight = data.amount;
+    netPayable = data.amount;
+    destination = '-';
+  }
+
+  // Sum all payments for this lorry
+  const paymentsForLorry = await prisma.payment.findMany({
+    where: { lorryNumber: { equals: lorryNo, mode: 'insensitive' } },
+    select: { amount: true },
+  });
+  const totalPaid = paymentsForLorry.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const balance = Math.max(0, Math.round((netPayable - totalPaid) * 100) / 100);
+
+  return {
+    details: {
+      date: data.date,
+      lorryNumber: lorryNo,
+      destination,
+      grossFreight,
+      kata,
+      hamali,
+      otherDeductions,
+      netPayable,
+      amountPaid: data.amount,
+      reference: data.reference ?? null,
+      balance,
+      screenshotUrl: data.screenshotUrl,
+    },
+    phone,
+    name,
+  };
 }
 
 export async function createPayment(req: Request, res: Response) {
@@ -154,6 +319,49 @@ export async function createPayment(req: Request, res: Response) {
     // English unless the counterparty has a language of their own on file. A
     // payee typed free-hand (expense heads) has no record, so no language.
     let waLanguage: WaLanguage | null = null;
+
+    const isLorryPayment = !!data.lorryNumber || data.type === 'TRANSPORTER_INWARD' || data.type === 'TRANSPORTER_OUTWARD' || data.type === 'TRANSPORTER';
+
+    if (isLorryPayment) {
+      const lorryRes = await resolveLorryPaymentDetails({
+        date: data.date,
+        amount: Number(data.amount),
+        reference: data.reference ?? null,
+        lorryNumber: data.lorryNumber ?? null,
+        description: data.description ?? null,
+        purchaseId: data.purchaseId ?? null,
+        screenshotUrl,
+      });
+
+      if (lorryRes) {
+        if (data.partyId) {
+          const party = await prisma.party.findUnique({ where: { id: data.partyId } });
+          if (party) {
+            phone = party.phone;
+            phone2 = party.phone2;
+            waLanguage = party.waLanguage;
+          }
+        }
+        await whatsappService.notifyLorryPaymentSent(
+          {
+            id: payment.id,
+            amount: Number(data.amount),
+            date: data.date,
+            reference: data.reference ?? null,
+            screenshotUrl,
+          },
+          lorryRes.details,
+          {
+            name: lorryRes.name,
+            phone: phone || lorryRes.phone,
+            phone2,
+            waLanguage,
+          }
+        );
+        return;
+      }
+    }
+
     if (data.partyId) {
       const party = await prisma.party.findUnique({ where: { id: data.partyId } });
       name = party?.name ?? 'Party';

@@ -7,7 +7,9 @@ import {
   updateDriver,
   deleteDriver,
   bulkTagPartyReligion,
+  bulkTagBrokerReligion,
   updatePartyPhone,
+  updateBrokerPhone,
   previewRecipients,
   generateWishText,
   generateWishImageEndpoint,
@@ -28,6 +30,8 @@ router.delete('/wishes/drivers/:id', canManage, asyncHandler(deleteDriver));
 
 router.post('/wishes/parties/bulk-religion', canManage, asyncHandler(bulkTagPartyReligion));
 router.patch('/wishes/parties/:id/phone', canManage, asyncHandler(updatePartyPhone));
+router.post('/wishes/brokers/bulk-religion', canManage, asyncHandler(bulkTagBrokerReligion));
+router.patch('/wishes/brokers/:id/phone', canManage, asyncHandler(updateBrokerPhone));
 
 router.get('/wishes/recipients', asyncHandler(previewRecipients));
 router.post('/wishes/generate/text', asyncHandler(generateWishText));

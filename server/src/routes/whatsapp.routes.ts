@@ -25,6 +25,7 @@ import {
   sendDueOnDateSingle,
   sendDuesOnDateBulk,
   updatePartyDueTodaySchedule,
+  sendLorryPaymentWhatsApp,
 } from '../controllers/whatsapp.controller.js';
 
 const router = Router();
@@ -76,5 +77,7 @@ router.post('/whatsapp/transport-confirmations/:id/restore', asyncHandler(restor
 router.post('/whatsapp/dispatches/:id/send', asyncHandler(sendDispatchWhatsApp));
 // Re-send just the driver's message (normally fires once, at dispatch creation).
 router.post('/whatsapp/dispatches/:id/resend-driver', asyncHandler(resendDriverWhatsApp));
+// Lorry Payment summary → driver / transporter on WhatsApp.
+router.post('/whatsapp/lorry-payment/send-summary', asyncHandler(sendLorryPaymentWhatsApp));
 
 export default router;

@@ -12,7 +12,8 @@ export const updateDriverSchema = createDriverSchema.partial().extend({
 });
 
 export const bulkTagReligionSchema = z.object({
-  partyIds: z.array(z.string()).min(1, 'Select at least one party'),
+  partyIds: z.array(z.string()).min(1, 'Select at least one party').optional(),
+  brokerIds: z.array(z.string()).min(1, 'Select at least one broker').optional(),
   religion: wishCategoryEnum.nullable(),
 });
 
@@ -20,6 +21,7 @@ export const bulkTagReligionSchema = z.object({
 export const recipientGroupsSchema = z.object({
   category: wishCategoryEnum.optional().nullable(),
   includeParties: z.boolean().default(true),
+  includeBrokers: z.boolean().default(true),
   includeDrivers: z.boolean().default(true),
   includeOwners: z.boolean().default(true),
 });

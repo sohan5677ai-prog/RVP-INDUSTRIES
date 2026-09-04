@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../lib/prisma.js', () => ({ prisma: {} }));
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-const { templateId, resolvedLanguage } = await import('./whatsapp.service.js');
+const { templateId, resolvedLanguage, formatLorryPaymentText, formatLorryPaymentVariables } = await import('./whatsapp.service.js');
 
 const ENV_KEYS = [
   'FAST2SMS_TMPL_RECEIPT_RECEIVED',
@@ -28,6 +28,10 @@ const ENV_KEYS = [
   'FAST2SMS_TMPL_STOCKIN_CONFIRMED_TA',
   'FAST2SMS_TMPL_PO_CREATED',
   'FAST2SMS_TMPL_PO_CREATED_TA',
+  'FAST2SMS_TMPL_LORRY_PAYMENT',
+  'FAST2SMS_TMPL_LORRY_PAYMENT_TE',
+  'FAST2SMS_TMPL_LORRY_PAYMENT_HI',
+  'FAST2SMS_TMPL_LORRY_PAYMENT_TA',
   // Cleared so the "no id anywhere" case below reads the source, not a local .env.
   'FAST2SMS_TMPL_PAYMENT_SENT_TEXT',
   'FAST2SMS_TMPL_WISHES',
@@ -154,5 +158,72 @@ describe('approved language ids', () => {
     process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '26130';
     expect(templateId('RECEIPT_RECEIVED', 'TA')).toBe('26130');
     expect(resolvedLanguage('RECEIPT_RECEIVED', 'TA')).toBe('EN');
+  });
+
+  it('formats lorry payment message text in all 4 languages (EN, TE, HI, TA)', () => {
+    const sample = {
+      date: new Date('2026-08-15T00:00:00.000Z'),
+      lorryNumber: 'AP39TR1234',
+      destination: 'Surat',
+      grossFreight: 45000,
+      kata: 250,
+      hamali: 2000,
+      otherDeductions: 3000,
+      netPayable: 39750,
+      amountPaid: 20000,
+      reference: 'IMPS/12345',
+      balance: 19750,
+    };
+
+    const enText = formatLorryPaymentText(sample, 'EN');
+    expect(enText).toContain('LORRY FREIGHT PAYMENT RECEIPT');
+    expect(enText).toContain('AP39TR1234');
+    expect(enText).toContain('Surat');
+    expect(enText).toContain('45,000');
+    expect(enText).toContain('250');
+    expect(enText).toContain('2,000');
+    expect(enText).toContain('3,000');
+    expect(enText).toContain('39,750');
+    expect(enText).toContain('20,000');
+    expect(enText).toContain('19,750');
+
+    const teText = formatLorryPaymentText(sample, 'TE');
+    expect(teText).toContain('లారీ రవాణా చెల్లింపు రశీదు');
+    expect(teText).toContain('AP39TR1234');
+    expect(teText).toContain('Surat');
+    expect(teText).toContain('45,000');
+
+    const hiText = formatLorryPaymentText(sample, 'HI');
+    expect(hiText).toContain('लॉरी भाड़ा भुगतान रसीद');
+    expect(hiText).toContain('AP39TR1234');
+    expect(hiText).toContain('Surat');
+
+    const taText = formatLorryPaymentText(sample, 'TA');
+    expect(taText).toContain('லாரி வாடகை கட்டண ரசீது');
+    expect(taText).toContain('AP39TR1234');
+    expect(taText).toContain('Surat');
+
+    const vars = formatLorryPaymentVariables(sample);
+    expect(vars).toHaveLength(11);
+    expect(vars[1]).toBe('AP39TR1234');
+    expect(vars[2]).toBe('Surat');
+    expect(vars[3]).toBe('45,000');
+    expect(vars[4]).toBe('250');
+    expect(vars[5]).toBe('2,000');
+    expect(vars[6]).toBe('3,000');
+    expect(vars[7]).toBe('39,750');
+    expect(vars[8]).toBe('20,000');
+    expect(vars[9]).toBe('IMPS/12345');
+    expect(vars[10]).toBe('19,750');
+  });
+
+  it('supports LORRY_PAYMENT environment variable configuration and fallback', () => {
+    process.env.FAST2SMS_TMPL_LORRY_PAYMENT = '40001';
+    process.env.FAST2SMS_TMPL_LORRY_PAYMENT_TE = '40002';
+    expect(templateId('LORRY_PAYMENT', 'EN')).toBe('40001');
+    expect(templateId('LORRY_PAYMENT', 'TE')).toBe('40002');
+    expect(templateId('LORRY_PAYMENT', 'HI')).toBe('40001');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'TE')).toBe('TE');
+    expect(resolvedLanguage('LORRY_PAYMENT', 'HI')).toBe('EN');
   });
 });

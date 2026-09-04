@@ -7,7 +7,7 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { Payment, Party, Broker } from '@/lib/types';
+import type { Payment, Party, Broker, PaymentType } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,9 +21,11 @@ import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import type { PaymentType } from '@/lib/types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SetOffsRegister } from '@/components/SetOffsRegister';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
+import { LorryPaymentShareDialog } from '@/components/LorryPaymentShareDialog';
+import type { LorryPaymentData } from '@/lib/lorryPaymentTemplate';
 
 // Types you can record directly from this page. Gunny Bags, Electricity,
 // Maintenance and Drawings are entered on their own detail pages (which auto-post
@@ -100,6 +102,7 @@ export default function PaymentsPage() {
   // The payment being corrected, or null when recording a fresh one. The same
   // dialog serves both.
   const [editing, setEditing] = useState<Payment | null>(null);
+  const [sharePaymentTarget, setSharePaymentTarget] = useState<LorryPaymentData | null>(null);
 
   // Server-side pagination: only the visible page is fetched, so opening the page
   // stays fast no matter how long the payment history grows. "All" (Infinity) and
@@ -353,7 +356,32 @@ export default function PaymentsPage() {
                         {managedIn ? (
                           <span className="text-[10px] text-muted-foreground pr-1" title={`Edit or delete this on the ${managedIn}`}>-</span>
                         ) : (
-                          <div className="flex items-center justify-end">
+                          <div className="flex items-center justify-end gap-1">
+                            {p.lorryNumber && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                                title="Share Lorry Freight Payment Receipt via WhatsApp (EN/TE/HI/TA)"
+                                onClick={() => {
+                                  setSharePaymentTarget({
+                                    date: p.date,
+                                    lorryNumber: p.lorryNumber!,
+                                    destination: '-',
+                                    grossFreight: Number(p.amount),
+                                    kata: 0,
+                                    hamali: 0,
+                                    otherDeductions: 0,
+                                    netPayable: Number(p.amount),
+                                    amountPaid: Number(p.amount),
+                                    reference: p.reference ?? null,
+                                    balance: 0,
+                                  });
+                                }}
+                              >
+                                <WhatsAppIcon className="h-4 w-4 fill-emerald-600 dark:fill-emerald-400" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -501,6 +529,13 @@ export default function PaymentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Lorry Freight Payment Receipt WhatsApp Dialog */}
+      <LorryPaymentShareDialog
+        open={sharePaymentTarget !== null}
+        onOpenChange={(o) => { if (!o) setSharePaymentTarget(null); }}
+        data={sharePaymentTarget}
+      />
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import { FESTIVALS, type FestivalItem } from '@/lib/festivals';
 import type {
   Party,
+  Broker,
   WishRecipientPreview,
   WishBroadcast,
   WishCategory,
@@ -49,6 +50,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 
@@ -65,19 +67,23 @@ const CATEGORY_OPTIONS: { label: string; value: CategoryFilter }[] = [
 
 export default function Wishes() {
   const [phoneFilter, setPhoneFilter] = useState<PhoneFilter>('ALL');
-  const partySectionRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<'parties' | 'brokers'>('parties');
+  const directorySectionRef = useRef<HTMLDivElement>(null);
 
-  function handleFilterMissingPhones() {
+  function handleFilterMissingPhones(target: 'parties' | 'brokers' = 'parties') {
+    setActiveTab(target);
     setPhoneFilter('MISSING');
-    partySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    directorySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   return (
     <div className="space-y-4">
       <WishComposer onFilterMissingPhones={handleFilterMissingPhones} />
       <WishHistorySection />
-      <div ref={partySectionRef} id="party-tagging-section">
-        <PartyReligionTaggingSection
+      <div ref={directorySectionRef} id="directory-tagging-section">
+        <DirectoryTaggingSection
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
           phoneFilter={phoneFilter}
           onPhoneFilterChange={setPhoneFilter}
         />
@@ -88,7 +94,11 @@ export default function Wishes() {
 
 // --- Compose + send -----------------------------------------------------------
 
-function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => void }) {
+function WishComposer({
+  onFilterMissingPhones,
+}: {
+  onFilterMissingPhones: (target: 'parties' | 'brokers') => void;
+}) {
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const [occasion, setOccasion] = useState(() => searchParams.get('occasion') || '');
@@ -124,6 +134,7 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
   }
 
   const [includeParties, setIncludeParties] = useState(true);
+  const [includeBrokers, setIncludeBrokers] = useState(true);
   const [includeDrivers, setIncludeDrivers] = useState(true);
   const [includeOwners, setIncludeOwners] = useState(true);
   const [messageText, setMessageText] = useState('');
@@ -132,10 +143,18 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
   const wireCategory = category === 'ALL' ? null : category;
 
   const { data: recipientData } = useQuery({
-    queryKey: ['wishes-recipients', wireCategory, includeParties, includeDrivers, includeOwners],
+    queryKey: [
+      'wishes-recipients',
+      wireCategory,
+      includeParties,
+      includeBrokers,
+      includeDrivers,
+      includeOwners,
+    ],
     queryFn: () => {
       const params = new URLSearchParams({
         includeParties: String(includeParties),
+        includeBrokers: String(includeBrokers),
         includeDrivers: String(includeDrivers),
         includeOwners: String(includeOwners),
       });
@@ -180,6 +199,7 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
           occasion,
           category: wireCategory,
           includeParties,
+          includeBrokers,
           includeDrivers,
           includeOwners,
           messageText,
@@ -256,7 +276,7 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
             </div>
             <p className="text-[11px] text-muted-foreground">
               "Everyone" reaches every recipient regardless of tag. A religion filters to only
-              parties/drivers tagged with that community.
+              parties/brokers/drivers tagged with that community.
             </p>
           </div>
         </div>
@@ -270,6 +290,14 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
               onClick={() => setIncludeParties((v) => !v)}
               badge={
                 breakdown ? `${breakdown.partiesWithPhone}/${breakdown.partiesTotal}` : undefined
+              }
+            />
+            <GroupToggle
+              label="Brokers"
+              active={includeBrokers}
+              onClick={() => setIncludeBrokers((v) => !v)}
+              badge={
+                breakdown ? `${breakdown.brokersWithPhone}/${breakdown.brokersTotal}` : undefined
               }
             />
             <GroupToggle
@@ -293,7 +321,7 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
             </span>
             {breakdown && (
               <span className="text-muted-foreground">
-                ({breakdown.partiesWithPhone} parties with phone + {breakdown.driversCount} drivers
+                ({breakdown.partiesWithPhone} parties with phone + {breakdown.brokersWithPhone} brokers + {breakdown.driversCount} drivers
                 + {breakdown.ownersCount} owners)
               </span>
             )}
@@ -309,10 +337,28 @@ function WishComposer({ onFilterMissingPhones }: { onFilterMissingPhones: () => 
               </div>
               <button
                 type="button"
-                onClick={onFilterMissingPhones}
+                onClick={() => onFilterMissingPhones('parties')}
                 className="font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
               >
                 View &amp; add phone numbers ({breakdown.partiesMissingPhone}) ↓
+              </button>
+            </div>
+          )}
+
+          {includeBrokers && breakdown && breakdown.brokersMissingPhone > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>
+                  <strong>{breakdown.brokersMissingPhone} of {breakdown.brokersTotal} brokers</strong> are missing a phone number and won't receive WhatsApp wishes.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onFilterMissingPhones('brokers')}
+                className="font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
+              >
+                View &amp; add phone numbers ({breakdown.brokersMissingPhone}) ↓
               </button>
             </div>
           )}
@@ -511,21 +557,86 @@ function ReligionSelect({
   );
 }
 
-// --- Party religion bulk tagging & phone management -------------------------------
+// --- Directory & Community Tagging (Parties & Brokers) ----------------------------
 
-function PartyReligionTaggingSection({
+function DirectoryTaggingSection({
+  activeTab,
+  onTabChange,
   phoneFilter,
   onPhoneFilterChange,
 }: {
+  activeTab: 'parties' | 'brokers';
+  onTabChange: (tab: 'parties' | 'brokers') => void;
+  phoneFilter: PhoneFilter;
+  onPhoneFilterChange: (f: PhoneFilter) => void;
+}) {
+  const { data: parties } = useQuery({
+    queryKey: ['parties'],
+    queryFn: () => api<Party[]>('/parties'),
+  });
+  const { data: brokers } = useQuery({
+    queryKey: ['brokers'],
+    queryFn: () => api<Broker[]>('/brokers'),
+  });
+
+  const partiesTotal = parties?.length ?? 0;
+  const brokersTotal = brokers?.length ?? 0;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40">
+        <div className="flex items-center gap-2">
+          <Tags className="h-5 w-5 text-purple-500" />
+          <div>
+            <CardTitle className="text-base">Directory &amp; Community Tagging</CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Phone numbers are required for WhatsApp wishes. Community tags filter recipients for festival wishes.
+            </p>
+          </div>
+        </div>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => onTabChange(v as 'parties' | 'brokers')}
+        >
+          <TabsList className="h-8">
+            <TabsTrigger value="parties" className="text-xs px-3">
+              Parties ({partiesTotal})
+            </TabsTrigger>
+            <TabsTrigger value="brokers" className="text-xs px-3">
+              Brokers ({brokersTotal})
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </CardHeader>
+      <CardContent className="pt-4 space-y-4">
+        {activeTab === 'parties' ? (
+          <PartyReligionTaggingTab
+            parties={parties ?? []}
+            phoneFilter={phoneFilter}
+            onPhoneFilterChange={onPhoneFilterChange}
+          />
+        ) : (
+          <BrokerReligionTaggingTab
+            brokers={brokers ?? []}
+            phoneFilter={phoneFilter}
+            onPhoneFilterChange={onPhoneFilterChange}
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PartyReligionTaggingTab({
+  parties,
+  phoneFilter,
+  onPhoneFilterChange,
+}: {
+  parties: Party[];
   phoneFilter: PhoneFilter;
   onPhoneFilterChange: (f: PhoneFilter) => void;
 }) {
   const qc = useQueryClient();
-  const { data: parties, isLoading } = useQuery({
-    queryKey: ['parties'],
-    queryFn: () => api<Party[]>('/parties'),
-  });
-
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tagAs, setTagAs] = useState<WishCategory | 'NONE'>('NONE');
@@ -534,14 +645,14 @@ function PartyReligionTaggingSection({
   const [editingPartyId, setEditingPartyId] = useState<string | null>(null);
   const [editingPhoneVal, setEditingPhoneVal] = useState('');
 
-  const totalCount = parties?.length ?? 0;
+  const totalCount = parties.length;
   const missingPhoneCount =
-    parties?.filter((p) => !p.phone?.trim() && !p.phone2?.trim()).length ?? 0;
+    parties.filter((p) => !p.phone?.trim() && !p.phone2?.trim()).length;
   const hasPhoneCount =
-    parties?.filter((p) => Boolean(p.phone?.trim() || p.phone2?.trim())).length ?? 0;
-  const untaggedCount = parties?.filter((p) => !p.religion).length ?? 0;
+    parties.filter((p) => Boolean(p.phone?.trim() || p.phone2?.trim())).length;
+  const untaggedCount = parties.filter((p) => !p.religion).length;
 
-  const filtered = (parties ?? []).filter((p) => {
+  const filtered = parties.filter((p) => {
     const hasPhone = Boolean(p.phone?.trim() || p.phone2?.trim());
     if (phoneFilter === 'MISSING' && hasPhone) return false;
     if (phoneFilter === 'HAS_PHONE' && !hasPhone) return false;
@@ -620,215 +731,491 @@ function PartyReligionTaggingSection({
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-2">
-        <Tags className="h-5 w-5 text-purple-500" />
-        <div>
-          <CardTitle className="text-base">Party Directory &amp; Community Tagging</CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {totalCount} total parties. Phone numbers are required to send WhatsApp wishes. Community tags filter recipients for festival wishes.
-          </p>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Filter pills */}
-        <div className="flex flex-wrap items-center gap-2 border-b pb-3">
-          <FilterPill
-            label={`All (${totalCount})`}
-            active={phoneFilter === 'ALL'}
-            onClick={() => onPhoneFilterChange('ALL')}
-          />
-          <FilterPill
-            label={`Missing Phone (${missingPhoneCount})`}
-            active={phoneFilter === 'MISSING'}
-            onClick={() => onPhoneFilterChange('MISSING')}
-            warning={missingPhoneCount > 0}
-            icon={PhoneOff}
-          />
-          <FilterPill
-            label={`Has Phone (${hasPhoneCount})`}
-            active={phoneFilter === 'HAS_PHONE'}
-            onClick={() => onPhoneFilterChange('HAS_PHONE')}
-            icon={Phone}
-          />
-          <FilterPill
-            label={`Untagged Community (${untaggedCount})`}
-            active={phoneFilter === 'UNTAGGED'}
-            onClick={() => onPhoneFilterChange('UNTAGGED')}
-          />
-        </div>
+    <div className="space-y-4">
+      {/* Filter pills */}
+      <div className="flex flex-wrap items-center gap-2 border-b pb-3">
+        <FilterPill
+          label={`All Parties (${totalCount})`}
+          active={phoneFilter === 'ALL'}
+          onClick={() => onPhoneFilterChange('ALL')}
+        />
+        <FilterPill
+          label={`Missing Phone (${missingPhoneCount})`}
+          active={phoneFilter === 'MISSING'}
+          onClick={() => onPhoneFilterChange('MISSING')}
+          warning={missingPhoneCount > 0}
+          icon={PhoneOff}
+        />
+        <FilterPill
+          label={`Has Phone (${hasPhoneCount})`}
+          active={phoneFilter === 'HAS_PHONE'}
+          onClick={() => onPhoneFilterChange('HAS_PHONE')}
+          icon={Phone}
+        />
+        <FilterPill
+          label={`Untagged Community (${untaggedCount})`}
+          active={phoneFilter === 'UNTAGGED'}
+          onClick={() => onPhoneFilterChange('UNTAGGED')}
+        />
+      </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <SearchInput
-            value={search}
-            onValueChange={setSearch}
-            placeholder="Search party name or phone…"
-            containerClassName="w-64"
-          />
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search party name or phone…"
+          containerClassName="w-64"
+        />
 
-          {selected.size > 0 && (
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{selected.size} selected</span>
-              <ReligionSelect value={tagAs} onChange={setTagAs} />
-              <Button size="sm" onClick={() => bulkTag.mutate()} disabled={bulkTag.isPending}>
-                Tag selected
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : filtered.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">
-            No parties match the selected filter.
+        {selected.size > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+            <ReligionSelect value={tagAs} onChange={setTagAs} />
+            <Button size="sm" onClick={() => bulkTag.mutate()} disabled={bulkTag.isPending}>
+              Tag selected
+            </Button>
           </div>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-input"
-                      checked={
-                        (pageRows ?? []).length > 0 &&
-                        (pageRows ?? []).every((p) => selected.has(p.id))
-                      }
-                      onChange={toggleAllVisible}
-                    />
-                  </TableHead>
-                  <TableHead>Party Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="w-[280px]">WhatsApp Phone</TableHead>
-                  <TableHead>Community</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(pageRows ?? []).map((p) => {
-                  const hasPhone = Boolean(p.phone?.trim() || p.phone2?.trim());
-                  const isEditing = editingPartyId === p.id;
-
-                  return (
-                    <TableRow key={p.id}>
-                      <TableCell>
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-input"
-                          checked={selected.has(p.id)}
-                          onChange={() => toggle(p.id)}
-                        />
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        <div>{p.name}</div>
-                        {p.nickname && (
-                          <div className="text-[11px] text-muted-foreground">{p.nickname}</div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px] font-normal">
-                          {p.type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5">
-                            <Input
-                              value={editingPhoneVal}
-                              onChange={(e) => setEditingPhoneVal(e.target.value)}
-                              placeholder="10-digit mobile"
-                              inputMode="tel"
-                              className="h-7 w-36 text-xs"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSavePhone(p.id);
-                                if (e.key === 'Escape') setEditingPartyId(null);
-                              }}
-                            />
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-green-600 hover:text-green-700"
-                              onClick={() => handleSavePhone(p.id)}
-                              disabled={updatePhoneMutation.isPending}
-                              title="Save phone"
-                            >
-                              <Check className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                              onClick={() => setEditingPartyId(null)}
-                              title="Cancel"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ) : hasPhone ? (
-                          <div className="flex items-center gap-2 group">
-                            <div className="text-xs">
-                              <span className="font-mono">{p.phone || '-'}</span>
-                              {p.phone2 && (
-                                <span className="ml-1 text-muted-foreground font-mono text-[11px]">
-                                  ({p.phone2})
-                                </span>
-                              )}
-                            </div>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                              onClick={() => startEditPhone(p)}
-                              title="Edit phone number"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className="border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-normal dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
-                            >
-                              No phone
-                            </Badge>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 px-2 text-[11px] font-medium"
-                              onClick={() => startEditPhone(p)}
-                            >
-                              <Plus className="mr-0.5 h-3 w-3" /> Add phone
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {p.religion ? (
-                          <Badge variant="soft">{WISH_CATEGORY_LABELS[p.religion]}</Badge>
-                        ) : (
-                          <Badge variant="outline">Not tagged</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            <PaginationBar
-              page={page}
-              setPage={setPage}
-              pageSize={pageSize}
-              setPageSize={setPageSize}
-              totalPages={totalPages}
-              total={total}
-            />
-          </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          No parties match the selected filter.
+        </div>
+      ) : (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input"
+                    checked={
+                      (pageRows ?? []).length > 0 &&
+                      (pageRows ?? []).every((p) => selected.has(p.id))
+                    }
+                    onChange={toggleAllVisible}
+                  />
+                </TableHead>
+                <TableHead>Party Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="w-[280px]">WhatsApp Phone</TableHead>
+                <TableHead>Community</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(pageRows ?? []).map((p) => {
+                const hasPhone = Boolean(p.phone?.trim() || p.phone2?.trim());
+                const isEditing = editingPartyId === p.id;
+
+                return (
+                  <TableRow key={p.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={selected.has(p.id)}
+                        onChange={() => toggle(p.id)}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <div>{p.name}</div>
+                      {p.nickname && (
+                        <div className="text-[11px] text-muted-foreground">{p.nickname}</div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-[10px] font-normal">
+                        {p.type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {isEditing ? (
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            value={editingPhoneVal}
+                            onChange={(e) => setEditingPhoneVal(e.target.value)}
+                            placeholder="10-digit mobile"
+                            inputMode="tel"
+                            className="h-7 w-36 text-xs"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSavePhone(p.id);
+                              if (e.key === 'Escape') setEditingPartyId(null);
+                            }}
+                          />
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-green-600 hover:text-green-700"
+                            onClick={() => handleSavePhone(p.id)}
+                            disabled={updatePhoneMutation.isPending}
+                            title="Save phone"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => setEditingPartyId(null)}
+                            title="Cancel"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : hasPhone ? (
+                        <div className="flex items-center gap-2 group">
+                          <div className="text-xs">
+                            <span className="font-mono">{p.phone || '-'}</span>
+                            {p.phone2 && (
+                              <span className="ml-1 text-muted-foreground font-mono text-[11px]">
+                                ({p.phone2})
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                            onClick={() => startEditPhone(p)}
+                            title="Edit phone number"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-normal dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+                          >
+                            No phone
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[11px] font-medium"
+                            onClick={() => startEditPhone(p)}
+                          >
+                            <Plus className="mr-0.5 h-3 w-3" /> Add phone
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {p.religion ? (
+                        <Badge variant="soft">{WISH_CATEGORY_LABELS[p.religion]}</Badge>
+                      ) : (
+                        <Badge variant="outline">Not tagged</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          <PaginationBar
+            page={page}
+            setPage={setPage}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            totalPages={totalPages}
+            total={total}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function BrokerReligionTaggingTab({
+  brokers,
+  phoneFilter,
+  onPhoneFilterChange,
+}: {
+  brokers: Broker[];
+  phoneFilter: PhoneFilter;
+  onPhoneFilterChange: (f: PhoneFilter) => void;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [tagAs, setTagAs] = useState<WishCategory | 'NONE'>('NONE');
+
+  // Inline editing of broker phone
+  const [editingBrokerId, setEditingBrokerId] = useState<string | null>(null);
+  const [editingPhoneVal, setEditingPhoneVal] = useState('');
+
+  const totalCount = brokers.length;
+  const missingPhoneCount = brokers.filter((b) => !b.phone?.trim()).length;
+  const hasPhoneCount = brokers.filter((b) => Boolean(b.phone?.trim())).length;
+  const untaggedCount = brokers.filter((b) => !b.religion).length;
+
+  const filtered = brokers.filter((b) => {
+    const hasPhone = Boolean(b.phone?.trim());
+    if (phoneFilter === 'MISSING' && hasPhone) return false;
+    if (phoneFilter === 'HAS_PHONE' && !hasPhone) return false;
+    if (phoneFilter === 'UNTAGGED' && b.religion) return false;
+
+    if (search) {
+      const q = search.toLowerCase();
+      const matchName = b.name.toLowerCase().includes(q);
+      const matchPhone = (b.phone ?? '').includes(q);
+      if (!matchName && !matchPhone) return false;
+    }
+    return true;
+  });
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(
+    filtered,
+    25
+  );
+
+  const bulkTag = useMutation({
+    mutationFn: () =>
+      api<{ updated: number }>('/wishes/brokers/bulk-religion', {
+        method: 'POST',
+        body: { brokerIds: Array.from(selected), religion: tagAs === 'NONE' ? null : tagAs },
+      }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['brokers'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+      setSelected(new Set());
+      toast.success(`Tagged ${r.updated} broker${r.updated === 1 ? '' : 's'}`);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const updatePhoneMutation = useMutation({
+    mutationFn: ({ id, phone }: { id: string; phone: string }) =>
+      api<Broker>(`/wishes/brokers/${id}/phone`, {
+        method: 'PATCH',
+        body: { phone },
+      }),
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['brokers'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+      setEditingBrokerId(null);
+      toast.success(`Phone saved for ${updated.name}`);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  function startEditPhone(b: Broker) {
+    setEditingBrokerId(b.id);
+    setEditingPhoneVal(b.phone ?? '');
+  }
+
+  function handleSavePhone(id: string) {
+    updatePhoneMutation.mutate({ id, phone: editingPhoneVal.trim() });
+  }
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const visibleIds = (pageRows ?? []).map((b) => b.id);
+      const allSelected = visibleIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      for (const id of visibleIds) allSelected ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filter pills */}
+      <div className="flex flex-wrap items-center gap-2 border-b pb-3">
+        <FilterPill
+          label={`All Brokers (${totalCount})`}
+          active={phoneFilter === 'ALL'}
+          onClick={() => onPhoneFilterChange('ALL')}
+        />
+        <FilterPill
+          label={`Missing Phone (${missingPhoneCount})`}
+          active={phoneFilter === 'MISSING'}
+          onClick={() => onPhoneFilterChange('MISSING')}
+          warning={missingPhoneCount > 0}
+          icon={PhoneOff}
+        />
+        <FilterPill
+          label={`Has Phone (${hasPhoneCount})`}
+          active={phoneFilter === 'HAS_PHONE'}
+          onClick={() => onPhoneFilterChange('HAS_PHONE')}
+          icon={Phone}
+        />
+        <FilterPill
+          label={`Untagged Community (${untaggedCount})`}
+          active={phoneFilter === 'UNTAGGED'}
+          onClick={() => onPhoneFilterChange('UNTAGGED')}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search broker name or phone…"
+          containerClassName="w-64"
+        />
+
+        {selected.size > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+            <ReligionSelect value={tagAs} onChange={setTagAs} />
+            <Button size="sm" onClick={() => bulkTag.mutate()} disabled={bulkTag.isPending}>
+              Tag selected
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          No brokers match the selected filter.
+        </div>
+      ) : (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input"
+                    checked={
+                      (pageRows ?? []).length > 0 &&
+                      (pageRows ?? []).every((b) => selected.has(b.id))
+                    }
+                    onChange={toggleAllVisible}
+                  />
+                </TableHead>
+                <TableHead>Broker Name</TableHead>
+                <TableHead className="w-[280px]">WhatsApp Phone</TableHead>
+                <TableHead>Community</TableHead>
+                <TableHead className="text-right">Brokerage / Order</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(pageRows ?? []).map((b) => {
+                const hasPhone = Boolean(b.phone?.trim());
+                const isEditing = editingBrokerId === b.id;
+
+                return (
+                  <TableRow key={b.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={selected.has(b.id)}
+                        onChange={() => toggle(b.id)}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <div>{b.name}</div>
+                    </TableCell>
+                    <TableCell>
+                      {isEditing ? (
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            value={editingPhoneVal}
+                            onChange={(e) => setEditingPhoneVal(e.target.value)}
+                            placeholder="10-digit mobile"
+                            inputMode="tel"
+                            className="h-7 w-36 text-xs"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSavePhone(b.id);
+                              if (e.key === 'Escape') setEditingBrokerId(null);
+                            }}
+                          />
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-green-600 hover:text-green-700"
+                            onClick={() => handleSavePhone(b.id)}
+                            disabled={updatePhoneMutation.isPending}
+                            title="Save phone"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => setEditingBrokerId(null)}
+                            title="Cancel"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : hasPhone ? (
+                        <div className="flex items-center gap-2 group">
+                          <div className="text-xs font-mono">{b.phone || '-'}</div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                            onClick={() => startEditPhone(b)}
+                            title="Edit phone number"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-normal dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+                          >
+                            No phone
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[11px] font-medium"
+                            onClick={() => startEditPhone(b)}
+                          >
+                            <Plus className="mr-0.5 h-3 w-3" /> Add phone
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {b.religion ? (
+                        <Badge variant="soft">{WISH_CATEGORY_LABELS[b.religion]}</Badge>
+                      ) : (
+                        <Badge variant="outline">Not tagged</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      ₹{Number(b.brokerageAmount).toLocaleString('en-IN')}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          <PaginationBar
+            page={page}
+            setPage={setPage}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            totalPages={totalPages}
+            total={total}
+          />
+        </>
+      )}
+    </div>
   );
 }
 

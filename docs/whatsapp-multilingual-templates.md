@@ -7,9 +7,12 @@ Six party-facing templates get a copy in Telugu, Tamil, Kannada and Hindi:
 | `PO_CREATED` | `rvp_po_created` | supplier, on PO create | 4 |
 | `STOCKIN_CONFIRMED` | `rvp_stockin_confirmed` | supplier, on stock-in | 4 |
 | `VERIFICATION_STATEMENT` | `rvp_verification_statement` | supplier, on weight verification (PDF header) | 4 |
-| `PAYMENT_SENT` / `PAYMENT_SENT_TEXT` | `rvp_payment_sent` (+ `_text`) | payee, on payment (image header / no header) | 4 |
+| `PAYMENT_SENT` / `PAYMENT_SENT_TEXT` | `rvp_payment_sent` (+ `_text`) | payee, on generic payment (image header / no header) | 4 |
+| `LORRY_PAYMENT` / `LORRY_PAYMENT_TEXT` | `rvp_lorry_payment` (+ `_text`) | transporter / driver, on freight payment (EN/TE/HI/TA) | 11 |
 | `PAYMENT_REMINDER` | `payment_reminder` | buyer + broker, sales dues | 3 |
 | `REMINDER` | `rvp_reminder` | supplier, pending loads | 3 |
+
+`LORRY_PAYMENT` (`rvp_lorry_payment`, transporter / driver, all-around freight payment summary, 11 vars: date, lorry, destination, gross freight, kata, hamali, other deductions, net payable, amount paid, ref, balance) lives in `docs/whatsapp-lorry-payment-template.md`.
 
 `PRIVATE_LOAN_STATEMENT` (`rvp_private_loan_statement`, borrower, on-demand
 loan statement, 6 vars) is approved and wired in EN/TE/HI (no TA/KN yet) and lives

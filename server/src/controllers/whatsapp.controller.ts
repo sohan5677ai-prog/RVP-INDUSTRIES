@@ -1550,3 +1550,36 @@ export async function updatePartyDueTodaySchedule(req: Request, res: Response) {
   });
 }
 
+/**
+ * Send Lorry Payment summary directly via WhatsApp API.
+ */
+export async function sendLorryPaymentWhatsApp(req: Request, res: Response) {
+  const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as {
+    lorryDetails: any;
+    targetPhone: string;
+    language?: WaLanguage;
+    screenshotUrl?: string;
+  };
+  const { lorryDetails, targetPhone, language = 'EN', screenshotUrl } = body;
+
+  if (!lorryDetails || !lorryDetails.lorryNumber) {
+    throw new HttpError(400, 'Valid lorry payment details required');
+  }
+  const cleanPhone = normalizeWhatsAppNumber(targetPhone);
+  if (!cleanPhone) {
+    throw new HttpError(400, 'Valid recipient phone number is required');
+  }
+
+  const result = await whatsappService.sendLorryPaymentSummary(
+    lorryDetails,
+    cleanPhone,
+    language,
+    screenshotUrl
+  );
+
+  if (!result.ok && !result.skipped) {
+    return res.status(400).json({ ok: false, message: result.error || 'Failed to send WhatsApp message' });
+  }
+
+  return res.json({ ok: true, message: 'Lorry payment summary sent successfully!' });
+}

@@ -25,6 +25,9 @@ import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 import SuryaRoadTransport from '@/pages/SuryaRoadTransport';
 import LorryConfirmations from '@/pages/LorryConfirmations';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
+import { LorryPaymentShareDialog } from '@/components/LorryPaymentShareDialog';
+import type { LorryPaymentData } from '@/lib/lorryPaymentTemplate';
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -795,6 +798,7 @@ function FreightTable({
   dueFor,
   onPay,
   onAdjust,
+  onShareReceipt,
   hideDeductions = false,
   paymentsByLorry,
 }: {
@@ -805,6 +809,7 @@ function FreightTable({
   dueFor: (row: FreightRow) => number;
   onPay: (row: FreightRow, due: number) => void;
   onAdjust: (row: FreightRow) => void;
+  onShareReceipt?: (row: FreightRow) => void;
   hideDeductions?: boolean;
   paymentsByLorry: Map<string, { date: string, amount: number, reference: string | null }[]>;
 }) {
@@ -1006,6 +1011,18 @@ function FreightTable({
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="inline-flex items-center justify-end gap-1.5">
+                      {r.lorry && onShareReceipt && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs gap-1 text-emerald-600 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
+                          onClick={() => onShareReceipt(r)}
+                          title="Share Lorry Payment Receipt via WhatsApp (English / Telugu / Hindi / Tamil)"
+                        >
+                          <WhatsAppIcon className="h-3 w-3 fill-emerald-600 dark:fill-emerald-400" />
+                          <span className="hidden sm:inline">Receipt</span>
+                        </Button>
+                      )}
                       {canAdjust && (
                         <Button
                           size="sm"
@@ -1035,19 +1052,35 @@ function FreightTable({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <PanelLabel>Freight Cost &amp; Deduction Breakdown</PanelLabel>
-                            {canAdjust && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-6 px-2 text-[11px] gap-1"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onAdjust(r);
-                                }}
-                              >
-                                <SlidersHorizontal className="h-3 w-3" /> Adjust Costs
-                              </Button>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {onShareReceipt && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2 text-[11px] gap-1 text-emerald-600 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onShareReceipt(r);
+                                  }}
+                                  title="Share Lorry Payment Receipt (EN/TE/HI/TA)"
+                                >
+                                  <WhatsAppIcon className="h-2.5 w-2.5 fill-emerald-600 dark:fill-emerald-400" /> Receipt
+                                </Button>
+                              )}
+                              {canAdjust && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2 text-[11px] gap-1"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onAdjust(r);
+                                  }}
+                                >
+                                  <SlidersHorizontal className="h-3 w-3" /> Adjust Costs
+                                </Button>
+                              )}
+                            </div>
                           </div>
                           <div className="rounded-lg border bg-card p-3 space-y-2 text-xs">
                             <div className="grid grid-cols-2 gap-2 pb-2 border-b">
@@ -1183,12 +1216,14 @@ function TransfersTable({
   paymentStatusFor,
   dueFor,
   onPay,
+  onShareReceipt,
   paymentsByLorry,
 }: {
   rows: FreightRow[];
   paymentStatusFor: (row: FreightRow) => PaymentStatus;
   dueFor: (row: FreightRow) => number;
   onPay: (row: FreightRow, due: number) => void;
+  onShareReceipt?: (row: FreightRow) => void;
   paymentsByLorry: Map<string, { date: string; amount: number; reference: string | null }[]>;
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -1300,11 +1335,25 @@ function TransfersTable({
                     )}
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                    {r.lorry && pay !== 'Paid' ? (
-                      <Button size="sm" variant="outline" onClick={() => onPay(r, due)}>
-                        Pay
-                      </Button>
-                    ) : null}
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      {r.lorry && onShareReceipt && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs gap-1 text-emerald-600 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
+                          onClick={() => onShareReceipt(r)}
+                          title="Share Lorry Payment Receipt via WhatsApp"
+                        >
+                          <WhatsAppIcon className="h-3 w-3 fill-emerald-600 dark:fill-emerald-400" />
+                          <span className="hidden sm:inline">Receipt</span>
+                        </Button>
+                      )}
+                      {r.lorry && pay !== 'Paid' ? (
+                        <Button size="sm" variant="outline" onClick={() => onPay(r, due)}>
+                          Pay
+                        </Button>
+                      ) : null}
+                    </div>
                   </TableCell>
                 </TableRow>
                 {isExpanded && r.lorry && (() => {
@@ -1685,12 +1734,41 @@ export default function FreightDuesPage() {
   return { outwardRows, inwardRows, knmRows, transferRows, rowStatus, rowDue, paymentsByLorry };
   }, [saleOrders, purchases, payments, company, huskTransfers, shellTransfers, stockTransfers]);
 
+  const [shareTarget, setShareTarget] = useState<LorryPaymentData | null>(null);
+
   function paymentStatusFor(r: FreightRow): PaymentStatus {
     return r.lorry ? (rowStatus.get(r.id) ?? 'Pending') : 'Pending';
   }
   function dueFor(r: FreightRow): number {
     return r.lorry ? (rowDue.get(r.id) ?? r.net) : 0;
   }
+
+  const buildLorryPaymentData = (row: FreightRow, paidNow?: number, payRef?: string, payDt?: string): LorryPaymentData => {
+    const history = paymentsByLorry.get(row.lorry || '') || [];
+    const prevPaid = history.reduce((s, p) => s + p.amount, 0);
+    const paid = paidNow != null ? paidNow : (prevPaid > 0 ? prevPaid : row.net - dueFor(row));
+    const remainingDue = Math.max(0, row.net - (prevPaid + (paidNow != null ? paidNow : 0)));
+
+    return {
+      date: payDt || row.date,
+      lorryNumber: row.lorry || '-',
+      destination: row.destination,
+      grossFreight: row.freight,
+      kata: row.kata,
+      hamali: row.hamali,
+      otherDeductions: Math.max(0, (row.transport || 0) + (row.totalOtherDeductions || 0) - (row.totalAdditions || 0)),
+      netPayable: row.net,
+      amountPaid: paid,
+      reference: payRef || (history.length ? history[history.length - 1].reference : null) || 'Cash / Bank',
+      balance: paidNow != null ? remainingDue : dueFor(row),
+      deductions: row.deductions,
+      additions: row.additions,
+    };
+  };
+
+  const handleShareReceipt = (row: FreightRow) => {
+    setShareTarget(buildLorryPaymentData(row));
+  };
 
   const payMutation = useMutation({
     mutationFn: () => {
@@ -1716,6 +1794,13 @@ export default function FreightDuesPage() {
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       toast.success('Freight payment recorded');
+      if (payTarget && payTarget.lorry) {
+        const all = [...outwardRows, ...inwardRows, ...knmRows, ...transferRows];
+        const match = all.find((r) => r.id === payTarget.id) || all.find((r) => r.lorry === payTarget.lorry);
+        if (match) {
+          setShareTarget(buildLorryPaymentData(match, Number(payAmount) || 0, payReference, payDate));
+        }
+      }
       setPayTarget(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -1810,7 +1895,7 @@ export default function FreightDuesPage() {
                     <div className="text-xs text-muted-foreground mt-1">Total: {rupees(outwardNet)}</div>
                   </CardContent>
                 </Card>
-                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} paymentsByLorry={paymentsByLorry} />
+                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
               <TabsContent value="inward" className="space-y-4">
@@ -1823,7 +1908,7 @@ export default function FreightDuesPage() {
                     <div className="text-xs text-muted-foreground mt-1">Total: {rupees(inwardNet)}</div>
                   </CardContent>
                 </Card>
-                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} paymentsByLorry={paymentsByLorry} />
+                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
               <TabsContent value="knm" className="space-y-6">
@@ -1868,12 +1953,12 @@ export default function FreightDuesPage() {
                   </TabsList>
 
                   <TabsContent value="usual">
-                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} onShareReceipt={handleShareReceipt} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
                   </TabsContent>
 
                   <TabsContent value="transfers" className="space-y-2">
                     <p className="text-xs text-muted-foreground">Husk, seed &amp; pre-cleaner dust transport billed to KNM Transport.</p>
-                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} paymentsByLorry={paymentsByLorry} />
+                    <TransfersTable rows={transferRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
                   </TabsContent>
                 </Tabs>
               </TabsContent>
@@ -1943,6 +2028,13 @@ export default function FreightDuesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Lorry Freight Payment Receipt WhatsApp Dialog */}
+      <LorryPaymentShareDialog
+        open={shareTarget !== null}
+        onOpenChange={(o) => { if (!o) setShareTarget(null); }}
+        data={shareTarget}
+      />
     </div>
   );
 }

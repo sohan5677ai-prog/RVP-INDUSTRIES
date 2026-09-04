@@ -7,4 +7,9 @@ async function main() {
   console.log('SBT Party:', party?.name, 'State:', party?.state, 'Address:', party?.address);
 }
 
-main().catch(console.error);
+main().catch(console.error).finally(() => prisma.$disconnect());
+
+
+
+
+

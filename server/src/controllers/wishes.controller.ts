@@ -43,12 +43,27 @@ export async function deleteDriver(req: Request, res: Response) {
   res.status(204).end();
 }
 
-// --- Party religion bulk tagging --------------------------------------------
+// --- Party & Broker religion bulk tagging ------------------------------------
 
 export async function bulkTagPartyReligion(req: Request, res: Response) {
   const { partyIds, religion } = bulkTagReligionSchema.parse(req.body);
+  if (!partyIds || partyIds.length === 0) {
+    throw new HttpError(400, 'Select at least one party');
+  }
   const result = await prisma.party.updateMany({
     where: { id: { in: partyIds } },
+    data: { religion },
+  });
+  res.json({ updated: result.count });
+}
+
+export async function bulkTagBrokerReligion(req: Request, res: Response) {
+  const { brokerIds, religion } = bulkTagReligionSchema.parse(req.body);
+  if (!brokerIds || brokerIds.length === 0) {
+    throw new HttpError(400, 'Select at least one broker');
+  }
+  const result = await prisma.broker.updateMany({
+    where: { id: { in: brokerIds } },
     data: { religion },
   });
   res.json({ updated: result.count });
@@ -65,10 +80,21 @@ export async function updatePartyPhone(req: Request, res: Response) {
   res.json(updated);
 }
 
+export async function updateBrokerPhone(req: Request, res: Response) {
+  const existing = await prisma.broker.findUnique({ where: { id: req.params.id } });
+  if (!existing) throw new HttpError(404, 'Broker not found');
+  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() || null : null;
+  const updated = await prisma.broker.update({
+    where: { id: req.params.id },
+    data: { phone },
+  });
+  res.json(updated);
+}
+
 // --- Recipient resolution ----------------------------------------------------
 
 export interface WishRecipient {
-  group: 'PARTY' | 'DRIVER' | 'OWNER';
+  group: 'PARTY' | 'BROKER' | 'DRIVER' | 'OWNER';
   id: string;
   name: string;
   phone: string;
@@ -76,7 +102,7 @@ export interface WishRecipient {
 }
 
 /**
- * Resolves who a Wishes send targets. `category` filters Parties and Drivers
+ * Resolves who a Wishes send targets. `category` filters Parties, Brokers and Drivers
  * (untagged records are excluded from a filtered send); Owners has no
  * religion tag and is included whenever `includeOwners` is on regardless of
  * category, since it's a small fixed on/off group (see
@@ -85,6 +111,7 @@ export interface WishRecipient {
 export async function resolveWishRecipients(opts: {
   category?: WishCategory | null;
   includeParties: boolean;
+  includeBrokers: boolean;
   includeDrivers: boolean;
   includeOwners: boolean;
 }): Promise<WishRecipient[]> {
@@ -98,6 +125,17 @@ export async function resolveWishRecipients(opts: {
     for (const p of parties) {
       const phone = p.phone?.trim() || p.phone2?.trim();
       if (phone) recipients.push({ group: 'PARTY', id: p.id, name: p.name, phone, waLanguage: p.waLanguage });
+    }
+  }
+
+  if (opts.includeBrokers) {
+    const brokers = await prisma.broker.findMany({
+      where: opts.category ? { religion: opts.category } : {},
+      select: { id: true, name: true, phone: true, waLanguage: true },
+    });
+    for (const b of brokers) {
+      const phone = b.phone?.trim();
+      if (phone) recipients.push({ group: 'BROKER', id: b.id, name: b.name, phone, waLanguage: b.waLanguage });
     }
   }
 
@@ -137,6 +175,7 @@ export async function previewRecipients(req: Request, res: Response) {
   const parsed = recipientGroupsSchema.parse({
     category: req.query.category || null,
     includeParties: req.query.includeParties !== 'false',
+    includeBrokers: req.query.includeBrokers !== 'false',
     includeDrivers: req.query.includeDrivers !== 'false',
     includeOwners: req.query.includeOwners !== 'false',
   });
@@ -150,6 +189,14 @@ export async function previewRecipients(req: Request, res: Response) {
   const partiesWithPhone = recipients.filter((r) => r.group === 'PARTY').length;
   const partiesMissingPhone = Math.max(0, totalParties - partiesWithPhone);
 
+  const totalBrokers = parsed.includeBrokers
+    ? await prisma.broker.count({
+        where: parsed.category ? { religion: parsed.category } : {},
+      })
+    : 0;
+  const brokersWithPhone = recipients.filter((r) => r.group === 'BROKER').length;
+  const brokersMissingPhone = Math.max(0, totalBrokers - brokersWithPhone);
+
   const driversCount = recipients.filter((r) => r.group === 'DRIVER').length;
   const ownersCount = recipients.filter((r) => r.group === 'OWNER').length;
 
@@ -159,6 +206,10 @@ export async function previewRecipients(req: Request, res: Response) {
       partiesTotal: totalParties,
       partiesWithPhone,
       partiesMissingPhone,
+      brokersTotal: totalBrokers,
+      brokersWithPhone,
+      brokersMissingPhone,
+      brokersCount: brokersWithPhone,
       driversCount,
       ownersCount,
     },
@@ -202,6 +253,7 @@ export async function sendWishBroadcast(req: Request, res: Response) {
       occasion: input.occasion,
       category: input.category ?? null,
       includeParties: input.includeParties,
+      includeBrokers: input.includeBrokers,
       includeDrivers: input.includeDrivers,
       includeOwners: input.includeOwners,
       messageText: input.messageText,

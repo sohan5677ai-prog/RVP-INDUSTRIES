@@ -39,20 +39,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { WA_LANGUAGE_LABELS } from '@/lib/types';
-import type { WaLanguage } from '@/lib/types';
+import { Badge } from '@/components/ui/badge';
+import { WA_LANGUAGE_LABELS, WISH_CATEGORY_LABELS } from '@/lib/types';
+import type { WaLanguage, WishCategory } from '@/lib/types';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 
 const BROKER_COLUMNS: ExportColumn<Broker>[] = [
   { header: 'Name', value: (b) => b.name },
   { header: 'Phone', value: (b) => b.phone ?? '' },
+  {
+    header: 'Community',
+    value: (b) => (b.religion ? WISH_CATEGORY_LABELS[b.religion] : 'Not tagged'),
+  },
   { header: 'Brokerage / Order', value: (b) => b.brokerageAmount, excel: (b) => Number(b.brokerageAmount), numFmt: '#,##0.00', align: 'right' },
 ];
 
 const brokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().optional(),
+  religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']),
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
   brokerageAmount: z.string().min(1, 'Required').refine((v) => Number(v) >= 0, 'Must be 0 or more'),
 });
@@ -70,12 +76,12 @@ export default function Brokers() {
 
   const form = useForm<BrokerForm>({
     resolver: zodResolver(brokerSchema),
-    defaultValues: { name: '', phone: '', waLanguage: 'EN', brokerageAmount: '2000' },
+    defaultValues: { name: '', phone: '', religion: 'NONE', waLanguage: 'EN', brokerageAmount: '2000' },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ name: '', phone: '', waLanguage: 'EN', brokerageAmount: '2000' });
+    form.reset({ name: '', phone: '', religion: 'NONE', waLanguage: 'EN', brokerageAmount: '2000' });
     setOpen(true);
   }
 
@@ -84,6 +90,7 @@ export default function Brokers() {
     form.reset({
       name: b.name,
       phone: b.phone ?? '',
+      religion: b.religion ?? 'NONE',
       waLanguage: b.waLanguage ?? 'EN',
       brokerageAmount: String(Number(b.brokerageAmount)),
     });
@@ -91,12 +98,19 @@ export default function Brokers() {
   }
 
   const saveMutation = useMutation({
-    mutationFn: (values: BrokerForm) =>
-      editing
-        ? api<Broker>(`/brokers/${editing.id}`, { method: 'PUT', body: { ...values, brokerageAmount: Number(values.brokerageAmount) } })
-        : api<Broker>('/brokers', { method: 'POST', body: { ...values, brokerageAmount: Number(values.brokerageAmount) } }),
+    mutationFn: (values: BrokerForm) => {
+      const payload = {
+        ...values,
+        religion: values.religion === 'NONE' ? null : values.religion,
+        brokerageAmount: Number(values.brokerageAmount),
+      };
+      return editing
+        ? api<Broker>(`/brokers/${editing.id}`, { method: 'PUT', body: payload })
+        : api<Broker>('/brokers', { method: 'POST', body: payload });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['brokers'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
       toast.success(editing ? 'Broker updated' : 'Broker created');
       setOpen(false);
       form.reset();
@@ -108,6 +122,7 @@ export default function Brokers() {
     mutationFn: (id: string) => api(`/brokers/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['brokers'] });
+      qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
       toast.success('Broker deleted');
     },
     onError: (e: Error) => toast.error(e.message),
@@ -140,6 +155,7 @@ export default function Brokers() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
+              <TableHead>Community</TableHead>
               <TableHead className="text-right">Brokerage / Order</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
@@ -147,14 +163,14 @@ export default function Brokers() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {brokers?.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   No brokers yet.
                 </TableCell>
               </TableRow>
@@ -163,6 +179,15 @@ export default function Brokers() {
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.name}</TableCell>
                 <TableCell>{b.phone ?? '-'}</TableCell>
+                <TableCell>
+                  {b.religion ? (
+                    <Badge variant="soft">{WISH_CATEGORY_LABELS[b.religion]}</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Not tagged
+                    </Badge>
+                  )}
+                </TableCell>
                 <TableCell className="text-right tabular-nums">₹{Number(b.brokerageAmount).toLocaleString('en-IN')}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
@@ -218,6 +243,33 @@ export default function Brokers() {
                     <FormControl>
                       <Input {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="religion"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Community (for Wishes)</FormLabel>
+                    <Select
+                      value={field.value || 'NONE'}
+                      onValueChange={(v) => field.onChange(v as WishCategory | 'NONE')}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select community" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="NONE">Not tagged (Everyone only)</SelectItem>
+                        <SelectItem value="HINDU">Hindu</SelectItem>
+                        <SelectItem value="MUSLIM">Muslim</SelectItem>
+                        <SelectItem value="CHRISTIAN">Christian</SelectItem>
+                        <SelectItem value="OTHER">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}

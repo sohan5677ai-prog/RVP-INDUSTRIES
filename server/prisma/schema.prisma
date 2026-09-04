@@ -198,13 +198,15 @@ model PartyAddress {
 }
 
 model Broker {
-  id              String      @id @default(cuid())
+  id              String        @id @default(cuid())
   name            String
   phone           String?
-  waLanguage      WaLanguage  @default(EN)
+  waLanguage      WaLanguage    @default(EN)
+  // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
+  religion        WishCategory?
   // Flat brokerage credited per dispatched sale order under this broker -
   // configurable per broker (was a single hardcoded ₹2,000 for everyone).
-  brokerageAmount Decimal     @default(2000) @db.Decimal(12, 2)
+  brokerageAmount Decimal       @default(2000) @db.Decimal(12, 2)
   saleOrders      SaleOrder[]
   payments        Payment[]
 }
@@ -1839,6 +1841,7 @@ model WishBroadcast {
   // Null = "Everyone" (no religion filter).
   category       WishCategory?
   includeParties Boolean       @default(true)
+  includeBrokers Boolean       @default(true)
   includeDrivers Boolean       @default(true)
   includeOwners  Boolean       @default(true)
   messageText    String

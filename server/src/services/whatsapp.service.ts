@@ -55,6 +55,9 @@ export type WaTemplateKey =
   // out precisely when there is no attachment. It also must not share PAYMENT_SENT's
   // message_id - see the guard in notifyPaymentSent.
   | 'PAYMENT_SENT_TEXT'
+  // rvp_lorry_payment (11 vars): date, lorry, destination, gross freight, kata, hamali, other deductions, net payable, amount paid, ref, balance.
+  | 'LORRY_PAYMENT'
+  | 'LORRY_PAYMENT_TEXT'
   | 'RECEIPT_RECEIVED' // rvp_receipt_received: payer, amount, date, reference - Receipt has no screenshot field, text-only
   | 'DISPATCH_PARTY' // rvp_dispatch_party (document header): buyer, invoice, lorry, qty, driver, phone - self-taken orders (no broker)
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
@@ -275,6 +278,157 @@ function fmtDate(d: Date): string {
 /** Indian-grouped amount, e.g. 450000 → "4,50,000". */
 function fmtInr(amount: number): string {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(amount));
+}
+
+export interface LorryPaymentDetails {
+  date: Date | string;
+  lorryNumber: string;
+  destination?: string | null;
+  grossFreight: number;
+  kata: number;
+  hamali: number;
+  otherDeductions: number;
+  netPayable: number;
+  amountPaid: number;
+  reference?: string | null;
+  balance: number;
+  screenshotUrl?: string | null;
+}
+
+export function formatLorryPaymentText(details: LorryPaymentDetails, lang: WaLanguage = 'EN'): string {
+  const dateObj = details.date instanceof Date ? details.date : new Date(details.date);
+  const dtStr = isNaN(dateObj.getTime()) ? String(details.date) : fmtDate(dateObj);
+  const lorry = details.lorryNumber?.trim() || '-';
+  const dest = details.destination?.trim() || '-';
+  const gross = fmtInr(details.grossFreight || 0);
+  const kata = fmtInr(details.kata || 0);
+  const hamali = fmtInr(details.hamali || 0);
+  const other = fmtInr(details.otherDeductions || 0);
+  const net = fmtInr(details.netPayable || 0);
+  const paid = fmtInr(details.amountPaid || 0);
+  const ref = details.reference?.trim() || 'Cash/Bank';
+  const bal = fmtInr(details.balance || 0);
+
+  switch (lang) {
+    case 'TE':
+      return [
+        `*లారీ రవాణా చెల్లింపు రశీదు* 🚛`,
+        `*RVP INDUSTRIES, PUNGANUR*`,
+        ``,
+        `📅 *తేదీ:* ${dtStr}`,
+        `🚛 *లారీ నంబర్:* ${lorry}`,
+        `📍 *చేరుకునే స్థలం (రూట్):* ${dest}`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💰 *మొత్తం లారీ కిరాయి (Gross Freight):* ₹${gross}`,
+        `⚖️ *కాటా ఖర్చు (Kata):* −₹${kata}`,
+        `📦 *హమాలీ ఖర్చు (Hamali):* −₹${hamali}`,
+        `📋 *ఇతర ఖర్చులు / తగ్గింపులు:* −₹${other}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💵 *నికర కిరాయి (Net Payable):* ₹${net}`,
+        `✅ *ఇప్పుడు చెల్లించిన మొత్తం:* ₹${paid}`,
+        `💳 *చెల్లింపు విధానం / Ref:* ${ref}`,
+        `📌 *మిగిలిన బ్యాలెన్స్:* ₹${bal}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `మీ రవాణా సేవలకు ధన్యవాదాలు.`,
+        `*RVP INDUSTRIES*`,
+      ].join('\n');
+
+    case 'HI':
+      return [
+        `*लॉरी भाड़ा भुगतान रसीद* 🚛`,
+        `*RVP INDUSTRIES, PUNGANUR*`,
+        ``,
+        `📅 *दिनांक:* ${dtStr}`,
+        `🚛 *लॉरी नंबर:* ${lorry}`,
+        `📍 *गंतव्य (रूट):* ${dest}`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💰 *कुल लॉरी भाड़ा (Gross Freight):* ₹${gross}`,
+        `⚖️ *कांटा खर्च (Kata):* −₹${kata}`,
+        `📦 *हमाली खर्च (Hamali):* −₹${hamali}`,
+        `📋 *अन्य खर्च / कटौती:* −₹${other}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💵 *शुद्ध देय भाड़ा (Net Payable):* ₹${net}`,
+        `✅ *भुगतान की गई राशि:* ₹${paid}`,
+        `💳 *भुगतान माध्यम / Ref:* ${ref}`,
+        `📌 *शेष बकाया (Balance):* ₹${bal}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `आपकी परिवहन सेवा के लिए धन्यवाद।`,
+        `*RVP INDUSTRIES*`,
+      ].join('\n');
+
+    case 'TA':
+      return [
+        `*லாரி வாடகை கட்டண ரசீது* 🚛`,
+        `*RVP INDUSTRIES, PUNGANUR*`,
+        ``,
+        `📅 *தேதி:* ${dtStr}`,
+        `🚛 *லாரி எண்:* ${lorry}`,
+        `📍 *சேருமிடம் (வழித்தடம்):* ${dest}`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💰 *மொத்த லாரி வாடகை (Gross Freight):* ₹${gross}`,
+        `⚖️ *எடை மேடை கட்டணம் (Kata):* −₹${kata}`,
+        `📦 *சுமை கூலி (Hamali):* −₹${hamali}`,
+        `📋 *இதர பிடித்தங்கள் / செலவுகள்:* −₹${other}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💵 *நிகர வாடகை (Net Payable):* ₹${net}`,
+        `✅ *செலுத்திய தொகை:* ₹${paid}`,
+        `💳 *பணம் செலுத்திய முறை / Ref:* ${ref}`,
+        `📌 *மீதமுள்ள நிலுவைத் தொகை (Balance):* ₹${bal}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `உங்கள் போக்குவரத்து சேவைக்கு நன்றி.`,
+        `*RVP INDUSTRIES*`,
+      ].join('\n');
+
+    case 'EN':
+    default:
+      return [
+        `*LORRY FREIGHT PAYMENT RECEIPT* 🚛`,
+        `*RVP INDUSTRIES, PUNGANUR*`,
+        ``,
+        `📅 *Date:* ${dtStr}`,
+        `🚛 *Lorry No:* ${lorry}`,
+        `📍 *Destination:* ${dest}`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💰 *Gross Freight:* ₹${gross}`,
+        `⚖️ *Kata Fee:* −₹${kata}`,
+        `📦 *Hamali Charges:* −₹${hamali}`,
+        `📋 *Other Deductions/Expenses:* −₹${other}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💵 *Net Freight Payable:* ₹${net}`,
+        `✅ *Amount Paid:* ₹${paid}`,
+        `💳 *Payment Mode / Ref:* ${ref}`,
+        `📌 *Remaining Balance:* ₹${bal}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `Thank you for your transport service.`,
+        `*RVP INDUSTRIES*`,
+      ].join('\n');
+  }
+}
+
+export function formatLorryPaymentVariables(details: LorryPaymentDetails): string[] {
+  const dateObj = details.date instanceof Date ? details.date : new Date(details.date);
+  const dtStr = isNaN(dateObj.getTime()) ? String(details.date) : fmtDate(dateObj);
+  return [
+    dtStr,
+    details.lorryNumber?.trim() || '-',
+    details.destination?.trim() || '-',
+    fmtInr(details.grossFreight || 0),
+    fmtInr(details.kata || 0),
+    fmtInr(details.hamali || 0),
+    fmtInr(details.otherDeductions || 0),
+    fmtInr(details.netPayable || 0),
+    fmtInr(details.amountPaid || 0),
+    details.reference?.trim() || 'Cash/Bank',
+    fmtInr(details.balance || 0),
+  ];
 }
 
 /** Weight in tonnes with the kg in brackets, e.g. 12340 → "12.34 MT (12,340 kg)". */
@@ -885,6 +1039,49 @@ export const whatsappService = {
       },
       [party.phone, party.phone2]
     );
+  },
+
+  /**
+   * Lorry Freight payment recorded → transporter / driver + internal office copy.
+   * Sends the dedicated 11-variable multilingual Lorry Payment summary template.
+   */
+  async notifyLorryPaymentSent(
+    payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null },
+    lorryDetails: LorryPaymentDetails,
+    recipient: WaRecipient
+  ) {
+    const hasImage = !!payment.screenshotUrl;
+    await sendToPartyAndInternal(
+      {
+        templateKey: hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT',
+        language: recipient.waLanguage,
+        variables: formatLorryPaymentVariables(lorryDetails),
+        mediaUrl: payment.screenshotUrl ?? undefined,
+        relatedType: 'PAYMENT',
+        relatedId: payment.id,
+      },
+      [recipient.phone, recipient.phone2]
+    );
+  },
+
+  /**
+   * Direct send of Lorry Payment summary via WhatsApp API to a specific phone number.
+   */
+  async sendLorryPaymentSummary(
+    details: LorryPaymentDetails,
+    targetPhone: string,
+    language: WaLanguage = 'EN',
+    screenshotUrl?: string | null
+  ) {
+    const hasImage = !!screenshotUrl;
+    return sendWhatsAppTemplate({
+      to: targetPhone,
+      templateKey: hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT',
+      language,
+      variables: formatLorryPaymentVariables(details),
+      mediaUrl: screenshotUrl ?? undefined,
+      relatedType: 'PAYMENT',
+    });
   },
 
   /**

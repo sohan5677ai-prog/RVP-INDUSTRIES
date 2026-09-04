@@ -807,6 +807,19 @@ function PartyPickerDialog({
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              type="button"
+              variant={phoneOnlyFilter ? 'default' : 'outline'}
+              size="sm"
+              className={cn(
+                'h-9 text-xs gap-1',
+                phoneOnlyFilter ? 'bg-primary text-primary-foreground' : ''
+              )}
+              onClick={() => setPhoneOnlyFilter((v) => !v)}
+            >
+              <Phone className="h-3.5 w-3.5" />
+              {phoneOnlyFilter ? 'Phone Only' : 'All'}
+            </Button>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">

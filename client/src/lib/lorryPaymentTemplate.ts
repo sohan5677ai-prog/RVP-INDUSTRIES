@@ -50,7 +50,6 @@ export function formatLorryPaymentReceiptText(
   const other = fmtInr(data.otherDeductions);
   const net = fmtInr(data.netPayable);
   const paid = fmtInr(data.amountPaid);
-  const ref = (data.reference || 'Cash / Bank Transfer').trim();
   const bal = fmtInr(data.balance);
 
   switch (lang) {

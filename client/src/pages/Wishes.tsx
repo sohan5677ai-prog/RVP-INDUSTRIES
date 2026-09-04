@@ -905,11 +905,32 @@ function PartyReligionTaggingTab({
                       )}
                     </TableCell>
                     <TableCell>
-                      {p.religion ? (
-                        <Badge variant="soft">{WISH_CATEGORY_LABELS[p.religion]}</Badge>
-                      ) : (
-                        <Badge variant="outline">Not tagged</Badge>
-                      )}
+                      <Select
+                        value={p.religion || 'NONE'}
+                        onValueChange={(val) => {
+                          bulkTag.mutateAsync &&
+                            api<{ updated: number }>('/wishes/parties/bulk-religion', {
+                              method: 'POST',
+                              body: { partyIds: [p.id], religion: val === 'NONE' ? null : (val as WishCategory) },
+                            }).then(() => {
+                              qc.invalidateQueries({ queryKey: ['parties'] });
+                              qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+                              toast.success(`Updated community for ${p.name}`);
+                            }).catch((e: Error) => toast.error(getErrorMessage(e)));
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-[125px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="NONE">Not tagged</SelectItem>
+                          {(Object.keys(WISH_CATEGORY_LABELS) as WishCategory[]).map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {WISH_CATEGORY_LABELS[c]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                   </TableRow>
                 );
@@ -1191,11 +1212,33 @@ function BrokerReligionTaggingTab({
                       )}
                     </TableCell>
                     <TableCell>
-                      {b.religion ? (
-                        <Badge variant="soft">{WISH_CATEGORY_LABELS[b.religion]}</Badge>
-                      ) : (
-                        <Badge variant="outline">Not tagged</Badge>
-                      )}
+                      <Select
+                        value={b.religion || 'NONE'}
+                        onValueChange={(val) => {
+                          api<{ updated: number }>('/wishes/brokers/bulk-religion', {
+                            method: 'POST',
+                            body: { brokerIds: [b.id], religion: val === 'NONE' ? null : (val as WishCategory) },
+                          })
+                            .then(() => {
+                              qc.invalidateQueries({ queryKey: ['brokers'] });
+                              qc.invalidateQueries({ queryKey: ['wishes-recipients'] });
+                              toast.success(`Updated community for ${b.name}`);
+                            })
+                            .catch((e: Error) => toast.error(getErrorMessage(e)));
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-[125px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="NONE">Not tagged</SelectItem>
+                          {(Object.keys(WISH_CATEGORY_LABELS) as WishCategory[]).map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {WISH_CATEGORY_LABELS[c]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       ₹{Number(b.brokerageAmount).toLocaleString('en-IN')}

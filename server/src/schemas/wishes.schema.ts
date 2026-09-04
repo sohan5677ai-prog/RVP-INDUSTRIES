@@ -26,6 +26,7 @@ export const recipientGroupsSchema = z.object({
   includeTransports: z.boolean().default(true),
   includeDrivers: z.boolean().default(true),
   includeOwners: z.boolean().default(true),
+  partyIds: z.array(z.string()).optional(),
 });
 
 export const generateWishSchema = z.object({

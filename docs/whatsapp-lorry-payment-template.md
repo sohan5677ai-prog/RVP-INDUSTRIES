@@ -15,7 +15,7 @@ Dedicated multilingual WhatsApp templates for Lorry Freight payments. This templ
 | **Hindi (HI)** | `lorry_hindi` | `1606377644202160` | **`31378`** |
 | **Tamil (TA)** | `lorry_tamil` | `950202474059177` | **`31379`** |
 
-## Variable Contract (11 Variables, Identical Positional Order in All Languages)
+### Variable Contract (10 Variables, Identical Positional Order in All Languages)
 
 | Slot | Value Description | Example |
 |---|---|---|
@@ -28,8 +28,7 @@ Dedicated multilingual WhatsApp templates for Lorry Freight payments. This templ
 | `{{7}}` | Other Expenses & Deductions (₹, `fmtInr`) | `3,000` |
 | `{{8}}` | Net Freight Payable (₹, `fmtInr`) | `39,750` |
 | `{{9}}` | Amount Paid in this Transaction (₹, `fmtInr`) | `20,000` |
-| `{{10}}` | Payment Reference / Mode / UTR | `IMPS / UTR12345678` |
-| `{{11}}` | Remaining Balance Due (₹, `fmtInr`) | `19,750` |
+| `{{10}}` | Remaining Balance Due (₹, `fmtInr`) | `19,750` |
 
 ---
 
@@ -52,8 +51,7 @@ Dedicated multilingual WhatsApp templates for Lorry Freight payments. This templ
 ━━━━━━━━━━━━━━━━━━━━
 💵 *Net Freight Payable:* ₹{{8}}
 ✅ *Amount Paid:* ₹{{9}}
-💳 *Payment Mode / Ref:* {{10}}
-📌 *Remaining Balance:* ₹{{11}}
+📌 *Remaining Balance:* ₹{{10}}
 ━━━━━━━━━━━━━━━━━━━━
 
 Thank you for your transport service.
@@ -77,8 +75,7 @@ Thank you for your transport service.
 ━━━━━━━━━━━━━━━━━━━━
 💵 *నికర కిరాయి (Net Payable):* ₹{{8}}
 ✅ *ఇప్పుడు చెల్లించిన మొత్తం:* ₹{{9}}
-💳 *చెల్లింపు విధానం / Ref:* {{10}}
-📌 *మిగిలిన బ్యాలెన్స్:* ₹{{11}}
+📌 *మిగిలిన బ్యాలెన్స్:* ₹{{10}}
 ━━━━━━━━━━━━━━━━━━━━
 
 మీ రవాణా సేవలకు ధన్యవాదాలు.
@@ -96,6 +93,42 @@ Thank you for your transport service.
 
 ━━━━━━━━━━━━━━━━━━━━
 💰 *कुल लॉरी भाड़ा (Gross Freight):* ₹{{4}}
+⚖️ *कांटा खर्च (Kata):* −₹{{5}}
+📦 *हमाली खर्च (Hamali):* −₹{{6}}
+📋 *अन्य खर्च / कटौती:* −₹{{7}}
+━━━━━━━━━━━━━━━━━━━━
+💵 *शुद्ध देय भाड़ा (Net Payable):* ₹{{8}}
+✅ *भुगतान की गई राशि:* ₹{{9}}
+📌 *शेष बकाया (Balance):* ₹{{10}}
+━━━━━━━━━━━━━━━━━━━━
+
+आपकी परिवहन सेवा के लिए धन्यवाद।
+*RVP INDUSTRIES*
+```
+
+### 4. Tamil (TA — தமிழ்)
+```
+*லாரி வாடகை கட்டண ரசீது* 🚛
+*RVP INDUSTRIES, PUNGANUR*
+
+📅 *தேதி:* {{1}}
+🚛 *லாரி எண்:* {{2}}
+📍 *சேருமிடம் (வழித்தடம்):* {{3}}
+
+━━━━━━━━━━━━━━━━━━━━
+💰 *மொத்த லாரி வாடகை (Gross Freight):* ₹{{4}}
+⚖️ *எடை மேடை கட்டணம் (Kata):* −₹{{5}}
+📦 *சுமை கூலி (Hamali):* −₹{{6}}
+📋 *இதர பிடித்தங்கள் / செலவுகள்:* −₹{{7}}
+━━━━━━━━━━━━━━━━━━━━
+💵 *நிகர வாடகை (Net Payable):* ₹{{8}}
+✅ *செலுத்திய தொகை:* ₹{{9}}
+📌 *மீதமுள்ள நிலுவைத் தொகை (Balance):* ₹{{10}}
+━━━━━━━━━━━━━━━━━━━━
+
+உங்கள் போக்குவரத்து சேவைக்கு நன்றி.
+*RVP INDUSTRIES*
+```�ाड़ा (Gross Freight):* ₹{{4}}
 ⚖️ *कांटा खर्च (Kata):* −₹{{5}}
 📦 *हमाली खर्च (Hamali):* −₹{{6}}
 📋 *अन्य खर्च / कटौती:* −₹{{7}}

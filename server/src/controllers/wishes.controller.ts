@@ -138,12 +138,21 @@ export async function resolveWishRecipients(opts: {
   includeTransports: boolean;
   includeDrivers: boolean;
   includeOwners: boolean;
+  partyIds?: string[];
 }): Promise<WishRecipient[]> {
   const recipients: WishRecipient[] = [];
 
   if (opts.includeParties) {
+    const partyWhere: Record<string, unknown> = {};
+    if (opts.partyIds && opts.partyIds.length > 0) {
+      partyWhere.id = { in: opts.partyIds };
+    }
+    if (opts.category) {
+      partyWhere.religion = opts.category;
+    }
+
     const parties = await prisma.party.findMany({
-      where: opts.category ? { religion: opts.category } : {},
+      where: partyWhere,
       select: { id: true, name: true, phone: true, phone2: true, waLanguage: true },
     });
     for (const p of parties) {
@@ -210,6 +219,13 @@ export async function resolveWishRecipients(opts: {
 }
 
 export async function previewRecipients(req: Request, res: Response) {
+  let partyIds: string[] | undefined;
+  if (typeof req.query.partyIds === 'string' && req.query.partyIds.trim()) {
+    partyIds = req.query.partyIds.split(',').map((s) => s.trim()).filter(Boolean);
+  } else if (Array.isArray(req.query.partyIds)) {
+    partyIds = (req.query.partyIds as string[]).map((s) => String(s).trim()).filter(Boolean);
+  }
+
   const parsed = recipientGroupsSchema.parse({
     category: req.query.category || null,
     includeParties: req.query.includeParties !== 'false',
@@ -217,12 +233,21 @@ export async function previewRecipients(req: Request, res: Response) {
     includeTransports: req.query.includeTransports !== 'false',
     includeDrivers: req.query.includeDrivers !== 'false',
     includeOwners: req.query.includeOwners !== 'false',
+    partyIds: partyIds && partyIds.length > 0 ? partyIds : undefined,
   });
   const recipients = await resolveWishRecipients(parsed);
 
+  const partyWhere: Record<string, unknown> = {};
+  if (parsed.partyIds && parsed.partyIds.length > 0) {
+    partyWhere.id = { in: parsed.partyIds };
+  }
+  if (parsed.category) {
+    partyWhere.religion = parsed.category;
+  }
+
   const totalParties = parsed.includeParties
     ? await prisma.party.count({
-        where: parsed.category ? { religion: parsed.category } : {},
+        where: partyWhere,
       })
     : 0;
   const partiesWithPhone = recipients.filter((r) => r.group === 'PARTY').length;

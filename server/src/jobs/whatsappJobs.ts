@@ -676,7 +676,7 @@ export async function runPartyReminderSchedulesSweep(): Promise<Record<string, u
 
     const dues = await computePartyDues(schedule.partyId);
     if (!dues || dues.invoices.length === 0) {
-      if (schedule.stopCondition === 'UNTIL_PAID') {
+      if (schedule.stopCondition === 'UNTIL_PAID' && schedule.sendsCount > 0) {
         await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data: { enabled: false, stoppedReason: 'PAID' } });
         stopped += 1;
       } else if (schedule.frequency !== 'INTERVAL') {

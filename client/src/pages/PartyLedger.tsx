@@ -320,7 +320,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
 
   // Whether this party has a standing automated reminder schedule - drives the
   // "Schedule" button's badge so it's obvious from the ledger whether one is live.
-  const { data: schedule } = useQuery({
+  const { data: schedule, isLoading: isScheduleLoading } = useQuery({
     queryKey: ['party-reminder-schedule', partyId],
     queryFn: () => api<PartyReminderSchedule | null>(`/whatsapp/parties/${partyId}/reminder-schedule`),
   });
@@ -689,6 +689,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
         partyId={partyId}
         partyName={party.name}
         schedule={schedule ?? null}
+        isLoading={isScheduleLoading}
       />
     </div>
   );
@@ -1094,10 +1095,10 @@ const SCHEDULE_DOW_OPTIONS = [
 ];
 
 const STOP_CONDITION_LABEL: Record<PartyReminderSchedule['stopCondition'], string> = {
-  UNTIL_PAID: 'Until fully paid',
+  MANUAL: "Keep active (I'll turn it off myself)",
+  UNTIL_PAID: 'Until current dues are paid',
   UNTIL_DATE: 'Until a specific date',
   AFTER_COUNT: 'After a number of reminders',
-  MANUAL: "Never - I'll turn it off myself",
 };
 
 const STOPPED_REASON_LABEL: Record<NonNullable<PartyReminderSchedule['stoppedReason']>, string> = {
@@ -1119,12 +1120,14 @@ function ScheduleReminderDialog({
   partyId,
   partyName,
   schedule,
+  isLoading,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   partyId: string;
   partyName: string;
   schedule: PartyReminderSchedule | null;
+  isLoading?: boolean;
 }) {
   const qc = useQueryClient();
   const [enabled, setEnabled] = useState(true);
@@ -1133,15 +1136,15 @@ function ScheduleReminderDialog({
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1]);
   const [intervalDays, setIntervalDays] = useState(3);
   const [target, setTarget] = useState<PartyReminderSchedule['target']>('PARTY');
-  const [stopCondition, setStopCondition] = useState<PartyReminderSchedule['stopCondition']>('UNTIL_PAID');
+  const [stopCondition, setStopCondition] = useState<PartyReminderSchedule['stopCondition']>('MANUAL');
   const [endDate, setEndDate] = useState('');
   const [maxSends, setMaxSends] = useState(5);
 
   // Reset from the current schedule (or sensible defaults for a new one) every
-  // time the dialog opens - not on every `schedule` refetch, so mid-edit typing
-  // isn't clobbered by a background refresh.
+  // time the dialog opens - wait until loading finishes so we don't clobber
+  // saved values with 10:00 AM defaults.
   useEffect(() => {
-    if (!open) return;
+    if (!open || isLoading) return;
     if (schedule) {
       setEnabled(schedule.enabled);
       setTime(`${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`);
@@ -1159,11 +1162,11 @@ function ScheduleReminderDialog({
       setDaysOfWeek([1]);
       setIntervalDays(3);
       setTarget('PARTY');
-      setStopCondition('UNTIL_PAID');
+      setStopCondition('MANUAL');
       setEndDate('');
       setMaxSends(5);
     }
-  }, [open, schedule]);
+  }, [open, schedule, isLoading]);
 
   const toggleDay = (d: number) => setDaysOfWeek((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 

@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale, Table2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronRight, Ban, ClipboardList, Clock, Truck, Scale, Table2, Undo2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PurchaseOrder, POStatus } from '@/lib/types';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
@@ -251,6 +251,22 @@ export default function PurchaseOrders() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const unvoidMutation = useMutation({
+    mutationFn: async (ids: string | string[]) => {
+      const arr = Array.isArray(ids) ? ids : [ids];
+      for (const id of arr) {
+        await api(`/purchase-orders/${id}/unvoid`, { method: 'POST' });
+      }
+    },
+    onSuccess: () => {
+      ['purchase-orders', 'stock-in', 'purchases', 'verifications', 'stock-by-price', 'pappu-margins', 'profit-loss', 'dashboard', 'silos'].forEach(
+        (k) => qc.invalidateQueries({ queryKey: [k] }),
+      );
+      toast.success('Purchase order restored to Pending');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const allPos = orders ?? [];
   const lorriesTotal = allPos.length;
   const lorriesArrived = allPos.reduce((s, p) => s + (p.stockIns?.length ? 1 : 0), 0);
@@ -371,7 +387,31 @@ export default function PurchaseOrders() {
                         ? <Badge variant={statusVariant[combinedStatus]}>{combinedStatus}</Badge>
                         : <Badge variant="outline">MIXED</Badge>}
                     </TableCell>
-                    <TableCell />
+                    <TableCell className="text-right">
+                      {ordered.some((p) => p.status === 'CANCELLED') && (
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-amber-700 hover:text-amber-800 hover:bg-amber-50"
+                            title="Undo cancellation (restore to Pending)"
+                            disabled={unvoidMutation.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const cancelledPos = ordered.filter((p) => p.status === 'CANCELLED');
+                              const msg = cancelledPos.length === 1
+                                ? `Restore purchase order ${cancelledPos[0].poNumber} back to Pending?`
+                                : `Restore ${cancelledPos.length} cancelled purchase order(s) for ${label} back to Pending?`;
+                              if (confirm(msg)) {
+                                unvoidMutation.mutate(cancelledPos.map((p) => p.id));
+                              }
+                            }}
+                          >
+                            <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
                   </TableRow>
 
                   {/* Individual per-lorry POs */}
@@ -426,6 +466,35 @@ export default function PurchaseOrders() {
                                     }}
                                   >
                                     <Ban className="h-3.5 w-3.5" /> Void
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Delete this purchase order?')) deleteMutation.mutate(po.id);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                                  </Button>
+                                </>
+                              ) : po.status === 'CANCELLED' ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                    title="Restore this PO back to Pending"
+                                    disabled={unvoidMutation.isPending}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm(`Restore purchase order ${po.poNumber} back to Pending?`)) {
+                                        unvoidMutation.mutate(po.id);
+                                      }
+                                    }}
+                                  >
+                                    <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
                                   </Button>
                                   <Button
                                     size="sm"

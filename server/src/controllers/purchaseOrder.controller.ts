@@ -283,3 +283,27 @@ export async function voidPurchaseOrder(req: Request, res: Response) {
 
   res.json(updated);
 }
+
+/**
+ * Unvoid (restore) a cancelled purchase order - set status back to PENDING.
+ */
+export async function unvoidPurchaseOrder(req: Request, res: Response) {
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id: req.params.id },
+    include: { party: true },
+  });
+  if (!po) throw new HttpError(404, 'Purchase order not found');
+  if (po.status !== 'CANCELLED') {
+    throw new HttpError(400, 'Only cancelled purchase orders can be restored');
+  }
+  const updated = await prisma.purchaseOrder.update({
+    where: { id: req.params.id },
+    data: { status: 'PENDING' },
+    include: { party: true },
+  });
+
+  clearCache('pappu_order_margins');
+  clearCache('unified_stock_engine');
+
+  res.json(updated);
+}

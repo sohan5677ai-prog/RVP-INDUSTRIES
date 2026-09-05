@@ -426,6 +426,7 @@ export function formatLorryPaymentVariables(details: LorryPaymentDetails): strin
     fmtInr(details.otherDeductions || 0),
     fmtInr(details.netPayable || 0),
     fmtInr(details.amountPaid || 0),
+    details.reference?.trim() || '-',
     fmtInr(details.balance || 0),
   ];
 }
@@ -576,13 +577,14 @@ export async function resolveInternalCopyRecipients(
   return testMode ? targets.slice(0, 1) : targets;
 }
 
-/** Variable values are pipe-joined on the wire - strip pipes (the delimiter) from each while preserving newlines. */
+/** Variable values are pipe-joined on the wire - strip pipes (the delimiter) from each while preserving newlines, and strip any leaked internal IDs. */
 function cleanVar(v: string | number | null | undefined): string {
   const s = (v ?? '')
     .toString()
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/\|+/g, ' ')
+    .replace(/\s*\[[a-zA-Z0-9_\-]{10,}\]\s*/g, ' ')
     .trim();
   return s || '-';
 }
@@ -1064,7 +1066,8 @@ export const whatsappService = {
   },
 
   /**
-   * Direct send of Lorry Payment summary via WhatsApp API to a specific phone number.
+   * Direct send of Lorry Payment summary via WhatsApp API to a specific phone number,
+   * with automatic internal copy delivery to the owner.
    */
   async sendLorryPaymentSummary(
     details: LorryPaymentDetails,
@@ -1073,14 +1076,16 @@ export const whatsappService = {
     screenshotUrl?: string | null
   ) {
     const hasImage = !!screenshotUrl;
-    return sendWhatsAppTemplate({
-      to: targetPhone,
-      templateKey: hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT',
-      language,
-      variables: formatLorryPaymentVariables(details),
-      mediaUrl: screenshotUrl ?? undefined,
-      relatedType: 'PAYMENT',
-    });
+    return sendToPartyAndInternal(
+      {
+        templateKey: hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT',
+        language,
+        variables: formatLorryPaymentVariables(details),
+        mediaUrl: screenshotUrl ?? undefined,
+        relatedType: 'PAYMENT',
+      },
+      [targetPhone]
+    );
   },
 
   /**

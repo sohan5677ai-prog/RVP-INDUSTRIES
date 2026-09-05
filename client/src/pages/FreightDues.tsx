@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer, LorryConfirmation } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { calcHamali, calcKataFee, companyVehicleNumbers, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
+import { calcHamali, calcKataFee, companyVehicleNumbers, findCompanyVehicle, normalizeLorryNumber, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -107,6 +107,8 @@ interface FreightRow {
   sourced: 'Purchase' | 'Sale' | 'Transfer';
   destination: string | null;
   party: string | null;
+  driverPhone?: string | null;
+  driverName?: string | null;
   kind?: 'Husk' | 'Seed' | 'Dust';
   weightKg?: number;
   rawDispatchId?: string;
@@ -198,6 +200,8 @@ function combineSharedLorryRows(rows: FreightRow[]): FreightRow[] {
       sourced,
       destination: destinations || null,
       party: parties || null,
+      driverPhone: list.find((x) => x.driverPhone)?.driverPhone ?? null,
+      driverName: list.find((x) => x.driverName)?.driverName ?? null,
       kind: kind || undefined,
       weightKg: totalWeight || undefined,
       rawItems,
@@ -1536,6 +1540,8 @@ export default function FreightDuesPage() {
         sourced: 'Sale',
         destination: o.destination ?? null,
         party: o.buyer?.name ?? null,
+        driverPhone: d.driverPhone || (d.transport?.phone ?? null),
+        driverName: d.driverName || (d.transport?.contactPerson ?? null),
         weightKg: d.weightKg,
         rawDispatchId: d.id,
       };
@@ -1549,6 +1555,7 @@ export default function FreightDuesPage() {
       const freight = round2(inwardFreightOf(p));
       const lorry = p.stockIn?.lorryNumber;
       const isKnm = lorry ? knmList.includes(lorry.trim().toLowerCase()) : false;
+      const cv = findCompanyVehicle(lorry, company?.companyVehicles);
       
       const defaultHamali = isKnm ? 0 : Number(p.hamaliCharge ?? 0);
       const customHamali = (p as any).customHamali != null ? Number((p as any).customHamali) : null;
@@ -1592,6 +1599,8 @@ export default function FreightDuesPage() {
         sourced: 'Purchase',
         destination: p.stockIn?.loadingLocation ?? null,
         party: p.stockIn?.purchaseOrder?.party?.name ?? null,
+        driverPhone: cv?.driverPhone || null,
+        driverName: cv?.driverName || null,
         weightKg: p.netWeightKg,
         rawPurchaseId: p.id,
       };
@@ -1612,6 +1621,7 @@ export default function FreightDuesPage() {
     t: { id: string; transferDate: string; lorryNumber: string | null; transportCharge: string | number; fromLocation: string; toLocation: string; weightKg: number },
   ): FreightRow => {
     const freight = round2(Number(t.transportCharge));
+    const cv = findCompanyVehicle(t.lorryNumber, company?.companyVehicles);
     return {
       id: `${prefix}-${t.id}`,
       date: t.transferDate,
@@ -1630,6 +1640,8 @@ export default function FreightDuesPage() {
       sourced: 'Transfer',
       destination: `${t.fromLocation} → ${t.toLocation}`,
       party: 'KNM Transport',
+      driverPhone: cv?.driverPhone || null,
+      driverName: cv?.driverName || null,
       kind,
       weightKg: t.weightKg,
     };
@@ -1749,9 +1761,30 @@ export default function FreightDuesPage() {
     const paid = paidNow != null ? paidNow : (prevPaid > 0 ? prevPaid : row.net - dueFor(row));
     const remainingDue = Math.max(0, row.net - (prevPaid + (paidNow != null ? paidNow : 0)));
 
+    let driverPhone = row.driverPhone || null;
+    let driverName = row.driverName || null;
+    if (!driverPhone && row.lorry) {
+      const cv = findCompanyVehicle(row.lorry, company?.companyVehicles);
+      if (cv?.driverPhone) {
+        driverPhone = cv.driverPhone;
+        driverName = cv.driverName || driverName;
+      } else {
+        const booking = (waitingBookings ?? []).find(
+          (b) => normalizeLorryNumber(b.lorryNumber) === normalizeLorryNumber(row.lorry)
+        );
+        if (booking?.driverPhone) {
+          driverPhone = booking.driverPhone;
+          driverName = booking.driverName || driverName;
+        }
+      }
+    }
+
     return {
       date: payDt || row.date,
       lorryNumber: row.lorry || '-',
+      driverPhone,
+      driverName,
+      ownerPhone: company?.ownerWhatsappNumber || null,
       destination: row.destination,
       grossFreight: row.freight,
       kata: row.kata,
@@ -1774,8 +1807,8 @@ export default function FreightDuesPage() {
     mutationFn: () => {
       if (!payTarget) throw new Error('No trip selected for payment');
       const desc = payTarget.sourced === 'Transfer'
-        ? `Transfer transport (${payTarget.kind || 'Internal'}) - Lorry ${payTarget.lorry} [${payTarget.id}]`
-        : `Freight payment - Lorry ${payTarget.lorry} [${payTarget.id}]`;
+        ? `Transfer transport (${payTarget.kind || 'Internal'}) - Lorry ${payTarget.lorry}`
+        : `Freight payment - Lorry ${payTarget.lorry}`;
 
       return api<Payment>('/payments', {
         method: 'POST',
@@ -1784,6 +1817,8 @@ export default function FreightDuesPage() {
           amount: Number(payAmount) || 0,
           type: payType,
           lorryNumber: payTarget.lorry,
+          purchaseId: payTarget.sourced === 'Purchase' && !payTarget.id.startsWith('comb-') ? payTarget.id : undefined,
+          tripId: !payTarget.id.startsWith('comb-') ? payTarget.id : undefined,
           reference: payReference || null,
           description: desc,
         },
@@ -2034,6 +2069,7 @@ export default function FreightDuesPage() {
         open={shareTarget !== null}
         onOpenChange={(o) => { if (!o) setShareTarget(null); }}
         data={shareTarget}
+        initialPhone={shareTarget?.driverPhone}
       />
     </div>
   );

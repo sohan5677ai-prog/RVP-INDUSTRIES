@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,7 @@ import {
   formatLorryPaymentReceiptText,
   buildWhatsAppWebUrl,
 } from '@/lib/lorryPaymentTemplate';
-import { Copy, Check, Send, ExternalLink, Loader2, Truck } from 'lucide-react';
+import { Copy, Check, Send, ExternalLink, Loader2, Truck, UserCheck, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 
@@ -29,9 +29,41 @@ export function LorryPaymentShareDialog({
   initialPhone = '',
 }: LorryPaymentShareDialogProps) {
   const [selectedLang, setSelectedLang] = useState<'EN' | 'TE' | 'HI' | 'TA'>('EN');
-  const [phone, setPhone] = useState(initialPhone || '');
+  const [phone, setPhone] = useState(initialPhone || data?.driverPhone || '');
+  const [driverName, setDriverName] = useState(data?.driverName || '');
+  const [ownerPhone, setOwnerPhone] = useState(data?.ownerPhone || '');
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (open && data) {
+      const initPhone = (initialPhone || data.driverPhone || '').trim();
+      setPhone(initPhone);
+      setDriverName(data.driverName || '');
+      setOwnerPhone(data.ownerPhone || '');
+
+      // If phone is missing, try looking it up via the backend contact-info endpoint
+      if (!initPhone && data.lorryNumber) {
+        api<{
+          driverPhone?: string | null;
+          driverName?: string | null;
+          ownerPhone?: string | null;
+        }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(data.lorryNumber)}`)
+          .then((res) => {
+            if (res?.driverPhone) {
+              setPhone(res.driverPhone);
+            }
+            if (res?.driverName) {
+              setDriverName(res.driverName);
+            }
+            if (res?.ownerPhone) {
+              setOwnerPhone(res.ownerPhone);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [open, initialPhone, data?.driverPhone, data?.driverName, data?.ownerPhone, data?.lorryNumber]);
 
   if (!data) return null;
 
@@ -48,8 +80,12 @@ export function LorryPaymentShareDialog({
     }
   };
 
-  const handleOpenWhatsAppWeb = () => {
-    const targetPhone = phone.trim() || initialPhone || '';
+  const handleOpenWhatsAppWeb = (target?: string) => {
+    const targetPhone = (target ?? phone).trim() || initialPhone || '';
+    if (!targetPhone) {
+      toast.error('Please enter a recipient phone number');
+      return;
+    }
     const url = buildWhatsAppWebUrl(targetPhone, messageText);
     window.open(url, '_blank');
   };
@@ -85,7 +121,7 @@ export function LorryPaymentShareDialog({
       });
 
       if (res.ok) {
-        toast.success(res.message || 'WhatsApp message sent successfully!');
+        toast.success(res.message || 'WhatsApp message sent to driver & copy delivered to owner!');
         onOpenChange(false);
       } else {
         toast.error(res.message || 'Failed to send WhatsApp message');
@@ -179,19 +215,57 @@ export function LorryPaymentShareDialog({
             </div>
           </div>
 
-          {/* Recipient Phone Input */}
-          <div className="space-y-1.5">
-            <Label htmlFor="target-phone" className="text-xs font-semibold text-muted-foreground">
-              Recipient WhatsApp Mobile
-            </Label>
+          {/* Recipient Phone Input & Auto-Fill Info */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="target-phone" className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                Driver WhatsApp Mobile
+                {driverName && (
+                  <Badge variant="secondary" className="font-normal text-[10px] py-0 px-1.5">
+                    <UserCheck className="h-3 w-3 mr-1 text-emerald-600" />
+                    {driverName}
+                  </Badge>
+                )}
+              </Label>
+              {phone && (
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  Auto-filled for {data.lorryNumber}
+                </span>
+              )}
+            </div>
             <Input
               id="target-phone"
               type="tel"
               placeholder="e.g. 9876543210 (Driver / Transporter)"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="text-sm"
+              className="text-sm font-mono"
             />
+
+            {/* Owner Copy Banner */}
+            <div className="flex items-center justify-between p-2 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-xs text-foreground">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <div>
+                  <span className="font-medium text-emerald-800 dark:text-emerald-300">Owner Copy:</span>{' '}
+                  <span className="text-muted-foreground text-[11px]">
+                    Automatic copy will be delivered to Owner WhatsApp {ownerPhone ? `(${ownerPhone})` : ''}
+                  </span>
+                </div>
+              </div>
+              {ownerPhone && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenWhatsAppWeb(ownerPhone)}
+                  className="h-6 px-2 text-[10px] gap-1 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+                  title="Open WhatsApp Web for Owner copy"
+                >
+                  <WhatsAppIcon className="h-3 w-3 fill-emerald-600" />
+                  Owner Web
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -203,7 +277,7 @@ export function LorryPaymentShareDialog({
           <Button
             variant="outline"
             size="sm"
-            onClick={handleOpenWhatsAppWeb}
+            onClick={() => handleOpenWhatsAppWeb()}
             className="gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 border-emerald-600/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 w-full sm:w-auto"
           >
             <WhatsAppIcon className="h-3.5 w-3.5 fill-emerald-600" />
@@ -212,7 +286,7 @@ export function LorryPaymentShareDialog({
           </Button>
           <Button
             size="sm"
-            onClick={handleSendApi}
+            onClick={() => handleSendApi()}
             disabled={sending}
             className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto ml-auto"
           >

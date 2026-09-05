@@ -10,6 +10,7 @@ export const createPaymentSchema = z.object({
   type: z.enum(PAYMENT_TYPES),
   partyId: z.string().optional().nullable(),
   purchaseId: z.string().optional().nullable(),
+  tripId: z.string().optional().nullable(),
   brokerId: z.string().optional().nullable(),
   lorryNumber: z.string().optional().nullable(),
   payee: z.string().optional().nullable(),

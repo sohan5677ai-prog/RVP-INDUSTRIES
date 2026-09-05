@@ -14,6 +14,7 @@ import {
 } from '../services/lorryConfirmation.service.js';
 import { JOB_RUNNERS, OWNER_DIGEST_JOBS, describeCron, buildCron, rescheduleOwnerJob, reschedulePartyDueTodayJob } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
+import { findCompanyVehicle } from '../lib/calc.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
 import { renderBrokerLedgerPdf } from '../lib/brokerLedgerPdf.js';
@@ -1190,6 +1191,106 @@ export async function lookupLorryConfirmation(req: Request, res: Response) {
   const raw = typeof req.query.lorryNumber === 'string' ? req.query.lorryNumber : '';
   const row = await findWaitingConfirmation(raw);
   res.json(row ?? null);
+}
+
+/**
+ * Lookup contact details (driver phone/name, transporter, owner) for a lorry.
+ * Queries CompanyProfile.companyVehicles, recent SaleDispatches, and TransportConfirmations.
+ */
+export async function getLorryContactInfo(req: Request, res: Response) {
+  const raw = typeof req.query.lorryNumber === 'string' ? req.query.lorryNumber : '';
+  const normalized = normalizeLorryNumber(raw);
+
+  const profile = await prisma.companyProfile.findUnique({
+    where: { id: 'default' },
+    select: { companyVehicles: true, ownerWhatsappNumber: true },
+  });
+
+  const ownerPhone = profile?.ownerWhatsappNumber ? normalizeWhatsAppNumber(profile.ownerWhatsappNumber) : null;
+
+  if (!normalized) {
+    return res.json({
+      lorryNumber: raw,
+      driverName: null,
+      driverPhone: null,
+      ownerPhone,
+      transporterName: null,
+      transporterPhone: null,
+      source: null,
+    });
+  }
+
+  // 1. Check company vehicle directory
+  const cv = findCompanyVehicle(normalized, profile?.companyVehicles);
+  if (cv && (cv.driverPhone || cv.driverName)) {
+    return res.json({
+      lorryNumber: cv.number || raw,
+      driverName: cv.driverName || null,
+      driverPhone: cv.driverPhone ? normalizeWhatsAppNumber(cv.driverPhone) : null,
+      ownerPhone,
+      transporterName: 'KNM Transport (Company)',
+      transporterPhone: ownerPhone,
+      source: 'company_vehicle',
+    });
+  }
+
+  // 2. Check TransportConfirmations (recent bookings)
+  const confirmations = await prisma.transportConfirmation.findMany({
+    where: {
+      lorryNumber: { not: null },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  const matchedBooking = confirmations.find(
+    (b) => normalizeLorryNumber(b.lorryNumber) === normalized && (b.driverPhone || b.driverName)
+  );
+  if (matchedBooking) {
+    return res.json({
+      lorryNumber: matchedBooking.lorryNumber || raw,
+      driverName: matchedBooking.driverName || null,
+      driverPhone: matchedBooking.driverPhone ? normalizeWhatsAppNumber(matchedBooking.driverPhone) : null,
+      ownerPhone,
+      transporterName: null,
+      transporterPhone: matchedBooking.fromPhone ? normalizeWhatsAppNumber(matchedBooking.fromPhone) : null,
+      source: 'transport_confirmation',
+    });
+  }
+
+  // 3. Check recent SaleDispatches
+  const dispatches = await prisma.saleDispatch.findMany({
+    where: {
+      vehicleNumber: { not: null },
+    },
+    orderBy: { dispatchDate: 'desc' },
+    include: { transport: true },
+    take: 100,
+  });
+  const matchedDispatch = dispatches.find(
+    (d) => normalizeLorryNumber(d.vehicleNumber) === normalized && (d.driverPhone || d.driverName)
+  );
+  if (matchedDispatch) {
+    return res.json({
+      lorryNumber: matchedDispatch.vehicleNumber || raw,
+      driverName: matchedDispatch.driverName || null,
+      driverPhone: matchedDispatch.driverPhone ? normalizeWhatsAppNumber(matchedDispatch.driverPhone) : null,
+      ownerPhone,
+      transporterName: matchedDispatch.transport?.name || null,
+      transporterPhone: matchedDispatch.transport?.phone ? normalizeWhatsAppNumber(matchedDispatch.transport.phone) : null,
+      source: 'sale_dispatch',
+    });
+  }
+
+  // Fallback if no specific driver found
+  return res.json({
+    lorryNumber: raw,
+    driverName: null,
+    driverPhone: null,
+    ownerPhone,
+    transporterName: null,
+    transporterPhone: null,
+    source: null,
+  });
 }
 
 const EDITABLE_TEXT = ['driverName', 'driverPhone', 'fromPlace', 'toPlace'] as const;

@@ -1,6 +1,10 @@
 export interface LorryPaymentData {
   date?: string | Date | null;
   lorryNumber: string;
+  driverPhone?: string | null;
+  driverName?: string | null;
+  ownerPhone?: string | null;
+  transporterPhone?: string | null;
   destination?: string | null;
   grossFreight: number;
   kata: number;

@@ -63,13 +63,14 @@ async function resolveLorryPaymentDetails(data: {
   lorryNumber?: string | null;
   description?: string | null;
   purchaseId?: string | null;
+  tripId?: string | null;
   screenshotUrl?: string | null;
 }): Promise<{ details: LorryPaymentDetails; phone: string | null; name: string } | null> {
   const lorryNo = data.lorryNumber?.trim() || null;
   if (!lorryNo) return null;
 
-  // Try extracting tripId from description [tripId] or purchaseId
-  let tripId: string | null = data.purchaseId || null;
+  // Try extracting tripId from explicit field or fallback from description [tripId] or purchaseId
+  let tripId: string | null = data.tripId || data.purchaseId || null;
   if (!tripId && data.description) {
     const m = data.description.match(/\[([a-zA-Z0-9_\-]+)\]/);
     if (m) tripId = m[1];
@@ -223,6 +224,10 @@ async function resolveLorryPaymentDetails(data: {
 export async function createPayment(req: Request, res: Response) {
   const data = createPaymentSchema.parse(req.body);
 
+  const cleanDescription = data.description
+    ? data.description.replace(/\s*\[[a-zA-Z0-9_\-]+\]\s*/g, ' ').trim() || null
+    : null;
+
   // Optional proof-of-payment screenshot: upload before the transaction starts
   // (network I/O shouldn't hold a DB transaction open).
   const screenshotUrl = req.file ? await uploadFileToStorage(req.file) : null;
@@ -275,7 +280,7 @@ export async function createPayment(req: Request, res: Response) {
         lorryNumber: data.lorryNumber ?? null,
         payee: data.payee ?? null,
         reference: data.reference ?? null,
-        description: data.description ?? null,
+        description: cleanDescription,
         hamaliVerificationId: data.hamaliVerificationId ?? null,
         screenshotUrl,
       },
@@ -290,7 +295,7 @@ export async function createPayment(req: Request, res: Response) {
       lorryNumber: data.lorryNumber ?? undefined,
       payee: data.payee ?? undefined,
       reference: data.reference ?? undefined,
-      description: data.description ?? undefined,
+      description: cleanDescription ?? undefined,
     });
 
     const journalEntry = await tx.journalEntry.findFirst({
@@ -328,8 +333,9 @@ export async function createPayment(req: Request, res: Response) {
         amount: Number(data.amount),
         reference: data.reference ?? null,
         lorryNumber: data.lorryNumber ?? null,
-        description: data.description ?? null,
+        description: cleanDescription,
         purchaseId: data.purchaseId ?? null,
+        tripId: data.tripId ?? null,
         screenshotUrl,
       });
 
@@ -377,8 +383,10 @@ export async function createPayment(req: Request, res: Response) {
       name = broker?.name ?? 'Broker';
       phone = broker?.phone ?? null;
       waLanguage = broker?.waLanguage ?? null;
+    } else if (data.lorryNumber) {
+      name = data.payee || `Lorry ${data.lorryNumber}`;
     } else {
-      name = data.payee || data.description || `${data.type} payment`;
+      name = data.payee || cleanDescription || `${data.type} payment`;
     }
     await whatsappService.notifyPaymentSent(
       {
@@ -463,6 +471,10 @@ export async function updatePayment(req: Request, res: Response) {
       await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
     }
 
+    const cleanDescription = data.description
+      ? data.description.replace(/\s*\[[a-zA-Z0-9_\-]+\]\s*/g, ' ').trim() || null
+      : null;
+
     await tx.payment.update({
       where: { id: existing.id },
       data: {
@@ -474,7 +486,7 @@ export async function updatePayment(req: Request, res: Response) {
         lorryNumber: data.lorryNumber ?? null,
         payee: data.payee ?? null,
         reference: data.reference ?? null,
-        description: data.description ?? null,
+        description: cleanDescription,
         ...(counterpartyChanged ? { purchaseId: null, hamaliVerificationId: null } : {}),
       },
     });
@@ -488,7 +500,7 @@ export async function updatePayment(req: Request, res: Response) {
       lorryNumber: data.lorryNumber ?? undefined,
       payee: data.payee ?? undefined,
       reference: data.reference ?? undefined,
-      description: data.description ?? undefined,
+      description: cleanDescription ?? undefined,
     });
 
     const journalEntry = await tx.journalEntry.findFirst({

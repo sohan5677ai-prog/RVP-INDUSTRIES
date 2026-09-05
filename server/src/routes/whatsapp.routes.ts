@@ -16,6 +16,7 @@ import {
   sendBrokerLedgerWhatsApp,
   listTransportConfirmations,
   lookupLorryConfirmation,
+  getLorryContactInfo,
   updateTransportConfirmation,
   dismissTransportConfirmation,
   restoreTransportConfirmation,
@@ -69,6 +70,7 @@ router.post('/whatsapp/brokers/:brokerId/send-ledger', asyncHandler(sendBrokerLe
 router.get('/whatsapp/transport-confirmations', asyncHandler(listTransportConfirmations));
 // Ahead of the :id routes - "lookup" would otherwise be read as an id.
 router.get('/whatsapp/transport-confirmations/lookup', asyncHandler(lookupLorryConfirmation));
+router.get('/whatsapp/lorry/contact-info', asyncHandler(getLorryContactInfo));
 router.patch('/whatsapp/transport-confirmations/:id', asyncHandler(updateTransportConfirmation));
 router.post('/whatsapp/transport-confirmations/:id/dismiss', asyncHandler(dismissTransportConfirmation));
 router.post('/whatsapp/transport-confirmations/:id/restore', asyncHandler(restoreTransportConfirmation));

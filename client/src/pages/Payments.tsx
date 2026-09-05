@@ -7,8 +7,9 @@ import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
-import type { Payment, Party, Broker, PaymentType } from '@/lib/types';
+import type { Payment, Party, Broker, PaymentType, CompanyProfile } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
+import { findCompanyVehicle } from '@/lib/calc';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -134,6 +135,11 @@ export default function PaymentsPage() {
   const { data: brokers } = useQuery({
     queryKey: ['brokers'],
     queryFn: () => api<Broker[]>('/brokers'),
+  });
+
+  const { data: company } = useQuery({
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
   });
 
   const suppliers = useMemo(() => parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [], [parties]);
@@ -364,9 +370,13 @@ export default function PaymentsPage() {
                                 className="h-8 w-8 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                                 title="Share Lorry Freight Payment Receipt via WhatsApp (EN/TE/HI/TA)"
                                 onClick={() => {
+                                  const cv = findCompanyVehicle(p.lorryNumber, company?.companyVehicles);
                                   setSharePaymentTarget({
                                     date: p.date,
                                     lorryNumber: p.lorryNumber!,
+                                    driverPhone: cv?.driverPhone || null,
+                                    driverName: cv?.driverName || null,
+                                    ownerPhone: company?.ownerWhatsappNumber || null,
                                     destination: '-',
                                     grossFreight: Number(p.amount),
                                     kata: 0,
@@ -535,6 +545,7 @@ export default function PaymentsPage() {
         open={sharePaymentTarget !== null}
         onOpenChange={(o) => { if (!o) setSharePaymentTarget(null); }}
         data={sharePaymentTarget}
+        initialPhone={sharePaymentTarget?.driverPhone}
       />
     </div>
   );

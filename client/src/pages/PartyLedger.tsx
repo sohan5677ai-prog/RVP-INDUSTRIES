@@ -1194,7 +1194,8 @@ function ScheduleReminderDialog({
         },
       });
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      qc.setQueryData(['party-reminder-schedule', partyId], saved);
       invalidate();
       toast.success('Reminder schedule saved');
       onOpenChange(false);
@@ -1205,6 +1206,7 @@ function ScheduleReminderDialog({
   const deleteMutation = useMutation({
     mutationFn: () => api(`/whatsapp/parties/${partyId}/reminder-schedule`, { method: 'DELETE' }),
     onSuccess: () => {
+      qc.setQueryData(['party-reminder-schedule', partyId], null);
       invalidate();
       toast.success('Reminder schedule removed');
       onOpenChange(false);

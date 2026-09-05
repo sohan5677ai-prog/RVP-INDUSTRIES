@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -63,17 +63,62 @@ const MESSAGE_TEMPLATES = [
   },
 ];
 
+/**
+ * Isolated timer component to avoid re-rendering the parent form on every second tick
+ */
+const DevLiveCountdown = memo(function DevLiveCountdown({
+  endsAt,
+  isUnderMaintenance,
+}: {
+  endsAt?: string | null;
+  isUnderMaintenance: boolean;
+}) {
+  const [secondsLeft, setSecondsLeft] = useState<number>(() => {
+    if (endsAt && isUnderMaintenance) {
+      return Math.max(0, Math.floor((new Date(endsAt).getTime() - Date.now()) / 1000));
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    if (!endsAt || !isUnderMaintenance) {
+      setSecondsLeft(0);
+      return;
+    }
+
+    const update = () => {
+      const diff = Math.max(0, Math.floor((new Date(endsAt).getTime() - Date.now()) / 1000));
+      setSecondsLeft(diff);
+    };
+
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [endsAt, isUnderMaintenance]);
+
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+  const timerStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+  return (
+    <div className="font-mono text-3xl sm:text-4xl font-bold text-amber-600 dark:text-amber-300 tracking-tight">
+      {timerStr}
+    </div>
+  );
+});
+
 export default function DeveloperMaintenance() {
   const qc = useQueryClient();
 
-  // Fetch full developer config & live status
+  // Fetch developer config & live status with a relaxed 6s interval
   const { data } = useQuery({
     queryKey: ['maintenance-config'],
     queryFn: () =>
       api<{ config: MaintenanceConfig; status: MaintenanceStatus }>(
         '/system/maintenance/config'
       ),
-    refetchInterval: 4000,
+    refetchInterval: 6000,
+    staleTime: 5000,
   });
 
   const status = data?.status;
@@ -110,6 +155,7 @@ export default function DeveloperMaintenance() {
     }) => api<MaintenanceStatus>('/system/maintenance/config', { method: 'POST', body }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['maintenance-config'] });
+      qc.invalidateQueries({ queryKey: ['maintenance-status-badge'] });
       if (res.enabled) {
         toast.success(`Maintenance Mode Activated for ${res.durationMinutes} minutes!`, {
           description: 'Users, Admins, and Owners are now seeing the live countdown screen.',
@@ -134,6 +180,7 @@ export default function DeveloperMaintenance() {
       }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['maintenance-config'] });
+      qc.invalidateQueries({ queryKey: ['maintenance-status-badge'] });
       toast.success(`Extended Maintenance by +${res.durationMinutes}m!`, {
         description: 'User countdown clocks have been updated in real-time.',
       });
@@ -147,6 +194,7 @@ export default function DeveloperMaintenance() {
     mutationFn: () => api<MaintenanceStatus>('/system/maintenance/end', { method: 'POST' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['maintenance-config'] });
+      qc.invalidateQueries({ queryKey: ['maintenance-status-badge'] });
       toast.success('Maintenance Mode Stopped!', {
         description: 'The app is back online for all users.',
       });
@@ -157,29 +205,6 @@ export default function DeveloperMaintenance() {
   });
 
   const isUnderMaintenance = !!status?.isUnderMaintenance;
-
-  // Live seconds countdown for developer display
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  useEffect(() => {
-    if (status?.endsAt && isUnderMaintenance) {
-      const diff = Math.floor((new Date(status.endsAt).getTime() - Date.now()) / 1000);
-      setSecondsLeft(Math.max(0, diff));
-    } else {
-      setSecondsLeft(0);
-    }
-  }, [status?.endsAt, isUnderMaintenance]);
-
-  useEffect(() => {
-    if (!isUnderMaintenance || secondsLeft <= 0) return;
-    const interval = setInterval(() => {
-      setSecondsLeft((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isUnderMaintenance, secondsLeft]);
-
-  const devMins = Math.floor(secondsLeft / 60);
-  const devSecs = secondsLeft % 60;
-  const devCountdownStr = `${String(devMins).padStart(2, '0')}:${String(devSecs).padStart(2, '0')}`;
 
   const handlePresetClick = (mins: number) => {
     setDurationMinutes(mins);
@@ -204,12 +229,10 @@ export default function DeveloperMaintenance() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-5xl">
+    <div className="space-y-6 max-w-5xl">
       {/* ── Active Status Banner ── */}
       {isUnderMaintenance ? (
-        <div className="rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-600/20 border border-amber-500/40 p-6 shadow-xl relative overflow-hidden backdrop-blur-md">
-          <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
+        <div className="rounded-2xl bg-amber-500/10 border border-amber-500/40 dark:border-amber-500/30 p-6 shadow-lg relative overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
             <div className="space-y-2">
               <div className="flex items-center gap-2.5">
@@ -217,13 +240,13 @@ export default function DeveloperMaintenance() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500" />
                 </span>
-                <span className="text-xs font-bold uppercase tracking-widest text-amber-400">
+                <span className="text-xs font-bold uppercase tracking-widest text-amber-700 dark:text-amber-400">
                   MAINTENANCE MODE IS CURRENTLY ACTIVE
                 </span>
               </div>
-              <h2 className="text-2xl font-bold text-white tracking-tight">{status?.title}</h2>
-              <p className="text-sm text-zinc-300 max-w-xl line-clamp-2">{status?.message}</p>
-              <div className="flex items-center gap-4 text-xs text-amber-200/80 pt-1">
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">{status?.title}</h2>
+              <p className="text-sm text-muted-foreground max-w-xl line-clamp-2">{status?.message}</p>
+              <div className="flex items-center gap-4 text-xs text-amber-800 dark:text-amber-200/80 pt-1 font-medium">
                 <span>Started: {status?.startedAt ? new Date(status.startedAt).toLocaleTimeString() : 'Recently'}</span>
                 <span>•</span>
                 <span>
@@ -233,55 +256,29 @@ export default function DeveloperMaintenance() {
             </div>
 
             {/* Countdown Box & Live Extension Controls */}
-            <div className="flex flex-col items-center sm:items-end gap-3 bg-zinc-900/80 border border-white/10 rounded-2xl p-4 shrink-0 shadow-inner">
+            <div className="flex flex-col items-center sm:items-end gap-3 bg-card border border-border rounded-2xl p-4 shrink-0 shadow-sm">
               <div className="text-center sm:text-right">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400/80">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   TIME LEFT FOR USERS
                 </div>
-                <div className="font-mono text-3xl font-bold text-amber-300 tracking-tight drop-shadow-[0_0_12px_rgba(245,158,11,0.5)]">
-                  {devCountdownStr}
-                </div>
+                <DevLiveCountdown endsAt={status?.endsAt} isUnderMaintenance={isUnderMaintenance} />
               </div>
 
               {/* Quick Extend Buttons */}
               <div className="flex items-center gap-1.5 flex-wrap justify-center">
-                <span className="text-[10px] text-zinc-400 mr-1">Extend:</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2 text-xs bg-zinc-800 hover:bg-amber-500/20 hover:text-amber-300 border-white/10"
-                  disabled={extendMutation.isPending}
-                  onClick={() => extendMutation.mutate(5)}
-                >
-                  +5m
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2 text-xs bg-zinc-800 hover:bg-amber-500/20 hover:text-amber-300 border-white/10"
-                  disabled={extendMutation.isPending}
-                  onClick={() => extendMutation.mutate(10)}
-                >
-                  +10m
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2 text-xs bg-zinc-800 hover:bg-amber-500/20 hover:text-amber-300 border-white/10"
-                  disabled={extendMutation.isPending}
-                  onClick={() => extendMutation.mutate(15)}
-                >
-                  +15m
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2 text-xs bg-zinc-800 hover:bg-amber-500/20 hover:text-amber-300 border-white/10"
-                  disabled={extendMutation.isPending}
-                  onClick={() => extendMutation.mutate(30)}
-                >
-                  +30m
-                </Button>
+                <span className="text-[10px] text-muted-foreground mr-1 font-medium">Extend:</span>
+                {[5, 10, 15, 30].map((mins) => (
+                  <Button
+                    key={mins}
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-xs bg-background hover:bg-amber-500/15 hover:text-amber-700 dark:hover:text-amber-300 border-border font-medium cursor-pointer"
+                    disabled={extendMutation.isPending}
+                    onClick={() => extendMutation.mutate(mins)}
+                  >
+                    +{mins}m
+                  </Button>
+                ))}
               </div>
 
               <div className="flex items-center gap-2 w-full pt-1">
@@ -289,9 +286,9 @@ export default function DeveloperMaintenance() {
                   size="sm"
                   variant="outline"
                   onClick={() => setShowPreviewModal(true)}
-                  className="flex-1 h-8 text-xs border-white/10"
+                  className="flex-1 h-8 text-xs border-border text-foreground hover:bg-muted cursor-pointer"
                 >
-                  <Eye className="h-3.5 w-3.5 mr-1 text-zinc-400" />
+                  <Eye className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                   Preview Screen
                 </Button>
                 <Button
@@ -299,30 +296,30 @@ export default function DeveloperMaintenance() {
                   variant="destructive"
                   disabled={endMutation.isPending}
                   onClick={() => endMutation.mutate()}
-                  className="flex-1 h-8 text-xs font-semibold bg-rose-600 hover:bg-rose-700"
+                  className="flex-1 h-8 text-xs font-semibold cursor-pointer"
                 >
                   <Square className="h-3.5 w-3.5 mr-1" />
-                  Stop Maintenance
+                  Stop Now
                 </Button>
               </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="rounded-2xl bg-zinc-900/60 border border-white/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+        <div className="rounded-2xl bg-card border border-border p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-3.5">
+            <div className="h-10 w-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <CheckCircle2 className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-white">System is Online</h3>
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">
+                <h3 className="font-semibold text-foreground">System is Online</h3>
+                <span className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
                   Normal Operations
                 </span>
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">
-                All Owners, Admins, and Users have unrestricted access to the ERP.
+                All Owners, Admins, and Users have full unrestricted access to the ERP.
               </p>
             </div>
           </div>
@@ -331,10 +328,10 @@ export default function DeveloperMaintenance() {
             size="sm"
             variant="outline"
             onClick={() => setShowPreviewModal(true)}
-            className="text-xs border-white/10 shrink-0"
+            className="text-xs border-border text-foreground hover:bg-muted shrink-0 cursor-pointer"
           >
-            <Eye className="h-3.5 w-3.5 mr-1 text-zinc-400" />
-            Preview User Experience
+            <Eye className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+            Preview User Screen
           </Button>
         </div>
       )}
@@ -343,19 +340,17 @@ export default function DeveloperMaintenance() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Form controls (2 cols) */}
         <div className="lg:col-span-2 space-y-6">
-          <Card className="border-white/10 bg-card/60 backdrop-blur-md shadow-lg">
+          <Card className="border-border bg-card shadow-sm">
             <CardHeader className="pb-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                    <Wrench className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Maintenance Setup</CardTitle>
-                    <CardDescription className="text-xs">
-                      Configure timer and notification message broadcasted to all logged-in accounts
-                    </CardDescription>
-                  </div>
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                  <Wrench className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-base sm:text-lg">Maintenance Setup</CardTitle>
+                  <CardDescription className="text-xs">
+                    Configure timer and message broadcasted to all users, admins, and owners
+                  </CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -364,7 +359,7 @@ export default function DeveloperMaintenance() {
               {/* Duration Presets */}
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5 text-amber-400" />
+                  <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                   Select Maintenance Duration
                 </Label>
 
@@ -378,8 +373,8 @@ export default function DeveloperMaintenance() {
                         onClick={() => handlePresetClick(p.minutes)}
                         className={`px-3 py-2.5 rounded-xl border text-xs font-semibold text-center transition-all cursor-pointer ${
                           isSelected
-                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-md shadow-amber-500/10'
-                            : 'bg-zinc-850/50 border-white/5 text-zinc-300 hover:bg-zinc-800 hover:border-white/15'
+                            ? 'bg-amber-500/15 border-amber-500 text-amber-800 dark:text-amber-300 shadow-sm font-bold'
+                            : 'bg-muted/40 border-border text-foreground hover:bg-muted hover:border-border/80'
                         }`}
                       >
                         {p.label}
@@ -402,16 +397,18 @@ export default function DeveloperMaintenance() {
                         setCustomMinutes(e.target.value);
                         if (e.target.value) setDurationMinutes(parseInt(e.target.value, 10) || 10);
                       }}
-                      className="h-8 text-xs pr-10 bg-zinc-900 border-white/10"
+                      className="h-8 text-xs pr-10 bg-background border-input text-foreground"
                     />
-                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500">mins</span>
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                      mins
+                    </span>
                   </div>
                 </div>
               </div>
 
               {/* Title Input */}
               <div className="space-y-1.5">
-                <Label htmlFor="maint-title" className="text-xs font-medium">
+                <Label htmlFor="maint-title" className="text-xs font-medium text-foreground">
                   Notice Title (Visible on User Lock Screen)
                 </Label>
                 <Input
@@ -419,13 +416,13 @@ export default function DeveloperMaintenance() {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="e.g. System Maintenance in Progress"
-                  className="h-9 text-sm bg-zinc-900 border-white/10"
+                  className="h-9 text-sm bg-background border-input text-foreground"
                 />
               </div>
 
               {/* Message Textarea */}
               <div className="space-y-1.5">
-                <Label htmlFor="maint-msg" className="text-xs font-medium">
+                <Label htmlFor="maint-msg" className="text-xs font-medium text-foreground">
                   Message from Developer (Detailed explanation of updates)
                 </Label>
                 <textarea
@@ -434,14 +431,14 @@ export default function DeveloperMaintenance() {
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="Explain to the users what is being upgraded..."
-                  className="w-full rounded-xl bg-zinc-900 border border-white/10 p-3 text-xs sm:text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  className="w-full rounded-xl bg-background border border-input p-3 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
 
               {/* Contact / Tech Support Info */}
               <div className="space-y-1.5">
-                <Label htmlFor="maint-contact" className="text-xs font-medium flex items-center gap-1.5">
-                  <Phone className="h-3.5 w-3.5 text-zinc-400" />
+                <Label htmlFor="maint-contact" className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
                   Support / Direct Line (Optional)
                 </Label>
                 <Input
@@ -449,15 +446,15 @@ export default function DeveloperMaintenance() {
                   value={contactInfo}
                   onChange={(e) => setContactInfo(e.target.value)}
                   placeholder="e.g. Developer Contact / Tech Desk: +91 9440216173"
-                  className="h-9 text-xs bg-zinc-900 border-white/10"
+                  className="h-9 text-xs bg-background border-input text-foreground"
                 />
               </div>
 
               {/* Action Buttons */}
-              <div className="pt-3 border-t border-white/5 flex items-center gap-3">
+              <div className="pt-3 border-t border-border flex items-center gap-3">
                 <Button
                   size="lg"
-                  className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-black font-bold shadow-lg shadow-amber-500/20"
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-500 dark:hover:bg-amber-600 dark:text-black font-bold shadow-md shadow-amber-500/10 cursor-pointer"
                   onClick={() => setShowConfirmModal(true)}
                   disabled={updateMutation.isPending}
                 >
@@ -471,7 +468,7 @@ export default function DeveloperMaintenance() {
                     variant="destructive"
                     onClick={() => endMutation.mutate()}
                     disabled={endMutation.isPending}
-                    className="h-11 px-5 font-semibold"
+                    className="h-11 px-5 font-semibold cursor-pointer"
                   >
                     <Square className="h-4 w-4 mr-2" />
                     Turn OFF
@@ -484,10 +481,10 @@ export default function DeveloperMaintenance() {
 
         {/* Right Column: Message Templates & Info */}
         <div className="space-y-6">
-          <Card className="border-white/10 bg-card/60 backdrop-blur-md shadow-lg">
+          <Card className="border-border bg-card shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-amber-400" />
+              <CardTitle className="text-sm flex items-center gap-2 text-foreground">
+                <MessageSquare className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 Quick Message Templates
               </CardTitle>
               <CardDescription className="text-xs">
@@ -499,13 +496,13 @@ export default function DeveloperMaintenance() {
                 <div
                   key={idx}
                   onClick={() => handleTemplateClick(tmpl)}
-                  className="p-3 rounded-xl border border-white/5 bg-zinc-900/50 hover:bg-zinc-800/80 hover:border-amber-500/30 transition-all cursor-pointer group"
+                  className="p-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/70 hover:border-amber-500/40 transition-all cursor-pointer group"
                 >
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-amber-300 flex items-center justify-between">
+                  <div className="text-xs font-semibold text-foreground group-hover:text-amber-700 dark:group-hover:text-amber-400 flex items-center justify-between">
                     <span>{tmpl.title}</span>
-                    <Zap className="h-3 w-3 opacity-0 group-hover:opacity-100 text-amber-400 transition-opacity" />
+                    <Zap className="h-3 w-3 opacity-0 group-hover:opacity-100 text-amber-600 dark:text-amber-400 transition-opacity" />
                   </div>
-                  <p className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
+                  <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
                     {tmpl.message}
                   </p>
                 </div>
@@ -513,22 +510,22 @@ export default function DeveloperMaintenance() {
             </CardContent>
           </Card>
 
-          <Card className="border-white/10 bg-card/60 backdrop-blur-md">
+          <Card className="border-border bg-card shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-amber-400" />
+              <CardTitle className="text-sm flex items-center gap-2 text-foreground">
+                <ShieldCheck className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 Developer Protection Guarantee
               </CardTitle>
             </CardHeader>
-            <CardContent className="text-xs text-muted-foreground space-y-2">
+            <CardContent className="text-xs text-muted-foreground space-y-2.5">
               <p>
-                • <strong>Developer Bypass:</strong> You (Developer account) are never locked out and retain full access to test, verify, and run transactions.
+                • <strong className="text-foreground">Developer Bypass:</strong> You (Developer account) are never locked out and retain full access to test, verify, and run transactions.
               </p>
               <p>
-                • <strong>Auto-Recovery:</strong> When the countdown timer ends, the user client automatically detects server restoration and unlocks without refresh.
+                • <strong className="text-foreground">Auto-Recovery:</strong> When the countdown timer ends, the user client automatically detects server restoration and unlocks without refresh.
               </p>
               <p>
-                • <strong>Backend Enforcement:</strong> Non-developer API requests receive HTTP 503 Service Unavailable with the live timer status.
+                • <strong className="text-foreground">Backend Enforcement:</strong> Non-developer API requests receive HTTP 503 Service Unavailable with the live timer status.
               </p>
             </CardContent>
           </Card>
@@ -537,29 +534,29 @@ export default function DeveloperMaintenance() {
 
       {/* ── Confirmation Modal ── */}
       <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
-        <DialogContent className="max-w-md bg-zinc-950 border-white/10">
+        <DialogContent className="max-w-md bg-card border-border text-card-foreground">
           <DialogHeader>
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
               <AlertTriangle className="h-6 w-6" />
             </div>
-            <DialogTitle className="text-center text-lg font-bold">
+            <DialogTitle className="text-center text-lg font-bold text-foreground">
               {isUnderMaintenance ? 'Update Maintenance Mode?' : 'Activate Maintenance Mode?'}
             </DialogTitle>
-            <DialogDescription className="text-center text-xs text-zinc-400 mt-1">
+            <DialogDescription className="text-center text-xs text-muted-foreground mt-1">
               All Owners, Admins, and standard Users will be locked out and shown the live countdown timer screen for{' '}
-              <strong className="text-amber-300 font-bold">
+              <strong className="text-amber-700 dark:text-amber-300 font-bold">
                 {customMinutes ? customMinutes : durationMinutes} minutes
               </strong>
               .
             </DialogDescription>
           </DialogHeader>
 
-          <div className="my-3 rounded-xl bg-zinc-900 border border-white/5 p-3 text-xs space-y-1 text-zinc-300">
+          <div className="my-3 rounded-xl bg-muted/50 border border-border p-3 text-xs space-y-1 text-foreground">
             <div>
-              <span className="text-zinc-500">Title:</span> {title}
+              <span className="text-muted-foreground font-medium">Title:</span> {title}
             </div>
             <div className="line-clamp-2">
-              <span className="text-zinc-500">Message:</span> {message}
+              <span className="text-muted-foreground font-medium">Message:</span> {message}
             </div>
           </div>
 
@@ -568,7 +565,7 @@ export default function DeveloperMaintenance() {
               variant="outline"
               size="sm"
               onClick={() => setShowConfirmModal(false)}
-              className="flex-1 border-white/10"
+              className="flex-1 border-border text-foreground hover:bg-muted cursor-pointer"
             >
               Cancel
             </Button>
@@ -576,7 +573,7 @@ export default function DeveloperMaintenance() {
               size="sm"
               onClick={handleStartMaintenance}
               disabled={updateMutation.isPending}
-              className="flex-1 bg-amber-500 hover:bg-amber-600 text-black font-bold"
+              className="flex-1 bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-500 dark:hover:bg-amber-600 dark:text-black font-bold cursor-pointer"
             >
               {updateMutation.isPending ? 'Activating…' : 'Confirm & Activate'}
             </Button>
@@ -586,15 +583,15 @@ export default function DeveloperMaintenance() {
 
       {/* ── Live Preview Modal ── */}
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-transparent border-none shadow-none max-h-[95vh]">
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-background border-border text-foreground shadow-2xl max-h-[95vh]">
           <div className="relative">
             <button
               onClick={() => setShowPreviewModal(false)}
-              className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-xs font-semibold text-white border border-white/20 shadow-lg cursor-pointer"
+              className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-xl bg-card hover:bg-muted text-xs font-semibold text-foreground border border-border shadow-md cursor-pointer"
             >
               ✕ Close Preview
             </button>
-            <div className="max-h-[85vh] overflow-y-auto rounded-3xl border border-white/20 shadow-2xl">
+            <div className="max-h-[85vh] overflow-y-auto rounded-3xl">
               <MaintenanceScreen
                 initialStatus={{
                   enabled: true,

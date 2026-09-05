@@ -138,10 +138,10 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // 1061557026326427). Telugu (28935) and Hindi (28936) wired in
   // LANGUAGE_TEMPLATE_IDS below.
   PRIVATE_LOAN_STATEMENT: '28933',
-  // rvp_rema (Marketing template, image header + 2 vars), approved on the shared
-  // KNM number (+917207146094). Fast2SMS message_id 31089 (Meta template ID
-  // 2139451610260693). See docs/whatsapp-wishes-template.md.
   WISHES: '31089',
+  // payment_sent_text (Utility template, 4 vars: recipient, amount, date, ref), approved on
+  // the shared KNM number (+917207146094). Fast2SMS message_id 26191 (Meta template ID 1698096171478475).
+  PAYMENT_SENT_TEXT: '26191',
   // lorry_english (Utility template, 11 vars), created on the shared KNM
   // number (+917207146094). Fast2SMS message_id 31369 (Meta template ID
   // 1081272931051099). See docs/whatsapp-lorry-payment-template.md.

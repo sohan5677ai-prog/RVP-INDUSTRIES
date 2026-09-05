@@ -80,8 +80,8 @@ describe('templateId language resolution', () => {
   });
 
   it('stays undefined when neither copy exists - a clean SKIPPED, not a bad send', () => {
-    // PAYMENT_SENT_TEXT has no checked-in id in any language: it lives on Render or is not yet approved.
-    expect(templateId('PAYMENT_SENT_TEXT', 'KN')).toBeUndefined();
+    // REMINDER has no checked-in id in any language: it lives on Render or is not yet approved.
+    expect(templateId('REMINDER', 'KN')).toBeUndefined();
   });
 
   it('never reports a language for an EN recipient', () => {

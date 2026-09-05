@@ -1759,9 +1759,10 @@ export default function FreightDuesPage() {
 
   const buildLorryPaymentData = (row: FreightRow, paidNow?: number, payRef?: string, payDt?: string): LorryPaymentData => {
     const history = paymentsByLorry.get(row.lorry || '') || [];
-    const prevPaid = history.reduce((s, p) => s + p.amount, 0);
-    const paid = paidNow != null ? paidNow : (prevPaid > 0 ? prevPaid : row.net - dueFor(row));
-    const remainingDue = Math.max(0, row.net - (prevPaid + (paidNow != null ? paidNow : 0)));
+    const prevDue = dueFor(row);
+    const prevPaidForRow = Math.max(0, row.net - prevDue);
+    const totalPaid = prevPaidForRow + (paidNow != null ? paidNow : 0);
+    const remainingDue = Math.max(0, row.net - totalPaid);
 
     let driverPhone = row.driverPhone || null;
     let driverName = row.driverName || null;
@@ -1793,9 +1794,9 @@ export default function FreightDuesPage() {
       hamali: row.hamali,
       otherDeductions: Math.max(0, (row.transport || 0) + (row.totalOtherDeductions || 0) - (row.totalAdditions || 0)),
       netPayable: row.net,
-      amountPaid: paid,
+      amountPaid: totalPaid,
       reference: payRef || (history.length ? history[history.length - 1].reference : null) || 'Cash / Bank',
-      balance: paidNow != null ? remainingDue : dueFor(row),
+      balance: remainingDue,
       deductions: row.deductions,
       additions: row.additions,
     };
@@ -1859,7 +1860,7 @@ export default function FreightDuesPage() {
       date: row.date,
       destination: row.destination,
     });
-    const paymentData = buildLorryPaymentData(row, due);
+    const paymentData = buildLorryPaymentData(row);
     setPayDriverPhone(paymentData.driverPhone || '');
     setPayDriverName(paymentData.driverName || '');
     setPayType(row.sourced === 'Purchase' ? 'TRANSPORTER_INWARD' : 'TRANSPORTER_OUTWARD');

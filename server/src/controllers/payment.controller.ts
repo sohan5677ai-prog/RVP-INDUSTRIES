@@ -221,13 +221,23 @@ async function resolveLorryPaymentDetails(data: {
     destination = '-';
   }
 
-  // Sum all payments for this lorry
-  const paymentsForLorry = await prisma.payment.findMany({
-    where: { lorryNumber: { equals: lorryNo, mode: 'insensitive' } },
-    select: { amount: true },
-  });
+  // Sum all payments for this lorry / purchase
+  const paymentWhere: any = {};
+  if (data.purchaseId) {
+    paymentWhere.purchaseId = data.purchaseId;
+  } else if (lorryNo) {
+    paymentWhere.lorryNumber = { equals: lorryNo, mode: 'insensitive' };
+  }
+
+  const paymentsForLorry = (lorryNo || data.purchaseId)
+    ? await prisma.payment.findMany({
+        where: paymentWhere,
+        select: { amount: true },
+      })
+    : [];
   const totalPaid = paymentsForLorry.reduce((s, p) => s + Number(p.amount || 0), 0);
-  const balance = Math.max(0, Math.round((netPayable - totalPaid) * 100) / 100);
+  const effectivePaid = totalPaid > 0 ? totalPaid : data.amount;
+  const balance = Math.max(0, Math.round((netPayable - effectivePaid) * 100) / 100);
 
   return {
     details: {
@@ -239,7 +249,7 @@ async function resolveLorryPaymentDetails(data: {
       hamali,
       otherDeductions,
       netPayable,
-      amountPaid: data.amount,
+      amountPaid: effectivePaid,
       reference: data.reference ?? null,
       balance,
       screenshotUrl: data.screenshotUrl,

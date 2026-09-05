@@ -330,7 +330,7 @@ export function formatLorryPaymentText(details: LorryPaymentDetails, lang: WaLan
         `📋 *ఇతర ఖర్చులు / తగ్గింపులు:* −₹${other}`,
         `━━━━━━━━━━━━━━━━━━━━`,
         `💵 *నికర కిరాయి (Net Payable):* ₹${net}`,
-        `✅ *ఇప్పుడు చెల్లించిన మొత్తం:* ₹${paid}`,
+        `✅ *చెల్లించిన మొత్తం:* ₹${paid}`,
         `📌 *మిగిలిన బ్యాలెన్స్:* ₹${bal}`,
         `━━━━━━━━━━━━━━━━━━━━`,
         ``,

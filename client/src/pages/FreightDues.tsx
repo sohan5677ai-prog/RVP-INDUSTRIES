@@ -1431,6 +1431,8 @@ export default function FreightDuesPage() {
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
   const [payReference, setPayReference] = useState('');
+  const [payDriverPhone, setPayDriverPhone] = useState('');
+  const [payDriverName, setPayDriverName] = useState('');
 
   // Cost Adjust dialog state
   const [adjustTarget, setAdjustTarget] = useState<FreightRow | null>(null);
@@ -1817,6 +1819,8 @@ export default function FreightDuesPage() {
           amount: Number(payAmount) || 0,
           type: payType,
           lorryNumber: payTarget.lorry,
+          driverPhone: payDriverPhone.trim() || undefined,
+          driverName: payDriverName.trim() || undefined,
           purchaseId: payTarget.sourced === 'Purchase' && !payTarget.id.startsWith('comb-') ? payTarget.id : undefined,
           tripId: !payTarget.id.startsWith('comb-') ? payTarget.id : undefined,
           reference: payReference || null,
@@ -1833,7 +1837,10 @@ export default function FreightDuesPage() {
         const all = [...outwardRows, ...inwardRows, ...knmRows, ...transferRows];
         const match = all.find((r) => r.id === payTarget.id) || all.find((r) => r.lorry === payTarget.lorry);
         if (match) {
-          setShareTarget(buildLorryPaymentData(match, Number(payAmount) || 0, payReference, payDate));
+          const shareData = buildLorryPaymentData(match, Number(payAmount) || 0, payReference, payDate);
+          if (payDriverPhone.trim()) shareData.driverPhone = payDriverPhone.trim();
+          if (payDriverName.trim()) shareData.driverName = payDriverName.trim();
+          setShareTarget(shareData);
         }
       }
       setPayTarget(null);
@@ -1852,6 +1859,9 @@ export default function FreightDuesPage() {
       date: row.date,
       destination: row.destination,
     });
+    const paymentData = buildLorryPaymentData(row, due);
+    setPayDriverPhone(paymentData.driverPhone || '');
+    setPayDriverName(paymentData.driverName || '');
     setPayType(row.sourced === 'Purchase' ? 'TRANSPORTER_INWARD' : 'TRANSPORTER_OUTWARD');
     setPayDate(row.date ? row.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
     setPayAmount(due > 0 ? String(due) : '');
@@ -2050,6 +2060,15 @@ export default function FreightDuesPage() {
                 <Label htmlFor="pay-amount">Amount (₹)</Label>
                 <Input id="pay-amount" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="e.g. 50000" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pay-driver-phone">Driver Phone (WhatsApp notification)</Label>
+              <Input
+                id="pay-driver-phone"
+                value={payDriverPhone}
+                onChange={(e) => setPayDriverPhone(e.target.value)}
+                placeholder="e.g. 9876543210 (auto-detected if available)"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="pay-ref">Reference (Cheque / UTR / Cash)</Label>

@@ -8,7 +8,7 @@ import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { whatsappService, type LorryPaymentDetails } from '../services/whatsapp.service.js';
-import { calcKataFee, calcHamali, pappuLoadingHamali } from '../lib/calc.js';
+import { calcKataFee, calcHamali, pappuLoadingHamali, findCompanyVehicle } from '../lib/calc.js';
 
 /**
  * Read an uploaded payment screenshot (bank/UPI/cheque) with Gemini and return
@@ -64,6 +64,8 @@ async function resolveLorryPaymentDetails(data: {
   description?: string | null;
   purchaseId?: string | null;
   tripId?: string | null;
+  driverPhone?: string | null;
+  driverName?: string | null;
   screenshotUrl?: string | null;
 }): Promise<{ details: LorryPaymentDetails; phone: string | null; name: string } | null> {
   const lorryNo = data.lorryNumber?.trim() || null;
@@ -82,8 +84,8 @@ async function resolveLorryPaymentDetails(data: {
   let otherDeductions = 0;
   let netPayable = 0;
   let destination = '-';
-  let phone: string | null = null;
-  let name = `Transporter (Lorry ${lorryNo})`;
+  let phone: string | null = data.driverPhone?.trim() || null;
+  let name = data.driverName?.trim() ? `${data.driverName.trim()} (Lorry ${lorryNo})` : `Transporter (Lorry ${lorryNo})`;
 
   let foundTrip = false;
 
@@ -116,8 +118,8 @@ async function resolveLorryPaymentDetails(data: {
       otherDeductions = Math.max(0, transportRet + deductions - additions);
       netPayable = Math.round((grossFreight + additions - (kata + hamali + transportRet + deductions)) * 100) / 100;
       destination = dispatch.saleOrder?.destination || dispatch.saleOrder?.buyer?.city || '-';
-      phone = dispatch.driverPhone || dispatch.saleOrder?.buyer?.phone || null;
-      if (dispatch.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
+      if (!phone) phone = dispatch.driverPhone || dispatch.transport?.phone || null;
+      if (dispatch.driverName && !data.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
     }
   }
 
@@ -154,7 +156,7 @@ async function resolveLorryPaymentDetails(data: {
       otherDeductions = Math.max(0, ret + deductions - additions);
       netPayable = Math.round((grossFreight + additions - (kata + hamali + ret + deductions)) * 100) / 100;
       destination = purchase.stockIn?.loadingLocation || 'Punganur';
-      phone = purchase.stockIn?.purchaseOrder?.party?.phone || null;
+      if (!phone) phone = (purchase.stockIn as any)?.driverPhone || null;
     }
   }
 
@@ -181,12 +183,38 @@ async function resolveLorryPaymentDetails(data: {
       otherDeductions = Math.max(0, transportRet + deductions - additions);
       netPayable = Math.round((grossFreight + additions - (kata + hamali + transportRet + deductions)) * 100) / 100;
       destination = dispatch.saleOrder?.destination || dispatch.saleOrder?.buyer?.city || '-';
-      phone = dispatch.driverPhone || dispatch.saleOrder?.buyer?.phone || null;
-      if (dispatch.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
+      if (!phone) phone = dispatch.driverPhone || dispatch.transport?.phone || null;
+      if (dispatch.driverName && !data.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
     }
   }
 
-  // 4. If still no trip found, fallback cleanly
+  // 4. Fallback search for Driver Phone from TransportConfirmation / CompanyVehicles:
+  if (!phone && lorryNo) {
+    const norm = lorryNo.replace(/\s+/g, '').toLowerCase();
+    const confirmations = await prisma.transportConfirmation.findMany({
+      where: { lorryNumber: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }).catch(() => []);
+    const booking = confirmations.find(
+      (b) => b.lorryNumber && b.lorryNumber.replace(/\s+/g, '').toLowerCase() === norm && (b.driverPhone || b.driverName)
+    );
+    if (booking?.driverPhone) {
+      phone = booking.driverPhone;
+      if (booking.driverName && !data.driverName) name = `${booking.driverName} (Lorry ${lorryNo})`;
+    }
+  }
+
+  if (!phone && lorryNo) {
+    const company = await prisma.companyProfile.findFirst().catch(() => null);
+    const cv = findCompanyVehicle((company as any)?.companyVehicles, lorryNo);
+    if (cv?.driverPhone) {
+      phone = cv.driverPhone;
+      if (cv.driverName && !data.driverName) name = `${cv.driverName} (Lorry ${lorryNo})`;
+    }
+  }
+
+  // 5. If still no trip found, fallback cleanly
   if (!foundTrip) {
     grossFreight = data.amount;
     netPayable = data.amount;
@@ -336,6 +364,8 @@ export async function createPayment(req: Request, res: Response) {
         description: cleanDescription,
         purchaseId: data.purchaseId ?? null,
         tripId: data.tripId ?? null,
+        driverPhone: data.driverPhone ?? null,
+        driverName: data.driverName ?? null,
         screenshotUrl,
       });
 

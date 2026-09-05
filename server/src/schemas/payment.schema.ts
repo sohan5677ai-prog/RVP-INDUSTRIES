@@ -11,6 +11,8 @@ export const createPaymentSchema = z.object({
   partyId: z.string().optional().nullable(),
   purchaseId: z.string().optional().nullable(),
   tripId: z.string().optional().nullable(),
+  driverPhone: z.string().optional().nullable(),
+  driverName: z.string().optional().nullable(),
   brokerId: z.string().optional().nullable(),
   lorryNumber: z.string().optional().nullable(),
   payee: z.string().optional().nullable(),

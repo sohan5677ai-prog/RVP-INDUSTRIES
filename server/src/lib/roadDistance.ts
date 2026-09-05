@@ -63,16 +63,49 @@ async function geocodePincode(pin: string): Promise<{ lat: number; lon: number }
   if (geocodeCache.has(pin)) return geocodeCache.get(pin)!;
 
   const point = await throttleNominatim(async () => {
-    const url = `https://nominatim.openstreetmap.org/search?postalcode=${pin}&country=India&format=json&limit=1`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`Nominatim returned ${res.status}`);
-    const hits = (await res.json()) as Array<{ lat: string; lon: string }>;
-    const hit = hits?.[0];
-    if (!hit) return null;
-    return { lat: Number(hit.lat), lon: Number(hit.lon) };
+    // 1. Direct Nominatim search by postal code
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?postalcode=${pin}&country=India&format=json&limit=1`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': USER_AGENT },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (res.ok) {
+        const hits = (await res.json()) as Array<{ lat: string; lon: string }>;
+        const hit = hits?.[0];
+        if (hit) return { lat: Number(hit.lat), lon: Number(hit.lon) };
+      }
+    } catch {
+      // ignore and try fallback
+    }
+
+    // 2. Fallback: Lookup PostOffice / District from India Post directory API and geocode that area
+    try {
+      const postRes = await fetch(`https://api.postalpincode.in/pincode/${pin}`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (postRes.ok) {
+        const postData = (await postRes.json()) as any;
+        const postOffice = postData?.[0]?.PostOffice?.[0];
+        if (postOffice?.District && postOffice?.State) {
+          const query = encodeURIComponent(`${postOffice.District}, ${postOffice.State}, India`);
+          const areaUrl = `https://nominatim.openstreetmap.org/search?q=${query}&format=json&limit=1`;
+          const areaRes = await fetch(areaUrl, {
+            headers: { 'User-Agent': USER_AGENT },
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+          if (areaRes.ok) {
+            const areaHits = (await areaRes.json()) as Array<{ lat: string; lon: string }>;
+            const areaHit = areaHits?.[0];
+            if (areaHit) return { lat: Number(areaHit.lat), lon: Number(areaHit.lon) };
+          }
+        }
+      }
+    } catch {
+      // ignore fallback error
+    }
+
+    return null;
   });
 
   geocodeCache.set(pin, point);

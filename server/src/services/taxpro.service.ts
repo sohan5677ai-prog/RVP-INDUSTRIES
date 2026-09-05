@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { istParts } from '../lib/istDate.js';
 import { resolveProductHsn } from '../lib/calc.js';
+import { resolveOrderEffectiveDetails } from '../lib/orderAddress.js';
 
 interface TaxproConfig {
   taxproGspId?: string | null;      // ASP id (aspid)           e.g. 1806883726
@@ -150,11 +151,18 @@ export class TaxproService {
           // GSP gateway error shape: { status_cd:'0', error:{ error_cd, message } }
           if (json?.error?.message) {
             let msg = `${json.error.error_cd || ''} ${json.error.message}`.trim();
+            const rawMsg = String(json.error.message);
+            const isUpstreamError =
+              /upstream|server error|gateway|timeout|nic404|nic500|nic502|nic503|nic504/i.test(rawMsg) ||
+              /upstream|server error|gateway|timeout|nic404|nic500|nic502|nic503|nic504/i.test(String(json.error.error_cd || ''));
+
             if (String(json.error.error_cd) === '1017' || msg.includes('1017')) {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings?`;
             }
             const err: any = new Error(msg);
-            err.isBusinessError = true;
+            if (!isUpstreamError) {
+              err.isBusinessError = true;
+            }
             throw err;
           }
 
@@ -164,6 +172,11 @@ export class TaxproService {
             let msg = json.ErrorDetails
               .map((e: any) => `${e.ErrorCode}: ${e.ErrorMessage}`)
               .join('; ');
+            const isTransientNicError = json.ErrorDetails.some(
+              (e: any) =>
+                ['5001', '5002', '5003', '5004', '5005'].includes(String(e.ErrorCode)) ||
+                /upstream|server error|system error|maintenance/i.test(e.ErrorMessage || '')
+            );
             // NIC 5001 "Application Error ... contact the help desk" is a generic,
             // usually-transient server-side fault (not a payload problem). Make the
             // message actionable rather than surfacing NIC's cryptic text verbatim.
@@ -174,7 +187,9 @@ export class TaxproService {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings? [${msg}]`;
             }
             const err: any = new Error(msg);
-            err.isBusinessError = true;
+            if (!isTransientNicError) {
+              err.isBusinessError = true;
+            }
             err.errorDetails = json.ErrorDetails;
             throw err;
           }
@@ -404,13 +419,22 @@ export class TaxproService {
   public static async prepareEInvoicePayload(dispatchId: string) {
     const dispatch = await prisma.saleDispatch.findUnique({
       where: { id: dispatchId },
-      include: { saleOrder: { include: { buyer: true } } },
+      include: {
+        saleOrder: {
+          include: {
+            buyer: {
+              include: { addresses: true },
+            },
+          },
+        },
+      },
     });
 
     if (!dispatch) throw new Error('Dispatch not found');
     const order = dispatch.saleOrder;
     const buyer = order.buyer;
     const company = await getCompanyProfileRow();
+    const addressDetails = await resolveOrderEffectiveDetails(order);
 
     const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
     const description = taxInfo?.description || `${order.product} Sale`;
@@ -421,16 +445,16 @@ export class TaxproService {
     const hsn = this.requireHsn(rawHsn, order.product);
 
     if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
-    const effectiveBuyerGstin = (order.buyerGstin || buyer.gstin || '').trim();
+    const effectiveBuyerGstin = (addressDetails.effectiveGstin || order.buyerGstin || buyer.gstin || '').trim();
     if (!effectiveBuyerGstin) throw new Error('Buyer GSTIN is not set in Buyer profile or Sale Order');
 
     const dispatchFrom = this.dispatchFromDetails(company as any);
     const shipTo = this.shipToDetails(buyer as any);
 
     const sellerAddr = this.formatNICAddress(dispatchFrom.addr1, 'Factory premises');
-    const buyerAddr = this.formatNICAddress(order.buyerAddress || buyer.address, 'Buyer address');
+    const buyerAddr = this.formatNICAddress(addressDetails.effectiveAddress || order.buyerAddress || buyer.address, 'Buyer address');
     const sellerLoc = this.formatNICPlace(dispatchFrom.place, 'Punganur');
-    const buyerLoc = this.formatNICPlace(order.buyerCity || shipTo.place, 'Town');
+    const buyerLoc = this.formatNICPlace(addressDetails.effectiveCity || order.buyerCity || shipTo.place, 'Town');
 
     const weight = dispatch.weightKg;
     const rate = Number(order.ratePerKg);
@@ -479,7 +503,7 @@ export class TaxproService {
         Addr1: buyerAddr.addr1,
         ...(buyerAddr.addr2 ? { Addr2: buyerAddr.addr2 } : {}),
         Loc: buyerLoc,
-        Pin: Number(order.buyerPincode) || shipTo.pincode,
+        Pin: Number(addressDetails.effectivePincode || order.buyerPincode || buyer.pincode) || shipTo.pincode,
         Stcd: buyerStateCode,
       },
       ItemList: [
@@ -914,29 +938,41 @@ export class TaxproService {
       password: company.taxproGspSecret || '',
       Gstin: company.gstin || '',
     });
-    const url = `${this.PRODUCTION_BASE_URLS[0]}/aspapi/v1.0/${endpoint}?${qs}`;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: this.baseHeaders(company, company.gstin || ''),
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
-    });
+    let lastError: any = null;
 
-    const buf = Buffer.from(await res.arrayBuffer());
-    // A PDF always starts with "%PDF-"; trust the magic bytes over Content-Type,
-    // which TaxPro is not guaranteed to set correctly.
-    if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return buf;
+    for (const base of this.PRODUCTION_BASE_URLS) {
+      try {
+        const url = `${base}/aspapi/v1.0/${endpoint}?${qs}`;
 
-    let msg = `Unexpected non-PDF response (HTTP ${res.status})`;
-    try {
-      const json = JSON.parse(buf.toString('utf8'));
-      msg = json?.error?.message || json?.ErrorDetails?.[0]?.ErrorMessage || json?.message || msg;
-    } catch {
-      const text = buf.toString('utf8').trim();
-      if (text) msg = `${msg}: ${text.slice(0, 300)}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || ''),
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
+        });
+
+        const buf = Buffer.from(await res.arrayBuffer());
+        // A PDF always starts with "%PDF-"; trust the magic bytes over Content-Type,
+        // which TaxPro is not guaranteed to set correctly.
+        if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return buf;
+
+        let msg = `Unexpected non-PDF response (HTTP ${res.status})`;
+        try {
+          const json = JSON.parse(buf.toString('utf8'));
+          msg = json?.error?.message || json?.ErrorDetails?.[0]?.ErrorMessage || json?.message || msg;
+        } catch {
+          const text = buf.toString('utf8').trim();
+          if (text) msg = `${msg}: ${text.slice(0, 300)}`;
+        }
+        throw new Error(`TaxPro ${endpoint} error: ${msg}`);
+      } catch (err: any) {
+        lastError = err;
+        logger.warn(`TaxPro PDF print failed on ${base}: ${err.message}. Trying next backup server...`);
+      }
     }
-    throw new Error(`TaxPro ${endpoint} error: ${msg}`);
+
+    throw lastError || new Error(`All TaxPro PDF print endpoints failed`);
   }
 
   /** Official government-format E-Way Bill PDF (standard print). */

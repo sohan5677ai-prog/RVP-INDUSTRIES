@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { roadDistanceKm } from '../lib/roadDistance.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
+import { resolveOrderEffectiveDetails } from '../lib/orderAddress.js';
 
 export type EwbDistanceSource = 'manual' | 'previous-ewb' | 'calculated';
 
@@ -35,7 +36,15 @@ export async function resolveEwbDistance(
 
   const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: dispatchId },
-    include: { saleOrder: { include: { buyer: { select: { id: true, pincode: true } } } } },
+    include: {
+      saleOrder: {
+        include: {
+          buyer: {
+            include: { addresses: true },
+          },
+        },
+      },
+    },
   });
   if (!dispatch) return null;
 
@@ -62,9 +71,10 @@ export async function resolveEwbDistance(
     };
   }
 
+  const { effectivePincode } = await resolveOrderEffectiveDetails(dispatch.saleOrder);
   const company = await getCompanyProfileRow();
   const fromPin = company.dispatchFromPincode || company.pincode;
-  const toPin = dispatch.saleOrder.buyer.pincode;
+  const toPin = effectivePincode;
   const km = await roadDistanceKm(fromPin, toPin);
   if (!km) return null;
 

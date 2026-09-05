@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
+import type { CompanyProfile } from '@/lib/types';
 import {
   LorryPaymentData,
   LORRY_PAYMENT_LANGUAGES,
@@ -14,6 +16,18 @@ import {
 import { Copy, Check, Send, ExternalLink, Loader2, Truck, UserCheck, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+
+type AlertMember = { name: string; phone: string };
+
+function parseAlertMembers(raw?: string | null): AlertMember[] {
+  try {
+    const arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr)) {
+      return arr.map((m: any) => ({ name: String(m?.name ?? '').trim(), phone: String(m?.phone ?? '').trim() })).filter((m) => m.name || m.phone);
+    }
+  } catch { /* malformed */ }
+  return [];
+}
 
 interface LorryPaymentShareDialogProps {
   open: boolean;
@@ -31,16 +45,29 @@ export function LorryPaymentShareDialog({
   const [selectedLang, setSelectedLang] = useState<'EN' | 'TE' | 'HI' | 'TA'>('EN');
   const [phone, setPhone] = useState(initialPhone || data?.driverPhone || '');
   const [driverName, setDriverName] = useState(data?.driverName || '');
-  const [ownerPhone, setOwnerPhone] = useState(data?.ownerPhone || '');
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
+
+  const { data: company } = useQuery({
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
+    staleTime: 60_000,
+  });
+
+  const internalRecipients = useMemo<AlertMember[]>(() => {
+    const parsed = parseAlertMembers(company?.alertRecipients);
+    if (parsed.length > 0) return parsed;
+    if (company?.ownerWhatsappNumber) {
+      return [{ name: 'Owner', phone: company.ownerWhatsappNumber }];
+    }
+    return [];
+  }, [company?.alertRecipients, company?.ownerWhatsappNumber]);
 
   useEffect(() => {
     if (open && data) {
       const initPhone = (initialPhone || data.driverPhone || '').trim();
       setPhone(initPhone);
       setDriverName(data.driverName || '');
-      setOwnerPhone(data.ownerPhone || '');
 
       // If phone is missing, try looking it up via the backend contact-info endpoint
       if (!initPhone && data.lorryNumber) {
@@ -56,14 +83,11 @@ export function LorryPaymentShareDialog({
             if (res?.driverName) {
               setDriverName(res.driverName);
             }
-            if (res?.ownerPhone) {
-              setOwnerPhone(res.ownerPhone);
-            }
           })
           .catch(() => {});
       }
     }
-  }, [open, initialPhone, data?.driverPhone, data?.driverName, data?.ownerPhone, data?.lorryNumber]);
+  }, [open, initialPhone, data?.driverPhone, data?.driverName, data?.lorryNumber]);
 
   if (!data) return null;
 
@@ -242,28 +266,42 @@ export function LorryPaymentShareDialog({
               className="text-sm font-mono"
             />
 
-            {/* Owner Copy Banner */}
-            <div className="flex items-center justify-between p-2 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-xs text-foreground">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <div>
-                  <span className="font-medium text-emerald-800 dark:text-emerald-300">Owner Copy:</span>{' '}
+            {/* Internal Team Copy Banner (Us / Management) */}
+            <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 p-2.5 space-y-2 text-xs text-foreground">
+              <div className="flex items-start gap-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                <div className="leading-tight">
+                  <span className="font-semibold text-emerald-900 dark:text-emerald-200">
+                    Internal Copy (Our Management Team):
+                  </span>{' '}
                   <span className="text-muted-foreground text-[11px]">
-                    Automatic copy will be delivered to Owner WhatsApp {ownerPhone ? `(${ownerPhone})` : ''}
+                    Automatic copy will be delivered to us (
+                    {internalRecipients.map((m) => m.name || m.phone).join(', ') || 'Internal Alerts'}
+                    ) on WhatsApp.
                   </span>
                 </div>
               </div>
-              {ownerPhone && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleOpenWhatsAppWeb(ownerPhone)}
-                  className="h-6 px-2 text-[10px] gap-1 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
-                  title="Open WhatsApp Web for Owner copy"
-                >
-                  <WhatsAppIcon className="h-3 w-3 fill-emerald-600" />
-                  Owner Web
-                </Button>
+
+              {internalRecipients.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-emerald-500/15">
+                  <span className="text-[10px] font-medium text-emerald-800 dark:text-emerald-300">
+                    WhatsApp Web to us:
+                  </span>
+                  {internalRecipients.map((m, idx) => (
+                    <Button
+                      key={idx}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleOpenWhatsAppWeb(m.phone)}
+                      className="h-5 px-1.5 text-[10px] gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+                      title={`Send WhatsApp Web copy to ${m.name} (${m.phone})`}
+                    >
+                      <WhatsAppIcon className="h-2.5 w-2.5 fill-emerald-600" />
+                      {m.name || m.phone}
+                    </Button>
+                  ))}
+                </div>
               )}
             </div>
           </div>

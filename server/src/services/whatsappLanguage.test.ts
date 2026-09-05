@@ -204,7 +204,8 @@ describe('approved language ids', () => {
     expect(taText).toContain('Surat');
 
     const vars = formatLorryPaymentVariables(sample);
-    expect(vars).toHaveLength(11);
+    expect(vars).toHaveLength(10);
+    expect(vars[0]).toBe('15-Aug-2026');
     expect(vars[1]).toBe('AP39TR1234');
     expect(vars[2]).toBe('Surat');
     expect(vars[3]).toBe('45,000');
@@ -213,8 +214,7 @@ describe('approved language ids', () => {
     expect(vars[6]).toBe('3,000');
     expect(vars[7]).toBe('39,750');
     expect(vars[8]).toBe('20,000');
-    expect(vars[9]).toBe('IMPS/12345');
-    expect(vars[10]).toBe('19,750');
+    expect(vars[9]).toBe('19,750');
   });
 
   it('maps each lorry payment language to its own approved message_id', () => {

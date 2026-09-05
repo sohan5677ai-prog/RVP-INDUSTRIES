@@ -426,7 +426,6 @@ export function formatLorryPaymentVariables(details: LorryPaymentDetails): strin
     fmtInr(details.otherDeductions || 0),
     fmtInr(details.netPayable || 0),
     fmtInr(details.amountPaid || 0),
-    details.reference?.trim() || '-',
     fmtInr(details.balance || 0),
   ];
 }

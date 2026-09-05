@@ -50,12 +50,12 @@ export default function MaintenanceBoundary() {
     const onFocus = () => fetchStatus();
     window.addEventListener('focus', onFocus);
 
-    // Periodic background polling: 5s if currently under maintenance, 20s if normal
+    // Periodic background polling: 3s if currently under maintenance, 8s if normal
     const pollInterval = setInterval(
       () => {
         fetchStatus();
       },
-      isLocked ? 5000 : 20000
+      isLocked ? 3000 : 8000
     );
 
     return () => {

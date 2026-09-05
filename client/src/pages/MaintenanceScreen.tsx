@@ -243,34 +243,34 @@ export default function MaintenanceScreen({
                     {hours > 0 && (
                       <>
                         <div className="flex flex-col items-center">
-                          <span className="bg-muted/70 border border-border px-2.5 py-1.5 rounded-xl shadow-xs text-amber-700 dark:text-amber-300">
+                          <span className="bg-secondary/70 border border-border px-3 py-1.5 rounded-xl shadow-xs text-foreground font-bold">
                             {format2(hours)}
                           </span>
-                          <span className="text-[9px] font-sans uppercase font-semibold text-muted-foreground mt-1">HRS</span>
+                          <span className="text-[9px] font-sans uppercase font-bold text-muted-foreground mt-1">HRS</span>
                         </div>
                         <span className="text-muted-foreground font-bold self-center -mt-3 text-2xl">:</span>
                       </>
                     )}
 
                     <div className="flex flex-col items-center">
-                      <span className="bg-muted/70 border border-border px-2.5 py-1.5 rounded-xl shadow-xs text-amber-700 dark:text-amber-300">
+                      <span className="bg-secondary/70 border border-border px-3 py-1.5 rounded-xl shadow-xs text-foreground font-bold">
                         {format2(minutes)}
                       </span>
-                      <span className="text-[9px] font-sans uppercase font-semibold text-muted-foreground mt-1">MIN</span>
+                      <span className="text-[9px] font-sans uppercase font-bold text-muted-foreground mt-1">MIN</span>
                     </div>
 
                     <span className="text-muted-foreground font-bold self-center -mt-3 text-2xl">:</span>
 
                     <div className="flex flex-col items-center">
-                      <span className="bg-muted/70 border border-border px-2.5 py-1.5 rounded-xl shadow-xs text-amber-700 dark:text-amber-300">
+                      <span className="bg-secondary/70 border border-border px-3 py-1.5 rounded-xl shadow-xs text-foreground font-bold">
                         {format2(seconds)}
                       </span>
-                      <span className="text-[9px] font-sans uppercase font-semibold text-muted-foreground mt-1">SEC</span>
+                      <span className="text-[9px] font-sans uppercase font-bold text-muted-foreground mt-1">SEC</span>
                     </div>
                   </div>
 
                   {/* Progress percentage pill */}
-                  <div className="mt-3 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] font-mono text-amber-800 dark:text-amber-300 font-semibold">
+                  <div className="mt-3 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono text-amber-800 dark:text-amber-300 font-bold">
                     {progressPercent}% Elapsed
                   </div>
                 </div>
@@ -278,19 +278,19 @@ export default function MaintenanceScreen({
 
               {/* ── Estimated Completion Bar ── */}
               {estimatedTimeFormatted && (
-                <div className="w-full max-w-md bg-muted/40 border border-border rounded-xl p-3 flex items-center justify-between text-xs mb-5">
-                  <div className="flex items-center gap-2 text-foreground font-medium">
+                <div className="w-full max-w-md bg-secondary/40 border border-border rounded-xl p-3 flex items-center justify-between text-xs mb-5">
+                  <div className="flex items-center gap-2 text-foreground font-semibold">
                     <Activity className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
                     <span>Estimated Reopening:</span>
                   </div>
-                  <span className="font-mono font-semibold text-amber-800 dark:text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
+                  <span className="font-mono font-bold text-amber-800 dark:text-amber-300 bg-amber-500/15 px-2.5 py-1 rounded-lg border border-amber-500/30">
                     {estimatedTimeFormatted} IST
                   </span>
                 </div>
               )}
 
               {/* ── Message from the Developer Card ── */}
-              <div className="w-full rounded-2xl bg-muted/30 border border-amber-500/30 p-5 sm:p-6 mb-6 text-left relative overflow-hidden">
+              <div className="w-full rounded-2xl bg-secondary/30 border border-border p-5 sm:p-6 mb-6 text-left relative overflow-hidden">
                 <div className="flex items-start gap-3.5">
                   <div className="h-10 w-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0 text-amber-700 dark:text-amber-400">
                     <Terminal className="h-5 w-5" />
@@ -298,22 +298,22 @@ export default function MaintenanceScreen({
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <h3 className="font-semibold text-sm sm:text-base text-foreground">
+                      <h3 className="font-bold text-base text-foreground">
                         {status?.title || 'System Maintenance in Progress'}
                       </h3>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-full">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 px-2.5 py-0.5 rounded-full">
                         <ShieldCheck className="h-3 w-3" />
                         Developer Notice
                       </span>
                     </div>
 
-                    <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap mt-2">
+                    <p className="text-xs sm:text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap mt-2">
                       {status?.message ||
                         'We are currently performing scheduled maintenance, database upgrades and core performance tuning. All your data is secure.'}
                     </p>
 
                     {status?.contactInfo && (
-                      <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-xs text-muted-foreground font-medium">
                         <AlertCircle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                         <span>Support Line: {status.contactInfo}</span>
                       </div>

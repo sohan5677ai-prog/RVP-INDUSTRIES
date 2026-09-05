@@ -85,7 +85,7 @@ export default function DeveloperMaintenanceBanner() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/25 transition-all shadow-sm cursor-pointer"
+          className="flex items-center gap-2 h-8 px-3 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-900 dark:text-amber-300 hover:bg-amber-500/25 transition-all shadow-xs cursor-pointer"
           title="Maintenance Mode is Active - Click for quick controls"
         >
           <span className="relative flex h-2 w-2">
@@ -99,36 +99,36 @@ export default function DeveloperMaintenanceBanner() {
         </button>
       </PopoverTrigger>
 
-      <PopoverContent className="w-80 p-4 bg-popover border-border text-popover-foreground shadow-xl" align="end">
+      <PopoverContent className="w-80 p-4 bg-card border border-border text-foreground shadow-2xl rounded-2xl" align="end">
         <div className="space-y-3">
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400 flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5" />
                 Live Maintenance Gate
               </div>
-              <p className="text-xs text-foreground font-semibold mt-1 truncate max-w-[190px]">
+              <p className="text-xs text-foreground font-bold mt-1 truncate max-w-[190px]">
                 {status?.title}
               </p>
             </div>
-            <div className="font-mono text-base font-bold text-amber-800 dark:text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
+            <div className="font-mono text-base font-bold text-amber-800 dark:text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-lg border border-amber-500/30">
               {timerStr}
             </div>
           </div>
 
-          <p className="text-[11px] text-muted-foreground line-clamp-2">
+          <p className="text-[11.5px] text-muted-foreground line-clamp-2 leading-relaxed">
             {status?.message}
           </p>
 
           <div className="space-y-1.5 pt-2 border-t border-border">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Quick Timer Extension:</div>
+            <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Quick Timer Extension:</div>
             <div className="grid grid-cols-3 gap-1.5">
               {[5, 10, 15].map((m) => (
                 <Button
                   key={m}
                   size="sm"
                   variant="outline"
-                  className="h-7 text-xs bg-background border-border hover:bg-amber-500/15 hover:text-amber-700 dark:hover:text-amber-300 cursor-pointer"
+                  className="h-7 text-xs bg-secondary/60 hover:bg-secondary border-border text-foreground font-semibold hover:text-amber-800 dark:hover:text-amber-300 cursor-pointer rounded-lg"
                   disabled={extendMutation.isPending}
                   onClick={() => extendMutation.mutate(m)}
                 >
@@ -143,7 +143,7 @@ export default function DeveloperMaintenanceBanner() {
               size="sm"
               variant="outline"
               onClick={() => navigate('/settings?tab=maintenance')}
-              className="flex-1 h-8 text-xs border-border text-foreground hover:bg-muted cursor-pointer"
+              className="flex-1 h-8 text-xs font-semibold border-border bg-background text-foreground hover:bg-muted cursor-pointer rounded-lg"
             >
               <ExternalLink className="h-3 w-3 mr-1" />
               Full Controls
@@ -153,7 +153,7 @@ export default function DeveloperMaintenanceBanner() {
               variant="destructive"
               disabled={endMutation.isPending}
               onClick={() => endMutation.mutate()}
-              className="flex-1 h-8 text-xs font-semibold cursor-pointer"
+              className="flex-1 h-8 text-xs font-bold cursor-pointer rounded-lg shadow-xs"
             >
               <Square className="h-3 w-3 mr-1" />
               End Now

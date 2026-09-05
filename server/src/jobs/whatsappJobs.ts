@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '../services/whatsapp.service.js';
-import { computeBuyerDues, computePartyDues, topPendingText, dueTodayListText } from '../services/salesDues.service.js';
+import { computeBuyerDues, computePartyDues, topPendingText, dueTodayListText, isSameIstDay } from '../services/salesDues.service.js';
 import { computeSupplierDues } from '../services/purchaseDues.service.js';
 import { computeProfitLossSummary } from '../controllers/ledger.controller.js';
 import { renderSalesDuesReportPdf } from '../lib/salesDuesPdf.js';
@@ -690,8 +690,23 @@ export async function runPartyReminderSchedulesSweep(): Promise<Record<string, u
       continue;
     }
 
+    // Only chase invoices that are actually due or overdue (exclude shipments still on the road or within credit period)
+    const dueInvoices = dues.invoices.filter((i) => !i.inTransit && (i.overdue || isSameIstDay(i.dueDate, now)));
+    if (dueInvoices.length === 0) {
+      // Party has outstanding invoices, but none are due or overdue yet (all are undue / within credit period).
+      // Skip sending today so we don't nag parties before their credit period expires.
+      if (schedule.frequency !== 'INTERVAL') {
+        await prisma.partyReminderSchedule.update({ where: { id: schedule.id }, data: { lastSentKey: todayKey } });
+      }
+      skipped += 1;
+      continue;
+    }
+
     try {
-      await runPartyPaymentReminderCore(schedule.partyId, { target: schedule.target });
+      await runPartyPaymentReminderCore(schedule.partyId, {
+        target: schedule.target,
+        dispatchIds: dueInvoices.map((i) => i.dispatchId),
+      });
       fired += 1;
       const sendsCount = schedule.sendsCount + 1;
       const data: { lastSentAt: Date; lastSentKey: string; sendsCount: number; enabled?: boolean; stoppedReason?: string } = {

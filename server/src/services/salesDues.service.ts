@@ -114,7 +114,7 @@ function addDays(base: Date, days: number): Date {
 }
 
 /** Same IST calendar day, not the same 24h window - a due date at 00:05 IST and `asOf` at 23:50 IST are still "today". */
-function isSameIstDay(a: Date, b: Date): boolean {
+export function isSameIstDay(a: Date, b: Date): boolean {
   const pa = istCalendar(a);
   const pb = istCalendar(b);
   return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;

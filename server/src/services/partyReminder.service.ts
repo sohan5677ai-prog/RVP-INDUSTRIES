@@ -1,23 +1,23 @@
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { whatsappService } from './whatsapp.service.js';
-import { computePartyDues, invoiceListText, type BuyerDues } from './salesDues.service.js';
+import { computePartyDues, invoiceListText, isSameIstDay, type BuyerDues } from './salesDues.service.js';
 
 /**
  * Which invoices a payment reminder should quote. The approved template says
- * "the due date has passed", so overdue invoices are used whenever there are
+ * "the due date has passed", so overdue and due-today invoices are used whenever there are
  * any; a party whose bills are all still inside their credit period is reported
  * as UPCOMING and reminded about the whole outstanding instead - the caller
  * shows/decides that distinction before anything is sent.
- *
- * Shared by the Party Ledger's manual "Payment Reminder" dialog
- * (whatsapp.controller.ts) and the automated per-party schedule sweep
- * (whatsappJobs.ts) - a scheduled fire and a manual click use the exact same
- * default scope.
  */
-export function duesScope(dues: BuyerDues) {
-  if (dues.overdueInvoices.length > 0) {
-    return { scope: 'OVERDUE' as const, invoices: dues.overdueInvoices, amount: dues.overdueOutstanding };
+export function duesScope(dues: BuyerDues, asOf: Date = new Date()) {
+  const dueInvoices = dues.invoices.filter((i) => !i.inTransit && (i.overdue || isSameIstDay(i.dueDate, asOf)));
+  if (dueInvoices.length > 0) {
+    return {
+      scope: 'OVERDUE' as const,
+      invoices: dueInvoices,
+      amount: dueInvoices.reduce((s, i) => s + i.outstanding, 0),
+    };
   }
   // Nothing overdue → quote the bills still inside their credit period, but
   // leave out shipments still on the road: the buyer has not received those

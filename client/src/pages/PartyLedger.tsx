@@ -1228,8 +1228,7 @@ function ScheduleReminderDialog({
           <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
             <div className="font-semibold text-sm">{partyName}</div>
             <p className="text-xs text-muted-foreground">
-              Automatically sends the WhatsApp payment reminder on this schedule - always for whatever is outstanding
-              at the time, not a fixed list.
+              Automatically sends the WhatsApp payment reminder on this schedule — only when invoices are due or overdue. Undue bills (inside credit period) are automatically skipped.
             </p>
           </div>
 

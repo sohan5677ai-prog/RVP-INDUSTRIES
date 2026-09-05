@@ -67,13 +67,24 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     window.dispatchEvent(new Event('subscription:locked'));
   }
 
+  // 503 = Maintenance mode active (or server temporarily unavailable).
+  // If flagged as maintenance, broadcast immediately so MaintenanceBoundary triggers.
+  if (res.status === 503 && res.headers.get('X-Maintenance-Mode') === '1') {
+    window.dispatchEvent(new Event('maintenance:active'));
+  }
+
   if (!res.ok) {
     let message = res.statusText;
     let details: unknown;
     try {
       const data = await res.json();
       message = data.error ?? message;
-      details = data.details;
+      details = data.details ?? data.maintenance;
+      if (data.code === 'MAINTENANCE_MODE' || data.maintenance) {
+        window.dispatchEvent(
+          new CustomEvent('maintenance:active', { detail: data.maintenance })
+        );
+      }
     } catch {
       /* non-JSON error body */
     }

@@ -17,6 +17,7 @@ import { useAuth } from '@/lib/auth';
 import Subscription from '@/pages/Subscription';
 import ArchiveManager from '@/pages/ArchiveManager';
 import Wishes from '@/pages/Wishes';
+import DeveloperMaintenance from '@/pages/DeveloperMaintenance';
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -32,7 +33,7 @@ const PRODUCT_LABELS: Record<SaleProduct, string> = {
 };
 
 /** Tabs only a developer account may see. */
-const DEV_ONLY_TABS = ['subscription', 'archives'];
+const DEV_ONLY_TABS = ['subscription', 'archives', 'maintenance'];
 
 export default function Settings() {
   const qc = useQueryClient();
@@ -72,6 +73,7 @@ export default function Settings() {
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
           {isDeveloper && <TabsTrigger value="subscription">Subscription</TabsTrigger>}
           {isDeveloper && <TabsTrigger value="archives">Archives</TabsTrigger>}
+          {isDeveloper && <TabsTrigger value="maintenance">Maintenance</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="company" className="focus-visible:outline-none focus-visible:ring-0">
@@ -113,6 +115,12 @@ export default function Settings() {
         {isDeveloper && (
           <TabsContent value="archives" className="focus-visible:outline-none focus-visible:ring-0">
             <ArchiveManager />
+          </TabsContent>
+        )}
+
+        {isDeveloper && (
+          <TabsContent value="maintenance" className="focus-visible:outline-none focus-visible:ring-0">
+            <DeveloperMaintenance />
           </TabsContent>
         )}
       </Tabs>

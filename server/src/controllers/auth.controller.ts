@@ -10,6 +10,11 @@ import {
   liveSessionCutoff,
 } from '../lib/sessionPolicy.js';
 import { forgetSession, touchSession } from '../middleware/auth.js';
+import {
+  getMaintenanceConfigRecord,
+  isMaintenanceActive,
+  formatMaintenanceStatus,
+} from '../services/maintenance.service.js';
 
 // Dummy hash so bcrypt.compare always runs, even for unknown usernames -
 // keeps response timing the same whether or not the account exists.
@@ -22,6 +27,20 @@ export async function login(req: Request, res: Response) {
 
   const ok = await bcrypt.compare(password, user?.password ?? DUMMY_HASH);
   if (!user || !ok) throw new HttpError(401, 'Invalid credentials');
+
+  // Prevent non-developer login when maintenance mode is active
+  if (user.role !== 'DEVELOPER') {
+    const config = await getMaintenanceConfigRecord();
+    if (isMaintenanceActive(config)) {
+      const status = formatMaintenanceStatus(config);
+      const minsLeft = Math.ceil(status.secondsLeft / 60);
+      const timeMsg = minsLeft > 0 ? ` (approx. ${minsLeft} min${minsLeft === 1 ? '' : 's'} remaining)` : '';
+      throw new HttpError(
+        503,
+        `System is currently under maintenance${timeMsg}: ${status.message}`
+      );
+    }
+  }
 
   // Sessions that have gone quiet past the idle window are dead - drop them so
   // a closed laptop or a lost phone stops holding one of the device slots.

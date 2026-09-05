@@ -43,19 +43,21 @@ import {
   HandCoins,
   StickyNote,
   CalendarClock,
+  Wrench,
 } from 'lucide-react';
-import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
-import { preloadRoute } from '@/lib/preload';
+import { useAuth } from '@/lib/auth';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import SupportButton from '@/components/SupportButton';
+import FloatingNotesWidget from '@/components/FloatingNotesWidget';
+import DeveloperMaintenanceBanner from '@/components/DeveloperMaintenanceBanner';
+import { preloadRoute } from '@/lib/preload';
 import SupportAnnouncements from '@/components/SupportAnnouncements';
 import FestivalReminders from '@/components/FestivalReminders';
 import UserNoteReminders from '@/components/UserNoteReminders';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
-import FloatingNotesWidget from '@/components/FloatingNotesWidget';
 import { ReminderQueueProvider } from '@/components/ReminderQueue';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
@@ -169,6 +171,7 @@ const sections: NavSection[] = [
       // admin should never see, let alone open, either one.
       { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard, devOnly: true },
       { to: '/settings?tab=archives', label: 'Archives', icon: Archive, devOnly: true },
+      { to: '/settings?tab=maintenance', label: 'Maintenance', icon: Wrench, devOnly: true },
       { to: '/support', label: 'Support tickets', icon: LifeBuoy },
       { to: '/notes-comments', label: 'Notes / Comments', icon: StickyNote },
     ],
@@ -387,6 +390,7 @@ export default function Layout() {
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <DeveloperMaintenanceBanner />
             <SupportButton pageLabel={current?.label ?? 'Home'} />
             <ThemeToggle />
           </div>

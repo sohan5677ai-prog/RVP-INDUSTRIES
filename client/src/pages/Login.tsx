@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
-import { ApiError } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
+import type { MaintenanceStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Lock, Mail, Loader2, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { Lock, Mail, Loader2, ArrowRight, Eye, EyeOff, Wrench, Clock, ShieldAlert } from 'lucide-react';
 
 export default function Login() {
   const { login } = useAuth();
@@ -15,6 +16,41 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Maintenance mode detection on login page
+  const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    const checkMaint = async () => {
+      try {
+        const res = await api<MaintenanceStatus>('/system/maintenance/status');
+        if (!alive) return;
+        setMaintenance(res);
+        if (res.isUnderMaintenance && res.endsAt) {
+          const diff = Math.floor((new Date(res.endsAt).getTime() - Date.now()) / 1000);
+          setSecondsLeft(Math.max(0, diff));
+        }
+      } catch {
+        /* fail open */
+      }
+    };
+    checkMaint();
+    const interval = setInterval(checkMaint, 6000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!maintenance?.isUnderMaintenance || secondsLeft <= 0) return;
+    const timer = setInterval(() => {
+      setSecondsLeft((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [maintenance?.isUnderMaintenance, secondsLeft]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +65,10 @@ export default function Login() {
       setSubmitting(false);
     }
   }
+
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+  const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950">
@@ -46,6 +86,35 @@ export default function Login() {
           <h1 className="font-display text-3xl font-bold tracking-tight text-white mb-2">RVP Industries</h1>
           <p className="text-zinc-400 text-sm tracking-wide">ENTERPRISE RESOURCE PLANNING</p>
         </div>
+
+        {/* Maintenance Banner on Login */}
+        {maintenance?.isUnderMaintenance && (
+          <div className="mb-6 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-600/20 border border-amber-500/40 p-4 shadow-xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center shrink-0 text-amber-400 mt-0.5">
+                <Wrench className="h-4 w-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Maintenance Active
+                  </span>
+                  <span className="font-mono text-xs font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 px-2 py-0.5 rounded-md">
+                    <Clock className="inline h-3 w-3 mr-1 -mt-0.5" />
+                    {timeStr} Left
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-300 mt-1.5 leading-relaxed line-clamp-3">
+                  {maintenance.message || 'System maintenance in progress. Non-developer logins are temporarily paused.'}
+                </p>
+                <div className="mt-2 text-[10.5px] text-amber-200/70">
+                  Developer accounts can still sign in below.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Glass Card */}
         <div className="backdrop-blur-xl bg-zinc-900/50 border border-white/10 rounded-3xl p-8 shadow-2xl">

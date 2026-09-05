@@ -2,11 +2,13 @@ import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import { subscriptionGate } from '../middleware/subscription.js';
+import { maintenanceGate } from '../middleware/maintenance.js';
 import { webhookLimiter, bulkImportLimiter } from '../middleware/rateLimit.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearCache } from '../lib/cache.js';
 import authRoutes from './auth.routes.js';
 import { parseBulkImport } from '../controllers/bulkImport.controller.js';
+import { getMaintenanceStatusHandler } from '../controllers/system.controller.js';
 import partyRoutes from './party.routes.js';
 import brokerRoutes from './broker.routes.js';
 import transportRoutes from './transport.routes.js';
@@ -43,6 +45,9 @@ const router = Router();
 
 // Public
 router.use('/auth', authRoutes);
+// Public maintenance status endpoint for polling, unauthenticated screens & pre-login checks
+router.get('/system/maintenance/status', asyncHandler(getMaintenanceStatusHandler));
+
 // Fast2SMS calls this from outside - no JWT. GET answers URL-validation probes.
 // No secret in the URL, so it needs its own limiter (the global apiLimiter is
 // per-route via router.use('/api', apiLimiter, ...) but generous 1000/15min
@@ -61,6 +66,10 @@ router.use('/subscription', subscriptionRoutes);
 
 // Everything below requires a valid token.
 router.use(requireAuth);
+
+// Developer Maintenance Gate: when maintenance mode is active, non-developers
+// receive HTTP 503 with the live countdown and developer message. The DEVELOPER role bypasses.
+router.use(maintenanceGate);
 
 // Licensing gate: once past auth, a locked deployment 402s every protected call
 // (the DEVELOPER role bypasses). Runs before the cache/route handlers so no

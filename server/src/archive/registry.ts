@@ -189,6 +189,8 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'WhatsApp reminder config for private loans.' },
   { name: 'UserNote', delegate: 'userNote', cls: 'EXCLUDED', order: 0,
     note: 'Floating workspace sticky notes.' },
+  { name: 'MaintenanceConfig', delegate: 'maintenanceConfig', cls: 'EXCLUDED', order: 0,
+    note: 'Developer maintenance mode flag and countdown config.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

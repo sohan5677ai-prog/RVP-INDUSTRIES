@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SubscriptionBoundary from '@/components/SubscriptionBoundary';
+import MaintenanceBoundary from '@/components/MaintenanceBoundary';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { registerPreload } from '@/lib/preload';
 
@@ -139,82 +140,85 @@ export default function App() {
           <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
-            <Route element={<SubscriptionBoundary />}>
-            <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
-            <Route path="/sale-dispatches/:id/ewaybill" element={<EWayBillView />} />
-            <Route path="/sale-dispatches/:id/einvoice-print" element={<EInvoiceView />} />
-            <Route path="/sale-dispatches/:id/lorry-receipt" element={<LorryReceiptView />} />
-            <Route element={<Layout />}>
-              <Route path="/" element={<Home />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/parties" element={<Parties />} />
-              <Route path="/brokers" element={<Brokers />} />
-              <Route path="/transports" element={<Transports />} />
-              <Route path="/purchase-orders" element={<PurchaseOrders />} />
-              <Route path="/stock-in" element={<StockIn />} />
-              <Route path="/purchases" element={<Purchases />} />
-              <Route path="/verification" element={<Verification />} />
-              <Route path="/purchases/:purchaseId/statement" element={<PurchaseStatement />} />
+            <Route element={<MaintenanceBoundary />}>
+              <Route element={<SubscriptionBoundary />}>
+                <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
+                <Route path="/sale-dispatches/:id/ewaybill" element={<EWayBillView />} />
+                <Route path="/sale-dispatches/:id/einvoice-print" element={<EInvoiceView />} />
+                <Route path="/sale-dispatches/:id/lorry-receipt" element={<LorryReceiptView />} />
+                <Route element={<Layout />}>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/parties" element={<Parties />} />
+                  <Route path="/brokers" element={<Brokers />} />
+                  <Route path="/transports" element={<Transports />} />
+                  <Route path="/purchase-orders" element={<PurchaseOrders />} />
+                  <Route path="/stock-in" element={<StockIn />} />
+                  <Route path="/purchases" element={<Purchases />} />
+                  <Route path="/verification" element={<Verification />} />
+                  <Route path="/purchases/:purchaseId/statement" element={<PurchaseStatement />} />
 
-              <Route path="/pappu-calculator" element={<PappuCalculator />} />
-              <Route path="/stock/overview" element={<BlackSeedStock />} />
-              <Route path="/stock/location" element={<StockLocation />} />
-              <Route path="/stock/transfer" element={<StockTransfer />} />
-              <Route path="/stock/date" element={<StockByDate />} />
-              <Route path="/stock/party" element={<StockByParty />} />
-              <Route path="/stock/price" element={<StockByPrice />} />
-              <Route path="/stock-by-price" element={<Navigate to="/stock/price" replace />} />
-              <Route path="/stock/state" element={<StockByState />} />
-              <Route path="/loans" element={<BankLoans />} />
-              <Route path="/private-loans" element={<PrivateLoans />} />
-              <Route path="/sale-orders" element={<SaleOrders />} />
-              <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
-              <Route path="/sales/husk" element={<Husk />} />
-              <Route path="/sales/notes" element={<CreditDebitNotes />} />
-              <Route path="/sales/tps" element={<SalesProduct product="TPS" />} />
-              <Route path="/sales/byproducts" element={<ByproductSales />} />
-              <Route path="/sales/shell" element={<ByproductSales />} />
-              <Route path="/sales/waste" element={<ByproductSales />} />
-              <Route path="/sales/profit-loss" element={<PappuProfitLoss />} />
-              <Route path="/sales/dues-today" element={<DuesOnThisDay />} />
-              <Route path="/sales/dues-on-this-day" element={<DuesOnThisDay />} />
-              <Route path="/accounts/party-ledger" element={<PartyLedger />} />
-              <Route path="/accounts/hamali-ledger" element={<HamaliLedger />} />
-              <Route path="/accounts/surya-road-transport" element={<Navigate to="/reports/freight-dues?tab=transport" replace />} />
-              <Route path="/accounts/brokerage-ledger" element={<BrokerageLedger />} />
-              <Route path="/accounts/chart-of-accounts" element={<Ledgers />} />
-              <Route path="/accounts/balance-sheet" element={<BalanceSheet />} />
-              <Route path="/accounts/profit-loss" element={<ProfitLoss />} />
-              <Route path="/accounts/journal-entries" element={<JournalEntries />} />
-              <Route path="/transactions/payments" element={<Payments />} />
-              <Route path="/transactions/receipts" element={<Receipts />} />
-              <Route path="/reports/sale-dues" element={<SaleDues />} />
-              <Route path="/reports/purchase-dues" element={<PurchaseDues />} />
-              <Route path="/reports/payment-planner" element={<PaymentPlanner />} />
-              <Route path="/reports/brokerage-dues" element={<BrokerageDues />} />
-              <Route path="/reports/freight-dues" element={<FreightDues />} />
-              <Route path="/reports/gunny-bags" element={<GunnyBags />} />
-              <Route path="/reports/electricity" element={<Electricity />} />
-              <Route path="/reports/maintenance" element={<Maintenance />} />
-              <Route path="/reports/drawings" element={<Drawings />} />
-              <Route path="/reports/interest" element={<Interest />} />
-              <Route path="/reports/expenses" element={<Expenses />} />
-              <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
-              <Route path="/reports/taxes" element={<Taxes />} />
-              <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
-              <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/settings/due-today" element={<Navigate to="/sales/dues-today" replace />} />
-              <Route path="/settings/dues-today" element={<Navigate to="/sales/dues-today" replace />} />
-              <Route path="/dues-today" element={<Navigate to="/sales/dues-today" replace />} />
-              <Route path="/sales/due-today" element={<Navigate to="/sales/dues-today" replace />} />
-              <Route path="/support" element={<SupportTickets />} />
-              <Route path="/notes-comments" element={<NotesComments />} />
-              <Route path="/settings/notes-comments" element={<Navigate to="/notes-comments" replace />} />
-              <Route path="/users" element={<Users />} />
-              <Route path="/subscription" element={<Navigate to="/settings?tab=subscription" replace />} />
-              <Route path="/archives" element={<Navigate to="/settings?tab=archives" replace />} />
-            </Route>
+                  <Route path="/pappu-calculator" element={<PappuCalculator />} />
+                  <Route path="/stock/overview" element={<BlackSeedStock />} />
+                  <Route path="/stock/location" element={<StockLocation />} />
+                  <Route path="/stock/transfer" element={<StockTransfer />} />
+                  <Route path="/stock/date" element={<StockByDate />} />
+                  <Route path="/stock/party" element={<StockByParty />} />
+                  <Route path="/stock/price" element={<StockByPrice />} />
+                  <Route path="/stock-by-price" element={<Navigate to="/stock/price" replace />} />
+                  <Route path="/stock/state" element={<StockByState />} />
+                  <Route path="/loans" element={<BankLoans />} />
+                  <Route path="/private-loans" element={<PrivateLoans />} />
+                  <Route path="/sale-orders" element={<SaleOrders />} />
+                  <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
+                  <Route path="/sales/husk" element={<Husk />} />
+                  <Route path="/sales/notes" element={<CreditDebitNotes />} />
+                  <Route path="/sales/tps" element={<SalesProduct product="TPS" />} />
+                  <Route path="/sales/byproducts" element={<ByproductSales />} />
+                  <Route path="/sales/shell" element={<ByproductSales />} />
+                  <Route path="/sales/waste" element={<ByproductSales />} />
+                  <Route path="/sales/profit-loss" element={<PappuProfitLoss />} />
+                  <Route path="/sales/dues-today" element={<DuesOnThisDay />} />
+                  <Route path="/sales/dues-on-this-day" element={<DuesOnThisDay />} />
+                  <Route path="/accounts/party-ledger" element={<PartyLedger />} />
+                  <Route path="/accounts/hamali-ledger" element={<HamaliLedger />} />
+                  <Route path="/accounts/surya-road-transport" element={<Navigate to="/reports/freight-dues?tab=transport" replace />} />
+                  <Route path="/accounts/brokerage-ledger" element={<BrokerageLedger />} />
+                  <Route path="/accounts/chart-of-accounts" element={<Ledgers />} />
+                  <Route path="/accounts/balance-sheet" element={<BalanceSheet />} />
+                  <Route path="/accounts/profit-loss" element={<ProfitLoss />} />
+                  <Route path="/accounts/journal-entries" element={<JournalEntries />} />
+                  <Route path="/transactions/payments" element={<Payments />} />
+                  <Route path="/transactions/receipts" element={<Receipts />} />
+                  <Route path="/reports/sale-dues" element={<SaleDues />} />
+                  <Route path="/reports/purchase-dues" element={<PurchaseDues />} />
+                  <Route path="/reports/payment-planner" element={<PaymentPlanner />} />
+                  <Route path="/reports/brokerage-dues" element={<BrokerageDues />} />
+                  <Route path="/reports/freight-dues" element={<FreightDues />} />
+                  <Route path="/reports/gunny-bags" element={<GunnyBags />} />
+                  <Route path="/reports/electricity" element={<Electricity />} />
+                  <Route path="/reports/maintenance" element={<Maintenance />} />
+                  <Route path="/reports/drawings" element={<Drawings />} />
+                  <Route path="/reports/interest" element={<Interest />} />
+                  <Route path="/reports/expenses" element={<Expenses />} />
+                  <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
+                  <Route path="/reports/taxes" element={<Taxes />} />
+                  <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
+                  <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/settings/due-today" element={<Navigate to="/sales/dues-today" replace />} />
+                  <Route path="/settings/dues-today" element={<Navigate to="/sales/dues-today" replace />} />
+                  <Route path="/dues-today" element={<Navigate to="/sales/dues-today" replace />} />
+                  <Route path="/sales/due-today" element={<Navigate to="/sales/dues-today" replace />} />
+                  <Route path="/support" element={<SupportTickets />} />
+                  <Route path="/notes-comments" element={<NotesComments />} />
+                  <Route path="/settings/notes-comments" element={<Navigate to="/notes-comments" replace />} />
+                  <Route path="/users" element={<Users />} />
+                  <Route path="/subscription" element={<Navigate to="/settings?tab=subscription" replace />} />
+                  <Route path="/archives" element={<Navigate to="/settings?tab=archives" replace />} />
+                  <Route path="/maintenance" element={<Navigate to="/settings?tab=maintenance" replace />} />
+                </Route>
+              </Route>
             </Route>
           </Route>
         </Routes>

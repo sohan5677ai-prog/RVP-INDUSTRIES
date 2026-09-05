@@ -2033,3 +2033,24 @@ model UserNote {
   @@index([createdAt])
 }
 
+// ---------------------------------------------------------------------------
+// Developer Maintenance Mode & System Status Configuration
+// Singleton row (id = 1) managed exclusively by the DEVELOPER role.
+// When enabled, all non-developer access is locked and users see a live countdown
+// clock with custom message from the developer.
+// ---------------------------------------------------------------------------
+model MaintenanceConfig {
+  id              Int       @id @default(1)
+  enabled         Boolean   @default(false)
+  title           String    @default("System Maintenance in Progress")
+  message         String    @default("We are performing essential system maintenance and database optimization. The ERP will be back online shortly.")
+  startedAt       DateTime  @default(now())
+  endsAt          DateTime?
+  durationMinutes Int       @default(10)
+  scope           String    @default("FULL") // "FULL" (lock non-devs)
+  contactInfo     String?   @default("Developer / Tech Support Team")
+  updatedById     String?
+  updatedByName   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}

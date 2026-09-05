@@ -363,51 +363,6 @@ export async function createPayment(req: Request, res: Response) {
     // payee typed free-hand (expense heads) has no record, so no language.
     let waLanguage: WaLanguage | null = null;
 
-    const isLorryPayment = !!data.lorryNumber || data.type === 'TRANSPORTER_INWARD' || data.type === 'TRANSPORTER_OUTWARD' || data.type === 'TRANSPORTER';
-
-    if (isLorryPayment) {
-      const lorryRes = await resolveLorryPaymentDetails({
-        date: data.date,
-        amount: Number(data.amount),
-        reference: data.reference ?? null,
-        lorryNumber: data.lorryNumber ?? null,
-        description: cleanDescription,
-        purchaseId: data.purchaseId ?? null,
-        tripId: data.tripId ?? null,
-        driverPhone: data.driverPhone ?? null,
-        driverName: data.driverName ?? null,
-        screenshotUrl,
-      });
-
-      if (lorryRes) {
-        if (data.partyId) {
-          const party = await prisma.party.findUnique({ where: { id: data.partyId } });
-          if (party) {
-            phone = party.phone;
-            phone2 = party.phone2;
-            waLanguage = party.waLanguage;
-          }
-        }
-        await whatsappService.notifyLorryPaymentSent(
-          {
-            id: payment.id,
-            amount: Number(data.amount),
-            date: data.date,
-            reference: data.reference ?? null,
-            screenshotUrl,
-          },
-          lorryRes.details,
-          {
-            name: lorryRes.name,
-            phone: phone || lorryRes.phone,
-            phone2,
-            waLanguage,
-          }
-        );
-        return;
-      }
-    }
-
     if (data.partyId) {
       const party = await prisma.party.findUnique({ where: { id: data.partyId } });
       name = party?.name ?? 'Party';
@@ -424,10 +379,27 @@ export async function createPayment(req: Request, res: Response) {
       phone = broker?.phone ?? null;
       waLanguage = broker?.waLanguage ?? null;
     } else if (data.lorryNumber) {
-      name = data.payee || `Lorry ${data.lorryNumber}`;
+      name = data.payee || `Freight payment - Lorry ${data.lorryNumber}`;
+      phone = data.driverPhone?.trim() || null;
+      if (!phone) {
+        const lorryRes = await resolveLorryPaymentDetails({
+          date: data.date,
+          amount: Number(data.amount),
+          reference: data.reference ?? null,
+          lorryNumber: data.lorryNumber ?? null,
+          description: cleanDescription,
+          purchaseId: data.purchaseId ?? null,
+          tripId: data.tripId ?? null,
+          driverPhone: data.driverPhone ?? null,
+          driverName: data.driverName ?? null,
+          screenshotUrl,
+        });
+        phone = lorryRes?.phone ?? null;
+      }
     } else {
       name = data.payee || cleanDescription || `${data.type} payment`;
     }
+
     await whatsappService.notifyPaymentSent(
       {
         id: payment.id,

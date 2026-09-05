@@ -1327,4 +1327,34 @@ export interface DuesOnDateResponse {
   };
 }
 
+export interface MaintenanceStatus {
+  enabled: boolean;
+  isUnderMaintenance: boolean;
+  title: string;
+  message: string;
+  startedAt: string | null;
+  endsAt: string | null;
+  secondsLeft: number;
+  durationMinutes: number;
+  contactInfo: string | null;
+  updatedAt: string;
+  updatedByName?: string | null;
+}
+
+export interface MaintenanceConfig {
+  id: number;
+  enabled: boolean;
+  title: string;
+  message: string;
+  startedAt: string;
+  endsAt: string | null;
+  durationMinutes: number;
+  scope: string;
+  contactInfo: string | null;
+  updatedById: string | null;
+  updatedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 

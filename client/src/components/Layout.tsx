@@ -44,6 +44,7 @@ import {
   StickyNote,
   CalendarClock,
   Wrench,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -130,6 +131,7 @@ const sections: NavSection[] = [
     items: [
       { to: '/reports/taxes', label: 'Taxes', icon: Scale },
       { to: '/reports/irn-ewb', label: 'IRN/EWB', icon: FileText },
+      { to: '/reports/email-logs', label: 'Email Logs', icon: Mail },
       { to: '/reports/purchase-dues', label: 'Purchase Dues', icon: TrendingDown },
       { to: '/reports/payment-planner', label: 'Payment Planner', icon: Wallet },
       { to: '/reports/sale-dues', label: 'Sale Dues', icon: TrendingUp },

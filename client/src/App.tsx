@@ -99,6 +99,7 @@ const NotesComments = lazyWithPreload(
   () => import('@/pages/NotesComments')
 );
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
+const EmailLogs = lazyWithPreload('/reports/email-logs', () => import('@/pages/Reports/EmailLogs'));
 const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/Reports/Taxes'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
@@ -204,6 +205,7 @@ export default function App() {
                   <Route path="/reports/interest" element={<Interest />} />
                   <Route path="/reports/expenses" element={<Expenses />} />
                   <Route path="/reports/irn-ewb" element={<IrnEwbReport />} />
+                  <Route path="/reports/email-logs" element={<EmailLogs />} />
                   <Route path="/reports/taxes" element={<Taxes />} />
                   <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
                   <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />

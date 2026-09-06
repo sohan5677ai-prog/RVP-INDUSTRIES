@@ -286,8 +286,8 @@ export default function IrnEwbReport() {
                         <div className="text-xs text-muted-foreground">{log.recipientEmail}</div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={log.status === 'FAILED' ? 'destructive' : 'success'}>{log.status}</Badge>
-                        {log.status === 'FAILED' && log.errorMessage && (
+                        <Badge variant={['FAILED', 'BOUNCED', 'COMPLAINED'].includes(log.status) ? 'destructive' : 'success'}>{log.status}</Badge>
+                        {['FAILED', 'BOUNCED'].includes(log.status) && log.errorMessage && (
                           <div className="mt-1 max-w-[220px] truncate text-[10px] text-destructive" title={log.errorMessage}>{log.errorMessage}</div>
                         )}
                       </TableCell>

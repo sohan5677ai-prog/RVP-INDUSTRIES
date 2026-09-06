@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Send } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
@@ -921,13 +921,19 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const sendInvoiceEmailMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/einvoice/email`, { method: 'POST' }),
-    onSuccess: () => toast.success('Invoice emailed to buyer'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success('Invoice emailed to buyer');
+    },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
   const sendEwbEmailMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/ewaybill/email`, { method: 'POST' }),
-    onSuccess: () => toast.success('E-Way Bill emailed to buyer'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success('E-Way Bill emailed to buyer');
+    },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
@@ -1457,15 +1463,62 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                               </Button>
                                             )}
                                             {d.irn && (
-                                              <Button
-                                                size="sm"
-                                                variant="outline"
-                                                title={o.buyer?.email ? undefined : 'Add an email in Parties first'}
-                                                disabled={!o.buyer?.email || sendInvoiceEmailMutation.isPending}
-                                                onClick={() => sendInvoiceEmailMutation.mutate(d.id)}
-                                              >
-                                                <Mail className="h-3.5 w-3.5" /> Send Invoice
-                                              </Button>
+                                              <>
+                                                {(() => {
+                                                  const invLog = d.emailLogs?.find((l) => l.documentType === 'INVOICE') || d.emailLogs?.[0];
+                                                  if (!invLog) return null;
+                                                  if (invLog.status === 'OPENED') {
+                                                    return (
+                                                      <span
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800"
+                                                        title={`Invoice opened by ${invLog.recipientEmail}${invLog.openedAt ? ` at ${new Date(invLog.openedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : ''}`}
+                                                      >
+                                                        <Eye className="h-3 w-3 text-purple-600" /> Opened
+                                                      </span>
+                                                    );
+                                                  }
+                                                  if (invLog.status === 'DELIVERED') {
+                                                    return (
+                                                      <span
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                                                        title={`Invoice delivered to ${invLog.recipientEmail}${invLog.deliveredAt ? ` at ${new Date(invLog.deliveredAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : ''}`}
+                                                      >
+                                                        <CheckCheck className="h-3 w-3 text-emerald-600" /> Delivered
+                                                      </span>
+                                                    );
+                                                  }
+                                                  if (invLog.status === 'SENT') {
+                                                    return (
+                                                      <span
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                                                        title={`Invoice emailed to ${invLog.recipientEmail} at ${new Date(invLog.sentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
+                                                      >
+                                                        <Send className="h-3 w-3 text-blue-600" /> Emailed
+                                                      </span>
+                                                    );
+                                                  }
+                                                  if (invLog.status === 'FAILED' || invLog.status === 'BOUNCED') {
+                                                    return (
+                                                      <span
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-800"
+                                                        title={invLog.errorMessage || `Failed sending to ${invLog.recipientEmail}`}
+                                                      >
+                                                        <AlertTriangle className="h-3 w-3 text-red-600" /> {invLog.status === 'BOUNCED' ? 'Bounced' : 'Failed'}
+                                                      </span>
+                                                    );
+                                                  }
+                                                  return null;
+                                                })()}
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  title={o.buyer?.email ? undefined : 'Add an email in Parties first'}
+                                                  disabled={!o.buyer?.email || sendInvoiceEmailMutation.isPending}
+                                                  onClick={() => sendInvoiceEmailMutation.mutate(d.id)}
+                                                >
+                                                  <Mail className="h-3.5 w-3.5" /> {d.emailLogs?.some((l) => l.documentType === 'INVOICE') ? 'Resend' : 'Send Invoice'}
+                                                </Button>
+                                              </>
                                             )}
 
                                             {/* E-Way Bill Action Buttons */}
@@ -1482,6 +1535,21 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'ewaybill')}>
                                                   Cancel EWB
                                                 </Button>
+                                                {(() => {
+                                                  const ewbLog = d.emailLogs?.find((l) => l.documentType === 'EWB');
+                                                  if (!ewbLog) return null;
+                                                  if (ewbLog.status === 'DELIVERED' || ewbLog.status === 'OPENED') {
+                                                    return (
+                                                      <span
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                                                        title={`EWB delivered to ${ewbLog.recipientEmail}`}
+                                                      >
+                                                        <CheckCheck className="h-3 w-3 text-emerald-600" /> EWB Sent
+                                                      </span>
+                                                    );
+                                                  }
+                                                  return null;
+                                                })()}
                                                 <Button
                                                   size="sm"
                                                   variant="outline"
@@ -1489,7 +1557,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                   disabled={!o.buyer?.email || sendEwbEmailMutation.isPending}
                                                   onClick={() => sendEwbEmailMutation.mutate(d.id)}
                                                 >
-                                                  <Mail className="h-3.5 w-3.5" /> Send EWB
+                                                  <Mail className="h-3.5 w-3.5" /> {d.emailLogs?.some((l) => l.documentType === 'EWB') ? 'Resend EWB' : 'Send EWB'}
                                                 </Button>
                                               </>
                                             )}

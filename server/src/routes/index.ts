@@ -38,6 +38,7 @@ import wishesRoutes from './wishes.routes.js';
 import supportRoutes from './support.routes.js';
 import userNoteRoutes from './userNote.routes.js';
 import { verifyWhatsAppWebhook, handleWhatsAppWebhook, runWhatsAppJob } from '../controllers/whatsapp.controller.js';
+import { handleResendWebhook } from '../controllers/resendWebhook.controller.js';
 import { globalSearch } from '../controllers/search.controller.js';
 import subscriptionRoutes from './subscription.routes.js';
 import archiveRoutes from './archive.routes.js';
@@ -47,6 +48,9 @@ const router = Router();
 router.use('/auth', authRoutes);
 // Public maintenance status endpoint for polling, unauthenticated screens & pre-login checks
 router.get('/system/maintenance/status', asyncHandler(getMaintenanceStatusHandler));
+
+// Resend email delivery/tracking webhook (public - Resend calls this, Svix signed)
+router.post('/webhooks/resend', webhookLimiter, asyncHandler(handleResendWebhook));
 
 // Fast2SMS calls this from outside - no JWT. GET answers URL-validation probes.
 // No secret in the URL, so it needs its own limiter (the global apiLimiter is

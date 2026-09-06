@@ -376,6 +376,11 @@ enum EmailDocumentType {
 enum EmailStatus {
   SENT
   FAILED
+  DELIVERED
+  OPENED
+  CLICKED
+  BOUNCED
+  COMPLAINED
 }
 
 // Audit trail of every document email sent to a party. Only one of
@@ -397,10 +402,15 @@ model EmailLog {
   resendMessageId String?
   status          EmailStatus
   errorMessage    String?
+  deliveredAt     DateTime?
+  openedAt        DateTime?
+  clickedAt       DateTime?
+  bouncedAt       DateTime?
   sentAt          DateTime          @default(now())
 
   @@index([partyId])
   @@index([saleDispatchId])
+  @@index([resendMessageId])
 }
 
 model StockIn {

@@ -515,6 +515,8 @@ export interface SaleDispatch {
   receipts?: Receipt[];
   // Credit notes linked to this shipment.
   creditNotes?: CreditNote[];
+  // Email delivery logs linked to this shipment
+  emailLogs?: EmailLog[];
 
   // E-Invoice (IRN) details
   irn?: string | null;
@@ -632,7 +634,7 @@ export interface PendingCreditNote {
 }
 
 export type EmailDocumentType = 'INVOICE' | 'EWB' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
-export type EmailStatus = 'SENT' | 'FAILED';
+export type EmailStatus = 'SENT' | 'FAILED' | 'DELIVERED' | 'OPENED' | 'CLICKED' | 'BOUNCED' | 'COMPLAINED';
 
 export interface EmailLog {
   id: string;
@@ -648,7 +650,20 @@ export interface EmailLog {
   resendMessageId?: string | null;
   status: EmailStatus;
   errorMessage?: string | null;
+  deliveredAt?: string | null;
+  openedAt?: string | null;
+  clickedAt?: string | null;
+  bouncedAt?: string | null;
   sentAt: string;
+}
+
+export interface EmailLogStats {
+  total: number;
+  sent: number;
+  delivered: number;
+  opened: number;
+  failed: number;
+  bounced: number;
 }
 
 /**

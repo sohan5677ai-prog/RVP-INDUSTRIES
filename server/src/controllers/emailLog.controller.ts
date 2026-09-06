@@ -3,20 +3,61 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { sendInvoiceEmail, sendEwbEmail } from '../services/saleDocumentEmail.service.js';
 import { sendNoteEmailById } from './notes.controller.js';
-import type { EmailDocumentType } from '@prisma/client';
+import type { EmailDocumentType, EmailStatus } from '@prisma/client';
 
 export async function listEmailLogs(req: Request, res: Response) {
   const partyId = req.query.partyId as string | undefined;
   const documentType = req.query.documentType as EmailDocumentType | undefined;
+  const status = req.query.status as EmailStatus | undefined;
+  const search = req.query.search ? (req.query.search as string).trim() : undefined;
+  const fromDate = req.query.fromDate as string | undefined;
+  const toDate = req.query.toDate as string | undefined;
+
+  const dateFilter: { gte?: Date; lte?: Date } = {};
+  if (fromDate) {
+    dateFilter.gte = new Date(fromDate);
+  }
+  if (toDate) {
+    const end = new Date(toDate);
+    end.setHours(23, 59, 59, 999);
+    dateFilter.lte = end;
+  }
+
+  const whereClause: any = {
+    ...(partyId ? { partyId } : {}),
+    ...(documentType ? { documentType } : {}),
+    ...(status ? { status } : {}),
+    ...(Object.keys(dateFilter).length > 0 ? { sentAt: dateFilter } : {}),
+    ...(search
+      ? {
+          OR: [
+            { referenceLabel: { contains: search, mode: 'insensitive' } },
+            { recipientEmail: { contains: search, mode: 'insensitive' } },
+            { subject: { contains: search, mode: 'insensitive' } },
+            { party: { name: { contains: search, mode: 'insensitive' } } },
+          ],
+        }
+      : {}),
+  };
+
   const rows = await prisma.emailLog.findMany({
-    where: {
-      ...(partyId ? { partyId } : {}),
-      ...(documentType ? { documentType } : {}),
-    },
+    where: whereClause,
     include: { party: true },
     orderBy: { sentAt: 'desc' },
   });
   res.json(rows);
+}
+
+export async function getEmailLogStats(req: Request, res: Response) {
+  const [total, sent, delivered, opened, failed, bounced] = await Promise.all([
+    prisma.emailLog.count(),
+    prisma.emailLog.count({ where: { status: 'SENT' } }),
+    prisma.emailLog.count({ where: { status: 'DELIVERED' } }),
+    prisma.emailLog.count({ where: { status: 'OPENED' } }),
+    prisma.emailLog.count({ where: { status: 'FAILED' } }),
+    prisma.emailLog.count({ where: { status: 'BOUNCED' } }),
+  ]);
+  res.json({ total, sent, delivered, opened, failed, bounced });
 }
 
 export async function resendEmailLog(req: Request, res: Response) {

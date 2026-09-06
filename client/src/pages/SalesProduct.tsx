@@ -274,14 +274,13 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   // Default internal weight (tonnes) applying moisture gain reduction if PAPPU
   const internalWeightDefaultTonnes = useMemo(() => {
+    if (!isPappu) return 0;
     const wKg = Math.round(dispatchTonnesNum * 1000);
     if (wKg <= 0) return 0;
-    if (isPappu) {
-      if (wKg >= 35000) return (wKg - 250) / 1000;
-      if (wKg >= 30000) return (wKg - 200) / 1000;
-      if (wKg >= 25000) return (wKg - 150) / 1000;
-      if (wKg >= 15000) return (wKg - 50) / 1000;
-    }
+    if (wKg >= 35000) return (wKg - 250) / 1000;
+    if (wKg >= 30000) return (wKg - 200) / 1000;
+    if (wKg >= 25000) return (wKg - 150) / 1000;
+    if (wKg >= 15000) return (wKg - 50) / 1000;
     return wKg / 1000;
   }, [dispatchTonnesNum, isPappu]);
 
@@ -398,9 +397,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (driverName) fd.append('driverName', driverName);
       if (driverPhone) fd.append('driverPhone', driverPhone);
       fd.append('tonnageKg', String(Math.round((Number(dispatchTonnes) || 0) * 1000)));
-      const internalWeightNum = Number(internalWeightTonnes);
-      if (internalWeightTonnes.trim() !== '' && !isNaN(internalWeightNum) && internalWeightNum > 0) {
-        fd.append('internalWeightKg', String(Math.round(internalWeightNum * 1000)));
+      if (isPappu) {
+        const internalWeightNum = Number(internalWeightTonnes);
+        if (internalWeightTonnes.trim() !== '' && !isNaN(internalWeightNum) && internalWeightNum > 0) {
+          fd.append('internalWeightKg', String(Math.round(internalWeightNum * 1000)));
+        }
       }
       if (dispatchDate) fd.append('dispatchDate', new Date(dispatchDate).toISOString());
       if (selectedTransportId) fd.append('transportId', selectedTransportId);
@@ -1354,7 +1355,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             )}
                                             <span>{d.vehicleNumber ?? 'no vehicle'}</span><span className="opacity-40">·</span>
                                             <span className="font-mono">{toTonnes(d.weightKg).toFixed(2)} t</span>
-                                            {d.internalWeightKg != null && (
+                                            {isPappu && d.internalWeightKg != null && (
                                               <>
                                                 <span className="opacity-40">·</span>
                                                 <span className="font-mono text-muted-foreground/80" title="Internal weight (internal reference only, without moisture gain)">
@@ -1705,36 +1706,38 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 </p>
               )}
             </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">
-                  Internal weight (tonnes) <span className="font-normal text-muted-foreground">(internal purpose only)</span>
-                </Label>
-                {internalWeightDefaultTonnes > 0 && (
-                  <button
-                    type="button"
-                    className="text-[11px] text-primary hover:underline"
-                    onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
-                  >
-                    Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
-                  </button>
-                )}
+            {isPappu && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">
+                    Internal weight (tonnes) <span className="font-normal text-muted-foreground">(internal purpose only)</span>
+                  </Label>
+                  {internalWeightDefaultTonnes > 0 && (
+                    <button
+                      type="button"
+                      className="text-[11px] text-primary hover:underline"
+                      onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
+                    >
+                      Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
+                    </button>
+                  )}
+                </div>
+                <Input
+                  type="number"
+                  step="0.001"
+                  value={internalWeightTonnes}
+                  onChange={(e) => setInternalWeightTonnes(e.target.value)}
+                  placeholder={
+                    internalWeightDefaultTonnes > 0
+                      ? `Auto-calculated default: ${internalWeightDefaultTonnes.toFixed(3)} t`
+                      : 'e.g. 24.85'
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Internal weight before moisture gain. Leave blank to auto-calculate (tiered moisture scale). Never sent to parties or on invoices.
+                </p>
               </div>
-              <Input
-                type="number"
-                step="0.001"
-                value={internalWeightTonnes}
-                onChange={(e) => setInternalWeightTonnes(e.target.value)}
-                placeholder={
-                  internalWeightDefaultTonnes > 0
-                    ? `Auto-calculated default: ${internalWeightDefaultTonnes.toFixed(3)} t`
-                    : 'e.g. 24.85'
-                }
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Internal weight before moisture gain. Leave blank to auto-calculate ({isPappu ? 'tiered moisture scale' : 'same as kata weight'}). Never sent to parties or on invoices.
-              </p>
-            </div>
+            )}
             {offerFromTransfer && (
               <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">
                 <input
@@ -2145,7 +2148,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <div className="rounded-lg border bg-sky-50/70 border-sky-200 dark:bg-sky-950/20 dark:border-sky-900 p-3 text-sm space-y-1">
                 <div className="font-semibold text-sky-800 dark:text-sky-300">Higher Weight Recorded (+{deliverExcessKg} kg)</div>
                 <div className="text-xs text-sky-700/90 dark:text-sky-400">
-                  Buyer's kata is higher (e.g. moisture gain in transit / scale variance). Shortage is 0 kg. Billing remains for dispatched weight ({deliverDispatch ? toTonnes(deliverDispatch.dispatch.weightKg).toFixed(2) : 0} tonnes) as per invoice. Recorded for internal weight tracking.
+                  Buyer's kata is higher (e.g. moisture gain in transit / scale variance). Shortage is 0 kg. Billing remains for dispatched weight ({deliverDispatch ? toTonnes(deliverDispatch.dispatch.weightKg).toFixed(2) : 0} tonnes) as per invoice.{isPappu ? ' Recorded for internal weight tracking.' : ''}
                 </div>
               </div>
             )}

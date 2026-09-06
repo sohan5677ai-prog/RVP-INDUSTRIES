@@ -1,6 +1,6 @@
 import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
-import type { WaLanguage } from '@prisma/client';
+import type { Prisma, WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createReceiptSchema, listReceiptsSchema, updateReceiptSchema } from '../schemas/receipt.schema.js';
@@ -24,10 +24,30 @@ export async function extractReceiptScreenshot(req: Request, res: Response) {
 }
 
 export async function listReceipts(req: Request, res: Response) {
-  const { skip, take, all, excludeSetOffs } = listReceiptsSchema.parse(req.query);
+  const { skip, take, all, excludeSetOffs, search } = listReceiptsSchema.parse(req.query);
   const include = { party: true };
-  // The register records money actually collected, so it drops set-off legs.
-  const where = excludeSetOffs === 'true' ? { setOffId: null } : {};
+
+  const conditions: Prisma.ReceiptWhereInput[] = [];
+  if (excludeSetOffs === 'true' || all !== 'true') {
+    conditions.push({ setOffId: null });
+  }
+
+  if (search && search.trim()) {
+    const q = search.trim();
+    conditions.push({
+      OR: [
+        { party: { name: { contains: q, mode: 'insensitive' } } },
+        { payer: { contains: q, mode: 'insensitive' } },
+        { reference: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+        { type: { contains: q, mode: 'insensitive' } },
+        { saleDispatch: { invoiceNumber: { contains: q, mode: 'insensitive' } } },
+        { saleDispatch: { vehicleNumber: { contains: q, mode: 'insensitive' } } },
+      ],
+    });
+  }
+
+  const where: Prisma.ReceiptWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
   // all=true → whole history as a plain array (Sale Dues / ledger FIFO matching
   // need the full set uncapped). Shape unchanged for those callers.
@@ -39,8 +59,8 @@ export async function listReceipts(req: Request, res: Response) {
 
   // Server-paginated slice + grand total for the Receipts register page.
   const [rows, total] = await Promise.all([
-    prisma.receipt.findMany({ where: { setOffId: null }, skip, take, orderBy: { date: 'desc' }, include }),
-    prisma.receipt.count({ where: { setOffId: null } }),
+    prisma.receipt.findMany({ where, skip, take, orderBy: { date: 'desc' }, include }),
+    prisma.receipt.count({ where }),
   ]);
   res.json({ rows, total });
 }

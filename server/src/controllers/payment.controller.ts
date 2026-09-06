@@ -1,6 +1,6 @@
 import { logger } from '../lib/logger.js';
 import type { Request, Response } from 'express';
-import type { WaLanguage } from '@prisma/client';
+import type { Prisma, WaLanguage } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createPaymentSchema, listPaymentsSchema, updatePaymentSchema } from '../schemas/payment.schema.js';
@@ -31,11 +31,30 @@ export async function extractPaymentScreenshot(req: Request, res: Response) {
 }
 
 export async function listPayments(req: Request, res: Response) {
-  const { skip, take, all, excludeSetOffs } = listPaymentsSchema.parse(req.query);
+  const { skip, take, all, excludeSetOffs, search } = listPaymentsSchema.parse(req.query);
   const include = { party: true, broker: true };
-  // The register is a record of money leaving the bank, so it drops set-off legs
-  // (no cash moved). Dues/FIFO callers pass neither flag and still see them.
-  const where = excludeSetOffs === 'true' ? { setOffId: null } : {};
+
+  const conditions: Prisma.PaymentWhereInput[] = [];
+  if (excludeSetOffs === 'true' || all !== 'true') {
+    conditions.push({ setOffId: null });
+  }
+
+  if (search && search.trim()) {
+    const q = search.trim();
+    conditions.push({
+      OR: [
+        { party: { name: { contains: q, mode: 'insensitive' } } },
+        { broker: { name: { contains: q, mode: 'insensitive' } } },
+        { payee: { contains: q, mode: 'insensitive' } },
+        { reference: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+        { lorryNumber: { contains: q, mode: 'insensitive' } },
+        { type: { contains: q, mode: 'insensitive' } },
+      ],
+    });
+  }
+
+  const where: Prisma.PaymentWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
   // all=true → the whole history as a plain array. The Purchase Dues / Payment
   // Planner / ledger pages match payments to bills via FIFO across a supplier's
@@ -50,8 +69,8 @@ export async function listPayments(req: Request, res: Response) {
   // requested slice plus the grand total, so the page renders a server-driven
   // pager instead of downloading every payment on first load.
   const [rows, total] = await Promise.all([
-    prisma.payment.findMany({ where: { setOffId: null }, skip, take, orderBy: { date: 'desc' }, include }),
-    prisma.payment.count({ where: { setOffId: null } }),
+    prisma.payment.findMany({ where, skip, take, orderBy: { date: 'desc' }, include }),
+    prisma.payment.count({ where }),
   ]);
   res.json({ rows, total });
 }

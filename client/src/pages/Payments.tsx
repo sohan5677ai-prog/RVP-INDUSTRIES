@@ -6,6 +6,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
+import { SearchInput } from '@/components/ui/search-input';
 import type { ExportColumn } from '@/lib/export';
 import type { Payment, Party, Broker, PaymentType, CompanyProfile } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
@@ -110,16 +111,27 @@ export default function PaymentsPage() {
   // the Export button still pull the full set on demand.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(50);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search]);
   useEffect(() => { setPage(1); }, [pageSize]);
 
+  const searchParam = debouncedSearch.trim() ? `&search=${encodeURIComponent(debouncedSearch.trim())}` : '';
+
   const { data: pageData, isLoading } = useQuery({
-    queryKey: ['payments', { page, pageSize }],
+    queryKey: ['payments', { page, pageSize, search: debouncedSearch }],
     queryFn: () =>
       pageSize === Infinity
         // Register view: set-off legs are excluded server-side (no cash moved),
         // so the "All" page and the export below match the paged view.
-        ? api<Payment[]>('/payments?all=true&excludeSetOffs=true').then((rows) => ({ rows, total: rows.length }))
-        : api<{ rows: Payment[]; total: number }>(`/payments?skip=${(page - 1) * pageSize}&take=${pageSize}`),
+        ? api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`).then((rows) => ({ rows, total: rows.length }))
+        : api<{ rows: Payment[]; total: number }>(`/payments?skip=${(page - 1) * pageSize}&take=${pageSize}${searchParam}`),
     // Keep the previous page on screen while the next loads, so paging doesn't flash.
     placeholderData: keepPreviousData,
   });
@@ -300,17 +312,26 @@ export default function PaymentsPage() {
         </TabsList>
 
         <TabsContent value="payments" className="space-y-4">
-          <div className="flex items-center justify-end gap-2">
-            <ExportButtons
-              filename="Payments"
-              title="Payments Register"
-              subtitle={`${total} payment(s)`}
-              columns={PAYMENT_EXPORT_COLUMNS}
-              rows={() => api<Payment[]>('/payments?all=true&excludeSetOffs=true')}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <SearchInput
+              value={search}
+              onValueChange={setSearch}
+              placeholder="Search party, broker, lorry, ref no, description…"
+              containerClassName="w-full sm:w-80"
+              className="h-9"
             />
-            <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
-              <Plus className="h-4 w-4" /> Record Payment
-            </Button>
+            <div className="flex items-center gap-2">
+              <ExportButtons
+                filename="Payments"
+                title="Payments Register"
+                subtitle={`${total} payment(s)`}
+                columns={PAYMENT_EXPORT_COLUMNS}
+                rows={() => api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`)}
+              />
+              <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
+                <Plus className="h-4 w-4" /> Record Payment
+              </Button>
+            </div>
           </div>
 
           <div className="rounded-lg border bg-card overflow-x-auto">
@@ -328,10 +349,14 @@ export default function PaymentsPage() {
               </TableHeader>
               <TableBody>
                 {isLoading && (
-                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
                 )}
                 {!isLoading && total === 0 && (
-                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                      {debouncedSearch.trim() ? `No payments found matching "${debouncedSearch.trim()}".` : 'No payments recorded yet.'}
+                    </TableCell>
+                  </TableRow>
                 )}
                 {visiblePayments.map((p) => {
                   const typeLabel = PAYMENT_TYPES.find((t) => t.value === p.type)?.label ?? p.type;

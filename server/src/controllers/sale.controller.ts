@@ -369,8 +369,14 @@ export async function updateDispatchFreightCosts(req: Request, res: Response) {
  * accurate internal weight is sometimes not known at dispatch time.
  */
 export async function updateDispatchInternalWeight(req: Request, res: Response) {
-  const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: req.params.id },
+    include: { saleOrder: { select: { product: true } } },
+  });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+  if (dispatch.saleOrder.product !== 'PAPPU') {
+    throw new HttpError(400, 'Internal weight is only applicable to Pappu products.');
+  }
 
   const data = updateInternalWeightSchema.parse(req.body);
 
@@ -788,13 +794,17 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     }
     excessOutKg = Math.min(data.excessOutKg, weightKg); // never more excess than the lorry weighs
   }
-  let internalWeightKg = data.internalWeightKg ?? null;
-  if (!internalWeightKg && order.product === 'PAPPU') {
-    if (weightKg >= 35000) internalWeightKg = weightKg - 250;
-    else if (weightKg >= 30000) internalWeightKg = weightKg - 200;
-    else if (weightKg >= 25000) internalWeightKg = weightKg - 150;
-    else if (weightKg >= 15000) internalWeightKg = weightKg - 50;
-    else internalWeightKg = weightKg;
+  let internalWeightKg: number | null = null;
+  if (order.product === 'PAPPU') {
+    if (data.internalWeightKg) {
+      internalWeightKg = data.internalWeightKg;
+    } else {
+      if (weightKg >= 35000) internalWeightKg = weightKg - 250;
+      else if (weightKg >= 30000) internalWeightKg = weightKg - 200;
+      else if (weightKg >= 25000) internalWeightKg = weightKg - 150;
+      else if (weightKg >= 15000) internalWeightKg = weightKg - 50;
+      else internalWeightKg = weightKg;
+    }
   }
   const baseAmount = weightKg * Number(order.ratePerKg);
   const gstAmount = order.gstExempt ? 0 : calcGst(weightKg, Number(order.ratePerKg), await gstFractionForProduct(order.product));

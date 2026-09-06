@@ -41,4 +41,5 @@ export const listPaymentsSchema = z.object({
   // bank, so the Payments REGISTER hides them - but the dues/FIFO consumers must
   // keep seeing them, since a leg is what clears its purchase bill.
   excludeSetOffs: z.enum(['true', 'false']).optional(),
+  search: z.string().optional(),
 });

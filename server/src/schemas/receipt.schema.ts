@@ -51,4 +51,5 @@ export const listReceiptsSchema = z.object({
   // the Receipts REGISTER hides them. Sale Dues still needs them (a leg is what
   // clears its invoice), so they stay in the ?all=true feed.
   excludeSetOffs: z.enum(['true', 'false']).optional(),
+  search: z.string().optional(),
 });

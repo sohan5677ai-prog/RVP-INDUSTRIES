@@ -7,6 +7,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ScreenshotUpload, nameKey, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import { ExportButtons } from '@/components/ExportButtons';
+import { SearchInput } from '@/components/ui/search-input';
 import type { ExportColumn } from '@/lib/export';
 import type { Receipt, Party, ReceiptType, SaleOrder } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
@@ -123,16 +124,27 @@ export default function ReceiptsPage() {
   // set on demand.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(50);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search]);
   useEffect(() => { setPage(1); }, [pageSize]);
 
+  const searchParam = debouncedSearch.trim() ? `&search=${encodeURIComponent(debouncedSearch.trim())}` : '';
+
   const { data: pageData, isLoading } = useQuery({
-    queryKey: ['receipts', { page, pageSize }],
+    queryKey: ['receipts', { page, pageSize, search: debouncedSearch }],
     queryFn: () =>
       pageSize === Infinity
         // Register view: set-off legs are excluded server-side (no cash was
         // collected), so "All" and the export match the paged view.
-        ? api<Receipt[]>('/receipts?all=true&excludeSetOffs=true').then((rows) => ({ rows, total: rows.length }))
-        : api<{ rows: Receipt[]; total: number }>(`/receipts?skip=${(page - 1) * pageSize}&take=${pageSize}`),
+        ? api<Receipt[]>(`/receipts?all=true&excludeSetOffs=true${searchParam}`).then((rows) => ({ rows, total: rows.length }))
+        : api<{ rows: Receipt[]; total: number }>(`/receipts?skip=${(page - 1) * pageSize}&take=${pageSize}${searchParam}`),
     placeholderData: keepPreviousData,
   });
   const visibleReceipts = pageData?.rows ?? [];
@@ -546,7 +558,7 @@ export default function ReceiptsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Receipts</h1>
           <p className="text-muted-foreground">
@@ -559,12 +571,22 @@ export default function ReceiptsPage() {
             title="Receipts Register"
             subtitle={`${total} receipt(s)`}
             columns={RECEIPT_EXPORT_COLUMNS}
-            rows={() => api<Receipt[]>('/receipts?all=true&excludeSetOffs=true')}
+            rows={() => api<Receipt[]>(`/receipts?all=true&excludeSetOffs=true${searchParam}`)}
           />
           <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
             <Plus className="h-4 w-4" /> Record Receipt
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search buyer, payer, invoice no, ref no, description…"
+          containerClassName="w-full sm:w-80"
+          className="h-9"
+        />
       </div>
 
       <div className="rounded-lg border bg-card overflow-x-auto">
@@ -582,10 +604,14 @@ export default function ReceiptsPage() {
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
             )}
             {!isLoading && total === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No receipts recorded yet.</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  {debouncedSearch.trim() ? `No receipts found matching "${debouncedSearch.trim()}".` : 'No receipts recorded yet.'}
+                </TableCell>
+              </TableRow>
             )}
             {visibleReceipts.map((r) => {
               const typeLabel = RECEIPT_TYPES.find((t) => t.value === r.type)?.label ?? r.type;

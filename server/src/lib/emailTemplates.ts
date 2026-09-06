@@ -1,11 +1,11 @@
 /**
  * RVP Industries — Resend Email Templates
  * ─────────────────────────────────────────
- * "Tamarind & Bone" themed HTML email templates for all document types.
+ * Clean, professional, typography-driven email templates.
+ * No emojis, no colored badges, no gradients — just elegant business correspondence.
  *
- * Every template uses inline styles + table layout for maximum email client
- * compatibility (Outlook, Gmail, Yahoo, Apple Mail). No CSS variables, no
- * flexbox, no external stylesheets, no Google Fonts link tags.
+ * Inspired by Apple transactional emails and Stripe receipts:
+ * white card, thin borders, restrained color, strong type hierarchy.
  *
  * Web-safe font fallbacks:
  *   Display (headings) → Georgia, 'Times New Roman', serif   (≈ Fraunces)
@@ -13,38 +13,25 @@
  *   Mono (numbers)     → 'Courier New', monospace            (≈ Geist Mono)
  */
 
-/* ── Design Tokens (hardcoded for email HTML) ──────────────────────────── */
 const T = {
-  // Canvas & surfaces
-  canvasBg:       '#f3eee3',   // warm bone
-  cardBg:         '#fffcf6',   // cream
-  cardBorder:     '#e5d9c2',   // warm hairline
+  bg:         '#f5f2ec',
+  card:       '#ffffff',
+  ink:        '#1a1610',
+  secondary:  '#6b6258',
+  tertiary:   '#9a9084',
+  border:     '#e8e2d8',
+  accent:     '#8b4513',   // understated warm brown
+  green:      '#2d6a4f',
+  red:        '#8b3a2a',
+  warm:       '#a0845c',
 
-  // Text
-  ink:            '#251c12',   // espresso
-  muted:          '#897a63',   // warm taupe
-  light:          '#b5a68e',   // lighter taupe for subtle text
-
-  // Accents
-  tamarind:       '#ad4f0a',   // primary
-  tamarindLight:  '#fdf6ea',   // primary foreground
-  forest:         '#1f5b41',   // success / green
-  forestLight:    '#f1f6f2',
-  warning:        '#c07c12',
-  warningLight:   '#fff8ec',
-  brick:          '#b23a22',   // destructive / overdue
-  brickLight:     '#fff5f1',
-  amber:          '#f0b34a',   // sidebar accent / gold
-
-  // Fonts
-  display:        "Georgia, 'Times New Roman', serif",
-  body:           "Helvetica, Arial, sans-serif",
-  mono:           "'Courier New', Courier, monospace",
+  display:    "Georgia, 'Times New Roman', serif",
+  body:       "Helvetica, Arial, sans-serif",
+  mono:       "'Courier New', Courier, monospace",
 } as const;
 
 /* ── Helpers ───────────────────────────────────────────────────────────── */
 
-/** Format a number as ₹X,XX,XXX.XX (Indian locale) */
 function formatINR(amount: number): string {
   return '₹' + amount.toLocaleString('en-IN', {
     minimumFractionDigits: 2,
@@ -52,7 +39,6 @@ function formatINR(amount: number): string {
   });
 }
 
-/** Format a Date as "15 Sep 2025" */
 function formatDate(d: Date | string): string {
   const date = typeof d === 'string' ? new Date(d) : d;
   return date.toLocaleDateString('en-IN', {
@@ -68,23 +54,22 @@ function formatDate(d: Date | string): string {
 interface LayoutOptions {
   preheader?: string;
   companyName?: string | null;
-  companyTagline?: string;
   companyAddress?: string | null;
   companyGstin?: string | null;
   companyContact?: string | null;
 }
 
-/**
- * Master email shell. Every template wraps its body content through this.
- * Produces a full HTML document with DOCTYPE, head, and table-based layout.
- */
 function baseLayout(bodyContent: string, opts: LayoutOptions = {}): string {
   const preheader = opts.preheader ?? '';
-  const companyName = opts.companyName ?? 'RVP INDUSTRIES';
-  const companyTagline = opts.companyTagline ?? 'Tamarind Processing & Export';
+  const companyName = opts.companyName ?? 'RVP Industries';
   const companyAddress = opts.companyAddress ?? undefined;
   const companyGstin = opts.companyGstin ?? undefined;
   const companyContact = opts.companyContact ?? undefined;
+
+  const footerParts: string[] = [];
+  if (companyAddress) footerParts.push(companyAddress);
+  if (companyGstin) footerParts.push(`GSTIN: ${companyGstin}`);
+  if (companyContact) footerParts.push(companyContact);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -97,88 +82,57 @@ function baseLayout(bodyContent: string, opts: LayoutOptions = {}): string {
   <title>${companyName}</title>
   <!--[if mso]>
   <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
-  <style>table,td{border-collapse:collapse;mso-table-lspace:0;mso-table-rspace:0}img{-ms-interpolation-mode:bicubic}</style>
+  <style>table,td{border-collapse:collapse;mso-table-lspace:0;mso-table-rspace:0}</style>
   <![endif]-->
   <style type="text/css">
     body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
     table,td{mso-table-lspace:0;mso-table-rspace:0}
-    img{-ms-interpolation-mode:bicubic;border:0;height:auto;line-height:100%;outline:none;text-decoration:none}
     body{margin:0;padding:0;width:100%!important;min-width:100%}
     @media only screen and (max-width:620px){
-      .mobile-full{width:100%!important;max-width:100%!important}
-      .mobile-pad{padding-left:16px!important;padding-right:16px!important}
+      .outer{width:100%!important;max-width:100%!important}
+      .inner{padding-left:24px!important;padding-right:24px!important}
     }
   </style>
 </head>
-<body style="margin:0;padding:0;background-color:${T.canvasBg};font-family:${T.body};color:${T.ink};line-height:1.6;-webkit-font-smoothing:antialiased;">
-  ${preheader ? `<div style="display:none;font-size:1px;color:${T.canvasBg};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
+<body style="margin:0;padding:0;background-color:${T.bg};font-family:${T.body};color:${T.ink};line-height:1.6;">
+  ${preheader ? `<div style="display:none;font-size:1px;color:${T.bg};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
 
-  <!-- Outer canvas table -->
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:${T.canvasBg};">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:${T.bg};">
     <tr>
-      <td align="center" style="padding:32px 12px;">
-
-        <!-- Card container -->
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="mobile-full" style="max-width:600px;width:100%;background-color:${T.cardBg};border:1px solid ${T.cardBorder};border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(30,22,14,0.08);">
-
-          <!-- Top accent line -->
-          <tr>
-            <td style="height:4px;background:linear-gradient(90deg, ${T.tamarind}, ${T.amber}, ${T.forest});font-size:0;line-height:0;">&nbsp;</td>
-          </tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" class="outer" style="max-width:560px;width:100%;background-color:${T.card};border:1px solid ${T.border};border-radius:4px;">
 
           <!-- Header -->
           <tr>
-            <td style="padding:28px 40px 20px 40px;border-bottom:1px solid ${T.cardBorder};" class="mobile-pad">
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                <tr>
-                  <td>
-                    <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-                      <tr>
-                        <td style="vertical-align:middle;padding-right:14px;">
-                          <div style="width:40px;height:40px;background:linear-gradient(135deg, #3b1a0e, #1a0a05);border-radius:10px;text-align:center;line-height:40px;">
-                            <span style="color:${T.amber};font-size:20px;font-family:${T.display};font-weight:bold;">R</span>
-                          </div>
-                        </td>
-                        <td style="vertical-align:middle;">
-                          <div style="font-family:${T.display};font-size:20px;font-weight:700;color:${T.ink};letter-spacing:-0.02em;line-height:1.2;">${companyName}</div>
-                          <div style="font-family:${T.body};font-size:12px;color:${T.muted};letter-spacing:0.04em;text-transform:uppercase;margin-top:1px;">${companyTagline}</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
+            <td style="padding:36px 44px 28px 44px;" class="inner">
+              <div style="font-family:${T.display};font-size:18px;font-weight:700;color:${T.ink};letter-spacing:0.02em;">${companyName}</div>
             </td>
           </tr>
 
-          <!-- Body Content -->
+          <!-- Divider -->
+          <tr><td style="padding:0 44px;" class="inner"><div style="border-top:1px solid ${T.border};"></div></td></tr>
+
+          <!-- Body -->
           <tr>
-            <td style="padding:0;">
+            <td style="padding:28px 44px;" class="inner">
               ${bodyContent}
             </td>
           </tr>
 
+          <!-- Footer divider -->
+          <tr><td style="padding:0 44px;" class="inner"><div style="border-top:1px solid ${T.border};"></div></td></tr>
+
           <!-- Footer -->
           <tr>
-            <td style="padding:24px 40px 28px 40px;border-top:1px solid ${T.cardBorder};background-color:#faf7f0;" class="mobile-pad">
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                ${companyAddress ? `<tr><td style="font-size:12px;color:${T.muted};line-height:1.5;padding-bottom:6px;">${companyAddress}</td></tr>` : ''}
-                ${companyGstin ? `<tr><td style="font-size:12px;color:${T.muted};line-height:1.5;">GSTIN: <span style="font-family:${T.mono};color:${T.ink};font-weight:600;">${companyGstin}</span></td></tr>` : ''}
-                ${companyContact ? `<tr><td style="font-size:12px;color:${T.muted};line-height:1.5;padding-bottom:12px;">${companyContact}</td></tr>` : ''}
-                <tr>
-                  <td style="padding-top:12px;border-top:1px solid ${T.cardBorder};">
-                    <p style="margin:0;font-size:11px;color:${T.light};line-height:1.5;text-align:center;">
-                      This is a system-generated email from ${companyName}. Please do not reply to this email.<br>
-                      For queries, contact our accounts department.
-                    </p>
-                  </td>
-                </tr>
-              </table>
+            <td style="padding:24px 44px 32px 44px;" class="inner">
+              ${footerParts.length > 0 ? `<p style="margin:0 0 12px 0;font-size:12px;color:${T.tertiary};line-height:1.6;">${footerParts.join('<br>')}</p>` : ''}
+              <p style="margin:0;font-size:11px;color:${T.tertiary};line-height:1.5;">
+                This is an automatically generated email. Please do not reply directly.
+              </p>
             </td>
           </tr>
 
         </table>
-
       </td>
     </tr>
   </table>
@@ -186,130 +140,53 @@ function baseLayout(bodyContent: string, opts: LayoutOptions = {}): string {
 </html>`;
 }
 
-/* ── Document Badge ────────────────────────────────────────────────────── */
+/* ── Composable blocks ─────────────────────────────────────────────────── */
 
-function documentBadge(label: string, color: string, bgColor: string, icon: string): string {
-  return `
-    <tr>
-      <td style="padding:28px 40px 0 40px;" class="mobile-pad">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-          <tr>
-            <td style="background-color:${bgColor};border:1px solid ${color}20;border-radius:6px;padding:8px 16px;">
-              <span style="font-size:14px;margin-right:6px;">${icon}</span>
-              <span style="font-family:${T.body};font-size:12px;font-weight:700;color:${color};letter-spacing:0.08em;text-transform:uppercase;">${label}</span>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
+function heading(text: string): string {
+  return `<h1 style="margin:0 0 20px 0;font-family:${T.display};font-size:22px;font-weight:700;color:${T.ink};letter-spacing:-0.01em;line-height:1.3;">${text}</h1>`;
 }
 
-/* ── Key-Value Detail Table ────────────────────────────────────────────── */
+function greeting(name: string): string {
+  return `<p style="margin:0 0 16px 0;font-size:14px;color:${T.ink};line-height:1.7;">Dear ${name},</p>`;
+}
+
+function paragraph(text: string): string {
+  return `<p style="margin:0 0 16px 0;font-size:14px;color:${T.secondary};line-height:1.7;">${text}</p>`;
+}
 
 interface DetailRow {
   label: string;
   value: string;
-  bold?: boolean;
-  valueColor?: string;
-  mono?: boolean;
+  strong?: boolean;
 }
 
 function detailTable(rows: DetailRow[]): string {
-  const rowsHtml = rows.map((r, i) => {
-    const isLast = i === rows.length - 1;
-    const borderBottom = isLast ? '' : `border-bottom:1px solid ${T.cardBorder};`;
-    const valueStyle = [
-      `font-size:14px`,
-      `color:${r.valueColor || T.ink}`,
-      r.bold ? 'font-weight:700' : 'font-weight:600',
-      r.mono ? `font-family:${T.mono}` : `font-family:${T.body}`,
-      'text-align:right',
-    ].join(';');
-
-    return `
-      <tr>
-        <td style="padding:10px 0;${borderBottom}font-size:13px;color:${T.muted};font-family:${T.body};white-space:nowrap;width:40%;">${r.label}</td>
-        <td style="padding:10px 0;${borderBottom}${valueStyle}">${r.value}</td>
-      </tr>`;
+  const html = rows.map((r, i) => {
+    const borderTop = i === 0 ? '' : `border-top:1px solid ${T.border};`;
+    return `<tr>
+      <td style="padding:10px 0;${borderTop}font-size:13px;color:${T.tertiary};vertical-align:top;width:40%;">${r.label}</td>
+      <td style="padding:10px 0;${borderTop}font-size:13px;color:${T.ink};text-align:right;vertical-align:top;${r.strong ? 'font-weight:700;' : ''}">${r.value}</td>
+    </tr>`;
   }).join('');
 
-  return `
-    <tr>
-      <td style="padding:20px 40px;" class="mobile-pad">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#faf7f0;border:1px solid ${T.cardBorder};border-radius:8px;">
-          <tr>
-            <td style="padding:4px 20px;">
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                ${rowsHtml}
-              </table>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:20px 0;">${html}</table>`;
 }
 
-/* ── Greeting Block ────────────────────────────────────────────────────── */
-
-function greetingBlock(partyName: string, lines: string[]): string {
-  const paras = lines.map(l => `<p style="margin:0 0 12px 0;font-size:14px;color:${T.ink};line-height:1.65;">${l}</p>`).join('');
-  return `
+function amount(label: string, value: string): string {
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:20px 0;border-top:2px solid ${T.ink};border-bottom:1px solid ${T.border};">
     <tr>
-      <td style="padding:24px 40px 0 40px;" class="mobile-pad">
-        <p style="margin:0 0 14px 0;font-size:15px;color:${T.ink};font-weight:600;">Dear ${partyName},</p>
-        ${paras}
-      </td>
-    </tr>`;
+      <td style="padding:12px 0;font-size:13px;color:${T.tertiary};text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">${label}</td>
+      <td style="padding:12px 0;font-size:18px;font-family:${T.display};font-weight:700;color:${T.ink};text-align:right;">${value}</td>
+    </tr>
+  </table>`;
 }
 
-/* ── CTA / Note Block ─────────────────────────────────────────────────── */
-
-function noteBlock(icon: string, text: string, bgColor: string = '#faf7f0'): string {
-  return `
-    <tr>
-      <td style="padding:0 40px 24px 40px;" class="mobile-pad">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-          <tr>
-            <td style="background-color:${bgColor};border-radius:6px;padding:14px 18px;text-align:center;">
-              <span style="font-size:14px;margin-right:6px;">${icon}</span>
-              <span style="font-size:13px;color:${T.muted};line-height:1.5;">${text}</span>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
+function signoff(companyName: string): string {
+  return `<p style="margin:24px 0 0 0;font-size:14px;color:${T.ink};line-height:1.7;">Regards,<br><span style="font-weight:600;">${companyName}</span></p>`;
 }
 
-/* ── Amount Highlight Block ────────────────────────────────────────────── */
-
-function amountHighlight(label: string, amount: string, color: string, bgColor: string): string {
-  return `
-    <tr>
-      <td style="padding:8px 40px 20px 40px;" class="mobile-pad">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-          <tr>
-            <td style="background-color:${bgColor};border-left:4px solid ${color};border-radius:0 8px 8px 0;padding:18px 24px;text-align:center;">
-              <div style="font-size:12px;color:${color};text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin-bottom:4px;">${label}</div>
-              <div style="font-family:${T.display};font-size:28px;font-weight:700;color:${color};letter-spacing:-0.02em;">${amount}</div>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
-}
-
-/* ── Regards / Sign-off Block ──────────────────────────────────────────── */
-
-function regardsBlock(companyName: string): string {
-  return `
-    <tr>
-      <td style="padding:4px 40px 28px 40px;" class="mobile-pad">
-        <p style="margin:0;font-size:14px;color:${T.ink};line-height:1.65;">
-          Warm regards,<br>
-          <strong style="color:${T.tamarind};">${companyName}</strong>
-        </p>
-      </td>
-    </tr>`;
+function note(text: string): string {
+  return `<p style="margin:20px 0 0 0;font-size:12px;color:${T.tertiary};line-height:1.6;font-style:italic;">${text}</p>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -330,30 +207,27 @@ export interface InvoiceEmailData {
 }
 
 export function invoiceEmailHtml(data: InvoiceEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'Invoice Number', value: data.invoiceNumber, bold: true, mono: true },
-    { label: 'Invoice Date', value: formatDate(data.invoiceDate) },
-    { label: 'Total Amount', value: formatINR(data.amount), bold: true, valueColor: T.tamarind },
+  const rows: DetailRow[] = [
+    { label: 'Invoice No.', value: data.invoiceNumber, strong: true },
+    { label: 'Date', value: formatDate(data.invoiceDate) },
   ];
-  if (data.irn) details.push({ label: 'IRN', value: data.irn.slice(0, 20) + '…', mono: true });
-  if (data.vehicleNumber) details.push({ label: 'Vehicle Number', value: data.vehicleNumber, mono: true });
+  if (data.irn) rows.push({ label: 'IRN', value: data.irn.length > 24 ? data.irn.slice(0, 24) + '…' : data.irn });
+  if (data.vehicleNumber) rows.push({ label: 'Vehicle', value: data.vehicleNumber });
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('Tax Invoice', T.tamarind, T.tamarindLight, '📄')}
-      ${greetingBlock(data.partyName, [
-        `Please find attached your tax invoice <strong style="color:${T.tamarind};">${data.invoiceNumber}</strong>${data.irn ? ' along with the e-invoice (IRN) details' : ''}.`,
-      ])}
-      ${amountHighlight('Invoice Amount', formatINR(data.amount), T.tamarind, T.tamarindLight)}
-      ${detailTable(details)}
-      ${noteBlock('📎', 'The tax invoice PDF is attached to this email for your records.')}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('Tax Invoice'),
+    greeting(data.partyName),
+    paragraph(`Please find attached your tax invoice <strong>${data.invoiceNumber}</strong>${data.irn ? ' with the e-invoice (IRN) details' : ''}.`),
+    amount('Total Amount', formatINR(data.amount)),
+    detailTable(rows),
+    paragraph('The invoice PDF is attached to this email.'),
+    signoff(cName),
+  ].join('\n');
 
   return baseLayout(body, {
-    preheader: `Tax Invoice ${data.invoiceNumber} — ${formatINR(data.amount)}`,
+    preheader: `Invoice ${data.invoiceNumber} — ${formatINR(data.amount)}`,
     companyName: cName,
     companyAddress: data.companyAddress,
     companyGstin: data.companyGstin,
@@ -379,30 +253,28 @@ export interface EwbEmailData {
 }
 
 export function ewbEmailHtml(data: EwbEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'E-Way Bill No.', value: data.ewbNumber, bold: true, mono: true },
-    { label: 'Invoice Number', value: data.invoiceNumber, mono: true },
+  const rows: DetailRow[] = [
+    { label: 'E-Way Bill No.', value: data.ewbNumber, strong: true },
+    { label: 'Invoice No.', value: data.invoiceNumber },
     { label: 'Invoice Date', value: formatDate(data.invoiceDate) },
   ];
-  if (data.validUpto) details.push({ label: 'Valid Until', value: formatDate(data.validUpto), bold: true, valueColor: T.forest });
-  if (data.vehicleNumber) details.push({ label: 'Vehicle Number', value: data.vehicleNumber, mono: true });
+  if (data.validUpto) rows.push({ label: 'Valid Until', value: formatDate(data.validUpto), strong: true });
+  if (data.vehicleNumber) rows.push({ label: 'Vehicle', value: data.vehicleNumber });
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('E-Way Bill', T.forest, T.forestLight, '🚛')}
-      ${greetingBlock(data.partyName, [
-        `Please find attached the e-way bill <strong style="color:${T.forest};">${data.ewbNumber}</strong> for invoice ${data.invoiceNumber}.`,
-        data.validUpto ? `This e-way bill is valid until <strong>${formatDate(data.validUpto)}</strong>.` : '',
-      ].filter(Boolean))}
-      ${detailTable(details)}
-      ${noteBlock('📎', 'The E-Way Bill PDF is attached to this email for your records.', T.forestLight)}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('E-Way Bill'),
+    greeting(data.partyName),
+    paragraph(`Please find attached the e-way bill <strong>${data.ewbNumber}</strong> for invoice ${data.invoiceNumber}.`),
+    data.validUpto ? paragraph(`Valid until <strong>${formatDate(data.validUpto)}</strong>.`) : '',
+    detailTable(rows),
+    paragraph('The E-Way Bill PDF is attached to this email.'),
+    signoff(cName),
+  ].filter(Boolean).join('\n');
 
   return baseLayout(body, {
-    preheader: `E-Way Bill ${data.ewbNumber} for Invoice ${data.invoiceNumber}`,
+    preheader: `E-Way Bill ${data.ewbNumber} — Invoice ${data.invoiceNumber}`,
     companyName: cName,
     companyAddress: data.companyAddress,
     companyGstin: data.companyGstin,
@@ -428,28 +300,25 @@ export interface CreditNoteEmailData {
 }
 
 export function creditNoteEmailHtml(data: CreditNoteEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'Credit Note No.', value: data.creditNoteNumber, bold: true, mono: true },
+  const rows: DetailRow[] = [
+    { label: 'Credit Note No.', value: data.creditNoteNumber, strong: true },
     { label: 'Date', value: formatDate(data.creditNoteDate) },
-    { label: 'Credit Amount', value: formatINR(data.amount), bold: true, valueColor: T.forest },
+    { label: 'Amount', value: formatINR(data.amount), strong: true },
   ];
-  if (data.againstInvoice) details.push({ label: 'Against Invoice', value: data.againstInvoice, mono: true });
-  if (data.reason) details.push({ label: 'Reason', value: data.reason });
+  if (data.againstInvoice) rows.push({ label: 'Against Invoice', value: data.againstInvoice });
+  if (data.reason) rows.push({ label: 'Reason', value: data.reason });
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('Credit Note', T.forest, T.forestLight, '💳')}
-      ${greetingBlock(data.partyName, [
-        `A credit note <strong style="color:${T.forest};">${data.creditNoteNumber}</strong> has been issued in your favour for <strong style="color:${T.forest};">${formatINR(data.amount)}</strong>.`,
-        data.againstInvoice ? `This is against invoice <strong>${data.againstInvoice}</strong>.` : '',
-      ].filter(Boolean))}
-      ${amountHighlight('Credit Amount', formatINR(data.amount), T.forest, T.forestLight)}
-      ${detailTable(details)}
-      ${noteBlock('📎', 'The Credit Note PDF is attached to this email for your records.', T.forestLight)}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('Credit Note'),
+    greeting(data.partyName),
+    paragraph(`A credit note <strong>${data.creditNoteNumber}</strong> for <strong>${formatINR(data.amount)}</strong> has been issued in your favour.`),
+    amount('Credit Amount', formatINR(data.amount)),
+    detailTable(rows),
+    paragraph('The credit note PDF is attached to this email.'),
+    signoff(cName),
+  ].join('\n');
 
   return baseLayout(body, {
     preheader: `Credit Note ${data.creditNoteNumber} — ${formatINR(data.amount)}`,
@@ -478,28 +347,25 @@ export interface DebitNoteEmailData {
 }
 
 export function debitNoteEmailHtml(data: DebitNoteEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'Debit Note No.', value: data.debitNoteNumber, bold: true, mono: true },
+  const rows: DetailRow[] = [
+    { label: 'Debit Note No.', value: data.debitNoteNumber, strong: true },
     { label: 'Date', value: formatDate(data.debitNoteDate) },
-    { label: 'Debit Amount', value: formatINR(data.amount), bold: true, valueColor: T.warning },
+    { label: 'Amount', value: formatINR(data.amount), strong: true },
   ];
-  if (data.againstInvoice) details.push({ label: 'Against Invoice', value: data.againstInvoice, mono: true });
-  if (data.reason) details.push({ label: 'Reason', value: data.reason });
+  if (data.againstInvoice) rows.push({ label: 'Against Invoice', value: data.againstInvoice });
+  if (data.reason) rows.push({ label: 'Reason', value: data.reason });
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('Debit Note', T.warning, T.warningLight, '📋')}
-      ${greetingBlock(data.partyName, [
-        `A debit note <strong style="color:${T.warning};">${data.debitNoteNumber}</strong> has been raised for <strong style="color:${T.warning};">${formatINR(data.amount)}</strong>.`,
-        data.againstInvoice ? `This is against invoice <strong>${data.againstInvoice}</strong>.` : '',
-      ].filter(Boolean))}
-      ${amountHighlight('Debit Amount', formatINR(data.amount), T.warning, T.warningLight)}
-      ${detailTable(details)}
-      ${noteBlock('📎', 'The Debit Note PDF is attached to this email for your records.', T.warningLight)}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('Debit Note'),
+    greeting(data.partyName),
+    paragraph(`A debit note <strong>${data.debitNoteNumber}</strong> for <strong>${formatINR(data.amount)}</strong> has been raised.`),
+    amount('Debit Amount', formatINR(data.amount)),
+    detailTable(rows),
+    paragraph('The debit note PDF is attached to this email.'),
+    signoff(cName),
+  ].join('\n');
 
   return baseLayout(body, {
     preheader: `Debit Note ${data.debitNoteNumber} — ${formatINR(data.amount)}`,
@@ -529,38 +395,30 @@ export interface PaymentReceivedEmailData {
 }
 
 export function paymentReceivedEmailHtml(data: PaymentReceivedEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'Amount Received', value: formatINR(data.amount), bold: true, valueColor: T.forest },
-    { label: 'Payment Date', value: formatDate(data.paymentDate) },
+  const rows: DetailRow[] = [
+    { label: 'Amount', value: formatINR(data.amount), strong: true },
+    { label: 'Date', value: formatDate(data.paymentDate) },
   ];
-  if (data.paymentMode) details.push({ label: 'Payment Mode', value: data.paymentMode });
-  if (data.referenceNumber) details.push({ label: 'Reference / UTR', value: data.referenceNumber, mono: true });
-  if (data.againstInvoices) details.push({ label: 'Against Invoices', value: data.againstInvoices });
+  if (data.paymentMode) rows.push({ label: 'Mode', value: data.paymentMode });
+  if (data.referenceNumber) rows.push({ label: 'Reference', value: data.referenceNumber });
+  if (data.againstInvoices) rows.push({ label: 'Against', value: data.againstInvoices });
   if (data.balanceOutstanding != null) {
-    details.push({
-      label: 'Balance Outstanding',
-      value: formatINR(data.balanceOutstanding),
-      bold: true,
-      valueColor: data.balanceOutstanding > 0 ? T.warning : T.forest,
-    });
+    rows.push({ label: 'Balance Outstanding', value: formatINR(data.balanceOutstanding), strong: true });
   }
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('Payment Received', T.forest, T.forestLight, '✅')}
-      ${greetingBlock(data.partyName, [
-        `We have received your payment of <strong style="color:${T.forest};">${formatINR(data.amount)}</strong>. Thank you for your prompt payment.`,
-      ])}
-      ${amountHighlight('Payment Received', formatINR(data.amount), T.forest, T.forestLight)}
-      ${detailTable(details)}
-      ${noteBlock('🙏', 'Thank you for your continued business with us.', T.forestLight)}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('Payment Received'),
+    greeting(data.partyName),
+    paragraph(`We acknowledge receipt of your payment of <strong>${formatINR(data.amount)}</strong>. Thank you.`),
+    amount('Amount Received', formatINR(data.amount)),
+    detailTable(rows),
+    signoff(cName),
+  ].join('\n');
 
   return baseLayout(body, {
-    preheader: `Payment of ${formatINR(data.amount)} received — Thank you`,
+    preheader: `Payment received — ${formatINR(data.amount)}`,
     companyName: cName,
     companyAddress: data.companyAddress,
     companyGstin: data.companyGstin,
@@ -587,28 +445,26 @@ export interface ReceiptEmailData {
 }
 
 export function receiptEmailHtml(data: ReceiptEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'Receipt Number', value: data.receiptNumber, bold: true, mono: true },
+  const rows: DetailRow[] = [
+    { label: 'Receipt No.', value: data.receiptNumber, strong: true },
     { label: 'Date', value: formatDate(data.receiptDate) },
-    { label: 'Amount', value: formatINR(data.amount), bold: true, valueColor: T.tamarind },
+    { label: 'Amount', value: formatINR(data.amount), strong: true },
   ];
-  if (data.paymentMode) details.push({ label: 'Payment Mode', value: data.paymentMode });
-  if (data.referenceNumber) details.push({ label: 'Reference / UTR', value: data.referenceNumber, mono: true });
-  if (data.againstInvoices) details.push({ label: 'Against Invoices', value: data.againstInvoices });
+  if (data.paymentMode) rows.push({ label: 'Mode', value: data.paymentMode });
+  if (data.referenceNumber) rows.push({ label: 'Reference', value: data.referenceNumber });
+  if (data.againstInvoices) rows.push({ label: 'Against', value: data.againstInvoices });
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('Payment Receipt', T.tamarind, T.tamarindLight, '🧾')}
-      ${greetingBlock(data.partyName, [
-        `Please find attached the payment receipt <strong style="color:${T.tamarind};">${data.receiptNumber}</strong> for <strong style="color:${T.tamarind};">${formatINR(data.amount)}</strong>.`,
-      ])}
-      ${amountHighlight('Receipt Amount', formatINR(data.amount), T.tamarind, T.tamarindLight)}
-      ${detailTable(details)}
-      ${noteBlock('📎', 'The receipt PDF is attached to this email for your records.')}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('Payment Receipt'),
+    greeting(data.partyName),
+    paragraph(`Please find attached receipt <strong>${data.receiptNumber}</strong> for <strong>${formatINR(data.amount)}</strong>.`),
+    amount('Receipt Amount', formatINR(data.amount)),
+    detailTable(rows),
+    paragraph('The receipt PDF is attached to this email.'),
+    signoff(cName),
+  ].join('\n');
 
   return baseLayout(body, {
     preheader: `Receipt ${data.receiptNumber} — ${formatINR(data.amount)}`,
@@ -627,14 +483,12 @@ export interface PaymentReminderEmailData {
   partyName: string;
   totalOutstanding: number;
   invoiceCount: number;
-  /** Pre-formatted list: "INV-001 (₹50,000) · INV-002 (₹30,000)" */
   invoiceSummary?: string | null;
   overdueSince?: Date | string | null;
   companyName?: string | null;
   companyAddress?: string | null;
   companyGstin?: string | null;
   companyContact?: string | null;
-  /** Company bank details for the payment section */
   bankName?: string;
   bankAccountNumber?: string;
   bankIfsc?: string;
@@ -642,69 +496,50 @@ export interface PaymentReminderEmailData {
 }
 
 export function paymentReminderEmailHtml(data: PaymentReminderEmailData): string {
-  const cName = data.companyName || 'RVP INDUSTRIES';
+  const cName = data.companyName || 'RVP Industries';
 
-  const details: DetailRow[] = [
-    { label: 'Total Outstanding', value: formatINR(data.totalOutstanding), bold: true, valueColor: T.brick },
-    { label: 'Invoices Pending', value: `${data.invoiceCount} invoice${data.invoiceCount !== 1 ? 's' : ''}`, bold: true },
+  const rows: DetailRow[] = [
+    { label: 'Outstanding', value: formatINR(data.totalOutstanding), strong: true },
+    { label: 'Invoices', value: `${data.invoiceCount}` },
   ];
-  if (data.overdueSince) details.push({ label: 'Overdue Since', value: formatDate(data.overdueSince), valueColor: T.brick });
+  if (data.overdueSince) rows.push({ label: 'Overdue Since', value: formatDate(data.overdueSince) });
 
-  // Bank details section
-  let bankSection = '';
+  let bankBlock = '';
   if (data.bankName && data.bankAccountNumber && data.bankIfsc) {
-    bankSection = `
-    <tr>
-      <td style="padding:0 40px 20px 40px;" class="mobile-pad">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:${T.forestLight};border:1px solid ${T.forest}20;border-radius:8px;">
-          <tr>
-            <td style="padding:16px 20px;">
-              <div style="font-size:11px;color:${T.forest};text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:10px;">🏦 Bank Details for Payment</div>
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                ${data.bankAccountName ? `<tr><td style="font-size:12px;color:${T.muted};padding:2px 0;width:40%;">Account Name</td><td style="font-size:12px;color:${T.ink};font-weight:600;padding:2px 0;">${data.bankAccountName}</td></tr>` : ''}
-                <tr><td style="font-size:12px;color:${T.muted};padding:2px 0;width:40%;">Bank</td><td style="font-size:12px;color:${T.ink};font-weight:600;padding:2px 0;">${data.bankName}</td></tr>
-                <tr><td style="font-size:12px;color:${T.muted};padding:2px 0;">A/C Number</td><td style="font-size:12px;color:${T.ink};font-weight:600;font-family:${T.mono};padding:2px 0;">${data.bankAccountNumber}</td></tr>
-                <tr><td style="font-size:12px;color:${T.muted};padding:2px 0;">IFSC</td><td style="font-size:12px;color:${T.ink};font-weight:600;font-family:${T.mono};padding:2px 0;">${data.bankIfsc}</td></tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
+    const bankRows: string[] = [];
+    if (data.bankAccountName) bankRows.push(`<tr><td style="padding:4px 0;font-size:12px;color:${T.tertiary};width:35%;">Account Name</td><td style="padding:4px 0;font-size:12px;color:${T.ink};font-weight:600;">${data.bankAccountName}</td></tr>`);
+    bankRows.push(`<tr><td style="padding:4px 0;font-size:12px;color:${T.tertiary};width:35%;">Bank</td><td style="padding:4px 0;font-size:12px;color:${T.ink};font-weight:600;">${data.bankName}</td></tr>`);
+    bankRows.push(`<tr><td style="padding:4px 0;font-size:12px;color:${T.tertiary};">A/C No.</td><td style="padding:4px 0;font-size:12px;color:${T.ink};font-weight:600;font-family:${T.mono};">${data.bankAccountNumber}</td></tr>`);
+    bankRows.push(`<tr><td style="padding:4px 0;font-size:12px;color:${T.tertiary};">IFSC</td><td style="padding:4px 0;font-size:12px;color:${T.ink};font-weight:600;font-family:${T.mono};">${data.bankIfsc}</td></tr>`);
+
+    bankBlock = `
+      <div style="margin:20px 0 0 0;padding:16px 0 0 0;border-top:1px solid ${T.border};">
+        <p style="margin:0 0 8px 0;font-size:12px;font-weight:700;color:${T.secondary};text-transform:uppercase;letter-spacing:0.05em;">Bank Details</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">${bankRows.join('')}</table>
+      </div>`;
   }
 
-  // Invoice summary section
-  let invoiceSummarySection = '';
+  let invoiceBlock = '';
   if (data.invoiceSummary) {
-    invoiceSummarySection = `
-    <tr>
-      <td style="padding:0 40px 20px 40px;" class="mobile-pad">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#faf7f0;border:1px solid ${T.cardBorder};border-radius:8px;">
-          <tr>
-            <td style="padding:14px 20px;">
-              <div style="font-size:11px;color:${T.muted};text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:8px;">📋 Pending Invoices</div>
-              <div style="font-size:13px;color:${T.ink};line-height:1.7;font-family:${T.mono};">${data.invoiceSummary}</div>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
+    invoiceBlock = `
+      <div style="margin:16px 0 0 0;padding:14px 0 0 0;border-top:1px solid ${T.border};">
+        <p style="margin:0 0 6px 0;font-size:12px;font-weight:700;color:${T.secondary};text-transform:uppercase;letter-spacing:0.05em;">Pending Invoices</p>
+        <p style="margin:0;font-size:13px;color:${T.ink};line-height:1.8;font-family:${T.mono};">${data.invoiceSummary}</p>
+      </div>`;
   }
 
-  const body = `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-      ${documentBadge('Payment Reminder', T.brick, T.brickLight, '⏰')}
-      ${greetingBlock(data.partyName, [
-        `This is a gentle reminder regarding your outstanding dues of <strong style="color:${T.brick};">${formatINR(data.totalOutstanding)}</strong> across ${data.invoiceCount} invoice${data.invoiceCount !== 1 ? 's' : ''}.`,
-        'We kindly request you to arrange the payment at the earliest convenience.',
-      ])}
-      ${amountHighlight('Outstanding Amount', formatINR(data.totalOutstanding), T.brick, T.brickLight)}
-      ${detailTable(details)}
-      ${invoiceSummarySection}
-      ${bankSection}
-      ${noteBlock('🤝', 'Please disregard this reminder if payment has already been made. We appreciate your business.', T.brickLight)}
-      ${regardsBlock(cName)}
-    </table>`;
+  const body = [
+    heading('Payment Reminder'),
+    greeting(data.partyName),
+    paragraph(`This is a reminder regarding your outstanding balance of <strong>${formatINR(data.totalOutstanding)}</strong> across ${data.invoiceCount} invoice${data.invoiceCount !== 1 ? 's' : ''}.`),
+    paragraph('We request you to kindly arrange payment at your earliest convenience.'),
+    amount('Amount Due', formatINR(data.totalOutstanding)),
+    detailTable(rows),
+    invoiceBlock,
+    bankBlock,
+    note('If payment has already been made, please disregard this notice.'),
+    signoff(cName),
+  ].filter(Boolean).join('\n');
 
   return baseLayout(body, {
     preheader: `Payment Reminder — ${formatINR(data.totalOutstanding)} outstanding`,

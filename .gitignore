@@ -71,6 +71,7 @@ server/deleted_duplicate_payments*.json
 # DB dumps / restore points (not part of the app)
 server/backups/
 server/scripts/backup_*.json
+server/email-previews/
 
 .vercel
 .env*

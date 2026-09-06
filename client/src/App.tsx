@@ -79,6 +79,7 @@ const ByproductSales = lazyWithPreload(
   () => import('@/pages/ByproductSales')
 );
 const PappuProfitLoss = lazyWithPreload('/sales/profit-loss', () => import('@/pages/PappuProfitLoss'));
+const InternalWeight = lazyWithPreload('/sales/internal-weight', () => import('@/pages/InternalWeight'));
 const DuesOnThisDay = lazyWithPreload(
   ['/sales/dues-today', '/sales/dues-on-this-day'],
   () => import('@/pages/DuesOnThisDay')
@@ -178,6 +179,7 @@ export default function App() {
                   <Route path="/sales/shell" element={<ByproductSales />} />
                   <Route path="/sales/waste" element={<ByproductSales />} />
                   <Route path="/sales/profit-loss" element={<PappuProfitLoss />} />
+                  <Route path="/sales/internal-weight" element={<InternalWeight />} />
                   <Route path="/sales/dues-today" element={<DuesOnThisDay />} />
                   <Route path="/sales/dues-on-this-day" element={<DuesOnThisDay />} />
                   <Route path="/accounts/party-ledger" element={<PartyLedger />} />

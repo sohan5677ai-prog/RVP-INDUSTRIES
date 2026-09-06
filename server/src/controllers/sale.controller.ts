@@ -11,6 +11,7 @@ import {
   lorryReceiptSchema,
   closeSaleOrderSchema,
   updateFreightCostsSchema,
+  updateInternalWeightSchema,
 } from '../schemas/sale.schema.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
@@ -355,6 +356,30 @@ export async function updateDispatchFreightCosts(req: Request, res: Response) {
       ...(data.freightAdditions !== undefined ? { freightAdditions: data.freightAdditions === null ? Prisma.JsonNull : (data.freightAdditions as unknown as Prisma.InputJsonValue) } : {}),
       ...(data.freightDeductions !== undefined ? { freightDeductions: data.freightDeductions === null ? Prisma.JsonNull : (data.freightDeductions as unknown as Prisma.InputJsonValue) } : {}),
     },
+  });
+
+  clearCache('sale-orders');
+  res.json(updated);
+}
+
+/**
+ * Update the internal weight on a dispatch. Intentionally has NO status guard -
+ * the user needs to edit this even after the lorry is delivered, because the
+ * accurate internal weight is sometimes not known at dispatch time.
+ */
+export async function updateDispatchInternalWeight(req: Request, res: Response) {
+  const dispatch = await prisma.saleDispatch.findUnique({ where: { id: req.params.id } });
+  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+
+  const data = updateInternalWeightSchema.parse(req.body);
+
+  if (data.internalWeightKg > dispatch.weightKg) {
+    throw new HttpError(400, 'Internal weight cannot be greater than the dispatched weight.');
+  }
+
+  const updated = await prisma.saleDispatch.update({
+    where: { id: req.params.id },
+    data: { internalWeightKg: data.internalWeightKg },
   });
 
   clearCache('sale-orders');

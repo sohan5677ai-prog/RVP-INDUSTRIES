@@ -116,6 +116,7 @@ const sections: NavSection[] = [
     items: [
       { to: '/sale-orders', label: 'Sale Orders', icon: ClipboardList },
       { to: '/sales/pappu', label: 'Pappu', icon: ShoppingCart },
+      { to: '/sales/internal-weight', label: 'Internal Weight', icon: Scale },
       { to: '/sales/profit-loss', label: 'Pappu Profit & Loss', icon: TrendingUp },
       { to: '/sales/husk', label: 'Husk', icon: Layers },
       { to: '/sales/tps', label: 'TPS (Brokens)', icon: Wheat },

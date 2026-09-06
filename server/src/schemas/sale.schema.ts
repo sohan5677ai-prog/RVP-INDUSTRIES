@@ -130,6 +130,11 @@ export const updateFreightCostsSchema = z.object({
   freightDeductions: z.array(z.object({ label: z.string().min(1), amount: z.coerce.number() })).optional().nullable(),
 });
 
+// Update internal weight on a dispatch (editable even after delivery).
+export const updateInternalWeightSchema = z.object({
+  internalWeightKg: z.coerce.number().int().positive(),
+});
+
 export type CreateSaleOrderInput = z.infer<typeof createSaleOrderSchema>;
 export type DeliverSaleDispatchInput = z.infer<typeof deliverSaleDispatchSchema>;
 export type DispatchSaleOrderInput = z.infer<typeof dispatchSaleOrderSchema>;

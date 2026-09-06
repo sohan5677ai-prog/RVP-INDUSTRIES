@@ -22,6 +22,7 @@ import {
   assignLorryReceiptNumber,
   deleteLorryReceipt,
   updateDispatchFreightCosts,
+  updateDispatchInternalWeight,
 } from '../controllers/sale.controller.js';
 import { downloadSaleDuesReportPdf } from '../controllers/salesDuesReport.controller.js';
 
@@ -88,5 +89,8 @@ router.post('/sale-dispatches/:id/undo', asyncHandler(undoSaleDispatch));
 
 // Adjust / customize freight costs, hamali, kata, transport, additions, and expense deductions
 router.patch('/sale-dispatches/:id/freight-costs', asyncHandler(updateDispatchFreightCosts));
+
+// Update internal weight on a dispatch (editable even after delivery).
+router.patch('/sale-dispatches/:id/internal-weight', asyncHandler(updateDispatchInternalWeight));
 
 export default router;

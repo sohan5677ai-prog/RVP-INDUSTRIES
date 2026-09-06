@@ -6,6 +6,7 @@ import { qrPngBuffer } from '../lib/qrcode.js';
 import { getCompanyProfileRow } from '../controllers/settings.controller.js';
 import { emailService } from './email.service.js';
 import { resolveProductHsn } from '../lib/calc.js';
+import { invoiceEmailHtml, ewbEmailHtml } from '../lib/emailTemplates.js';
 
 /**
  * Loads everything needed to render the tax-invoice PDF for a dispatch
@@ -94,9 +95,20 @@ export async function sendInvoiceEmail(dispatchId: string) {
   if (!order.buyer.email) throw new HttpError(400, `${order.buyer.name} has no email on file - add one in Parties first`);
 
   const buffer = await renderInvoicePdf(pdfData);
-  const html = `<p>Dear ${order.buyer.name},</p>` +
-    `<p>Please find attached the tax invoice <strong>${dispatch.invoiceNumber}</strong> along with the e-invoice (IRN) details.</p>` +
-    `<p>Regards,<br/>${company.name}</p>`;
+  const lineTotal = pdfData.line.quantityKg * pdfData.line.ratePerKg;
+  const invoiceAmount = lineTotal + lineTotal * pdfData.gstRate;
+  const html = invoiceEmailHtml({
+    partyName: order.buyer.name,
+    invoiceNumber: dispatch.invoiceNumber!,
+    invoiceDate: dispatch.invoiceDate!,
+    amount: invoiceAmount,
+    irn: dispatch.irn ?? undefined,
+    vehicleNumber: dispatch.vehicleNumber,
+    companyName: company.name,
+    companyAddress: company.address,
+    companyGstin: company.gstin,
+    companyContact: company.contact,
+  });
 
   return emailService.sendDocumentEmail({
     party: { id: order.buyer.id, email: order.buyer.email, name: order.buyer.name },
@@ -141,10 +153,18 @@ export async function sendEwbEmail(dispatchId: string) {
     dispatchDate: dispatch.dispatchDate,
     qrPngBuffer: await qrPngBuffer(dispatch.ewbNumber),
   });
-  const html = `<p>Dear ${order.buyer.name},</p>` +
-    `<p>Please find attached the e-way bill <strong>${dispatch.ewbNumber}</strong> for invoice ${dispatch.invoiceNumber}.</p>` +
-    `<p>Valid up to: ${dispatch.ewbValidUpto ? dispatch.ewbValidUpto.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }) : ''}</p>` +
-    `<p>Regards,<br/>${company.name}</p>`;
+  const html = ewbEmailHtml({
+    partyName: order.buyer.name,
+    ewbNumber: dispatch.ewbNumber,
+    invoiceNumber: dispatch.invoiceNumber!,
+    invoiceDate: dispatch.invoiceDate!,
+    validUpto: dispatch.ewbValidUpto,
+    vehicleNumber: dispatch.vehicleNumber,
+    companyName: company.name,
+    companyAddress: company.address,
+    companyGstin: company.gstin,
+    companyContact: company.contact,
+  });
 
   return emailService.sendDocumentEmail({
     party: { id: order.buyer.id, email: order.buyer.email, name: order.buyer.name },

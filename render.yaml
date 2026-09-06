@@ -37,7 +37,15 @@ services:
       - key: SUPABASE_STORAGE_BUCKET
         value: invoices
       - key: SLACK_ENABLED
-        value: "false"
+        value: "true"
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: SLACK_SIGNING_SECRET
+        sync: false
+      - key: SLACK_KATA_CHANNEL
+        sync: false
       # WhatsApp via Fast2SMS (shared KNM Multi ERP business number).
       # Test mode defaults ON in code - set WHATSAPP_TEST_MODE=false only after
       # the whole pipeline has been verified against WHATSAPP_TEST_NUMBER.

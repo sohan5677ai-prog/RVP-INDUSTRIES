@@ -732,7 +732,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const buyerKataKg = Math.round((Number(buyerKataTonnes) || 0) * 1000);
   const deliverShortageKg = deliverDispatch ? Math.max(0, deliverDispatch.dispatch.weightKg - buyerKataKg) : 0;
-  const deliverOverweight = deliverDispatch ? buyerKataKg > deliverDispatch.dispatch.weightKg : false;
+  const deliverExcessKg = deliverDispatch ? Math.max(0, buyerKataKg - deliverDispatch.dispatch.weightKg) : 0;
   const deliverDateTooEarly = deliverDispatch && deliverDate
     ? deliverDate < new Date(deliverDispatch.dispatch.dispatchDate).toISOString().slice(0, 10)
     : false;
@@ -1359,6 +1359,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 <span className="opacity-40">·</span>
                                                 <span className="font-mono text-muted-foreground/80" title="Internal weight (internal reference only, without moisture gain)">
                                                   Int: {toTonnes(d.internalWeightKg).toFixed(2)} t
+                                                </span>
+                                              </>
+                                            )}
+                                            {d.buyerKataKg != null && d.buyerKataKg !== d.weightKg && (
+                                              <>
+                                                <span className="opacity-40">·</span>
+                                                <span className="font-mono text-muted-foreground/80" title="Buyer's weighbridge weight (delivered)">
+                                                  Buyer: {toTonnes(d.buyerKataKg).toFixed(2)} t
                                                 </span>
                                               </>
                                             )}
@@ -2130,17 +2138,22 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 <div className="text-xs text-amber-600/80 mt-1">Shortages are saved but will not reduce the invoice value automatically. Adjust them at the time of payment receipt.</div>
               </div>
             )}
-            {deliverShortageKg === 0 && buyerKataKg > 0 && !deliverOverweight && (
+            {deliverShortageKg === 0 && deliverExcessKg === 0 && buyerKataKg > 0 && (
               <div className="rounded-lg border bg-emerald-50/50 p-3 text-sm text-emerald-700 font-medium text-center">Weights match. No credit note needed.</div>
             )}
-            {deliverOverweight && (
-              <div className="rounded-lg border bg-rose-50/50 p-3 text-sm text-rose-700 font-medium text-center">Buyer weight cannot exceed dispatched weight.</div>
+            {deliverExcessKg > 0 && (
+              <div className="rounded-lg border bg-sky-50/70 border-sky-200 dark:bg-sky-950/20 dark:border-sky-900 p-3 text-sm space-y-1">
+                <div className="font-semibold text-sky-800 dark:text-sky-300">Higher Weight Recorded (+{deliverExcessKg} kg)</div>
+                <div className="text-xs text-sky-700/90 dark:text-sky-400">
+                  Buyer's kata is higher (e.g. moisture gain in transit / scale variance). Shortage is 0 kg. Billing remains for dispatched weight ({deliverDispatch ? toTonnes(deliverDispatch.dispatch.weightKg).toFixed(2) : 0} tonnes) as per invoice. Recorded for internal weight tracking.
+                </div>
+              </div>
             )}
             {deliverDateTooEarly && (
               <div className="rounded-lg border bg-rose-50/50 p-3 text-sm text-rose-700 font-medium text-center">Delivered date cannot be before the dispatch date.</div>
             )}
             <DialogFooter>
-              <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverOverweight || deliverDateTooEarly} variant="forest">
+              <Button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending || deliverDateTooEarly} variant="forest">
                 <PackageCheck className="h-4 w-4" /> {deliverMutation.isPending ? 'Saving…' : deliverDispatch?.dispatch.status === 'DELIVERED' ? 'Update Delivery' : 'Confirm Delivered'}
               </Button>
             </DialogFooter>

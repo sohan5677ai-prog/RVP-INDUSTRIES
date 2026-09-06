@@ -118,20 +118,46 @@ describe('confirmDelivery service', () => {
     expect(result.status).toBe('DELIVERED');
   });
 
-  it('rejects buyer kata greater than dispatched weight', async () => {
-    dispatchFindUnique.mockResolvedValue({
+  it('allows buyer kata greater than dispatched weight (e.g. moisture gain) with 0 shortage', async () => {
+    const mockDispatch = {
       id: 'disp1',
       status: 'DISPATCHED',
       weightKg: 25000,
       dispatchDate: new Date('2026-09-01'),
-      saleOrder: { id: 'so1', ratePerKg: 100, buyer: { name: 'Test' } },
+      receivedDate: null,
+      saleOrder: {
+        id: 'so1',
+        product: 'PAPPU',
+        ratePerKg: 100,
+        gstExempt: false,
+        tonnageKg: 25000,
+        buyer: { name: 'Test Buyer' },
+      },
+    };
+
+    dispatchFindUnique.mockResolvedValue(mockDispatch);
+    dispatchUpdate.mockResolvedValue({ ...mockDispatch, status: 'DELIVERED', buyerKataKg: 25500, shortageKg: 0, creditNoteAmount: 0 });
+    dispatchFindMany.mockResolvedValue([{ id: 'disp1', status: 'DELIVERED', weightKg: 25000 }]);
+    orderFindUnique.mockResolvedValue({ product: 'PAPPU', costFrozenAt: new Date() });
+
+    const result = await confirmDelivery({
+      dispatchId: 'disp1',
+      buyerKataKg: 25500, // Greater than dispatched (moisture gain)
+      deliveredDate: new Date('2026-09-02'),
     });
 
-    await expect(
-      confirmDelivery({
-        dispatchId: 'disp1',
-        buyerKataKg: 25500, // Greater than dispatched
+    expect(dispatchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'disp1' },
+        data: expect.objectContaining({
+          status: 'DELIVERED',
+          buyerKataKg: 25500,
+          shortageKg: 0,
+          creditNoteAmount: 0,
+        }),
       })
-    ).rejects.toThrow("Buyer's Kata weight cannot be greater than dispatched weight");
+    );
+
+    expect(result.status).toBe('DELIVERED');
   });
 });

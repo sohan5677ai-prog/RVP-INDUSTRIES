@@ -89,10 +89,9 @@ export async function confirmDelivery(args: ConfirmDeliveryArgs): Promise<SaleDi
   let creditNoteAmount: number | null = null;
 
   if (buyerKataKg !== undefined) {
-    if (buyerKataKg > dispatch.weightKg) {
-      throw new HttpError(400, "Buyer's Kata weight cannot be greater than dispatched weight. Contact admin.");
-    }
-    shortageKg = dispatch.weightKg - buyerKataKg;
+    // If buyer's kata is higher (e.g. moisture gain in transit or scale variance),
+    // the shortage is 0 (no credit note). Billing stays for dispatched weight as per invoice.
+    shortageKg = Math.max(0, dispatch.weightKg - buyerKataKg);
     creditNoteAmount = shortageKg > 0 ? shortageKg * rate + (order.gstExempt ? 0 : calcGst(shortageKg, rate, await gstFractionForProduct(order.product))) : 0;
   }
 

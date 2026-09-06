@@ -31,9 +31,21 @@ interface WeightRow {
   status: string;
 }
 
-function diffTonnes(dispatched: number, internal: number | null): string {
-  if (internal == null) return '-';
-  return ((dispatched - internal) / 1000).toFixed(2);
+function getDeliveredDiff(buyerKataKg: number | null, internalWeightKg: number | null): {
+  text: string;
+  diffKg: number | null;
+  tone: 'green' | 'red' | 'neutral' | 'empty';
+} {
+  if (buyerKataKg == null || internalWeightKg == null) {
+    return { text: '-', diffKg: null, tone: 'empty' };
+  }
+  const diffKg = buyerKataKg - internalWeightKg;
+  const diffT = diffKg / 1000;
+  const sign = diffT > 0 ? '+' : '';
+  const text = `${sign}${diffT.toFixed(2)}`;
+  if (diffKg > 0) return { text, diffKg, tone: 'green' };
+  if (diffKg < 0) return { text, diffKg, tone: 'red' };
+  return { text, diffKg, tone: 'neutral' };
 }
 
 export default function InternalWeight() {
@@ -139,7 +151,13 @@ export default function InternalWeight() {
   // ── Summary stats ─────────────────────────────────────────────────────────
   const totalDispatched = filtered.reduce((s, r) => s + r.weightKg, 0);
   const totalInternal = filtered.reduce((s, r) => s + (r.internalWeightKg ?? 0), 0);
-  const totalDiff = filtered.reduce((s, r) => s + (r.internalWeightKg != null ? r.weightKg - r.internalWeightKg : 0), 0);
+  const deliveredWithInternal = filtered.filter(
+    (r) => r.buyerKataKg != null && r.internalWeightKg != null,
+  );
+  const totalDeliveredDiff = deliveredWithInternal.reduce(
+    (s, r) => s + (r.buyerKataKg! - r.internalWeightKg!),
+    0,
+  );
 
   // ── Export columns ─────────────────────────────────────────────────────────
   const exportCols: ExportColumn<WeightRow>[] = [
@@ -149,7 +167,7 @@ export default function InternalWeight() {
     { header: 'Dispatched (t)', value: (r) => toTonnes(r.weightKg).toFixed(2), align: 'right' },
     { header: 'Internal (t)', value: (r) => r.internalWeightKg != null ? toTonnes(r.internalWeightKg).toFixed(2) : '-', align: 'right' },
     { header: 'Delivered (t)', value: (r) => r.buyerKataKg != null ? toTonnes(r.buyerKataKg).toFixed(2) : '-', align: 'right' },
-    { header: 'Difference (t)', value: (r) => diffTonnes(r.weightKg, r.internalWeightKg), align: 'right' },
+    { header: 'Difference (t)', value: (r) => getDeliveredDiff(r.buyerKataKg, r.internalWeightKg).text, align: 'right' },
     { header: 'Driver', value: (r) => r.driverName ?? '-' },
     { header: 'Driver Phone', value: (r) => r.driverPhone ?? '-' },
     { header: 'Status', value: (r) => r.status },
@@ -186,8 +204,17 @@ export default function InternalWeight() {
           <p className="text-2xl font-bold tabular-nums">{toTonnes(totalInternal).toFixed(2)} t</p>
         </div>
         <div className="rounded-2xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground font-medium">Total Difference</p>
-          <p className="text-2xl font-bold tabular-nums text-amber-600 dark:text-amber-400">{toTonnes(totalDiff).toFixed(2)} t</p>
+          <p className="text-xs text-muted-foreground font-medium">Total Delivered Diff</p>
+          <p className={cn(
+            "text-2xl font-bold tabular-nums",
+            totalDeliveredDiff > 0 && "text-emerald-600 dark:text-emerald-400",
+            totalDeliveredDiff < 0 && "text-rose-600 dark:text-rose-400",
+            deliveredWithInternal.length === 0 && "text-muted-foreground",
+          )}>
+            {deliveredWithInternal.length > 0
+              ? `${totalDeliveredDiff > 0 ? '+' : ''}${toTonnes(totalDeliveredDiff).toFixed(2)} t`
+              : '-'}
+          </p>
         </div>
       </div>
 
@@ -319,14 +346,19 @@ export default function InternalWeight() {
                         <span className="text-muted-foreground/60">-</span>
                       )}
                     </TableCell>
-                    <TableCell className={cn(
-                      'text-right font-mono text-sm tabular-nums',
-                      r.internalWeightKg != null && r.weightKg - r.internalWeightKg > 0
-                        ? 'text-amber-600 dark:text-amber-400'
-                        : '',
-                    )}>
-                      {diffTonnes(r.weightKg, r.internalWeightKg)}
-                    </TableCell>
+                    {(() => {
+                      const diff = getDeliveredDiff(r.buyerKataKg, r.internalWeightKg);
+                      return (
+                        <TableCell className={cn(
+                          'text-right font-mono text-sm tabular-nums',
+                          diff.tone === 'green' && 'text-emerald-600 dark:text-emerald-400 font-semibold',
+                          diff.tone === 'red' && 'text-rose-600 dark:text-rose-400 font-semibold',
+                          diff.tone === 'empty' && 'text-muted-foreground/60',
+                        )}>
+                          {diff.text}
+                        </TableCell>
+                      );
+                    })()}
                     <TableCell className="text-sm">
                       {r.driverPhone ? (
                         <span className="font-mono">{r.driverPhone}</span>

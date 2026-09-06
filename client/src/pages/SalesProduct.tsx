@@ -1696,7 +1696,15 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             <div className="space-y-1.5">
               <Label className="text-xs">Tonnage from kata (tonnes)</Label>
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />
-              <p className="text-[11px] text-muted-foreground">This actual weight bills the sale and depletes the black-seed pool.</p>
+              <p className="text-[11px] text-muted-foreground">
+                {isPappu
+                  ? 'This actual weight bills the sale and depletes the black-seed pool.'
+                  : product === 'HUSK'
+                    ? 'This actual weight bills the sale and depletes the husk pool.'
+                    : ['WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'].includes(product)
+                      ? 'This actual weight bills the sale and draws down the by-product pool.'
+                      : 'This actual weight bills the sale.'}
+              </p>
               {dispatchOverflow && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining - dispatching the extra is allowed and will bill the full weight.</p>
               )}

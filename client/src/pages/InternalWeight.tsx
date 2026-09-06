@@ -3,12 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Scale, Phone, Pencil, Check, X, Search } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleDispatch } from '@/lib/types';
+import type { SaleOrder } from '@/lib/types';
 import { shortDate, toTonnes } from '@/lib/format';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/PageHeader';
@@ -144,16 +143,16 @@ export default function InternalWeight() {
 
   // ── Export columns ─────────────────────────────────────────────────────────
   const exportCols: ExportColumn<WeightRow>[] = [
-    { header: 'Date', accessor: (r) => shortDate(r.dispatchDate) },
-    { header: 'Party Name', accessor: (r) => r.partyName },
-    { header: 'Lorry Number', accessor: (r) => r.vehicleNumber ?? '-' },
-    { header: 'Dispatched (t)', accessor: (r) => toTonnes(r.weightKg).toFixed(2) },
-    { header: 'Internal (t)', accessor: (r) => r.internalWeightKg != null ? toTonnes(r.internalWeightKg).toFixed(2) : '-' },
-    { header: 'Delivered (t)', accessor: (r) => r.buyerKataKg != null ? toTonnes(r.buyerKataKg).toFixed(2) : '-' },
-    { header: 'Difference (t)', accessor: (r) => diffTonnes(r.weightKg, r.internalWeightKg) },
-    { header: 'Driver', accessor: (r) => r.driverName ?? '-' },
-    { header: 'Driver Phone', accessor: (r) => r.driverPhone ?? '-' },
-    { header: 'Status', accessor: (r) => r.status },
+    { header: 'Date', value: (r) => shortDate(r.dispatchDate) },
+    { header: 'Party Name', value: (r) => r.partyName },
+    { header: 'Lorry Number', value: (r) => r.vehicleNumber ?? '-' },
+    { header: 'Dispatched (t)', value: (r) => toTonnes(r.weightKg).toFixed(2), align: 'right' },
+    { header: 'Internal (t)', value: (r) => r.internalWeightKg != null ? toTonnes(r.internalWeightKg).toFixed(2) : '-', align: 'right' },
+    { header: 'Delivered (t)', value: (r) => r.buyerKataKg != null ? toTonnes(r.buyerKataKg).toFixed(2) : '-', align: 'right' },
+    { header: 'Difference (t)', value: (r) => diffTonnes(r.weightKg, r.internalWeightKg), align: 'right' },
+    { header: 'Driver', value: (r) => r.driverName ?? '-' },
+    { header: 'Driver Phone', value: (r) => r.driverPhone ?? '-' },
+    { header: 'Status', value: (r) => r.status },
   ];
 
   return (

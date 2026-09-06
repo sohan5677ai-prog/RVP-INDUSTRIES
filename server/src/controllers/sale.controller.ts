@@ -1222,7 +1222,9 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
       where: { invoiceFy: fy, invoiceSeries: series },
       _max: { invoiceSeq: true },
     });
-    const seq = (last._max.invoiceSeq ?? 0) + 1;
+    const maxExisting = last._max.invoiceSeq ?? 0;
+    const configuredFloor = series === 'URS' ? (company.nextUrsInvoiceSeq ?? 1) : (company.nextInvoiceSeq ?? 1);
+    const seq = Math.max(configuredFloor, maxExisting + 1);
     // Displayed number uses the short financial-year form (e.g. "26-27"), while
     // invoiceFy keeps the full "2026-27" used for the sequence + unique key.
     const fyShort = fy.slice(2);
@@ -1270,7 +1272,9 @@ export async function previewSaleInvoiceNumber(req: Request, res: Response) {
     where: { invoiceFy: fy, invoiceSeries: series },
     _max: { invoiceSeq: true },
   });
-  const seq = (last._max.invoiceSeq ?? 0) + 1;
+  const maxExisting = last._max.invoiceSeq ?? 0;
+  const configuredFloor = series === 'URS' ? (company.nextUrsInvoiceSeq ?? 1) : (company.nextInvoiceSeq ?? 1);
+  const seq = Math.max(configuredFloor, maxExisting + 1);
   const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fy.slice(2)}`;
 
   res.json({ invoiceNumber, invoiceDate, series, raised: false });

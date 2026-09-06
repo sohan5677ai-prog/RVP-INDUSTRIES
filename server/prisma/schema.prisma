@@ -1013,6 +1013,8 @@ model CompanyProfile {
   dispatchFromPincode            String?
   // Invoice number = invoicePrefix/seq/FY (e.g. RVP/01/2026-27).
   invoicePrefix                  String  @default("RVP")
+  nextInvoiceSeq                 Int?
+  nextUrsInvoiceSeq              Int?
   // JSON print-layout config (paper size, margins, font, column widths).
   invoiceLayout                  String?
   // Comma or newline separated list of company vehicles exempt from kata & hamali

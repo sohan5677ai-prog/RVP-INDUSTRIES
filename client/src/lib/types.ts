@@ -701,6 +701,13 @@ export interface CompanyProfile {
   bankAccountNumber: string | null;
   bankBranchIfsc: string | null;
   invoicePrefix: string;
+  nextInvoiceSeq?: number | null;
+  nextUrsInvoiceSeq?: number | null;
+  currentNextRvpSeq?: number;
+  currentNextUrsSeq?: number;
+  maxExistingRvpSeq?: number;
+  maxExistingUrsSeq?: number;
+  currentFy?: string;
   companyVehicles?: string | null;
   ownerWhatsappNumber?: string | null;
   // JSON string: [{ name, phone }] - up to 3 internal-alert recipients.

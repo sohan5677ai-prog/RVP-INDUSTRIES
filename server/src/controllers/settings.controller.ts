@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
+import { indianFinancialYear } from '../lib/invoice.js';
 
 export async function listFreightRates(_req: Request, res: Response) {
   const rates = await prisma.freightRate.findMany({ orderBy: { destination: 'asc' } });
@@ -220,7 +221,31 @@ function redactCompanyProfile<T extends Record<string, unknown>>(row: T): T {
 }
 
 export async function getCompanyProfile(_req: Request, res: Response) {
-  res.json(redactCompanyProfile(await getCompanyProfileRow()));
+  const profile = await getCompanyProfileRow();
+  const fy = indianFinancialYear(new Date());
+
+  const lastRvp = await prisma.saleDispatch.aggregate({
+    where: { invoiceFy: fy, invoiceSeries: 'RVP' },
+    _max: { invoiceSeq: true },
+  });
+  const maxRvpSeq = lastRvp._max.invoiceSeq ?? 0;
+  const currentNextRvpSeq = Math.max(profile.nextInvoiceSeq ?? 1, maxRvpSeq + 1);
+
+  const lastUrs = await prisma.saleDispatch.aggregate({
+    where: { invoiceFy: fy, invoiceSeries: 'URS' },
+    _max: { invoiceSeq: true },
+  });
+  const maxUrsSeq = lastUrs._max.invoiceSeq ?? 0;
+  const currentNextUrsSeq = Math.max(profile.nextUrsInvoiceSeq ?? 1, maxUrsSeq + 1);
+
+  res.json({
+    ...redactCompanyProfile(profile),
+    currentNextRvpSeq,
+    currentNextUrsSeq,
+    maxExistingRvpSeq: maxRvpSeq,
+    maxExistingUrsSeq: maxUrsSeq,
+    currentFy: fy,
+  });
 }
 
 const companyProfileSchema = z.object({
@@ -240,6 +265,8 @@ const companyProfileSchema = z.object({
   bankAccountNumber: z.string().optional().nullable(),
   bankBranchIfsc: z.string().optional().nullable(),
   invoicePrefix: z.string().trim().min(1).default('RVP'),
+  nextInvoiceSeq: z.coerce.number().int().min(1).max(999999).optional().nullable(),
+  nextUrsInvoiceSeq: z.coerce.number().int().min(1).max(999999).optional().nullable(),
   companyVehicles: z.string().optional().nullable(),
   ownerWhatsappNumber: z.string().optional().nullable(),
   alertRecipients: z.string().optional().nullable(),

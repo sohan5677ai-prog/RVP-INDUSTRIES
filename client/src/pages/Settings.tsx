@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal, Bell, Send, Pencil, X } from 'lucide-react';
+import { Plus, Trash2, Truck, Save, Building2, Landmark, FileText, ShieldCheck, MessageCircle, SlidersHorizontal, Bell, Send, Pencil, X, Loader2 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { FreightRate, CompanyProfile, ProductTaxInfo, SaleProduct, HamaliRate, WishCategory } from '@/lib/types';
 import { WISH_CATEGORY_LABELS } from '@/lib/types';
@@ -466,22 +466,65 @@ function InvoiceTaxSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
   const { data, isLoading } = useQuery({ queryKey: ['product-tax'], queryFn: () => api<ProductTaxInfo[]>('/settings/product-tax') });
 
   const [prefix, setPrefix] = useState('RVP');
+  const [nextSeq, setNextSeq] = useState<string>('');
+  const [nextUrsSeq, setNextUrsSeq] = useState<string>('');
   const [rows, setRows] = useState<ProductTaxInfo[]>([]);
-  useEffect(() => { if (company) setPrefix(company.invoicePrefix || 'RVP'); }, [company]);
+
+  useEffect(() => {
+    if (company) {
+      setPrefix(company.invoicePrefix || 'RVP');
+      setNextSeq(String(company.nextInvoiceSeq ?? company.currentNextRvpSeq ?? ''));
+      setNextUrsSeq(String(company.nextUrsInvoiceSeq ?? company.currentNextUrsSeq ?? ''));
+    }
+  }, [company]);
   useEffect(() => { if (data) setRows(data); }, [data]);
 
-  const savePrefix = useMutation({
-    mutationFn: () => api<CompanyProfile>('/settings/company', { method: 'PUT', body: { ...company, invoicePrefix: prefix.trim() || 'RVP' } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company'] }); toast.success('Invoice prefix saved'); },
+  const saveNumbering = useMutation({
+    mutationFn: () =>
+      api<CompanyProfile>('/settings/company', {
+        method: 'PUT',
+        body: {
+          ...company,
+          invoicePrefix: prefix.trim() || 'RVP',
+          nextInvoiceSeq: nextSeq ? parseInt(nextSeq, 10) : null,
+          nextUrsInvoiceSeq: nextUrsSeq ? parseInt(nextUrsSeq, 10) : null,
+        },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['company'] });
+      toast.success('Invoice numbering & sequence settings saved');
+    },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
+
   const saveTax = useMutation({
-    mutationFn: () => api<ProductTaxInfo[]>('/settings/product-tax', { method: 'PUT', body: { rows: rows.map((r) => ({ product: r.product, hsn: r.hsn, hsnExempt: r.hsnExempt, description: r.description, gstRate: r.gstRate })) } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['product-tax'] }); toast.success('HSN / descriptions saved'); },
+    mutationFn: () =>
+      api<ProductTaxInfo[]>('/settings/product-tax', {
+        method: 'PUT',
+        body: {
+          rows: rows.map((r) => ({
+            product: r.product,
+            hsn: r.hsn,
+            hsnExempt: r.hsnExempt,
+            description: r.description,
+            gstRate: r.gstRate,
+          })),
+        },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['product-tax'] });
+      toast.success('HSN / descriptions saved');
+    },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
   const setRow = (i: number, patch: Partial<ProductTaxInfo>) => setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const fyShort = (company?.currentFy || '2026-27').slice(2);
+  const rvpEffectiveSeq = nextSeq ? parseInt(nextSeq, 10) : (company?.currentNextRvpSeq || 1);
+  const ursEffectiveSeq = nextUrsSeq ? parseInt(nextUrsSeq, 10) : (company?.currentNextUrsSeq || 1);
+  const rvpPreviewNum = `${prefix || 'RVP'}/${String(rvpEffectiveSeq).padStart(2, '0')}/${fyShort}`;
+  const ursPreviewNum = `URS/${String(ursEffectiveSeq).padStart(2, '0')}/${fyShort}`;
 
   return (
     <Card>
@@ -489,14 +532,71 @@ function InvoiceTaxSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
         <FileText className="h-5 w-5 text-violet-500" />
         <CardTitle className="text-base">Invoice Setup</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="space-y-1.5 max-w-sm">
-          <Label className="text-xs">Invoice number prefix</Label>
-          <div className="flex gap-2">
-            <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="RVP" />
-            <Button variant="outline" onClick={() => savePrefix.mutate()} disabled={savePrefix.isPending}>Save</Button>
+      <CardContent className="space-y-6">
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">Invoice Numbering &amp; Sequences</h4>
+              <p className="text-[11px] text-muted-foreground">Configure prefix and sequence counters per series. Change the sequence forward anytime an invoice number is cancelled on the GST portal.</p>
+            </div>
+            <span className="text-xs text-muted-foreground font-mono bg-muted/60 px-2 py-0.5 rounded">Financial Year: {company?.currentFy || '2026-27'}</span>
           </div>
-          <p className="text-[11px] text-muted-foreground">Numbers are auto-generated as <span className="font-mono">{(prefix || 'RVP')}/01/2026-27</span> and reset each financial year.</p>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Invoice Number Prefix</Label>
+              <Input
+                value={prefix}
+                onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+                placeholder="RVP"
+              />
+              <p className="text-[11px] text-muted-foreground">Series prefix (e.g. <span className="font-mono">RVP</span>, <span className="font-mono">RVP26</span>).</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Next Sequence (Registered)</Label>
+              <Input
+                type="number"
+                min="1"
+                value={nextSeq}
+                onChange={(e) => setNextSeq(e.target.value)}
+                placeholder={String(company?.currentNextRvpSeq || 1)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Next: <span className="font-semibold font-mono text-foreground">{rvpPreviewNum}</span>
+                {company?.maxExistingRvpSeq ? <span className="block text-[10px] text-muted-foreground">Highest raised: #{company.maxExistingRvpSeq}</span> : null}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Next Sequence (Unregistered / URS)</Label>
+              <Input
+                type="number"
+                min="1"
+                value={nextUrsSeq}
+                onChange={(e) => setNextUrsSeq(e.target.value)}
+                placeholder={String(company?.currentNextUrsSeq || 1)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Next: <span className="font-semibold font-mono text-foreground">{ursPreviewNum}</span>
+                {company?.maxExistingUrsSeq ? <span className="block text-[10px] text-muted-foreground">Highest raised: #{company.maxExistingUrsSeq}</span> : null}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 max-w-xl">
+              💡 <strong>GST Error 2278 fix:</strong> If a document number was cancelled on NIC, increment the sequence number above (e.g. 152 → 153) and click Save Numbering to skip the cancelled number.
+            </p>
+            <Button
+              size="sm"
+              onClick={() => saveNumbering.mutate()}
+              disabled={saveNumbering.isPending}
+            >
+              {saveNumbering.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Save Numbering
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-3">

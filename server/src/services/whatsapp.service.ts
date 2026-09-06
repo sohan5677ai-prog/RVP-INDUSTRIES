@@ -556,6 +556,42 @@ export function resolveSupportRecipient(): string | null {
 }
 
 /**
+ * Resolves Shabari's phone number for WhatsApp receipts (Lorry Payment Receipts).
+ * Per company requirement, WhatsApp receipts must ONLY go to the driver and Shabari (no one else).
+ * Matches a member whose name includes 'shab' (e.g. Shabari or Shabri) from alertRecipients,
+ * falling back to ownerWhatsappNumber (9902953300).
+ */
+export async function resolveShabariRecipient(): Promise<string | null> {
+  try {
+    const profile = await prisma.companyProfile.findUnique({
+      where: { id: 'default' },
+      select: { alertRecipients: true, ownerWhatsappNumber: true },
+    });
+    if (profile?.alertRecipients) {
+      try {
+        const parsed = JSON.parse(profile.alertRecipients) as Array<{ name?: string; phone?: string }>;
+        if (Array.isArray(parsed)) {
+          const match = parsed.find((r) => r?.name && /shab/i.test(r.name.trim()));
+          if (match?.phone) {
+            const n = normalizeWhatsAppNumber(match.phone);
+            if (n) return n;
+          }
+        }
+      } catch {
+        /* malformed JSON */
+      }
+    }
+    if (profile?.ownerWhatsappNumber) {
+      const n = normalizeWhatsAppNumber(profile.ownerWhatsappNumber);
+      if (n) return n;
+    }
+  } catch {
+    /* DB unreachable */
+  }
+  return normalizeWhatsAppNumber(process.env.SHABARI_WHATSAPP_NUMBER || '9902953300');
+}
+
+/**
  * Who gets an *internal copy* of a message that just went to a party: the same
  * alert members as above, minus anyone already on the outgoing message (a member
  * whose number is also the party's shouldn't be told twice).
@@ -1042,8 +1078,9 @@ export const whatsappService = {
   },
 
   /**
-   * Lorry Freight payment recorded → transporter / driver + internal office copy.
+   * Lorry Freight payment recorded → transporter / driver + Shabari copy only.
    * Sends the dedicated 11-variable multilingual Lorry Payment summary template.
+   * Per business requirement, WhatsApp receipts must ONLY go to the driver and Shabari, no one else.
    */
   async notifyLorryPaymentSent(
     payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null },
@@ -1051,22 +1088,31 @@ export const whatsappService = {
     recipient: WaRecipient
   ) {
     const hasImage = !!payment.screenshotUrl;
-    await sendToPartyAndInternal(
-      {
-        templateKey: hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT',
-        language: recipient.waLanguage,
-        variables: formatLorryPaymentVariables(lorryDetails),
-        mediaUrl: payment.screenshotUrl ?? undefined,
-        relatedType: 'PAYMENT',
-        relatedId: payment.id,
-      },
-      [recipient.phone, recipient.phone2]
-    );
+    const message = {
+      templateKey: (hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT') as WaTemplateKey,
+      language: recipient.waLanguage,
+      variables: formatLorryPaymentVariables(lorryDetails),
+      mediaUrl: payment.screenshotUrl ?? undefined,
+      relatedType: 'PAYMENT' as const,
+      relatedId: payment.id,
+    };
+    const targetPhones = [recipient.phone, recipient.phone2].filter(Boolean) as string[];
+    const result = targetPhones.length > 0
+      ? await sendWhatsAppTemplate({ ...message, to: targetPhones })
+      : { ok: false, skipped: true, error: 'No driver/recipient phone on file' };
+
+    // Copy Shabari ONLY - no one else needed
+    const shabari = await resolveShabariRecipient();
+    const sentTo = targetPhones.map(normalizeWhatsAppNumber).filter(Boolean);
+    if (shabari && !sentTo.includes(shabari)) {
+      await sendWhatsAppTemplate({ ...message, to: shabari, language: 'EN' });
+    }
+    return result;
   },
 
   /**
-   * Direct send of Lorry Payment summary via WhatsApp API to a specific phone number,
-   * with automatic internal copy delivery to the owner.
+   * Direct send of Lorry Payment summary (receipt) via WhatsApp API to driver's phone,
+   * with copy delivered ONLY to Shabari.
    */
   async sendLorryPaymentSummary(
     details: LorryPaymentDetails,
@@ -1075,16 +1121,25 @@ export const whatsappService = {
     screenshotUrl?: string | null
   ) {
     const hasImage = !!screenshotUrl;
-    return sendToPartyAndInternal(
-      {
-        templateKey: hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT',
-        language,
-        variables: formatLorryPaymentVariables(details),
-        mediaUrl: screenshotUrl ?? undefined,
-        relatedType: 'PAYMENT',
-      },
-      [targetPhone]
-    );
+    const message = {
+      templateKey: (hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT') as WaTemplateKey,
+      language,
+      variables: formatLorryPaymentVariables(details),
+      mediaUrl: screenshotUrl ?? undefined,
+      relatedType: 'PAYMENT' as const,
+    };
+    const result = await sendWhatsAppTemplate({
+      ...message,
+      to: targetPhone,
+    });
+
+    // Copy Shabari ONLY - no one else needed
+    const shabari = await resolveShabariRecipient();
+    const cleanTarget = normalizeWhatsAppNumber(targetPhone);
+    if (shabari && shabari !== cleanTarget) {
+      await sendWhatsAppTemplate({ ...message, to: shabari, language: 'EN' });
+    }
+    return result;
   },
 
   /**

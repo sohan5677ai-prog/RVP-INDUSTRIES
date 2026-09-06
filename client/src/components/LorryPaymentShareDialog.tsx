@@ -54,13 +54,16 @@ export function LorryPaymentShareDialog({
     staleTime: 60_000,
   });
 
-  const internalRecipients = useMemo<AlertMember[]>(() => {
+  const shabariRecipient = useMemo<AlertMember | null>(() => {
     const parsed = parseAlertMembers(company?.alertRecipients);
-    if (parsed.length > 0) return parsed;
-    if (company?.ownerWhatsappNumber) {
-      return [{ name: 'Owner', phone: company.ownerWhatsappNumber }];
+    const found = parsed.find((m) => /shab/i.test(m.name));
+    if (found && found.phone) {
+      return { name: found.name || 'Shabari', phone: found.phone };
     }
-    return [];
+    if (company?.ownerWhatsappNumber) {
+      return { name: 'Shabari', phone: company.ownerWhatsappNumber };
+    }
+    return { name: 'Shabari', phone: '9902953300' };
   }, [company?.alertRecipients, company?.ownerWhatsappNumber]);
 
   useEffect(() => {
@@ -145,7 +148,7 @@ export function LorryPaymentShareDialog({
       });
 
       if (res.ok) {
-        toast.success(res.message || 'WhatsApp message sent to driver & copy delivered to owner!');
+        toast.success(res.message || 'WhatsApp message sent to driver & copy delivered to Shabari!');
         onOpenChange(false);
       } else {
         toast.error(res.message || 'Failed to send WhatsApp message');
@@ -266,41 +269,36 @@ export function LorryPaymentShareDialog({
               className="text-sm font-mono"
             />
 
-            {/* Internal Team Copy Banner (Us / Management) */}
+            {/* Internal Copy Banner (Shabari Only) */}
             <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 p-2.5 space-y-2 text-xs text-foreground">
               <div className="flex items-start gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div className="leading-tight">
                   <span className="font-semibold text-emerald-900 dark:text-emerald-200">
-                    Internal Copy (Our Management Team):
+                    Internal Copy (Shabari):
                   </span>{' '}
                   <span className="text-muted-foreground text-[11px]">
-                    Automatic copy will be delivered to us (
-                    {internalRecipients.map((m) => m.name || m.phone).join(', ') || 'Internal Alerts'}
-                    ) on WhatsApp.
+                    Automatic copy will be delivered only to Shabari {shabariRecipient?.phone ? `(${shabariRecipient.phone})` : ''} on WhatsApp.
                   </span>
                 </div>
               </div>
 
-              {internalRecipients.length > 0 && (
+              {shabariRecipient?.phone && (
                 <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-emerald-500/15">
                   <span className="text-[10px] font-medium text-emerald-800 dark:text-emerald-300">
-                    WhatsApp Web to us:
+                    WhatsApp Web copy:
                   </span>
-                  {internalRecipients.map((m, idx) => (
-                    <Button
-                      key={idx}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleOpenWhatsAppWeb(m.phone)}
-                      className="h-5 px-1.5 text-[10px] gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
-                      title={`Send WhatsApp Web copy to ${m.name} (${m.phone})`}
-                    >
-                      <WhatsAppIcon className="h-2.5 w-2.5 fill-emerald-600" />
-                      {m.name || m.phone}
-                    </Button>
-                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenWhatsAppWeb(shabariRecipient.phone)}
+                    className="h-5 px-1.5 text-[10px] gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+                    title={`Send WhatsApp Web copy to Shabari (${shabariRecipient.phone})`}
+                  >
+                    <WhatsAppIcon className="h-2.5 w-2.5 fill-emerald-600" />
+                    Shabari ({shabariRecipient.phone})
+                  </Button>
                 </div>
               )}
             </div>

@@ -1974,7 +1974,7 @@ export async function sendLorryPaymentWhatsApp(req: Request, res: Response) {
     return res.status(400).json({ ok: false, message: result.error || 'Failed to send WhatsApp message' });
   }
 
-  return res.json({ ok: true, message: 'Lorry payment summary sent successfully!' });
+  return res.json({ ok: true, message: 'Lorry payment receipt sent to driver & copy delivered to Shabari!' });
 }
 
 /**

@@ -74,6 +74,26 @@ function extractInbound(body: unknown): ExtractedInbound {
   const containers = [b, b.data, b.message, b.payload].filter(
     (x): x is Record<string, unknown> => !!x && typeof x === 'object'
   );
+
+  // Meta Direct envelope: entry[].changes[].value.messages[]
+  if (Array.isArray(b.entry)) {
+    for (const entry of b.entry) {
+      const changes = asRecord(entry)?.changes;
+      if (!Array.isArray(changes)) continue;
+      for (const change of changes) {
+        const val = asRecord(asRecord(change)?.value);
+        if (val) {
+          containers.push(val);
+          if (Array.isArray(val.messages)) {
+            for (const m of val.messages) {
+              if (m && typeof m === 'object') containers.push(m as Record<string, unknown>);
+            }
+          }
+        }
+      }
+    }
+  }
+
   let from: string | null = null;
   let text: string | null = null;
   let mediaUrl: string | null = null;
@@ -144,6 +164,21 @@ function extractMessageId(body: unknown): string | null {
     const v = r[key];
     if ((typeof v === 'string' || typeof v === 'number') && String(v).trim()) return String(v).trim();
   }
+
+  // Meta envelope: entry[].changes[].value.messages[0].id
+  if (Array.isArray(r.entry)) {
+    for (const entry of r.entry) {
+      const changes = asRecord(entry)?.changes;
+      if (!Array.isArray(changes)) continue;
+      for (const change of changes) {
+        const val = asRecord(asRecord(change)?.value);
+        if (Array.isArray(val?.messages) && val?.messages[0]?.id) {
+          return String(val.messages[0].id);
+        }
+      }
+    }
+  }
+
   return null;
 }
 

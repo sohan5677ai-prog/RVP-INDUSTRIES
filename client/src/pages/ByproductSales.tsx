@@ -21,7 +21,7 @@ export default function ByproductSales() {
       <PageHeader
         icon={Recycle}
         title="Tamarind Byproducts"
-        description="Waste and the pre-cleaner byproducts all sell from the single 10% pool. Every sale here draws that pool down."
+        description="Sales and dispatches for tamarind waste and pre-cleaner byproducts."
       />
 
       <Tabs value={tab} onValueChange={setTab} className="gap-4">

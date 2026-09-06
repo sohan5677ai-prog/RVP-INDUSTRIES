@@ -1701,9 +1701,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   ? 'This actual weight bills the sale and depletes the black-seed pool.'
                   : product === 'HUSK'
                     ? 'This actual weight bills the sale and depletes the husk pool.'
-                    : ['WASTE', 'SHELL', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU'].includes(product)
-                      ? 'This actual weight bills the sale and draws down the by-product pool.'
-                      : 'This actual weight bills the sale.'}
+                    : 'This actual weight bills the sale.'}
               </p>
               {dispatchOverflow && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">Over the {toTonnes(dispatchRemaining).toFixed(2)} t remaining - dispatching the extra is allowed and will bill the full weight.</p>

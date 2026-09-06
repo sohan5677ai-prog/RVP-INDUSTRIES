@@ -67,32 +67,36 @@ export function kataCardBlocks(
   blocks.push(fieldsSection(fields));
 
   if (sub.status === 'PENDING') {
-    blocks.push({
-      type: 'actions',
-      block_id: `${FLOW}:actions_${sub.id}`,
-      elements: [
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '✅ Approve & Deliver', emoji: true },
-          style: 'primary',
-          action_id: `${FLOW}:approve`,
-          value: sub.id,
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '✏️ Edit Weight', emoji: true },
-          action_id: `${FLOW}:edit`,
-          value: sub.id,
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '❌ Reject', emoji: true },
-          style: 'danger',
-          action_id: `${FLOW}:reject`,
-          value: sub.id,
-        },
-      ],
-    });
+    if (dispatch.status === 'DISPATCHED') {
+      blocks.push({
+        type: 'actions',
+        block_id: `${FLOW}:actions_${sub.id}`,
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '✅ Approve & Deliver', emoji: true },
+            style: 'primary',
+            action_id: `${FLOW}:approve`,
+            value: sub.id,
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '✏️ Edit Weight', emoji: true },
+            action_id: `${FLOW}:edit`,
+            value: sub.id,
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '❌ Reject', emoji: true },
+            style: 'danger',
+            action_id: `${FLOW}:reject`,
+            value: sub.id,
+          },
+        ],
+      });
+    } else {
+      blocks.push(contextBlock(`:information_source: *Dispatch is already marked ${dispatch.status}.*`));
+    }
   } else if (sub.status === 'APPROVED') {
     blocks.push(
       contextBlock(

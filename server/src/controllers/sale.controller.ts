@@ -17,6 +17,7 @@ import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
 import { clearCache } from '../lib/cache.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { confirmDelivery } from '../services/delivery.service.js';
 
 import {
   calcSaleFreight,
@@ -1316,91 +1317,15 @@ export async function deliverSaleDispatch(req: Request, res: Response) {
   const files = req.files as Record<string, Express.Multer.File[]> | undefined;
   const kataFile = files?.kata?.[0];
 
-  const dispatch = await prisma.saleDispatch.findUnique({
-    where: { id: req.params.id },
-    include: { saleOrder: { include: { buyer: true } } },
-  });
-  if (!dispatch) throw new HttpError(404, 'Dispatch not found');
-  if (dispatch.status !== 'DISPATCHED' && dispatch.status !== 'DELIVERED') {
-    throw new HttpError(400, `Cannot mark a ${dispatch.status} shipment as delivered`);
-  }
-
-  // Block editing delivery details once payment has been recorded against this shipment.
-  if (dispatch.status === 'DELIVERED') {
-    const receiptCount = await prisma.receipt.count({ where: { saleDispatchId: dispatch.id } });
-    if (receiptCount > 0) {
-      throw new HttpError(400, 'Cannot edit delivery - payment has already been recorded against this shipment.');
-    }
-  }
-
-  // Delivery is practically impossible before the shipment left - compare
-  // calendar dates (not instants) since both are date-only pickers on the UI.
-  if (data.deliveredDate) {
-    const dispatchDay = dispatch.dispatchDate.toISOString().slice(0, 10);
-    const deliveredDay = data.deliveredDate.toISOString().slice(0, 10);
-    if (deliveredDay < dispatchDay) {
-      throw new HttpError(400, 'Delivered date cannot be before the dispatch date.');
-    }
-  }
-
-  const order = dispatch.saleOrder;
-  const rate = Number(order.ratePerKg);
-  let orderIsFullyShipped = false;
-
-  let shortageKg: number | null = null;
-  let creditNoteAmount: number | null = null;
-
-  if (data.buyerKataKg !== undefined) {
-    if (data.buyerKataKg > dispatch.weightKg) {
-      throw new HttpError(400, "Buyer's Kata weight cannot be greater than dispatched weight. Contact admin.");
-    }
-    shortageKg = dispatch.weightKg - data.buyerKataKg;
-    creditNoteAmount = shortageKg > 0 ? shortageKg * rate + (order.gstExempt ? 0 : calcGst(shortageKg, rate, await gstFractionForProduct(order.product))) : 0;
-  }
-
-  // Upload before the transaction starts - network I/O shouldn't hold a DB
-  // transaction open.
+  // Upload before calling confirmDelivery
   const buyerKataFileUrl = kataFile ? await uploadFileToStorage(kataFile) : null;
 
-  const updated = await prisma.$transaction(async (tx) => {
-    // We intentionally do not post a Credit Note to the ledger here anymore.
-    // The shortage is recorded on the dispatch, but A/R is maintained at the full billed amount.
-    // Deductions will be handled at the time of Receipt if the party doesn't pay the full amount.
-
-    const result = await tx.saleDispatch.update({
-      where: { id: dispatch.id },
-      data: {
-        status: 'DELIVERED',
-        receivedDate: dispatch.receivedDate ?? (data.deliveredDate ?? new Date()),
-        deliveredDate: data.deliveredDate ?? new Date(),
-        ...(data.buyerKataKg !== undefined && {
-          buyerKataKg: data.buyerKataKg,
-          shortageKg,
-          creditNoteAmount,
-        }),
-        ...(kataFile && { buyerKataFileUrl }),
-      },
-      include: { saleOrder: { include: { buyer: true, broker: true } } },
-    });
-
-    // Roll the order status forward: once every shipment on a fully-dispatched
-    // order is DELIVERED, the order itself is DELIVERED. Otherwise it stays
-    // DISPATCHED (all shipped, some still in transit) or PARTIAL (remainder unshipped).
-    const siblings = await tx.saleDispatch.findMany({ where: { saleOrderId: order.id } });
-    const dispatchedKg = siblings.reduce((s, d) => s + d.weightKg, 0);
-    const orderStatus = dispatchedKg < order.tonnageKg
-      ? 'PARTIAL'
-      : siblings.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
-    orderIsFullyShipped = orderStatus !== 'PARTIAL';
-    await tx.saleOrder.update({ where: { id: order.id }, data: { status: orderStatus } });
-
-    return result;
+  const updated = await confirmDelivery({
+    dispatchId: req.params.id,
+    buyerKataKg: data.buyerKataKg,
+    deliveredDate: data.deliveredDate,
+    buyerKataFileUrl,
   });
-
-  // Safety net. The freeze normally happens at full dispatch; this catches an
-  // order that got there without one (a freeze that failed, or a row predating
-  // the feature). Idempotent, so it is a no-op in the normal case.
-  if (order.product === 'PAPPU' && orderIsFullyShipped) await freezeOrderCost(order.id);
 
   res.json(updated);
 }

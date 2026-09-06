@@ -1702,4 +1702,154 @@ export const whatsappService = {
     });
     return row?.createdAt ?? null;
   },
+
+  downloadMedia: downloadWhatsAppMedia,
+  notifyDriverKataReceived,
+  notifyDriverKataConfirmed,
+  notifyDriverKataRejected,
 };
+
+/**
+ * Fetch media buffer (image or PDF) from an HTTP URL or Meta/Fast2SMS media ID.
+ */
+export async function downloadWhatsAppMedia(urlOrId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const apiKey = process.env.FAST2SMS_API_KEY?.trim();
+  try {
+    // 1. Direct HTTP URL
+    if (urlOrId.startsWith('http://') || urlOrId.startsWith('https://')) {
+      const res = await fetch(urlOrId, {
+        headers: apiKey ? { Authorization: apiKey, 'User-Agent': 'RVP-ERP/1.0' } : undefined,
+      });
+      if (!res.ok) return null;
+      const arrayBuffer = await res.arrayBuffer();
+      const mimeType = res.headers.get('content-type') || 'image/jpeg';
+      return { buffer: Buffer.from(arrayBuffer), mimeType };
+    }
+
+    // 2. Fast2SMS / Meta media ID lookup
+    const endpoints = [
+      `https://www.fast2sms.com/dev/whatsapp/media/${urlOrId}`,
+      `https://graph.facebook.com/v24.0/${urlOrId}`,
+    ];
+
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep, {
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+        });
+        if (!res.ok) continue;
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const json: any = await res.json();
+          if (json?.url) {
+            const dlRes = await fetch(json.url, {
+              headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+            });
+            if (dlRes.ok) {
+              const arrayBuffer = await dlRes.arrayBuffer();
+              return {
+                buffer: Buffer.from(arrayBuffer),
+                mimeType: json.mime_type || dlRes.headers.get('content-type') || 'image/jpeg',
+              };
+            }
+          }
+        } else {
+          const arrayBuffer = await res.arrayBuffer();
+          return { buffer: Buffer.from(arrayBuffer), mimeType: contentType || 'image/jpeg' };
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  } catch (err) {
+    logger.error('[whatsapp] media download failed', err);
+    return null;
+  }
+}
+
+/**
+ * Send a freeform text message to a user within their 24-hour inbound WhatsApp window.
+ */
+export async function sendSessionTextMessage(args: {
+  to: string | null | undefined;
+  text: string;
+  relatedType?: string;
+  relatedId?: string;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  const phoneNumberId = process.env.FAST2SMS_PHONE_NUMBER_ID;
+  const enabled = process.env.WHATSAPP_ENABLED === 'true';
+  const { testMode, testNumber } = await resolveWhatsAppMode();
+
+  const realNumber = normalizeWhatsAppNumber(args.to);
+  const targetNumber = testMode ? normalizeWhatsAppNumber(testNumber) : realNumber;
+
+  if (!enabled) return { ok: false, skipped: true, error: 'WHATSAPP_ENABLED is false' };
+  if (!apiKey) return { ok: false, skipped: true, error: 'FAST2SMS_API_KEY not configured' };
+  if (!targetNumber) return { ok: false, error: 'Recipient phone missing or invalid' };
+
+  if (phoneNumberId) {
+    try {
+      const body = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: targetNumber,
+        type: 'text',
+        text: { body: args.text },
+      };
+      const res = await fetch(`${FAST2SMS_URL}/v24.0/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      if (res.ok) {
+        await prisma.whatsAppLog.create({
+          data: {
+            direction: 'OUTBOUND',
+            phone: targetNumber,
+            body: args.text,
+            status: 'SENT',
+            relatedType: args.relatedType,
+            relatedId: args.relatedId,
+          },
+        });
+        logger.info(`[whatsapp] session text sent to ${targetNumber}`);
+        return { ok: true };
+      }
+      logger.warn(`[whatsapp] session text failed: ${text.slice(0, 300)}`);
+    } catch (err) {
+      logger.error('[whatsapp] session text error', err);
+    }
+  }
+
+  return { ok: false, error: 'Session text not delivered' };
+}
+
+export async function notifyDriverKataReceived(driverPhone: string, lorryNumber: string) {
+  const text = `Namaste! 🙏\nWe have received the buyer weighbridge slip (kata) for lorry *${lorryNumber}*.\nOur team is reviewing and confirming the delivery weight. Thank you!\n\n— *RVP Industries*`;
+  return sendSessionTextMessage({ to: driverPhone, text, relatedType: 'KATA_RECEIVED' });
+}
+
+export async function notifyDriverKataConfirmed(
+  driverPhone: string,
+  lorryNumber: string,
+  buyerName: string,
+  shortageKg: number
+) {
+  const shortageText = shortageKg > 0 ? `Transit shortage: ${shortageKg} kg.` : 'No shortage recorded.';
+  const text = `✅ *Delivery Confirmed!*\nLorry: *${lorryNumber}*\nBuyer: *${buyerName}*\n${shortageText}\nDelivery has been successfully recorded. Thank you for your service! 🚛\n\n— *RVP Industries*`;
+  return sendSessionTextMessage({ to: driverPhone, text, relatedType: 'KATA_CONFIRMED' });
+}
+
+export async function notifyDriverKataRejected(
+  driverPhone: string,
+  lorryNumber: string,
+  reason?: string
+) {
+  const reasonText = reason ? `Reason: ${reason}` : 'The photo was not clear or readable.';
+  const text = `⚠️ *Kata Slip Needs Re-Submission*\nLorry: *${lorryNumber}*\n${reasonText}\nPlease take a clear photo of the buyer\'s weighbridge slip and send it again.\n\n— *RVP Industries*`;
+  return sendSessionTextMessage({ to: driverPhone, text, relatedType: 'KATA_REJECTED' });
+}
+

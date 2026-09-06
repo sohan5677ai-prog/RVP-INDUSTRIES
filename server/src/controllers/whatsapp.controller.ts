@@ -1,10 +1,18 @@
 import type { Request, Response } from 'express';
 import type { WaLanguage } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
-import { whatsappService, normalizeWhatsAppNumber } from '../services/whatsapp.service.js';
-import { parseTransportConfirmationText } from '../lib/gemini.js';
+import {
+  whatsappService,
+  normalizeWhatsAppNumber,
+  downloadWhatsAppMedia,
+  notifyDriverKataReceived,
+  notifyDriverKataConfirmed,
+  notifyDriverKataRejected,
+} from '../services/whatsapp.service.js';
+import { parseTransportConfirmationText, parseBuyerKataImage } from '../lib/gemini.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import {
   normalizeLorryNumber,
@@ -19,9 +27,12 @@ import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
 import { renderBrokerLedgerPdf } from '../lib/brokerLedgerPdf.js';
 import { buildBrokerLedgerData, isOwnBroker } from '../services/brokerLedger.service.js';
-import { uploadFileToStorage } from '../lib/upload.js';
+import { uploadFileToStorage, uploadBufferToStorage } from '../lib/upload.js';
 import { computeBuyerDues, computePartyDues, invoiceListText } from '../services/salesDues.service.js';
 import { duesScope, runPartyPaymentReminderCore } from '../services/partyReminder.service.js';
+import { getSlackApp } from '../slack/app.js';
+import { kataCardBlocks } from '../slack/flows/driverKata.js';
+import { confirmDelivery } from '../services/delivery.service.js';
 
 // ---------------------------------------------------------------------------
 // Inbound webhook (public - Fast2SMS calls this, no JWT)
@@ -43,14 +54,32 @@ export async function verifyWhatsAppWebhook(req: Request, res: Response) {
  * commonly use; the raw body is always logged so the real shape can be
  * confirmed from WhatsAppLog after the first live event.
  */
-function extractInbound(body: unknown): { from: string | null; text: string | null } {
-  if (!body || typeof body !== 'object') return { from: null, text: null };
+interface ExtractedInbound {
+  from: string | null;
+  text: string | null;
+  mediaUrl: string | null;
+  mediaId: string | null;
+  mediaType: string | null;
+}
+
+/**
+ * Pull the sender + message text + any attached media out of a Fast2SMS webhook payload.
+ * Probe common BSP and Meta Cloud API payload fields.
+ */
+function extractInbound(body: unknown): ExtractedInbound {
+  if (!body || typeof body !== 'object') {
+    return { from: null, text: null, mediaUrl: null, mediaId: null, mediaType: null };
+  }
   const b = body as Record<string, unknown>;
   const containers = [b, b.data, b.message, b.payload].filter(
     (x): x is Record<string, unknown> => !!x && typeof x === 'object'
   );
   let from: string | null = null;
   let text: string | null = null;
+  let mediaUrl: string | null = null;
+  let mediaId: string | null = null;
+  let mediaType: string | null = null;
+
   for (const c of containers) {
     for (const key of ['from', 'sender', 'mobile', 'number', 'wa_id', 'phone', 'from_number']) {
       const v = c[key];
@@ -66,8 +95,45 @@ function extractInbound(body: unknown): { from: string | null; text: string | nu
         text = ((v as Record<string, unknown>).body as string).trim();
       }
     }
+
+    // Direct media URL fields
+    for (const key of ['media_url', 'mediaUrl', 'url', 'image_url', 'file_url']) {
+      const v = c[key];
+      if (!mediaUrl && typeof v === 'string' && v.trim().startsWith('http')) {
+        mediaUrl = v.trim();
+      }
+    }
+
+    // Media ID fields (Meta Cloud API / Fast2SMS media asset IDs)
+    for (const key of ['media_id', 'mediaId']) {
+      const v = c[key];
+      if (!mediaId && (typeof v === 'string' || typeof v === 'number') && String(v).trim()) {
+        mediaId = String(v).trim();
+      }
+    }
+
+    for (const key of ['media_type', 'mediaType', 'mime_type', 'mimetype', 'type']) {
+      const v = c[key];
+      if (!mediaType && typeof v === 'string' && v.trim()) {
+        mediaType = v.trim();
+      }
+    }
+
+    // Meta object style: { image: { id, mime_type, sha256, caption }, type: 'image' }
+    // or { document: { id, filename, mime_type } }
+    for (const mediaKey of ['image', 'document', 'media']) {
+      const mediaObj = c[mediaKey];
+      if (mediaObj && typeof mediaObj === 'object') {
+        const m = mediaObj as Record<string, unknown>;
+        if (!mediaId && m.id) mediaId = String(m.id);
+        if (!mediaUrl && typeof m.link === 'string') mediaUrl = m.link;
+        if (!mediaUrl && typeof m.url === 'string') mediaUrl = m.url;
+        if (!mediaType && typeof m.mime_type === 'string') mediaType = m.mime_type;
+        if (!text && typeof m.caption === 'string' && m.caption.trim()) text = m.caption.trim();
+      }
+    }
   }
-  return { from, text };
+  return { from, text, mediaUrl, mediaId, mediaType };
 }
 
 /** Fast2SMS's `message_id` (a Meta `wamid.…`), used to drop retried deliveries. */
@@ -81,6 +147,15 @@ function extractMessageId(body: unknown): string | null {
   return null;
 }
 
+export interface InboundLogRow {
+  id: string;
+  from: string | null;
+  text: string | null;
+  mediaUrl: string | null;
+  mediaId: string | null;
+  mediaType: string | null;
+}
+
 /**
  * Persist an inbound message. Runs BEFORE the webhook is acknowledged, so a
  * restart between the ACK and this write can't lose a transporter's message.
@@ -89,19 +164,14 @@ function extractMessageId(body: unknown): string | null {
  * database failure - the caller turns that into a non-2xx so Fast2SMS retries
  * rather than dropping the message on the floor.
  */
-async function recordInboundMessage(rawBody: unknown): Promise<{ id: string; from: string | null; text: string | null } | null> {
-  const { from, text } = extractInbound(rawBody);
+async function recordInboundMessage(rawBody: unknown): Promise<InboundLogRow | null> {
+  const { from, text, mediaUrl, mediaId, mediaType } = extractInbound(rawBody);
   const body = text ?? JSON.stringify(rawBody).slice(0, 4000);
 
   // Fast2SMS retries a webhook up to 3 times, 60s apart, whenever our response
   // wasn't a 2xx - so the same message can legitimately arrive more than once.
   // Without this, one retried transporter message becomes two DRAFT rows, and
   // confirming both would apply the freight twice.
-  //
-  // The body has to match too. A retry repeats the payload verbatim, so an
-  // identical body is the signature of one; matching on the id ALONE would mean
-  // that if Fast2SMS ever sends a per-webhook `request_id` rather than a
-  // per-message `wamid`, every message after the first is discarded forever.
   const messageId = extractMessageId(rawBody);
   if (messageId) {
     const seen = await prisma.whatsAppLog.findFirst({
@@ -115,9 +185,122 @@ async function recordInboundMessage(rawBody: unknown): Promise<{ id: string; fro
   }
 
   const logRow = await prisma.whatsAppLog.create({
-    data: { direction: 'INBOUND', phone: from, body, status: 'RECEIVED', providerId: messageId },
+    data: {
+      direction: 'INBOUND',
+      phone: from,
+      body,
+      mediaUrl: mediaUrl || mediaId || null,
+      mediaType: mediaType || null,
+      status: 'RECEIVED',
+      providerId: messageId,
+    },
   });
-  return { id: logRow.id, from, text };
+  return { id: logRow.id, from, text, mediaUrl, mediaId, mediaType };
+}
+
+/**
+ * Check if an inbound WhatsApp message is from a driver with an active DISPATCHED trip,
+ * and if so, processes their buyer kata slip image.
+ * Returns true if handled as a driver kata submission, false otherwise.
+ */
+async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean> {
+  const from = logRow.from;
+  if (!from) return false;
+
+  const phoneDigits = from.replace(/\D/g, '').slice(-10);
+  if (phoneDigits.length < 10) return false;
+
+  const mediaSource = logRow.mediaUrl || logRow.mediaId;
+  if (!mediaSource) return false;
+
+  // Find most recent DISPATCHED trip for this driver phone
+  const dispatch = await prisma.saleDispatch.findFirst({
+    where: {
+      status: 'DISPATCHED',
+      driverPhone: { contains: phoneDigits },
+    },
+    orderBy: { dispatchDate: 'desc' },
+    include: {
+      saleOrder: { include: { buyer: true } },
+    },
+  });
+
+  if (!dispatch) {
+    // Not a dispatched driver with an active load
+    return false;
+  }
+
+  logger.info(`[whatsapp] downloading kata media from driver ${from} for dispatch ${dispatch.id}...`);
+
+  // 1. Download image
+  const downloaded = await downloadWhatsAppMedia(mediaSource);
+  if (!downloaded) {
+    logger.warn(`[whatsapp] could not download kata media from ${mediaSource}`);
+    return false;
+  }
+
+  // 2. Upload to Supabase storage to persist public URL
+  const ext = downloaded.mimeType.includes('pdf') ? '.pdf' : '.jpg';
+  let publicUrl: string;
+  try {
+    publicUrl = await uploadBufferToStorage(downloaded.buffer, downloaded.mimeType, ext);
+  } catch (uploadErr) {
+    logger.error('[whatsapp] failed to upload kata slip to Supabase', uploadErr);
+    return false;
+  }
+
+  // 3. OCR via Gemini
+  logger.info(`[whatsapp] running Gemini OCR on kata slip from driver ${from}...`);
+  const parsed = await parseBuyerKataImage(downloaded.buffer, downloaded.mimeType);
+
+  // 4. Save DriverKataSubmission
+  const submission = await prisma.driverKataSubmission.create({
+    data: {
+      saleDispatchId: dispatch.id,
+      driverPhone: from,
+      imageUrl: publicUrl,
+      rawOcrResult: parsed?.rawResponse ?? (parsed as any) ?? Prisma.JsonNull,
+      ocrBuyerKataKg: parsed?.buyerKataKg ?? null,
+      ocrLorryNumber: parsed?.lorryNumber ?? null,
+      ocrBuyerName: parsed?.buyerName ?? null,
+      status: 'PENDING',
+    },
+  });
+
+  // 5. Send acknowledgment reply to driver
+  const lorryNo = dispatch.vehicleNumber || parsed?.lorryNumber || 'your lorry';
+  notifyDriverKataReceived(from, lorryNo).catch((err) => {
+    logger.error('[whatsapp] driver ack reply failed', err);
+  });
+
+  // 6. Post Slack review card
+  const slack = getSlackApp();
+  if (slack) {
+    try {
+      const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'dispatches';
+      const blocks = kataCardBlocks(submission, dispatch, dispatch.saleOrder);
+      const postRes = await slack.client.chat.postMessage({
+        channel,
+        text: `📷 Buyer kata received from driver for lorry ${lorryNo} (${parsed?.buyerKataKg ? `${parsed.buyerKataKg} kg` : 'OCR pending'})`,
+        blocks,
+      });
+
+      if (postRes.ts) {
+        await prisma.driverKataSubmission.update({
+          where: { id: submission.id },
+          data: {
+            slackChannel: channel,
+            slackTs: postRes.ts,
+          },
+        });
+      }
+    } catch (err) {
+      logger.error('[slack] failed to post driver kata card', err);
+    }
+  }
+
+  logger.info(`[whatsapp] DriverKataSubmission ${submission.id} created for dispatch ${dispatch.id}`);
+  return true;
 }
 
 /**
@@ -130,7 +313,7 @@ async function recordInboundMessage(rawBody: unknown): Promise<{ id: string; fro
  * lorry number. Nothing existing is touched: a booking message is news about a
  * lorry that is yet to load, not a correction to a trip already made.
  */
-async function parseInboundIntoRegister(logRow: { id: string; from: string | null; text: string | null }) {
+async function parseInboundIntoRegister(logRow: InboundLogRow) {
   const { from, text } = logRow;
 
   // A transport confirmation is a long-ish text with digits (lorry no / phone).
@@ -359,8 +542,8 @@ function routeWebhookEvent(rawBody: unknown): WebhookRoute {
   }
 
   // Unlabelled from here down.
-  const { from, text } = extractInbound(rawBody);
-  if (from && text) return { kind: 'inbound' };
+  const { from, text, mediaUrl, mediaId } = extractInbound(rawBody);
+  if (from && (text || mediaUrl || mediaId)) return { kind: 'inbound' };
 
   const events = extractStatusEvents(rawBody);
   if (events.some((e) => isKnownDeliveryStatus(e.status))) return { kind: 'status', events };
@@ -418,12 +601,18 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
       return;
     }
     res.json({ received: true });
-    // Duplicate (null) needs no further work; otherwise parse in the background,
-    // where a failure costs a register row but never the message itself.
+    // Duplicate (null) needs no further work; otherwise process in the background,
+    // where a failure costs a register/submission row but never the message itself.
     if (logRow) {
-      parseInboundIntoRegister(logRow).catch((err) => {
-        logger.error(`[whatsapp] booking parse failed for log ${logRow.id}`, err);
-      });
+      processDriverKataInbound(logRow)
+        .then((handled) => {
+          if (!handled) {
+            return parseInboundIntoRegister(logRow);
+          }
+        })
+        .catch((err) => {
+          logger.error(`[whatsapp] inbound processing failed for log ${logRow.id}`, err);
+        });
     }
     return;
   }
@@ -1684,3 +1873,141 @@ export async function sendLorryPaymentWhatsApp(req: Request, res: Response) {
 
   return res.json({ ok: true, message: 'Lorry payment summary sent successfully!' });
 }
+
+/**
+ * List pending and historical driver kata submissions.
+ */
+export async function listDriverKataSubmissions(req: Request, res: Response) {
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const submissions = await prisma.driverKataSubmission.findMany({
+    where: status ? { status: status as any } : undefined,
+    include: {
+      saleDispatch: {
+        include: {
+          saleOrder: {
+            include: { buyer: true, broker: true },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+  res.json(submissions);
+}
+
+/**
+ * Approve a driver kata submission via Web API (sets weight, marks delivered).
+ */
+export async function approveDriverKataSubmission(req: Request, res: Response) {
+  const { id } = req.params;
+  const body = req.body || {};
+  const sub = await prisma.driverKataSubmission.findUnique({
+    where: { id },
+    include: {
+      saleDispatch: {
+        include: { saleOrder: { include: { buyer: true } } },
+      },
+    },
+  });
+
+  if (!sub) throw new HttpError(404, 'Submission not found');
+  if (sub.status !== 'PENDING') throw new HttpError(400, `Submission is already ${sub.status}`);
+
+  const confirmedWeight = body.buyerKataKg != null ? Number(body.buyerKataKg) : sub.ocrBuyerKataKg;
+  if (!confirmedWeight || confirmedWeight <= 0) {
+    throw new HttpError(400, 'A valid buyer kata weight in kg is required');
+  }
+
+  const user = (req as any).user;
+  const confirmedBy = user?.name || user?.username || 'Admin';
+
+  const updatedDispatch = await confirmDelivery({
+    dispatchId: sub.saleDispatchId,
+    buyerKataKg: confirmedWeight,
+    deliveredDate: body.deliveredDate ? new Date(body.deliveredDate) : new Date(),
+    buyerKataFileUrl: sub.imageUrl,
+    submissionId: sub.id,
+    confirmedBy,
+  });
+
+  // Notify driver via WhatsApp
+  const lorry = sub.saleDispatch.vehicleNumber || 'your lorry';
+  const buyer = sub.saleDispatch.saleOrder.buyer.name;
+  const shortage = Math.max(0, sub.saleDispatch.weightKg - confirmedWeight);
+  notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage).catch((err) => {
+    logger.error('[whatsapp] driver confirmation notify failed', err);
+  });
+
+  // Update Slack card if exists
+  if (sub.slackChannel && sub.slackTs) {
+    const slack = getSlackApp();
+    if (slack) {
+      const updatedSub = await prisma.driverKataSubmission.findUnique({ where: { id: sub.id } });
+      if (updatedSub) {
+        slack.client.chat.update({
+          channel: sub.slackChannel,
+          ts: sub.slackTs,
+          text: `✅ Kata approved for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
+          blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
+        }).catch(() => {});
+      }
+    }
+  }
+
+  res.json({ ok: true, dispatch: updatedDispatch });
+}
+
+/**
+ * Reject a driver kata submission via Web API.
+ */
+export async function rejectDriverKataSubmission(req: Request, res: Response) {
+  const { id } = req.params;
+  const reason = req.body?.reason || 'Slip not clear or unreadable';
+  const sub = await prisma.driverKataSubmission.findUnique({
+    where: { id },
+    include: {
+      saleDispatch: {
+        include: { saleOrder: { include: { buyer: true } } },
+      },
+    },
+  });
+
+  if (!sub) throw new HttpError(404, 'Submission not found');
+  if (sub.status !== 'PENDING') throw new HttpError(400, `Submission is already ${sub.status}`);
+
+  const user = (req as any).user;
+  const confirmedBy = user?.name || user?.username || 'Admin';
+
+  const updatedSub = await prisma.driverKataSubmission.update({
+    where: { id: sub.id },
+    data: {
+      status: 'REJECTED',
+      rejectionReason: reason,
+      confirmedBy,
+      confirmedAt: new Date(),
+    },
+  });
+
+  // Notify driver via WhatsApp
+  const lorry = sub.saleDispatch.vehicleNumber || 'your lorry';
+  notifyDriverKataRejected(sub.driverPhone, lorry, reason).catch((err) => {
+    logger.error('[whatsapp] driver reject notify failed', err);
+  });
+
+  // Update Slack card if exists
+  if (sub.slackChannel && sub.slackTs) {
+    const slack = getSlackApp();
+    if (slack) {
+      slack.client.chat.update({
+        channel: sub.slackChannel,
+        ts: sub.slackTs,
+        text: `❌ Kata rejected for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
+        blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
+      }).catch(() => {});
+    }
+  }
+
+  res.json({ ok: true, submission: updatedSub });
+}
+

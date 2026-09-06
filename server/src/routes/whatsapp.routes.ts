@@ -27,6 +27,9 @@ import {
   sendDuesOnDateBulk,
   updatePartyDueTodaySchedule,
   sendLorryPaymentWhatsApp,
+  listDriverKataSubmissions,
+  approveDriverKataSubmission,
+  rejectDriverKataSubmission,
 } from '../controllers/whatsapp.controller.js';
 
 const router = Router();
@@ -81,5 +84,10 @@ router.post('/whatsapp/dispatches/:id/send', asyncHandler(sendDispatchWhatsApp))
 router.post('/whatsapp/dispatches/:id/resend-driver', asyncHandler(resendDriverWhatsApp));
 // Lorry Payment summary → driver / transporter on WhatsApp.
 router.post('/whatsapp/lorry-payment/send-summary', asyncHandler(sendLorryPaymentWhatsApp));
+
+// Driver kata submissions (buyer weighbridge slips sent via WhatsApp)
+router.get('/whatsapp/driver-kata-submissions', asyncHandler(listDriverKataSubmissions));
+router.post('/whatsapp/driver-kata-submissions/:id/approve', asyncHandler(approveDriverKataSubmission));
+router.post('/whatsapp/driver-kata-submissions/:id/reject', asyncHandler(rejectDriverKataSubmission));
 
 export default router;

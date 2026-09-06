@@ -155,6 +155,7 @@ const TABLES: ArchiveModel[] = [
   { name: 'EmailLog', delegate: 'emailLog', cls: 'LOG', order: 350, dateField: 'sentAt' },
   { name: 'WhatsAppLog', delegate: 'whatsAppLog', cls: 'LOG', order: 360, dateField: 'createdAt' },
   { name: 'TransportConfirmation', delegate: 'transportConfirmation', cls: 'LOG', order: 370, dateField: 'createdAt' },
+  { name: 'DriverKataSubmission', delegate: 'driverKataSubmission', cls: 'LOG', order: 375, dateField: 'createdAt' },
   { name: 'WishBroadcast', delegate: 'wishBroadcast', cls: 'LOG', order: 380, dateField: 'createdAt' },
 ];
 

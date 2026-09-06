@@ -54,6 +54,13 @@ enum SaleStatus {
   DELIVERED
 }
 
+enum KataSubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
 enum AllocationStatus {
   SOFT
   HARD
@@ -763,10 +770,11 @@ model SaleDispatch {
 
   createdAt DateTime @default(now())
 
-  receipts    Receipt[]
-  creditNotes CreditNote[]
-  debitNotes  DebitNote[]
-  emailLogs   EmailLog[]
+  receipts        Receipt[]
+  creditNotes     CreditNote[]
+  debitNotes      DebitNote[]
+  emailLogs       EmailLog[]
+  kataSubmissions DriverKataSubmission[]
 
   @@unique([invoiceFy, invoiceSeq, invoiceSeries])
   @@index([saleOrderId])
@@ -1870,6 +1878,7 @@ model WhatsAppLog {
   language     WaLanguage? // which language copy was sent (outbound only)
   body         String? // rendered variable values (outbound) / raw text (inbound)
   mediaUrl     String?
+  mediaType    String?
   // Loose link back to the record that triggered the message, e.g.
   // ('PO', purchaseOrderId) or ('REMINDER', partyId). No FK - logs outlive edits.
   relatedType  String?
@@ -1925,6 +1934,43 @@ model TransportConfirmation {
   @@index([status])
   @@index([lorryNumber])
   @@index([saleDispatchId])
+}
+
+// Driver-submitted buyer weighbridge slip (kata) photo sent over WhatsApp.
+// Stored as PENDING awaiting review/confirmation by the team before marking
+// the dispatch DELIVERED and calculating shortage.
+model DriverKataSubmission {
+  id              String               @id @default(cuid())
+  saleDispatchId  String
+  saleDispatch    SaleDispatch         @relation(fields: [saleDispatchId], references: [id])
+
+  // What the driver sent
+  driverPhone     String
+  imageUrl        String                // Supabase public URL of the kata slip
+  rawOcrResult    Json?                 // Full Gemini response for audit
+
+  // OCR-extracted fields
+  ocrBuyerKataKg  Int?                  // Weight extracted by Gemini
+  ocrLorryNumber  String?               // Lorry number from slip (cross-check)
+  ocrBuyerName    String?               // Buyer name from slip (cross-check)
+
+  // Team confirmation
+  status          KataSubmissionStatus  @default(PENDING)
+  confirmedKg     Int?                  // Final weight (may differ from OCR if team edits)
+  confirmedBy     String?               // Slack user or staff who approved/rejected
+  confirmedAt     DateTime?
+  rejectionReason String?
+
+  // Slack tracking
+  slackChannel    String?
+  slackTs         String?               // Message timestamp for updating the card
+
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([saleDispatchId])
+  @@index([driverPhone])
+  @@index([status])
 }
 
 // Persisted drafts for Slack multi-step flows (PO, Stock In, etc.)

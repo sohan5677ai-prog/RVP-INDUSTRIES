@@ -890,6 +890,123 @@ ${text}`;
   }
 }
 
+export interface ParsedBuyerKata {
+  isBuyerKataSlip: boolean;
+  buyerKataKg?: number;
+  grossWeightKg?: number;
+  tareWeightKg?: number;
+  lorryNumber?: string;
+  buyerName?: string;
+  date?: string; // ISO yyyy-mm-dd
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  rawResponse?: any;
+}
+
+const BUYER_KATA_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    isBuyerKataSlip: { type: Type.BOOLEAN },
+    grossWeightKg: { type: Type.NUMBER },
+    tareWeightKg: { type: Type.NUMBER },
+    buyerKataKg: { type: Type.NUMBER },
+    lorryNumber: { type: Type.STRING },
+    buyerName: { type: Type.STRING },
+    date: { type: Type.STRING },
+    confidence: { type: Type.STRING },
+  },
+  required: ['isBuyerKataSlip'],
+};
+
+/**
+ * Send a driver's buyer-weighbridge slip photo (or PDF) to Gemini to extract
+ * the delivered net weight, lorry number, and counterparty.
+ * Returns null if unparseable or not a weighbridge slip.
+ */
+export async function parseBuyerKataImage(
+  buffer: Buffer,
+  mimeType: string = 'image/jpeg'
+): Promise<ParsedBuyerKata | null> {
+  if (!process.env.GEMINI_API_KEY) return null;
+  try {
+    const ai = getClient();
+    const prompt = `You are reading a photograph sent by a truck driver of a weighbridge slip ("kata slip") from an unloading/delivery location in India.
+Decide if this image shows a weighbridge slip / weight measurement, and extract the weight and lorry details.
+
+Weighbridge slip rules:
+- Weighbridge slips typically show GROSS weight, TARE weight, and NET weight in kg.
+- The GROSS weight is the LARGEST of those numbers (loaded vehicle).
+- The TARE weight is the empty vehicle weight.
+- The NET weight is GROSS − TARE. NET must be positive and smaller than GROSS.
+- If three numbers are present and one equals (largest − one of the others), that is the NET weight.
+- If only two weight numbers are present, NET = larger − smaller.
+- If weights are given in Tonnes / MT / Quintals, convert to KILOGRAMS (1 tonne = 1000 kg, 1 quintal = 100 kg) and round to the nearest whole integer.
+- lorryNumber: the vehicle registration number (e.g. "TS16UB4567", "AP39T8217"). Strip spaces/dashes and uppercase it.
+- buyerName: the name of the company, factory, mill or weighbridge printed on the slip if legible.
+- date: the weighing date in ISO yyyy-mm-dd format. In India dates are DD/MM/YYYY.
+- confidence: "HIGH" if numbers and vehicle are clear, "MEDIUM" if partially blurry, "LOW" if difficult to read.
+
+Return JSON matching the schema.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType, data: buffer.toString('base64') } },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: BUYER_KATA_SCHEMA,
+      },
+    });
+
+    const out = response.text;
+    if (!out) return null;
+    const parsed = JSON.parse(out);
+    if (typeof parsed?.isBuyerKataSlip !== 'boolean') return null;
+
+    const clean: ParsedBuyerKata = {
+      isBuyerKataSlip: parsed.isBuyerKataSlip,
+      rawResponse: parsed,
+    };
+    if (typeof parsed.buyerKataKg === 'number' && parsed.buyerKataKg > 0) {
+      clean.buyerKataKg = Math.round(parsed.buyerKataKg);
+    } else if (
+      typeof parsed.grossWeightKg === 'number' &&
+      typeof parsed.tareWeightKg === 'number' &&
+      parsed.grossWeightKg > parsed.tareWeightKg
+    ) {
+      clean.buyerKataKg = Math.round(parsed.grossWeightKg - parsed.tareWeightKg);
+    }
+    if (typeof parsed.grossWeightKg === 'number' && parsed.grossWeightKg > 0) {
+      clean.grossWeightKg = Math.round(parsed.grossWeightKg);
+    }
+    if (typeof parsed.tareWeightKg === 'number' && parsed.tareWeightKg > 0) {
+      clean.tareWeightKg = Math.round(parsed.tareWeightKg);
+    }
+    if (parsed.lorryNumber?.toString().trim()) {
+      clean.lorryNumber = parsed.lorryNumber.toString().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    }
+    if (parsed.buyerName?.toString().trim()) {
+      clean.buyerName = parsed.buyerName.toString().trim();
+    }
+    if (parsed.date?.toString().trim()) {
+      clean.date = parsed.date.toString().trim();
+    }
+    if (parsed.confidence === 'HIGH' || parsed.confidence === 'MEDIUM' || parsed.confidence === 'LOW') {
+      clean.confidence = parsed.confidence;
+    }
+
+    return clean;
+  } catch (err) {
+    return null;
+  }
+}
+
 const WISH_CATEGORY_CONTEXT: Record<string, string> = {
   HINDU: 'This message is going only to recipients from the Hindu community, so it is fine to reference Hindu customs/imagery for this occasion.',
   MUSLIM: 'This message is going only to recipients from the Muslim community, so it is fine to reference Islamic customs/imagery for this occasion.',

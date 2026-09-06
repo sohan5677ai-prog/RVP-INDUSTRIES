@@ -7,6 +7,13 @@ import { registerVerificationFlow } from './flows/verification.js';
 import { registerStockTransferFlow } from './flows/stockTransfer.js';
 import { registerSaleFlow } from './flows/sale.js';
 import { registerDispatchFlow } from './flows/dispatch.js';
+import { registerDriverKataFlow } from './flows/driverKata.js';
+
+let slackAppInstance: App | null = null;
+
+export function getSlackApp(): App | null {
+  return slackAppInstance;
+}
 
 /**
  * Start the Slack bot in Socket Mode (outbound WebSocket - no public URL needed).
@@ -32,6 +39,7 @@ export async function startSlackBot(): Promise<void> {
     socketMode: true,
     signingSecret: process.env.SLACK_SIGNING_SECRET, // unused in socket mode, harmless if set
   });
+  slackAppInstance = app;
 
   app.error(async (error: Error) => {
     logger.error('[slack] error:', error);
@@ -57,7 +65,9 @@ export async function startSlackBot(): Promise<void> {
   registerStockTransferFlow(app);
   registerSaleFlow(app);
   registerDispatchFlow(app);
+  registerDriverKataFlow(app);
 
   await app.start();
   logger.info('Slack bot connected (Socket Mode)');
 }
+

@@ -7,6 +7,18 @@ import { indianFinancialYear } from '../lib/invoice.js';
 import { renderNotePdf, type NotePdfData } from '../lib/notePdf.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { emailService } from '../services/email.service.js';
+import { resolveProductHsn } from '../lib/calc.js';
+
+const PRODUCT_FALLBACK: Record<string, string> = {
+  PAPPU: 'Tamarind Seed Kernel',
+  HUSK: 'Tamarind Husk',
+  WASTE: 'Tamarind Waste',
+  TPS: 'Broken Seed',
+  SHELL: 'Tamarind Shell',
+  PRECLEANER_DUST: 'Precleaner Dust',
+  NALLA_POKKULU: 'Nalla Pokkulu',
+  NALLA_CHINTAPANDU: 'Nalla Chintapandu',
+};
 
 type Kind = 'CREDIT' | 'DEBIT';
 
@@ -116,13 +128,70 @@ export function deleteNote(kind: Kind) {
 async function buildNotePdfData(kind: Kind, id: string) {
   const row = await (model(kind) as any).findUnique({
     where: { id },
-    include: { party: true, saleDispatch: true },
+    include: {
+      party: true,
+      saleDispatch: {
+        include: {
+          saleOrder: {
+            include: {
+              buyer: true,
+              broker: true,
+            },
+          },
+        },
+      },
+    },
   }) as any;
   if (!row) throw new HttpError(404, `${kind === 'CREDIT' ? 'Credit' : 'Debit'} note not found`);
 
-  const company = await getCompanyProfileRow();
+  const [company, taxRows] = await Promise.all([
+    getCompanyProfileRow(),
+    prisma.productTaxInfo.findMany(),
+  ]);
+
   const partyGstin = row.party.gstin ?? null;
   const partyStateCode = partyGstin && /^\d{2}/.test(partyGstin) ? partyGstin.slice(0, 2) : null;
+
+  const dispatch = row.saleDispatch;
+  const order = dispatch?.saleOrder;
+
+  // Consignee and Buyer details
+  const consignee = {
+    name: order?.buyer?.name || row.party.name,
+    address: order?.buyerAddress || row.party.address,
+    gstin: order?.buyerGstin || partyGstin,
+    stateName: order?.buyerState || row.party.state,
+    stateCode: (order?.buyerGstin && /^\d{2}/.test(order.buyerGstin) ? order.buyerGstin.slice(0, 2) : partyStateCode),
+  };
+
+  const buyer = {
+    name: row.party.name,
+    address: row.party.address,
+    gstin: partyGstin,
+    stateName: row.party.state,
+    stateCode: partyStateCode,
+  };
+
+  // Product & HSN resolution
+  const tax = taxRows.find((t) => t.product === order?.product);
+  const description = tax?.description || (order?.product ? PRODUCT_FALLBACK[order.product] : null) || row.reason;
+  const hsn = resolveProductHsn(row.party, tax, order?.gstExempt, '1207');
+
+  // Quantity and Rate calculation
+  const ratePerKg = order?.ratePerKg != null && Number(order.ratePerKg) > 0 ? Number(order.ratePerKg) : null;
+  let quantityKg: number | null = null;
+  if (dispatch?.shortageKg && dispatch.shortageKg > 0) {
+    quantityKg = dispatch.shortageKg;
+  } else if (ratePerKg && ratePerKg > 0) {
+    const derived = Math.round(Number(row.taxableValue) / ratePerKg);
+    if (derived > 0) quantityKg = derived;
+  } else if (dispatch?.weightKg && Math.abs(dispatch.weightKg * (ratePerKg ?? 0) - Number(row.taxableValue)) < 2) {
+    quantityKg = dispatch.weightKg;
+  }
+
+  // Original invoice details
+  const origInvNo = dispatch?.invoiceNumber ?? null;
+  const origInvDate = dispatch?.invoiceDate ?? dispatch?.dispatchDate ?? null;
 
   const pdfData: NotePdfData = {
     kind,
@@ -133,26 +202,40 @@ async function buildNotePdfData(kind: Kind, id: string) {
       stateName: company.stateName,
       stateCode: company.stateCode,
       contact: company.contact,
+      email: (company as any).email || 'rvpindustries2024@gmail.com',
+      signatureHeight: company.signatureHeight ?? 55,
+      stampSize: company.stampSize ?? 95,
       bankAccountName: company.bankAccountName,
       bankName: company.bankName,
       bankAccountNumber: company.bankAccountNumber,
       bankBranchIfsc: company.bankBranchIfsc,
     },
-    party: {
-      name: row.party.name,
-      address: row.party.address,
-      gstin: partyGstin,
-      stateName: row.party.state,
-      stateCode: partyStateCode,
-    },
+    consignee,
+    buyer,
     noteNumber: row.noteNumber,
     noteDate: row.noteDate,
-    reason: row.reason,
+    ewbNumber: dispatch?.ewbNumber ?? null,
+    originalInvoiceNumber: origInvNo,
+    originalInvoiceDate: origInvDate,
+    otherReferences: order?.broker?.name ?? null,
+    poNumber: order?.poNumber ?? null,
+    poDate: order?.poDate ?? null,
+    dispatchedThrough: 'Road',
+    destination: order?.destination || row.party.destination || row.party.state || null,
+    motorVehicleNo: dispatch?.vehicleNumber ?? null,
+    line: {
+      description,
+      hsn,
+      quantityKg,
+      ratePerKg: ratePerKg ?? (quantityKg && quantityKg > 0 ? Number(row.taxableValue) / quantityKg : null),
+      unit: 'Kgs',
+    },
     taxableValue: Number(row.taxableValue),
     gstRate: Number(row.gstRate),
     gstAmount: Number(row.gstAmount),
     totalAmount: Number(row.totalAmount),
-    referenceInvoiceNumber: row.saleDispatch?.invoiceNumber ?? null,
+    reason: row.reason,
+    referenceInvoiceNumber: origInvNo,
   };
 
   return { row, company, pdfData };

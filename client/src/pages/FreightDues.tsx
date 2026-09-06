@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Fragment } from 'react';
+import { useState, useMemo, useCallback, memo, useEffect, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -794,7 +794,7 @@ function AdjustFreightCostsDialog({
   );
 }
 
-function FreightTable({
+const FreightTable = memo(function FreightTable({
   freightLabel,
   exportName,
   rows,
@@ -1203,7 +1203,7 @@ function FreightTable({
       <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
   );
-}
+});
 
 const kindVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
   Husk: 'secondary',
@@ -1215,7 +1215,7 @@ const kindVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
  * Transfer transport payable to KNM Transport (husk / seed / pre-cleaner dust).
  * Billed to KNM Transport per trip / weight and settled per lorry.
  */
-function TransfersTable({
+const TransfersTable = memo(function TransfersTable({
   rows,
   paymentStatusFor,
   dueFor,
@@ -1405,7 +1405,7 @@ function TransfersTable({
       <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
   );
-}
+});
 
 interface PayTarget {
   id: string;
@@ -1455,6 +1455,7 @@ export default function FreightDuesPage() {
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
+    staleTime: 5 * 60_000,
   });
   // Transfer transport (husk / seed / pre-cleaner dust) is billed to KNM Transport
   // and settles from the same per-lorry pool as the usual KNM freight.
@@ -1750,14 +1751,15 @@ export default function FreightDuesPage() {
 
   const [shareTarget, setShareTarget] = useState<LorryPaymentData | null>(null);
 
-  function paymentStatusFor(r: FreightRow): PaymentStatus {
+  const paymentStatusFor = useCallback((r: FreightRow): PaymentStatus => {
     return r.lorry ? (rowStatus.get(r.id) ?? 'Pending') : 'Pending';
-  }
-  function dueFor(r: FreightRow): number {
-    return r.lorry ? (rowDue.get(r.id) ?? r.net) : 0;
-  }
+  }, [rowStatus]);
 
-  const buildLorryPaymentData = (row: FreightRow, paidNow?: number, payRef?: string, payDt?: string): LorryPaymentData => {
+  const dueFor = useCallback((r: FreightRow): number => {
+    return r.lorry ? (rowDue.get(r.id) ?? r.net) : 0;
+  }, [rowDue]);
+
+  const buildLorryPaymentData = useCallback((row: FreightRow, paidNow?: number, payRef?: string, payDt?: string): LorryPaymentData => {
     const history = paymentsByLorry.get(row.lorry || '') || [];
     const prevDue = dueFor(row);
     const prevPaidForRow = Math.max(0, row.net - prevDue);
@@ -1800,11 +1802,15 @@ export default function FreightDuesPage() {
       deductions: row.deductions,
       additions: row.additions,
     };
-  };
+  }, [paymentsByLorry, dueFor, company?.companyVehicles, company?.ownerWhatsappNumber, waitingBookings]);
 
-  const handleShareReceipt = (row: FreightRow) => {
+  const handleShareReceipt = useCallback((row: FreightRow) => {
     setShareTarget(buildLorryPaymentData(row));
-  };
+  }, [buildLorryPaymentData]);
+
+  const handleAdjust = useCallback((row: FreightRow) => {
+    setAdjustTarget(row);
+  }, []);
 
   const payMutation = useMutation({
     mutationFn: () => {
@@ -1849,7 +1855,7 @@ export default function FreightDuesPage() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  function openPay(row: FreightRow, due: number) {
+  const openPay = useCallback((row: FreightRow, due: number) => {
     if (!row.lorry) return;
     setPayTarget({
       id: row.id,
@@ -1867,19 +1873,18 @@ export default function FreightDuesPage() {
     setPayDate(row.date ? row.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
     setPayAmount(due > 0 ? String(due) : '');
     setPayReference('');
-  }
+  }, [buildLorryPaymentData]);
 
-  const outwardNet = outwardRows.reduce((s, r) => s + r.net, 0);
-  const outwardDue = outwardRows.reduce((s, r) => s + dueFor(r), 0);
-
-  const inwardNet = inwardRows.reduce((s, r) => s + r.net, 0);
-  const inwardDue = inwardRows.reduce((s, r) => s + dueFor(r), 0);
-
-  const knmUsualNet = knmRows.reduce((s, r) => s + r.net, 0);
-  const knmUsualDue = knmRows.reduce((s, r) => s + dueFor(r), 0);
-
-  const transfersNet = transferRows.reduce((s, r) => s + r.net, 0);
-  const transfersDue = transferRows.reduce((s, r) => s + dueFor(r), 0);
+  const { outwardNet, outwardDue, inwardNet, inwardDue, knmUsualNet, knmUsualDue, transfersNet, transfersDue } = useMemo(() => ({
+    outwardNet: outwardRows.reduce((s, r) => s + r.net, 0),
+    outwardDue: outwardRows.reduce((s, r) => s + dueFor(r), 0),
+    inwardNet: inwardRows.reduce((s, r) => s + r.net, 0),
+    inwardDue: inwardRows.reduce((s, r) => s + dueFor(r), 0),
+    knmUsualNet: knmRows.reduce((s, r) => s + r.net, 0),
+    knmUsualDue: knmRows.reduce((s, r) => s + dueFor(r), 0),
+    transfersNet: transferRows.reduce((s, r) => s + r.net, 0),
+    transfersDue: transferRows.reduce((s, r) => s + dueFor(r), 0),
+  }), [outwardRows, inwardRows, knmRows, transferRows, dueFor]);
 
   return (
     <div className="space-y-6">
@@ -1941,7 +1946,7 @@ export default function FreightDuesPage() {
                     <div className="text-xs text-muted-foreground mt-1">Total: {rupees(outwardNet)}</div>
                   </CardContent>
                 </Card>
-                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
+                <FreightTable freightLabel="Outward Freight" exportName="Freight_Dues_Outward" rows={outwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={handleAdjust} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
               <TabsContent value="inward" className="space-y-4">
@@ -1954,7 +1959,7 @@ export default function FreightDuesPage() {
                     <div className="text-xs text-muted-foreground mt-1">Total: {rupees(inwardNet)}</div>
                   </CardContent>
                 </Card>
-                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
+                <FreightTable freightLabel="Inward Freight" exportName="Freight_Dues_Inward" rows={inwardRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={handleAdjust} onShareReceipt={handleShareReceipt} paymentsByLorry={paymentsByLorry} />
               </TabsContent>
 
               <TabsContent value="knm" className="space-y-6">
@@ -1999,7 +2004,7 @@ export default function FreightDuesPage() {
                   </TabsList>
 
                   <TabsContent value="usual">
-                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={setAdjustTarget} onShareReceipt={handleShareReceipt} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
+                    <FreightTable freightLabel="KNM Freight" exportName="Freight_Dues_KNM" rows={knmRows} paymentStatusFor={paymentStatusFor} dueFor={dueFor} onPay={openPay} onAdjust={handleAdjust} onShareReceipt={handleShareReceipt} hideDeductions={true} paymentsByLorry={paymentsByLorry} />
                   </TabsContent>
 
                   <TabsContent value="transfers" className="space-y-2">

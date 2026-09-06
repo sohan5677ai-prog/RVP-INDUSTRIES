@@ -42,16 +42,40 @@ export function LorryPaymentShareDialog({
   data,
   initialPhone = '',
 }: LorryPaymentShareDialogProps) {
+  if (!open || !data) return null;
+
+  return (
+    <LorryPaymentShareDialogInner
+      key={`${data.lorryNumber}-${String(data.date ?? '')}-${initialPhone || data.driverPhone || ''}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      data={data}
+      initialPhone={initialPhone}
+    />
+  );
+}
+
+function LorryPaymentShareDialogInner({
+  open,
+  onOpenChange,
+  data,
+  initialPhone = '',
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  data: LorryPaymentData;
+  initialPhone?: string | null;
+}) {
   const [selectedLang, setSelectedLang] = useState<'EN' | 'TE' | 'HI' | 'TA'>('EN');
-  const [phone, setPhone] = useState(initialPhone || data?.driverPhone || '');
-  const [driverName, setDriverName] = useState(data?.driverName || '');
+  const [phone, setPhone] = useState(() => (initialPhone || data?.driverPhone || '').trim());
+  const [driverName, setDriverName] = useState(() => (data?.driverName || '').trim());
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
 
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
   });
 
   const shabariRecipient = useMemo<AlertMember | null>(() => {
@@ -66,33 +90,25 @@ export function LorryPaymentShareDialog({
     return { name: 'Shabari', phone: '9902953300' };
   }, [company?.alertRecipients, company?.ownerWhatsappNumber]);
 
+  // Only query the backend if phone number wasn't already in data
   useEffect(() => {
-    if (open && data) {
-      const initPhone = (initialPhone || data.driverPhone || '').trim();
-      setPhone(initPhone);
-      setDriverName(data.driverName || '');
-
-      // If phone is missing, try looking it up via the backend contact-info endpoint
-      if (!initPhone && data.lorryNumber) {
-        api<{
-          driverPhone?: string | null;
-          driverName?: string | null;
-          ownerPhone?: string | null;
-        }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(data.lorryNumber)}`)
-          .then((res) => {
-            if (res?.driverPhone) {
-              setPhone(res.driverPhone);
-            }
-            if (res?.driverName) {
-              setDriverName(res.driverName);
-            }
-          })
-          .catch(() => {});
-      }
+    if (!phone && data.lorryNumber) {
+      api<{
+        driverPhone?: string | null;
+        driverName?: string | null;
+        ownerPhone?: string | null;
+      }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(data.lorryNumber)}`)
+        .then((res) => {
+          if (res?.driverPhone) {
+            setPhone((prev) => prev || res.driverPhone!.trim());
+          }
+          if (res?.driverName) {
+            setDriverName((prev) => prev || res.driverName!.trim());
+          }
+        })
+        .catch(() => {});
     }
-  }, [open, initialPhone, data?.driverPhone, data?.driverName, data?.lorryNumber]);
-
-  if (!data) return null;
+  }, [phone, data.lorryNumber]);
 
   const messageText = formatLorryPaymentReceiptText(data, selectedLang);
 

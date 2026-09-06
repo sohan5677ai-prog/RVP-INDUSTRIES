@@ -334,7 +334,7 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
       logger.warn(`[whatsapp] kata slip detected from ${from} for lorry ${parsed.lorryNumber} (${parsed.buyerKataKg} kg) but no matching dispatch found`);
       const slack = getSlackApp();
       if (slack) {
-        const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'dispatches';
+        const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'C0BVDE4MXHA';
         slack.client.chat.postMessage({
           channel,
           text: `⚠️ *Buyer Weighbridge Slip Received (No Dispatch Match)*\n• Sender: +${from}\n• Lorry on Slip: *${parsed.lorryNumber || 'Unknown'}*\n• Net Weight: *${parsed.buyerKataKg ? `${parsed.buyerKataKg.toLocaleString('en-IN')} kg` : 'N/A'}*\n• Mill / Weighbridge: ${parsed.buyerName || 'N/A'}\n_Could not link to an active dispatch in ERP. Please verify manually._`,
@@ -379,7 +379,7 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
   const slack = getSlackApp();
   if (slack) {
     try {
-      const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'dispatches';
+      const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'C0BVDE4MXHA';
       const extraNote = dispatch.status === 'DELIVERED' ? '⚠️ Note: This dispatch was already marked DELIVERED.' : undefined;
       const blocks = kataCardBlocks(submission, dispatch, dispatch.saleOrder, extraNote);
       const postRes = await slack.client.chat.postMessage({

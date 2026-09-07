@@ -169,6 +169,18 @@ export async function confirmDelivery(args: ConfirmDeliveryArgs): Promise<SaleDi
           confirmedAt: new Date(),
         },
       });
+    } else {
+      // If delivery confirmed without explicit submissionId (e.g. from ERP web modal),
+      // mark any pending kata submissions for this dispatch as approved as well.
+      await tx.driverKataSubmission.updateMany({
+        where: { saleDispatchId: dispatch.id, status: 'PENDING' },
+        data: {
+          status: 'APPROVED',
+          confirmedKg: buyerKataKg,
+          confirmedBy: confirmedBy ?? 'ERP Web',
+          confirmedAt: new Date(),
+        },
+      });
     }
 
     return result;

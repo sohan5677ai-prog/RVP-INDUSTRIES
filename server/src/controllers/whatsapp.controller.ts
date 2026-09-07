@@ -468,6 +468,10 @@ async function parseInboundIntoRegister(logRow: InboundLogRow) {
   // A transport confirmation is a long-ish text with digits (lorry no / phone).
   if (!text || text.length < 25 || !/\d{4}/.test(text)) return;
 
+  // Never treat owner commands or delivery review replies as lorry transport bookings
+  if (/^(?:APPROVE|REJECT|DELIVER|CONFIRM|STATUS|CHECK|HELP|KATA)\b/i.test(text.trim())) return;
+  if (/\b(?:override\s*weight|confirm\s*delivery|kata\s*slip|kata\s*received)\b/i.test(text)) return;
+
   const parsed = await parseTransportConfirmationText(text);
   if (!parsed?.isTransportConfirmation) return;
   if (!parsed.lorryNumber && !parsed.driverPhone) return; // nothing actionable
@@ -595,21 +599,50 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
   }
 
   // 4. Approve / Confirm / Deliver Command
-  // Matches: "APPROVE TN 28 BF 7423", "APPROVE TN28BF7423 24850", "APPROVE TN28BF7423 24.85"
-  const approveMatch = text.match(/^(?:APPROVE|DELIVER|CONFIRM)\s+([A-Z0-9\s]+?)(?:\s+(\d{4,6}|\d{1,2}(?:\.\d+)?))?$/i);
-  if (approveMatch) {
-    const rawLorry = approveMatch[1].trim();
-    const cleanLorry = rawLorry.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const lorrySuffix = cleanLorry.slice(-4);
-    const weightArg = approveMatch[2];
+  // Matches:
+  // "APPROVE TN29CJ5359", "APPROVE TN29CJ5359 <34820>", "APPROVE TN29CJ5359 <34820> (override weight)"
+  // "APPROVE TN29CJ5359 34820", "APPROVE TN 29 CJ 5359 34,820 kg", "APPROVE TN29CJ5359 34.82 MT"
+  if (/^(?:APPROVE|DELIVER|CONFIRM)\b/i.test(text)) {
+    let body = text.replace(/^(?:APPROVE|DELIVER|CONFIRM)\s*/i, '').trim();
+
+    // Strip common copy-pasted prompt helpers like "(override weight)", "(confirm delivery)", "(override)"
+    body = body.replace(/\((?:confirm\s*delivery|override\s*weight|override|confirm)\)/gi, '').trim();
 
     let overrideKg: number | undefined;
-    if (weightArg) {
-      const val = parseFloat(weightArg);
+
+    // Check for weight in brackets: <...>, [...], (...)
+    const bracketMatch = body.match(/[<\[(]([0-9.,]+)\s*(?:kg|kgs|t|mt|tonne|tonnes|ton|tons)?[>\])]/i);
+    if (bracketMatch) {
+      const numStr = bracketMatch[1].replace(/,/g, '');
+      const val = parseFloat(numStr);
       if (!isNaN(val) && val > 0) {
-        // If user typed e.g. "24.85" (tonnes), convert to kg (24850). If "24850", keep as kg.
         overrideKg = val < 200 ? Math.round(val * 1000) : Math.round(val);
       }
+      body = body.replace(bracketMatch[0], '').trim();
+    } else {
+      // Check for standalone/trailing weight number with optional units
+      const numMatch = body.match(/(?:^|\s+)(\d{1,3}(?:,\d{3})+|\d{4,6}|\d{1,2}(?:\.\d+)?)\s*(?:kg|kgs|t|mt|tonne|tonnes|ton|tons)?(?:\s*\(.*\))?$/i);
+      if (numMatch) {
+        const numStr = numMatch[1].replace(/,/g, '');
+        const val = parseFloat(numStr);
+        if (!isNaN(val) && val > 0) {
+          overrideKg = val < 200 ? Math.round(val * 1000) : Math.round(val);
+        }
+        body = body.slice(0, numMatch.index).trim();
+      }
+    }
+
+    const rawLorry = body.replace(/[^A-Za-z0-9\s-]/g, '').trim();
+    const cleanLorry = rawLorry.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const lorrySuffix = cleanLorry.slice(-4);
+
+    if (cleanLorry.length < 3) {
+      await sendSessionTextMessage({
+        to: from,
+        text: `⚠️ Please specify a valid lorry number.\n*Example:* APPROVE TN29CJ5359 or APPROVE TN29CJ5359 34820`,
+        relatedType: 'KATA_APPROVE_ERROR',
+      });
+      return true;
     }
 
     // Find pending submission first
@@ -631,19 +664,29 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
 
     let dispatch = sub?.saleDispatch;
 
-    // If no pending submission was found, check for active DISPATCHED trips
+    // If no pending submission was found, check for active DISPATCHED or recently DELIVERED trips (last 14 days)
     if (!dispatch) {
-      const activeDispatches = await prisma.saleDispatch.findMany({
-        where: { status: 'DISPATCHED' },
-        include: { saleOrder: { include: { buyer: true } } },
+      const recentDispatches = await prisma.saleDispatch.findMany({
+        where: {
+          status: { in: ['DISPATCHED', 'DELIVERED'] },
+          dispatchDate: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
+        },
+        include: {
+          saleOrder: { include: { buyer: true } },
+          kataSubmissions: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
         orderBy: { dispatchDate: 'desc' },
-        take: 20,
+        take: 30,
       });
 
-      dispatch = activeDispatches.find((d) => {
+      dispatch = recentDispatches.find((d) => {
         const v = (d.vehicleNumber || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
         return v.includes(cleanLorry) || cleanLorry.includes(v) || (lorrySuffix.length === 4 && v.endsWith(lorrySuffix));
       });
+
+      if (dispatch && !sub && (dispatch as any).kataSubmissions?.[0]) {
+        sub = (dispatch as any).kataSubmissions[0];
+      }
     }
 
     if (!dispatch) {
@@ -659,7 +702,7 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
     if (!finalWeightKg || finalWeightKg <= 0) {
       await sendSessionTextMessage({
         to: from,
-        text: `⚠️ Could not determine weight for lorry *${dispatch.vehicleNumber || rawLorry}*.\nPlease specify the weight: *APPROVE ${cleanLorry} <weight_in_kg>* (e.g. APPROVE ${cleanLorry} 24850)`,
+        text: `⚠️ Could not determine weight for lorry *${dispatch.vehicleNumber || rawLorry}*.\nPlease specify the weight: *APPROVE ${cleanLorry} 34820*`,
         relatedType: 'KATA_APPROVE_ERROR',
       });
       return true;
@@ -733,15 +776,45 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
   }
 
   // 5. Reject Command
-  // Matches: "REJECT TN 28 BF 7423 Blurry photo", "REJECT TN28BF7423 - wrong slip", "REJECT TN28BF7423"
-  const rejectMatch = text.match(/^REJECT\s+([A-Z0-9\s]+?)(?:\s+[-:]\s+|\s+reason\s*:\s*|\s+)(.*)$/i);
-  const bareRejectMatch = !rejectMatch ? text.match(/^REJECT\s+([A-Z0-9\s]+)$/i) : null;
+  // Matches:
+  // "REJECT TN29CJ5359", "REJECT TN29CJ5359 <blurry slip>", "REJECT TN29CJ5359 <reason> (ask driver to resend)"
+  // "REJECT TN 28 BF 7423 Blurry photo", "REJECT TN28BF7423 - wrong slip"
+  if (/^REJECT\b/i.test(text)) {
+    let body = text.replace(/^REJECT\s*/i, '').trim();
+    body = body.replace(/\((?:ask\s*driver\s*to\s*resend|resend)\)/gi, '').trim();
 
-  if (rejectMatch || bareRejectMatch) {
-    const rawLorry = (rejectMatch ? rejectMatch[1] : bareRejectMatch![1]).trim();
-    const reason = (rejectMatch ? rejectMatch[2]?.trim() : '') || 'Photo was unclear or unreadable';
+    let reason = '';
+    const angleMatch = body.match(/[<\[(]([^>\])]+)[>\])]/);
+    if (angleMatch) {
+      reason = angleMatch[1].trim();
+      body = body.replace(angleMatch[0], '').trim();
+    } else {
+      const parts = body.split(/\s+[-:]\s+|\s+reason\s*:\s*/i);
+      if (parts.length > 1) {
+        body = parts[0].trim();
+        reason = parts.slice(1).join(' ').trim();
+      } else {
+        const tokens = body.split(/\s+/);
+        if (tokens.length > 1) {
+          body = tokens[0].trim();
+          reason = tokens.slice(1).join(' ').trim();
+        }
+      }
+    }
+
+    const rawLorry = body.replace(/[^A-Za-z0-9\s-]/g, '').trim();
     const cleanLorry = rawLorry.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     const lorrySuffix = cleanLorry.slice(-4);
+    reason = reason || 'Photo was unclear or unreadable';
+
+    if (cleanLorry.length < 3) {
+      await sendSessionTextMessage({
+        to: from,
+        text: `⚠️ Please specify a valid lorry number.\n*Example:* REJECT TN29CJ5359 blurry photo`,
+        relatedType: 'KATA_REJECT_ERROR',
+      });
+      return true;
+    }
 
     const pendingSubs = await prisma.driverKataSubmission.findMany({
       where: { status: 'PENDING' },
@@ -821,6 +894,19 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
       });
       return true;
     }
+  }
+
+  // 6. If owner message starts with a recognized command keyword but didn't match, help them rather than ignoring
+  if (/^(?:APPROVE|DELIVER|CONFIRM|REJECT|STATUS|CHECK)\b/i.test(text)) {
+    const helpMsg =
+      `🤖 *RVP Kata Assistant*\n\n` +
+      `Could not recognize that command format.\n\n` +
+      `• *APPROVE <lorry>* — e.g. APPROVE TN29CJ5359\n` +
+      `• *APPROVE <lorry> <weight>* — e.g. APPROVE TN29CJ5359 34820\n` +
+      `• *REJECT <lorry> <reason>* — e.g. REJECT TN29CJ5359 blurry photo\n` +
+      `• *STATUS <lorry>* — e.g. STATUS TN29CJ5359`;
+    await sendSessionTextMessage({ to: from, text: helpMsg, relatedType: 'KATA_HELP' });
+    return true;
   }
 
   // Not an owner command - let it fall through

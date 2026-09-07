@@ -2017,8 +2017,8 @@ export async function notifyOwnersKataReceived(args: {
     (args.imageUrl ? `\n📎 *Slip Photo:* ${args.imageUrl}\n` : '') +
     `\n⚡ *Quick Actions (Reply on WhatsApp):*\n` +
     `👉 *APPROVE ${args.lorryNumber}* (confirm delivery)\n` +
-    `👉 *APPROVE ${args.lorryNumber} <weight_in_kg>* (override weight)\n` +
-    `👉 *REJECT ${args.lorryNumber} <reason>* (ask driver to resend)\n\n` +
+    `👉 *APPROVE ${args.lorryNumber} ${args.buyerKataKg || args.dispatchedKg}* (override weight in kg)\n` +
+    `👉 *REJECT ${args.lorryNumber} blurry slip* (ask driver to resend)\n\n` +
     `🌐 *Review in ERP:*\n` +
     `${appBaseUrl}/sales/dispatches`;
 

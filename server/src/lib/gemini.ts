@@ -829,8 +829,11 @@ Transport brokers send lorry-booking confirmations that look roughly like:
 Wording, order and spelling vary a lot (Tones/Tons/MT, Frieght, etc).
 
 Decide whether THIS message is such a lorry-booking confirmation and return JSON:
-- isTransportConfirmation: true only if the message clearly confirms a booked lorry
+- isTransportConfirmation: true only if the message clearly confirms a newly booked lorry
   (it should mention at least a vehicle registration number, plus typically route/driver/freight).
+  CRITICAL: If this message is an approval, rejection, or delivery review command (e.g. starts with "APPROVE",
+  "REJECT", "STATUS", "CONFIRM", or contains "(override weight)"), it is NOT a transport booking confirmation.
+  Set isTransportConfirmation: false!
 - messageDate: the date mentioned, ISO yyyy-mm-dd. Dates are written in the INDIAN
   day/month/year order ("18/7/26" = 18 July 2026), and two-digit years are 20xx.
 - fromPlace / toPlace: the route ("X To Y").
@@ -933,15 +936,16 @@ export async function parseBuyerKataImage(
 Decide if this image shows a weighbridge slip / weight measurement, and extract the weight and lorry details.
 
 Weighbridge slip rules:
-- Weighbridge slips typically show GROSS weight, TARE weight, and NET weight in kg.
+- Weighbridge slips show GROSS weight (First Wt / loaded), TARE weight (Second Wt / empty), and NET weight in kg.
 - The GROSS weight is the LARGEST of those numbers (loaded vehicle).
 - The TARE weight is the empty vehicle weight.
-- The NET weight is GROSS − TARE. NET must be positive and smaller than GROSS.
-- If three numbers are present and one equals (largest − one of the others), that is the NET weight.
+- ARITHMETIC LAW OF WEIGHBRIDGES: NET weight = GROSS − TARE.
+- Compute calculatedNet = GROSS − TARE.
+- In India, weighbridges frequently use 9-pin dot-matrix printers where digits like 8 and 6, or 2 and 4, can look easily confusable. If the printed Net weight appears to differ from (GROSS − TARE), (GROSS − TARE) is ALWAYS the true Net weight. Set buyerKataKg to calculatedNet.
 - If only two weight numbers are present, NET = larger − smaller.
 - If weights are given in Tonnes / MT / Quintals, convert to KILOGRAMS (1 tonne = 1000 kg, 1 quintal = 100 kg) and round to the nearest whole integer.
-- lorryNumber: the vehicle registration number (e.g. "TS16UB4567", "AP39T8217"). Strip spaces/dashes and uppercase it.
-- buyerName: the name of the company, factory, mill or weighbridge printed on the slip if legible.
+- lorryNumber: the vehicle registration number (e.g. "TS16UB4567", "TN29CJ5359"). Strip spaces/dashes and uppercase it.
+- buyerName: the name of the company, factory, mill or weighbridge printed on the slip or invoice if legible.
 - date: the weighing date in ISO yyyy-mm-dd format. In India dates are DD/MM/YYYY.
 - confidence: "HIGH" if numbers and vehicle are clear, "MEDIUM" if partially blurry, "LOW" if difficult to read.
 
@@ -961,6 +965,7 @@ Return JSON matching the schema.`;
       config: {
         responseMimeType: 'application/json',
         responseSchema: BUYER_KATA_SCHEMA,
+        temperature: 0.0,
       },
     });
 
@@ -973,20 +978,25 @@ Return JSON matching the schema.`;
       isBuyerKataSlip: parsed.isBuyerKataSlip,
       rawResponse: parsed,
     };
-    if (typeof parsed.buyerKataKg === 'number' && parsed.buyerKataKg > 0) {
-      clean.buyerKataKg = Math.round(parsed.buyerKataKg);
-    } else if (
-      typeof parsed.grossWeightKg === 'number' &&
-      typeof parsed.tareWeightKg === 'number' &&
-      parsed.grossWeightKg > parsed.tareWeightKg
-    ) {
-      clean.buyerKataKg = Math.round(parsed.grossWeightKg - parsed.tareWeightKg);
-    }
+
     if (typeof parsed.grossWeightKg === 'number' && parsed.grossWeightKg > 0) {
       clean.grossWeightKg = Math.round(parsed.grossWeightKg);
     }
     if (typeof parsed.tareWeightKg === 'number' && parsed.tareWeightKg > 0) {
       clean.tareWeightKg = Math.round(parsed.tareWeightKg);
+    }
+
+    // Mathematical validation: on a weighbridge slip, Net is definitionally Gross - Tare.
+    // If dot-matrix OCR misread a digit (e.g. 8 vs 6), Gross - Tare takes precedence.
+    const gross = clean.grossWeightKg;
+    const tare = clean.tareWeightKg;
+    const mathNet = gross && tare && gross > tare ? Math.round(gross - tare) : undefined;
+
+    if (typeof parsed.buyerKataKg === 'number' && parsed.buyerKataKg > 0) {
+      const parsedNet = Math.round(parsed.buyerKataKg);
+      clean.buyerKataKg = mathNet ?? parsedNet;
+    } else if (mathNet) {
+      clean.buyerKataKg = mathNet;
     }
     if (parsed.lorryNumber?.toString().trim()) {
       clean.lorryNumber = parsed.lorryNumber.toString().replace(/[^A-Za-z0-9]/g, '').toUpperCase();

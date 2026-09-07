@@ -32,7 +32,6 @@ export class TaxproService {
   private static readonly PRODUCTION_BASE_URLS = [
     'https://einvapi.charteredinfo.com',
     'https://einvapimum1.charteredinfo.com',
-    'https://einvapidel2.charteredinfo.com',
   ];
   private static readonly SANDBOX_BASE_URLS = ['https://gstsandbox.charteredinfo.com'];
 
@@ -160,7 +159,9 @@ export class TaxproService {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings?`;
             }
             const err: any = new Error(msg);
-            if (!isUpstreamError) {
+            if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+              err.isBusinessError = true;
+            } else if (!isUpstreamError) {
               err.isBusinessError = true;
             }
             throw err;
@@ -187,14 +188,22 @@ export class TaxproService {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings? [${msg}]`;
             }
             const err: any = new Error(msg);
-            if (!isTransientNicError) {
+            if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+              err.isBusinessError = true;
+            } else if (!isTransientNicError) {
               err.isBusinessError = true;
             }
             err.errorDetails = json.ErrorDetails;
             throw err;
           }
 
-          if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+          if (!res.ok) {
+            const err: any = new Error(`HTTP Error ${res.status}`);
+            if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+              err.isBusinessError = true;
+            }
+            throw err;
+          }
 
           return json;
         } catch (err: any) {
@@ -1012,16 +1021,33 @@ export class TaxproService {
     }
 
     try {
-      const json = await this.withAuth(company, company.gstin || '', (token) =>
-        this.request(company.taxproSandbox, '/ewaybillapi/dec/v1.03/ewayapi?action=CANEWB', {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = company.taxproSandbox
+          ? '/ewaybillapi/dec/v1.03/ewayapi?action=CANEWB'
+          : `/v1.03/dec/ewayapi?action=CANEWB&authtoken=${encodeURIComponent(token)}`;
+        const headers = company.taxproSandbox
+          ? this.baseHeaders(company, company.gstin || '', { authtoken: token })
+          : {
+              'Content-Type': 'application/json',
+              aspid: company.taxproGspId || '',
+              password: company.taxproGspSecret || '',
+              Gstin: company.gstin || '',
+              username: company.taxproGstUser || '',
+              authtoken: token,
+            };
+
+        return this.request(company.taxproSandbox, ewbPath, {
           method: 'POST',
-          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          headers,
           body: JSON.stringify(payload),
-        }));
-      const data = this.parseData(json.Data) || {};
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const cancelDate = data.CancelDate || data.cancelDate || data.cancel_date;
       return {
         success: true,
-        cancelledDate: data.CancelDate ? new Date(data.CancelDate) : new Date(),
+        cancelledDate: cancelDate ? this.parseNicDate(cancelDate) : new Date(),
         message: 'E-Way Bill cancelled successfully',
       };
     } catch (err: any) {

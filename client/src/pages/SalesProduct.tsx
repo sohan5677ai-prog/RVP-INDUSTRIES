@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Send, Clock } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Clock } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
@@ -1534,37 +1534,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 Cancel IRN
                                               </Button>
                                             )}
-                                            {d.irn && (
-                                              <>
-                                                {(() => {
-                                                  const invLog = d.emailLogs?.find((l) => l.documentType === 'INVOICE') || d.emailLogs?.[0];
-                                                  if (!invLog) return null;
-                                                  if (invLog.status === 'OPENED') {
-                                                    return (
-                                                      <span
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800"
-                                                        title={`Invoice opened by ${invLog.recipientEmail}${invLog.openedAt ? ` at ${new Date(invLog.openedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : ''}`}
-                                                      >
-                                                        <Eye className="h-3 w-3 text-purple-600" /> Opened
-                                                      </span>
-                                                    );
-                                                  }
-                                                  if (invLog.status === 'DELIVERED') {
-                                                    return (
-                                                      <span
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                                                        title={`Invoice delivered to ${invLog.recipientEmail}${invLog.deliveredAt ? ` at ${new Date(invLog.deliveredAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : ''}`}
-                                                      >
-                                                        <CheckCheck className="h-3 w-3 text-emerald-600" /> Delivered
-                                                      </span>
-                                                    );
-                                                  }
-                                                  if (invLog.status === 'SENT') {
-                                                    return (
-                                                      <span
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-                                                        title={`Invoice emailed to ${invLog.recipientEmail} at ${new Date(invLog.sentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
-                                            
                                             {d.irn && (
                                               <>
                                                 {(() => {

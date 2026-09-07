@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, apiBlob } from '@/lib/api';
@@ -225,6 +225,7 @@ const SALE_DUES_COLUMNS: ExportColumn<OutstandingInvoice>[] = [
 ];
 
 export default function SaleDuesPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [receiveDialog, setReceiveDialog] = useState<ReceiveDialogState | null>(null);
   const [enableTds, setEnableTds] = useState(false);
@@ -285,6 +286,33 @@ export default function SaleDuesPage() {
 
   const isLoading = loadingParties || loadingSales || loadingReceipts;
 
+  // BOTH counts as a buyer - byproduct customers are usually seed suppliers too.
+  const buyers = useMemo(() => parties?.filter((p) => p.type === 'BUYER' || p.type === 'BOTH') ?? [], [parties]);
+
+  // Buyer opening balance map (DR is receivable from buyer, CR is advance credit from buyer)
+  const buyerOpeningById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const b of buyers) {
+      const rawOpening = Number(b.openingBalance || 0);
+      const isDr = b.openingBalanceType === 'DR' || (b.openingBalanceType !== 'CR' && b.type === 'BUYER');
+      const signed = rawOpening ? (isDr ? rawOpening : -rawOpening) : 0;
+      if (signed) map.set(b.id, signed);
+    }
+    return map;
+  }, [buyers]);
+
+  // Map of unallocated buyer receipts (on-account receipts without a saleDispatchId)
+  const partyUnappliedMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of receipts ?? []) {
+      if (r.type === 'BUYER' && !r.saleDispatchId && r.partyId) {
+        const amt = Number(r.amount) + Number(r.tdsAmount ?? 0) + Number(r.shortageAmount ?? 0);
+        map.set(r.partyId, (map.get(r.partyId) ?? 0) + amt);
+      }
+    }
+    return map;
+  }, [receipts]);
+
   // Settlement is invoice-based ONLY - no FIFO, no on-account spillover. Each
   // shipment is cleared solely by the buyer receipts stamped with its own
   // saleDispatchId, and the Paid decision runs through the SAME shared helpers
@@ -293,125 +321,154 @@ export default function SaleDuesPage() {
   // no saleDispatchId clears nothing here. Keyed strictly on the source data so
   // it recomputes only when data changes (not on every keystroke in the dialog).
   const outstandingInvoices = useMemo<OutstandingInvoice[]>(() => {
-  // BOTH counts as a buyer - byproduct customers (Nalla Chintapandu / Pokkulu /
-  // Waste / Pre Cleaner Dust) are usually seed suppliers too, so filtering on
-  // 'BUYER' alone silently dropped every one of their invoices from this list.
-  const buyers = parties?.filter((p) => p.type === 'BUYER' || p.type === 'BOTH') ?? [];
-  const rows: OutstandingInvoice[] = [];
-  const today = new Date();
+    const rows: OutstandingInvoice[] = [];
+    const today = new Date();
+    const todayTime = today.getTime();
 
-  // Single source of truth for "cleared per dispatch", identical to the sales pages.
-  const settled = settledByDispatch(
-    receipts,
-    (saleOrders ?? []).flatMap((o) => o.dispatches ?? []).flatMap((d) => d.creditNotes ?? []),
-  );
+    // Single source of truth for "cleared per dispatch", identical to the sales pages.
+    const allDispatches = (saleOrders ?? []).flatMap((o) => o.dispatches ?? []);
+    const allCreditNotes = allDispatches.flatMap((d) => d.creditNotes ?? []);
+    const settled = settledByDispatch(receipts, allCreditNotes);
 
-  buyers.forEach((b) => {
-    const buyerReceipts = receipts?.filter((r) => r.type === 'BUYER' && r.partyId === b.id) ?? [];
-    const shipments = (saleOrders ?? [])
-      .filter((o) => o.buyerId === b.id)
-      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ d, o })));
+    // Pre-index receipts by saleDispatchId for O(1) lookup
+    const receiptsByDispatch = new Map<string, NonNullable<typeof receipts>>();
+    if (receipts) {
+      for (const r of receipts) {
+        if (r.type === 'BUYER' && r.saleDispatchId) {
+          let list = receiptsByDispatch.get(r.saleDispatchId);
+          if (!list) {
+            list = [];
+            receiptsByDispatch.set(r.saleDispatchId, list);
+          }
+          list.push(r);
+        }
+      }
+    }
 
-    shipments.forEach(({ d, o }) => {
-      const rate = Number(o.ratePerKg);
-      const total = dispatchTotal(d, rate);
-      const cleared = settled.get(d.id) ?? 0;
+    // Pre-group sale orders by buyerId
+    const ordersByBuyer = new Map<string, NonNullable<typeof saleOrders>>();
+    if (saleOrders) {
+      for (const o of saleOrders) {
+        if (!o.buyerId) continue;
+        let list = ordersByBuyer.get(o.buyerId);
+        if (!list) {
+          list = [];
+          ordersByBuyer.set(o.buyerId, list);
+        }
+        list.push(o);
+      }
+    }
 
-      // Per-receipt detail (for the expandable panel, cash summary, and Undo).
-      const linked = buyerReceipts.filter((r) => r.saleDispatchId === d.id);
-      let cashReceived = 0;
-      let tdsDeducted = 0;
-      let shortageDeducted = 0;
-      const appliedReceipts: OutstandingInvoice['appliedReceipts'] = [];
-      const deletableReceiptIds: string[] = [];
-      linked.forEach((r) => {
-        const cash = Number(r.amount);
-        const tds = Number(r.tdsAmount ?? 0);
-        const shortage = Number(r.shortageAmount ?? 0);
-        const clearing = cash + tds + shortage;
-        cashReceived += cash;
-        tdsDeducted += tds;
-        shortageDeducted += shortage;
-        deletableReceiptIds.push(r.id);
-        appliedReceipts.push({ date: r.date, cash, tds, shortage, amount: clearing, isTdsOrShortage: cash === 0 });
-      });
+    for (const b of buyers) {
+      const buyerOrders = ordersByBuyer.get(b.id);
+      if (!buyerOrders || buyerOrders.length === 0) continue;
 
-      // Credit notes issued against this dispatch.
-      const dispatchCreditNotes = (d.creditNotes ?? []).filter((cn) => cn.status === 'ISSUED');
-      const cnTotal = dispatchCreditNotes.reduce((s, cn) => s + Number(cn.totalAmount || 0), 0);
-      const nonReceiptCnCredit = Math.max(0, cnTotal - shortageDeducted);
-      const creditNoteDeducted = round2(nonReceiptCnCredit);
-      const appliedCreditNotes = dispatchCreditNotes.map((cn) => ({
-        id: cn.id,
-        noteNumber: cn.noteNumber,
-        reason: cn.reason,
-        amount: Number(cn.totalAmount || 0),
-        date: cn.noteDate,
-      }));
+      for (const o of buyerOrders) {
+        const dispatches = o.dispatches ?? [];
+        if (dispatches.length === 0) continue;
 
-      const paid = isDispatchPaid(d, rate, settled);
-      const remaining = paid ? 0 : Math.max(0, total - cleared);
+        const rate = Number(o.ratePerKg);
 
-      // A shipment still on the road is a receivable (the ledger debits the buyer
-      // at dispatch - see the SALE- lines in ledger.controller), so it belongs on
-      // this list. But it is not yet COLLECTABLE: credit days run from delivery.
-      // Calling it "Unpaid" and ticking overdue days against it would invent an
-      // arrears that nobody can chase, so it reads "In Transit" and the clock
-      // stays at zero until Mark-as-Delivered stamps deliveredDate.
-      const inTransit = d.status !== 'DELIVERED';
-      const status = paid
-        ? 'Paid'
-        : cleared > 0.01 ? 'Partially Paid'
-        : inTransit ? 'In Transit'
-        : 'Unpaid';
+        for (const d of dispatches) {
+          const total = dispatchTotal(d, rate);
+          const cleared = settled.get(d.id) ?? 0;
 
-      // For an in-transit row this is a PLACEHOLDER, not a forecast: dispatch
-      // date + credit days would say a lorry that left on the 8th is due on the
-      // 9th, which assumes it arrives the day it leaves. It exists only to give
-      // the row a sort key and a month bucket - the UI prints the credit term
-      // ("Delivery + 1 day") in its place until deliveredDate is stamped.
-      const start = d.deliveredDate || d.dispatchDate;
-      const dueDate = new Date(start);
-      dueDate.setDate(dueDate.getDate() + (o.dueDays || 0));
-      const dueDaysAfter = inTransit
-        ? 0
-        : Math.max(0, Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
+          // Per-receipt detail (for the expandable panel, cash summary, and Undo).
+          const linked = receiptsByDispatch.get(d.id) ?? [];
+          let cashReceived = 0;
+          let tdsDeducted = 0;
+          let shortageDeducted = 0;
+          const appliedReceipts: OutstandingInvoice['appliedReceipts'] = [];
+          const deletableReceiptIds: string[] = [];
+          for (const r of linked) {
+            const cash = Number(r.amount);
+            const tds = Number(r.tdsAmount ?? 0);
+            const shortage = Number(r.shortageAmount ?? 0);
+            const clearing = cash + tds + shortage;
+            cashReceived += cash;
+            tdsDeducted += tds;
+            shortageDeducted += shortage;
+            deletableReceiptIds.push(r.id);
+            appliedReceipts.push({ date: r.date, cash, tds, shortage, amount: clearing, isTdsOrShortage: cash === 0 });
+          }
 
-      rows.push({
-        id: d.id,
-        partyId: b.id,
-        product: o.product,
-        brokerName: o.broker?.name ?? null,
-        dueDate,
-        partyName: b.name,
-        invoiceNumber: d.invoiceNumber,
-        vehicleNumber: d.vehicleNumber ?? null,
-        billDate: new Date(d.dispatchDate),
-        billAmount: total,
-        saleBase: d.weightKg * rate,
-        shortageBase: (Number(d.shortageKg) || 0) * rate,
-        gstExempt: o.gstExempt,
-        discount: 0,
-        netAmount: remaining,
-        totalAmount: total,
-        cashReceived,
-        tdsDeducted: round2(tdsDeducted),
-        shortageDeducted: round2(shortageDeducted),
-        creditNoteDeducted,
-        dueDaysAfter,
-        status,
-        inTransit,
-        dueDays: o.dueDays || 0,
-        appliedReceipts,
-        appliedCreditNotes,
-        deletableReceiptIds,
-      });
-    });
-  });
+          // Credit notes issued against this dispatch.
+          const dispatchCreditNotes = (d.creditNotes ?? []).filter((cn) => cn.status === 'ISSUED');
+          const cnTotal = dispatchCreditNotes.reduce((s, cn) => s + Number(cn.totalAmount || 0), 0);
+          const nonReceiptCnCredit = Math.max(0, cnTotal - shortageDeducted);
+          const creditNoteDeducted = round2(nonReceiptCnCredit);
+          const appliedCreditNotes = dispatchCreditNotes.map((cn) => ({
+            id: cn.id,
+            noteNumber: cn.noteNumber,
+            reason: cn.reason,
+            amount: Number(cn.totalAmount || 0),
+            date: cn.noteDate,
+          }));
 
-  rows.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-  return rows;
-  }, [parties, saleOrders, receipts]);
+          const paid = isDispatchPaid(d, rate, settled);
+          const remaining = paid ? 0 : Math.max(0, total - cleared);
+
+          // A shipment still on the road is a receivable (the ledger debits the buyer
+          // at dispatch - see the SALE- lines in ledger.controller), so it belongs on
+          // this list. But it is not yet COLLECTABLE: credit days run from delivery.
+          // Calling it "Unpaid" and ticking overdue days against it would invent an
+          // arrears that nobody can chase, so it reads "In Transit" and the clock
+          // stays at zero until Mark-as-Delivered stamps deliveredDate.
+          const inTransit = d.status !== 'DELIVERED';
+          const status = paid
+            ? 'Paid'
+            : cleared > 0.01 ? 'Partially Paid'
+            : inTransit ? 'In Transit'
+            : 'Unpaid';
+
+          // For an in-transit row this is a PLACEHOLDER, not a forecast: dispatch
+          // date + credit days would say a lorry that left on the 8th is due on the
+          // 9th, which assumes it arrives the day it leaves. It exists only to give
+          // the row a sort key and a month bucket - the UI prints the credit term
+          // ("Delivery + 1 day") in its place until deliveredDate is stamped.
+          const start = d.deliveredDate || d.dispatchDate;
+          const dueDate = new Date(start);
+          dueDate.setDate(dueDate.getDate() + (o.dueDays || 0));
+          const dueDaysAfter = inTransit
+            ? 0
+            : Math.max(0, Math.ceil((todayTime - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+          rows.push({
+            id: d.id,
+            partyId: b.id,
+            product: o.product,
+            brokerName: o.broker?.name ?? null,
+            dueDate,
+            partyName: b.name,
+            invoiceNumber: d.invoiceNumber,
+            vehicleNumber: d.vehicleNumber ?? null,
+            billDate: new Date(d.dispatchDate),
+            billAmount: total,
+            saleBase: d.weightKg * rate,
+            shortageBase: (Number(d.shortageKg) || 0) * rate,
+            gstExempt: o.gstExempt,
+            discount: 0,
+            netAmount: remaining,
+            totalAmount: total,
+            cashReceived,
+            tdsDeducted: round2(tdsDeducted),
+            shortageDeducted: round2(shortageDeducted),
+            creditNoteDeducted,
+            dueDaysAfter,
+            status,
+            inTransit,
+            dueDays: o.dueDays || 0,
+            appliedReceipts,
+            appliedCreditNotes,
+            deletableReceiptIds,
+          });
+        }
+      }
+    }
+
+    rows.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    return rows;
+  }, [buyers, saleOrders, receipts]);
 
   // Deep link from the overdue-dues login reminder:
   //   /reports/sale-dues?collect=<saleDispatchId>
@@ -532,6 +589,33 @@ export default function SaleDuesPage() {
     return true;
   });
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(dueInvoices, 50);
+
+  // For the currently filtered scope:
+  const activeBuyerIds = useMemo(() => {
+    if (filtersActive) {
+      return new Set(visibleInvoices.map((inv) => inv.partyId));
+    }
+    return new Set(buyers.map((b) => b.id));
+  }, [filtersActive, visibleInvoices, buyers]);
+
+  const visibleOpeningTotal = useMemo(() => {
+    let sum = 0;
+    activeBuyerIds.forEach((id) => {
+      sum += buyerOpeningById.get(id) ?? 0;
+    });
+    return sum;
+  }, [activeBuyerIds, buyerOpeningById]);
+
+  const visibleOnAccountTotal = useMemo(() => {
+    let sum = 0;
+    activeBuyerIds.forEach((id) => {
+      sum += partyUnappliedMap.get(id) ?? 0;
+    });
+    return sum;
+  }, [activeBuyerIds, partyUnappliedMap]);
+
+  // Reconciled net receivable (matches Party Ledger balance)
+  const reconciledLedgerReceivable = totalOutstanding - visibleOnAccountTotal + visibleOpeningTotal;
 
   /** Cash still expected = outstanding − shortage(base + 5% GST) − TDS. Both
    *  deductions come OFF the amount received (same as "Mark as Paid"). */
@@ -751,13 +835,14 @@ export default function SaleDuesPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="bg-card/50 border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Billed Sales</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{rupees(totalBillingAll)}</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">Gross value across {visibleInvoices.length} invoices</div>
               </CardContent>
             </Card>
             <Card className="bg-card/50 border shadow-sm">
@@ -766,20 +851,37 @@ export default function SaleDuesPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalReceiptsAll)}</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">Directly cleared against invoices</div>
               </CardContent>
             </Card>
             <Card className="bg-card/50 border shadow-sm">
               <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Net Outstanding Receivables</CardTitle>
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Invoice Dues</CardTitle>
                 <TrendingUp className="h-4 w-4 text-emerald-500" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalOutstanding)}</div>
-                {inTransitOutstanding > 0 && (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    incl. <span className="font-semibold text-sky-600 dark:text-sky-400">{rupees(inTransitOutstanding)}</span> in transit (not yet due)
-                  </div>
-                )}
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  {inTransitOutstanding > 0 ? (
+                    <>incl. <span className="font-semibold text-sky-600 dark:text-sky-400">{rupees(inTransitOutstanding)}</span> in transit</>
+                  ) : (
+                    'Unsettled dispatch balance'
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-card/50 border shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reconciled Ledger Balance</CardTitle>
+                <IndianRupee className="h-4 w-4 text-indigo-500" />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${reconciledLedgerReceivable >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  {rupees(Math.abs(reconciledLedgerReceivable))} {reconciledLedgerReceivable >= 0 ? 'DR' : 'CR'}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground truncate" title={`Matches Party Ledger: Invoices (${rupees(totalOutstanding)}) ${visibleOnAccountTotal > 0 ? `- Unapplied (${rupees(visibleOnAccountTotal)})` : ''} ${visibleOpeningTotal !== 0 ? `± Opening (${rupees(Math.abs(visibleOpeningTotal))} ${visibleOpeningTotal >= 0 ? 'DR' : 'CR'})` : ''}`}>
+                  Matches Party Ledger {visibleOnAccountTotal > 0 ? `· Less ${rupees(visibleOnAccountTotal)} unapplied` : ''}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -805,6 +907,16 @@ export default function SaleDuesPage() {
                       </li>
                     ))}
                   </ul>
+                  <div className="pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs border-amber-400 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                      onClick={() => navigate('/transactions/receipts')}
+                    >
+                      <ReceiptText className="mr-1.5 h-3.5 w-3.5" /> Go to Receipts to Allocate
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -869,7 +981,14 @@ export default function SaleDuesPage() {
                             shortDate(inv.dueDate.toISOString())
                           )}
                         </TableCell>
-                        <TableCell>{inv.partyName}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{inv.partyName}</div>
+                          {partyUnappliedMap.has(inv.partyId) && (
+                            <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                              Unallocated: {rupees(partyUnappliedMap.get(inv.partyId)!)}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{productDescription(inv.product)}</TableCell>
                         <TableCell className="font-sans text-xs font-medium text-foreground/80">{inv.invoiceNumber ?? '-'}</TableCell>
                         <TableCell>{shortDate(inv.billDate.toISOString())}</TableCell>

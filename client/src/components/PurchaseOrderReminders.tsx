@@ -77,6 +77,8 @@ export default function PurchaseOrderReminders() {
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
     enabled: !closed && !isDevSuppressed,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const thresholdDays = Number(company?.poReminderDays ?? 3);
@@ -86,6 +88,8 @@ export default function PurchaseOrderReminders() {
     queryKey: ['purchase-orders', 'PENDING'],
     queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true&status=PENDING'),
     enabled,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const due = useMemo<PendingPoGroup[]>(() => {

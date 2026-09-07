@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { TrendingDown, Loader2, ChevronRight, Undo2, IndianRupee, ArrowLeftRight } from 'lucide-react';
+import { TrendingDown, Loader2, ChevronRight, Undo2, IndianRupee, ArrowLeftRight, AlertTriangle } from 'lucide-react';
 import { Fragment } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Segmented } from '@/components/ui/segmented';
@@ -174,102 +174,116 @@ export default function PurchaseDuesPage() {
   // FIFO allocation across every supplier/purchase/payment - O(n²)-ish and must
   // be memoized so it doesn't recompute on every render (e.g. each keystroke in
   // the payment dialog, which only touches unrelated state).
-  const { outstandingPurchases, totalBillingAll, totalPaymentsAll } = useMemo(() => {
-  const isDustRef = (ref?: string | null) => !!ref && ref.startsWith('DUST:');
-  const suppliers = parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [];
+  // Suppliers list: non-buyers, non-hamali
+  const suppliers = useMemo(() => parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [], [parties]);
 
-  const rows: OutstandingPurchase[] = [];
+  // FIFO allocation across every supplier/purchase/payment - pre-indexed maps for O(N) performance
+  const { outstandingPurchases, totalBillingAll, totalPaymentsAll, unallocatedAdvancesBySupplier, supplierOpeningById } = useMemo(() => {
+    const isDustRef = (ref?: string | null) => !!ref && ref.startsWith('DUST:');
 
-  let totalBillingAll = 0;
-  let totalPaymentsAll = 0;
+    // Pre-index purchases by partyId
+    const purchasesByParty = new Map<string, typeof purchases>();
+    for (const p of purchases ?? []) {
+      const partyId = p.stockIn?.purchaseOrder?.partyId;
+      if (!partyId || !p.verification) continue;
+      let arr = purchasesByParty.get(partyId);
+      if (!arr) { arr = []; purchasesByParty.set(partyId, arr); }
+      arr.push(p);
+    }
 
-  suppliers.forEach((s) => {
-    const activePurchases = purchases?.filter(
-      (p) => p.stockIn?.purchaseOrder?.partyId === s.id && p.verification
-    )
-      .sort((a, b) => {
-        const dateA = new Date(a.stockIn?.arrivalDate || a.createdAt).getTime();
-        const dateB = new Date(b.stockIn?.arrivalDate || b.createdAt).getTime();
-        return dateA - dateB;
-      })
-      .map((p) => {
-        const total = p.verification ? Math.round(Number(p.verification.totalAmount)) : 0;
-        return {
+    // Pre-index payments by partyId
+    const paymentsByParty = new Map<string, typeof payments>();
+    for (const pay of payments ?? []) {
+      if (pay.type !== 'SUPPLIER' || !pay.partyId) continue;
+      let arr = paymentsByParty.get(pay.partyId);
+      if (!arr) { arr = []; paymentsByParty.set(pay.partyId, arr); }
+      arr.push(pay);
+    }
+
+    // Pre-index dust purchases by partyId
+    const dustByParty = new Map<string, typeof dustPurchases>();
+    for (const d of dustPurchases ?? []) {
+      let arr = dustByParty.get(d.partyId);
+      if (!arr) { arr = []; dustByParty.set(d.partyId, arr); }
+      arr.push(d);
+    }
+
+    const rows: OutstandingPurchase[] = [];
+    const unallocatedAdvancesBySupplier = new Map<string, { partyId: string; partyName: string; amount: number; count: number }>();
+    const supplierOpeningById = new Map<string, number>();
+
+    let totalBillingAll = 0;
+    let totalPaymentsAll = 0;
+
+    suppliers.forEach((s) => {
+      const rawOpening = Number(s.openingBalance || 0);
+      const isCr = s.openingBalanceType === 'CR' || (s.openingBalanceType !== 'DR' && s.type !== 'BUYER');
+      const signedOpening = rawOpening ? (isCr ? rawOpening : -rawOpening) : 0;
+      if (signedOpening) supplierOpeningById.set(s.id, signedOpening);
+
+      const rawActive = purchasesByParty.get(s.id) ?? [];
+      const activePurchases = rawActive
+        .map((p) => {
+          const arrTime = new Date(p.stockIn?.arrivalDate || p.createdAt).getTime();
+          const total = p.verification ? Math.round(Number(p.verification.totalAmount)) : 0;
+          return {
+            ...p,
+            arrTime,
+            totalAmount: total,
+            remainingAmount: total,
+            appliedPayments: [] as OutstandingPurchase['appliedPayments'],
+            deletablePaymentIds: [] as string[],
+          };
+        })
+        .sort((a, b) => a.arrTime - b.arrTime);
+
+      activePurchases.forEach((p) => { totalBillingAll += p.totalAmount; });
+
+      const rawPartyPayments = paymentsByParty.get(s.id) ?? [];
+      const partyPayments = rawPartyPayments
+        .map((p) => ({
           ...p,
-          totalAmount: total,
-          remainingAmount: total,
-          appliedPayments: [] as OutstandingPurchase['appliedPayments'],
-          deletablePaymentIds: [] as string[],
-        };
-      }) ?? [];
+          payTime: new Date(p.date).getTime(),
+        }))
+        .sort((a, b) => a.payTime - b.payTime);
 
-    activePurchases.forEach((p) => { totalBillingAll += p.totalAmount; });
+      const totalPaid = partyPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      totalPaymentsAll += totalPaid;
 
-    const partyPayments = payments?.filter((p) => p.type === 'SUPPLIER' && p.partyId === s.id)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) ?? [];
-    
-    const totalPaid = partyPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-    totalPaymentsAll += totalPaid;
-
-    // Apply direct payments first
-    activePurchases.forEach((p) => {
-      const directPayments = partyPayments.filter((pay) => pay.purchaseId === p.id);
-      directPayments.forEach((pay) => {
-        p.deletablePaymentIds.push(pay.id);
-        const amt = Number(pay.amount);
-        if (p.remainingAmount > 0) {
-          const applied = Math.min(amt, p.remainingAmount);
-          p.remainingAmount -= applied;
-          p.appliedPayments.push({
-            date: pay.date,
-            amount: applied,
-            mode: pay.reference || 'Manual'
-          });
-        }
-      });
-    });
-
-    // Grain FIFO pool = floating (non-bill-linked) general payments.
-    // Process floating payments in chronological order of payment date so past payments
-    // settle invoices existing at that time without retroactively absorbing newly verified bills.
-    const floatingPayments = partyPayments
-      .filter((p) => !p.purchaseId && !isDustRef(p.reference))
-      .map((p) => ({
-        ...p,
-        available: Number(p.amount),
-        payTime: new Date(p.date).getTime(),
-      }))
-      .sort((a, b) => a.payTime - b.payTime);
-
-    floatingPayments.forEach((payment) => {
-      if (payment.available <= 0) return;
-
-      // Eligible purchases: unpaid purchases with purchaseDate <= paymentDate
-      const eligiblePurchases = activePurchases
-        .filter((p) => p.remainingAmount > 0 && new Date(p.stockIn?.arrivalDate || p.createdAt).getTime() <= payment.payTime);
-
-      for (const p of eligiblePurchases) {
-        if (payment.available <= 0) break;
-        const applied = Math.min(payment.available, p.remainingAmount);
-        payment.available -= applied;
-        p.remainingAmount -= applied;
-
-        if (!p.deletablePaymentIds.includes(payment.id)) {
-          p.deletablePaymentIds.push(payment.id);
-        }
-
-        p.appliedPayments.push({
-          date: payment.date,
-          amount: applied,
-          mode: payment.reference || 'Manual',
+      // Apply direct payments first
+      activePurchases.forEach((p) => {
+        const directPayments = partyPayments.filter((pay) => pay.purchaseId === p.id);
+        directPayments.forEach((pay) => {
+          p.deletablePaymentIds.push(pay.id);
+          const amt = Number(pay.amount);
+          if (p.remainingAmount > 0) {
+            const applied = Math.min(amt, p.remainingAmount);
+            p.remainingAmount -= applied;
+            p.appliedPayments.push({
+              date: pay.date,
+              amount: applied,
+              mode: pay.reference || 'Manual',
+            });
+          }
         });
-      }
+      });
 
-      // If the floating payment still has unused amount (advance payment), apply to remaining open purchases
-      if (payment.available > 0) {
-        const upcomingPurchases = activePurchases.filter((p) => p.remainingAmount > 0);
+      // Grain FIFO pool = floating (non-bill-linked) general payments
+      const floatingPayments = partyPayments
+        .filter((p) => !p.purchaseId && !isDustRef(p.reference))
+        .map((p) => ({
+          ...p,
+          available: Number(p.amount),
+        }));
 
-        for (const p of upcomingPurchases) {
+      floatingPayments.forEach((payment) => {
+        if (payment.available <= 0) return;
+
+        // Eligible purchases: unpaid purchases with purchaseDate <= paymentDate
+        const eligiblePurchases = activePurchases
+          .filter((p) => p.remainingAmount > 0 && p.arrTime <= payment.payTime);
+
+        for (const p of eligiblePurchases) {
           if (payment.available <= 0) break;
           const applied = Math.min(payment.available, p.remainingAmount);
           payment.available -= applied;
@@ -285,90 +299,129 @@ export default function PurchaseDuesPage() {
             mode: payment.reference || 'Manual',
           });
         }
+
+        // If the floating payment still has unused amount (advance payment), apply to remaining open purchases
+        if (payment.available > 0) {
+          const upcomingPurchases = activePurchases.filter((p) => p.remainingAmount > 0);
+
+          for (const p of upcomingPurchases) {
+            if (payment.available <= 0) break;
+            const applied = Math.min(payment.available, p.remainingAmount);
+            payment.available -= applied;
+            p.remainingAmount -= applied;
+
+            if (!p.deletablePaymentIds.includes(payment.id)) {
+              p.deletablePaymentIds.push(payment.id);
+            }
+
+            p.appliedPayments.push({
+              date: payment.date,
+              amount: applied,
+              mode: payment.reference || 'Manual',
+            });
+          }
+        }
+      });
+
+      // Track any unallocated advance payments remaining after FIFO application
+      let supplierUnallocatedAdvance = 0;
+      let unallocatedCount = 0;
+      floatingPayments.forEach((payment) => {
+        if (payment.available > 0.01) {
+          supplierUnallocatedAdvance += payment.available;
+          unallocatedCount += 1;
+        }
+      });
+      if (supplierUnallocatedAdvance > 0.01) {
+        unallocatedAdvancesBySupplier.set(s.id, {
+          partyId: s.id,
+          partyName: s.name,
+          amount: Math.round(supplierUnallocatedAdvance),
+          count: unallocatedCount,
+        });
       }
-    });
 
-    const today = new Date();
-    activePurchases.forEach((p) => {
-      let status = 'Unpaid';
-      if (p.remainingAmount <= 0.01) status = 'Paid';
-      else if (p.remainingAmount < p.totalAmount - 0.01) status = 'Partially Paid';
+      const today = new Date();
+      activePurchases.forEach((p) => {
+        let status = 'Unpaid';
+        if (p.remainingAmount <= 0.01) status = 'Paid';
+        else if (p.remainingAmount < p.totalAmount - 0.01) status = 'Partially Paid';
 
-      const purchaseDate = new Date(p.stockIn?.arrivalDate || p.createdAt);
-      const diffTime = today.getTime() - purchaseDate.getTime();
-      const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+        const purchaseDate = new Date(p.stockIn?.arrivalDate || p.createdAt);
+        const diffTime = today.getTime() - purchaseDate.getTime();
+        const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
-      rows.push({
-        id: p.id,
-        kind: 'GRAIN',
-        partyId: s.id,
-        purchaseDate,
-        partyName: s.name,
-        invoiceNumber: p.stockIn?.invoiceNumber ?? null,
-        pricePerKg: p.verification?.pricePerKg ?? '0',
-        tonnageKg: p.verification?.finalWeightKg ?? p.verification?.billingWeightKg ?? p.netWeightKg,
-        lorryNumber: p.stockIn?.lorryNumber ?? null,
-        dueAge,
-        amount: p.remainingAmount,
-        totalAmount: p.totalAmount,
-        status,
-        appliedPayments: p.appliedPayments,
-        deletablePaymentIds: p.deletablePaymentIds,
+        rows.push({
+          id: p.id,
+          kind: 'GRAIN',
+          partyId: s.id,
+          purchaseDate,
+          partyName: s.name,
+          invoiceNumber: p.stockIn?.invoiceNumber ?? null,
+          pricePerKg: p.verification?.pricePerKg ?? '0',
+          tonnageKg: p.verification?.finalWeightKg ?? p.verification?.billingWeightKg ?? p.netWeightKg,
+          lorryNumber: p.stockIn?.lorryNumber ?? null,
+          dueAge,
+          amount: p.remainingAmount,
+          totalAmount: p.totalAmount,
+          status,
+          appliedPayments: p.appliedPayments,
+          deletablePaymentIds: p.deletablePaymentIds,
+        });
+      });
+
+      // ── Dust / tamarind byproduct purchases for this supplier ────────────────
+      const supplierDust = dustByParty.get(s.id) ?? [];
+      supplierDust.forEach((d) => {
+        const total = Math.round(Number(d.amount));
+        totalBillingAll += total;
+
+        const tag = `DUST:${d.id}:`;
+        const linked = partyPayments.filter((pay) => pay.reference?.startsWith(tag));
+        const paid = linked.reduce((sum, pay) => sum + Number(pay.amount), 0);
+        const remaining = Math.max(0, total - paid);
+
+        let status = 'Unpaid';
+        if (remaining <= 0.01) status = 'Paid';
+        else if (paid > 0.01) status = 'Partially Paid';
+
+        const purchaseDate = new Date(d.purchaseDate);
+        const diffTime = today.getTime() - purchaseDate.getTime();
+        const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+        rows.push({
+          id: d.id,
+          kind: 'DUST',
+          partyId: s.id,
+          purchaseDate,
+          partyName: s.name,
+          invoiceNumber: d.invoiceNumber ?? null,
+          pricePerKg: d.pricePerKg,
+          tonnageKg: d.weightKg,
+          lorryNumber: d.lorryNumber ?? null,
+          dueAge,
+          amount: remaining,
+          totalAmount: total,
+          status,
+          appliedPayments: linked.map((pay) => ({
+            date: pay.date,
+            amount: Number(pay.amount),
+            mode: pay.reference?.split(':')[2] || 'Manual',
+          })),
+          deletablePaymentIds: linked.map((pay) => pay.id),
+        });
       });
     });
 
-    // ── Dust / tamarind byproduct purchases for this supplier ────────────────
-    // These are matched to payments by a DIRECT reference tag only (never FIFO):
-    // the "Paid" button records a SUPPLIER payment with reference
-    // "DUST:<dustId>:<mode>", and we settle each bill against payments carrying
-    // its own tag. That keeps them fully isolated from the grain payment pool.
-    const supplierDust = dustPurchases?.filter((d) => d.partyId === s.id) ?? [];
-    supplierDust.forEach((d) => {
-      const total = Math.round(Number(d.amount));
-      totalBillingAll += total;
-
-      const tag = `DUST:${d.id}:`;
-      const linked = partyPayments.filter((pay) => pay.reference?.startsWith(tag));
-      const paid = linked.reduce((sum, pay) => sum + Number(pay.amount), 0);
-      const remaining = Math.max(0, total - paid);
-
-      let status = 'Unpaid';
-      if (remaining <= 0.01) status = 'Paid';
-      else if (paid > 0.01) status = 'Partially Paid';
-
-      const purchaseDate = new Date(d.purchaseDate);
-      const diffTime = today.getTime() - purchaseDate.getTime();
-      const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-
-      rows.push({
-        id: d.id,
-        kind: 'DUST',
-        partyId: s.id,
-        purchaseDate,
-        partyName: s.name,
-        invoiceNumber: d.invoiceNumber ?? null,
-        pricePerKg: d.pricePerKg,
-        tonnageKg: d.weightKg,
-        lorryNumber: d.lorryNumber ?? null,
-        dueAge,
-        amount: remaining,
-        totalAmount: total,
-        status,
-        appliedPayments: linked.map((pay) => ({
-          date: pay.date,
-          amount: Number(pay.amount),
-          mode: pay.reference?.split(':')[2] || 'Manual',
-        })),
-        deletablePaymentIds: linked.map((pay) => pay.id),
-      });
-    });
-  });
-
-  rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
-  return { outstandingPurchases: rows, totalBillingAll, totalPaymentsAll };
-  }, [parties, purchases, payments, dustPurchases]);
-
-  const totalOutstanding = outstandingPurchases.reduce((sum, item) => sum + item.amount, 0);
+    rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
+    return {
+      outstandingPurchases: rows,
+      totalBillingAll,
+      totalPaymentsAll,
+      unallocatedAdvancesBySupplier,
+      supplierOpeningById,
+    };
+  }, [suppliers, purchases, payments, dustPurchases]);
 
   // Payment tab: All shows everything (incl. fully paid), Paid shows settled
   // bills, Unpaid shows anything still carrying a balance (partial or none).
@@ -395,6 +448,44 @@ export default function PurchaseDuesPage() {
     return true;
   });
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(shownPurchases, 50);
+
+  const totalOutstandingBills = shownPurchases.reduce((sum, item) => sum + item.amount, 0);
+
+  // For the currently filtered suppliers:
+  const activeSupplierIds = useMemo(() => {
+    if (filtersActive) {
+      return new Set(shownPurchases.map((b) => b.partyId));
+    }
+    return new Set(suppliers.map((s) => s.id));
+  }, [filtersActive, shownPurchases, suppliers]);
+
+  const visibleOpeningTotal = useMemo(() => {
+    let sum = 0;
+    activeSupplierIds.forEach((id) => {
+      sum += supplierOpeningById.get(id) ?? 0;
+    });
+    return sum;
+  }, [activeSupplierIds, supplierOpeningById]);
+
+  const visibleUnallocatedAdvances = useMemo(() => {
+    let sum = 0;
+    activeSupplierIds.forEach((id) => {
+      sum += unallocatedAdvancesBySupplier.get(id)?.amount ?? 0;
+    });
+    return sum;
+  }, [activeSupplierIds, unallocatedAdvancesBySupplier]);
+
+  const unallocatedSupplierList = useMemo(() => {
+    const list: Array<{ partyId: string; partyName: string; amount: number; count: number }> = [];
+    activeSupplierIds.forEach((id) => {
+      const item = unallocatedAdvancesBySupplier.get(id);
+      if (item && item.amount > 0) list.push(item);
+    });
+    return list.sort((a, b) => b.amount - a.amount);
+  }, [activeSupplierIds, unallocatedAdvancesBySupplier]);
+
+  // Reconciled net payable (matches Party Ledger: Bills - Unallocated Advances + Opening Balance)
+  const reconciledLedgerPayable = totalOutstandingBills - visibleUnallocatedAdvances + visibleOpeningTotal;
 
   function openPayDialog(bill: OutstandingPurchase) {
     const today = new Date().toISOString().slice(0, 10);
@@ -516,13 +607,14 @@ export default function PurchaseDuesPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="bg-card/50 border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Verified Purchases</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{rupees(totalBillingAll)}</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">Across {shownPurchases.length} bills</div>
               </CardContent>
             </Card>
             <Card className="bg-card/50 border shadow-sm">
@@ -531,18 +623,59 @@ export default function PurchaseDuesPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalPaymentsAll)}</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">Direct & FIFO applied</div>
               </CardContent>
             </Card>
             <Card className="bg-card/50 border shadow-sm">
               <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Net Outstanding Dues</CardTitle>
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bills Outstanding</CardTitle>
                 <TrendingDown className="h-4 w-4 text-rose-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-rose-600 dark:text-rose-400">{rupees(totalOutstanding)}</div>
+                <div className="text-2xl font-bold text-rose-600 dark:text-rose-400">{rupees(totalOutstandingBills)}</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">Unpaid bill balances</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-card/50 border shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reconciled Ledger Balance</CardTitle>
+                <IndianRupee className="h-4 w-4 text-indigo-500" />
+              </CardHeader>
+              <CardContent>
+                <div className={cn('text-2xl font-bold', reconciledLedgerPayable >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                  {rupees(Math.abs(reconciledLedgerPayable))} {reconciledLedgerPayable >= 0 ? 'CR' : 'DR'}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground truncate" title={`Matches Party Ledger: Bills (${rupees(totalOutstandingBills)}) ${visibleUnallocatedAdvances > 0 ? `- Advances (${rupees(visibleUnallocatedAdvances)})` : ''} ${visibleOpeningTotal !== 0 ? `± Opening (${rupees(Math.abs(visibleOpeningTotal))} ${visibleOpeningTotal >= 0 ? 'CR' : 'DR'})` : ''}`}>
+                  Matches Party Ledger {visibleUnallocatedAdvances > 0 ? `· Less ${rupees(visibleUnallocatedAdvances)} advance` : ''}
+                </div>
               </CardContent>
             </Card>
           </div>
+
+          {unallocatedSupplierList.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 dark:border-amber-900 dark:bg-amber-950/30">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    {rupees(visibleUnallocatedAdvances)} paid in advance or unallocated to purchase bills
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    These supplier payments reduced the ledger balance without being absorbed by past verified bills.
+                    They stand as advance credit against future arrivals or pending weight verifications.
+                  </p>
+                  <ul className="pt-1 text-xs text-amber-800 dark:text-amber-300">
+                    {unallocatedSupplierList.map((p) => (
+                      <li key={p.partyId}>
+                        <span className="font-medium">{p.partyName}</span> · {rupees(p.amount)}
+                        {p.count > 1 ? ` (${p.count} payments)` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border bg-card overflow-auto max-h-[70vh]">
             <div className="px-5 py-4 border-b font-semibold text-sm">Purchase Aging List</div>
@@ -582,12 +715,19 @@ export default function PurchaseDuesPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            {bill.partyName}
-                            {bill.kind === 'DUST' && (
-                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                                Dust / Byproduct
-                              </span>
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              {bill.partyName}
+                              {bill.kind === 'DUST' && (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                                  Dust / Byproduct
+                                </span>
+                              )}
+                            </div>
+                            {unallocatedAdvancesBySupplier.has(bill.partyId) && (
+                              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                Advance: {rupees(unallocatedAdvancesBySupplier.get(bill.partyId)!.amount)}
+                              </div>
                             )}
                           </div>
                         </TableCell>

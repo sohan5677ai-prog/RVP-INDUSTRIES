@@ -17,6 +17,8 @@ import { PageHeader } from '@/components/PageHeader';
 import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { usePagedRows } from '@/lib/usePagedRows';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -120,8 +122,26 @@ export default function PappuProfitLoss() {
     observer.observe(tableScroller);
     if (tableScroller.firstElementChild) observer.observe(tableScroller.firstElementChild);
 
-    const onTopScroll = () => { tableScroller.scrollLeft = topScroller.scrollLeft; };
-    const onTableScroll = () => { topScroller.scrollLeft = tableScroller.scrollLeft; };
+    let isSyncingTop = false;
+    let isSyncingTable = false;
+
+    const onTopScroll = () => {
+      if (isSyncingTop) {
+        isSyncingTop = false;
+        return;
+      }
+      isSyncingTable = true;
+      tableScroller.scrollLeft = topScroller.scrollLeft;
+    };
+
+    const onTableScroll = () => {
+      if (isSyncingTable) {
+        isSyncingTable = false;
+        return;
+      }
+      isSyncingTop = true;
+      topScroller.scrollLeft = tableScroller.scrollLeft;
+    };
 
     topScroller.addEventListener('scroll', onTopScroll, { passive: true });
     tableScroller.addEventListener('scroll', onTableScroll, { passive: true });
@@ -166,6 +186,8 @@ export default function PappuProfitLoss() {
     }
     return sorted;
   }, [margins, profitFilter, buyerFilter, fromDate, toDate, sortKey]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows = [] } = usePagedRows(visible, 50);
 
   // ── Aggregate metrics (over the filtered set) ──────────────────────────────
   const t = useMemo(() => {
@@ -383,7 +405,7 @@ export default function PappuProfitLoss() {
             {!isLoading && visible.length === 0 && (
               <TableRow><TableCell colSpan={11} className="h-28 text-center text-muted-foreground">No Pappu orders matching filters.</TableCell></TableRow>
             )}
-            {visible.map((m) => {
+            {pageRows.map((m) => {
               const isOpen = expanded.has(m.orderId);
               return (
                 <Fragment key={m.orderId}>
@@ -468,6 +490,15 @@ export default function PappuProfitLoss() {
           )}
         </Table>
       </div>
+
+      <PaginationBar
+        page={page}
+        setPage={setPage}
+        pageSize={pageSize}
+        setPageSize={setPageSize}
+        totalPages={totalPages}
+        total={total}
+      />
     </div>
   );
 }

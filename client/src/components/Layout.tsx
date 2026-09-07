@@ -1,4 +1,4 @@
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -204,6 +204,30 @@ function PageLoader() {
   );
 }
 
+function DeferredReminders() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // Delay reminder evaluation so the active page's primary data queries
+    // have uncontended HTTP/1.1 socket bandwidth and finish loading first.
+    const timer = setTimeout(() => setReady(true), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!ready) return null;
+
+  return (
+    <ReminderQueueProvider>
+      <SupportAnnouncements />
+      <FestivalReminders />
+      <UserNoteReminders />
+      <DispatchReminders />
+      <SalesDuesReminders />
+      <PurchaseOrderReminders />
+    </ReminderQueueProvider>
+  );
+}
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
@@ -236,15 +260,8 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* One queue, one popup on screen at a time - see ReminderQueue. */}
-      <ReminderQueueProvider>
-        <SupportAnnouncements />
-        <FestivalReminders />
-        <UserNoteReminders />
-        <DispatchReminders />
-        <SalesDuesReminders />
-        <PurchaseOrderReminders />
-      </ReminderQueueProvider>
+      {/* One queue, one popup on screen at a time - mounted after initial route load */}
+      <DeferredReminders />
       <aside className={cn('w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border relative', sidebarOpen ? 'flex' : 'hidden')}>
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(125%_40%_at_0%_0%,rgba(232,169,63,0.11),transparent_62%)]" />
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.025] via-transparent to-black/25" />

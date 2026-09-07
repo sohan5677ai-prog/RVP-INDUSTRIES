@@ -104,7 +104,7 @@ export default function SaleOrders() {
   // the product and the user only flips it for the occasional delivered deal.
   const [priceType, setPriceType] = useState<'BASE' | 'DELIVERY'>('DELIVERY');
 
-  const { data: orders, isLoading } = useQuery({ queryKey: ['sale-orders'], queryFn: () => api<SaleOrder[]>('/sale-orders') });
+  const { data: orders, isLoading } = useQuery({ queryKey: ['sale-orders'], queryFn: () => api<SaleOrder[]>('/sale-orders?all=true') });
   const { data: parties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
   const { data: brokers } = useQuery({ queryKey: ['brokers'], queryFn: () => api<Broker[]>('/brokers') });
   const { data: receipts } = useQuery({ queryKey: ['receipts'], queryFn: () => api<Receipt[]>('/receipts?all=true') });

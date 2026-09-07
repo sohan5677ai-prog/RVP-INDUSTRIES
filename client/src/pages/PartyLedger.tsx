@@ -14,6 +14,9 @@ import { Segmented } from '@/components/ui/segmented';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { openPartyStatement, type StatementCompany } from '@/lib/partyStatement';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -160,12 +163,14 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
     queryFn: () => api<PartyLedgerRow[]>('/ledger/parties'),
   });
 
+  const debouncedQ = useDebounce(q, 200);
+
   const rows = useMemo(() => {
     let r = data ?? [];
     if (typeFilter !== 'ALL') {
       r = r.filter((p) => p.type === typeFilter || p.type === 'BOTH');
     }
-    const term = q.trim().toLowerCase();
+    const term = debouncedQ.trim().toLowerCase();
     if (term) {
       r = r.filter((p) =>
         [p.name, p.phone, p.phone2, p.address, p.state, p.gstin, p.bankAccountNumber]
@@ -173,7 +178,9 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
       );
     }
     return r;
-  }, [data, q, typeFilter]);
+  }, [data, debouncedQ, typeFilter]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pagedRows = [] } = usePagedRows(rows, 50);
 
   const totals = useMemo(() => {
     const r = data ?? [];
@@ -233,7 +240,7 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
             ) : rows.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground">No parties match your search.</TableCell></TableRow>
             ) : (
-              rows.map((p) => (
+              pagedRows.map((p) => (
                 <TableRow key={p.id} className="cursor-pointer" onClick={() => onSelect(p.id)}>
                   <TableCell>
                     <div className="font-semibold">{p.name}</div>
@@ -258,6 +265,15 @@ function PartyIndex({ onSelect }: { onSelect: (id: string) => void }) {
           </TableBody>
         </Table>
       </div>
+
+      <PaginationBar
+        page={page}
+        setPage={setPage}
+        pageSize={pageSize}
+        setPageSize={setPageSize}
+        totalPages={totalPages}
+        total={total}
+      />
     </div>
   );
 }
@@ -325,12 +341,14 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
     queryFn: () => api<PartyReminderSchedule | null>(`/whatsapp/parties/${partyId}/reminder-schedule`),
   });
 
+  const debouncedQ = useDebounce(q, 200);
+
   const filtered = useMemo(() => {
     let t = data?.transactions ?? [];
     if (kind !== 'ALL') t = t.filter((x) => x.kind === kind || (kind === 'RECEIPT' && (x.kind === 'CREDIT_NOTE' || x.kind === 'TDS' || x.kind === 'SHORTAGE')));
     if (from) t = t.filter((x) => x.date >= from);
     if (to) t = t.filter((x) => x.date <= to + 'T23:59:59');
-    const term = q.trim().toLowerCase();
+    const term = debouncedQ.trim().toLowerCase();
     if (term) {
       t = t.filter((x) =>
         [x.particulars, x.invoiceNumber, x.vehicleNumber, x.utr, x.reference, x.product]
@@ -338,7 +356,9 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
       );
     }
     return t;
-  }, [data, kind, q, from, to]);
+  }, [data, kind, debouncedQ, from, to]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pagedTxns = [] } = usePagedRows(filtered, 50);
 
   if (isLoading || !data) {
     return (
@@ -630,7 +650,7 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
                     <TableCell className="text-right border-l border-border/60 bg-muted/20"><BalanceCell value={opening} muted /></TableCell>
                   </TableRow>
 
-                  {filtered.map((t, i) => <TxnRow key={t.id} t={t} zebra={i % 2 === 1} />)}
+                  {pagedTxns.map((t, i) => <TxnRow key={t.id} t={t} zebra={i % 2 === 1} />)}
 
                   {/* closing balance */}
                   <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
@@ -660,6 +680,15 @@ function PartyDetail({ partyId, onBack }: { partyId: string; onBack: () => void 
           </div>
         )}
       </div>
+
+      <PaginationBar
+        page={page}
+        setPage={setPage}
+        pageSize={pageSize}
+        setPageSize={setPageSize}
+        totalPages={totalPages}
+        total={total}
+      />
 
       <SendPartyLedgerWhatsAppDialog
         open={waDialogOpen}

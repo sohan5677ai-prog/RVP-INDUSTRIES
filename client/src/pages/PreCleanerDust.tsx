@@ -294,7 +294,7 @@ function TransfersPanel() {
   });
   const { data: orders } = useQuery({
     queryKey: ['sale-orders', 'PRECLEANER_DUST'],
-    queryFn: () => api<SaleOrder[]>('/sale-orders?product=PRECLEANER_DUST'),
+    queryFn: () => api<SaleOrder[]>('/sale-orders?product=PRECLEANER_DUST&all=true'),
   });
 
   const transferredKg = (transfers ?? []).reduce((sum, t) => sum + t.weightKg, 0);

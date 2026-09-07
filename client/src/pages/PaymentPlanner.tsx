@@ -75,99 +75,143 @@ export default function PaymentPlannerPage() {
   // typing in the plan-amount / bank-balance inputs doesn't recompute the whole
   // allocation on every keystroke.
   const outstandingPurchases = useMemo<OutstandingPurchase[]>(() => {
-  const suppliers = parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [];
+    const suppliers = parties?.filter((p) => p.type !== 'BUYER' && p.type !== 'HAMALI_TEAM') ?? [];
+    if (!suppliers.length || !purchases?.length) return [];
 
-  const rows: OutstandingPurchase[] = [];
+    // Pre-group verified purchases by supplier partyId with pre-computed arrival timestamps
+    const purchasesByParty = new Map<string, Array<{
+      p: PurchaseRow;
+      totalAmount: number;
+      remainingAmount: number;
+      arrTime: number;
+      arrivalDate: Date;
+    }>>();
 
-  suppliers.forEach((s) => {
-    const activePurchases = purchases?.filter(
-      (p) => p.stockIn?.purchaseOrder?.partyId === s.id && p.verification
-    )
-      .sort((a, b) => {
-        const dateA = new Date(a.stockIn?.arrivalDate || a.createdAt).getTime();
-        const dateB = new Date(b.stockIn?.arrivalDate || b.createdAt).getTime();
-        return dateA - dateB;
-      })
-      .map((p) => {
-        const total = p.verification ? Math.round(Number(p.verification.totalAmount)) : 0;
-        return { ...p, totalAmount: total, remainingAmount: total };
-      }) ?? [];
-
-    const partyPayments = payments?.filter((p) => p.type === 'SUPPLIER' && p.partyId === s.id)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) ?? [];
-
-    // Apply direct payments first
-    activePurchases.forEach((p) => {
-      const directPayments = partyPayments.filter((pay) => pay.purchaseId === p.id);
-      directPayments.forEach((pay) => {
-        const amt = Number(pay.amount);
-        if (p.remainingAmount > 0) {
-          const applied = Math.min(amt, p.remainingAmount);
-          p.remainingAmount -= applied;
-        }
-      });
-    });
-
-    const floatingPayments = partyPayments
-      .filter((p) => !p.purchaseId)
-      .map((p) => ({
-        ...p,
-        available: Number(p.amount),
-        payTime: new Date(p.date).getTime(),
-      }))
-      .sort((a, b) => a.payTime - b.payTime);
-
-    floatingPayments.forEach((payment) => {
-      if (payment.available <= 0) return;
-
-      const eligiblePurchases = activePurchases
-        .filter((p) => p.remainingAmount > 0 && new Date(p.stockIn?.arrivalDate || p.createdAt).getTime() <= payment.payTime);
-
-      for (const p of eligiblePurchases) {
-        if (payment.available <= 0) break;
-        const applied = Math.min(payment.available, p.remainingAmount);
-        payment.available -= applied;
-        p.remainingAmount -= applied;
+    for (const p of purchases) {
+      const partyId = p.stockIn?.purchaseOrder?.partyId;
+      if (!partyId || !p.verification) continue;
+      const total = Math.round(Number(p.verification.totalAmount));
+      const arrivalDateStr = p.stockIn?.arrivalDate || p.createdAt;
+      const arrivalDate = new Date(arrivalDateStr);
+      const item = {
+        p,
+        totalAmount: total,
+        remainingAmount: total,
+        arrTime: arrivalDate.getTime(),
+        arrivalDate,
+      };
+      let list = purchasesByParty.get(partyId);
+      if (!list) {
+        list = [];
+        purchasesByParty.set(partyId, list);
       }
+      list.push(item);
+    }
 
-      if (payment.available > 0) {
-        const upcomingPurchases = activePurchases.filter((p) => p.remainingAmount > 0);
+    // Sort each party's purchases by arrival date ascending
+    for (const list of purchasesByParty.values()) {
+      list.sort((a, b) => a.arrTime - b.arrTime);
+    }
 
-        for (const p of upcomingPurchases) {
-          if (payment.available <= 0) break;
-          const applied = Math.min(payment.available, p.remainingAmount);
-          payment.available -= applied;
-          p.remainingAmount -= applied;
+    // Pre-index direct payments and floating payments by party
+    const directPaymentsByPurchase = new Map<string, number>();
+    const floatingPaymentsByParty = new Map<string, Array<{ available: number; payTime: number }>>();
+
+    if (payments) {
+      for (const pay of payments) {
+        if (pay.type !== 'SUPPLIER' || !pay.partyId) continue;
+        if (pay.purchaseId) {
+          const prev = directPaymentsByPurchase.get(pay.purchaseId) ?? 0;
+          directPaymentsByPurchase.set(pay.purchaseId, prev + Number(pay.amount));
+        } else {
+          let list = floatingPaymentsByParty.get(pay.partyId);
+          if (!list) {
+            list = [];
+            floatingPaymentsByParty.set(pay.partyId, list);
+          }
+          list.push({
+            available: Number(pay.amount),
+            payTime: new Date(pay.date).getTime(),
+          });
         }
       }
-    });
+    }
 
-    const today = new Date();
-    activePurchases.forEach((p) => {
-      if (p.remainingAmount <= 0.01) return; // only unpaid / partially paid bills matter here
+    // Sort floating payments ascending by date
+    for (const list of floatingPaymentsByParty.values()) {
+      list.sort((a, b) => a.payTime - b.payTime);
+    }
 
-      const purchaseDate = new Date(p.stockIn?.arrivalDate || p.createdAt);
-      const diffTime = today.getTime() - purchaseDate.getTime();
-      const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    const rows: OutstandingPurchase[] = [];
+    const todayTime = new Date().getTime();
 
-      rows.push({
-        id: p.id,
-        partyId: s.id,
-        purchaseDate,
-        partyName: s.name,
-        invoiceNumber: p.stockIn?.invoiceNumber ?? null,
-        pricePerKg: p.verification?.pricePerKg ?? '0',
-        tonnageKg: p.verification?.finalWeightKg ?? p.verification?.billingWeightKg ?? p.netWeightKg,
-        lorryNumber: p.stockIn?.lorryNumber ?? null,
-        dueAge,
-        amount: p.remainingAmount,
-      });
-    });
-  });
+    for (const s of suppliers) {
+      const activePurchases = purchasesByParty.get(s.id);
+      if (!activePurchases || activePurchases.length === 0) continue;
 
-  // Oldest dues first - pay these before the newer ones.
-  rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
-  return rows;
+      // 1. Apply direct payments first
+      for (const item of activePurchases) {
+        const directAmt = directPaymentsByPurchase.get(item.p.id);
+        if (directAmt && item.remainingAmount > 0) {
+          item.remainingAmount = Math.max(0, item.remainingAmount - directAmt);
+        }
+      }
+
+      // 2. Apply floating payments
+      const partyFloating = floatingPaymentsByParty.get(s.id);
+      if (partyFloating && partyFloating.length > 0) {
+        for (const payment of partyFloating) {
+          if (payment.available <= 0) continue;
+
+          // Eligible purchases (arrived at or before payment date)
+          for (const item of activePurchases) {
+            if (payment.available <= 0) break;
+            if (item.remainingAmount > 0 && item.arrTime <= payment.payTime) {
+              const applied = Math.min(payment.available, item.remainingAmount);
+              payment.available -= applied;
+              item.remainingAmount -= applied;
+            }
+          }
+
+          // Remaining upcoming purchases if credit still available
+          if (payment.available > 0) {
+            for (const item of activePurchases) {
+              if (payment.available <= 0) break;
+              if (item.remainingAmount > 0) {
+                const applied = Math.min(payment.available, item.remainingAmount);
+                payment.available -= applied;
+                item.remainingAmount -= applied;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Collect unpaid / partially paid bills
+      for (const item of activePurchases) {
+        if (item.remainingAmount <= 0.01) continue;
+
+        const diffTime = todayTime - item.arrTime;
+        const dueAge = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+        rows.push({
+          id: item.p.id,
+          partyId: s.id,
+          purchaseDate: item.arrivalDate,
+          partyName: s.name,
+          invoiceNumber: item.p.stockIn?.invoiceNumber ?? null,
+          pricePerKg: item.p.verification?.pricePerKg ?? '0',
+          tonnageKg: item.p.verification?.finalWeightKg ?? item.p.verification?.billingWeightKg ?? item.p.netWeightKg,
+          lorryNumber: item.p.stockIn?.lorryNumber ?? null,
+          dueAge,
+          amount: item.remainingAmount,
+        });
+      }
+    }
+
+    // Oldest dues first - pay these before the newer ones.
+    rows.sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
+    return rows;
   }, [parties, purchases, payments]);
 
   // Club invoices party-wise so dues are reviewed and settled per supplier.

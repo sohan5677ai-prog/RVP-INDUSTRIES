@@ -204,7 +204,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
   const { data: orders, isLoading: loadingOrders } = useQuery({
     queryKey: ['sale-orders', product],
-    queryFn: () => api<SaleOrder[]>(`/sale-orders?product=${product}`),
+    queryFn: () => api<SaleOrder[]>(`/sale-orders?product=${product}&all=true`),
   });
   const { data: parties, isLoading: loadingParties } = useQuery({ queryKey: ['parties'], queryFn: () => api<Party[]>('/parties') });
   const { data: brokers, isLoading: loadingBrokers } = useQuery({ queryKey: ['brokers'], queryFn: () => api<Broker[]>('/brokers') });

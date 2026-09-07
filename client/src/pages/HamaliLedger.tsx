@@ -252,6 +252,8 @@ export default function HamaliLedger() {
   const { data: serverRoundedValues } = useQuery({
     queryKey: ['hamali-rounded-values'],
     queryFn: () => api<Record<string, number>>('/hamali-verifications/rounded-values'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const roundedValues = useMemo(() => serverRoundedValues ?? {}, [serverRoundedValues]);
@@ -340,6 +342,8 @@ export default function HamaliLedger() {
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases', 'hamali'],
     queryFn: () => api<PurchaseRow[]>('/purchases?view=hamali'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
@@ -347,41 +351,57 @@ export default function HamaliLedger() {
     // would drop older dispatches (and their loading hamali) off this ledger.
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: hamaliRates } = useQuery({
     queryKey: ['hamali-rates'],
     queryFn: () => api<HamaliRate[]>('/settings/hamali-rates'),
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: companyProfile } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: stockTransfers, isLoading: loadingStockTransfers } = useQuery({
     queryKey: ['stock-transfers'],
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: shellTransfers, isLoading: loadingShellTransfers } = useQuery({
     queryKey: ['shell-transfers'],
     queryFn: () => api<ShellTransfer[]>('/shell-transfers'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: huskTransfers, isLoading: loadingHuskTransfers } = useQuery({
     queryKey: ['husk-transfers'],
     queryFn: () => api<HuskTransfer[]>('/husk-transfers'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: manualCosts } = useQuery({
     queryKey: ['manual-hamali-costs'],
     queryFn: () => api<ManualHamaliCost[]>('/manual-hamali-costs'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: verifications } = useQuery({
     queryKey: ['hamali-verifications'],
     queryFn: () => api<HamaliVerification[]>('/hamali-verifications'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // Crew-settlement payments (type HAMALI) - drive the Payables status and the
@@ -390,6 +410,8 @@ export default function HamaliLedger() {
   const { data: payments } = useQuery({
     queryKey: ['payments', { all: true }],
     queryFn: () => api<Payment[]>('/payments?all=true'),
+    staleTime: 3 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // The single "Bikash and Team" hamali party crew payments are booked against
@@ -397,6 +419,8 @@ export default function HamaliLedger() {
   const { data: teamParty } = useQuery({
     queryKey: ['hamali-team-party'],
     queryFn: () => api<Party>('/hamali-verifications/team-party'),
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // Square-off (reconciliation checkpoint) state
@@ -558,6 +582,9 @@ export default function HamaliLedger() {
   //   - Pappu: split our share / lorry share, crew / P/L margin.
   //   - Husk / Waste: 100% company-borne - shown even with no freight (lifted ex-works).
   //   - TPS / others: flat, fully off the lorry's freight.
+  const customRates = (hamaliRates ?? []).filter((x) => x.isCustom);
+  const rateByKey = new Map((hamaliRates ?? []).map((r) => [r.key, r]));
+
   const saleEntries: HamaliEntry[] = (saleOrders ?? [])
     .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
     .flatMap(({ o, d }) => {
@@ -573,25 +600,25 @@ export default function HamaliLedger() {
       const entries: HamaliEntry[] = [];
 
       if (o.product === 'PAPPU') {
-        const r = hamaliRates?.find((x) => x.key === 'PAPPU_LOADING') || { ratePerTonne: 200, lorryPerTonne: 80, marginPerTonne: 10 };
+        const r = rateByKey.get('PAPPU_LOADING') || { ratePerTonne: 200, lorryPerTonne: 80, marginPerTonne: 10 };
         const lh = pappuLoadingHamali(d.weightKg, false, Number(r.ratePerTonne), Number(r.lorryPerTonne), Number(r.marginPerTonne));
         
         entries.push({ ...base, id: `SALE-${d.id}-LOAD`, source: 'SALE' as const, label: 'Pappu Loading', fullCharge: lh.total, ourShare: lh.company, lorryShare: lh.lorry, crew: lh.crew, pl: lh.margin });
         
         // Custom costs (e.g. Roasting)
-        for (const c of hamaliRates?.filter(x => x.isCustom) || []) {
+        for (const c of customRates) {
            const ch = customLoadingHamali(d.weightKg, Number(c.ratePerTonne), Number(c.lorryPerTonne), Number(c.marginPerTonne));
            entries.push({ ...base, id: `SALE-${d.id}-${c.key}`, source: 'SALE' as const, label: `Pappu ${c.label}`, fullCharge: ch.total, ourShare: ch.company, lorryShare: ch.lorry, crew: ch.crew, pl: ch.margin });
         }
       } else if (o.product === 'HUSK' || o.product === 'WASTE') {
         const key = o.product === 'HUSK' ? 'HUSK_LOADING' : 'WASTE_LOADING';
         const fallback = o.product === 'HUSK' ? 333 : 150;
-        const r = hamaliRates?.find((x) => x.key === key) || { ratePerTonne: fallback, lorryPerTonne: 0, marginPerTonne: 0 };
+        const r = rateByKey.get(key) || { ratePerTonne: fallback, lorryPerTonne: 0, marginPerTonne: 0 };
         const lh = customLoadingHamali(d.weightKg, Number(r.ratePerTonne), Number(r.lorryPerTonne), Number(r.marginPerTonne));
         const label = `${o.product === 'HUSK' ? 'Husk' : 'Waste'} Loading`;
         entries.push({ ...base, id: `SALE-${d.id}-LOAD`, source: 'SALE' as const, label, fullCharge: lh.total, ourShare: lh.company, lorryShare: lh.lorry, crew: lh.crew, pl: lh.margin });
       } else if (o.product === 'TPS') {
-        const r = hamaliRates?.find((x) => x.key === 'TPS_LOADING') || { ratePerTonne: 160, lorryPerTonne: 160, marginPerTonne: 0 };
+        const r = rateByKey.get('TPS_LOADING') || { ratePerTonne: 160, lorryPerTonne: 160, marginPerTonne: 0 };
         const lh = customLoadingHamali(d.weightKg, Number(r.ratePerTonne), Number(r.lorryPerTonne), Number(r.marginPerTonne));
         entries.push({ ...base, id: `SALE-${d.id}-LOAD`, source: 'SALE' as const, label: 'TPS Loading', fullCharge: lh.total, ourShare: lh.company, lorryShare: lh.lorry, crew: lh.crew, pl: lh.margin });
       } else {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,6 +9,9 @@ import { PageHeader } from '@/components/PageHeader';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PartyAddress } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Table,
   TableBody,
@@ -179,30 +182,36 @@ export default function Parties() {
 
   const uniqueStates = Array.from(new Set(parties?.map(p => p.state).filter(Boolean))).sort() as string[];
 
-  const filteredParties = parties?.filter(p => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch = !q || (
-      (p.name?.toLowerCase() || '').includes(q) ||
-      (p.phone?.toLowerCase() || '').includes(q) ||
-      (p.phone2?.toLowerCase() || '').includes(q) ||
-      (p.gstin?.toLowerCase() || '').includes(q) ||
-      (p.bankAccountNumber?.toLowerCase() || '').includes(q)
-    );
+  const debouncedSearch = useDebounce(searchQuery, 200);
 
-    const matchesType =
-      typeFilter === 'ALL' ||
-      p.type === typeFilter ||
-      // "Both" parties surface under the Buyer and Supplier filters, but not Hamali Team.
-      (p.type === 'BOTH' && (typeFilter === 'BUYER' || typeFilter === 'SUPPLIER'));
-    const matchesCommodity =
-      commodityFilter === 'ALL' ||
-      (commodityFilter === 'TAMARIND_BYPRODUCTS'
-        ? TAMARIND_BYPRODUCT_COMMODITIES.some((c) => p.commodities?.includes(c))
-        : p.commodities?.includes(commodityFilter as Commodity));
-    const matchesState = stateFilter === 'ALL' || p.state === stateFilter;
+  const filteredParties = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    return (parties ?? []).filter((p) => {
+      const matchesSearch = !q || (
+        (p.name?.toLowerCase() || '').includes(q) ||
+        (p.phone?.toLowerCase() || '').includes(q) ||
+        (p.phone2?.toLowerCase() || '').includes(q) ||
+        (p.gstin?.toLowerCase() || '').includes(q) ||
+        (p.bankAccountNumber?.toLowerCase() || '').includes(q)
+      );
 
-    return matchesSearch && matchesType && matchesCommodity && matchesState;
-  });
+      const matchesType =
+        typeFilter === 'ALL' ||
+        p.type === typeFilter ||
+        // "Both" parties surface under the Buyer and Supplier filters, but not Hamali Team.
+        (p.type === 'BOTH' && (typeFilter === 'BUYER' || typeFilter === 'SUPPLIER'));
+      const matchesCommodity =
+        commodityFilter === 'ALL' ||
+        (commodityFilter === 'TAMARIND_BYPRODUCTS'
+          ? TAMARIND_BYPRODUCT_COMMODITIES.some((c) => p.commodities?.includes(c))
+          : p.commodities?.includes(commodityFilter as Commodity));
+      const matchesState = stateFilter === 'ALL' || p.state === stateFilter;
+
+      return matchesSearch && matchesType && matchesCommodity && matchesState;
+    });
+  }, [parties, debouncedSearch, typeFilter, commodityFilter, stateFilter]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pagedParties = [] } = usePagedRows(filteredParties, 50);
 
   const form = useForm<PartyForm>({
     resolver: zodResolver(partySchema) as any,
@@ -564,7 +573,7 @@ export default function Parties() {
                 </TableCell>
               </TableRow>
             )}
-            {filteredParties?.map((p) => (
+            {pagedParties?.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
                 <TableCell className="font-sans font-medium text-xs text-foreground/80">{p.nickname ?? '-'}</TableCell>
@@ -630,6 +639,15 @@ export default function Parties() {
           </TableBody>
         </Table>
       </div>
+
+      <PaginationBar
+        page={page}
+        setPage={setPage}
+        pageSize={pageSize}
+        setPageSize={setPageSize}
+        totalPages={totalPages}
+        total={total}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">

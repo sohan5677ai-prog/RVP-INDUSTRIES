@@ -54,7 +54,13 @@ export default function DispatchReminders() {
   const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissed());
   const [closed, setClosed] = useState(false);
 
-  const { data: orders } = useQuery({ queryKey: ['sale-orders'], queryFn: () => api<SaleOrder[]>('/sale-orders'), enabled: !closed });
+  const { data: orders } = useQuery({
+    queryKey: ['sale-orders', { status: 'PENDING', all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?status=PENDING&all=true'),
+    enabled: !closed,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
 
   const due = useMemo(() => {
     return (orders ?? [])

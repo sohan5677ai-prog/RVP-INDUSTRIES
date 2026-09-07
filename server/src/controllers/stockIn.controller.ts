@@ -141,7 +141,7 @@ export async function listStockIns(_req: Request, res: Response) {
     orderBy: { createdAt: 'desc' },
     include: {
       purchaseOrder: { include: { party: true } },
-      purchase: { include: { verification: true, processing: true } },
+      purchase: { include: { verification: true } },
     },
   });
   res.json(stockIns);

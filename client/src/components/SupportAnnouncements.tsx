@@ -49,6 +49,8 @@ export default function SupportAnnouncements() {
     queryKey: ['support-announcements'],
     queryFn: () => api<SupportAnnouncement[]>('/support/announcements'),
     enabled: !!user && !isDeveloper && !closed,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const pending = (data ?? []).filter((t) => !handled.has(t.id));

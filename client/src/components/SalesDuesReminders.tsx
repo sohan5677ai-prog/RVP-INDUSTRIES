@@ -56,18 +56,24 @@ export default function SalesDuesReminders() {
     queryKey: ['parties'],
     queryFn: () => api<Party[]>('/parties'),
     enabled: !closed,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: saleOrders } = useQuery({
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
     enabled: !closed,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: receipts } = useQuery({
     queryKey: ['receipts', { all: true }],
     queryFn: () => api<Receipt[]>('/receipts?all=true'),
     enabled: !closed,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const dueItems = useMemo<OverdueDueItem[]>(() => {

@@ -16,6 +16,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { SearchInput } from '@/components/ui/search-input';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
+import { useDebounce } from '@/lib/useDebounce';
 import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import {
@@ -278,13 +279,18 @@ export default function PurchaseOrders() {
     value: s,
   }));
 
+  const debouncedQ = useDebounce(q, 200);
+
   // Search filters the grouped orders by party name or PO number.
-  const shown = useMemo(() => q.trim()
-    ? groups.filter(({ pos }) => {
-        const hay = `${pos[0].party?.name ?? ''} ${pos.map((p) => p.poNumber).join(' ')}`.toLowerCase();
-        return hay.includes(q.trim().toLowerCase());
-      })
-    : groups, [groups, q]);
+  const shown = useMemo(() => {
+    const term = debouncedQ.trim().toLowerCase();
+    return term
+      ? groups.filter(({ pos }) => {
+          const hay = `${pos[0].party?.name ?? ''} ${pos.map((p) => p.poNumber).join(' ')}`.toLowerCase();
+          return hay.includes(term);
+        })
+      : groups;
+  }, [groups, debouncedQ]);
 
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(shown, 50);
 

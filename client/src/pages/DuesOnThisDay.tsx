@@ -37,6 +37,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/PageHeader';
 import { toast } from 'sonner';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 
 const DOW_OPTIONS = [
   { value: 1, label: 'Mon' },
@@ -183,6 +186,8 @@ export default function DuesOnThisDay() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const debouncedSearch = useDebounce(searchQuery, 200);
+
   // Filtered invoices
   const filteredInvoices = useMemo(() => {
     if (!data?.invoices) return [];
@@ -195,8 +200,8 @@ export default function DuesOnThisDay() {
       if (statusFilter === 'PENDING' && inv.lastSentStatus === 'SENT') return false;
 
       // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
+      if (debouncedSearch.trim()) {
+        const q = debouncedSearch.toLowerCase().trim();
         const bName = inv.buyerName.toLowerCase();
         const brName = (inv.brokerName || '').toLowerCase();
         const invNo = inv.invoiceNumber.toLowerCase();
@@ -207,7 +212,9 @@ export default function DuesOnThisDay() {
       }
       return true;
     });
-  }, [data?.invoices, productFilter, statusFilter, searchQuery]);
+  }, [data?.invoices, productFilter, statusFilter, debouncedSearch]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pagedInvoices = [] } = usePagedRows(filteredInvoices, 25);
 
   // Selection handlers
   const allFilteredSelected =
@@ -637,7 +644,7 @@ export default function DuesOnThisDay() {
             </div>
           ) : (
             <div className="divide-y overflow-x-auto">
-              {filteredInvoices.map((inv) => {
+              {pagedInvoices.map((inv) => {
                 const isSelected = selectedInvoices.has(inv.dispatchId);
                 const isSentToday = inv.lastSentStatus === 'SENT';
 
@@ -758,6 +765,15 @@ export default function DuesOnThisDay() {
           )}
         </CardContent>
       </Card>
+
+      <PaginationBar
+        page={page}
+        setPage={setPage}
+        pageSize={pageSize}
+        setPageSize={setPageSize}
+        totalPages={totalPages}
+        total={total}
+      />
 
       {/* Floating / Sticky Batch Action Bar */}
       {selectedCount > 0 && (

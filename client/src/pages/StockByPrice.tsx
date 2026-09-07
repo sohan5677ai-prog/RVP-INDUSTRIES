@@ -22,6 +22,7 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, PanelDot, Figure } from '@/components/ExpandPanel';
+import { useDebounce } from '@/lib/useDebounce';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
@@ -472,20 +473,23 @@ export default function StockByPrice() {
   }, [tonnage, hasTonnage, processingChargePerKg, huskPricePerKg, plan, overallWacBlack]);
 
       
-  const q = search.trim().toLowerCase();
-  const visible = bands.filter((b) => {
-    // 2. Text Search
-    if (!q) return true;
-    if (rupees(b.blackPricePerKg).toLowerCase().includes(q)) return true;
-    if (b.blackPricePerKg.toFixed(2).includes(q)) return true;
-    if (rupees(b.impliedPappuPrice).toLowerCase().includes(q)) return true;
-    return b.rows.some(
-      (r) =>
-        r.partyName.toLowerCase().includes(q) ||
-        r.lorryNumber.toLowerCase().includes(q) ||
-        (r.poNumber ?? '').toLowerCase().includes(q)
-    );
-  });
+  const debouncedSearch = useDebounce(search, 200);
+
+  const visible = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    if (!q) return bands;
+    return bands.filter((b) => {
+      if (rupees(b.blackPricePerKg).toLowerCase().includes(q)) return true;
+      if (b.blackPricePerKg.toFixed(2).includes(q)) return true;
+      if (rupees(b.impliedPappuPrice).toLowerCase().includes(q)) return true;
+      return b.rows.some(
+        (r) =>
+          r.partyName.toLowerCase().includes(q) ||
+          r.lorryNumber.toLowerCase().includes(q) ||
+          (r.poNumber ?? '').toLowerCase().includes(q)
+      );
+    });
+  }, [bands, debouncedSearch]);
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pagedBands = [] } = usePagedRows(visible, 50);
 
   if (isLoading) {

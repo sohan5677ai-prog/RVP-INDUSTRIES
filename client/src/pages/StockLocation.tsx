@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, PanelDot, Figure } from '@/components/ExpandPanel';
+import { useDebounce } from '@/lib/useDebounce';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
 
@@ -427,7 +428,8 @@ export default function StockLocation() {
   const metrics = getMetrics(selectedLoc);
 
   // Filter bands/lots for the detail table.
-  const q = searchQuery.trim().toLowerCase();
+  const debouncedSearch = useDebounce(searchQuery, 200);
+  const q = debouncedSearch.trim().toLowerCase();
   const visibleBands = useMemo(() => {
     const hasFilter = !!q || !!fromDate || !!toDate;
     if (!hasFilter) return metrics.bands;

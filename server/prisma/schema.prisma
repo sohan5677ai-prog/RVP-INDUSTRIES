@@ -181,6 +181,9 @@ model Party {
   setOffs             PartySetOff[]
   reminderSchedule    PartyReminderSchedule?
   addresses           PartyAddress[]
+
+  @@index([type])
+  @@index([name])
 }
 
 model PartyAddress {
@@ -284,6 +287,8 @@ model PurchaseOrder {
   // Party ledger + planner group/filter POs by supplier; index the FK so those
   // GROUP BY / WHERE partyId scans stay index-driven as the table grows.
   @@index([partyId])
+  @@index([poDate])
+  @@index([status])
 }
 
 // Running per-series-per-financial-year counter backing PO numbering
@@ -454,6 +459,9 @@ model StockIn {
   purchase          Purchase?
 
   @@index([purchaseOrderId])
+  @@index([arrivalDate])
+  @@index([lorryNumber])
+  @@index([invoiceNumber])
 }
 
 model Purchase {
@@ -489,6 +497,8 @@ model Purchase {
   verification      WeightVerification?
   payments          Payment[]
   processing        Processing?
+
+  @@index([purchaseDate])
 }
 
 model WeightVerification {
@@ -668,6 +678,11 @@ model SaleOrder {
   // both FKs so those GROUP BY / WHERE scans stay index-driven as the table grows.
   @@index([buyerId])
   @@index([brokerId])
+  @@index([product])
+  @@index([saleDate])
+  @@index([status])
+  @@index([product, saleDate])
+  @@index([status, saleDate])
 }
 
 // A single physical dispatch (one lorry) shipped against a SaleOrder. Carries the
@@ -788,6 +803,10 @@ model SaleDispatch {
 
   @@unique([invoiceFy, invoiceSeq, invoiceSeries])
   @@index([saleOrderId])
+  @@index([dispatchDate])
+  @@index([status])
+  @@index([vehicleNumber])
+  @@index([invoiceNumber])
   @@index([transportId])
 }
 
@@ -897,6 +916,8 @@ model JournalEntry {
   payment     Payment?
   receipt     Receipt?
   setOff      PartySetOff?
+
+  @@index([date])
 }
 
 model JournalLine {
@@ -1346,6 +1367,10 @@ model Payment {
   @@index([hamaliVerificationId])
   @@index([journalEntryId])
   @@index([setOffId])
+  @@index([date])
+  @@index([type])
+  @@index([type, date])
+  @@index([partyId, type])
 }
 
 model Receipt {
@@ -1373,6 +1398,10 @@ model Receipt {
   @@index([saleDispatchId])
   @@index([journalEntryId])
   @@index([setOffId])
+  @@index([date])
+  @@index([type])
+  @@index([type, date])
+  @@index([partyId, type])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

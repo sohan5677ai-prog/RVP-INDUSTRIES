@@ -797,6 +797,8 @@ export default function StockIn() {
   const { data: items, isLoading } = useQuery({
     queryKey: ['stock-in'],
     queryFn: () => api<StockInRow[]>('/stock-in'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const toggleGroup = useCallback((poId: string) => {
@@ -865,6 +867,8 @@ export default function StockIn() {
   const { data: pendingPOs } = useQuery({
     queryKey: ['purchase-orders', 'PENDING'],
     queryFn: () => api<PurchaseOrder[]>('/purchase-orders?status=PENDING&all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {

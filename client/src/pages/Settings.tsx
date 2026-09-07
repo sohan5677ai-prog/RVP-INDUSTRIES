@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -14,10 +14,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PageHeader } from '@/components/PageHeader';
 import { useAuth } from '@/lib/auth';
-import Subscription from '@/pages/Subscription';
-import ArchiveManager from '@/pages/ArchiveManager';
-import Wishes from '@/pages/Wishes';
-import DeveloperMaintenance from '@/pages/DeveloperMaintenance';
+
+const Subscription = lazy(() => import('@/pages/Subscription'));
+const ArchiveManager = lazy(() => import('@/pages/ArchiveManager'));
+const Wishes = lazy(() => import('@/pages/Wishes'));
+const DeveloperMaintenance = lazy(() => import('@/pages/DeveloperMaintenance'));
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -99,7 +100,9 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="wishes" className="focus-visible:outline-none focus-visible:ring-0">
-          <Wishes />
+          <Suspense fallback={<TabLoader />}>
+            <Wishes />
+          </Suspense>
         </TabsContent>
 
         <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">
@@ -108,22 +111,36 @@ export default function Settings() {
 
         {isDeveloper && (
           <TabsContent value="subscription" className="focus-visible:outline-none focus-visible:ring-0">
-            <Subscription />
+            <Suspense fallback={<TabLoader />}>
+              <Subscription />
+            </Suspense>
           </TabsContent>
         )}
 
         {isDeveloper && (
           <TabsContent value="archives" className="focus-visible:outline-none focus-visible:ring-0">
-            <ArchiveManager />
+            <Suspense fallback={<TabLoader />}>
+              <ArchiveManager />
+            </Suspense>
           </TabsContent>
         )}
 
         {isDeveloper && (
           <TabsContent value="maintenance" className="focus-visible:outline-none focus-visible:ring-0">
-            <DeveloperMaintenance />
+            <Suspense fallback={<TabLoader />}>
+              <DeveloperMaintenance />
+            </Suspense>
           </TabsContent>
         )}
       </Tabs>
+    </div>
+  );
+}
+
+function TabLoader() {
+  return (
+    <div className="flex items-center justify-center p-12">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
   );
 }

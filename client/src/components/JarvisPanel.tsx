@@ -10,6 +10,8 @@ import {
   ArrowRight,
   Bot,
   Zap,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import './JarvisPanel.css';
@@ -120,9 +122,82 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(() => {
+    return localStorage.getItem('jarvis-voice-reply') !== 'false';
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  // Toggle voice replies
+  const toggleVoiceReply = useCallback(() => {
+    setVoiceReplyEnabled(prev => {
+      const next = !prev;
+      localStorage.setItem('jarvis-voice-reply', String(next));
+      if (!next && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  }, []);
+
+  // Text to Speech (TTS) for JARVIS voice replies
+  const speak = useCallback((text: string) => {
+    if (!('speechSynthesis' in window) || !voiceReplyEnabled) return;
+    window.speechSynthesis.cancel();
+
+    // Clean text: strip table rows, markdown formatting, HTML, and URLs for smooth speech
+    let clean = text
+      .replace(/\|[^\n]+\|/g, '') // strip table rows
+      .replace(/[*#`_~>]/g, '')   // strip markdown formatting
+      .replace(/<[^>]*>/g, '')    // strip HTML tags
+      .replace(/https?:\/\/\S+/g, '') // strip URLs
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!clean) return;
+
+    // Keep voice summary crisp so it doesn't drone on
+    if (clean.length > 280) {
+      const sentenceEnd = clean.indexOf('.', 180);
+      if (sentenceEnd > 0 && sentenceEnd < 320) {
+        clean = clean.slice(0, sentenceEnd + 1) + ' I have displayed the complete breakdown on your screen.';
+      } else {
+        clean = clean.slice(0, 240) + '... Full details are displayed on your screen.';
+      }
+    }
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.02;
+    utterance.pitch = 0.95;
+
+    // Pick best voice: Indian English or UK/US English
+    const voices = window.speechSynthesis.getVoices();
+    const voice =
+      voices.find(v => v.lang === 'en-IN') ||
+      voices.find(v => v.lang.startsWith('en-GB')) ||
+      voices.find(v => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google'))) ||
+      voices.find(v => v.lang.startsWith('en'));
+
+    if (voice) utterance.voice = voice;
+
+    window.speechSynthesis.speak(utterance);
+  }, [voiceReplyEnabled]);
+
+  // Cancel speech on close or unmount
+  useEffect(() => {
+    if (!open && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   // Fetch proactive insights
   const { data: insightsData } = useQuery({
@@ -192,6 +267,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
       };
 
       setMessages(prev => [...prev, assistantMsg]);
+      speak(assistantMsg.content);
     } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: `e-${Date.now()}`,
@@ -202,7 +278,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [messages, loading]);
+  }, [messages, loading, speak]);
 
   // Voice input using Web Speech API
   const toggleVoice = useCallback(() => {
@@ -279,6 +355,13 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
             <h3>JARVIS</h3>
             <p>RVP Industries AI Assistant</p>
           </div>
+          <button
+            className={`jarvis-icon-btn ${voiceReplyEnabled ? 'active' : ''}`}
+            onClick={toggleVoiceReply}
+            title={voiceReplyEnabled ? 'Voice reply enabled (click to mute)' : 'Voice reply muted (click to enable)'}
+          >
+            {voiceReplyEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+          </button>
           <button className="jarvis-close" onClick={onClose} title="Close (Esc)">
             <X className="h-4 w-4" />
           </button>

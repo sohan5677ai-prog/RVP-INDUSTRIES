@@ -219,7 +219,8 @@
   opacity: 0.8;
 }
 
-.jarvis-close {
+.jarvis-close,
+.jarvis-icon-btn {
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -234,9 +235,16 @@
   flex-shrink: 0;
 }
 
-.jarvis-close:hover {
+.jarvis-close:hover,
+.jarvis-icon-btn:hover {
   background: hsl(var(--muted));
   color: hsl(var(--foreground));
+}
+
+.jarvis-icon-btn.active {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(14, 165, 233, 0.4);
+  color: #0ea5e9;
 }
 
 /* ─── Insight Cards ──────────────────────────────────────── */

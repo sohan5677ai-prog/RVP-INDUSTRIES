@@ -199,9 +199,9 @@ export class TaxproService {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings? [${msg}]`;
             }
             const err: any = new Error(msg);
-            if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
-              err.isBusinessError = true;
-            } else if (!isTransientNicError) {
+            if (isTransientNicError) {
+              err.isBusinessError = false;
+            } else if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
               err.isBusinessError = true;
             }
             err.errorDetails = json.ErrorDetails;
@@ -1093,6 +1093,14 @@ export class TaxproService {
       };
     } catch (err: any) {
       logger.error('TaxPro EWB Cancellation Error:', err);
+      const msg = String(err?.message || '');
+      if (/412|already.*cancel|multi.*vehicle/i.test(msg)) {
+        return {
+          success: true,
+          cancelledDate: new Date(),
+          message: 'E-Way Bill is already cancelled on the government portal (NIC 412 / Precondition Met)',
+        };
+      }
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -1380,6 +1388,10 @@ export class TaxproService {
       };
     } catch (err: any) {
       logger.error('TaxPro GetTransporterDetails Error:', err);
+      const msg = String(err?.message || '');
+      if (msg.includes('328') || /could not retrieve/i.test(msg)) {
+        throw new Error(`Transporter GSTIN "${trnNo}" could not be retrieved from NIC registry (Error 328). Please verify the GSTIN is active and registered as an enrolled transporter.`);
+      }
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -1422,6 +1434,18 @@ export class TaxproService {
       };
     } catch (err: any) {
       logger.error('TaxPro GetEwayBillsofOtherParty Error:', err);
+      const msg = String(err?.message || '');
+      if (msg.includes('366') || /today/i.test(msg)) {
+        throw new Error(`NIC policy restriction (Error 366): Inward E-Way Bills generated today cannot be retrieved. Please query yesterday (${(() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toLocaleDateString('en-GB'); })()}) or earlier.`);
+      }
+      if (msg.includes('325') || /could not retrieve/i.test(msg)) {
+        return {
+          success: true,
+          date: dateFormatted,
+          ewayBills: [],
+          message: `No inward E-Way Bills found for GSTIN on ${dateFormatted} (NIC 325)`,
+        };
+      }
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }

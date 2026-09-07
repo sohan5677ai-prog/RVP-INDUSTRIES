@@ -1,8 +1,11 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Loader2, Users, ArrowUpRight, ArrowDownRight, Archive, ChevronRight, Target, ShoppingCart, AlertTriangle, CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown, Tag } from 'lucide-react';
 import { api } from '@/lib/api';
 import { kg, rupees, toTonnes } from '@/lib/format';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
@@ -145,14 +148,7 @@ export default function StockByParty() {
     });
   }
 
-  const filteredPartyStocks = partyStocks?.filter((p) => {
-    const term = searchQuery.toLowerCase();
-    return (
-      p.partyName.toLowerCase().includes(term) ||
-      p.address.toLowerCase().includes(term) ||
-      p.state.toLowerCase().includes(term)
-    );
-  }) ?? [];
+  const debouncedSearch = useDebounce(searchQuery, 200);
 
   function handleSort(field: 'netStockKg' | 'weightedAveragePrice') {
     if (sortField === field) {
@@ -163,13 +159,28 @@ export default function StockByParty() {
     }
   }
 
-  const sortedPartyStocks = [...filteredPartyStocks].sort((a, b) => {
-    if (!sortField) return 0;
-    const valA = a[sortField] ?? 0;
-    const valB = b[sortField] ?? 0;
-    if (valA === valB) return 0;
-    return sortOrder === 'desc' ? valB - valA : valA - valB;
-  });
+  const sortedPartyStocks = useMemo(() => {
+    const term = debouncedSearch.trim().toLowerCase();
+    const filtered = (partyStocks ?? []).filter((p) => {
+      if (!term) return true;
+      return (
+        p.partyName.toLowerCase().includes(term) ||
+        p.address.toLowerCase().includes(term) ||
+        p.state.toLowerCase().includes(term)
+      );
+    });
+
+    if (!sortField) return filtered;
+
+    return [...filtered].sort((a, b) => {
+      const valA = a[sortField] ?? 0;
+      const valB = b[sortField] ?? 0;
+      if (valA === valB) return 0;
+      return sortOrder === 'desc' ? valB - valA : valA - valB;
+    });
+  }, [partyStocks, debouncedSearch, sortField, sortOrder]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleParties } = usePagedRows(sortedPartyStocks, 50);
 
   if (isLoading) {
     return (
@@ -486,14 +497,14 @@ export default function StockByParty() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedPartyStocks.length === 0 ? (
+            {visibleParties.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No supplier stock details found.
                 </TableCell>
               </TableRow>
             ) : (
-              sortedPartyStocks.map((p) => {
+              visibleParties.map((p) => {
                 const isExpanded = expandedParties.has(p.partyId);
                 const hasStock = p.netStockKg > 0;
                 
@@ -590,6 +601,7 @@ export default function StockByParty() {
             )}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </Card>
     </div>
   );

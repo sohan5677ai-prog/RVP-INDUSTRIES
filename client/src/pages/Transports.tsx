@@ -13,6 +13,9 @@ import { StatCard } from '@/components/StatCard';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Table,
   TableBody,
@@ -101,6 +104,8 @@ export default function Transports() {
   const { data: transports, isLoading } = useQuery({
     queryKey: ['transports'],
     queryFn: () => api<Transport[]>('/transports'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const form = useForm<TransportForm>({
@@ -198,10 +203,12 @@ export default function Transports() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  const debouncedSearch = useDebounce(search, 200);
+
   const filteredTransports = useMemo(() => {
     if (!transports) return [];
-    if (!search.trim()) return transports;
-    const q = search.toLowerCase().trim();
+    if (!debouncedSearch.trim()) return transports;
+    const q = debouncedSearch.toLowerCase().trim();
     return transports.filter(
       (t) =>
         t.name.toLowerCase().includes(q) ||
@@ -211,7 +218,9 @@ export default function Transports() {
         (t.gstin && t.gstin.toLowerCase().includes(q)) ||
         (t.contactPerson && t.contactPerson.toLowerCase().includes(q))
     );
-  }, [transports, search]);
+  }, [transports, debouncedSearch]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleTransports } = usePagedRows(filteredTransports, 25);
 
   const totalTransports = transports?.length ?? 0;
   const activeTransports = transports?.filter((t) => t.active).length ?? 0;
@@ -281,14 +290,14 @@ export default function Transports() {
                   Loading transports...
                 </TableCell>
               </TableRow>
-            ) : filteredTransports.length === 0 ? (
+            ) : visibleTransports.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   No transports found. Click &quot;Add Transport&quot; to create one.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredTransports.map((t) => (
+              visibleTransports.map((t) => (
                 <TableRow key={t.id} className="hover:bg-muted/50">
                   <TableCell>
                     <div className="font-semibold text-foreground flex items-center gap-2">
@@ -329,19 +338,27 @@ export default function Transports() {
                       <span className="text-xs text-muted-foreground">-</span>
                     )}
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {t.gstin || '-'}
+                  <TableCell>
+                    {t.gstin ? (
+                      <span className="text-xs font-mono">{t.gstin}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
                   </TableCell>
-                  <TableCell className="text-right font-medium font-mono">
-                    {rupees(t.defaultRetention)}
+                  <TableCell className="text-right">
+                    {t.defaultRetention != null ? (
+                      <span className="text-xs font-semibold">{rupees(t.defaultRetention)}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Badge variant="secondary" className="font-mono text-xs">
+                    <Badge variant="secondary" className="text-xs">
                       {t._count?.saleDispatches ?? 0}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={t.active ? 'default' : 'secondary'}>
+                    <Badge variant={t.active ? 'default' : 'outline'}>
                       {t.active ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
@@ -379,6 +396,7 @@ export default function Transports() {
             )}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       {/* Add / Edit Dialog */}

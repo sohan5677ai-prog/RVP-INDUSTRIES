@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -21,6 +21,9 @@ import {
 import { api, getErrorMessage } from '@/lib/api';
 import { shortDate, rupees } from '@/lib/format';
 import { dispatchTotal } from '@/lib/saleStatus';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { PageHeader } from '@/components/PageHeader';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -310,18 +313,27 @@ export default function IrnEwbReport() {
     setExtRemarks('');
   };
 
-  const sales = data?.sales || [];
-  const filteredSales = sales.filter((s) => {
-    const term = searchQuery.toLowerCase();
-    const party = s.saleOrder?.buyer?.name?.toLowerCase() || '';
-    const inv = s.invoiceNumber?.toLowerCase() || '';
-    const irn = s.irn?.toLowerCase() || '';
-    const ewb = s.ewbNumber?.toLowerCase() || '';
-    return party.includes(term) || inv.includes(term) || irn.includes(term) || ewb.includes(term);
-  });
+  const debouncedSearch = useDebounce(searchQuery, 200);
 
-  const irnSales = filteredSales.filter((s) => s.irn);
-  const ewbSales = filteredSales.filter((s) => s.ewbNumber);
+  const sales = data?.sales || [];
+  const { irnSales, ewbSales } = useMemo(() => {
+    const term = debouncedSearch.trim().toLowerCase();
+    const filtered = sales.filter((s) => {
+      if (!term) return true;
+      const party = s.saleOrder?.buyer?.name?.toLowerCase() || '';
+      const inv = s.invoiceNumber?.toLowerCase() || '';
+      const irn = s.irn?.toLowerCase() || '';
+      const ewb = s.ewbNumber?.toLowerCase() || '';
+      return party.includes(term) || inv.includes(term) || irn.includes(term) || ewb.includes(term);
+    });
+    return {
+      irnSales: filtered.filter((s) => s.irn),
+      ewbSales: filtered.filter((s) => s.ewbNumber),
+    };
+  }, [sales, debouncedSearch]);
+
+  const { page: irnPage, setPage: setIrnPage, pageSize: irnPageSize, setPageSize: setIrnPageSize, totalPages: irnTotalPages, total: irnTotal, pageRows: visibleIrnSales } = usePagedRows(irnSales, 25);
+  const { page: ewbPage, setPage: setEwbPage, pageSize: ewbPageSize, setPageSize: setEwbPageSize, totalPages: ewbTotalPages, total: ewbTotal, pageRows: visibleEwbSales } = usePagedRows(ewbSales, 25);
 
   // Inward E-Way Bills list parsing
   const rawInwardList = inwardData?.data?.custom_fields?.ewbList || inwardData?.data?.ewbList || inwardData?.data;
@@ -426,10 +438,10 @@ export default function IrnEwbReport() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Loading E-Invoices...</TableCell></TableRow>
-                ) : irnSales.length === 0 ? (
+                ) : visibleIrnSales.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No E-Invoices found</TableCell></TableRow>
                 ) : (
-                  irnSales.map((s) => {
+                  visibleIrnSales.map((s) => {
                     const isCancelled = s.irnStatus === 'CANCELLED';
                     const elapsedHours = s.irnAckDate ? (Date.now() - new Date(s.irnAckDate).getTime()) / (1000 * 60 * 60) : 0;
                     const canCancel = !isCancelled && elapsedHours <= 24;
@@ -498,6 +510,7 @@ export default function IrnEwbReport() {
                 )}
               </TableBody>
             </Table>
+            <PaginationBar page={irnPage} setPage={setIrnPage} pageSize={irnPageSize} setPageSize={setIrnPageSize} totalPages={irnTotalPages} total={irnTotal} />
           </div>
         </TabsContent>
 
@@ -519,10 +532,10 @@ export default function IrnEwbReport() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Loading E-Way Bills...</TableCell></TableRow>
-                ) : ewbSales.length === 0 ? (
+                ) : visibleEwbSales.length === 0 ? (
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No E-Way Bills found</TableCell></TableRow>
                 ) : (
-                  ewbSales.map((s) => {
+                  visibleEwbSales.map((s) => {
                     const isCancelled = s.ewbStatus === 'CANCELLED';
                     const elapsedHours = s.ewbDate ? (Date.now() - new Date(s.ewbDate).getTime()) / (1000 * 60 * 60) : 0;
                     const canCancel = !isCancelled && elapsedHours <= 24;
@@ -593,6 +606,7 @@ export default function IrnEwbReport() {
                 )}
               </TableBody>
             </Table>
+            <PaginationBar page={ewbPage} setPage={setEwbPage} pageSize={ewbPageSize} setPageSize={setEwbPageSize} totalPages={ewbTotalPages} total={ewbTotal} />
           </div>
         </TabsContent>
 

@@ -4,6 +4,9 @@ import { Loader2, Search, Warehouse, IndianRupee, TrendingUp, CalendarDays } fro
 import { api } from '@/lib/api';
 import type { StockTransfer } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -206,13 +209,18 @@ export default function StockByDate() {
 
   const isLoading = loadingSeed || loadingTransfers;
 
-  const q = search.trim().toLowerCase();
-  const visible = dateRows.filter((r) => {
-    if (fromDate && r.date < fromDate) return false;
-    if (toDate && r.date > toDate) return false;
-    if (q && !shortDate(r.date).toLowerCase().includes(q) && !r.date.includes(q)) return false;
-    return true;
-  });
+  const debouncedSearch = useDebounce(search, 200);
+  const visible = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    return dateRows.filter((r) => {
+      if (fromDate && r.date < fromDate) return false;
+      if (toDate && r.date > toDate) return false;
+      if (q && !shortDate(r.date).toLowerCase().includes(q) && !r.date.includes(q)) return false;
+      return true;
+    });
+  }, [dateRows, debouncedSearch, fromDate, toDate]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: pageLots } = usePagedRows(visible, 50);
 
   if (isLoading) {
     return (
@@ -320,7 +328,7 @@ export default function StockByDate() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {visible.length === 0 && (
+            {pageLots.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                   {dateRows.length === 0
@@ -329,7 +337,7 @@ export default function StockByDate() {
                 </TableCell>
               </TableRow>
             )}
-            {visible.map((r, idx) => {
+            {pageLots.map((r, idx) => {
               const depleted = r.remWeightKg === 0;
               const partial = !depleted && r.remWeightKg < r.recvWeightKg;
               return (
@@ -359,6 +367,7 @@ export default function StockByDate() {
             })}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
     </div>
   );

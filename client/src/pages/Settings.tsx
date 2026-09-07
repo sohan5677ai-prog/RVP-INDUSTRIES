@@ -19,6 +19,7 @@ const Subscription = lazy(() => import('@/pages/Subscription'));
 const ArchiveManager = lazy(() => import('@/pages/ArchiveManager'));
 const Wishes = lazy(() => import('@/pages/Wishes'));
 const DeveloperMaintenance = lazy(() => import('@/pages/DeveloperMaintenance'));
+const KeyboardShortcutsSection = lazy(() => import('@/pages/Settings/KeyboardShortcutsSection'));
 
 interface RateRow { id?: string; destination: string; ratePerTonne: string }
 
@@ -72,6 +73,7 @@ export default function Settings() {
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="wishes">Wishes</TabsTrigger>
           <TabsTrigger value="taxpro">TaxPro GSP</TabsTrigger>
+          <TabsTrigger value="shortcuts">Shortcuts</TabsTrigger>
           {isDeveloper && <TabsTrigger value="subscription">Subscription</TabsTrigger>}
           {isDeveloper && <TabsTrigger value="archives">Archives</TabsTrigger>}
           {isDeveloper && <TabsTrigger value="maintenance">Maintenance</TabsTrigger>}
@@ -107,6 +109,12 @@ export default function Settings() {
 
         <TabsContent value="taxpro" className="focus-visible:outline-none focus-visible:ring-0">
           <TaxproGspSection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="shortcuts" className="focus-visible:outline-none focus-visible:ring-0">
+          <Suspense fallback={<TabLoader />}>
+            <KeyboardShortcutsSection />
+          </Suspense>
         </TabsContent>
 
         {isDeveloper && (

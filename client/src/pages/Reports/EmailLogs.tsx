@@ -34,6 +34,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useDebounce } from '@/lib/useDebounce';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import {
   Select,
   SelectContent,
@@ -91,6 +94,8 @@ export default function EmailLogs() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
 
+  const debouncedSearch = useDebounce(search, 300);
+
   // Fetch parties for the filter dropdown
   const { data: parties } = useQuery({
     queryKey: ['parties-compact'],
@@ -101,20 +106,24 @@ export default function EmailLogs() {
   // Query params for email logs
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
-    if (search.trim()) params.set('search', search.trim());
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim());
     if (selectedPartyId !== 'all') params.set('partyId', selectedPartyId);
     if (selectedDocType !== 'all') params.set('documentType', selectedDocType);
     if (selectedStatus !== 'all') params.set('status', selectedStatus);
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
     return params.toString();
-  }, [search, selectedPartyId, selectedDocType, selectedStatus, fromDate, toDate]);
+  }, [debouncedSearch, selectedPartyId, selectedDocType, selectedStatus, fromDate, toDate]);
 
   // Fetch filtered email logs
   const { data: emailLogs, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['email-logs', queryParams],
     queryFn: () => api<EmailLog[]>(`/email-logs?${queryParams}`),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleLogs } = usePagedRows(emailLogs ?? [], 25);
 
   // Resend mutation
   const resendMutation = useMutation({
@@ -453,7 +462,7 @@ export default function EmailLogs() {
                 </TableCell>
               </TableRow>
             ) : (
-              emailLogs.map((log) => {
+              visibleLogs.map((log) => {
                 const docConfig = DOC_TYPE_LABELS[log.documentType] || { label: log.documentType, icon: FileText };
                 const DocIcon = docConfig.icon;
 
@@ -525,6 +534,7 @@ export default function EmailLogs() {
             )}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
     </div>
   );

@@ -18,6 +18,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ExportButtons } from '@/components/ExportButtons';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, PanelMeta, Figure, PanelEmpty } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
@@ -82,9 +84,13 @@ export default function PrivateLoansPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['private-loans'],
     queryFn: () => api<PrivateLoansResponse>('/private-loans'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const loans = data?.loans ?? [];
   const summary = data?.summary;
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleLoans } = usePagedRows(loans, 25);
 
   const loanColumns: ExportColumn<PrivateLoan>[] = [
     { header: 'Date', value: (l) => shortDate(l.startDate) },
@@ -358,7 +364,7 @@ export default function PrivateLoansPage() {
             {!isLoading && loans.length === 0 && (
               <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">No loans yet.</TableCell></TableRow>
             )}
-            {loans.map((loan) => (
+            {visibleLoans.map((loan) => (
               <Fragment key={loan.id}>
                 <TableRow
                   className={cn('cursor-pointer transition-colors', expanded[loan.id] ? 'bg-accent/40' : 'hover:bg-accent/30')}
@@ -513,7 +519,7 @@ export default function PrivateLoansPage() {
                         )}
                         {loan.reminderSchedule.stoppedReason && (
                           <div className="text-amber-700 dark:text-amber-400 font-medium pt-0.5">
-                            {STOPPED_REASON_LABEL[loan.reminderSchedule.stoppedReason]}
+                            {STOPPED_REASON_LABEL[loan.reminderSchedule.stoppedReason as keyof typeof STOPPED_REASON_LABEL]}
                           </div>
                         )}
                       </div>
@@ -523,7 +529,7 @@ export default function PrivateLoansPage() {
                       <PanelEmpty>No repayments yet.</PanelEmpty>
                     ) : (
                       <PanelStack>
-                        {loan.repayments.map((r) => (
+                        {loan.repayments.map((r: any) => (
                           <PanelCard
                             key={r.id}
                             icon={IndianRupee}
@@ -563,6 +569,7 @@ export default function PrivateLoansPage() {
             ))}
           </TableBody>
         </Table>
+        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
 
       {/* Add / Edit loan dialog */}

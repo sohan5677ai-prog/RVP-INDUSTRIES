@@ -6,6 +6,7 @@ import SubscriptionBoundary from '@/components/SubscriptionBoundary';
 import MaintenanceBoundary from '@/components/MaintenanceBoundary';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { registerPreload } from '@/lib/preload';
+import { ShortcutProvider } from '@/lib/shortcuts/ShortcutContext';
 
 function lazyWithPreload(paths: string | string[], importFn: () => Promise<any>) {
   const safeImportFn = async () => {
@@ -138,7 +139,8 @@ export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <Suspense fallback={<Fallback />}>
+        <ShortcutProvider>
+          <Suspense fallback={<Fallback />}>
           <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
@@ -225,8 +227,9 @@ export default function App() {
               </Route>
             </Route>
           </Route>
-        </Routes>
-      </Suspense>
+          </Routes>
+        </Suspense>
+      </ShortcutProvider>
     </BrowserRouter>
   </ErrorBoundary>
   );

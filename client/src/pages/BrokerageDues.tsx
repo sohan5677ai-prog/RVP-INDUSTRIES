@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Broker, SaleOrder, Payment } from '@/lib/types';
@@ -37,6 +38,8 @@ export default function BrokerageDuesPage() {
   const { data: brokers, isLoading: loadingBrokers } = useQuery({
     queryKey: ['brokers'],
     queryFn: () => api<Broker[]>('/brokers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
@@ -44,62 +47,77 @@ export default function BrokerageDuesPage() {
     // silently dropped older orders (and their brokerage) out of the FIFO run.
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: payments, isLoading: loadingPayments } = useQuery({
     // Full history - dues are matched against every payment, not just latest 100.
     queryKey: ['payments', { all: true }],
     queryFn: () => api<Payment[]>('/payments?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const isLoading = loadingBrokers || loadingSales || loadingPayments;
 
-  // Calculate flat list of outstanding brokerage orders using FIFO allocation
-  const outstandingBrokerage: Array<{
-    id: string;
-    brokerName: string;
-    saleDate: string;
-    invoiceNumber: string | null;
-    buyerName: string;
-    vehicleNumber: string | null;
-    brokerageAmount: number;
-  }> = [];
+  // Calculate flat list of outstanding brokerage orders using FIFO allocation with O(1) Map pre-grouping
+  const { outstandingBrokerage, totalEarnedAll, totalPaymentsAll, totalOutstanding } = useMemo(() => {
+    let earned = 0;
+    let paid = 0;
+    const outstanding: BrokerageDueRow[] = [];
 
-  let totalEarnedAll = 0;
-  let totalPaymentsAll = 0;
+    if (!brokers?.length) {
+      return { outstandingBrokerage: outstanding, totalEarnedAll: 0, totalPaymentsAll: 0, totalOutstanding: 0 };
+    }
 
-  brokers?.forEach((b) => {
-    if (isOwnBroker(b.name)) return; // own (RVP) orders carry no brokerage
-    // 1. This broker's flat brokerage per dispatched shipment, oldest first.
-    const rate = Number(b.brokerageAmount);
-    const activeOrders = (saleOrders ?? [])
-      .filter((o) => o.brokerId === b.id)
-      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
-      .sort((a, z) => new Date(a.d.dispatchDate).getTime() - new Date(z.d.dispatchDate).getTime())
-      .map(({ o, d }) => ({
-        id: d.id,
-        saleDate: d.dispatchDate,
-        invoiceNumber: d.invoiceNumber,
-        buyerName: o.buyer?.name ?? '-',
-        vehicleNumber: d.vehicleNumber,
-        totalBrokerage: rate,
-        remainingBrokerage: rate,
-      }));
+    // Pre-group sale orders by brokerId
+    const salesByBroker = new Map<string, SaleOrder[]>();
+    for (const order of saleOrders ?? []) {
+      if (!order.brokerId) continue;
+      const list = salesByBroker.get(order.brokerId);
+      if (list) list.push(order);
+      else salesByBroker.set(order.brokerId, [order]);
+    }
 
-    activeOrders.forEach((o) => {
-      totalEarnedAll += o.totalBrokerage;
-    });
+    // Pre-group broker payments by brokerId
+    const paymentsByBroker = new Map<string, Payment[]>();
+    for (const p of payments ?? []) {
+      if (p.type === 'BROKER' && p.brokerId) {
+        const list = paymentsByBroker.get(p.brokerId);
+        if (list) list.push(p);
+        else paymentsByBroker.set(p.brokerId, [p]);
+      }
+    }
 
-    // 2. Fetch payments made to this broker
-    const brokerPayments = payments?.filter((p) => p.type === 'BROKER' && p.brokerId === b.id) ?? [];
-    const totalPaid = brokerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-    totalPaymentsAll += totalPaid;
+    for (const b of brokers) {
+      if (isOwnBroker(b.name)) continue; // own (RVP) orders carry no brokerage
+      const rate = Number(b.brokerageAmount);
+      const brokerOrders = salesByBroker.get(b.id) ?? [];
+      const activeOrders = brokerOrders
+        .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+        .sort((a, z) => (a.d.dispatchDate || '').localeCompare(z.d.dispatchDate || ''))
+        .map(({ o, d }) => ({
+          id: d.id,
+          saleDate: d.dispatchDate,
+          invoiceNumber: d.invoiceNumber,
+          buyerName: o.buyer?.name ?? '-',
+          vehicleNumber: d.vehicleNumber,
+          totalBrokerage: rate,
+          remainingBrokerage: rate,
+        }));
 
-    let unallocatedPayments = totalPaid;
+      for (const o of activeOrders) {
+        earned += o.totalBrokerage;
+      }
 
-    // 3. FIFO Allocation
-    activeOrders.forEach((o) => {
-      if (unallocatedPayments > 0) {
+      const brokerPayments = paymentsByBroker.get(b.id) ?? [];
+      const totalPaid = brokerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      paid += totalPaid;
+
+      let unallocatedPayments = totalPaid;
+      for (const o of activeOrders) {
+        if (unallocatedPayments <= 0) break;
         if (unallocatedPayments >= o.remainingBrokerage) {
           unallocatedPayments -= o.remainingBrokerage;
           o.remainingBrokerage = 0;
@@ -108,28 +126,34 @@ export default function BrokerageDuesPage() {
           unallocatedPayments = 0;
         }
       }
-    });
 
-    // 4. Push outstanding items to flat list
-    activeOrders.forEach((o) => {
-      if (o.remainingBrokerage > 0.01) { // ignore floating point dust
-        outstandingBrokerage.push({
-          id: o.id,
-          brokerName: b.name,
-          saleDate: o.saleDate,
-          invoiceNumber: o.invoiceNumber,
-          buyerName: o.buyerName,
-          vehicleNumber: o.vehicleNumber,
-          brokerageAmount: o.remainingBrokerage,
-        });
+      for (const o of activeOrders) {
+        if (o.remainingBrokerage > 0.01) {
+          outstanding.push({
+            id: o.id,
+            brokerName: b.name,
+            saleDate: o.saleDate,
+            invoiceNumber: o.invoiceNumber,
+            buyerName: o.buyerName,
+            vehicleNumber: o.vehicleNumber,
+            brokerageAmount: o.remainingBrokerage,
+          });
+        }
       }
-    });
-  });
+    }
 
-  // Sort outstanding list by sale date (oldest first)
-  outstandingBrokerage.sort((a, b) => new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
+    // Sort outstanding list by sale date (oldest first)
+    outstanding.sort((a, b) => (a.saleDate || '').localeCompare(b.saleDate || ''));
+    const totalOut = outstanding.reduce((sum, item) => sum + item.brokerageAmount, 0);
 
-  const totalOutstanding = outstandingBrokerage.reduce((sum, item) => sum + item.brokerageAmount, 0);
+    return {
+      outstandingBrokerage: outstanding,
+      totalEarnedAll: earned,
+      totalPaymentsAll: paid,
+      totalOutstanding: totalOut,
+    };
+  }, [brokers, saleOrders, payments]);
+
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(outstandingBrokerage, 50);
 
   return (

@@ -300,8 +300,37 @@ export async function getProfitLoss(_req: Request, res: Response) {
 }
 
 export async function listJournalEntries(req: Request, res: Response) {
+  const { all, startDate, endDate, search, page, take } = req.query;
+  const where: any = {};
+
+  if (startDate || endDate) {
+    where.date = {};
+    if (startDate) where.date.gte = new Date(startDate as string);
+    if (endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      where.date.lte = end;
+    }
+  }
+
+  if (search) {
+    const s = String(search).trim();
+    where.OR = [
+      { description: { contains: s, mode: 'insensitive' } },
+      { reference: { contains: s, mode: 'insensitive' } },
+      { lines: { some: { account: { name: { contains: s, mode: 'insensitive' } } } } },
+      { lines: { some: { account: { code: { contains: s, mode: 'insensitive' } } } } },
+    ];
+  }
+
+  const isAll = all === 'true' || all === '1';
+  const limit = isAll ? undefined : (take ? Math.max(1, Math.min(1000, Number(take))) : (startDate || endDate ? undefined : 200));
+  const skip = !isAll && page && limit ? (Math.max(1, Number(page)) - 1) * limit : undefined;
+
   const entries = await prisma.journalEntry.findMany({
-    take: 100,
+    where: Object.keys(where).length > 0 ? where : undefined,
+    take: limit,
+    skip,
     orderBy: { date: 'desc' },
     include: {
       lines: {

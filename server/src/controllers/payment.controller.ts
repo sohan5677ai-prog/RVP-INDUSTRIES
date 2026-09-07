@@ -209,15 +209,19 @@ async function resolveLorryPaymentDetails(data: {
 
   // 4. Fallback search for Driver Phone from TransportConfirmation / CompanyVehicles:
   if (!phone && lorryNo) {
-    const norm = lorryNo.replace(/\s+/g, '').toLowerCase();
-    const confirmations = await prisma.transportConfirmation.findMany({
-      where: { lorryNumber: { not: null } },
+    const cleanLorry = lorryNo.trim();
+    const compactLorry = cleanLorry.replace(/\s+/g, '');
+    const booking = await prisma.transportConfirmation.findFirst({
+      where: {
+        OR: [
+          { lorryNumber: { equals: cleanLorry, mode: 'insensitive' } },
+          { lorryNumber: { equals: compactLorry, mode: 'insensitive' } },
+        ],
+        NOT: { driverPhone: null },
+      },
       orderBy: { createdAt: 'desc' },
-      take: 50,
-    }).catch(() => []);
-    const booking = confirmations.find(
-      (b) => b.lorryNumber && b.lorryNumber.replace(/\s+/g, '').toLowerCase() === norm && (b.driverPhone || b.driverName)
-    );
+    }).catch(() => null);
+
     if (booking?.driverPhone) {
       phone = booking.driverPhone;
       if (booking.driverName && !data.driverName) name = `${booking.driverName} (Lorry ${lorryNo})`;

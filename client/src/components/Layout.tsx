@@ -45,9 +45,14 @@ import {
   CalendarClock,
   Wrench,
   Mail,
+  Keyboard,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
+import { useShortcuts } from '@/lib/shortcuts/ShortcutContext';
+import CommandPalette from '@/components/CommandPalette';
+import ShortcutCheatSheetModal from '@/components/ShortcutCheatSheetModal';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import SupportButton from '@/components/SupportButton';
 import FloatingNotesWidget from '@/components/FloatingNotesWidget';
@@ -238,9 +243,16 @@ export default function Layout() {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () => (activeHeading ? { [activeHeading]: true } : {})
   );
+  const { toggleCommandPalette, toggleCheatSheet } = useShortcuts();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const toggle = (heading: string) =>
     setOpenSections((prev) => (prev[heading] ? {} : { [heading]: true }));
+
+  useEffect(() => {
+    const onToggleSidebar = () => setSidebarOpen((prev) => !prev);
+    window.addEventListener('rvp:toggle-sidebar', onToggleSidebar);
+    return () => window.removeEventListener('rvp:toggle-sidebar', onToggleSidebar);
+  }, []);
 
   let current: { label: string; heading?: string } | undefined;
   for (const s of sections) {
@@ -410,6 +422,30 @@ export default function Layout() {
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* Quick Command Palette Button */}
+            <button
+              type="button"
+              onClick={toggleCommandPalette}
+              className="hidden md:flex items-center gap-2 h-9 px-3 rounded-lg border border-border bg-card/60 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors text-xs"
+            >
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              <span>Search or Ctrl+K</span>
+              <kbd className="ml-1.5 font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded border border-border bg-muted/60 text-muted-foreground">
+                Ctrl K
+              </kbd>
+            </button>
+
+            {/* Keyboard Shortcuts Cheat Sheet Button */}
+            <button
+              type="button"
+              title="Keyboard Shortcuts (?)"
+              aria-label="Keyboard shortcuts reference"
+              onClick={toggleCheatSheet}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Keyboard className="h-4 w-4" />
+            </button>
+
             <DeveloperMaintenanceBanner />
             <SupportButton pageLabel={current?.label ?? 'Home'} />
             <ThemeToggle />
@@ -425,6 +461,8 @@ export default function Layout() {
         </main>
       </div>
       <FloatingNotesWidget pageLabel={current?.label ?? 'Home'} />
+      <CommandPalette />
+      <ShortcutCheatSheetModal />
     </div>
   );
 }

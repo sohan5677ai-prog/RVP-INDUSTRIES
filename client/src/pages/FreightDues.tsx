@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, memo, useEffect, Fragment } from 'react';
+import { useState, useMemo, useCallback, memo, useEffect, Fragment, lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -18,16 +18,18 @@ import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, Messa
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
+import { useDebounce } from '@/lib/useDebounce';
 import { ExportButtons } from '@/components/ExportButtons';
 import { PageHeader } from '@/components/PageHeader';
 import { ExpandPanel, PanelLabel, PanelStack, PanelCard, PanelTitle, Figure, PanelEmpty } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
-import SuryaRoadTransport from '@/pages/SuryaRoadTransport';
-import LorryConfirmations from '@/pages/LorryConfirmations';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { LorryPaymentShareDialog } from '@/components/LorryPaymentShareDialog';
 import type { LorryPaymentData } from '@/lib/lorryPaymentTemplate';
+
+const SuryaRoadTransport = lazy(() => import('@/pages/SuryaRoadTransport'));
+const LorryConfirmations = lazy(() => import('@/pages/LorryConfirmations'));
 
 type PurchaseRow = Purchase & {
   stockIn?: {
@@ -820,10 +822,11 @@ const FreightTable = memo(function FreightTable({
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 200);
 
   const filteredRows = useMemo(() => {
     const payFiltered = filterByPayment(rows, payFilter, paymentStatusFor);
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     if (!q) return payFiltered;
     const qNorm = q.replace(/[^a-z0-9]/g, '');
     return payFiltered.filter((r) => {
@@ -836,7 +839,7 @@ const FreightTable = memo(function FreightTable({
       const matchSourced = r.sourced.toLowerCase().includes(q);
       return matchLorry || matchInvoice || matchParty || matchDest || matchStatus || matchPayment || matchSourced;
     });
-  }, [rows, payFilter, paymentStatusFor, search]);
+  }, [rows, payFilter, paymentStatusFor, debouncedSearch]);
 
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
 
@@ -1233,10 +1236,11 @@ const TransfersTable = memo(function TransfersTable({
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [payFilter, setPayFilter] = useState<PayFilterValue>('all');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 200);
 
   const filteredRows = useMemo(() => {
     const payFiltered = filterByPayment(rows, payFilter, paymentStatusFor);
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     if (!q) return payFiltered;
     const qNorm = q.replace(/[^a-z0-9]/g, '');
     return payFiltered.filter((r) => {
@@ -1247,7 +1251,7 @@ const TransfersTable = memo(function TransfersTable({
       const matchPayment = paymentStatusFor(r).toLowerCase().includes(q);
       return matchLorry || matchDest || matchKind || matchParty || matchPayment;
     });
-  }, [rows, payFilter, paymentStatusFor, search]);
+  }, [rows, payFilter, paymentStatusFor, debouncedSearch]);
 
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filteredRows, 50);
   const totalTransport = filteredRows.reduce((s, r) => s + r.net, 0);
@@ -1440,36 +1444,49 @@ export default function FreightDuesPage() {
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases'],
     queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
     // Full history - /sale-orders is capped at the latest 100 by default, which
     // would drop older dispatches (and their outward freight) out of the dues run.
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const { data: payments, isLoading: loadingPayments } = useQuery({
     // Full history - dues are matched against every payment, not just latest 100.
     queryKey: ['payments', { all: true }],
     queryFn: () => api<Payment[]>('/payments?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
     staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
   // Transfer transport (husk / seed / pre-cleaner dust) is billed to KNM Transport
   // and settles from the same per-lorry pool as the usual KNM freight.
   const { data: huskTransfers } = useQuery({
     queryKey: ['husk-transfers'],
     queryFn: () => api<HuskTransfer[]>('/husk-transfers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const { data: shellTransfers } = useQuery({
     queryKey: ['shell-transfers'],
     queryFn: () => api<ShellTransfer[]>('/shell-transfers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const { data: stockTransfers } = useQuery({
     queryKey: ['stock-transfers'],
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   // Lorries booked over WhatsApp and not yet dispatched - badged on the tab so a
   // new booking is visible without opening it. Shares its key with the register,
@@ -1477,6 +1494,8 @@ export default function FreightDuesPage() {
   const { data: waitingBookings } = useQuery({
     queryKey: ['lorry-confirmations', 'WAITING'],
     queryFn: () => api<LorryConfirmation[]>('/whatsapp/transport-confirmations?status=WAITING'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     refetchInterval: 60_000,
   });
   const waitingLorries = waitingBookings?.length ?? 0;
@@ -2036,11 +2055,15 @@ export default function FreightDuesPage() {
         </TabsContent>
 
         <TabsContent value="transport">
-          <SuryaRoadTransport embedded />
+          <Suspense fallback={<div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mr-2 text-primary" /><span className="text-sm font-medium">Loading Surya Road Transport…</span></div>}>
+            <SuryaRoadTransport embedded />
+          </Suspense>
         </TabsContent>
 
         <TabsContent value="lorries">
-          <LorryConfirmations />
+          <Suspense fallback={<div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mr-2 text-primary" /><span className="text-sm font-medium">Loading Lorry Confirmations…</span></div>}>
+            <LorryConfirmations />
+          </Suspense>
         </TabsContent>
       </Tabs>
 

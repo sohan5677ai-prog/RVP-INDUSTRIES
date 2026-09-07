@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ExportButtons } from '@/components/ExportButtons';
+import { usePagedRows } from '@/lib/usePagedRows';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import type { ExportColumn } from '@/lib/export';
 
 interface GunnyBagEntry {
@@ -219,6 +221,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
   const totalDebit = ledgerRows.reduce((s, r) => s + r.debitAmount, 0);
   const totalCredit = ledgerRows.reduce((s, r) => s + r.creditAmount, 0);
   const closingBalance = ledgerRows.length ? ledgerRows[ledgerRows.length - 1].runningBalance : 0;
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visibleLedgerRows } = usePagedRows(ledgerRows, 50);
 
   const actions = (
     <>
@@ -307,7 +310,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
                   </TableRow>
 
                   {/* Transactions */}
-                  {ledgerRows.map((t, i) => {
+                  {visibleLedgerRows.map((t, i) => {
                     const meta = KIND_META[t.type] || { label: t.type, cls: 'bg-muted text-muted-foreground' };
                     return (
                       <TableRow key={t.id} className={i % 2 === 1 ? 'bg-muted/[0.18]' : undefined}>
@@ -356,6 +359,7 @@ export default function GunnyBags({ embedded = false }: { embedded?: boolean } =
               )}
             </TableBody>
           </Table>
+          <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
         </div>
 
         {ledgerRows.length > 0 && (

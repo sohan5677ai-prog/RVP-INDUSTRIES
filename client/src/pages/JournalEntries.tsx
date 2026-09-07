@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileSpreadsheet, RefreshCcw, Tag } from 'lucide-react';
+import { FileSpreadsheet, RefreshCcw, Tag, Search, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
+import { useDebounce } from '@/lib/useDebounce';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
@@ -10,6 +11,8 @@ import type { JournalEntry } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 // One flattened row per journal line, carrying the voucher context - the export
 // is a flat ledger, not the nested voucher cards shown on screen.
@@ -31,9 +34,24 @@ const JOURNAL_EXPORT_COLUMNS: ExportColumn<JournalRow>[] = [
 ];
 
 export default function JournalEntries() {
+  const [search, setSearch] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  const debouncedSearch = useDebounce(search, 250);
+
+  const queryParams = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('all', 'true');
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim());
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    return params.toString();
+  }, [debouncedSearch, startDate, endDate]);
+
   const { data: entries, isLoading, refetch, isRefetching } = useQuery({
-    queryKey: ['journal-entries'],
-    queryFn: () => api<JournalEntry[]>('/ledger/entries'),
+    queryKey: ['journal-entries', queryParams],
+    queryFn: () => api<JournalEntry[]>(`/ledger/entries?${queryParams}`),
   });
 
   const journalRows = useMemo<JournalRow[]>(
@@ -56,9 +74,11 @@ export default function JournalEntries() {
   // progressively so a long audit log doesn't mount everything on open.
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(entries ?? [], 25);
 
+  const hasFilters = Boolean(search || startDate || endDate);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">General Journal Vouchers</h1>
           <p className="text-muted-foreground">Audit log of all double-entry transaction journals posted by the system</p>
@@ -81,6 +101,57 @@ export default function JournalEntries() {
             Refresh
           </Button>
         </div>
+      </div>
+
+      {/* Filter Toolbar */}
+      <div className="flex flex-wrap items-end gap-3 p-4 bg-card rounded-lg border shadow-sm">
+        <div className="flex-1 min-w-[220px] space-y-1">
+          <Label className="text-xs text-muted-foreground">Search Vouchers</Label>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search description, reference, account..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">From Date</Label>
+          <Input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="w-40"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">To Date</Label>
+          <Input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="w-40"
+          />
+        </div>
+
+        {hasFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSearch('');
+              setStartDate('');
+              setEndDate('');
+            }}
+            className="gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" /> Clear
+          </Button>
+        )}
       </div>
 
       {isLoading && (

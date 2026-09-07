@@ -39,18 +39,48 @@ function ChartsSkeleton() {
 export default function Dashboard() {
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Summary>('/dashboard/summary') });
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => api<Summary>('/dashboard/summary'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
   // Management P&L - the Profitability card mirrors the Profit & Loss A/c page
   // so the dashboard and the report never quote two different net profits.
   // Key matches ProfitLoss.tsx so both share one cached fetch.
-  const { data: pnl } = useQuery({ queryKey: ['profit-loss'], queryFn: () => api<ProfitLoss>('/reports/profit-loss') });
-  const { data: purchases } = useQuery({ queryKey: ['purchases'], queryFn: () => api<PurchaseRow[]>('/purchases?all=true') });
-  const { data: poAll } = useQuery({ queryKey: ['purchase-orders', 'ALL'], queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true') });
+  const { data: pnl } = useQuery({
+    queryKey: ['profit-loss'],
+    queryFn: () => api<ProfitLoss>('/reports/profit-loss'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const { data: purchases } = useQuery({
+    queryKey: ['purchases'],
+    queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const { data: poAll } = useQuery({
+    queryKey: ['purchase-orders', 'ALL'],
+    queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
   // Full history - the charts count every order by status, so the default
   // latest-100 cap would silently under-report. Key matches the report pages
   // so they all share one cached fetch.
-  const { data: saleAll } = useQuery({ queryKey: ['sale-orders', { all: true }], queryFn: () => api<SaleOrder[]>('/sale-orders?all=true') });
-  const { data: huskPnl } = useQuery({ queryKey: ['husk-pnl'], queryFn: () => api<HuskPnl>('/reports/husk-pnl') });
+  const { data: saleAll } = useQuery({
+    queryKey: ['sale-orders', { all: true }],
+    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const { data: huskPnl } = useQuery({
+    queryKey: ['husk-pnl'],
+    queryFn: () => api<HuskPnl>('/reports/husk-pnl'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
 
   const resetMutation = useMutation({
     mutationFn: () => api<{ message: string }>('/system/clear-transactions', { method: 'POST' }),

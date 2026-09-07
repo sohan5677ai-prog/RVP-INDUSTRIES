@@ -20,8 +20,8 @@ export function usePagedRows<T>(rows: T[] | undefined, defaultPageSize: number =
     setPage(1);
   }, [total, pageSize]);
 
-  const pageRows = useMemo(() => {
-    if (!rows) return rows;
+  const pageRows = useMemo((): T[] => {
+    if (!rows) return [];
     if (pageSize === Infinity) return rows;
     const start = (page - 1) * pageSize;
     return rows.slice(start, start + pageSize);

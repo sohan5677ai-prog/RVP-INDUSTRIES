@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -90,11 +90,15 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
   const { data: parties } = useQuery({
     queryKey: ['parties'],
     queryFn: () => api<Party[]>('/parties'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: purchases, isLoading: loadingPurchases } = useQuery({
     queryKey: ['purchases'],
     queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: saleOrders, isLoading: loadingSales } = useQuery({
@@ -102,31 +106,43 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
     // would drop older dispatches (and their kata fee) off this ledger.
     queryKey: ['sale-orders', { all: true }],
     queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: dustPurchases, isLoading: loadingDust } = useQuery({
     queryKey: ['dust-purchases'],
     queryFn: () => api<DustPurchase[]>('/dust-purchases'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: stockTransfers, isLoading: loadingStockTransfers } = useQuery({
     queryKey: ['stock-transfers'],
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: shellTransfers, isLoading: loadingShellTransfers } = useQuery({
     queryKey: ['shell-transfers'],
     queryFn: () => api<ShellTransfer[]>('/shell-transfers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: huskTransfers, isLoading: loadingHuskTransfers } = useQuery({
     queryKey: ['husk-transfers'],
     queryFn: () => api<HuskTransfer[]>('/husk-transfers'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const isLoading =
@@ -145,12 +161,12 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
   // Company (KNM) vehicles are exempt from the weighbridge fee - kata is never
   // charged on them, so they compute to ₹0 everywhere below.
   const companyVehicles = company?.companyVehicles;
-  const exempt = (lorry: string | null | undefined) => isVehicleExempt(lorry, companyVehicles);
 
-  // Purchase (inward) kata fees from the weighbridge on arrival. Black-seed
-  // purchases store the already-exemption-aware fee on the record.
-  const purchaseEntries: KataEntry[] = (purchases ?? [])
-    .map((p) => ({
+  const { filtered, totalKataFee, lorryCount, brackets } = useMemo(() => {
+    const exempt = (lorry: string | null | undefined) => isVehicleExempt(lorry, companyVehicles);
+
+    // Purchase (inward) kata fees from the weighbridge on arrival.
+    const purchaseEntries: KataEntry[] = (purchases ?? []).map((p) => ({
       id: `PUR-${p.id}`,
       date: p.stockIn?.arrivalDate ?? p.createdAt,
       source: 'PURCHASE' as const,
@@ -162,10 +178,8 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
       kataFee: Number(p.kataFee),
     }));
 
-  // Pre-cleaner dust bought in from outside parties - the lorry is weighed on the
-  // RVP kata just like a seed purchase, so it carries the same weighbridge fee.
-  const dustEntries: KataEntry[] = (dustPurchases ?? [])
-    .map((d) => ({
+    // Pre-cleaner dust bought in from outside parties
+    const dustEntries: KataEntry[] = (dustPurchases ?? []).map((d) => ({
       id: `DUST-${d.id}`,
       date: d.purchaseDate,
       source: 'DUST' as const,
@@ -177,94 +191,94 @@ export default function KataFeeLedger({ embedded = false }: { embedded?: boolean
       kataFee: calcKataFee(d.weightKg, exempt(d.lorryNumber)),
     }));
 
-  // Sale (outward) kata fees deducted from the lorry's delivery freight. Company
-  // (KNM) vehicles are exempt, so pass the exemption flag through.
-  const saleEntries: KataEntry[] = (saleOrders ?? [])
-    .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
-    .map(({ o, d }) => ({
-      id: `SALE-${d.id}`,
-      date: d.dispatchDate,
-      source: 'SALE' as const,
-      partyId: o.buyerId,
-      partyName: o.buyer?.name ?? '-',
-      lorryNumber: d.vehicleNumber ?? null,
-      reference: d.invoiceNumber ?? '-',
-      netWeightKg: d.weightKg,
-      kataFee: calcKataFee(d.weightKg, exempt(d.vehicleNumber)),
-    }));
+    // Sale (outward) kata fees deducted from the lorry's delivery freight
+    const saleEntries: KataEntry[] = (saleOrders ?? [])
+      .flatMap((o) => (o.dispatches ?? []).map((d) => ({ o, d })))
+      .map(({ o, d }) => ({
+        id: `SALE-${d.id}`,
+        date: d.dispatchDate,
+        source: 'SALE' as const,
+        partyId: o.buyerId,
+        partyName: o.buyer?.name ?? '-',
+        lorryNumber: d.vehicleNumber ?? null,
+        reference: d.invoiceNumber ?? '-',
+        netWeightKg: d.weightKg,
+        kataFee: calcKataFee(d.weightKg, exempt(d.vehicleNumber)),
+      }));
 
-  // Byproduct transfers (husk / shell / black-seed storage moves). Each hired
-  // lorry is weighed on the RVP kata, so it bears the fee unless it is a KNM vehicle.
-  const transferEntries: KataEntry[] = [
-    ...(stockTransfers ?? []).map((t) => ({
-      id: `STOCK-${t.id}`,
-      date: t.transferDate,
-      source: 'TRANSFER' as const,
-      partyId: null,
-      partyName: `${t.fromLocation} → ${t.toLocation}`,
-      lorryNumber: t.lorryNumber ?? null,
-      reference: 'Seed Transfer',
-      netWeightKg: t.weightKg,
-      kataFee: calcKataFee(t.weightKg, exempt(t.lorryNumber)),
-    })),
-    ...(shellTransfers ?? []).map((t) => ({
-      id: `SHELL-${t.id}`,
-      date: t.transferDate,
-      source: 'TRANSFER' as const,
-      partyId: null,
-      partyName: `${t.fromLocation} → ${t.toLocation}`,
-      lorryNumber: t.lorryNumber ?? null,
-      reference: 'Shell Transfer',
-      netWeightKg: t.weightKg,
-      kataFee: calcKataFee(t.weightKg, exempt(t.lorryNumber)),
-    })),
-    ...(huskTransfers ?? []).map((t) => ({
-      id: `HUSK-${t.id}`,
-      date: t.transferDate,
-      source: 'TRANSFER' as const,
-      partyId: null,
-      partyName: `${t.fromLocation} → ${t.toLocation}`,
-      lorryNumber: t.lorryNumber ?? null,
-      reference: 'Husk Transfer',
-      netWeightKg: t.weightKg,
-      kataFee: calcKataFee(t.weightKg, exempt(t.lorryNumber)),
-    })),
-  ];
+    // Byproduct transfers (husk / shell / black-seed storage moves)
+    const transferEntries: KataEntry[] = [
+      ...(stockTransfers ?? []).map((t) => ({
+        id: `STOCK-${t.id}`,
+        date: t.transferDate,
+        source: 'TRANSFER' as const,
+        partyId: null,
+        partyName: `${t.fromLocation} → ${t.toLocation}`,
+        lorryNumber: t.lorryNumber ?? null,
+        reference: 'Seed Transfer',
+        netWeightKg: t.weightKg,
+        kataFee: calcKataFee(t.weightKg, exempt(t.lorryNumber)),
+      })),
+      ...(shellTransfers ?? []).map((t) => ({
+        id: `SHELL-${t.id}`,
+        date: t.transferDate,
+        source: 'TRANSFER' as const,
+        partyId: null,
+        partyName: `${t.fromLocation} → ${t.toLocation}`,
+        lorryNumber: t.lorryNumber ?? null,
+        reference: 'Shell Transfer',
+        netWeightKg: t.weightKg,
+        kataFee: calcKataFee(t.weightKg, exempt(t.lorryNumber)),
+      })),
+      ...(huskTransfers ?? []).map((t) => ({
+        id: `HUSK-${t.id}`,
+        date: t.transferDate,
+        source: 'TRANSFER' as const,
+        partyId: null,
+        partyName: `${t.fromLocation} → ${t.toLocation}`,
+        lorryNumber: t.lorryNumber ?? null,
+        reference: 'Husk Transfer',
+        netWeightKg: t.weightKg,
+        kataFee: calcKataFee(t.weightKg, exempt(t.lorryNumber)),
+      })),
+    ];
 
-  const allEntries = [...purchaseEntries, ...dustEntries, ...saleEntries, ...transferEntries];
+    const allEntries = [...purchaseEntries, ...dustEntries, ...saleEntries, ...transferEntries];
 
-  const filtered = allEntries
-    .filter((e) => {
-      if (partyId !== 'ALL' && e.partyId !== partyId) return false;
-      const d = new Date(e.date).toISOString().slice(0, 10);
-      if (startDate && d < startDate) return false;
-      if (endDate && d > endDate) return false;
-      return true;
-    })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const filteredList = allEntries
+      .filter((e) => {
+        if (partyId !== 'ALL' && e.partyId !== partyId) return false;
+        const d = e.date ? e.date.slice(0, 10) : '';
+        if (startDate && d < startDate) return false;
+        if (endDate && d > endDate) return false;
+        return true;
+      })
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
-
-  // Metrics
-  const totalKataFee = filtered.reduce((acc, e) => acc + e.kataFee, 0);
-  const lorryCount = filtered.length;
-
-  // Bracket counts
-  const brackets = filtered.reduce(
-    (acc, e) => {
+    let totalFee = 0;
+    const b = { b5: 0, b15: 0, b25: 0, bOver: 0, exempt: 0 };
+    for (const e of filteredList) {
+      totalFee += e.kataFee;
       if (e.kataFee === 0) {
-        acc.exempt += 1;
+        b.exempt += 1;
       } else {
         const tonnes = e.netWeightKg / 1000;
-        if (tonnes <= 5) acc.b5 += 1;
-        else if (tonnes <= 15) acc.b15 += 1;
-        else if (tonnes <= 25) acc.b25 += 1;
-        else acc.bOver += 1;
+        if (tonnes <= 5) b.b5 += 1;
+        else if (tonnes <= 15) b.b15 += 1;
+        else if (tonnes <= 25) b.b25 += 1;
+        else b.bOver += 1;
       }
-      return acc;
-    },
-    { b5: 0, b15: 0, b25: 0, bOver: 0, exempt: 0 }
-  );
+    }
+
+    return {
+      filtered: filteredList,
+      totalKataFee: totalFee,
+      lorryCount: filteredList.length,
+      brackets: b,
+    };
+  }, [purchases, dustPurchases, saleOrders, stockTransfers, shellTransfers, huskTransfers, companyVehicles, partyId, startDate, endDate]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible } = usePagedRows(filtered);
 
   return (
     <div className="space-y-6">

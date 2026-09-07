@@ -1,18 +1,30 @@
-import { Wallet } from 'lucide-react';
+import { lazy, Suspense } from 'react';
+import { Wallet, Loader2 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import GunnyBags from '@/pages/GunnyBags';
-import Electricity from '@/pages/Electricity';
-import Maintenance from '@/pages/Maintenance';
-import Miscellaneous from '@/pages/Miscellaneous';
-import Drawings from '@/pages/Drawings';
-import Interest from '@/pages/Interest';
-import StorageMaintenance from '@/pages/StorageMaintenance';
-import SubscriptionExpense from '@/pages/SubscriptionExpense';
-import KataFeeLedger from '@/pages/KataFeeLedger';
-import HamaliCompanyProfit from '@/pages/HamaliCompanyProfit';
-import GunnySales from '@/pages/GunnySales';
-import OtherIncome from '@/pages/OtherIncome';
+
+// Lazy load subpages for optimal bundle code-splitting
+const GunnyBags = lazy(() => import('@/pages/GunnyBags'));
+const Electricity = lazy(() => import('@/pages/Electricity'));
+const Maintenance = lazy(() => import('@/pages/Maintenance'));
+const Miscellaneous = lazy(() => import('@/pages/Miscellaneous'));
+const Drawings = lazy(() => import('@/pages/Drawings'));
+const Interest = lazy(() => import('@/pages/Interest'));
+const StorageMaintenance = lazy(() => import('@/pages/StorageMaintenance'));
+const SubscriptionExpense = lazy(() => import('@/pages/SubscriptionExpense'));
+const KataFeeLedger = lazy(() => import('@/pages/KataFeeLedger'));
+const HamaliCompanyProfit = lazy(() => import('@/pages/HamaliCompanyProfit'));
+const GunnySales = lazy(() => import('@/pages/GunnySales'));
+const OtherIncome = lazy(() => import('@/pages/OtherIncome'));
+
+function TabLoader() {
+  return (
+    <div className="flex items-center justify-center py-16 text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin mr-2 text-primary" />
+      <span className="text-sm font-medium">Loading tab content…</span>
+    </div>
+  );
+}
 
 /**
  * Unified Income & Expenses workspace.
@@ -50,10 +62,12 @@ export default function Expenses() {
               <TabsTrigger value="other">Other Income</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="kata"><KataFeeLedger embedded /></TabsContent>
-            <TabsContent value="hamali"><HamaliCompanyProfit /></TabsContent>
-            <TabsContent value="gunny-sales"><GunnySales /></TabsContent>
-            <TabsContent value="other"><OtherIncome embedded /></TabsContent>
+            <Suspense fallback={<TabLoader />}>
+              <TabsContent value="kata"><KataFeeLedger embedded /></TabsContent>
+              <TabsContent value="hamali"><HamaliCompanyProfit /></TabsContent>
+              <TabsContent value="gunny-sales"><GunnySales /></TabsContent>
+              <TabsContent value="other"><OtherIncome embedded /></TabsContent>
+            </Suspense>
           </Tabs>
         </TabsContent>
 
@@ -70,14 +84,16 @@ export default function Expenses() {
               <TabsTrigger value="subscription">Subscription</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="gunny"><GunnyBags embedded /></TabsContent>
-            <TabsContent value="electricity"><Electricity embedded /></TabsContent>
-            <TabsContent value="maintenance"><Maintenance embedded /></TabsContent>
-            <TabsContent value="misc"><Miscellaneous embedded /></TabsContent>
-            <TabsContent value="drawings"><Drawings embedded /></TabsContent>
-            <TabsContent value="interest"><Interest embedded /></TabsContent>
-            <TabsContent value="storage"><StorageMaintenance /></TabsContent>
-            <TabsContent value="subscription"><SubscriptionExpense /></TabsContent>
+            <Suspense fallback={<TabLoader />}>
+              <TabsContent value="gunny"><GunnyBags embedded /></TabsContent>
+              <TabsContent value="electricity"><Electricity embedded /></TabsContent>
+              <TabsContent value="maintenance"><Maintenance embedded /></TabsContent>
+              <TabsContent value="misc"><Miscellaneous embedded /></TabsContent>
+              <TabsContent value="drawings"><Drawings embedded /></TabsContent>
+              <TabsContent value="interest"><Interest embedded /></TabsContent>
+              <TabsContent value="storage"><StorageMaintenance /></TabsContent>
+              <TabsContent value="subscription"><SubscriptionExpense /></TabsContent>
+            </Suspense>
           </Tabs>
         </TabsContent>
       </Tabs>

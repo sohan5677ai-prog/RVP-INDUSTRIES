@@ -977,20 +977,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  const sendInvoiceEmailMutation = useMutation({
+  const sendEmailBundleMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/einvoice/email`, { method: 'POST' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      toast.success('Invoice emailed to buyer');
-    },
-    onError: (e: Error) => toast.error(getErrorMessage(e)),
-  });
-
-  const sendEwbEmailMutation = useMutation({
-    mutationFn: (id: string) => api(`/sale-dispatches/${id}/ewaybill/email`, { method: 'POST' }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sale-orders'] });
-      toast.success('E-Way Bill emailed to buyer');
+      toast.success('Document bundle emailed to buyer (CC broker, BCC company)');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -1573,18 +1564,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                       <span
                                                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
                                                         title={`Invoice emailed to ${invLog.recipientEmail} at ${new Date(invLog.sentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
-                                                      >
-                                                        <Send className="h-3 w-3 text-blue-600" /> Emailed
-                                                      </span>
-                                                    );
-                                                  }
-                                                  if (invLog.status === 'FAILED' || invLog.status === 'BOUNCED') {
+                                            
+                                            {d.irn && (
+                                              <>
+                                                {(() => {
+                                                  const emailLog = d.emailLogs?.find((l) => l.documentType === 'INVOICE' || l.documentType === 'EWB');
+                                                  if (emailLog && emailLog.status === 'SENT') {
                                                     return (
                                                       <span
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-800"
-                                                        title={invLog.errorMessage || `Failed sending to ${invLog.recipientEmail}`}
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                                                        title={`Email delivered to ${emailLog.recipientEmail}`}
                                                       >
-                                                        <AlertTriangle className="h-3 w-3 text-red-600" /> {invLog.status === 'BOUNCED' ? 'Bounced' : 'Failed'}
+                                                        <CheckCheck className="h-3 w-3 text-emerald-600" /> Email Sent
                                                       </span>
                                                     );
                                                   }
@@ -1593,11 +1584,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 <Button
                                                   size="sm"
                                                   variant="outline"
-                                                  title={o.buyer?.email ? undefined : 'Add an email in Parties first'}
-                                                  disabled={!o.buyer?.email || sendInvoiceEmailMutation.isPending}
-                                                  onClick={() => sendInvoiceEmailMutation.mutate(d.id)}
+                                                  title={o.buyer?.email ? 'Email combined invoice, E-Way Bill & LR bundle to buyer (CC broker, BCC company)' : 'Add an email in Parties first'}
+                                                  disabled={!o.buyer?.email || sendEmailBundleMutation.isPending}
+                                                  onClick={() => sendEmailBundleMutation.mutate(d.id)}
                                                 >
-                                                  <Mail className="h-3.5 w-3.5" /> {d.emailLogs?.some((l) => l.documentType === 'INVOICE') ? 'Resend' : 'Send Invoice'}
+                                                  <Mail className="h-3.5 w-3.5" /> {d.emailLogs?.some((l) => l.documentType === 'INVOICE' || l.documentType === 'EWB') ? 'Resend Email' : 'Send Email'}
                                                 </Button>
                                               </>
                                             )}
@@ -1621,29 +1612,6 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 </Button>
                                                 <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d, 'ewaybill')}>
                                                   Cancel EWB
-                                                </Button>
-                                                {(() => {
-                                                  const ewbLog = d.emailLogs?.find((l) => l.documentType === 'EWB');
-                                                  if (ewbLog && ewbLog.status === 'SENT') {
-                                                    return (
-                                                      <span
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                                                        title={`EWB delivered to ${ewbLog.recipientEmail}`}
-                                                      >
-                                                        <CheckCheck className="h-3 w-3 text-emerald-600" /> EWB Sent
-                                                      </span>
-                                                    );
-                                                  }
-                                                  return null;
-                                                })()}
-                                                <Button
-                                                  size="sm"
-                                                  variant="outline"
-                                                  title={o.buyer?.email ? undefined : 'Add an email in Parties first'}
-                                                  disabled={!o.buyer?.email || sendEwbEmailMutation.isPending}
-                                                  onClick={() => sendEwbEmailMutation.mutate(d.id)}
-                                                >
-                                                  <Mail className="h-3.5 w-3.5" /> {d.emailLogs?.some((l) => l.documentType === 'EWB') ? 'Resend EWB' : 'Send EWB'}
                                                 </Button>
                                               </>
                                             )}

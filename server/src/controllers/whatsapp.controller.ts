@@ -1171,23 +1171,22 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
       res.status(503).json({ error: 'Could not record message' });
       return;
     }
-    res.json({ received: true });
-    // Duplicate (null) needs no further work; otherwise process in the background,
-    // where a failure costs a register/submission row but never the message itself.
+    // Process message synchronously before acknowledging so container recycling
+    // cannot kill the in-flight OCR / notification promise.
     if (logRow) {
-      processOwnerKataCommand(logRow)
-        .then((handled) => {
-          if (handled) return;
-          return processDriverKataInbound(logRow).then((kataHandled) => {
-            if (!kataHandled) {
-              return parseInboundIntoRegister(logRow);
-            }
-          });
-        })
-        .catch((err) => {
-          logger.error(`[whatsapp] inbound processing failed for log ${logRow.id}`, err);
-        });
+      try {
+        const handled = await processOwnerKataCommand(logRow);
+        if (!handled) {
+          const kataHandled = await processDriverKataInbound(logRow);
+          if (!kataHandled) {
+            await parseInboundIntoRegister(logRow);
+          }
+        }
+      } catch (err) {
+        logger.error(`[whatsapp] inbound processing failed for log ${logRow.id}`, err);
+      }
     }
+    res.json({ received: true });
     return;
   }
 
@@ -1985,14 +1984,16 @@ export async function getLorryContactInfo(req: Request, res: Response) {
 
   // 1. Check company vehicle directory
   const cv = findCompanyVehicle(normalized, profile?.companyVehicles);
-  if (cv && (cv.driverPhone || cv.driverName)) {
+  if (cv) {
+    const knmPhone = '9440416639';
     return res.json({
       lorryNumber: cv.number || raw,
-      driverName: cv.driverName || null,
-      driverPhone: cv.driverPhone ? normalizeWhatsAppNumber(cv.driverPhone) : null,
+      driverName: 'KNM Transport (Reddy)',
+      driverPhone: knmPhone,
       ownerPhone,
-      transporterName: 'KNM Transport (Company)',
-      transporterPhone: ownerPhone,
+      transporterName: 'KNM Transport',
+      transporterPhone: knmPhone,
+      isKnm: true,
       source: 'company_vehicle',
     });
   }

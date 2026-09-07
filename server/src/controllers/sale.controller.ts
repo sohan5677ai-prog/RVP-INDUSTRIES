@@ -122,7 +122,7 @@ function withFulfilment<
 
 export async function listSaleOrders(req: Request, res: Response) {
   const { status, product, skip, take, all } = listSaleOrdersSchema.parse(req.query);
-  const isAll = all === 'true' || all === true;
+  const isAll = all === 'true';
   const statusFilter = status
     ? status === 'PENDING'
       ? { in: ['PENDING', 'PARTIAL'] as SaleStatus[] }

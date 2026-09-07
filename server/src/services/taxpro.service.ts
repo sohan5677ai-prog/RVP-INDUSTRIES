@@ -61,13 +61,9 @@ export class TaxproService {
     return {
       'Content-Type': 'application/json',
       aspid: config.taxproGspId || '',
-      password: config.taxproGspSecret || '', // GSP layer validates this as the ASP password
+      password: config.taxproGspSecret || '',
       Gstin: gstin,
-      User_Name: config.taxproGstUser || '',
       user_name: config.taxproGstUser || '',
-      username: config.taxproGstUser || '',
-      eInvPwd: config.taxproGstPass || '',
-      ewbpwd: config.taxproGstPass || '',
       ...extra,
     } as Record<string, string>;
   }
@@ -285,7 +281,13 @@ export class TaxproService {
 
     const json = await this.request(config.taxproSandbox, '/eivital/dec/v1.04/auth', {
       method: 'GET',
-      headers: this.baseHeaders(config, gstin),
+      headers: {
+        aspid: config.taxproGspId || '',
+        password: config.taxproGspSecret || '',
+        Gstin: gstin,
+        user_name: config.taxproGstUser || '',
+        eInvPwd: config.taxproGstPass || '',
+      },
     });
     const token = json?.Data?.AuthToken || json?.AuthToken;
     if (!token) throw new Error('TaxPro auth succeeded but returned no AuthToken');
@@ -1268,7 +1270,7 @@ export class TaxproService {
       const json = await this.withAuth(company, company.gstin || '', (token) => {
         const ewbPath = company.taxproSandbox
           ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBill', { authtoken: token, ewbNo })}`
-          : `/ewaybillapi/dec/v1.03/ewayapi?action=GetEwayBill&authtoken=${encodeURIComponent(token)}&ewbNo=${ewbNo}`;
+          : `/v1.03/dec/ewayapi?action=GetEwayBill&authtoken=${encodeURIComponent(token)}&ewbNo=${encodeURIComponent(String(ewbNo))}`;
         return this.request(company.taxproSandbox, ewbPath, {
           method: 'GET',
           headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
@@ -1332,7 +1334,7 @@ export class TaxproService {
       const json = await this.withAuth(company, company.gstin || '', (token) => {
         const ewbPath = company.taxproSandbox
           ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBillGeneratedByConsigner', { authtoken: token, docType, docNo })}`
-          : `/ewaybillapi/dec/v1.03/ewayapi?action=GetEwayBillGeneratedByConsigner&authtoken=${encodeURIComponent(token)}&docType=${docType}&docNo=${encodeURIComponent(docNo)}`;
+          : `/v1.03/dec/ewayapi?action=GetEwayBillGeneratedByConsigner&authtoken=${encodeURIComponent(token)}&docType=${encodeURIComponent(docType)}&docNo=${encodeURIComponent(docNo)}`;
         return this.request(company.taxproSandbox, ewbPath, {
           method: 'GET',
           headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
@@ -1365,7 +1367,7 @@ export class TaxproService {
       const json = await this.withAuth(company, company.gstin || '', (token) => {
         const path = company.taxproSandbox
           ? `/ewaybillapi/dec/v1.03/Master?${this.ewbQueryString(company, company.gstin || '', 'GetTransporterDetails', { authtoken: token, trn_no: trnNo })}`
-          : `/ewaybillapi/dec/v1.03/Master?action=GetTransporterDetails&authtoken=${encodeURIComponent(token)}&trn_no=${encodeURIComponent(trnNo)}`;
+          : `/v1.03/dec/Master?action=GetTransporterDetails&authtoken=${encodeURIComponent(token)}&trn_no=${encodeURIComponent(trnNo)}`;
         return this.request(company.taxproSandbox, path, {
           method: 'GET',
           headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
@@ -1405,7 +1407,7 @@ export class TaxproService {
       const json = await this.withAuth(company, company.gstin || '', (token) => {
         const path = company.taxproSandbox
           ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBillsofOtherParty', { authtoken: token, date: dateFormatted })}`
-          : `/ewaybillapi/dec/v1.03/ewayapi?action=GetEwayBillsofOtherParty&authtoken=${encodeURIComponent(token)}&date=${encodeURIComponent(dateFormatted)}`;
+          : `/v1.03/dec/ewayapi?action=GetEwayBillsofOtherParty&authtoken=${encodeURIComponent(token)}&date=${encodeURIComponent(dateFormatted)}`;
         return this.request(company.taxproSandbox, path, {
           method: 'GET',
           headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),

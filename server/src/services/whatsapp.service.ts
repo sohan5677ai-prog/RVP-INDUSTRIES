@@ -1762,6 +1762,7 @@ export const whatsappService = {
   notifyDriverKataReceived,
   notifyDriverKataConfirmed,
   notifyDriverKataRejected,
+  notifyOwnersKataReceived,
 };
 
 /**
@@ -1829,6 +1830,7 @@ export async function downloadWhatsAppMedia(urlOrId: string): Promise<{ buffer: 
 export async function sendSessionTextMessage(args: {
   to: string | null | undefined;
   text: string;
+  imageUrl?: string | null;
   relatedType?: string;
   relatedId?: string;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
@@ -1846,18 +1848,50 @@ export async function sendSessionTextMessage(args: {
 
   if (phoneNumberId) {
     try {
-      const body = {
+      let body: any = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to: targetNumber,
         type: 'text',
         text: { body: args.text },
       };
-      const res = await fetch(`${FAST2SMS_URL}/v24.0/${phoneNumberId}/messages`, {
+
+      if (args.imageUrl && /^https?:\/\//i.test(args.imageUrl)) {
+        body = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: targetNumber,
+          type: 'image',
+          image: {
+            link: args.imageUrl,
+            caption: args.text,
+          },
+        };
+      }
+
+      let res = await fetch(`${FAST2SMS_URL}/v24.0/${phoneNumberId}/messages`, {
         method: 'POST',
         headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
+      // If sending with image failed, retry as pure text
+      if (!res.ok && args.imageUrl) {
+        logger.warn(`[whatsapp] image session message failed, retrying with text: HTTP ${res.status}`);
+        body = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: targetNumber,
+          type: 'text',
+          text: { body: args.text },
+        };
+        res = await fetch(`${FAST2SMS_URL}/v24.0/${phoneNumberId}/messages`, {
+          method: 'POST',
+          headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
+
       const text = await res.text();
       if (res.ok) {
         await prisma.whatsAppLog.create({
@@ -1865,6 +1899,7 @@ export async function sendSessionTextMessage(args: {
             direction: 'OUTBOUND',
             phone: targetNumber,
             body: args.text,
+            mediaUrl: args.imageUrl || null,
             status: 'SENT',
             relatedType: args.relatedType,
             relatedId: args.relatedId,
@@ -1907,4 +1942,64 @@ export async function notifyDriverKataRejected(
   const text = `⚠️ *Kata Slip Needs Re-Submission*\nLorry: *${lorryNumber}*\n${reasonText}\nPlease take a clear photo of the buyer\'s weighbridge slip and send it again.\n\n— *RVP Industries*`;
   return sendSessionTextMessage({ to: driverPhone, text, relatedType: 'KATA_REJECTED' });
 }
+
+export async function notifyOwnersKataReceived(args: {
+  submissionId: string;
+  lorryNumber: string;
+  driverPhone?: string | null;
+  buyerName: string;
+  product?: string | null;
+  dispatchedKg: number;
+  buyerKataKg: number | null;
+  shortageKg: number;
+  shortagePct: string;
+  imageUrl?: string | null;
+}): Promise<{ ok: boolean; error?: string }> {
+  const recipients = await resolveAlertRecipients();
+  if (recipients.length === 0) {
+    logger.warn('[whatsapp] no alert recipients found to notify for driver kata');
+    return { ok: false, error: 'No alert recipients configured' };
+  }
+
+  const appBaseUrl = process.env.APP_BASE_URL || 'https://rvp-erp.onrender.com';
+  const weightText = args.buyerKataKg
+    ? `*${args.buyerKataKg.toLocaleString('en-IN')} kg* (${(args.buyerKataKg / 1000).toFixed(2)} MT)`
+    : '⚠️ _Could not read weight from slip_';
+
+  const shortageText = args.shortageKg > 0
+    ? `*${args.shortageKg.toLocaleString('en-IN')} kg* (${args.shortagePct}%)`
+    : 'No shortage (0 kg)';
+
+  const text =
+    `📷 *Buyer Kata Received (Delivery Review)*\n\n` +
+    `🚛 *Lorry:* *${args.lorryNumber}*\n` +
+    `🏢 *Buyer:* ${args.buyerName}\n` +
+    `📦 *Product:* ${args.product || 'Goods'}\n` +
+    `⚖️ *Dispatched Wt:* ${args.dispatchedKg.toLocaleString('en-IN')} kg (${(args.dispatchedKg / 1000).toFixed(2)} MT)\n` +
+    `⚖️ *Buyer Kata (OCR):* ${weightText}\n` +
+    `📉 *Shortage (Loss):* ${shortageText}\n` +
+    (args.driverPhone ? `👤 *Driver Phone:* +${args.driverPhone}\n` : '') +
+    (args.imageUrl ? `\n📎 *Slip Photo:* ${args.imageUrl}\n` : '') +
+    `\n⚡ *Quick Actions (Reply on WhatsApp):*\n` +
+    `👉 *APPROVE ${args.lorryNumber}* (confirm delivery)\n` +
+    `👉 *APPROVE ${args.lorryNumber} <weight_in_kg>* (override weight)\n` +
+    `👉 *REJECT ${args.lorryNumber} <reason>* (ask driver to resend)\n\n` +
+    `🌐 *Review in ERP:*\n` +
+    `${appBaseUrl}/sales/dispatches`;
+
+  const results = await Promise.all(
+    recipients.map((phone) =>
+      sendSessionTextMessage({
+        to: phone,
+        text,
+        imageUrl: args.imageUrl,
+        relatedType: 'KATA_ALERT',
+        relatedId: args.submissionId,
+      })
+    )
+  );
+
+  return { ok: results.some((r) => r.ok) };
+}
+
 

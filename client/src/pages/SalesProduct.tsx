@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Send } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Send, Clock } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
 import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
@@ -849,9 +849,27 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [transDocNo, setTransDocNo] = useState('');
   const [transDocDt, setTransDocDt] = useState('');
 
-  const [cancelTarget, setCancelTarget] = useState<{ id: string; type: 'einvoice' | 'ewaybill' } | null>(null);
-  const [cancelReason, setCancelReason] = useState('2'); // default "2" - Data Entry Mistake
+  const [cancelTarget, setCancelTarget] = useState<{ dispatch: SaleDispatch; type: 'einvoice' | 'ewaybill' } | null>(null);
+  const [cancelReason, setCancelReason] = useState('2'); // default "2"
   const [cancelRemarks, setCancelRemarks] = useState('Cancelled from ERP');
+  const [cancelCascade, setCancelCascade] = useState(false);
+
+  // Update Vehicle (VEHEWB) state
+  const [updateVehTarget, setUpdateVehTarget] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+  const [newVehicleNo, setNewVehicleNo] = useState('');
+  const [vehFromPlace, setVehFromPlace] = useState('');
+  const [vehFromState, setVehFromState] = useState<number>(28);
+  const [vehReasonCode, setVehReasonCode] = useState('1'); // 1-Break down, 2-Transshipment, 3-Others, 4-First time
+  const [vehReasonRem, setVehReasonRem] = useState('');
+
+  // Extend Validity (EXTENDVALIDITY) state
+  const [extendValTarget, setExtendValTarget] = useState<{ dispatch: SaleDispatch; order: SaleOrder } | null>(null);
+  const [extRemainingDist, setExtRemainingDist] = useState<number>(50);
+  const [extFromPincode, setExtFromPincode] = useState<number>(517247);
+  const [extFromPlace, setExtFromPlace] = useState('');
+  const [extFromState, setExtFromState] = useState<number>(28);
+  const [extRsnCode, setExtRsnCode] = useState<number>(1); // 1-Natural Calamity, 2-Law & Order, 3-Transshipment, 4-Accident, 5-Others
+  const [extRemarks, setExtRemarks] = useState('');
 
   const generateIrnMutation = useMutation({
     mutationFn: (id: string) => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${id}/einvoice`, { method: 'POST' }),
@@ -863,9 +881,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
 
   const cancelIrnMutation = useMutation({
-    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${cancelTarget!.id}/einvoice/cancel`, {
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${cancelTarget!.dispatch.id}/einvoice/cancel`, {
       method: 'POST',
-      body: { cancelReason, cancelRemarks },
+      body: { cancelReason, cancelRemarks, forceCascade: cancelCascade },
     }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
@@ -907,7 +925,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   });
 
   const cancelEwbMutation = useMutation({
-    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${cancelTarget!.id}/ewaybill/cancel`, {
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${cancelTarget!.dispatch.id}/ewaybill/cancel`, {
       method: 'POST',
       body: { cancelReason, cancelRemarks },
     }),
@@ -915,6 +933,46 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(res.message);
       setCancelTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const updateVehMutation = useMutation({
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${updateVehTarget!.dispatch.id}/ewaybill/update-vehicle`, {
+      method: 'POST',
+      body: {
+        vehicleNumber: newVehicleNo,
+        fromPlace: vehFromPlace,
+        fromState: vehFromState,
+        reasonCode: vehReasonCode,
+        reasonRem: vehReasonRem || 'Vehicle updated from ERP',
+      },
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message || 'Lorry updated on E-Way Bill successfully');
+      setUpdateVehTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const extendValMutation = useMutation({
+    mutationFn: () => api<{ updated: SaleDispatch; message: string }>(`/sale-dispatches/${extendValTarget!.dispatch.id}/ewaybill/extend-validity`, {
+      method: 'POST',
+      body: {
+        vehicleNumber: extendValTarget!.dispatch.vehicleNumber || '',
+        fromPlace: extFromPlace,
+        fromState: extFromState,
+        fromPincode: extFromPincode,
+        remainingDistance: extRemainingDist,
+        extnRsnCode: extRsnCode,
+        extnRemarks: extRemarks || 'Extended from ERP',
+      },
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
+      toast.success(res.message || 'E-Way Bill validity extended successfully');
+      setExtendValTarget(null);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
@@ -977,10 +1035,30 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const transporterIdNorm = transporterId.trim().toUpperCase();
   const transporterIdInvalid = transporterIdNorm.length > 0 && !/^[0-9]{2}[A-Z0-9]{13}$/.test(transporterIdNorm);
 
-  function openCancel(id: string, type: 'einvoice' | 'ewaybill') {
-    setCancelTarget({ id, type });
+  function openCancel(dispatch: SaleDispatch, type: 'einvoice' | 'ewaybill') {
+    setCancelTarget({ dispatch, type });
     setCancelReason(type === 'einvoice' ? '2' : '3');
     setCancelRemarks('Cancelled from ERP');
+    setCancelCascade(false);
+  }
+
+  function openUpdateVeh(dispatch: SaleDispatch, order: SaleOrder) {
+    setUpdateVehTarget({ dispatch, order });
+    setNewVehicleNo(dispatch.vehicleNumber || '');
+    setVehFromPlace(company?.dispatchFromPlace || company?.stateName || 'Punganur');
+    setVehFromState(Number(company?.gstin?.slice(0, 2)) || 28);
+    setVehReasonCode('1');
+    setVehReasonRem('Vehicle broken down');
+  }
+
+  function openExtendVal(dispatch: SaleDispatch, order: SaleOrder) {
+    setExtendValTarget({ dispatch, order });
+    setExtRemainingDist(dispatch.ewbDistance ? Math.max(20, Math.round(dispatch.ewbDistance * 0.3)) : 50);
+    setExtFromPincode(Number(company?.dispatchFromPincode || company?.pincode) || 517247);
+    setExtFromPlace(company?.dispatchFromPlace || company?.stateName || 'Punganur');
+    setExtFromState(Number(company?.gstin?.slice(0, 2)) || 28);
+    setExtRsnCode(1);
+    setExtRemarks('Transit delayed due to breakdown/calamity');
   }
 
   const [searchParams] = useSearchParams();
@@ -1461,7 +1539,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                               </Button>
                                             )}
                                             {d.irn && d.irnStatus !== 'CANCELLED' && (
-                                              <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'einvoice')}>
+                                              <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d, 'einvoice')}>
                                                 Cancel IRN
                                               </Button>
                                             )}
@@ -1525,9 +1603,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             )}
 
                                             {/* E-Way Bill Action Buttons */}
-                                            {d.irn && d.irnStatus !== 'CANCELLED' && !d.ewbNumber && (
+                                            {d.irn && d.irnStatus !== 'CANCELLED' && (!d.ewbNumber || d.ewbStatus === 'CANCELLED') && (
                                               <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openEwb(d, o)}>
-                                                Gen EWB
+                                                {d.ewbStatus === 'CANCELLED' ? 'Re-gen EWB' : 'Gen EWB'}
                                               </Button>
                                             )}
                                             {d.ewbNumber && d.ewbStatus !== 'CANCELLED' && (
@@ -1535,13 +1613,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                                 <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => navigate(`/sale-dispatches/${d.id}/ewaybill`)}>
                                                   <Printer className="h-3.5 w-3.5 mr-1" /> EWB
                                                 </Button>
-                                                <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d.id, 'ewaybill')}>
+                                                <Button size="sm" variant="outline" className="border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openUpdateVeh(d, o)} title="Change vehicle/driver on active E-Way Bill without cancelling">
+                                                  <Truck className="h-3.5 w-3.5 mr-1" /> Update Lorry
+                                                </Button>
+                                                <Button size="sm" variant="outline" className="border-amber-200 text-amber-700 hover:bg-amber-50" onClick={() => openExtendVal(d, o)} title="Extend validity if transit is delayed">
+                                                  <Clock className="h-3.5 w-3.5 mr-1" /> Extend
+                                                </Button>
+                                                <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => openCancel(d, 'ewaybill')}>
                                                   Cancel EWB
                                                 </Button>
                                                 {(() => {
                                                   const ewbLog = d.emailLogs?.find((l) => l.documentType === 'EWB');
-                                                  if (!ewbLog) return null;
-                                                  if (ewbLog.status === 'DELIVERED' || ewbLog.status === 'OPENED') {
+                                                  if (ewbLog && ewbLog.status === 'SENT') {
                                                     return (
                                                       <span
                                                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
@@ -2340,51 +2423,263 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
 
       {/* Cancel Dialog (Shared for IRN and EWB) */}
       <Dialog open={!!cancelTarget} onOpenChange={(v) => !v && setCancelTarget(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Cancel {cancelTarget?.type === 'einvoice' ? 'E-Invoice (IRN)' : 'E-Way Bill'}</DialogTitle>
           </DialogHeader>
+          {cancelTarget && (() => {
+            const d = cancelTarget.dispatch;
+            const isIrn = cancelTarget.type === 'einvoice';
+            const dateRef = isIrn ? d.irnAckDate : d.ewbDate;
+            const elapsedHours = dateRef ? (Date.now() - new Date(dateRef).getTime()) / (1000 * 60 * 60) : 0;
+            const remainingHours = Math.max(0, 24 - elapsedHours);
+            const isLapsed = elapsedHours > 24;
+            const hasActiveLinkedEwb = Boolean(isIrn && d.ewbNumber && d.ewbStatus !== 'CANCELLED');
+
+            return (
+              <div className="space-y-4">
+                {isLapsed ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 space-y-1.5">
+                    <div className="font-semibold flex items-center gap-1.5 text-sm">
+                      <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" /> Government 24-Hour Cutoff Passed
+                    </div>
+                    <p>
+                      More than 24 hours have passed since this {isIrn ? 'IRN' : 'E-Way Bill'} was generated ({elapsedHours.toFixed(1)}h ago). The NIC portal will reject direct cancellation.
+                    </p>
+                    <p className="font-medium">
+                      Under GST law, you must issue a <strong>Credit Note (GSTR-1 adjustment)</strong> to adjust or cancel this sale.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Clock className="h-3.5 w-3.5 text-emerald-600" /> 24-Hour Portal Window:
+                    </span>
+                    <span className="font-semibold">{remainingHours.toFixed(1)} hours left to cancel</span>
+                  </div>
+                )}
+
+                {hasActiveLinkedEwb && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 space-y-2">
+                    <div className="font-semibold flex items-center gap-1.5 text-sm text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" /> Active E-Way Bill Attached (#{d.ewbNumber})
+                    </div>
+                    <p>
+                      Under GST regulations, an E-Invoice cannot be cancelled while an active E-Way Bill is attached. The E-Way Bill must be cancelled first.
+                    </p>
+                    <label className="flex items-center gap-2 cursor-pointer font-medium p-1 rounded bg-amber-100/70 dark:bg-amber-900/40">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-amber-600 rounded"
+                        checked={cancelCascade}
+                        onChange={(e) => setCancelCascade(e.target.checked)}
+                      />
+                      <span>Cancel linked E-Way Bill (#{d.ewbNumber}) together with this invoice</span>
+                    </label>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Cancellation Reason Code</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                  >
+                    {isIrn ? (
+                      <>
+                        <option value="1">1 - Duplicate</option>
+                        <option value="2">2 - Data Entry Mistake</option>
+                        <option value="3">3 - Order Cancelled</option>
+                        <option value="4">4 - Others</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="1">1 - Duplicate</option>
+                        <option value="2">2 - Order Cancelled</option>
+                        <option value="3">3 - Mistake in EWB</option>
+                        <option value="4">4 - Others</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Cancellation Remarks</Label>
+                  <textarea
+                    value={cancelRemarks}
+                    onChange={(e) => setCancelRemarks(e.target.value)}
+                    rows={2}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    placeholder="Explain the reason for cancellation..."
+                  />
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                  {isLapsed ? (
+                    <Button
+                      variant="outline"
+                      className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                      onClick={() => {
+                        setCancelTarget(null);
+                        navigate('/credit-debit-notes');
+                      }}
+                    >
+                      Open Credit Notes
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="destructive"
+                      onClick={() => (isIrn ? cancelIrnMutation.mutate() : cancelEwbMutation.mutate())}
+                      disabled={
+                        cancelIrnMutation.isPending ||
+                        cancelEwbMutation.isPending ||
+                        (hasActiveLinkedEwb && !cancelCascade)
+                      }
+                    >
+                      {cancelIrnMutation.isPending || cancelEwbMutation.isPending
+                        ? 'Cancelling on Portal...'
+                        : hasActiveLinkedEwb && cancelCascade
+                          ? 'Cancel Both (EWB + IRN)'
+                          : `Confirm ${isIrn ? 'IRN' : 'EWB'} Cancellation`}
+                    </Button>
+                  )}
+                </DialogFooter>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Update Vehicle Dialog (VEHEWB) */}
+      <Dialog open={!!updateVehTarget} onOpenChange={(v) => !v && setUpdateVehTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Update Lorry / Part-B Details</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Are you sure you want to cancel the generated {cancelTarget?.type === 'einvoice' ? 'E-Invoice' : 'E-Way Bill'}? This action is reported to the government portal.
+            <p className="text-xs text-muted-foreground">
+              Update the lorry number on active E-Way Bill <strong>#{updateVehTarget?.dispatch.ewbNumber}</strong> on the government portal without cancelling the bill.
             </p>
             <div className="space-y-1.5">
-              <Label className="text-xs">Cancellation Reason Code</Label>
-              <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
-                {cancelTarget?.type === 'einvoice' ? (
-                  <>
-                    <option value="1">1 - Duplicate</option>
-                    <option value="2">2 - Data Entry Mistake</option>
-                    <option value="3">3 - Order Cancelled</option>
-                    <option value="4">4 - Others</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="1">1 - Duplicate</option>
-                    <option value="2">2 - Order Cancelled</option>
-                    <option value="3">3 - Mistake in EWB</option>
-                    <option value="4">4 - Others</option>
-                  </>
-                )}
+              <Label className="text-xs">New Vehicle Number *</Label>
+              <Input
+                value={newVehicleNo}
+                onChange={(e) => setNewVehicleNo(e.target.value.toUpperCase())}
+                placeholder="e.g. AP04TT1234"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">From Place *</Label>
+                <Input value={vehFromPlace} onChange={(e) => setVehFromPlace(e.target.value)} placeholder="Town name" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">From State Code *</Label>
+                <Input type="number" value={vehFromState} onChange={(e) => setVehFromState(Number(e.target.value))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reason for Vehicle Change</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={vehReasonCode}
+                onChange={(e) => setVehReasonCode(e.target.value)}
+              >
+                <option value="1">1 - Due to Breakdown</option>
+                <option value="2">2 - Due to Transshipment</option>
+                <option value="3">3 - Others</option>
+                <option value="4">4 - First Time Part-B</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Cancellation Remarks</Label>
-              <textarea
-                value={cancelRemarks}
-                onChange={(e) => setCancelRemarks(e.target.value)}
-                rows={3}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                placeholder="Explain the reason for cancellation..."
+              <Label className="text-xs">Reason Remarks</Label>
+              <Input
+                value={vehReasonRem}
+                onChange={(e) => setVehReasonRem(e.target.value)}
+                placeholder="e.g. Lorry punctured / engine problem"
               />
             </div>
             <DialogFooter>
+              <Button variant="outline" onClick={() => setUpdateVehTarget(null)}>Cancel</Button>
               <Button
-                variant="destructive"
-                onClick={() => cancelTarget?.type === 'einvoice' ? cancelIrnMutation.mutate() : cancelEwbMutation.mutate()}
-                disabled={cancelIrnMutation.isPending || cancelEwbMutation.isPending}
+                className="bg-sky-600 hover:bg-sky-700 text-white"
+                onClick={() => updateVehMutation.mutate()}
+                disabled={updateVehMutation.isPending || !newVehicleNo.trim() || !vehFromPlace.trim()}
               >
-                {cancelIrnMutation.isPending || cancelEwbMutation.isPending ? 'Cancelling...' : 'Confirm Cancellation'}
+                {updateVehMutation.isPending ? 'Updating on NIC...' : 'Update Lorry on NIC'}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Extend Validity Dialog (EXTENDVALIDITY) */}
+      <Dialog open={!!extendValTarget} onOpenChange={(v) => !v && setExtendValTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Extend E-Way Bill Validity</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Extend validity for E-Way Bill <strong>#{extendValTarget?.dispatch.ewbNumber}</strong> due to road delay, mechanical trouble, or weather.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Current Vehicle No</Label>
+                <Input value={extendValTarget?.dispatch.vehicleNumber || ''} disabled className="bg-muted/50" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Remaining Distance (KM) *</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="4000"
+                  value={extRemainingDist}
+                  onChange={(e) => setExtRemainingDist(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5 col-span-2">
+                <Label className="text-xs">Current Location (Town) *</Label>
+                <Input value={extFromPlace} onChange={(e) => setExtFromPlace(e.target.value)} placeholder="Town name" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">PIN Code *</Label>
+                <Input type="number" value={extFromPincode} onChange={(e) => setExtFromPincode(Number(e.target.value))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Extension Reason</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={extRsnCode}
+                onChange={(e) => setExtRsnCode(Number(e.target.value))}
+              >
+                <option value={1}>1 - Natural Calamity / Weather</option>
+                <option value={2}>2 - Law and Order / Strike</option>
+                <option value={3}>3 - Transshipment Delay</option>
+                <option value={4}>4 - Accident / Mechanical Trouble</option>
+                <option value={5}>5 - Others</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Extension Remarks</Label>
+              <Input
+                value={extRemarks}
+                onChange={(e) => setExtRemarks(e.target.value)}
+                placeholder="e.g. Highway traffic jam / tyre replacement"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setExtendValTarget(null)}>Cancel</Button>
+              <Button
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={() => extendValMutation.mutate()}
+                disabled={extendValMutation.isPending || !(extRemainingDist > 0) || !extFromPlace.trim()}
+              >
+                {extendValMutation.isPending ? 'Extending on NIC...' : 'Extend Validity on NIC'}
               </Button>
             </DialogFooter>
           </div>

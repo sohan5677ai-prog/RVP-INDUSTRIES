@@ -11,6 +11,9 @@ import {
   notifyDriverKataReceived,
   notifyDriverKataConfirmed,
   notifyDriverKataRejected,
+  notifyOwnersKataReceived,
+  resolveAlertRecipients,
+  sendSessionTextMessage,
 } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText, parseBuyerKataImage } from '../lib/gemini.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
@@ -332,6 +335,28 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
   if (!dispatch) {
     if (parsed?.isBuyerKataSlip) {
       logger.warn(`[whatsapp] kata slip detected from ${from} for lorry ${parsed.lorryNumber} (${parsed.buyerKataKg} kg) but no matching dispatch found`);
+
+      // 1. Notify Owners / Alert recipients on WhatsApp
+      resolveAlertRecipients()
+        .then((recipients) => {
+          const alertText =
+            `⚠️ *Buyer Weighbridge Slip Received (No Dispatch Match)*\n\n` +
+            `• Sender: +${from}\n` +
+            `• Lorry on Slip: *${parsed.lorryNumber || 'Unknown'}*\n` +
+            `• Net Weight: *${parsed.buyerKataKg ? `${parsed.buyerKataKg.toLocaleString('en-IN')} kg` : 'N/A'}*\n` +
+            `• Mill / Weighbridge: ${parsed.buyerName || 'N/A'}\n\n` +
+            `_Could not link to an active dispatch in ERP. Please verify manually._`;
+          return Promise.all(
+            recipients.map((phone) =>
+              sendSessionTextMessage({ to: phone, text: alertText, relatedType: 'KATA_UNMATCHED' })
+            )
+          );
+        })
+        .catch((err) => {
+          logger.error('[whatsapp] failed to notify owners of unmatched kata slip', err);
+        });
+
+      // 2. Mirror to Slack if configured
       const slack = getSlackApp();
       if (slack) {
         const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'C0BVDE4MXHA';
@@ -375,7 +400,28 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
     logger.error('[whatsapp] driver ack reply failed', err);
   });
 
-  // 7. Post Slack review card
+  // 7. Notify Owners / Alert recipients on WhatsApp
+  const dispatchedKg = dispatch.weightKg;
+  const kataKg = parsed?.buyerKataKg ?? 0;
+  const shortageKg = kataKg > 0 ? Math.max(0, dispatchedKg - kataKg) : 0;
+  const shortagePct = dispatchedKg > 0 && shortageKg > 0 ? ((shortageKg / dispatchedKg) * 100).toFixed(2) : '0';
+
+  notifyOwnersKataReceived({
+    submissionId: submission.id,
+    lorryNumber: dispatch.vehicleNumber || parsed?.lorryNumber || 'Unknown',
+    driverPhone: from,
+    buyerName: dispatch.saleOrder.buyer.name,
+    product: dispatch.saleOrder.product,
+    dispatchedKg,
+    buyerKataKg: parsed?.buyerKataKg ?? null,
+    shortageKg,
+    shortagePct,
+    imageUrl: publicUrl,
+  }).catch((err) => {
+    logger.error('[whatsapp] failed to notify owners of driver kata', err);
+  });
+
+  // 8. Post Slack review card (if Slack configured)
   const slack = getSlackApp();
   if (slack) {
     try {
@@ -445,6 +491,342 @@ async function parseInboundIntoRegister(logRow: InboundLogRow) {
   });
   logger.info(`[whatsapp] lorry booking ${booking.id} (${booking.lorryNumber ?? 'no lorry no'}) filed from ${from} (log ${logRow.id})`);
 }
+
+/**
+ * Process inbound WhatsApp messages from authorized owners/managers to approve,
+ * reject, or query driver kata submissions.
+ * Returns true if the message was handled as an owner command, false otherwise.
+ */
+async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> {
+  const from = logRow.from;
+  const text = (logRow.text || '').trim();
+  if (!from || !text) return false;
+
+  const senderDigits = from.replace(/\D/g, '').slice(-10);
+  if (senderDigits.length < 10) return false;
+
+  // 1. Verify sender authorization against configured alert recipients / owner numbers
+  const recipients = await resolveAlertRecipients();
+  const isRecipient = recipients.some((r) => r.replace(/\D/g, '').slice(-10) === senderDigits);
+
+  let isAuthorized = isRecipient;
+  if (!isAuthorized) {
+    try {
+      const profile = await prisma.companyProfile.findUnique({
+        where: { id: 'default' },
+        select: { ownerWhatsappNumber: true },
+      });
+      if (profile?.ownerWhatsappNumber && profile.ownerWhatsappNumber.replace(/\D/g, '').slice(-10) === senderDigits) {
+        isAuthorized = true;
+      }
+    } catch {
+      // ignore db error
+    }
+  }
+
+  // Also permit WHATSAPP_TEST_NUMBER for staging/testing
+  if (!isAuthorized && process.env.WHATSAPP_TEST_NUMBER) {
+    if (process.env.WHATSAPP_TEST_NUMBER.replace(/\D/g, '').slice(-10) === senderDigits) {
+      isAuthorized = true;
+    }
+  }
+
+  if (!isAuthorized) return false;
+
+  const upper = text.toUpperCase();
+
+  // 2. Help Command
+  if (upper === 'HELP' || upper === 'KATA' || upper === 'KATA HELP') {
+    const helpMsg =
+      `🤖 *RVP Kata Approval Assistant*\n\n` +
+      `Commands:\n` +
+      `• *APPROVE <lorry>* — Confirm delivery using the OCR weight from the slip.\n` +
+      `  _Example: APPROVE TN28BF7423_\n` +
+      `• *APPROVE <lorry> <weight>* — Confirm delivery with custom weight (kg or tonnes).\n` +
+      `  _Example: APPROVE TN28BF7423 24850_ or _APPROVE TN28BF7423 24.85_\n` +
+      `• *REJECT <lorry> <reason>* — Reject slip and ask driver to resend.\n` +
+      `  _Example: REJECT TN28BF7423 Blurry photo_\n` +
+      `• *STATUS <lorry>* — Check delivery status of a lorry.`;
+    await sendSessionTextMessage({ to: from, text: helpMsg, relatedType: 'KATA_HELP' });
+    return true;
+  }
+
+  // 3. Status Query Command
+  const statusMatch = text.match(/^(?:STATUS|CHECK)\s+([A-Z0-9\s]+)$/i);
+  if (statusMatch) {
+    const cleanLorry = statusMatch[1].replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const lorrySuffix = cleanLorry.slice(-4);
+    const dispatches = await prisma.saleDispatch.findMany({
+      take: 20,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        saleOrder: { include: { buyer: true } },
+        kataSubmissions: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+    const match = dispatches.find((d) => {
+      const v = (d.vehicleNumber || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      return v.includes(cleanLorry) || cleanLorry.includes(v) || (lorrySuffix.length === 4 && v.endsWith(lorrySuffix));
+    });
+
+    if (!match) {
+      await sendSessionTextMessage({
+        to: from,
+        text: `❌ No dispatch record found for lorry *${statusMatch[1].trim()}*.`,
+        relatedType: 'KATA_STATUS',
+      });
+      return true;
+    }
+
+    const latestSub = match.kataSubmissions[0];
+    const subStatus = latestSub ? `Kata Slip: *${latestSub.status}*` : 'No Kata slip submitted yet';
+    const statusMsg =
+      `📋 *Lorry Status: ${match.vehicleNumber || 'Unknown'}*\n\n` +
+      `• *Status:* *${match.status}*\n` +
+      `• *Buyer:* ${match.saleOrder.buyer.name}\n` +
+      `• *Dispatched Wt:* ${match.weightKg.toLocaleString('en-IN')} kg\n` +
+      (match.buyerKataKg ? `• *Buyer Kata Wt:* ${match.buyerKataKg.toLocaleString('en-IN')} kg\n` : '') +
+      (match.deliveredDate ? `• *Delivered Date:* ${new Date(match.deliveredDate).toLocaleDateString('en-IN')}\n` : '') +
+      `• *${subStatus}*\n` +
+      (latestSub?.imageUrl ? `• *Slip Photo:* ${latestSub.imageUrl}\n` : '');
+
+    await sendSessionTextMessage({ to: from, text: statusMsg, relatedType: 'KATA_STATUS' });
+    return true;
+  }
+
+  // 4. Approve / Confirm / Deliver Command
+  // Matches: "APPROVE TN 28 BF 7423", "APPROVE TN28BF7423 24850", "APPROVE TN28BF7423 24.85"
+  const approveMatch = text.match(/^(?:APPROVE|DELIVER|CONFIRM)\s+([A-Z0-9\s]+?)(?:\s+(\d{4,6}|\d{1,2}(?:\.\d+)?))?$/i);
+  if (approveMatch) {
+    const rawLorry = approveMatch[1].trim();
+    const cleanLorry = rawLorry.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const lorrySuffix = cleanLorry.slice(-4);
+    const weightArg = approveMatch[2];
+
+    let overrideKg: number | undefined;
+    if (weightArg) {
+      const val = parseFloat(weightArg);
+      if (!isNaN(val) && val > 0) {
+        // If user typed e.g. "24.85" (tonnes), convert to kg (24850). If "24850", keep as kg.
+        overrideKg = val < 200 ? Math.round(val * 1000) : Math.round(val);
+      }
+    }
+
+    // Find pending submission first
+    const pendingSubs = await prisma.driverKataSubmission.findMany({
+      where: { status: 'PENDING' },
+      include: {
+        saleDispatch: {
+          include: { saleOrder: { include: { buyer: true } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    let sub = pendingSubs.find((s) => {
+      const v = (s.saleDispatch.vehicleNumber || s.ocrLorryNumber || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      return v.includes(cleanLorry) || cleanLorry.includes(v) || (lorrySuffix.length === 4 && v.endsWith(lorrySuffix));
+    });
+
+    let dispatch = sub?.saleDispatch;
+
+    // If no pending submission was found, check for active DISPATCHED trips
+    if (!dispatch) {
+      const activeDispatches = await prisma.saleDispatch.findMany({
+        where: { status: 'DISPATCHED' },
+        include: { saleOrder: { include: { buyer: true } } },
+        orderBy: { dispatchDate: 'desc' },
+        take: 20,
+      });
+
+      dispatch = activeDispatches.find((d) => {
+        const v = (d.vehicleNumber || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        return v.includes(cleanLorry) || cleanLorry.includes(v) || (lorrySuffix.length === 4 && v.endsWith(lorrySuffix));
+      });
+    }
+
+    if (!dispatch) {
+      await sendSessionTextMessage({
+        to: from,
+        text: `❌ No active dispatch or pending kata submission found matching lorry *${rawLorry}*.`,
+        relatedType: 'KATA_APPROVE_ERROR',
+      });
+      return true;
+    }
+
+    const finalWeightKg = overrideKg ?? sub?.ocrBuyerKataKg ?? (dispatch.buyerKataKg ?? null);
+    if (!finalWeightKg || finalWeightKg <= 0) {
+      await sendSessionTextMessage({
+        to: from,
+        text: `⚠️ Could not determine weight for lorry *${dispatch.vehicleNumber || rawLorry}*.\nPlease specify the weight: *APPROVE ${cleanLorry} <weight_in_kg>* (e.g. APPROVE ${cleanLorry} 24850)`,
+        relatedType: 'KATA_APPROVE_ERROR',
+      });
+      return true;
+    }
+
+    try {
+      await confirmDelivery({
+        dispatchId: dispatch.id,
+        buyerKataKg: finalWeightKg,
+        deliveredDate: new Date(),
+        buyerKataFileUrl: sub?.imageUrl ?? null,
+        submissionId: sub?.id,
+        confirmedBy: `WhatsApp (+${senderDigits})`,
+      });
+
+      const updatedSub = sub
+        ? await prisma.driverKataSubmission.findUnique({ where: { id: sub.id } })
+        : null;
+
+      // Mirror update to Slack card if exists
+      if (sub?.slackChannel && sub?.slackTs && updatedSub) {
+        const slack = getSlackApp();
+        if (slack) {
+          slack.client.chat.update({
+            channel: sub.slackChannel,
+            ts: sub.slackTs,
+            text: `✅ Kata approved for lorry ${dispatch.vehicleNumber || ''}`,
+            blocks: kataCardBlocks(updatedSub, dispatch, dispatch.saleOrder),
+          }).catch(() => {});
+        }
+      }
+
+      // Notify driver via WhatsApp
+      const driverPhone = sub?.driverPhone || dispatch.driverPhone;
+      const lorryNo = dispatch.vehicleNumber || rawLorry;
+      const buyerName = dispatch.saleOrder.buyer.name;
+      const shortageKg = Math.max(0, dispatch.weightKg - finalWeightKg);
+
+      if (driverPhone) {
+        notifyDriverKataConfirmed(driverPhone, lorryNo, buyerName, shortageKg).catch((err) => {
+          logger.error('[whatsapp] driver confirmation notify failed', err);
+        });
+      }
+
+      // Reply back to the Owner on WhatsApp
+      const shortageMsg = shortageKg > 0
+        ? `📉 Transit Shortage: *${shortageKg.toLocaleString('en-IN')} kg* (${((shortageKg / dispatch.weightKg) * 100).toFixed(2)}%)`
+        : '📉 Shortage: *0 kg (No shortage)*';
+
+      const replyMsg =
+        `✅ *Delivery Confirmed & Recorded!*\n\n` +
+        `🚛 *Lorry:* *${lorryNo}*\n` +
+        `🏢 *Buyer:* ${buyerName}\n` +
+        `⚖️ *Dispatched Wt:* ${dispatch.weightKg.toLocaleString('en-IN')} kg\n` +
+        `⚖️ *Confirmed Kata Wt:* ${finalWeightKg.toLocaleString('en-IN')} kg\n` +
+        `${shortageMsg}\n\n` +
+        (driverPhone ? `Driver (+${driverPhone}) notified on WhatsApp. 🚛\n` : '') +
+        `ERP status updated to *DELIVERED*. 👍`;
+
+      await sendSessionTextMessage({ to: from, text: replyMsg, relatedType: 'KATA_CONFIRMED_OWNER' });
+      return true;
+    } catch (err: any) {
+      logger.error('[whatsapp] owner kata approve error', err);
+      await sendSessionTextMessage({
+        to: from,
+        text: `❌ Error confirming delivery for *${rawLorry}*: ${err?.message || 'Unknown database error'}`,
+        relatedType: 'KATA_APPROVE_ERROR',
+      });
+      return true;
+    }
+  }
+
+  // 5. Reject Command
+  // Matches: "REJECT TN 28 BF 7423 Blurry photo", "REJECT TN28BF7423 - wrong slip", "REJECT TN28BF7423"
+  const rejectMatch = text.match(/^REJECT\s+([A-Z0-9\s]+?)(?:\s+[-:]\s+|\s+reason\s*:\s*|\s+)(.*)$/i);
+  const bareRejectMatch = !rejectMatch ? text.match(/^REJECT\s+([A-Z0-9\s]+)$/i) : null;
+
+  if (rejectMatch || bareRejectMatch) {
+    const rawLorry = (rejectMatch ? rejectMatch[1] : bareRejectMatch![1]).trim();
+    const reason = (rejectMatch ? rejectMatch[2]?.trim() : '') || 'Photo was unclear or unreadable';
+    const cleanLorry = rawLorry.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const lorrySuffix = cleanLorry.slice(-4);
+
+    const pendingSubs = await prisma.driverKataSubmission.findMany({
+      where: { status: 'PENDING' },
+      include: {
+        saleDispatch: {
+          include: { saleOrder: { include: { buyer: true } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    const sub = pendingSubs.find((s) => {
+      const v = (s.saleDispatch.vehicleNumber || s.ocrLorryNumber || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      return v.includes(cleanLorry) || cleanLorry.includes(v) || (lorrySuffix.length === 4 && v.endsWith(lorrySuffix));
+    });
+
+    if (!sub) {
+      await sendSessionTextMessage({
+        to: from,
+        text: `❌ No pending kata submission found for lorry *${rawLorry}*.`,
+        relatedType: 'KATA_REJECT_ERROR',
+      });
+      return true;
+    }
+
+    try {
+      const updatedSub = await prisma.driverKataSubmission.update({
+        where: { id: sub.id },
+        data: {
+          status: 'REJECTED',
+          rejectionReason: reason,
+          confirmedBy: `WhatsApp (+${senderDigits})`,
+          confirmedAt: new Date(),
+        },
+        include: {
+          saleDispatch: { include: { saleOrder: { include: { buyer: true } } } },
+        },
+      });
+
+      // Mirror to Slack if card exists
+      if (sub.slackChannel && sub.slackTs) {
+        const slack = getSlackApp();
+        if (slack) {
+          slack.client.chat.update({
+            channel: sub.slackChannel,
+            ts: sub.slackTs,
+            text: `❌ Kata rejected for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
+            blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
+          }).catch(() => {});
+        }
+      }
+
+      // Notify driver via WhatsApp
+      const lorryNo = sub.saleDispatch.vehicleNumber || rawLorry;
+      await notifyDriverKataRejected(sub.driverPhone, lorryNo, reason).catch((err) => {
+        logger.error('[whatsapp] driver reject notify failed', err);
+      });
+
+      // Confirm to owner
+      await sendSessionTextMessage({
+        to: from,
+        text:
+          `❌ *Kata Slip Rejected*\n\n` +
+          `🚛 *Lorry:* ${lorryNo}\n` +
+          `📝 *Reason:* ${reason}\n\n` +
+          `Driver (+${sub.driverPhone}) has been instructed on WhatsApp to re-take and resend a clear photo.`,
+        relatedType: 'KATA_REJECTED_OWNER',
+      });
+      return true;
+    } catch (err: any) {
+      logger.error('[whatsapp] owner kata reject error', err);
+      await sendSessionTextMessage({
+        to: from,
+        text: `❌ Error rejecting kata slip for *${rawLorry}*: ${err?.message || 'Database error'}`,
+        relatedType: 'KATA_REJECT_ERROR',
+      });
+      return true;
+    }
+  }
+
+  // Not an owner command - let it fall through
+  return false;
+}
+
 
 // ---------------------------------------------------------------------------
 // Delivery-status callbacks
@@ -707,11 +1089,14 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
     // Duplicate (null) needs no further work; otherwise process in the background,
     // where a failure costs a register/submission row but never the message itself.
     if (logRow) {
-      processDriverKataInbound(logRow)
+      processOwnerKataCommand(logRow)
         .then((handled) => {
-          if (!handled) {
-            return parseInboundIntoRegister(logRow);
-          }
+          if (handled) return;
+          return processDriverKataInbound(logRow).then((kataHandled) => {
+            if (!kataHandled) {
+              return parseInboundIntoRegister(logRow);
+            }
+          });
         })
         .catch((err) => {
           logger.error(`[whatsapp] inbound processing failed for log ${logRow.id}`, err);

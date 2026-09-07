@@ -32,6 +32,37 @@ async function runTaxpro<T>(fn: () => Promise<T>): Promise<T> {
 const cancelSchema = z.object({
   cancelReason: z.string().min(1),
   cancelRemarks: z.string().optional().default('Cancelled from ERP'),
+  forceCascade: z.boolean().optional().default(false),
+});
+
+const updateVehicleSchema = z.object({
+  vehicleNumber: z.string().min(1, 'Vehicle number is required'),
+  fromPlace: z.string().min(1, 'From place is required'),
+  fromState: z.coerce.number().int(),
+  reasonCode: z.string().default('1'),
+  reasonRem: z.string().default('Vehicle updated from ERP'),
+  transDocNo: z.string().optional(),
+  transDocDt: z.string().optional(),
+  transMode: z.string().default('1'),
+  vehicleType: z.string().default('R'),
+});
+
+const extendValiditySchema = z.object({
+  vehicleNumber: z.string().min(1, 'Vehicle number is required'),
+  fromPlace: z.string().min(1, 'From place is required'),
+  fromState: z.coerce.number().int(),
+  fromPincode: z.coerce.number().int(),
+  remainingDistance: z.coerce.number().int().min(1, 'Remaining distance must be > 0'),
+  extnRsnCode: z.coerce.number().int().default(1),
+  extnRemarks: z.string().default('Extended from ERP'),
+  consignmentStatus: z.string().default('T'),
+  transitType: z.string().default('R'),
+  transDocNo: z.string().optional(),
+  transDocDt: z.string().optional(),
+  transMode: z.string().default('1'),
+  addressLine1: z.string().optional(),
+  addressLine2: z.string().optional(),
+  addressLine3: z.string().optional(),
 });
 
 const ewbSchema = z.object({
@@ -91,7 +122,7 @@ router.post(
     });
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
     if (!dispatch.invoiceNumber) throw new HttpError(400, 'Tax Invoice must be raised before E-Invoice');
-    if (dispatch.irn) throw new HttpError(400, 'E-Invoice IRN already generated for this dispatch');
+    if (dispatch.irn && dispatch.irnStatus !== 'CANCELLED') throw new HttpError(400, 'Active E-Invoice IRN already generated for this dispatch');
 
     const result = await runTaxpro(() => TaxproService.generateIRN(id));
 
@@ -116,7 +147,7 @@ router.post(
   '/sale-dispatches/:id/einvoice/cancel',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { cancelReason, cancelRemarks } = cancelSchema.parse(req.body);
+    const { cancelReason, cancelRemarks, forceCascade } = cancelSchema.parse(req.body);
 
     const dispatch = await prisma.saleDispatch.findUnique({
       where: { id },
@@ -124,6 +155,28 @@ router.post(
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
     if (!dispatch.irn) throw new HttpError(400, 'No E-Invoice found to cancel');
     if (dispatch.irnStatus === 'CANCELLED') throw new HttpError(400, 'E-Invoice is already cancelled');
+
+    // Under GST rules, IRN CANNOT be cancelled while an active E-Way Bill exists.
+    if (dispatch.ewbNumber && dispatch.ewbStatus !== 'CANCELLED') {
+      if (!forceCascade) {
+        throw new HttpError(
+          400,
+          `An active E-Way Bill (${dispatch.ewbNumber}) is linked to this invoice. Under GST rules, you must cancel the E-Way Bill first before cancelling the E-Invoice.`,
+        );
+      }
+      // If forceCascade is requested, cancel the EWB first
+      logger.info(`[taxpro] Auto-cancelling active EWB ${dispatch.ewbNumber} before cancelling IRN for dispatch ${id}`);
+      const ewbCancel = await runTaxpro(() =>
+        TaxproService.cancelEWayBill(id, '2', 'Order cancelled with invoice'),
+      );
+      await prisma.saleDispatch.update({
+        where: { id },
+        data: {
+          ewbStatus: 'CANCELLED',
+          ewbCancelledDate: ewbCancel.cancelledDate,
+        },
+      });
+    }
 
     const result = await runTaxpro(() => TaxproService.cancelIRN(id, cancelReason, cancelRemarks));
 
@@ -152,7 +205,10 @@ router.post(
     });
     if (!dispatch) throw new HttpError(404, 'Dispatch not found');
     if (!dispatch.irn) throw new HttpError(400, 'E-Invoice IRN must be generated before E-Way Bill');
-    if (dispatch.ewbNumber) throw new HttpError(400, 'E-Way Bill already generated for this dispatch');
+    // Lockout fix: Only block if an ACTIVE (not cancelled) E-Way Bill already exists!
+    if (dispatch.ewbNumber && dispatch.ewbStatus !== 'CANCELLED') {
+      throw new HttpError(400, `Active E-Way Bill (${dispatch.ewbNumber}) already generated for this dispatch`);
+    }
 
     // Worked out here for local record / preview / WhatsApp / PDF print:
     // reused from this buyer's last bill, or routed from dispatch-from PIN code to buyer's.
@@ -334,4 +390,177 @@ router.post(
   })
 );
 
+// Update Vehicle (Part-B) of active E-Way Bill
+router.post(
+  '/sale-dispatches/:id/ewaybill/update-vehicle',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const body = updateVehicleSchema.parse(req.body);
+
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found to update');
+    if (dispatch.ewbStatus === 'CANCELLED') throw new HttpError(400, 'E-Way Bill is cancelled');
+
+    const result = await runTaxpro(() =>
+      TaxproService.updateVehicle(id, {
+        vehicleNo: body.vehicleNumber,
+        fromPlace: body.fromPlace,
+        fromState: body.fromState,
+        reasonCode: body.reasonCode,
+        reasonRem: body.reasonRem,
+        transDocNo: body.transDocNo,
+        transDocDate: body.transDocDt,
+        transMode: body.transMode,
+        vehicleType: body.vehicleType,
+      })
+    );
+
+    const updated = await prisma.saleDispatch.update({
+      where: { id },
+      data: {
+        vehicleNumber: result.vehicleNo,
+        ...(result.validUpto ? { ewbValidUpto: result.validUpto } : {}),
+      },
+      include: { saleOrder: { include: { buyer: true } } },
+    });
+
+    res.json({ updated, message: result.message });
+  })
+);
+
+// Extend E-Way Bill validity
+router.post(
+  '/sale-dispatches/:id/ewaybill/extend-validity',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const body = extendValiditySchema.parse(req.body);
+
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found to extend');
+    if (dispatch.ewbStatus === 'CANCELLED') throw new HttpError(400, 'E-Way Bill is cancelled');
+
+    const result = await runTaxpro(() =>
+      TaxproService.extendValidity(id, {
+        vehicleNo: body.vehicleNumber,
+        fromPlace: body.fromPlace,
+        fromState: body.fromState,
+        fromPincode: body.fromPincode,
+        remainingDistance: body.remainingDistance,
+        extnRsnCode: body.extnRsnCode,
+        extnRemarks: body.extnRemarks,
+        consignmentStatus: body.consignmentStatus,
+        transitType: body.transitType,
+        transDocNo: body.transDocNo,
+        transDocDate: body.transDocDt,
+        transMode: body.transMode,
+        addressLine1: body.addressLine1,
+        addressLine2: body.addressLine2,
+        addressLine3: body.addressLine3,
+      })
+    );
+
+    const updated = await prisma.saleDispatch.update({
+      where: { id },
+      data: {
+        ewbValidUpto: result.newValidUpto,
+        ewbDistance: body.remainingDistance,
+      },
+      include: { saleOrder: { include: { buyer: true } } },
+    });
+
+    res.json({ updated, message: result.message });
+  })
+);
+
+// Live E-Way Bill Status & Details from NIC
+router.get(
+  '/sale-dispatches/:id/ewaybill/live-status',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (!dispatch.ewbNumber) throw new HttpError(400, 'No E-Way Bill found');
+
+    const result = await runTaxpro(() => TaxproService.getLiveEwayBill(dispatch.ewbNumber!));
+    const liveData = result.data || {};
+    const liveStatus = String(liveData.status || liveData.Status || '').toUpperCase();
+
+    let updated = dispatch;
+    if (liveStatus === 'CNL' || liveStatus === 'CANCELLED') {
+      updated = await prisma.saleDispatch.update({
+        where: { id },
+        data: {
+          ewbStatus: 'CANCELLED',
+          ewbCancelledDate: liveData.cancelDate ? TaxproService.parseNicDate(liveData.cancelDate) : new Date(),
+        },
+        include: { saleOrder: { include: { buyer: true } } },
+      });
+    }
+
+    res.json({ liveData, updated, message: 'Live E-Way Bill status fetched' });
+  })
+);
+
+// Live E-Invoice IRN Status & Details from NIC
+router.get(
+  '/sale-dispatches/:id/einvoice/live-status',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id } });
+    if (!dispatch) throw new HttpError(404, 'Dispatch not found');
+    if (!dispatch.irn) throw new HttpError(400, 'No E-Invoice IRN found');
+
+    const result = await runTaxpro(() => TaxproService.getLiveIRN(dispatch.irn!));
+    const liveData = result.data || {};
+    const liveStatus = String(liveData.status || liveData.Status || '').toUpperCase();
+
+    let updated = dispatch;
+    if (liveStatus === 'CNL' || liveStatus === 'CANCELLED') {
+      updated = await prisma.saleDispatch.update({
+        where: { id },
+        data: {
+          irnStatus: 'CANCELLED',
+          irnCancelledDate: liveData.CancelDate ? TaxproService.parseNicDate(liveData.CancelDate) : new Date(),
+        },
+        include: { saleOrder: { include: { buyer: true } } },
+      });
+    }
+
+    res.json({ liveData, updated, message: 'Live E-Invoice status fetched' });
+  })
+);
+
+// Transporter master lookup by GSTIN/TRANSIN
+router.get(
+  '/taxpro/transporter/:trnNo',
+  asyncHandler(async (req, res) => {
+    const { trnNo } = req.params;
+    const result = await runTaxpro(() => TaxproService.getTransporterDetails(trnNo));
+    res.json(result);
+  })
+);
+
+// Fetch Inward E-Way Bills (purchases from suppliers) by date
+router.get(
+  '/taxpro/inward-ewb',
+  asyncHandler(async (req, res) => {
+    const date = req.query.date as string | undefined;
+    const result = await runTaxpro(() => TaxproService.getInwardEwayBills(date));
+    res.json(result);
+  })
+);
+
+// Reject Inward E-Way Bill
+router.post(
+  '/taxpro/reject-ewb',
+  asyncHandler(async (req, res) => {
+    const { ewbNo } = z.object({ ewbNo: z.string().min(1) }).parse(req.body);
+    const result = await runTaxpro(() => TaxproService.rejectEwayBill(ewbNo));
+    res.json(result);
+  })
+);
+
 export default router;
+

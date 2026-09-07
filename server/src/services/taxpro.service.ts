@@ -64,9 +64,24 @@ export class TaxproService {
       password: config.taxproGspSecret || '', // GSP layer validates this as the ASP password
       Gstin: gstin,
       User_Name: config.taxproGstUser || '',
+      user_name: config.taxproGstUser || '',
+      username: config.taxproGstUser || '',
       eInvPwd: config.taxproGstPass || '',
+      ewbpwd: config.taxproGstPass || '',
       ...extra,
     } as Record<string, string>;
+  }
+
+  private static ewbQueryString(config: TaxproConfig, gstin: string, action: string, extra: Record<string, string> = {}) {
+    const params = new URLSearchParams({
+      action,
+      aspid: config.taxproGspId || '',
+      password: config.taxproGspSecret || '',
+      gstin: gstin || config.gstin || '',
+      username: config.taxproGstUser || '',
+      ...extra,
+    });
+    return params.toString();
   }
 
   private static credsMissing(config: TaxproConfig): boolean {
@@ -774,6 +789,39 @@ export class TaxproService {
         }
       }
 
+      // If NIC rejected because an EWB was already generated for this document (e.g. earlier network blip),
+      // attempt to recover it directly using GetEwayBillGeneratedByConsigner
+      const isAlreadyExistsError =
+        /already.*exist|duplicate.*ewb|1003|4013/i.test(err?.message || '') ||
+        (Array.isArray(err?.errorDetails) &&
+          err.errorDetails.some(
+            (e: any) =>
+              ['1003', '4013'].includes(String(e?.ErrorCode)) ||
+              /already.*exist|duplicate/i.test(e?.ErrorMessage || ''),
+          ));
+
+      if (isAlreadyExistsError && dispatch.invoiceNumber) {
+        logger.warn(`[taxpro] EWB reported already exists for invoice ${dispatch.invoiceNumber}. Attempting auto-recovery...`);
+        try {
+          const recovered = await this.recoverEwayBillByDoc(dispatch.invoiceNumber);
+          if (recovered && (recovered.ewbNo || recovered.EwbNo)) {
+            const ewbNo = String(recovered.ewbNo || recovered.EwbNo);
+            const ewbDate = recovered.ewbDate || recovered.EwbDt || new Date();
+            const validUpto = recovered.validUpto || recovered.EwbValidTill || recovered.validTill;
+            return {
+              success: true,
+              ewbNumber: ewbNo,
+              ewbDate: this.parseNicDate(ewbDate),
+              ewbValidUpto: validUpto ? this.parseNicDate(validUpto) : new Date(),
+              distance: Number(recovered.distance || recovered.Distance) || (Number(transportDetails.transDistance) || null),
+              message: 'E-Way Bill auto-recovered from government portal',
+            };
+          }
+        } catch (recErr: any) {
+          logger.warn(`[taxpro] Auto-recovery failed: ${recErr.message}`);
+        }
+      }
+
       logger.error('TaxPro EWB Generation Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
@@ -1023,18 +1071,9 @@ export class TaxproService {
     try {
       const json = await this.withAuth(company, company.gstin || '', (token) => {
         const ewbPath = company.taxproSandbox
-          ? '/ewaybillapi/dec/v1.03/ewayapi?action=CANEWB'
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'CANEWB', { authtoken: token })}`
           : `/v1.03/dec/ewayapi?action=CANEWB&authtoken=${encodeURIComponent(token)}`;
-        const headers = company.taxproSandbox
-          ? this.baseHeaders(company, company.gstin || '', { authtoken: token })
-          : {
-              'Content-Type': 'application/json',
-              aspid: company.taxproGspId || '',
-              password: company.taxproGspSecret || '',
-              Gstin: company.gstin || '',
-              username: company.taxproGstUser || '',
-              authtoken: token,
-            };
+        const headers = this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token });
 
         return this.request(company.taxproSandbox, ewbPath, {
           method: 'POST',
@@ -1055,4 +1094,363 @@ export class TaxproService {
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
+
+  /**
+   * Updates vehicle (Part-B) of an active E-Way Bill without cancelling it.
+   * Allowed for road transport when a vehicle breaks down or is transshipped.
+   */
+  public static async updateVehicle(dispatchId: string, params: {
+    vehicleNo: string;
+    fromPlace: string;
+    fromState: number;
+    reasonCode: string; // '1'-Due to break down, '2'-Due to transshipment, '3'-Others, '4'-First time Part-B
+    reasonRem: string;
+    transDocNo?: string;
+    transDocDate?: string;
+    transMode?: string;
+    vehicleType?: string;
+  }) {
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id: dispatchId } });
+    if (!dispatch || !dispatch.ewbNumber) throw new Error('E-Way Bill number not found on dispatch');
+    if (dispatch.ewbStatus === 'CANCELLED') throw new Error('Cannot update vehicle on a cancelled E-Way Bill');
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const payload: Record<string, any> = {
+      ewbNo: Number(dispatch.ewbNumber),
+      vehicleNo: params.vehicleNo.toUpperCase().replace(/\s+/g, ''),
+      fromPlace: params.fromPlace.slice(0, 50),
+      fromState: Number(params.fromState),
+      reasonCode: params.reasonCode || '1',
+      reasonRem: params.reasonRem || 'Vehicle updated from ERP',
+      transMode: params.transMode || '1',
+      vehicleType: params.vehicleType || 'R',
+    };
+    if (params.transDocNo) payload.transDocNo = params.transDocNo;
+    if (params.transDocDate) payload.transDocDate = this.formatNICDate(new Date(params.transDocDate));
+
+    if (isMock) {
+      return {
+        success: true,
+        vehicleNo: payload.vehicleNo,
+        updatedDate: new Date(),
+        message: 'Simulated vehicle update successful (credentials not configured)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'VEHEWB', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=VEHEWB&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, ewbPath, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify(payload),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const updatedDate = data.VehUpdDate ? this.parseNicDate(data.VehUpdDate) : new Date();
+      return {
+        success: true,
+        vehicleNo: payload.vehicleNo,
+        updatedDate,
+        validUpto: data.validUpto ? this.parseNicDate(data.validUpto) : undefined,
+        message: 'E-Way Bill vehicle updated successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro VEHEWB Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Extends the validity period of an active E-Way Bill.
+   * Allowed within 8 hours before or 8 hours after validity expiry.
+   */
+  public static async extendValidity(dispatchId: string, params: {
+    vehicleNo: string;
+    fromPlace: string;
+    fromState: number;
+    fromPincode: number;
+    remainingDistance: number;
+    extnRsnCode: number; // 1-Natural Calamity, 2-Law and Order, 3-Transshipment, 4-Accident, 5-Others
+    extnRemarks: string;
+    consignmentStatus?: string; // 'M'-In Movement, 'T'-In Transit
+    transitType?: string; // 'R'-Road, 'W'-Warehouse, 'O'-Others
+    transDocNo?: string;
+    transDocDate?: string;
+    transMode?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    addressLine3?: string;
+  }) {
+    const dispatch = await prisma.saleDispatch.findUnique({ where: { id: dispatchId } });
+    if (!dispatch || !dispatch.ewbNumber) throw new Error('E-Way Bill number not found on dispatch');
+    if (dispatch.ewbStatus === 'CANCELLED') throw new Error('Cannot extend validity on a cancelled E-Way Bill');
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const payload: Record<string, any> = {
+      ewbNo: Number(dispatch.ewbNumber),
+      vehicleNo: params.vehicleNo.toUpperCase().replace(/\s+/g, ''),
+      fromPlace: params.fromPlace.slice(0, 50),
+      fromState: Number(params.fromState),
+      fromPincode: Number(params.fromPincode),
+      remainingDistance: Number(params.remainingDistance),
+      extnRsnCode: Number(params.extnRsnCode || 1),
+      extnRemarks: params.extnRemarks || 'Extended from ERP',
+      transMode: params.transMode || '1',
+      consignmentStatus: params.consignmentStatus || 'T',
+      transitType: params.transitType || 'R',
+      addressLine1: (params.addressLine1 || params.fromPlace).slice(0, 100),
+      addressLine2: (params.addressLine2 || '').slice(0, 100),
+      addressLine3: (params.addressLine3 || '').slice(0, 100),
+    };
+    if (params.transDocNo) payload.transDocNo = params.transDocNo;
+    if (params.transDocDate) payload.transDocDate = this.formatNICDate(new Date(params.transDocDate));
+
+    if (isMock) {
+      const newValid = new Date();
+      newValid.setDate(newValid.getDate() + Math.max(1, Math.ceil(params.remainingDistance / 100)));
+      return {
+        success: true,
+        newValidUpto: newValid,
+        message: 'Simulated validity extension successful (credentials not configured)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'EXTENDVALIDITY', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=EXTENDVALIDITY&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, ewbPath, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify(payload),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const validUptoStr = data.validUpto || data.validTill || data.ValidUpto;
+      return {
+        success: true,
+        newValidUpto: validUptoStr ? this.parseNicDate(validUptoStr) : new Date(),
+        message: 'E-Way Bill validity extended successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro EXTENDVALIDITY Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Fetches live E-Way Bill details directly from the government portal by EWB number.
+   */
+  public static async getLiveEwayBill(ewbNo: string) {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock) {
+      return {
+        success: true,
+        ewbNo,
+        status: 'ACT',
+        genMode: 'API',
+        data: { ewbNo, status: 'ACT', userGstin: company.gstin },
+        message: 'Simulated live EWB query (credentials not configured)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBill', { authtoken: token, ewbNo })}`
+          : `/ewaybillapi/dec/v1.03/ewayapi?action=GetEwayBill&authtoken=${encodeURIComponent(token)}&ewbNo=${ewbNo}`;
+        return this.request(company.taxproSandbox, ewbPath, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      return {
+        success: true,
+        data,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro GetEwayBill Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Fetches live E-Invoice IRN details directly from NIC.
+   */
+  public static async getLiveIRN(irn: string) {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock) {
+      return {
+        success: true,
+        irn,
+        status: 'ACT',
+        data: { Irn: irn, Status: 'ACT' },
+        message: 'Simulated live IRN query (credentials not configured)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        return this.request(company.taxproSandbox, `/eicore/dec/v1.03/Invoice/irn/${irn}`, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      return {
+        success: true,
+        data,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro Get IRN Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Recovers an already-generated EWB by document type and document number.
+   * Useful when network failure occurred during generation.
+   */
+  public static async recoverEwayBillByDoc(docNo: string, docType = 'INV') {
+    const company = await getCompanyProfileRow();
+    if (this.credsMissing(company)) return null;
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBillGeneratedByConsigner', { authtoken: token, docType, docNo })}`
+          : `/ewaybillapi/dec/v1.03/ewayapi?action=GetEwayBillGeneratedByConsigner&authtoken=${encodeURIComponent(token)}&docType=${docType}&docNo=${encodeURIComponent(docNo)}`;
+        return this.request(company.taxproSandbox, ewbPath, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Looks up transporter details by GSTIN/TRANSIN from official master.
+   */
+  public static async getTransporterDetails(trnNo: string) {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock) {
+      return {
+        success: true,
+        transId: trnNo,
+        transName: 'Verified Transporter (Simulated)',
+        status: 'Active',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/Master?${this.ewbQueryString(company, company.gstin || '', 'GetTransporterDetails', { authtoken: token, trn_no: trnNo })}`
+          : `/ewaybillapi/dec/v1.03/Master?action=GetTransporterDetails&authtoken=${encodeURIComponent(token)}&trn_no=${encodeURIComponent(trnNo)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      return {
+        success: true,
+        data,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro GetTransporterDetails Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Fetches inward E-Way Bills generated by suppliers / third parties for our GSTIN on a given date.
+   */
+  public static async getInwardEwayBills(dateStr?: string) {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+    const dateFormatted = dateStr
+      ? this.formatNICDate(new Date(dateStr))
+      : this.formatNICDate(new Date());
+
+    if (isMock) {
+      return {
+        success: true,
+        date: dateFormatted,
+        ewayBills: [],
+        message: 'Simulated inward EWB query (credentials not configured)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBillsofOtherParty', { authtoken: token, date: dateFormatted })}`
+          : `/ewaybillapi/dec/v1.03/ewayapi?action=GetEwayBillsofOtherParty&authtoken=${encodeURIComponent(token)}&date=${encodeURIComponent(dateFormatted)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || [];
+      const bills = Array.isArray(data) ? data : (data.bills || (data.ewbNo ? [data] : []));
+      return {
+        success: true,
+        date: dateFormatted,
+        ewayBills: bills,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro GetEwayBillsofOtherParty Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Rejects an inward E-Way Bill generated for our GSTIN within 72 hours.
+   */
+  public static async rejectEwayBill(ewbNo: string) {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock) {
+      return { success: true, message: `Simulated rejection of EWB ${ewbNo}` };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'REJEWB', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=REJEWB&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify({ ewbNo: String(ewbNo) }),
+        });
+      });
+      return { success: true, message: 'E-Way Bill rejected successfully', data: json };
+    } catch (err: any) {
+      logger.error('TaxPro REJEWB Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
 }
+

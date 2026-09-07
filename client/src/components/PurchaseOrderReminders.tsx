@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { PackageCheck, Truck, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import type { CompanyProfile, PurchaseOrder } from '@/lib/types';
 import { shortDate, toTonnes } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,7 @@ import { useReminderSlot } from '@/components/ReminderQueue';
 // here on login, so an order the supplier quietly sat on doesn't go unnoticed.
 // Threshold 0 switches the popup off.
 const DISMISS_KEY = 'poReminders:dismissed';
+const DEV_DISMISSED_KEY = 'poReminders:developer_dismissed';
 
 const dayStart = (iso: string) => {
   const d = new Date(iso);
@@ -56,17 +58,29 @@ interface PendingPoGroup {
 
 export default function PurchaseOrderReminders() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isDeveloper = user?.role === 'DEVELOPER';
+
+  const [devSeen, setDevSeen] = useState(() => {
+    try {
+      return localStorage.getItem(DEV_DISMISSED_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [snoozes, setSnoozes] = useState<Snoozes>(() => loadSnoozes());
   const [closed, setClosed] = useState(false);
+
+  const isDevSuppressed = isDeveloper && devSeen;
 
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
-    enabled: !closed,
+    enabled: !closed && !isDevSuppressed,
   });
 
   const thresholdDays = Number(company?.poReminderDays ?? 3);
-  const enabled = !closed && thresholdDays > 0;
+  const enabled = !closed && !isDevSuppressed && thresholdDays > 0;
 
   const { data: orders } = useQuery({
     queryKey: ['purchase-orders', 'PENDING'],
@@ -121,7 +135,25 @@ export default function PurchaseOrderReminders() {
 
   const slot = useReminderSlot('purchase-orders', enabled && due.length > 0);
 
+  useEffect(() => {
+    if (isDeveloper && slot.open && !devSeen) {
+      try {
+        localStorage.setItem(DEV_DISMISSED_KEY, 'true');
+      } catch {
+        // ignore
+      }
+    }
+  }, [isDeveloper, slot.open, devSeen]);
+
   const close = () => {
+    if (isDeveloper) {
+      try {
+        localStorage.setItem(DEV_DISMISSED_KEY, 'true');
+      } catch {
+        // ignore
+      }
+      setDevSeen(true);
+    }
     setClosed(true);
     slot.close();
   };
@@ -129,6 +161,14 @@ export default function PurchaseOrderReminders() {
   if (!enabled || !slot.open || due.length === 0) return null;
 
   const ignore = (g: PendingPoGroup) => {
+    if (isDeveloper) {
+      try {
+        localStorage.setItem(DEV_DISMISSED_KEY, 'true');
+      } catch {
+        // ignore
+      }
+      setDevSeen(true);
+    }
     const next = { ...snoozes, [g.key]: new Date().toISOString().slice(0, 10) };
     setSnoozes(next);
     localStorage.setItem(DISMISS_KEY, JSON.stringify(next));

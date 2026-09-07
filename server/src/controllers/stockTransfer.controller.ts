@@ -160,14 +160,27 @@ export async function previewStockTransfer(req: Request, res: Response) {
 export async function createStockTransfer(req: Request, res: Response) {
   const data = createStockTransferSchema.parse(req.body);
 
-  // The source silo must actually hold enough seed to move.
+  // The source location must actually hold enough physical seed to move.
+  const purchases = await prisma.purchase.findMany({
+    where: { stockIn: { loadingLocation: data.fromLocation } },
+    select: { netWeightKg: true },
+  });
+  const totalReceivedKg = purchases.reduce((sum, p) => sum + p.netWeightKg, 0);
+  const priorTransfersAgg = await prisma.stockTransfer.aggregate({
+    where: { fromLocation: data.fromLocation },
+    _sum: { weightKg: true },
+  });
+  const availablePhysicalKg = Math.max(0, totalReceivedKg - (priorTransfersAgg._sum.weightKg ?? 0));
+
   const source = await prisma.siloInventory.findFirst({
     where: { itemType: 'BLACK_SEED', location: data.fromLocation },
   });
-  if (!source || source.weightKg < data.weightKg) {
+
+  const availableKg = Math.min(availablePhysicalKg, source?.weightKg ?? 0);
+  if (availableKg < data.weightKg) {
     throw new HttpError(
       400,
-      `Not enough black seed at ${data.fromLocation} (have ${source?.weightKg ?? 0} kg, need ${data.weightKg} kg)`
+      `Not enough black seed at ${data.fromLocation} (have ${availableKg} kg, need ${data.weightKg} kg)`
     );
   }
 

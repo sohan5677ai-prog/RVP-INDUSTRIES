@@ -43,7 +43,7 @@ export default function StockTransferPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
-  const { data: transfers, isLoading } = useQuery({
+  const { data: transfers, isLoading: loadingTransfers } = useQuery({
     queryKey: ['stock-transfers'],
     queryFn: () => api<StockTransfer[]>('/stock-transfers'),
   });
@@ -55,15 +55,18 @@ export default function StockTransferPage() {
   // reference weight the supplier is paid for), which over-counts physical stock by
   // the forgiven ≤80 kg shortages. Using kata net keeps these storage figures in
   // lock-step with Stock by Location, which values physical kata weight.
-  const { data: seedData } = useQuery({
+  const { data: seedData, isLoading: loadingSeed } = useQuery({
     queryKey: ['black-seed-stock'],
     queryFn: () => api<{ rows: { rvpNetWeightKg: number; location: string; isTransferredIn?: boolean }[] }>('/inventory/black-seed'),
   });
+
+  const isLoading = loadingTransfers || loadingSeed;
 
   // Storage carrying interest is a flat 1% per month (shown monthly to match the
   // Bank Loans page), day-prorated per lot by its storage dwell on save.
 
   const storageStock = (loc: string) => {
+    if (!seedData) return 0;
     const received = (seedData?.rows ?? [])
       .filter((r) => !r.isTransferredIn && (r.location || 'RVP') === loc)
       .reduce((s, r) => s + r.rvpNetWeightKg, 0);
@@ -73,7 +76,7 @@ export default function StockTransferPage() {
     const inbound = (transfers ?? [])
       .filter((t) => t.toLocation === loc)
       .reduce((s, t) => s + t.weightKg, 0);
-    return received - out + inbound;
+    return Math.max(0, received - out + inbound);
   };
 
   const [fromLocation, setFromLocation] = useState<string>('');
@@ -184,7 +187,9 @@ export default function StockTransferPage() {
         {STORAGES.map((loc) => (
           <div key={loc} className="rounded-lg border bg-card p-4">
             <div className="text-sm text-muted-foreground">{loc}</div>
-            <div className="text-xl font-bold">{kg(storageStock(loc))}</div>
+            <div className="text-xl font-bold">
+              {loadingSeed && !seedData ? '…' : kg(storageStock(loc))}
+            </div>
             <div className="text-xs text-muted-foreground">black seed in storage</div>
           </div>
         ))}
@@ -263,7 +268,9 @@ export default function StockTransferPage() {
                 <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                 <SelectContent>
                   {STORAGES.map((loc) => (
-                    <SelectItem key={loc} value={loc}>{loc} - {kg(storageStock(loc))} available</SelectItem>
+                    <SelectItem key={loc} value={loc}>
+                      {loc} - {loadingSeed && !seedData ? 'Loading…' : `${kg(storageStock(loc))} available`}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

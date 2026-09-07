@@ -6,12 +6,11 @@ import {
   Send,
   Mic,
   MicOff,
-  Sparkles,
-  ArrowRight,
   Bot,
   Zap,
   Volume2,
   VolumeX,
+  ArrowRight,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import './JarvisPanel.css';

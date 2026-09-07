@@ -10,7 +10,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import type { ExportColumn } from '@/lib/export';
 import type { Payment, Party, Broker, PaymentType, CompanyProfile } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { findCompanyVehicle } from '@/lib/calc';
+import { findCompanyVehicle, companyVehicleNumbers } from '@/lib/calc';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -396,11 +396,16 @@ export default function PaymentsPage() {
                                 title="Share Lorry Freight Payment Receipt via WhatsApp (EN/TE/HI/TA)"
                                 onClick={() => {
                                   const cv = findCompanyVehicle(p.lorryNumber, company?.companyVehicles);
+                                  const knmList = companyVehicleNumbers(company?.companyVehicles);
+                                  const isKnm = Boolean(
+                                    (p.lorryNumber && knmList.includes(p.lorryNumber.trim().toLowerCase())) ||
+                                    (p.payee && /knm/i.test(p.payee))
+                                  );
                                   setSharePaymentTarget({
                                     date: p.date,
                                     lorryNumber: p.lorryNumber!,
-                                    driverPhone: cv?.driverPhone || null,
-                                    driverName: cv?.driverName || null,
+                                    driverPhone: isKnm ? '9440416639' : (cv?.driverPhone || null),
+                                    driverName: isKnm ? 'KNM Transport (Reddy)' : (cv?.driverName || null),
                                     ownerPhone: company?.ownerWhatsappNumber || null,
                                     destination: '-',
                                     grossFreight: Number(p.amount),
@@ -411,6 +416,7 @@ export default function PaymentsPage() {
                                     amountPaid: Number(p.amount),
                                     reference: p.reference ?? null,
                                     balance: 0,
+                                    isKnm,
                                   });
                                 }}
                               >

@@ -16,6 +16,7 @@ export interface LorryPaymentData {
   balance: number;
   deductions?: { label: string; amount: number }[];
   additions?: { label: string; amount: number }[];
+  isKnm?: boolean;
 }
 
 export const LORRY_PAYMENT_LANGUAGES: { key: 'EN' | 'TE' | 'HI' | 'TA'; label: string; native: string }[] = [

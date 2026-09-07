@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
-import { Prisma, type Party, type PriceType } from '@prisma/client';
+import { Prisma, type Party, type PriceType, type SaleStatus } from '@prisma/client';
 import { HttpError } from '../lib/httpError.js';
 import {
   createSaleOrderSchema,
@@ -45,6 +45,8 @@ import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.service.js';
+import { logger } from '../lib/logger.js';
 import { findWaitingConfirmation, markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
 import { resolveOrderEffectiveDetails, resolveOrderBuyerAddress } from '../lib/orderAddress.js';
 
@@ -120,10 +122,15 @@ function withFulfilment<
 
 export async function listSaleOrders(req: Request, res: Response) {
   const { status, product, skip, take, all } = listSaleOrdersSchema.parse(req.query);
-  const isAll = all === 'true';
+  const isAll = all === 'true' || all === true;
+  const statusFilter = status
+    ? status === 'PENDING'
+      ? { in: ['PENDING', 'PARTIAL'] as SaleStatus[] }
+      : status
+    : undefined;
   const orders = await prisma.saleOrder.findMany({
     // The main listing is paginated (take 100). Aging reports bypass this by passing all=true.
-    where: { ...(status ? { status } : {}), ...(product ? { product } : {}) },
+    where: { ...(statusFilter ? { status: statusFilter } : {}), ...(product ? { product } : {}) },
     skip: isAll ? undefined : skip,
     take: isAll ? undefined : take,
     orderBy: { saleDate: 'desc' },
@@ -1054,30 +1061,10 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // already pulled into freightCharge above).
   await markConfirmationUsed(dispatch.vehicleNumber, dispatch.id);
 
-  // WhatsApp the driver where he is going and who to call - fire-and-forget,
-  // only when a driver phone was captured on this dispatch. The broker/buyer
-  // invoice bundle is sent later, from the explicit "Send via WhatsApp" action
-  // (the invoice/EWB don't exist yet at dispatch time).
-  const details = await resolveOrderEffectiveDetails(order);
-
-  void whatsappService.notifyDispatchDriver(
-    {
-      id: dispatch.id,
-      vehicleNumber: dispatch.vehicleNumber,
-      driverName: dispatch.driverName,
-      driverPhone: dispatch.driverPhone,
-      weightKg: dispatch.weightKg,
-    },
-    {
-      name: order.buyer.name,
-      phone: details.effectivePhone,
-      phone2: details.effectivePhone2,
-      locationLink: details.effectiveLocationLink,
-      address: details.effectiveAddress,
-      city: details.effectiveCity,
-    },
-    { destination: details.effectiveDestination, product: order.product }
-  );
+  // Note: Driver location WhatsApp notification is deliberately deferred to invoice
+  // raising (raiseSaleInvoice). Operators occasionally make kata or vehicle errors
+  // at dispatch and undo/re-dispatch, so sending here risked double-sending location
+  // messages to the driver.
 
   res.status(201).json(dispatch);
 }
@@ -1302,6 +1289,15 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
       include: { saleOrder: { include: { buyer: true, broker: true } } },
     });
   });
+
+  // Send the location pin and delivery details to the driver on WhatsApp.
+  // Sent once when the invoice is raised (and deduplicated so re-raising or
+  // subsequent EWB generation never double-sends). Non-blocking to invoice creation.
+  try {
+    await sendDriverLocationIfNotSent(dispatch.id);
+  } catch (err) {
+    logger.warn(`[sale] driver location message failed on raise invoice for dispatch ${dispatch.id}: ${err}`);
+  }
 
   res.json(updated);
 }

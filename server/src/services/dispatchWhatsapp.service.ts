@@ -232,13 +232,9 @@ export async function sendDispatchBundleWhatsApp(dispatchId: string): Promise<Di
     brokerResult = { ok: false, skipped: true, error: `${broker!.name} has no phone number on file` };
   }
 
-  // Driver - NOT sent from here. He already got the buyer's name, phone and maps
-  // link the moment the dispatch was created (createDispatch in sale.controller),
-  // which is when he actually needs them; the invoice bundle runs hours later,
-  // once the IRN/EWB exist. Sending again here only duplicated the message and
-  // billed a second WhatsApp conversation. Report that earlier send instead, so
-  // the toast still accounts for all three legs.
-  const driverLeg = await driverLegFromLog(dispatch.id, dispatch.driverPhone);
+  // Driver - sent when the invoice is raised. If for any reason it wasn't sent yet
+  // (e.g. legacy dispatch or earlier failure), send it now without double-sending.
+  const driverLeg = await sendDriverLocationIfNotSent(dispatch.id);
 
   // Internal copy - every member in Settings → "Dispatch & alert recipients" gets
   // the very same paperwork the buyer got: the buyer's template, the buyer's
@@ -323,10 +319,41 @@ async function driverLegFromLog(dispatchId: string, driverPhone: string | null):
     select: { status: true, errorMessage: true },
   });
   if (!row) {
-    return { status: 'skipped', error: 'No driver message on record - the driver is messaged when the dispatch is created' };
+    return { status: 'skipped', error: 'No driver message on record - the driver is messaged when the invoice is raised' };
   }
   if (row.status === 'SENT') return { status: 'sent', error: null };
   return { status: row.status === 'SKIPPED' ? 'skipped' : 'failed', error: row.errorMessage ?? null };
+}
+
+/**
+ * Send the WhatsApp location template to the driver for a dispatch, IF it has
+ * not already been sent (to prevent double-sending).
+ * Called when an invoice is raised, and safely checked again during bundle send.
+ */
+export async function sendDriverLocationIfNotSent(dispatchId: string): Promise<DispatchWhatsAppLeg> {
+  const dispatch = await prisma.saleDispatch.findUnique({
+    where: { id: dispatchId },
+    select: { id: true, driverPhone: true },
+  });
+  if (!dispatch) return { status: 'skipped', error: 'Dispatch not found' };
+  if (!dispatch.driverPhone) return { status: 'skipped', error: 'No driver phone on this dispatch' };
+
+  // Check if a message was already sent to avoid double-sending
+  const sentRow = await prisma.whatsAppLog.findFirst({
+    where: {
+      direction: 'OUTBOUND',
+      template: 'DISPATCH_DRIVER',
+      relatedType: 'DISPATCH',
+      relatedId: dispatchId,
+      status: 'SENT',
+    },
+  });
+  if (sentRow) {
+    return { status: 'sent', error: null };
+  }
+
+  // Not sent yet -> send to driver now
+  return resendDispatchDriverWhatsApp(dispatchId);
 }
 
 /**

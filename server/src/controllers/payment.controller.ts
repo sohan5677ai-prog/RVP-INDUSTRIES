@@ -7,8 +7,8 @@ import { createPaymentSchema, listPaymentsSchema, updatePaymentSchema } from '..
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 import { uploadFileToStorage } from '../lib/upload.js';
-import { whatsappService, type LorryPaymentDetails } from '../services/whatsapp.service.js';
-import { calcKataFee, calcHamali, pappuLoadingHamali, findCompanyVehicle } from '../lib/calc.js';
+import { whatsappService, type LorryPaymentDetails, resolveKnmTransportRecipient } from '../services/whatsapp.service.js';
+import { calcKataFee, calcHamali, pappuLoadingHamali, findCompanyVehicle, isVehicleExempt } from '../lib/calc.js';
 
 /**
  * Read an uploaded payment screenshot (bank/UPI/cheque) with Gemini and return
@@ -224,12 +224,15 @@ async function resolveLorryPaymentDetails(data: {
     }
   }
 
-  if (!phone && lorryNo) {
+  let isKnmLorry = false;
+  if (lorryNo) {
     const company = await prisma.companyProfile.findFirst().catch(() => null);
-    const cv = findCompanyVehicle((company as any)?.companyVehicles, lorryNo);
-    if (cv?.driverPhone) {
-      phone = cv.driverPhone;
-      if (cv.driverName && !data.driverName) name = `${cv.driverName} (Lorry ${lorryNo})`;
+    const cv = findCompanyVehicle(lorryNo, (company as any)?.companyVehicles);
+    if (cv) {
+      isKnmLorry = true;
+      // Per business requirement: KNM Transport payments/receipts go to Reddy 9440416639, never drivers
+      phone = '9440416639';
+      name = `KNM Transport (Reddy) - Lorry ${lorryNo}`;
     }
   }
 
@@ -272,6 +275,7 @@ async function resolveLorryPaymentDetails(data: {
       reference: data.reference ?? null,
       balance,
       screenshotUrl: data.screenshotUrl,
+      isKnm: isKnmLorry,
     },
     phone,
     name,
@@ -382,23 +386,51 @@ export async function createPayment(req: Request, res: Response) {
     // payee typed free-hand (expense heads) has no record, so no language.
     let waLanguage: WaLanguage | null = null;
 
-    if (data.partyId) {
-      const party = await prisma.party.findUnique({ where: { id: data.partyId } });
-      name = party?.name ?? 'Party';
-      // Hamali Team is crew, not a WhatsApp-reachable party - still get the
-      // internal office copy, just skip messaging their own phone.
-      if (party && party.type !== 'HAMALI_TEAM') {
-        phone = party.phone;
-        phone2 = party.phone2;
-        waLanguage = party.waLanguage;
+    const profile = await prisma.companyProfile.findUnique({
+      where: { id: 'default' },
+      select: { companyVehicles: true, ownerWhatsappNumber: true, alertRecipients: true },
+    }).catch(() => null);
+
+    const lorryNo = data.lorryNumber?.trim() || null;
+    const isKnmVehicle = lorryNo
+      ? (isVehicleExempt(lorryNo, profile?.companyVehicles) || !!findCompanyVehicle(lorryNo, profile?.companyVehicles))
+      : false;
+    const isKnmText = Boolean(
+      (data.payee && /knm/i.test(data.payee)) ||
+      (cleanDescription && (/knm/i.test(cleanDescription) || /transfer transport/i.test(cleanDescription)))
+    );
+    let isKnmTrip = false;
+    if (data.tripId) {
+      const trip = await prisma.saleDispatch.findUnique({
+        where: { id: data.tripId },
+        select: { transportProvider: true, transport: { select: { code: true, name: true } } },
+      }).catch(() => null);
+      if (trip && (trip.transportProvider === 'KNM' || trip.transport?.code === 'KNM' || (trip.transport?.name && /knm/i.test(trip.transport.name)))) {
+        isKnmTrip = true;
       }
-    } else if (data.brokerId) {
-      const broker = await prisma.broker.findUnique({ where: { id: data.brokerId } });
-      name = broker?.name ?? 'Broker';
-      phone = broker?.phone ?? null;
-      waLanguage = broker?.waLanguage ?? null;
-    } else if (data.lorryNumber) {
-      name = data.payee || `Freight payment - Lorry ${data.lorryNumber}`;
+    }
+    let isKnmParty = false;
+    if (data.partyId) {
+      const p = await prisma.party.findUnique({ where: { id: data.partyId }, select: { name: true } }).catch(() => null);
+      if (p && /knm/i.test(p.name)) isKnmParty = true;
+    }
+    const isKnm = isKnmVehicle || isKnmText || isKnmTrip || isKnmParty;
+    const isLorryPayment = Boolean(
+      lorryNo ||
+      ['TRANSPORTER', 'TRANSPORTER_INWARD', 'TRANSPORTER_OUTWARD', 'TRANSPORT'].includes(data.type) ||
+      isKnm ||
+      (data.payee && /lorry|freight/i.test(data.payee)) ||
+      (cleanDescription && /lorry|freight|transfer transport/i.test(cleanDescription))
+    );
+
+    if (isKnm) {
+      // Per business requirement: For KNM Transport, do NOT send to driver! Send to Reddy 9440416639.
+      name = data.payee || (lorryNo ? `KNM Transport - Lorry ${lorryNo}` : 'KNM Transport');
+      phone = '9440416639';
+      phone2 = null;
+    } else if (isLorryPayment) {
+      // Regular lorry payment: send to driver
+      name = data.payee || (lorryNo ? `Freight payment - Lorry ${lorryNo}` : 'Freight payment');
       phone = data.driverPhone?.trim() || null;
       if (!phone) {
         const lorryRes = await resolveLorryPaymentDetails({
@@ -415,6 +447,21 @@ export async function createPayment(req: Request, res: Response) {
         });
         phone = lorryRes?.phone ?? null;
       }
+    } else if (data.partyId) {
+      const party = await prisma.party.findUnique({ where: { id: data.partyId } });
+      name = party?.name ?? 'Party';
+      // Hamali Team is crew, not a WhatsApp-reachable party - still get the
+      // internal office copy, just skip messaging their own phone.
+      if (party && party.type !== 'HAMALI_TEAM') {
+        phone = party.phone;
+        phone2 = party.phone2;
+        waLanguage = party.waLanguage;
+      }
+    } else if (data.brokerId) {
+      const broker = await prisma.broker.findUnique({ where: { id: data.brokerId } });
+      name = broker?.name ?? 'Broker';
+      phone = broker?.phone ?? null;
+      waLanguage = broker?.waLanguage ?? null;
     } else {
       name = data.payee || cleanDescription || `${data.type} payment`;
     }
@@ -427,7 +474,8 @@ export async function createPayment(req: Request, res: Response) {
         reference: data.reference ?? null,
         screenshotUrl,
       },
-      { name, phone, phone2, waLanguage }
+      { name, phone, phone2, waLanguage },
+      { isLorryPayment, isKnm }
     );
   })().catch(() => {});
 

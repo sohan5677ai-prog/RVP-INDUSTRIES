@@ -57,7 +57,7 @@ const PRODUCT_TO_COMMODITY: Record<SaleProduct, Commodity> = {
   NALLA_CHINTAPANDU: 'NALLA_CHINTAPANDU',
 };
 
-const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED'];
+const STATUS_FILTERS: ('ALL' | SaleStatus)[] = ['ALL', 'PENDING', 'DISPATCHED'];
 
 // Payment-status tabs, keyed off receipts (not the lifecycle status). "Received"
 // = every shipment fully paid; "Pending" = any balance still outstanding.
@@ -114,7 +114,13 @@ export default function SaleOrders() {
   );
 
   const filtered = (orders ?? []).filter((o) => {
-    if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
+    if (statusFilter !== 'ALL') {
+      if (statusFilter === 'PENDING') {
+        if (o.status !== 'PENDING' && o.status !== 'PARTIAL') return false;
+      } else if (o.status !== statusFilter) {
+        return false;
+      }
+    }
     if (payFilter !== 'ALL') {
       const received = saleDisplayStatus(o, settled) === 'PAID';
       if (payFilter === 'RECEIVED' && !received) return false;

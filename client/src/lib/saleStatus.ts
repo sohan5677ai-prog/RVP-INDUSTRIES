@@ -3,13 +3,12 @@ import { shortageWithGst, round2 } from './receiptCalc';
 
 /** Lifecycle a sale moves through, with PAID layered on top of the DB status
  *  (payment is tracked via receipts, not a column on the order). */
-export type SaleDisplayStatus = 'PENDING' | 'PARTIAL' | 'DISPATCHED' | 'DELIVERED' | 'PAID';
+export type SaleDisplayStatus = 'PENDING' | 'DISPATCHED' | 'DELIVERED' | 'PAID';
 
 /** Shared badge colour per status, used on every sales page so the lifecycle
  *  reads the same everywhere: amber → grey → blue → green → solid. */
 export const SALE_STATUS_VARIANT: Record<SaleDisplayStatus, 'soft' | 'warning' | 'success' | 'outline' | 'default'> = {
   PENDING: 'warning',
-  PARTIAL: 'outline',
   DISPATCHED: 'soft',
   DELIVERED: 'success',
   PAID: 'default',
@@ -136,7 +135,8 @@ export function dispatchShortage(
 }
 
 /** Order status for display: PAID once it is fully shipped and every shipment is
- *  paid; otherwise the underlying lifecycle status (PENDING/PARTIAL/DISPATCHED/DELIVERED). */
+ *  paid; otherwise the underlying lifecycle status (PENDING/DISPATCHED/DELIVERED),
+ *  with partial shipments treated as PENDING until fully dispatched. */
 export function saleDisplayStatus(o: SaleOrder, settled: Map<string, number>): SaleDisplayStatus {
   const dispatches = o.dispatches ?? [];
   const fullyShipped = o.closedAt != null || o.status === 'DISPATCHED' || o.status === 'DELIVERED';
@@ -146,5 +146,8 @@ export function saleDisplayStatus(o: SaleOrder, settled: Map<string, number>): S
   if (o.closedAt) {
     return dispatches.length > 0 && dispatches.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
   }
-  return o.status;
+  if (o.status === 'PARTIAL') {
+    return 'PENDING';
+  }
+  return o.status === 'DELIVERED' || o.status === 'DISPATCHED' ? o.status : 'PENDING';
 }

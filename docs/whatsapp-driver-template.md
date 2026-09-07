@@ -1,6 +1,6 @@
 # Dispatch → driver WhatsApp (`driver_industries`)
 
-The message the lorry driver gets when a dispatch is created, and again from
+The message the lorry driver gets when an invoice is raised, and again from
 **Resend to driver** on the dispatch row. Approved 2026-08-12, message_id
 `28540`, on the shared KNM number (+91 7207146094).
 

@@ -88,7 +88,7 @@ const statusVariant: Record<SaleStatus, 'soft' | 'warning' | 'success' | 'outlin
   DELIVERED: 'success',
 };
 
-const STATUS_FILTERS: ('ALL' | SaleDisplayStatus)[] = ['ALL', 'PENDING', 'PARTIAL', 'DISPATCHED', 'DELIVERED', 'PAID'];
+const STATUS_FILTERS: ('ALL' | SaleDisplayStatus)[] = ['ALL', 'PENDING', 'DISPATCHED', 'DELIVERED', 'PAID'];
 const NO_BROKER = '__none__';
 
 /**
@@ -1005,7 +1005,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // Re-send just the driver's message - normally fires once at dispatch creation.
+  // Re-send just the driver's message - normally fires once when the invoice is raised.
   // Also doubles as the way to test a template fix against Settings -> WhatsApp's
   // test number without creating a new dispatch.
   const resendDriverWhatsAppMutation = useMutation({

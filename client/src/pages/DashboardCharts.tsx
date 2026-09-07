@@ -238,8 +238,11 @@ export default function DashboardCharts({ data, pnl, purchases, poAll, saleAll, 
     .map((s) => ({ status: s[0] + s.slice(1).toLowerCase(), key: s, count: poAll?.filter((p) => p.status === s).length ?? 0 }));
 
   // ── Sales fulfilment by status ────────────────────────────────────
-  const salePipeline = (['PENDING', 'PARTIAL', 'DISPATCHED', 'DELIVERED'] as SaleStatus[])
-    .map((s) => ({ name: s[0] + s.slice(1).toLowerCase(), value: saleAll?.filter((o) => o.status === s).length ?? 0 }))
+  const salePipeline = (['PENDING', 'DISPATCHED', 'DELIVERED'] as SaleStatus[])
+    .map((s) => ({
+      name: s[0] + s.slice(1).toLowerCase(),
+      value: saleAll?.filter((o) => s === 'PENDING' ? (o.status === 'PENDING' || o.status === 'PARTIAL') : o.status === s).length ?? 0,
+    }))
     .filter((d) => d.value > 0);
 
   // ── Stock composition ─────────────────────────────────────────────

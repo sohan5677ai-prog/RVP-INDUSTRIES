@@ -13,6 +13,7 @@ import {
   formatLorryPaymentReceiptText,
   buildWhatsAppWebUrl,
 } from '@/lib/lorryPaymentTemplate';
+import { companyVehicleNumbers, findCompanyVehicle } from '@/lib/calc';
 import { Copy, Check, Send, ExternalLink, Loader2, Truck, UserCheck, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -66,17 +67,27 @@ function LorryPaymentShareDialogInner({
   data: LorryPaymentData;
   initialPhone?: string | null;
 }) {
-  const [selectedLang, setSelectedLang] = useState<'EN' | 'TE' | 'HI' | 'TA'>('EN');
-  const [phone, setPhone] = useState(() => (initialPhone || data?.driverPhone || '').trim());
-  const [driverName, setDriverName] = useState(() => (data?.driverName || '').trim());
-  const [copied, setCopied] = useState(false);
-  const [sending, setSending] = useState(false);
-
   const { data: company } = useQuery({
     queryKey: ['company'],
     queryFn: () => api<CompanyProfile>('/settings/company'),
     staleTime: 5 * 60_000,
   });
+
+  const isKnm = useMemo(() => {
+    if (data?.isKnm) return true;
+    if (!data?.lorryNumber) return false;
+    const knmList = companyVehicleNumbers(company?.companyVehicles);
+    if (knmList.includes(data.lorryNumber.trim().toLowerCase())) return true;
+    if (findCompanyVehicle(data.lorryNumber, company?.companyVehicles)) return true;
+    if (data.driverName && /knm/i.test(data.driverName)) return true;
+    return false;
+  }, [data?.isKnm, data?.lorryNumber, data?.driverName, company?.companyVehicles]);
+
+  const [selectedLang, setSelectedLang] = useState<'EN' | 'TE' | 'HI' | 'TA'>('EN');
+  const [phone, setPhone] = useState(() => (isKnm ? '9440416639' : (initialPhone || data?.driverPhone || '')).trim());
+  const [driverName, setDriverName] = useState(() => (isKnm ? 'KNM Transport (Reddy)' : (data?.driverName || '')).trim());
+  const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const shabariRecipient = useMemo<AlertMember | null>(() => {
     const parsed = parseAlertMembers(company?.alertRecipients);
@@ -92,23 +103,34 @@ function LorryPaymentShareDialogInner({
 
   // Only query the backend if phone number wasn't already in data
   useEffect(() => {
+    if (isKnm) {
+      setPhone('9440416639');
+      setDriverName('KNM Transport (Reddy)');
+      return;
+    }
     if (!phone && data.lorryNumber) {
       api<{
         driverPhone?: string | null;
         driverName?: string | null;
         ownerPhone?: string | null;
+        isKnm?: boolean;
       }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(data.lorryNumber)}`)
         .then((res) => {
-          if (res?.driverPhone) {
-            setPhone((prev) => prev || res.driverPhone!.trim());
-          }
-          if (res?.driverName) {
-            setDriverName((prev) => prev || res.driverName!.trim());
+          if (res?.isKnm) {
+            setPhone('9440416639');
+            setDriverName('KNM Transport (Reddy)');
+          } else {
+            if (res?.driverPhone) {
+              setPhone((prev) => prev || res.driverPhone!.trim());
+            }
+            if (res?.driverName) {
+              setDriverName((prev) => prev || res.driverName!.trim());
+            }
           }
         })
         .catch(() => {});
     }
-  }, [phone, data.lorryNumber]);
+  }, [isKnm, phone, data.lorryNumber]);
 
   const messageText = formatLorryPaymentReceiptText(data, selectedLang);
 
@@ -157,6 +179,7 @@ function LorryPaymentShareDialogInner({
             amountPaid: data.amountPaid,
             reference: data.reference,
             balance: data.balance,
+            isKnm,
           },
           targetPhone,
           language: selectedLang,
@@ -164,7 +187,7 @@ function LorryPaymentShareDialogInner({
       });
 
       if (res.ok) {
-        toast.success(res.message || 'WhatsApp message sent to driver & copy delivered to Shabari!');
+        toast.success(res.message || (isKnm ? 'WhatsApp receipt sent to KNM Transport (Reddy) & copy delivered to Shabari!' : 'WhatsApp receipt sent to driver & copy delivered to Shabari!'));
         onOpenChange(false);
       } else {
         toast.error(res.message || 'Failed to send WhatsApp message');
@@ -262,7 +285,7 @@ function LorryPaymentShareDialogInner({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="target-phone" className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                Driver WhatsApp Mobile
+                {isKnm ? 'KNM Transport WhatsApp Mobile (Reddy)' : 'Driver WhatsApp Mobile'}
                 {driverName && (
                   <Badge variant="secondary" className="font-normal text-[10px] py-0 px-1.5">
                     <UserCheck className="h-3 w-3 mr-1 text-emerald-600" />
@@ -272,14 +295,14 @@ function LorryPaymentShareDialogInner({
               </Label>
               {phone && (
                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  Auto-filled for {data.lorryNumber}
+                  {isKnm ? 'Auto-filled for KNM Transport (Reddy 9440416639)' : `Auto-filled for ${data.lorryNumber}`}
                 </span>
               )}
             </div>
             <Input
               id="target-phone"
               type="tel"
-              placeholder="e.g. 9876543210 (Driver / Transporter)"
+              placeholder={isKnm ? '9440416639 (Reddy - KNM Transport)' : 'e.g. 9876543210 (Driver / Transporter)'}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="text-sm font-mono"
@@ -291,10 +314,10 @@ function LorryPaymentShareDialogInner({
                 <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div className="leading-tight">
                   <span className="font-semibold text-emerald-900 dark:text-emerald-200">
-                    Internal Copy (Shabari):
+                    Internal Copy (Shabari Only):
                   </span>{' '}
                   <span className="text-muted-foreground text-[11px]">
-                    Automatic copy will be delivered only to Shabari {shabariRecipient?.phone ? `(${shabariRecipient.phone})` : ''} on WhatsApp.
+                    Automatic copy will be delivered only to Shabari {shabariRecipient?.phone ? `(${shabariRecipient.phone})` : ''} on WhatsApp. No other alert members are messaged.
                   </span>
                 </div>
               </div>

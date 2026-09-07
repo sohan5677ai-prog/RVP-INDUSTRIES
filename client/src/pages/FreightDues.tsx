@@ -1766,9 +1766,14 @@ export default function FreightDuesPage() {
     const totalPaid = prevPaidForRow + (paidNow != null ? paidNow : 0);
     const remainingDue = Math.max(0, row.net - totalPaid);
 
-    let driverPhone = row.driverPhone || null;
-    let driverName = row.driverName || null;
-    if (!driverPhone && row.lorry) {
+    const knmList = companyVehicleNumbers(company?.companyVehicles);
+    const isKnm = (row.lorry && knmList.includes(row.lorry.toLowerCase())) ||
+                  row.party === 'KNM Transport' ||
+                  row.sourced === 'Transfer';
+
+    let driverPhone = isKnm ? '9440416639' : (row.driverPhone || null);
+    let driverName = isKnm ? 'KNM Transport (Reddy)' : (row.driverName || null);
+    if (!isKnm && !driverPhone && row.lorry) {
       const cv = findCompanyVehicle(row.lorry, company?.companyVehicles);
       if (cv?.driverPhone) {
         driverPhone = cv.driverPhone;
@@ -1801,6 +1806,7 @@ export default function FreightDuesPage() {
       balance: remainingDue,
       deductions: row.deductions,
       additions: row.additions,
+      isKnm,
     };
   }, [paymentsByLorry, dueFor, company?.companyVehicles, company?.ownerWhatsappNumber, waitingBookings]);
 
@@ -1815,9 +1821,16 @@ export default function FreightDuesPage() {
   const payMutation = useMutation({
     mutationFn: () => {
       if (!payTarget) throw new Error('No trip selected for payment');
-      const desc = payTarget.sourced === 'Transfer'
-        ? `Transfer transport (${payTarget.kind || 'Internal'}) - Lorry ${payTarget.lorry}`
-        : `Freight payment - Lorry ${payTarget.lorry}`;
+      const knmList = companyVehicleNumbers(company?.companyVehicles);
+      const isTargetKnm = (payTarget.lorry && knmList.includes(payTarget.lorry.toLowerCase())) ||
+                          payTarget.sourced === 'Transfer';
+      const desc = isTargetKnm
+        ? (payTarget.sourced === 'Transfer'
+            ? `Transfer transport (${payTarget.kind || 'Internal'}) - Lorry ${payTarget.lorry}`
+            : `KNM Freight payment - Lorry ${payTarget.lorry}`)
+        : (payTarget.sourced === 'Transfer'
+            ? `Transfer transport (${payTarget.kind || 'Internal'}) - Lorry ${payTarget.lorry}`
+            : `Freight payment - Lorry ${payTarget.lorry}`);
 
       return api<Payment>('/payments', {
         method: 'POST',
@@ -1826,8 +1839,9 @@ export default function FreightDuesPage() {
           amount: Number(payAmount) || 0,
           type: payType,
           lorryNumber: payTarget.lorry,
-          driverPhone: payDriverPhone.trim() || undefined,
-          driverName: payDriverName.trim() || undefined,
+          payee: isTargetKnm ? `KNM Transport - Lorry ${payTarget.lorry}` : undefined,
+          driverPhone: isTargetKnm ? '9440416639' : (payDriverPhone.trim() || undefined),
+          driverName: isTargetKnm ? 'KNM Transport (Reddy)' : (payDriverName.trim() || undefined),
           purchaseId: payTarget.sourced === 'Purchase' && !payTarget.id.startsWith('comb-') ? payTarget.id : undefined,
           tripId: !payTarget.id.startsWith('comb-') ? payTarget.id : undefined,
           reference: payReference || null,
@@ -1866,14 +1880,18 @@ export default function FreightDuesPage() {
       date: row.date,
       destination: row.destination,
     });
+    const knmList = companyVehicleNumbers(company?.companyVehicles);
+    const isKnm = (row.lorry && knmList.includes(row.lorry.toLowerCase())) ||
+                  row.party === 'KNM Transport' ||
+                  row.sourced === 'Transfer';
     const paymentData = buildLorryPaymentData(row);
-    setPayDriverPhone(paymentData.driverPhone || '');
-    setPayDriverName(paymentData.driverName || '');
+    setPayDriverPhone(isKnm ? '9440416639' : (paymentData.driverPhone || ''));
+    setPayDriverName(isKnm ? 'KNM Transport (Reddy)' : (paymentData.driverName || ''));
     setPayType(row.sourced === 'Purchase' ? 'TRANSPORTER_INWARD' : 'TRANSPORTER_OUTWARD');
     setPayDate(row.date ? row.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
     setPayAmount(due > 0 ? String(due) : '');
     setPayReference('');
-  }, [buildLorryPaymentData]);
+  }, [buildLorryPaymentData, company?.companyVehicles]);
 
   const { outwardNet, outwardDue, inwardNet, inwardDue, knmUsualNet, knmUsualDue, transfersNet, transfersDue } = useMemo(() => ({
     outwardNet: outwardRows.reduce((s, r) => s + r.net, 0),
@@ -2068,12 +2086,30 @@ export default function FreightDuesPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pay-driver-phone">Driver Phone (WhatsApp notification)</Label>
+              <Label htmlFor="pay-driver-phone">
+                {(() => {
+                  const knmList = companyVehicleNumbers(company?.companyVehicles);
+                  const isKnm = (payTarget?.lorry && knmList.includes(payTarget.lorry.toLowerCase())) ||
+                                payTarget?.sourced === 'Transfer' ||
+                                mainTab === 'knm';
+                  return isKnm
+                    ? 'KNM Transport Phone (Reddy 9440416639)'
+                    : 'Driver Phone (WhatsApp notification)';
+                })()}
+              </Label>
               <Input
                 id="pay-driver-phone"
                 value={payDriverPhone}
                 onChange={(e) => setPayDriverPhone(e.target.value)}
-                placeholder="e.g. 9876543210 (auto-detected if available)"
+                placeholder={(() => {
+                  const knmList = companyVehicleNumbers(company?.companyVehicles);
+                  const isKnm = (payTarget?.lorry && knmList.includes(payTarget.lorry.toLowerCase())) ||
+                                payTarget?.sourced === 'Transfer' ||
+                                mainTab === 'knm';
+                  return isKnm
+                    ? '9440416639 (KNM Transport - Reddy)'
+                    : 'e.g. 9876543210 (auto-detected if available)';
+                })()}
               />
             </div>
             <div className="space-y-2">

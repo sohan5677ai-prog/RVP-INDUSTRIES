@@ -263,6 +263,16 @@ function templateName(key: WaTemplateKey): string | undefined {
 const DISPATCH_REMINDER_NUMBER = process.env.WHATSAPP_DISPATCH_REMINDER_NUMBER?.trim() || '9440416639';
 
 /**
+ * Dedicated WhatsApp number for KNM Transport (Reddy).
+ * Lorry payment messages for KNM Transport must go to Reddy, not individual drivers.
+ */
+export const KNM_TRANSPORT_WHATSAPP_NUMBER = process.env.KNM_TRANSPORT_WHATSAPP_NUMBER?.trim() || '9440416639';
+
+export function resolveKnmTransportRecipient(): string {
+  return normalizeWhatsAppNumber(KNM_TRANSPORT_WHATSAPP_NUMBER) || '919440416639';
+}
+
+/**
  * Normalise an Indian phone number to the 12-digit "91XXXXXXXXXX" form
  * Fast2SMS expects. Returns null when the input can't be a valid mobile.
  */
@@ -300,6 +310,7 @@ export interface LorryPaymentDetails {
   reference?: string | null;
   balance: number;
   screenshotUrl?: string | null;
+  isKnm?: boolean;
 }
 
 export function formatLorryPaymentText(details: LorryPaymentDetails, lang: WaLanguage = 'EN'): string {
@@ -1058,7 +1069,11 @@ export const whatsappService = {
    * If the ids differ, the wrong wording is baked into rvp_payment_sent_text's
    * own approved body and has to be corrected in the Fast2SMS panel.
    */
-  async notifyPaymentSent(payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null }, party: WaRecipient) {
+  async notifyPaymentSent(
+    payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null },
+    party: WaRecipient,
+    options?: { isLorryPayment?: boolean; isKnm?: boolean }
+  ) {
     const hasImage = !!payment.screenshotUrl;
     const lang = party.waLanguage ?? 'EN';
     if (!hasImage && templateId('PAYMENT_SENT_TEXT', lang) && templateId('PAYMENT_SENT_TEXT', lang) === templateId('PAYMENT_SENT', lang)) {
@@ -1067,15 +1082,42 @@ export const whatsappService = {
           `(${templateId('PAYMENT_SENT', lang)}) - this payment has no screenshot but will send on the image template's copy`
       );
     }
+
+    const message: MessageBody = {
+      templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
+      language: party.waLanguage,
+      variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
+      mediaUrl: payment.screenshotUrl ?? undefined,
+      relatedType: 'PAYMENT',
+      relatedId: payment.id,
+    };
+
+    const isLorry =
+      options?.isLorryPayment ??
+      Boolean(
+        /lorry/i.test(party.name) ||
+        /freight payment/i.test(party.name) ||
+        /knm transport/i.test(party.name)
+      );
+
+    if (isLorry) {
+      // For lorry payments: message goes to counterparty (driver, or Reddy 9440416639 for KNM Transport).
+      // Shabari gets an internal copy ONLY. No other internal alert recipients get spammed.
+      const targetPhones = [party.phone, party.phone2].filter(Boolean) as string[];
+      const result = targetPhones.length > 0
+        ? await sendWhatsAppTemplate({ ...message, to: targetPhones })
+        : { ok: false, skipped: true, error: 'No recipient phone on file' };
+
+      const shabari = await resolveShabariRecipient();
+      const sentTo = targetPhones.map(normalizeWhatsAppNumber).filter(Boolean);
+      if (shabari && !sentTo.includes(shabari)) {
+        await sendWhatsAppTemplate({ ...message, to: shabari, language: 'EN' });
+      }
+      return result;
+    }
+
     await sendToPartyAndInternal(
-      {
-        templateKey: hasImage ? 'PAYMENT_SENT' : 'PAYMENT_SENT_TEXT',
-        language: party.waLanguage,
-        variables: [party.name, fmtInr(payment.amount), fmtDate(payment.date), payment.reference ?? '-'],
-        mediaUrl: payment.screenshotUrl ?? undefined,
-        relatedType: 'PAYMENT',
-        relatedId: payment.id,
-      },
+      message,
       [party.phone, party.phone2]
     );
   },
@@ -1084,12 +1126,14 @@ export const whatsappService = {
    * Lorry Freight payment recorded → transporter / driver + Shabari copy only.
    * Sends the dedicated 11-variable multilingual Lorry Payment summary template.
    * Per business requirement, WhatsApp receipts must ONLY go to the driver and Shabari, no one else.
+   * For KNM Transport, receipts go to Reddy (9440416639), not drivers.
    */
   async notifyLorryPaymentSent(
     payment: { id: string; amount: number; date: Date; reference: string | null; screenshotUrl: string | null },
     lorryDetails: LorryPaymentDetails,
     recipient: WaRecipient
   ) {
+    const isKnm = lorryDetails.isKnm || /knm/i.test(recipient.name) || /knm/i.test(lorryDetails.destination || '');
     const hasImage = !!payment.screenshotUrl;
     const message = {
       templateKey: (hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT') as WaTemplateKey,
@@ -1099,7 +1143,10 @@ export const whatsappService = {
       relatedType: 'PAYMENT' as const,
       relatedId: payment.id,
     };
-    const targetPhones = [recipient.phone, recipient.phone2].filter(Boolean) as string[];
+    const targetPhones = isKnm
+      ? [resolveKnmTransportRecipient()]
+      : ([recipient.phone, recipient.phone2].filter(Boolean) as string[]);
+
     const result = targetPhones.length > 0
       ? await sendWhatsAppTemplate({ ...message, to: targetPhones })
       : { ok: false, skipped: true, error: 'No driver/recipient phone on file' };
@@ -1114,8 +1161,8 @@ export const whatsappService = {
   },
 
   /**
-   * Direct send of Lorry Payment summary (receipt) via WhatsApp API to driver's phone,
-   * with copy delivered ONLY to Shabari.
+   * Direct send of Lorry Payment summary (receipt) via WhatsApp API to driver's phone
+   * (or Reddy 9440416639 for KNM Transport), with copy delivered ONLY to Shabari.
    */
   async sendLorryPaymentSummary(
     details: LorryPaymentDetails,
@@ -1123,6 +1170,11 @@ export const whatsappService = {
     language: WaLanguage = 'EN',
     screenshotUrl?: string | null
   ) {
+    const isKnm = details.isKnm;
+    const effectiveTarget = (isKnm && (!targetPhone || targetPhone.includes('9440416639')))
+      ? resolveKnmTransportRecipient()
+      : targetPhone;
+
     const hasImage = !!screenshotUrl;
     const message = {
       templateKey: (hasImage ? 'LORRY_PAYMENT' : 'LORRY_PAYMENT_TEXT') as WaTemplateKey,
@@ -1133,12 +1185,12 @@ export const whatsappService = {
     };
     const result = await sendWhatsAppTemplate({
       ...message,
-      to: targetPhone,
+      to: effectiveTarget,
     });
 
     // Copy Shabari ONLY - no one else needed
     const shabari = await resolveShabariRecipient();
-    const cleanTarget = normalizeWhatsAppNumber(targetPhone);
+    const cleanTarget = normalizeWhatsAppNumber(effectiveTarget);
     if (shabari && shabari !== cleanTarget) {
       await sendWhatsAppTemplate({ ...message, to: shabari, language: 'EN' });
     }

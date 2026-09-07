@@ -149,7 +149,60 @@ export const toolDeclarations: FunctionDeclaration[] = [
       type: Type.OBJECT,
       properties: {},
     },
-  }
+  },
+  {
+    name: 'navigate_to_page',
+    description: 'Navigate the user to a specific ERP page. Use this when the user asks to go to / show / open a page. Return the route path that the client should navigate to. Available pages: / (Home), /dashboard, /parties, /brokers, /transports, /purchase-orders, /stock-in, /purchases, /verification, /pappu-calculator, /stock/overview, /stock/location, /stock/transfer, /stock/date, /stock/party, /stock/price, /stock/state, /loans, /private-loans, /sale-orders, /sales/pappu, /sales/husk, /sales/tps, /sales/byproducts, /sales/profit-loss, /sales/internal-weight, /sales/dues-today, /accounts/party-ledger (add ?partyId=X to go to a specific party), /accounts/hamali-ledger, /accounts/brokerage-ledger, /accounts/chart-of-accounts, /accounts/balance-sheet, /accounts/profit-loss, /accounts/journal-entries, /transactions/payments, /transactions/receipts, /reports/sale-dues, /reports/purchase-dues, /reports/payment-planner, /reports/brokerage-dues, /reports/freight-dues, /reports/gunny-bags, /reports/electricity, /reports/maintenance, /reports/drawings, /reports/interest, /reports/expenses, /reports/irn-ewb, /reports/email-logs, /reports/taxes, /settings, /users',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        route: {
+          type: Type.STRING,
+          description: 'The route path to navigate to (e.g. /purchase-orders or /accounts/party-ledger?partyId=abc123)',
+        },
+        pageLabel: {
+          type: Type.STRING,
+          description: 'Human-readable name of the page (e.g. "Purchase Orders")',
+        },
+      },
+      required: ['route', 'pageLabel'],
+    },
+  },
+  {
+    name: 'get_party_ledger_summary',
+    description: 'Get the outstanding balance summary for a specific party (supplier or buyer). Searches by name and returns the net position (payable/receivable), total purchases, sales, payments, and receipts.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        partyName: {
+          type: Type.STRING,
+          description: 'Name (or partial name) of the party to look up',
+        },
+      },
+      required: ['partyName'],
+    },
+  },
+  {
+    name: 'get_overdue_dues',
+    description: 'Get sale dispatches that are past their due date (delivered but not fully paid). Shows overdue buyers with amounts.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limit: {
+          type: Type.INTEGER,
+          description: 'Max number of overdue entries to return (default 10)',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_todays_summary',
+    description: 'Get a summary of today\'s ERP activity: arrivals, dispatches, payments made, and receipts collected today.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+    },
+  },
 ];
 
 export async function executeTool(name: string, args: Record<string, any>): Promise<any> {
@@ -394,6 +447,160 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
             balance: totalDebit - totalCredit,
           };
         })
+      };
+    }
+    case 'navigate_to_page': {
+      // The actual navigation happens client-side. We just return the intent.
+      return {
+        action: 'navigate',
+        route: args.route as string,
+        pageLabel: args.pageLabel as string,
+      };
+    }
+    case 'get_party_ledger_summary': {
+      const partyName = args.partyName as string;
+      const party = await prisma.party.findFirst({
+        where: { name: { contains: partyName, mode: 'insensitive' } },
+        select: { id: true, name: true, type: true, phone: true, destination: true, openingBalance: true, openingBalanceType: true },
+      });
+      if (!party) return { error: `No party found matching "${partyName}"` };
+
+      const [purchases, sales, payments, receipts] = await Promise.all([
+        prisma.weightVerification.aggregate({
+          _sum: { totalAmount: true },
+          where: { purchase: { stockIn: { purchaseOrder: { partyId: party.id } } } },
+        }),
+        prisma.saleDispatch.aggregate({
+          _sum: { weightKg: true },
+          where: { saleOrder: { buyerId: party.id } },
+        }),
+        prisma.payment.aggregate({
+          _sum: { amount: true },
+          _count: true,
+          where: { partyId: party.id },
+        }),
+        prisma.receipt.aggregate({
+          _sum: { amount: true },
+          _count: true,
+          where: { partyId: party.id },
+        }),
+      ]);
+
+      return {
+        party: { id: party.id, name: party.name, type: party.type, phone: party.phone, destination: party.destination },
+        totalPurchases: Number(purchases._sum.totalAmount ?? 0),
+        totalSaleDispatchKg: sales._sum.weightKg ?? 0,
+        totalPaymentsMade: Number(payments._sum.amount ?? 0),
+        paymentCount: payments._count,
+        totalReceiptsCollected: Number(receipts._sum.amount ?? 0),
+        receiptCount: receipts._count,
+        openingBalance: Number(party.openingBalance ?? 0),
+        openingBalanceType: party.openingBalanceType,
+      };
+    }
+    case 'get_overdue_dues': {
+      const limit = Number(args.limit) || 10;
+      const now = new Date();
+      // Find dispatches that are delivered and whose sale order has dueDays set
+      const dispatches = await prisma.saleDispatch.findMany({
+        where: {
+          status: 'DELIVERED',
+          deliveredDate: { not: null },
+          saleOrder: { dueDays: { not: null } },
+        },
+        include: {
+          saleOrder: { include: { buyer: { select: { name: true } } } },
+          receipts: { select: { amount: true } },
+        },
+        orderBy: { deliveredDate: 'asc' },
+      });
+
+      const overdue: any[] = [];
+      for (const d of dispatches) {
+        if (!d.deliveredDate || !d.saleOrder.dueDays) continue;
+        const dueDate = new Date(d.deliveredDate);
+        dueDate.setDate(dueDate.getDate() + d.saleOrder.dueDays);
+        if (dueDate >= now) continue; // not yet overdue
+
+        const rate = Number(d.saleOrder.ratePerKg);
+        const billed = Math.round(d.weightKg * rate + Number(d.gstAmount));
+        const received = d.receipts.reduce((s, r) => s + Number(r.amount), 0);
+        const outstanding = Math.round(billed - received);
+        if (outstanding <= 0) continue; // fully paid
+
+        const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / 86400000);
+        overdue.push({
+          buyerName: d.saleOrder.buyer.name,
+          invoiceNumber: d.invoiceNumber,
+          product: d.saleOrder.product,
+          billed,
+          received: Math.round(received),
+          outstanding,
+          dueDate: dueDate.toISOString(),
+          daysOverdue,
+        });
+        if (overdue.length >= limit) break;
+      }
+      return { overdueCount: overdue.length, overdueDues: overdue };
+    }
+    case 'get_todays_summary': {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+      const dateFilter = { gte: todayStart, lte: todayEnd };
+
+      const [arrivals, dispatches, payments, receipts] = await Promise.all([
+        prisma.stockIn.findMany({
+          where: { arrivalDate: dateFilter },
+          include: { purchaseOrder: { include: { party: { select: { name: true } } } } },
+        }),
+        prisma.saleDispatch.findMany({
+          where: { dispatchDate: dateFilter },
+          include: { saleOrder: { include: { buyer: { select: { name: true } } } } },
+        }),
+        prisma.payment.findMany({
+          where: { date: dateFilter },
+          include: { party: { select: { name: true } } },
+        }),
+        prisma.receipt.findMany({
+          where: { date: dateFilter },
+          include: { party: { select: { name: true } } },
+        }),
+      ]);
+
+      return {
+        arrivals: arrivals.map(a => ({
+          supplier: a.purchaseOrder.party.name,
+          lorry: a.lorryNumber,
+          weightKg: a.rvpKataKg,
+          invoice: a.invoiceNumber,
+        })),
+        dispatches: dispatches.map(d => ({
+          buyer: d.saleOrder.buyer.name,
+          product: d.saleOrder.product,
+          weightKg: d.weightKg,
+          vehicle: d.vehicleNumber,
+          invoice: d.invoiceNumber,
+        })),
+        payments: payments.map(p => ({
+          partyName: p.party?.name || 'Other',
+          amount: Number(p.amount),
+          type: p.type,
+        })),
+        receipts: receipts.map(r => ({
+          partyName: r.party?.name || 'Other',
+          amount: Number(r.amount),
+          type: r.type,
+        })),
+        totals: {
+          arrivalsCount: arrivals.length,
+          arrivalsKg: arrivals.reduce((s, a) => s + a.rvpKataKg, 0),
+          dispatchesCount: dispatches.length,
+          dispatchesKg: dispatches.reduce((s, d) => s + d.weightKg, 0),
+          paymentTotal: Math.round(payments.reduce((s, p) => s + Number(p.amount), 0)),
+          receiptTotal: Math.round(receipts.reduce((s, r) => s + Number(r.amount), 0)),
+        },
       };
     }
     default:

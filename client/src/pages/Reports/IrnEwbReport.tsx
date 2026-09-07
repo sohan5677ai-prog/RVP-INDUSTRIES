@@ -147,7 +147,7 @@ export default function IrnEwbReport() {
   const sendInvoiceEmailMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/einvoice/email`, { method: 'POST' }),
     onSuccess: () => {
-      toast.success('Invoice emailed to buyer');
+      toast.success('Document bundle emailed to buyer (CC broker, BCC company)');
       qc.invalidateQueries({ queryKey: ['email-logs'] });
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -156,7 +156,7 @@ export default function IrnEwbReport() {
   const sendEwbEmailMutation = useMutation({
     mutationFn: (id: string) => api(`/sale-dispatches/${id}/ewaybill/email`, { method: 'POST' }),
     onSuccess: () => {
-      toast.success('E-Way Bill emailed to buyer');
+      toast.success('Document bundle emailed to buyer (CC broker, BCC company)');
       qc.invalidateQueries({ queryKey: ['email-logs'] });
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -497,7 +497,7 @@ export default function IrnEwbReport() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            title={s.saleOrder?.buyer?.email ? 'Email IRN' : 'No buyer email'}
+                            title={s.saleOrder?.buyer?.email ? 'Email document bundle (Invoice + EWB + LR) to buyer (CC broker, BCC company)' : 'No buyer email'}
                             disabled={!s.saleOrder?.buyer?.email || sendInvoiceEmailMutation.isPending}
                             onClick={() => sendInvoiceEmailMutation.mutate(s.id)}
                           >
@@ -593,7 +593,7 @@ export default function IrnEwbReport() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            title={s.saleOrder?.buyer?.email ? 'Email EWB' : 'No buyer email'}
+                            title={s.saleOrder?.buyer?.email ? 'Email document bundle (Invoice + EWB + LR) to buyer (CC broker, BCC company)' : 'No buyer email'}
                             disabled={!s.saleOrder?.buyer?.email || sendEwbEmailMutation.isPending}
                             onClick={() => sendEwbEmailMutation.mutate(s.id)}
                           >

@@ -17,7 +17,7 @@ import { InventoryService } from '../services/inventory.service.js';
 import { computePappuOrderMargins } from './inventory.controller.js';
 import { clearCache } from '../lib/cache.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { confirmDelivery } from '../services/delivery.service.js';
+import { confirmDelivery, closeTolerancePctFor } from '../services/delivery.service.js';
 
 import {
   calcSaleFreight,
@@ -101,28 +101,21 @@ async function deriveDestinationFreight(buyer: Party, weightKg: number, priceTyp
  * silently vanishing.
  */
 function withFulfilment<
-  T extends { tonnageKg: number; closedAt?: Date | null; dispatches?: { weightKg: number }[] },
+  T extends { tonnageKg: number; closedAt?: Date | null; dispatches?: { weightKg: number; status?: string }[]; status?: string },
 >(order: T) {
   const dispatchedKg = (order.dispatches ?? []).reduce((s, d) => s + d.weightKg, 0);
   const balanceKg = Math.max(0, order.tonnageKg - dispatchedKg);
   const closed = order.closedAt != null;
+  const status = closed && (order.status === 'PARTIAL' || order.status === 'PENDING')
+    ? (order.dispatches?.length && order.dispatches.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED')
+    : order.status;
   return {
     ...order,
+    ...(status ? { status } : {}),
     dispatchedKg,
     remainingKg: closed ? 0 : balanceKg,
     shortKg: closed ? balanceKg : 0,
   };
-}
-
-/**
- * Close tolerance (%) configured for a product: the tight figure for bagged
- * pappu, the wider one for husk and the other loose byproducts.
- */
-async function closeTolerancePctFor(product: string): Promise<number> {
-  const company = await getCompanyProfileRow();
-  return isLooseLoadedProduct(product)
-    ? Number(company.saleCloseToleranceByproductPct ?? DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT)
-    : Number(company.saleCloseTolerancePct ?? DEFAULT_SALE_CLOSE_TOLERANCE_PCT);
 }
 
 export async function listSaleOrders(req: Request, res: Response) {
@@ -685,7 +678,14 @@ export async function updateSaleOrder(req: Request, res: Response) {
 
   const stamps = dispatchedKg > 0 ? {} : await currentCostStamps(destination ?? effectiveDestination, priceType);
 
-  const status = dispatchedKg === 0 ? 'PENDING' : (dispatchedKg >= data.tonnageKg ? 'DISPATCHED' : 'PARTIAL');
+  const tolerancePct = await closeTolerancePctFor(data.product);
+  const isFulfilled = isSaleOrderFulfilled(data.tonnageKg, dispatchedKg, tolerancePct);
+  const isClosed = order.closedAt != null || isFulfilled;
+  const status = dispatchedKg === 0
+    ? 'PENDING'
+    : isClosed
+      ? (order.dispatches.length > 0 && order.dispatches.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED')
+      : 'PARTIAL';
 
   const buyerAddressId = data.buyerAddressId !== undefined ? (selectedAddr?.id || data.buyerAddressId) : (selectedAddr?.id || order.buyerAddressId);
   const buyerAddress = data.buyerAddress !== undefined ? (selectedAddr?.address || data.buyerAddress) : (order.buyerAddress || selectedAddr?.address || buyer.address || null);
@@ -1212,10 +1212,12 @@ export async function closeSaleOrder(req: Request, res: Response) {
   const shortKg = Math.max(0, order.tonnageKg - dispatchedKg);
   if (shortKg === 0) throw new HttpError(400, 'This sale order is already fully dispatched');
 
+  const allDelivered = order.dispatches.length > 0 && order.dispatches.every((d) => d.status === 'DELIVERED');
+
   await prisma.saleOrder.update({
     where: { id: order.id },
     data: {
-      status: 'DISPATCHED',
+      status: allDelivered ? 'DELIVERED' : 'DISPATCHED',
       closedAt: new Date(),
       closeReason: reason?.trim() || `Closed short - ${shortKg} kg left unshipped`,
     },

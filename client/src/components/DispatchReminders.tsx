@@ -60,7 +60,8 @@ export default function DispatchReminders() {
     return (orders ?? [])
       .filter((o) => {
         if (!o.reminderDate) return false;
-        if (o.status === 'DISPATCHED') return false; // nothing left to dispatch
+        if (o.closedAt) return false;
+        if (o.status === 'DISPATCHED' || o.status === 'DELIVERED') return false; // nothing left to dispatch
         if ((o.remainingKg ?? o.tonnageKg) <= 0) return false;
         if (daysUntil(o.reminderDate) > REMIND_WINDOW_DAYS) return false; // still too early
         if (dismissed.has(reminderKey(o))) return false;

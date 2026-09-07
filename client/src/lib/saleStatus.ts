@@ -139,9 +139,12 @@ export function dispatchShortage(
  *  paid; otherwise the underlying lifecycle status (PENDING/PARTIAL/DISPATCHED/DELIVERED). */
 export function saleDisplayStatus(o: SaleOrder, settled: Map<string, number>): SaleDisplayStatus {
   const dispatches = o.dispatches ?? [];
-  const fullyShipped = o.status === 'DISPATCHED' || o.status === 'DELIVERED';
+  const fullyShipped = o.closedAt != null || o.status === 'DISPATCHED' || o.status === 'DELIVERED';
   if (fullyShipped && dispatches.length > 0 && dispatches.every((d) => isDispatchPaid(d, Number(o.ratePerKg), settled))) {
     return 'PAID';
+  }
+  if (o.closedAt) {
+    return dispatches.length > 0 && dispatches.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
   }
   return o.status;
 }

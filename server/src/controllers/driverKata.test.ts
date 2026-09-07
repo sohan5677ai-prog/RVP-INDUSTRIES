@@ -160,4 +160,45 @@ describe('confirmDelivery service', () => {
 
     expect(result.status).toBe('DELIVERED');
   });
+
+  it('does not revert a short-closed order to PARTIAL upon delivery', async () => {
+    const mockDispatch = {
+      id: 'disp_short',
+      status: 'DISPATCHED',
+      weightKg: 29500,
+      dispatchDate: new Date('2026-09-01'),
+      receivedDate: null,
+      saleOrder: {
+        id: 'so_short',
+        product: 'HUSK',
+        ratePerKg: 10.3,
+        gstExempt: false,
+        tonnageKg: 30000,
+        closedAt: new Date('2026-09-01'),
+        closeReason: 'Final lorry landed 500 kg under the booked tonnage - within the 2% tolerance',
+        buyer: { name: 'Kraft Food Tech India LLP' },
+      },
+    };
+
+    dispatchFindUnique.mockResolvedValue(mockDispatch);
+    dispatchUpdate.mockResolvedValue({ ...mockDispatch, status: 'DELIVERED', buyerKataKg: 29500, shortageKg: 0, creditNoteAmount: 0 });
+    dispatchFindMany.mockResolvedValue([{ id: 'disp_short', status: 'DELIVERED', weightKg: 29500 }]);
+    orderFindUnique.mockResolvedValue({ product: 'HUSK', costFrozenAt: null });
+
+    const result = await confirmDelivery({
+      dispatchId: 'disp_short',
+      buyerKataKg: 29500,
+      deliveredDate: new Date('2026-09-02'),
+    });
+
+    expect(orderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'so_short' },
+        data: expect.objectContaining({
+          status: 'DELIVERED',
+        }),
+      })
+    );
+    expect(result.status).toBe('DELIVERED');
+  });
 });

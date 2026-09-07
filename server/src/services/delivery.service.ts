@@ -2,9 +2,33 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { clearCache } from '../lib/cache.js';
 import { computePappuOrderMargins } from '../controllers/inventory.controller.js';
+import { getCompanyProfileRow } from '../controllers/settings.controller.js';
+import {
+  isLooseLoadedProduct,
+  isSaleOrderFulfilled,
+  DEFAULT_SALE_CLOSE_TOLERANCE_PCT,
+  DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
+} from '../lib/calc.js';
 import type { SaleDispatch } from '@prisma/client';
 
 const GST_RATE = 0.05;
+
+/**
+ * Close tolerance (%) configured for a product: the tight figure for bagged
+ * pappu, the wider one for husk and the other loose byproducts.
+ */
+export async function closeTolerancePctFor(product: string): Promise<number> {
+  try {
+    const company = await getCompanyProfileRow();
+    return isLooseLoadedProduct(product)
+      ? Number(company?.saleCloseToleranceByproductPct ?? DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT)
+      : Number(company?.saleCloseTolerancePct ?? DEFAULT_SALE_CLOSE_TOLERANCE_PCT);
+  } catch {
+    return isLooseLoadedProduct(product)
+      ? DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT
+      : DEFAULT_SALE_CLOSE_TOLERANCE_PCT;
+  }
+}
 
 /** GST on weight × rate at the given fraction (default 5%), rounded to paise. */
 export function calcGst(weightKg: number, ratePerKg: number, fraction: number = GST_RATE): number {
@@ -114,11 +138,26 @@ export async function confirmDelivery(args: ConfirmDeliveryArgs): Promise<SaleDi
 
     const siblings = await tx.saleDispatch.findMany({ where: { saleOrderId: order.id } });
     const dispatchedKg = siblings.reduce((s, d) => s + d.weightKg, 0);
-    const orderStatus = dispatchedKg < order.tonnageKg
+    const tolerancePct = await closeTolerancePctFor(order.product);
+    const isClosedOrFulfilled = order.closedAt != null || isSaleOrderFulfilled(order.tonnageKg, dispatchedKg, tolerancePct);
+    const orderStatus = !isClosedOrFulfilled && dispatchedKg < order.tonnageKg
       ? 'PARTIAL'
       : siblings.every((d) => d.status === 'DELIVERED') ? 'DELIVERED' : 'DISPATCHED';
     orderIsFullyShipped = orderStatus !== 'PARTIAL';
-    await tx.saleOrder.update({ where: { id: order.id }, data: { status: orderStatus } });
+    const shortKg = Math.max(0, order.tonnageKg - dispatchedKg);
+    const autoClose = isClosedOrFulfilled && order.closedAt == null && shortKg > 0;
+    await tx.saleOrder.update({
+      where: { id: order.id },
+      data: {
+        status: orderStatus,
+        ...(autoClose
+          ? {
+              closedAt: new Date(),
+              closeReason: `Final lorry landed ${shortKg} kg under the booked tonnage - within the ${tolerancePct}% tolerance`,
+            }
+          : {}),
+      },
+    });
 
     if (submissionId) {
       await tx.driverKataSubmission.update({

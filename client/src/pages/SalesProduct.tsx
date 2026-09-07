@@ -13,7 +13,7 @@ import {
   DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
 } from '@/lib/calc';
 import { findCompanyVehicle } from '@/lib/calc';
-import { settledByDispatch, isDispatchPaid, saleDisplayStatus, dispatchShortage, type SaleDisplayStatus } from '@/lib/saleStatus';
+import { settledByDispatch, isDispatchPaid, saleDisplayStatus, dispatchShortage, SALE_STATUS_VARIANT, saleStatusLabel, type SaleDisplayStatus } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
 import {
@@ -1237,7 +1237,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={statusVariant[o.status]}>{titleCase(o.status)}</Badge>
+                        {(() => {
+                          const ds = saleDisplayStatus(o, settled);
+                          return <Badge variant={SALE_STATUS_VARIANT[ds]}>{saleStatusLabel(ds)}</Badge>;
+                        })()}
                         {shortKg > 0 && (
                           <Badge variant="warning" title={o.closeReason ?? undefined}>
                             Short {toTonnes(shortKg).toFixed(2)}t

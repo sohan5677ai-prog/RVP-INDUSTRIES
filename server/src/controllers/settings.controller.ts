@@ -256,6 +256,7 @@ const companyProfileSchema = z.object({
   stateCode: z.string().optional().nullable(),
   pincode: z.string().optional().nullable(),
   contact: z.string().optional().nullable(),
+  companyBccEmail: z.string().email('Invalid email address').optional().nullable().or(z.literal('')),
   dispatchFromPlace: z.string().optional().nullable(),
   dispatchFromAddress1: z.string().optional().nullable(),
   dispatchFromAddress2: z.string().optional().nullable(),

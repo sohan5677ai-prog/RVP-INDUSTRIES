@@ -48,6 +48,7 @@ import type { ExportColumn } from '@/lib/export';
 const BROKER_COLUMNS: ExportColumn<Broker>[] = [
   { header: 'Name', value: (b) => b.name },
   { header: 'Phone', value: (b) => b.phone ?? '' },
+  { header: 'Email', value: (b) => b.email ?? '' },
   {
     header: 'Community',
     value: (b) => (b.religion ? WISH_CATEGORY_LABELS[b.religion] : 'Not tagged'),
@@ -58,6 +59,7 @@ const BROKER_COLUMNS: ExportColumn<Broker>[] = [
 const brokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().optional(),
+  email: z.string().email('Invalid email address').optional().or(z.literal('')),
   religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']),
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']),
   brokerageAmount: z.string().min(1, 'Required').refine((v) => Number(v) >= 0, 'Must be 0 or more'),
@@ -76,12 +78,12 @@ export default function Brokers() {
 
   const form = useForm<BrokerForm>({
     resolver: zodResolver(brokerSchema),
-    defaultValues: { name: '', phone: '', religion: 'NONE', waLanguage: 'EN', brokerageAmount: '2000' },
+    defaultValues: { name: '', phone: '', email: '', religion: 'NONE', waLanguage: 'EN', brokerageAmount: '2000' },
   });
 
   function openCreate() {
     setEditing(null);
-    form.reset({ name: '', phone: '', religion: 'NONE', waLanguage: 'EN', brokerageAmount: '2000' });
+    form.reset({ name: '', phone: '', email: '', religion: 'NONE', waLanguage: 'EN', brokerageAmount: '2000' });
     setOpen(true);
   }
 
@@ -90,6 +92,7 @@ export default function Brokers() {
     form.reset({
       name: b.name,
       phone: b.phone ?? '',
+      email: b.email ?? '',
       religion: b.religion ?? 'NONE',
       waLanguage: b.waLanguage ?? 'EN',
       brokerageAmount: String(Number(b.brokerageAmount)),
@@ -101,6 +104,7 @@ export default function Brokers() {
     mutationFn: (values: BrokerForm) => {
       const payload = {
         ...values,
+        email: values.email?.trim() || null,
         religion: values.religion === 'NONE' ? null : values.religion,
         brokerageAmount: Number(values.brokerageAmount),
       };
@@ -155,6 +159,7 @@ export default function Brokers() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
+              <TableHead>Email</TableHead>
               <TableHead>Community</TableHead>
               <TableHead className="text-right">Brokerage / Order</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
@@ -163,14 +168,14 @@ export default function Brokers() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             )}
             {brokers?.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   No brokers yet.
                 </TableCell>
               </TableRow>
@@ -179,6 +184,7 @@ export default function Brokers() {
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.name}</TableCell>
                 <TableCell>{b.phone ?? '-'}</TableCell>
+                <TableCell className="text-muted-foreground text-xs">{b.email || '-'}</TableCell>
                 <TableCell>
                   {b.religion ? (
                     <Badge variant="soft">{WISH_CATEGORY_LABELS[b.religion]}</Badge>
@@ -242,6 +248,19 @@ export default function Brokers() {
                     <FormLabel>Phone</FormLabel>
                     <FormControl>
                       <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email (for CC on Invoices &amp; Credit Notes)</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="broker@example.com" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

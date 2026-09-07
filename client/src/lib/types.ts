@@ -145,6 +145,7 @@ export interface Broker {
   id: string;
   name: string;
   phone: string | null;
+  email?: string | null;
   /** Language the broker's payment-reminder copy is sent in. */
   waLanguage?: WaLanguage;
   /** Settings -> Wishes targeting only. Null/undefined = not tagged. */
@@ -706,6 +707,7 @@ export interface CompanyProfile {
   stateCode: string | null;
   pincode?: string | null;
   contact: string | null;
+  companyBccEmail?: string | null;
   // E-Way Bill "Dispatch From" block (Settings → Invoice Setup).
   dispatchFromPlace?: string | null;
   dispatchFromAddress1?: string | null;

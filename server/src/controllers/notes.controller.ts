@@ -8,6 +8,7 @@ import { renderNotePdf, type NotePdfData } from '../lib/notePdf.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { emailService } from '../services/email.service.js';
 import { resolveProductHsn } from '../lib/calc.js';
+import { creditNoteEmailHtml, debitNoteEmailHtml } from '../lib/emailTemplates.js';
 
 const PRODUCT_FALLBACK: Record<string, string> = {
   PAPPU: 'Tamarind Seed Kernel',
@@ -257,10 +258,27 @@ export async function sendNoteEmailById(kind: Kind, id: string) {
 
   const buffer = await renderNotePdf(pdfData);
   const title = kind === 'CREDIT' ? 'Credit Note' : 'Debit Note';
-  const html = `<p>Dear ${row.party.name},</p>` +
-    `<p>Please find attached the ${title.toLowerCase()} <strong>${row.noteNumber}</strong>.</p>` +
-    `<p>Reason: ${row.reason}</p>` +
-    `<p>Regards,<br/>${company.name}</p>`;
+
+  const noteEmailData = {
+    partyName: row.party.name,
+    [kind === 'CREDIT' ? 'creditNoteNumber' : 'debitNoteNumber']: row.noteNumber,
+    [kind === 'CREDIT' ? 'creditNoteDate' : 'debitNoteDate']: row.noteDate,
+    amount: Number(row.totalAmount),
+    againstInvoice: pdfData.originalInvoiceNumber,
+    reason: row.reason,
+    companyName: company.name,
+    companyAddress: company.address,
+    companyGstin: company.gstin,
+    companyContact: company.contact,
+  };
+
+  const html =
+    kind === 'CREDIT'
+      ? creditNoteEmailHtml(noteEmailData as any)
+      : debitNoteEmailHtml(noteEmailData as any);
+
+  const brokerEmail = row.saleDispatch?.saleOrder?.broker?.email?.trim() || undefined;
+  const companyBcc = (company as any).companyBccEmail?.trim() || undefined;
 
   return emailService.sendDocumentEmail({
     party: { id: row.party.id, email: row.party.email, name: row.party.name },
@@ -271,6 +289,8 @@ export async function sendNoteEmailById(kind: Kind, id: string) {
     subject: `${title} ${row.noteNumber} - ${company.name}`,
     html,
     attachments: [{ filename: `${row.noteNumber.replace(/\//g, '-')}.pdf`, content: buffer }],
+    cc: brokerEmail ? [brokerEmail] : undefined,
+    bcc: companyBcc ? [companyBcc] : undefined,
   });
 }
 

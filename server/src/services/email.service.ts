@@ -21,6 +21,8 @@ export const emailService = {
    */
   async sendEmail({
     to,
+    cc,
+    bcc,
     subject,
     text,
     html,
@@ -28,6 +30,8 @@ export const emailService = {
     from,
   }: {
     to: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
     subject: string;
     text?: string;
     html?: string;
@@ -36,7 +40,7 @@ export const emailService = {
   }) {
     if (!resend) {
       console.warn('⚠️ RESEND_API_KEY is not set. Email not sent.');
-      console.dir({ to, subject }, { depth: null });
+      console.dir({ to, cc, bcc, subject }, { depth: null });
       return null;
     }
     if (!html && !text) throw new Error('sendEmail requires html or text content');
@@ -44,12 +48,14 @@ export const emailService = {
     const data = await resend.emails.send({
       from: from || DEFAULT_FROM_EMAIL,
       to,
+      ...(cc ? { cc } : {}),
+      ...(bcc ? { bcc } : {}),
       subject,
       attachments,
-      ...(html ? { html, text } : { text: text! }),
-    });
+      ...(html ? { html } : { text: text! }),
+    } as any);
     if (data.error) throw new Error(data.error.message);
-    console.log(`✅ Email sent to ${to}: ${data.data?.id}`);
+    console.log(`✅ Email sent to ${to}${cc ? ` (CC: ${cc})` : ''}${bcc ? ` (BCC: ${bcc})` : ''}: ${data.data?.id}`);
     return data;
   },
 
@@ -67,8 +73,10 @@ export const emailService = {
     subject: string;
     html: string;
     attachments: EmailAttachment[];
+    cc?: string | string[];
+    bcc?: string | string[];
   }): Promise<{ ok: boolean; messageId?: string; error?: string }> {
-    const { party, documentType, referenceLabel, saleDispatchId, creditNoteId, debitNoteId, subject, html, attachments } = params;
+    const { party, documentType, referenceLabel, saleDispatchId, creditNoteId, debitNoteId, subject, html, attachments, cc, bcc } = params;
 
     if (!party.email) {
       throw new Error(`${party.name} has no email address on file. Add one in Parties first.`);
@@ -77,7 +85,7 @@ export const emailService = {
     let messageId: string | undefined;
     let errorMessage: string | undefined;
     try {
-      const result = await this.sendEmail({ to: party.email, subject, html, attachments });
+      const result = await this.sendEmail({ to: party.email, cc, bcc, subject, html, attachments });
       if (result) {
         messageId = result.data?.id;
       } else {

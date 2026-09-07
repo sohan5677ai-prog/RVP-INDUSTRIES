@@ -159,6 +159,7 @@ const emptyCompany: CompanyProfile = {
   id: 'default', name: '', address: '', gstin: '', stateName: '', stateCode: '', contact: '',
   bankAccountName: '', bankName: '', bankAccountNumber: '', bankBranchIfsc: '', invoicePrefix: 'RVP',
   ownerWhatsappNumber: '',
+  companyBccEmail: '',
   alertRecipients: '',
   whatsappTestMode: true,
   whatsappTestNumber: '',
@@ -204,6 +205,7 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               {field('Owner WhatsApp number (internal alerts + dispatch copies)', 'ownerWhatsappNumber', '9876543210')}
+              {field('Company Email for BCC (Invoices, EWBs & Notes)', 'companyBccEmail', 'e.g. accounts@rvpindustries.com')}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Address (printed as-is, multi-line)</Label>

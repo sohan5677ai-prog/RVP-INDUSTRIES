@@ -4,6 +4,7 @@ import { wishCategoryEnum } from './party.schema.js';
 export const createBrokerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().optional().nullable(),
+  email: z.string().email('Invalid email address').optional().nullable().or(z.literal('')),
   // Brokers get the payment-reminder copy on their own phone, so they carry
   // their own language rather than inheriting the buyer's.
   waLanguage: z.enum(['EN', 'TE', 'TA', 'KN', 'HI']).optional(),

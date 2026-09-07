@@ -204,10 +204,15 @@ export interface InvoiceEmailData {
   companyAddress?: string | null;
   companyGstin?: string | null;
   companyContact?: string | null;
+  ewbNumber?: string | null;
+  ewbValidUpto?: Date | string | null;
+  lrNumber?: string | null;
+  attachedDocs?: string[];
 }
 
 export function invoiceEmailHtml(data: InvoiceEmailData): string {
   const cName = data.companyName || 'RVP Industries';
+  const hasBundle = (data.attachedDocs && data.attachedDocs.length > 1) || !!data.ewbNumber || !!data.lrNumber;
 
   const rows: DetailRow[] = [
     { label: 'Invoice No.', value: data.invoiceNumber, strong: true },
@@ -215,14 +220,30 @@ export function invoiceEmailHtml(data: InvoiceEmailData): string {
   ];
   if (data.irn) rows.push({ label: 'IRN', value: data.irn.length > 24 ? data.irn.slice(0, 24) + '…' : data.irn });
   if (data.vehicleNumber) rows.push({ label: 'Vehicle', value: data.vehicleNumber });
+  if (data.ewbNumber) rows.push({ label: 'E-Way Bill No.', value: data.ewbNumber, strong: true });
+  if (data.ewbValidUpto) rows.push({ label: 'EWB Valid Until', value: formatDate(data.ewbValidUpto) });
+  if (data.lrNumber) rows.push({ label: 'Lorry Receipt No.', value: data.lrNumber, strong: true });
+  if (data.attachedDocs && data.attachedDocs.length > 0) {
+    rows.push({ label: 'Attached', value: data.attachedDocs.join(' + ') });
+  }
+
+  const docDesc = [
+    'tax invoice <strong>' + data.invoiceNumber + '</strong>',
+    data.ewbNumber ? 'e-way bill (' + data.ewbNumber + ')' : '',
+    data.lrNumber ? 'lorry receipt (' + data.lrNumber + ')' : '',
+  ].filter(Boolean).join(', ');
 
   const body = [
-    heading('Tax Invoice'),
+    heading(hasBundle ? 'Tax Invoice & Dispatch Documents' : 'Tax Invoice'),
     greeting(data.partyName),
-    paragraph(`Please find attached your tax invoice <strong>${data.invoiceNumber}</strong>${data.irn ? ' with the e-invoice (IRN) details' : ''}.`),
+    paragraph(`Please find attached your ${docDesc}.`),
     amount('Total Amount', formatINR(data.amount)),
     detailTable(rows),
-    paragraph('The invoice PDF is attached to this email.'),
+    paragraph(
+      hasBundle
+        ? 'The combined document package (Tax Invoice, E-Way Bill & Lorry Receipt) is attached to this email as a single PDF.'
+        : 'The invoice PDF is attached to this email.'
+    ),
     signoff(cName),
   ].join('\n');
 

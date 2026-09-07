@@ -211,6 +211,7 @@ model Broker {
   id              String        @id @default(cuid())
   name            String
   phone           String?
+  email           String?
   waLanguage      WaLanguage    @default(EN)
   // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
   religion        WishCategory?
@@ -1035,6 +1036,8 @@ model CompanyProfile {
   stateCode                      String? // GST state code, e.g. "37"
   pincode                        String?
   contact                        String?
+  // Company email address BCC'd on all outbound document emails (invoices, EWBs, credit notes)
+  companyBccEmail                String?
   // Bank details printed in the invoice footer.
   bankAccountName                String?
   bankName                       String?

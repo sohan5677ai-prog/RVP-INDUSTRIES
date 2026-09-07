@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 DO $$ BEGIN
     CREATE TYPE "BalanceType" AS ENUM ('DR', 'CR');
 EXCEPTION

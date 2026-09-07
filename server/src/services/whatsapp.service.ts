@@ -94,7 +94,10 @@ export type WaTemplateKey =
   // (festival, Independence Day, etc.) - the varying part is the two variables,
   // not the template itself. See docs/whatsapp-wishes-template.md.
   // Approved under name `rvp_rema` on +917207146094 with Fast2SMS message_id 31089.
-  | 'WISHES';
+  | 'WISHES'
+  // rvp_buyer_kata_alert (image header - buyer weighbridge slip): lorry, buyer, product, dispatched wt, kata wt, shortage
+  | 'BUYER_KATA_ALERT'
+  | 'BUYER_KATA_ALERT_TEXT';
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -1961,14 +1964,46 @@ export async function notifyOwnersKataReceived(args: {
     return { ok: false, error: 'No alert recipients configured' };
   }
 
+  const hasImage = !!args.imageUrl;
+  const tmplKey = hasImage ? 'BUYER_KATA_ALERT' : 'BUYER_KATA_ALERT_TEXT';
+  const tid = templateId(tmplKey) || templateId('BUYER_KATA_ALERT');
+
+  const weightClean = args.buyerKataKg ? `${args.buyerKataKg.toLocaleString('en-IN')} kg` : 'OCR pending';
+  const shortageClean = args.shortageKg > 0
+    ? `${args.shortageKg.toLocaleString('en-IN')} kg (${args.shortagePct}%)`
+    : 'No shortage (0 kg)';
+
+  // 1. If an approved template is configured on Fast2SMS, use it!
+  // This bypasses Meta's 24-hour window restriction completely and sends 24/7 unconditionally.
+  if (tid) {
+    const selectedKey = (hasImage && templateId('BUYER_KATA_ALERT'))
+      ? 'BUYER_KATA_ALERT'
+      : (templateId('BUYER_KATA_ALERT_TEXT') ? 'BUYER_KATA_ALERT_TEXT' : 'BUYER_KATA_ALERT');
+
+    return fanOutToAlertRecipients((to) =>
+      sendWhatsAppTemplate({
+        templateKey: selectedKey,
+        to,
+        variables: [
+          args.lorryNumber,
+          args.buyerName,
+          args.product || 'Dispatched goods',
+          `${args.dispatchedKg.toLocaleString('en-IN')} kg`,
+          weightClean,
+          shortageClean,
+        ],
+        mediaUrl: args.imageUrl ?? undefined,
+        relatedType: 'KATA_ALERT',
+        relatedId: args.submissionId,
+      })
+    );
+  }
+
+  // 2. Fallback to freeform session message (works when 24h window is open)
   const appBaseUrl = process.env.APP_BASE_URL || 'https://rvp-erp.onrender.com';
   const weightText = args.buyerKataKg
     ? `*${args.buyerKataKg.toLocaleString('en-IN')} kg* (${(args.buyerKataKg / 1000).toFixed(2)} MT)`
     : '⚠️ _Could not read weight from slip_';
-
-  const shortageText = args.shortageKg > 0
-    ? `*${args.shortageKg.toLocaleString('en-IN')} kg* (${args.shortagePct}%)`
-    : 'No shortage (0 kg)';
 
   const text =
     `📷 *Buyer Kata Received (Delivery Review)*\n\n` +
@@ -1977,7 +2012,7 @@ export async function notifyOwnersKataReceived(args: {
     `📦 *Product:* ${args.product || 'Goods'}\n` +
     `⚖️ *Dispatched Wt:* ${args.dispatchedKg.toLocaleString('en-IN')} kg (${(args.dispatchedKg / 1000).toFixed(2)} MT)\n` +
     `⚖️ *Buyer Kata (OCR):* ${weightText}\n` +
-    `📉 *Shortage (Loss):* ${shortageText}\n` +
+    `📉 *Shortage (Loss):* ${shortageClean}\n` +
     (args.driverPhone ? `👤 *Driver Phone:* +${args.driverPhone}\n` : '') +
     (args.imageUrl ? `\n📎 *Slip Photo:* ${args.imageUrl}\n` : '') +
     `\n⚡ *Quick Actions (Reply on WhatsApp):*\n` +

@@ -1,5 +1,103 @@
 import { Type, FunctionDeclaration } from '@google/genai';
 import { prisma } from './prisma.js';
+import { TaxproService } from '../services/taxpro.service.js';
+import { sendInvoiceEmail } from '../services/saleDocumentEmail.service.js';
+import { logger } from './logger.js';
+
+/**
+ * Calculate Damerau-Levenshtein distance between two strings
+ */
+function levenshteinDistance(s1: string, s2: string): number {
+  const m = s1.length;
+  const n = s2.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+      if (i > 1 && j > 1 && s1[i - 1] === s2[j - 2] && s1[i - 2] === s2[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Fuzzy party search against all parties in database
+ * Handles voice transcription typos like "spectermum" -> "Spectrum Auxi Chem Private Limited"
+ */
+export async function searchPartiesFuzzy(query: string, limit = 5) {
+  const q = query.toLowerCase().trim().replace(/[^a-z0-9 ]/g, '');
+  if (!q) return [];
+
+  const parties = await prisma.party.findMany({
+    select: {
+      id: true,
+      name: true,
+      nickname: true,
+      type: true,
+      phone: true,
+      email: true,
+      gstin: true,
+      destination: true,
+      openingBalance: true,
+      openingBalanceType: true,
+    },
+  });
+
+  const scored = parties.map(p => {
+    const pName = p.name.toLowerCase();
+    const pNick = (p.nickname || '').toLowerCase();
+    const cleanName = pName.replace(/[^a-z0-9 ]/g, '');
+    const cleanNick = pNick.replace(/[^a-z0-9 ]/g, '');
+
+    let score = 0;
+
+    // Exact match or substring contains gets highest score
+    if (cleanName === q || cleanNick === q) {
+      score += 150;
+    } else if (cleanName.includes(q) || (cleanNick && cleanNick.includes(q))) {
+      score += 100;
+    }
+
+    const nameWords = [...cleanName.split(/\s+/), ...cleanNick.split(/\s+/)].filter(Boolean);
+    const qWords = q.split(/\s+/).filter(Boolean);
+
+    for (const qw of qWords) {
+      for (const nw of nameWords) {
+        if (nw === qw) {
+          score += 60;
+        } else if (nw.startsWith(qw) || qw.startsWith(nw)) {
+          score += 40;
+        } else {
+          const dist = levenshteinDistance(qw, nw);
+          const maxLen = Math.max(qw.length, nw.length);
+          if (dist <= 2 || (maxLen >= 6 && dist <= 3)) {
+            const similarity = 1 - dist / maxLen;
+            score += Math.round(similarity * 50);
+          }
+        }
+      }
+    }
+
+    return { party: p, score };
+  });
+
+  return scored
+    .filter(s => s.score > 20)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(s => s.party);
+}
 
 export const toolDeclarations: FunctionDeclaration[] = [
   {
@@ -196,6 +294,58 @@ export const toolDeclarations: FunctionDeclaration[] = [
     },
   },
   {
+    name: 'open_party_ledger',
+    description: 'Open the party ledger for a specific customer or supplier. Automatically matches fuzzy or voice-transcribed party names (e.g. "spectermum" -> "Spectrum Auxi Chem Private Limited", "kannan", "murugan"). Navigates immediately to the ledger on screen.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        partyName: {
+          type: Type.STRING,
+          description: 'Name or spoken name of the party (e.g. "spectermum", "Spectrum", "Kannan")',
+        },
+      },
+      required: ['partyName'],
+    },
+  },
+  {
+    name: 'send_einvoice',
+    description: 'Generate E-Invoice (IRN) and/or send/email the official Tax Invoice & E-Invoice bundle to the buyer for a sale dispatch. Use this when the user says "send e-invoice", "send e-invoice for Spectrum", "generate e-invoice", or similar.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        partyName: {
+          type: Type.STRING,
+          description: 'Name or spoken name of the buyer (optional if invoiceNumber is provided)',
+        },
+        invoiceNumber: {
+          type: Type.STRING,
+          description: 'Invoice number (e.g. "RVP/79/26-27" or "79")',
+        },
+        action: {
+          type: Type.STRING,
+          description: 'Action to perform: "GENERATE_IRN", "SEND_EMAIL", or "BOTH" (default)',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_dispatches_for_einvoice',
+    description: 'Find recent sale dispatches to check their E-Invoice IRN status, invoice number, and email readiness.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        buyerName: {
+          type: Type.STRING,
+          description: 'Filter by buyer name (e.g. "Spectrum")',
+        },
+        status: {
+          type: Type.STRING,
+          description: 'Filter by status: "PENDING_IRN" (no IRN yet), "GENERATED" (IRN generated), or "ALL"',
+        },
+      },
+    },
+  },
+  {
     name: 'get_todays_summary',
     description: 'Get a summary of today\'s ERP activity: arrivals, dispatches, payments made, and receipts collected today.',
     parameters: {
@@ -232,11 +382,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     }
     case 'search_parties': {
       const query = args.query as string;
-      const parties = await prisma.party.findMany({
-        where: { name: { contains: query, mode: 'insensitive' } },
-        select: { id: true, name: true, type: true, phone: true, gstin: true, destination: true },
-        take: 5,
-      });
+      const parties = await searchPartiesFuzzy(query, 5);
       return { parties };
     }
     case 'get_outstanding_loans': {
@@ -450,11 +596,12 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       };
     }
     case 'navigate_to_page': {
-      // The actual navigation happens client-side. We just return the intent.
+      // The actual navigation happens client-side. We return the intent with autoExecute.
       return {
         action: 'navigate',
         route: args.route as string,
         pageLabel: args.pageLabel as string,
+        autoExecute: args.autoExecute !== false,
       };
     }
     case 'get_party_ledger_summary': {
@@ -601,6 +748,186 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
           paymentTotal: Math.round(payments.reduce((s, p) => s + Number(p.amount), 0)),
           receiptTotal: Math.round(receipts.reduce((s, r) => s + Number(r.amount), 0)),
         },
+      };
+    }
+    case 'open_party_ledger': {
+      const partyName = (args.partyName || '').trim();
+      const matches = await searchPartiesFuzzy(partyName, 3);
+      if (matches.length === 0) {
+        return {
+          success: false,
+          error: `Could not find any party matching "${partyName}". Please check the party name.`,
+        };
+      }
+      const matchedParty = matches[0];
+      return {
+        success: true,
+        action: 'navigate',
+        route: `/accounts/party-ledger?partyId=${matchedParty.id}`,
+        pageLabel: `Party Ledger - ${matchedParty.name}`,
+        autoExecute: true,
+        party: {
+          id: matchedParty.id,
+          name: matchedParty.name,
+          type: matchedParty.type,
+          destination: matchedParty.destination,
+        },
+        message: `Opening party ledger for ${matchedParty.name}.`,
+      };
+    }
+    case 'send_einvoice': {
+      const { partyName, invoiceNumber, action = 'BOTH' } = args;
+      let dispatch = null;
+
+      if (invoiceNumber) {
+        dispatch = await prisma.saleDispatch.findFirst({
+          where: {
+            invoiceNumber: { contains: String(invoiceNumber).trim(), mode: 'insensitive' },
+          },
+          include: {
+            saleOrder: { include: { buyer: true } },
+          },
+          orderBy: { dispatchDate: 'desc' },
+        });
+      } else if (partyName) {
+        const matches = await searchPartiesFuzzy(partyName, 1);
+        if (matches.length > 0) {
+          dispatch = await prisma.saleDispatch.findFirst({
+            where: {
+              saleOrder: { buyerId: matches[0].id },
+              invoiceNumber: { not: null },
+            },
+            include: {
+              saleOrder: { include: { buyer: true } },
+            },
+            orderBy: { dispatchDate: 'desc' },
+          });
+        }
+      } else {
+        dispatch = await prisma.saleDispatch.findFirst({
+          where: { invoiceNumber: { not: null } },
+          include: {
+            saleOrder: { include: { buyer: true } },
+          },
+          orderBy: { dispatchDate: 'desc' },
+        });
+      }
+
+      if (!dispatch) {
+        return {
+          success: false,
+          error: `No invoice dispatch found ${partyName ? `for party "${partyName}"` : invoiceNumber ? `for invoice "${invoiceNumber}"` : 'to send'}. Please verify the party or invoice number.`,
+        };
+      }
+
+      const buyer = dispatch.saleOrder.buyer;
+      const results: any = {
+        success: true,
+        dispatchId: dispatch.id,
+        invoiceNumber: dispatch.invoiceNumber,
+        buyerName: buyer.name,
+        buyerEmail: buyer.email || null,
+        buyerPhone: buyer.phone || null,
+        vehicleNumber: dispatch.vehicleNumber,
+        weightKg: dispatch.weightKg,
+      };
+
+      // 1. Generate IRN if needed
+      if (action === 'GENERATE_IRN' || action === 'BOTH') {
+        if (dispatch.irn && dispatch.irnStatus !== 'CANCELLED') {
+          results.irn = dispatch.irn;
+          results.irnStatus = dispatch.irnStatus;
+          results.irnMessage = 'Active E-Invoice IRN already exists.';
+        } else {
+          try {
+            const taxproRes = await TaxproService.generateIRN(dispatch.id);
+            await prisma.saleDispatch.update({
+              where: { id: dispatch.id },
+              data: {
+                irn: taxproRes.irn,
+                irnAckNo: taxproRes.ackNo,
+                irnAckDate: taxproRes.ackDate,
+                irnSignedQr: taxproRes.signedQr,
+                irnStatus: 'GENERATED',
+              },
+            });
+            results.irn = taxproRes.irn;
+            results.irnStatus = 'GENERATED';
+          } catch (err: any) {
+            results.irnError = err.message || 'Failed to generate IRN via Taxpro';
+            logger.error(`[JARVIS send_einvoice] IRN error: ${results.irnError}`);
+          }
+        }
+      }
+
+      // 2. Email invoice if requested
+      if (action === 'SEND_EMAIL' || action === 'BOTH') {
+        if (!buyer.email) {
+          results.emailStatus = 'SKIPPED';
+          results.emailMessage = `Buyer ${buyer.name} does not have an email address configured.`;
+        } else {
+          try {
+            const emailRes = await sendInvoiceEmail(dispatch.id);
+            if (emailRes.ok) {
+              results.emailStatus = 'SENT';
+              results.emailMessage = `Tax invoice bundle emailed to ${buyer.email}.`;
+            } else {
+              results.emailStatus = 'FAILED';
+              results.emailError = emailRes.error || 'Failed to send email';
+            }
+          } catch (err: any) {
+            results.emailStatus = 'FAILED';
+            results.emailError = err.message || 'Error occurred while sending email';
+          }
+        }
+      }
+
+      results.summary = `Invoice ${dispatch.invoiceNumber} for ${buyer.name}: ` +
+        (results.irn ? `IRN active. ` : results.irnError ? `IRN: ${results.irnError}. ` : '') +
+        (results.emailStatus === 'SENT' ? `Email sent to ${buyer.email}.` : results.emailMessage ? results.emailMessage : '');
+
+      return results;
+    }
+    case 'get_dispatches_for_einvoice': {
+      const { buyerName, status = 'ALL' } = args;
+      let buyerId: string | undefined = undefined;
+      if (buyerName) {
+        const matches = await searchPartiesFuzzy(buyerName, 1);
+        if (matches.length > 0) buyerId = matches[0].id;
+      }
+
+      const where: any = { invoiceNumber: { not: null } };
+      if (buyerId) where.saleOrder = { buyerId };
+      if (status === 'PENDING_IRN') {
+        where.OR = [{ irn: null }, { irnStatus: 'CANCELLED' }];
+      } else if (status === 'GENERATED') {
+        where.irn = { not: null };
+        where.irnStatus = 'GENERATED';
+      }
+
+      const dispatches = await prisma.saleDispatch.findMany({
+        where,
+        take: 8,
+        orderBy: { dispatchDate: 'desc' },
+        include: {
+          saleOrder: { include: { buyer: { select: { id: true, name: true, email: true, phone: true } } } },
+        },
+      });
+
+      return {
+        dispatches: dispatches.map(d => ({
+          id: d.id,
+          invoiceNumber: d.invoiceNumber,
+          buyerName: d.saleOrder.buyer.name,
+          buyerEmail: d.saleOrder.buyer.email,
+          buyerPhone: d.saleOrder.buyer.phone,
+          date: d.dispatchDate,
+          weightKg: d.weightKg,
+          vehicleNumber: d.vehicleNumber,
+          irn: d.irn,
+          irnStatus: d.irnStatus,
+          ewbNumber: d.ewbNumber,
+        })),
       };
     }
     default:

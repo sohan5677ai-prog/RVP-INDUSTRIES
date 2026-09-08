@@ -13,7 +13,7 @@ function getClient(): GoogleGenAI {
 }
 
 const JARVIS_SYSTEM_PROMPT =
-  "You are JARVIS — the RVP Industries ERP AI Assistant. You are intelligent, proactive, and highly capable.\n" +
+  "You are JARVIS — the RVP Industries ERP AI Assistant. You are intelligent, proactive, voice-interactive, and highly capable.\n" +
   "Think of yourself as the Iron Man JARVIS but for a Tamarind Processing business. You are sharp, efficient, and slightly witty.\n\n" +
   "RVP INDUSTRIES BUSINESS CONTEXT:\n" +
   "- Raw materials: 'Black Seed' (itemType: BLACK_SEED). Stored in storage locations (Rampalli, Murugan, Multi) or at the factory ('RVP').\n" +
@@ -23,15 +23,16 @@ const JARVIS_SYSTEM_PROMPT =
   "- Sales: A SaleOrder specifies product, customer, total weight, and credit days. Actual deliveries are made via one or more physical lorry shipments called 'SaleDispatch'. Each dispatch tracks actual weight, vehicle, generated Tax Invoice, E-Invoice IRN, and E-Way Bill (EWB).\n" +
   "- Accounting: Double-entry ledger with cost centers, accounts (Asset, Liability, Equity, Revenue, Expense) and Journal Entries.\n" +
   "- Outstanding loans: Principal bank loans taken against storage stock.\n\n" +
-  "DATABASE TOOLS: You have access to real-time ERP tools. ALWAYS use them when asked about data. Never guess numbers.\n\n" +
-  "NAVIGATION: When the user asks to 'go to', 'open', 'show me', or 'take me to' a page, use the navigate_to_page tool. When looking up a party ledger, first search_parties to get the id, then use navigate_to_page with /accounts/party-ledger?partyId=<id>.\n\n" +
+  "VOICE & REAL-TIME COMMANDS:\n" +
+  "- Users interact with you via voice and speech-to-text. Voice transcription often produces phonetic typos (e.g. 'spectermum' or 'spectram' -> 'Spectrum Auxi Chem Private Limited', 'kannan' -> 'Kannan Katpadi', 'murugan' -> 'Murugan and Co', etc.).\n" +
+  "- When the user says 'open party ledger of <party>' or 'show ledger of <party>', IMMEDIATELY call the open_party_ledger tool with that party name. It will automatically fuzzy match the party and navigate to their ledger.\n" +
+  "- When the user says 'send e invoice' or 'send e-invoice for <party>', IMMEDIATELY call the send_einvoice tool. If they mention a party, pass the partyName. If they mention an invoice number, pass invoiceNumber.\n" +
+  "- When the user asks to navigate to any other page (e.g. 'take me to purchase orders', 'open stock overview'), use navigate_to_page.\n\n" +
   "RESPONSE STYLE:\n" +
-  "1. Be concise but informative. Use bullet points and tables for data.\n" +
-  "2. Use relevant emojis sparingly (📦 stock, 💰 money, 🚚 transport, 📊 reports).\n" +
-  "3. When you detect navigation intent, ALWAYS call navigate_to_page and tell the user you're taking them there.\n" +
-  "4. For financial figures, format in Indian numbering (lakhs/crores) or use ₹ symbol.\n" +
-  "5. Be proactive — if the user asks about stock and it's low, warn them. If dues are overdue, flag it.\n" +
-  "6. Keep responses focused and actionable. You're an executive assistant, not a chatbot.";
+  "1. Be concise, fast, and conversational. Since your response is spoken aloud via text-to-speech, keep your voice confirmation punchy and clear (1-2 sentences), followed by any tables/details.\n" +
+  "2. For voice commands like opening a ledger or sending an invoice, confirm the action cleanly: e.g. 'Opening party ledger for Spectrum Auxi Chem Private Limited.' or 'Processing E-Invoice for Spectrum Auxi Chem.'\n" +
+  "3. Always format financial figures in Indian notation (₹ or Lakhs/Crores).\n" +
+  "4. Use relevant tools. Never guess numbers.";
 
 export async function handleChat(req: Request, res: Response) {
   const { messages } = req.body;
@@ -45,8 +46,85 @@ export async function handleChat(req: Request, res: Response) {
     parts: [{ text: m.content }]
   }));
 
-  
-    let response = await ai.models.generateContent({
+  let response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents,
+    config: {
+      systemInstruction: { parts: [{ text: JARVIS_SYSTEM_PROMPT }] },
+      tools: [{ functionDeclarations: toolDeclarations }]
+    }
+  });
+
+  // Collect navigation intents and action cards from tool calls
+  const navigationIntents: { route: string; pageLabel: string; autoExecute?: boolean }[] = [];
+  const actions: { type: string; title: string; description: string; status: 'SUCCESS' | 'WARNING' | 'ERROR'; data?: any }[] = [];
+
+  let loops = 0;
+  while (response.functionCalls && response.functionCalls.length > 0 && loops < 5) {
+    loops++;
+    // Add model's function call to history
+    contents.push({
+      role: 'model',
+      parts: response.functionCalls.map(call => ({
+        functionCall: {
+          name: call.name,
+          args: call.args || {},
+          id: call.id
+        }
+      }))
+    });
+
+    const functionResponses = [];
+    for (const call of response.functionCalls) {
+      try {
+        if (!call.name) throw new Error('Function call missing name');
+        const result = await executeTool(call.name, call.args || {});
+
+        // Capture navigation intents & actions
+        if (call.name === 'open_party_ledger' && result.action === 'navigate') {
+          navigationIntents.push({ route: result.route, pageLabel: result.pageLabel, autoExecute: true });
+          actions.push({
+            type: 'NAVIGATE',
+            title: result.pageLabel,
+            description: result.message || 'Opening party ledger',
+            status: 'SUCCESS',
+            data: result.party,
+          });
+        } else if (call.name === 'navigate_to_page' && result.action === 'navigate') {
+          navigationIntents.push({ route: result.route, pageLabel: result.pageLabel, autoExecute: result.autoExecute !== false });
+          actions.push({
+            type: 'NAVIGATE',
+            title: result.pageLabel,
+            description: `Navigating to ${result.pageLabel}`,
+            status: 'SUCCESS',
+          });
+        } else if (call.name === 'send_einvoice') {
+          actions.push({
+            type: 'EINVOICE',
+            title: `E-Invoice: ${result.invoiceNumber || 'Dispatch'}`,
+            description: result.summary || 'E-Invoice action executed',
+            status: result.success ? (result.emailStatus === 'FAILED' || result.irnError ? 'WARNING' : 'SUCCESS') : 'ERROR',
+            data: result,
+          });
+        }
+
+        functionResponses.push({
+          functionResponse: { id: call.id, name: call.name, response: result }
+        });
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        functionResponses.push({
+          functionResponse: { id: call.id, name: call.name, response: { error: errMsg } }
+        });
+      }
+    }
+
+    contents.push({
+      role: 'user', // function responses are sent from 'user'
+      parts: functionResponses
+    });
+
+    response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents,
       config: {
@@ -54,66 +132,13 @@ export async function handleChat(req: Request, res: Response) {
         tools: [{ functionDeclarations: toolDeclarations }]
       }
     });
+  }
 
-    // Collect navigation intents from tool calls to pass back to client
-    const navigationIntents: { route: string; pageLabel: string }[] = [];
-
-    let loops = 0;
-    while (response.functionCalls && response.functionCalls.length > 0 && loops < 5) {
-      loops++;
-      // Add model's function call to history
-      contents.push({
-        role: 'model',
-        parts: response.functionCalls.map(call => ({
-          functionCall: {
-            name: call.name,
-            args: call.args || {},
-            id: call.id
-          }
-        }))
-      });
-
-      const functionResponses = [];
-      for (const call of response.functionCalls) {
-        try {
-          if (!call.name) throw new Error('Function call missing name');
-          const result = await executeTool(call.name, call.args || {});
-          
-          // Capture navigation intents
-          if (call.name === 'navigate_to_page' && result.action === 'navigate') {
-            navigationIntents.push({ route: result.route, pageLabel: result.pageLabel });
-          }
-          
-          functionResponses.push({
-            functionResponse: { id: call.id, name: call.name, response: result }
-          });
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          functionResponses.push({
-             functionResponse: { id: call.id, name: call.name, response: { error: errMsg } }
-          });
-        }
-      }
-
-      contents.push({
-        role: 'user', // function responses are sent from 'user'
-        parts: functionResponses
-      });
-
-      response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents,
-        config: {
-          systemInstruction: { parts: [{ text: JARVIS_SYSTEM_PROMPT }] },
-          tools: [{ functionDeclarations: toolDeclarations }]
-        }
-      });
-    }
-
-    res.json({
-      text: response.text,
-      navigationIntents: navigationIntents.length > 0 ? navigationIntents : undefined,
-    });
+  res.json({
+    text: response.text,
+    navigationIntents: navigationIntents.length > 0 ? navigationIntents : undefined,
+    actions: actions.length > 0 ? actions : undefined,
+  });
 }
 
 // ---------------------------------------------------------------------------

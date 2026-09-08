@@ -146,7 +146,7 @@ function CopyBtn({ value }: { value: string }) {
 
 export default function PartyLedger() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const selected = searchParams.get('party');
+  const selected = searchParams.get('party') || searchParams.get('partyId');
   return selected
     ? <PartyDetail partyId={selected} onBack={() => setSearchParams({})} />
     : <PartyIndex onSelect={(id) => setSearchParams({ party: id })} />;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bot } from 'lucide-react';
+import { Bot, Mic } from 'lucide-react';
 import { api } from '@/lib/api';
 import JarvisPanel from './JarvisPanel';
 import './JarvisPanel.css';
@@ -15,6 +15,7 @@ interface InsightCard {
 
 export default function JarvisOrb() {
   const [open, setOpen] = useState(false);
+  const [startVoiceImmediately, setStartVoiceImmediately] = useState(false);
 
   // Fetch insights for the badge count
   const { data: insightsData } = useQuery({
@@ -31,6 +32,7 @@ export default function JarvisOrb() {
     if ((e.ctrlKey || e.metaKey) && e.key === 'j') {
       e.preventDefault();
       setOpen(prev => !prev);
+      setStartVoiceImmediately(false);
     }
   }, []);
 
@@ -39,25 +41,55 @@ export default function JarvisOrb() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  const handleOpenVoice = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setStartVoiceImmediately(true);
+    setOpen(true);
+  };
+
+  const handleOpenNormal = () => {
+    setStartVoiceImmediately(false);
+    setOpen(true);
+  };
+
   return (
     <>
       {/* Floating Orb Button */}
       {!open && (
-        <button
-          className="jarvis-orb"
-          onClick={() => setOpen(true)}
-          title="Open JARVIS (Ctrl+J)"
-          aria-label="Open JARVIS AI Assistant"
-        >
-          <Bot className="jarvis-orb-icon" />
-          {insightCount > 0 && (
-            <span className="jarvis-orb-badge">{insightCount}</span>
-          )}
-        </button>
+        <div className="jarvis-orb-container">
+          <button
+            className="jarvis-orb"
+            onClick={handleOpenNormal}
+            title="Open JARVIS (Ctrl+J)"
+            aria-label="Open JARVIS AI Assistant"
+          >
+            <Bot className="jarvis-orb-icon" />
+            {insightCount > 0 && (
+              <span className="jarvis-orb-badge">{insightCount}</span>
+            )}
+          </button>
+
+          {/* Quick 1-tap Voice Orb Button */}
+          <button
+            className="jarvis-orb-mic"
+            onClick={handleOpenVoice}
+            title="Speak to JARVIS (Voice Command)"
+            aria-label="Speak to JARVIS"
+          >
+            <Mic className="h-3.5 w-3.5 text-white" />
+          </button>
+        </div>
       )}
 
       {/* Panel */}
-      <JarvisPanel open={open} onClose={() => setOpen(false)} />
+      <JarvisPanel
+        open={open}
+        onClose={() => {
+          setOpen(false);
+          setStartVoiceImmediately(false);
+        }}
+        startVoiceImmediately={startVoiceImmediately}
+      />
     </>
   );
 }

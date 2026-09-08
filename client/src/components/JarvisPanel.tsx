@@ -11,16 +11,30 @@ import {
   Volume2,
   VolumeX,
   ArrowRight,
+  Minimize2,
+  Maximize2,
+  CheckCircle2,
+  AlertTriangle,
+  Radio,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import './JarvisPanel.css';
 
 // ── Types ─────────────────────────────────────────────────
+export interface ActionCard {
+  type: string;
+  title: string;
+  description: string;
+  status: 'SUCCESS' | 'WARNING' | 'ERROR';
+  data?: any;
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   content: string;
-  navigationIntents?: { route: string; pageLabel: string }[];
+  navigationIntents?: { route: string; pageLabel: string; autoExecute?: boolean }[];
+  actions?: ActionCard[];
 }
 
 interface InsightCard {
@@ -35,6 +49,7 @@ interface InsightCard {
 interface JarvisPanelProps {
   open: boolean;
   onClose: () => void;
+  startVoiceImmediately?: boolean;
 }
 
 // ── Quick suggestion chips ─────────────────────────────────
@@ -114,19 +129,27 @@ function renderMarkdown(text: string): string {
 }
 
 // ── Component ──────────────────────────────────────────────
-export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
+export default function JarvisPanel({ open, onClose, startVoiceImmediately }: JarvisPanelProps) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isDocked, setIsDocked] = useState(false);
+  const [lastStatus, setLastStatus] = useState("Hello, I'm JARVIS");
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [handsFreeMode, setHandsFreeMode] = useState(() => {
+    return localStorage.getItem('jarvis-hands-free') === 'true';
+  });
   const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(() => {
     return localStorage.getItem('jarvis-voice-reply') !== 'false';
   });
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const silenceTimerRef = useRef<any>(null);
 
   // Toggle voice replies
   const toggleVoiceReply = useCallback(() => {
@@ -135,7 +158,17 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
       localStorage.setItem('jarvis-voice-reply', String(next));
       if (!next && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
+        setIsSpeaking(false);
       }
+      return next;
+    });
+  }, []);
+
+  // Toggle hands-free continuous listening mode
+  const toggleHandsFree = useCallback(() => {
+    setHandsFreeMode(prev => {
+      const next = !prev;
+      localStorage.setItem('jarvis-hands-free', String(next));
       return next;
     });
   }, []);
@@ -145,9 +178,9 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
     if (!('speechSynthesis' in window) || !voiceReplyEnabled) return;
     window.speechSynthesis.cancel();
 
-    // Clean text: strip table rows, markdown formatting, HTML, and URLs for smooth speech
+    // Clean text for speech
     let clean = text
-      .replace(/\|[^\n]+\|/g, '') // strip table rows
+      .replace(/\|[^\n]+\|/g, '') // strip tables
       .replace(/[*#`_~>]/g, '')   // strip markdown formatting
       .replace(/<[^>]*>/g, '')    // strip HTML tags
       .replace(/https?:\/\/\S+/g, '') // strip URLs
@@ -156,21 +189,21 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
 
     if (!clean) return;
 
-    // Keep voice summary crisp so it doesn't drone on
-    if (clean.length > 280) {
-      const sentenceEnd = clean.indexOf('.', 180);
-      if (sentenceEnd > 0 && sentenceEnd < 320) {
-        clean = clean.slice(0, sentenceEnd + 1) + ' I have displayed the complete breakdown on your screen.';
+    // Keep voice response concise
+    if (clean.length > 250) {
+      const sentenceEnd = clean.indexOf('.', 140);
+      if (sentenceEnd > 0 && sentenceEnd < 280) {
+        clean = clean.slice(0, sentenceEnd + 1);
       } else {
-        clean = clean.slice(0, 240) + '... Full details are displayed on your screen.';
+        clean = clean.slice(0, 200) + '... Full details are displayed on your screen.';
       }
     }
 
     const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.rate = 1.02;
-    utterance.pitch = 0.95;
+    utterance.rate = 1.05;
+    utterance.pitch = 0.96;
 
-    // Pick best voice: Indian English or UK/US English
+    // Best voice selection
     const voices = window.speechSynthesis.getVoices();
     const voice =
       voices.find(v => v.lang === 'en-IN') ||
@@ -180,13 +213,27 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
 
     if (voice) utterance.voice = voice;
 
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      if (handsFreeMode && open) {
+        setTimeout(() => startListening(), 400);
+      }
+    };
+    utterance.onerror = () => setIsSpeaking(false);
+
     window.speechSynthesis.speak(utterance);
-  }, [voiceReplyEnabled]);
+  }, [voiceReplyEnabled, handsFreeMode, open]);
 
   // Cancel speech on close or unmount
   useEffect(() => {
     if (!open && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        setIsListening(false);
+      }
     }
   }, [open]);
 
@@ -195,26 +242,29 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
     };
   }, []);
 
-  // Fetch proactive insights
+  // Proactive insights
   const { data: insightsData } = useQuery({
     queryKey: ['jarvis-insights'],
     queryFn: () => api<{ insights: InsightCard[] }>('/chat/insights'),
-    enabled: open,
-    staleTime: 60_000, // refresh every minute when panel is open
-    refetchInterval: open ? 120_000 : false,
+    enabled: open && !isDocked,
+    staleTime: 60_000,
+    refetchInterval: open && !isDocked ? 120_000 : false,
   });
 
   const insights = insightsData?.insights ?? [];
 
   // Focus input when opened
   useEffect(() => {
-    if (open) {
+    if (open && !isDocked) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [open]);
+  }, [open, isDocked]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -225,16 +275,34 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (isDocked) {
+          setIsDocked(false);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+  }, [open, isDocked, onClose]);
+
+  // Handle navigation
+  const handleNavigate = useCallback((route: string) => {
+    setIsDocked(true);
+    navigate(route);
+  }, [navigate]);
 
   // Send message
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
+
+    // Interrupt any ongoing speech
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
 
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -245,27 +313,39 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    setLastStatus(`Processing: "${trimmed}"`);
 
     try {
-      // Build history for context
       const history = [...messages, userMsg].map(m => ({
         role: m.role,
         content: m.content,
       }));
 
-      const res = await api<{ text: string; navigationIntents?: { route: string; pageLabel: string }[] }>(
-        '/chat',
-        { method: 'POST', body: { messages: history } }
-      );
+      const res = await api<{
+        text: string;
+        navigationIntents?: { route: string; pageLabel: string; autoExecute?: boolean }[];
+        actions?: ActionCard[];
+      }>('/chat', { method: 'POST', body: { messages: history } });
 
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'model',
         content: res.text || 'I couldn\'t process that. Please try again.',
         navigationIntents: res.navigationIntents,
+        actions: res.actions,
       };
 
       setMessages(prev => [...prev, assistantMsg]);
+      setLastStatus(res.text || 'Action completed');
+
+      // Check for auto-navigation command (e.g. "open party ledger of spectermum")
+      const autoNav = res.navigationIntents?.find(n => n.autoExecute);
+      if (autoNav) {
+        navigate(autoNav.route);
+        // Automatically dock into Floating Voice HUD so the user immediately sees the target page!
+        setIsDocked(true);
+      }
+
       speak(assistantMsg.content);
     } catch (err: any) {
       const errorMsg: ChatMessage = {
@@ -274,70 +354,189 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
         content: `⚠️ ${err.message || 'Something went wrong. Please try again.'}`,
       };
       setMessages(prev => [...prev, errorMsg]);
+      setLastStatus('Encountered an error');
     } finally {
       setLoading(false);
     }
-  }, [messages, loading, speak]);
+  }, [messages, loading, speak, navigate]);
 
-  // Voice input using Web Speech API
-  const toggleVoice = useCallback(() => {
+  // Voice Recognition handler
+  const startListening = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Voice input is not supported in this browser. Please use Chrome or Edge.');
+      alert('Voice recognition is not supported in this browser. Please use Chrome or Edge.');
       return;
     }
 
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-      return;
+    // Cancel existing speech output when user starts speaking
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = true;
-    recognition.continuous = false;
-
-    recognition.onresult = (event: any) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
+    try {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch {}
       }
-      setVoiceTranscript(transcript);
-      if (event.results[0]?.isFinal) {
-        setInput(transcript);
-        setVoiceTranscript('');
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-IN';
+      recognition.interimResults = true;
+      recognition.continuous = true;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceTranscript('Listening...');
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const currentText = finalTranscript || interimTranscript;
+        setVoiceTranscript(currentText);
+
+        // Reset silence timer
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+        if (finalTranscript.trim()) {
+          // If a complete phrase is recognized, submit after brief pause
+          silenceTimerRef.current = setTimeout(() => {
+            const queryToSend = finalTranscript.trim();
+            setVoiceTranscript('');
+            setIsListening(false);
+            try { recognition.stop(); } catch {}
+            sendMessage(queryToSend);
+          }, 600);
+        } else if (interimTranscript.trim().length > 3) {
+          // Debounce interim pause to auto-submit
+          silenceTimerRef.current = setTimeout(() => {
+            const queryToSend = interimTranscript.trim();
+            setVoiceTranscript('');
+            setIsListening(false);
+            try { recognition.stop(); } catch {}
+            sendMessage(queryToSend);
+          }, 1200);
+        }
+      };
+
+      recognition.onerror = (e: any) => {
+        if (e.error !== 'no-speech') {
+          setIsListening(false);
+          setVoiceTranscript('');
+        }
+      };
+
+      recognition.onend = () => {
         setIsListening(false);
-        // Auto-send after short delay
-        setTimeout(() => sendMessage(transcript), 300);
-      }
-    };
+      };
 
-    recognition.onerror = () => {
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Speech recognition error:', err);
       setIsListening(false);
-      setVoiceTranscript('');
-    };
+    }
+  }, [sendMessage]);
 
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+  const stopListening = useCallback(() => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+    }
+    setIsListening(false);
+    setVoiceTranscript('');
+  }, []);
 
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-    setVoiceTranscript('Listening...');
-  }, [isListening, sendMessage]);
+  const toggleVoice = useCallback(() => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  }, [isListening, startListening, stopListening]);
 
-  // Handle navigation
-  const handleNavigate = (route: string) => {
-    onClose();
-    navigate(route);
-  };
+  // Trigger voice automatically if requested on open
+  useEffect(() => {
+    if (open && startVoiceImmediately && !isListening) {
+      startListening();
+    }
+  }, [open, startVoiceImmediately]);
 
   if (!open) return null;
 
   const hasMessages = messages.length > 0;
 
+  // ── Floating Docked Voice HUD ─────────────────────────────
+  if (isDocked) {
+    return (
+      <div className="jarvis-voice-hud" role="dialog" aria-label="JARVIS Voice Assistant">
+        <div
+          className={`jarvis-hud-avatar ${isSpeaking ? 'speaking' : ''}`}
+          onClick={() => setIsDocked(false)}
+          title="Click to expand chat"
+        >
+          <Bot className="h-5 w-5 text-white" />
+        </div>
+
+        <div className="jarvis-hud-info">
+          <div className="jarvis-hud-title">
+            <span>JARVIS</span>
+            {(isListening || isSpeaking) && (
+              <div className="jarvis-waveform">
+                <div className="jarvis-waveform-bar" />
+                <div className="jarvis-waveform-bar" />
+                <div className="jarvis-waveform-bar" />
+                <div className="jarvis-waveform-bar" />
+                <div className="jarvis-waveform-bar" />
+              </div>
+            )}
+          </div>
+          <div className="jarvis-hud-text" title={voiceTranscript || lastStatus}>
+            {isListening
+              ? (voiceTranscript || 'Listening to your command...')
+              : isSpeaking
+              ? 'Speaking...'
+              : lastStatus}
+          </div>
+        </div>
+
+        <div className="jarvis-hud-actions">
+          <button
+            className={`jarvis-hud-btn ${isListening ? 'active' : ''}`}
+            onClick={toggleVoice}
+            title={isListening ? 'Stop listening' : 'Start voice command'}
+          >
+            {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </button>
+          <button
+            className="jarvis-hud-btn"
+            onClick={() => setIsDocked(false)}
+            title="Expand chat panel"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            className="jarvis-hud-btn"
+            onClick={onClose}
+            title="Close JARVIS"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Full Chat Panel ───────────────────────────────────────
   return (
     <>
       {/* Backdrop */}
@@ -347,20 +546,49 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
       <div className="jarvis-panel">
         {/* Header */}
         <div className="jarvis-header">
-          <div className="jarvis-avatar">
+          <div className={`jarvis-avatar ${isSpeaking ? 'speaking' : ''}`}>
             <Bot />
           </div>
           <div className="jarvis-title">
-            <h3>JARVIS</h3>
-            <p>RVP Industries AI Assistant</p>
+            <div className="flex items-center gap-2">
+              <h3>JARVIS</h3>
+              {(isListening || isSpeaking) && (
+                <div className="jarvis-waveform">
+                  <div className="jarvis-waveform-bar" />
+                  <div className="jarvis-waveform-bar" />
+                  <div className="jarvis-waveform-bar" />
+                  <div className="jarvis-waveform-bar" />
+                  <div className="jarvis-waveform-bar" />
+                </div>
+              )}
+            </div>
+            <p>RVP Industries AI Voice Assistant</p>
           </div>
+
+          <button
+            className={`jarvis-icon-btn ${handsFreeMode ? 'active' : ''}`}
+            onClick={toggleHandsFree}
+            title={handsFreeMode ? 'Hands-Free continuous listening ON' : 'Hands-Free continuous listening OFF'}
+          >
+            <Radio className="h-4 w-4" />
+          </button>
+
           <button
             className={`jarvis-icon-btn ${voiceReplyEnabled ? 'active' : ''}`}
             onClick={toggleVoiceReply}
-            title={voiceReplyEnabled ? 'Voice reply enabled (click to mute)' : 'Voice reply muted (click to enable)'}
+            title={voiceReplyEnabled ? 'Voice reply enabled' : 'Voice reply muted'}
           >
             {voiceReplyEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
           </button>
+
+          <button
+            className="jarvis-icon-btn"
+            onClick={() => setIsDocked(true)}
+            title="Dock to Floating Voice HUD"
+          >
+            <Minimize2 className="h-4 w-4" />
+          </button>
+
           <button className="jarvis-close" onClick={onClose} title="Close (Esc)">
             <X className="h-4 w-4" />
           </button>
@@ -392,10 +620,9 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
             <div className="jarvis-empty-icon">
               <Zap />
             </div>
-            <h4>Hello, I'm JARVIS</h4>
+            <h4>Voice-Ready JARVIS</h4>
             <p>
-              Your AI assistant for RVP Industries ERP. Ask me about stock, sales, dues, parties, or say
-              "take me to purchase orders" to navigate.
+              Speak naturally: "Open party ledger of Spectrum", "Send E-invoice", or ask about stock and dues.
             </p>
             <div className="jarvis-suggestions">
               {SUGGESTIONS.map(s => (
@@ -409,7 +636,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
               ))}
             </div>
             <div className="jarvis-shortcut-hint">
-              <kbd>Ctrl</kbd>+<kbd>J</kbd> to toggle
+              <kbd>Ctrl</kbd>+<kbd>J</kbd> to toggle • Click mic to talk
             </div>
           </div>
         ) : (
@@ -427,6 +654,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
                   ) : (
                     msg.content
                   )}
+
                   {/* Navigation action buttons */}
                   {msg.navigationIntents?.map((nav, i) => (
                     <button
@@ -438,8 +666,55 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
                       Go to {nav.pageLabel}
                     </button>
                   ))}
+
+                  {/* Action Cards (e.g. E-Invoice or Party Ledger trigger) */}
+                  {msg.actions?.map((act, i) => (
+                    <div
+                      key={i}
+                      className="jarvis-action-card"
+                      data-status={act.status}
+                    >
+                      <div className="jarvis-action-header">
+                        <span className="jarvis-action-title">
+                          {act.status === 'SUCCESS' ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                          )}
+                          {act.title}
+                        </span>
+                        <span className="jarvis-action-badge">{act.status}</span>
+                      </div>
+                      <div className="jarvis-action-desc">{act.description}</div>
+                      {act.data && (
+                        <div className="jarvis-action-details">
+                          {act.data.irn && (
+                            <span className="jarvis-action-chip">
+                              IRN: {act.data.irn.slice(0, 12)}...
+                            </span>
+                          )}
+                          {act.data.invoiceNumber && (
+                            <span className="jarvis-action-chip">
+                              Inv #{act.data.invoiceNumber}
+                            </span>
+                          )}
+                          {act.data.buyerName && (
+                            <span className="jarvis-action-chip">
+                              Party: {act.data.buyerName}
+                            </span>
+                          )}
+                          {act.data.emailStatus && (
+                            <span className="jarvis-action-chip">
+                              Email: {act.data.emailStatus}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
+
               {loading && (
                 <div className="jarvis-thinking">
                   <div className="jarvis-thinking-dots">
@@ -453,7 +728,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Quick suggestions below chat when there are few messages */}
+            {/* Quick suggestions below chat */}
             {messages.length < 3 && !loading && (
               <div className="jarvis-suggestions">
                 {SUGGESTIONS.slice(0, 4).map(s => (
@@ -470,10 +745,15 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
           </>
         )}
 
-        {/* Voice transcript preview */}
-        {voiceTranscript && (
+        {/* Live Voice Transcript Preview */}
+        {(voiceTranscript || isListening) && (
           <div className="jarvis-voice-preview">
-            🎤 {voiceTranscript}
+            <div className="jarvis-waveform">
+              <div className="jarvis-waveform-bar" />
+              <div className="jarvis-waveform-bar" />
+              <div className="jarvis-waveform-bar" />
+            </div>
+            <span>{voiceTranscript || 'Listening...'}</span>
           </div>
         )}
 
@@ -482,7 +762,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
           <button
             className={`jarvis-btn ${isListening ? 'mic-active' : ''}`}
             onClick={toggleVoice}
-            title={isListening ? 'Stop listening' : 'Voice input'}
+            title={isListening ? 'Stop listening' : 'Talk to JARVIS'}
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </button>
@@ -490,7 +770,7 @@ export default function JarvisPanel({ open, onClose }: JarvisPanelProps) {
             ref={inputRef}
             type="text"
             className="jarvis-input"
-            placeholder="Ask JARVIS anything..."
+            placeholder={isListening ? 'Listening to your voice...' : 'Ask JARVIS anything...'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {

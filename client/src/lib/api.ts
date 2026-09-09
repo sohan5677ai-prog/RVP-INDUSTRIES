@@ -41,7 +41,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     body = opts.body as FormData;
   } else if (opts.body !== undefined) {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(opts.body);
+    body = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
   }
 
   const res = await fetch(`${BASE}${path}`, {

@@ -20,6 +20,9 @@ export function errorHandler(
   if (err instanceof HttpError) {
     return res.status(err.status).json({ error: err.message });
   }
+  if (err instanceof SyntaxError && 'status' in err && (err as any).status === 400) {
+    return res.status(400).json({ error: 'Malformed JSON payload in request body' });
+  }
   logger.error(err);
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? err.stack : undefined;

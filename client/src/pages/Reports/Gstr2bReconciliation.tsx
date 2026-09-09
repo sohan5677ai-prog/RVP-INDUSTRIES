@@ -129,7 +129,7 @@ export default function Gstr2bReconciliation() {
     mutationFn: async (payload: { jsonData: any; period: string }) => {
       return api<{ success: boolean; totalInvoices: number; message: string }>('/gstr2b/upload-json', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: payload,
       });
     },
     onSuccess: (res) => {
@@ -150,7 +150,7 @@ export default function Gstr2bReconciliation() {
     mutationFn: async (p: string) => {
       return api<{ success: boolean; totalInvoices: number; message: string }>('/gstr2b/sync', {
         method: 'POST',
-        body: JSON.stringify({ period: p }),
+        body: { period: p },
       });
     },
     onSuccess: (res) => {

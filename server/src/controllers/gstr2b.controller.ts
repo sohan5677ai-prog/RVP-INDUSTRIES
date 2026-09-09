@@ -3,12 +3,21 @@ import { prisma } from '../lib/prisma.js';
 import { Gstr2bReconciliationService } from '../services/gstr2bReconciliation.service.js';
 
 export async function syncGstr2b(req: Request, res: Response) {
-  const period = String(req.body.period || '').replace(/[^0-9]/g, '');
-  if (period.length !== 6) {
-    return res.status(400).json({ error: 'Valid 6-digit return period required (e.g. 082026 for Aug 2026)' });
-  }
-
   try {
+    let rawPeriod = req.body?.period;
+    if (!rawPeriod && typeof req.body === 'string') {
+      try {
+        const parsed = JSON.parse(req.body);
+        rawPeriod = parsed?.period;
+      } catch {
+        rawPeriod = req.body;
+      }
+    }
+    const period = String(rawPeriod || '').replace(/[^0-9]/g, '');
+    if (period.length !== 6) {
+      return res.status(400).json({ error: 'Valid 6-digit return period required (e.g. 082026 for Aug 2026)' });
+    }
+
     const result = await Gstr2bReconciliationService.syncFromTaxPro(period);
     return res.json(result);
   } catch (err: any) {

@@ -20,6 +20,8 @@ import {
   Tag,
   CheckCircle2,
   RefreshCw,
+  AlertTriangle,
+  Pencil,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -190,6 +192,12 @@ export default function WeighbridgeScreen() {
   const [manualWeightInput, setManualWeightInput] = useState<string>('');
   const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
+
+  const manualInputRef = useRef<HTMLInputElement>(null);
+  const isNoDls = Boolean(
+    scale.error?.toUpperCase().includes('DLS') ||
+    scale.rawText?.toUpperCase().includes('DLS')
+  );
 
   // Cameras & Snapshot triggers
   const [camRefreshTrigger, setCamRefreshTrigger] = useState<number>(0);
@@ -404,7 +412,7 @@ export default function WeighbridgeScreen() {
     },
   });
 
-  // Global Keyboard Shortcuts (F12 = Save, F4 = Pending, Esc = Clear)
+  // Global Keyboard Shortcuts (F12 = Save, F4 = Pending, F8 = Override, Esc = Clear)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F12') {
@@ -413,6 +421,16 @@ export default function WeighbridgeScreen() {
       } else if (e.key === 'F4') {
         e.preventDefault();
         setActiveTab((prev) => (prev === 'pending' ? 'entry' : 'pending'));
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        setIsManualOverride((prev) => {
+          const next = !prev;
+          if (next) {
+            setManualWeightInput(String(scale.liveWeight || ''));
+            setTimeout(() => manualInputRef.current?.focus(), 60);
+          }
+          return next;
+        });
       } else if (e.key === 'Escape') {
         if (!slipModalTicket) {
           handleResetForm();
@@ -421,7 +439,7 @@ export default function WeighbridgeScreen() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [saveMutation, slipModalTicket, handleResetForm]);
+  }, [saveMutation, slipModalTicket, handleResetForm, scale.liveWeight]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -813,75 +831,157 @@ export default function WeighbridgeScreen() {
               {/* Radial ambient glow */}
               <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
 
+              {/* Hardware Fault / NO DLS Alert Banner */}
+              {isNoDls && !isManualOverride && (
+                <div className="mb-3.5 p-3 rounded-xl bg-red-500/15 border border-red-500/40 text-red-200 text-xs flex items-start justify-between gap-3 animate-pulse">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-bold text-red-200">Scale Hardware Alert: "NO DLS" (Load Cell Signal Lost)</div>
+                      <p className="text-[11px] text-red-300/85 mt-0.5 leading-relaxed">
+                        Power fluctuated or load cells are initializing. In your old software it showed 0; here you can manually type the weight from the physical display.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setIsManualOverride(true);
+                      setTimeout(() => manualInputRef.current?.focus(), 60);
+                    }}
+                    className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white shrink-0 gap-1.5 font-bold shadow-xs"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Override (F8)
+                  </Button>
+                </div>
+              )}
+
               {/* Top readout status row */}
               <div className="flex items-center justify-between mb-3 text-xs font-mono">
                 <div className="flex items-center gap-2">
                   <span className="relative flex h-2.5 w-2.5">
                     <span className={cn(
                       'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
-                      scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
+                      isManualOverride ? 'bg-amber-400' : scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
                     )} />
                     <span className={cn(
                       'relative inline-flex rounded-full h-2.5 w-2.5',
-                      scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
+                      isManualOverride ? 'bg-amber-500' : scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
                     )} />
                   </span>
                   <span className="font-bold tracking-wider text-stone-300">
-                    SCALE INDICATOR (COM4)
+                    {isManualOverride ? 'MANUAL OVERRIDE' : 'SCALE INDICATOR (COM4)'}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className={cn(
-                    'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
-                    scale.isStable
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                  )}>
-                    {scale.isStable ? 'STABLE' : 'IN MOTION'}
-                  </span>
+                  {isManualOverride ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setIsManualOverride(false);
+                        setManualWeightInput('');
+                      }}
+                      className="h-6 px-2 text-[10px] font-mono text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 gap-1"
+                    >
+                      <RotateCcw className="h-2.5 w-2.5" />
+                      Resume COM4 Sync
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setIsManualOverride(true);
+                        setManualWeightInput(String(currentLiveWeight || ''));
+                        setTimeout(() => manualInputRef.current?.focus(), 60);
+                      }}
+                      className="h-6 px-2 text-[10px] font-mono text-stone-400 hover:text-stone-200 bg-stone-800/80 border border-stone-700/60 gap-1"
+                      title="Manually override weight displayed in this box (F8)"
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                      Override (F8)
+                    </Button>
+                  )}
+
+                  {!isManualOverride && (
+                    <span className={cn(
+                      'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
+                      isNoDls
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : scale.isStable
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    )}>
+                      {isNoDls ? 'NO DLS' : scale.isStable ? 'STABLE' : 'IN MOTION'}
+                    </span>
+                  )}
                 </div>
               </div>
 
               {/* Large Digital Weight Display */}
-              <div className="py-2 text-center select-none">
-                <div className="flex items-baseline justify-center gap-2">
-                  <span className="font-mono font-black text-6xl text-amber-400 tracking-tight drop-shadow-[0_0_20px_rgba(251,191,36,0.3)]">
-                    {currentLiveWeight.toLocaleString('en-IN')}
-                  </span>
-                  <span className="font-mono font-bold text-xl text-stone-400">
-                    KG
-                  </span>
-                </div>
-
-                {/* Sub-readout in metric tonnes */}
-                <div className="text-stone-400 font-mono text-xs mt-1">
-                  ≈ {(currentLiveWeight / 1000).toFixed(3)} Metric Tonnes (MT)
-                </div>
-              </div>
-
-              {/* Manual Override input if scale is offline */}
-              <div className="mt-4 pt-3 border-t border-stone-800/80 flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  onClick={() => setIsManualOverride((m) => !m)}
-                  className="text-stone-400 hover:text-stone-200 transition-colors underline text-[11px]"
+              {isNoDls && !isManualOverride ? (
+                <div
+                  className="py-3 text-center select-none cursor-pointer group"
+                  onClick={() => {
+                    setIsManualOverride(true);
+                    setTimeout(() => manualInputRef.current?.focus(), 60);
+                  }}
+                  title="Click to type weight manually (F8)"
                 >
-                  {isManualOverride ? 'Switch to Live COM4 Serial Sync' : 'Manual Weight Entry (COM offline)'}
-                </button>
-
-                {isManualOverride && (
-                  <div className="flex items-center gap-1.5 w-32">
-                    <Input
+                  <span className="font-mono font-black text-5xl text-red-500 tracking-tight drop-shadow-[0_0_20px_rgba(239,68,68,0.4)]">
+                    NO DLS
+                  </span>
+                  <div className="text-red-400/90 font-mono text-xs mt-1.5">
+                    Load Cell Signal Lost · Click here to type weight manually (F8)
+                  </div>
+                </div>
+              ) : isManualOverride ? (
+                <div className="py-2 text-center select-none">
+                  <div className="flex items-baseline justify-center gap-2">
+                    <input
+                      ref={manualInputRef}
                       type="number"
                       value={manualWeightInput}
                       onChange={(e) => setManualWeightInput(e.target.value)}
-                      placeholder="0 kg"
-                      className="h-7 text-xs bg-stone-900 border-stone-700 text-stone-100 font-mono"
+                      placeholder="0"
+                      className="w-56 font-mono font-black text-5xl text-center text-amber-400 bg-stone-900 border-2 border-amber-500 rounded-xl px-2 py-1 outline-none shadow-inner drop-shadow-[0_0_15px_rgba(251,191,36,0.3)]"
+                      autoFocus
                     />
+                    <span className="font-mono font-bold text-xl text-stone-400">KG</span>
                   </div>
-                )}
-              </div>
+                  <div className="text-amber-400/90 font-mono text-xs mt-1">
+                    ✏️ Manual Override Active (Press F8 or click 'Resume COM4 Sync' to exit)
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="py-2 text-center select-none group cursor-pointer"
+                  onClick={() => {
+                    setIsManualOverride(true);
+                    setManualWeightInput(String(currentLiveWeight || ''));
+                    setTimeout(() => manualInputRef.current?.focus(), 60);
+                  }}
+                  title="Click to manually override weight displayed in this box (F8)"
+                >
+                  <div className="flex items-baseline justify-center gap-2">
+                    <span className="font-mono font-black text-6xl text-amber-400 tracking-tight drop-shadow-[0_0_20px_rgba(251,191,36,0.3)] transition-transform group-hover:scale-102">
+                      {currentLiveWeight.toLocaleString('en-IN')}
+                    </span>
+                    <span className="font-mono font-bold text-xl text-stone-400">
+                      KG
+                    </span>
+                  </div>
+
+                  {/* Sub-readout in metric tonnes */}
+                  <div className="text-stone-400 font-mono text-xs mt-1 flex items-center justify-center gap-2">
+                    <span>≈ {(currentLiveWeight / 1000).toFixed(3)} Metric Tonnes (MT)</span>
+                    <span className="text-stone-500 text-[10px]">· Click to override (F8)</span>
+                  </div>
+                </div>
+              )}
 
               {/* 3 Weight Breakdown Pills */}
               <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-stone-800 text-center text-xs font-mono">

@@ -179,6 +179,29 @@ class ServerScaleService {
     const clean = raw.replace(/[^\x20-\x7E]/g, '').trim();
     if (!clean) return;
 
+    // Check for hardware faults or power surge error codes (e.g. "no dLs", "no dls", "oL", "Err 02")
+    const upper = clean.toUpperCase();
+    if (
+      upper.includes('NO DLS') ||
+      upper.includes('NODLS') ||
+      upper.includes('NO DL') ||
+      upper.includes('NO-DL') ||
+      upper.includes('ERR') ||
+      upper.includes('OVERLOAD') ||
+      upper.includes('------') ||
+      upper === 'OL'
+    ) {
+      logger.warn(`[scale] Hardware fault indicator received: "${clean}"`);
+      this.currentReading = {
+        ...this.currentReading,
+        rawText: clean,
+        lastUpdated: Date.now(),
+        error: upper.includes('DLS') || upper.includes('DL') ? 'NO DLS (Load Cell Signal Lost / Power Cut)' : `Scale Fault: ${clean}`,
+      };
+      this.notifyListeners();
+      return;
+    }
+
     // Detect stability markers (e.g. ST = Stable, US/MO = Motion/Unstable)
     let isStable = false;
     if (clean.includes('ST') || clean.includes('S ')) {

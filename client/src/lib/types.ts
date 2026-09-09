@@ -1381,4 +1381,28 @@ export interface MaintenanceConfig {
   updatedAt: string;
 }
 
+export interface WeighbridgeTicket {
+  id: string;
+  ticketNo: number;
+  vehicleNumber: string;
+  vehicleType: 'LORRY' | 'TRACTOR' | 'AUTO' | 'TANKER' | 'OTHER' | string;
+  tripType: 'FIRST' | 'SECOND' | 'SINGLE' | string;
+  partyName: string | null;
+  partyMobile: string | null;
+  material: string | null;
+  loadType: 'LOAD' | 'EMPTY' | string;
+  billType: 'CASH' | 'CREDIT' | string;
+  amount: number;
+  firstWeightKg: number | null;
+  secondWeightKg: number | null;
+  netWeightKg: number | null;
+  firstWeighedAt: string | null;
+  secondWeighedAt: string | null;
+  status: 'PENDING_SECOND' | 'COMPLETED' | 'CANCELLED' | string;
+  operatorName: string | null;
+  remarks: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 

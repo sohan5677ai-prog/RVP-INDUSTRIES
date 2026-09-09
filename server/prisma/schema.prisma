@@ -2144,3 +2144,35 @@ model MaintenanceConfig {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
+
+// ---------------------------------------------------------------------------
+// Weighbridge / Kata Ticket System
+// Models incoming/outgoing vehicle weighment tickets with First, Second, and Net weights.
+// ---------------------------------------------------------------------------
+model WeighbridgeTicket {
+  id              String    @id @default(cuid())
+  ticketNo        Int       @unique
+  vehicleNumber   String
+  vehicleType     String    @default("LORRY") // LORRY, TRACTOR, AUTO, TANKER, OTHER
+  tripType        String    @default("SECOND") // FIRST, SECOND, SINGLE
+  partyName       String?
+  partyMobile     String?
+  material        String?
+  loadType        String    @default("LOAD") // LOAD, EMPTY
+  billType        String    @default("CASH") // CASH, CREDIT
+  amount          Decimal   @default(100) @db.Decimal(10, 2)
+  firstWeightKg   Int?
+  secondWeightKg  Int?
+  netWeightKg     Int?
+  firstWeighedAt  DateTime?
+  secondWeighedAt DateTime?
+  status          String    @default("COMPLETED") // PENDING_SECOND, COMPLETED, CANCELLED
+  operatorName    String?
+  remarks         String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([vehicleNumber])
+  @@index([status])
+  @@index([createdAt])
+}

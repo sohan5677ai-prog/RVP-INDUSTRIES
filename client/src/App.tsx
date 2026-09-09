@@ -103,6 +103,7 @@ const NotesComments = lazyWithPreload(
 const IrnEwbReport = lazyWithPreload('/reports/irn-ewb', () => import('@/pages/Reports/IrnEwbReport'));
 const EmailLogs = lazyWithPreload('/reports/email-logs', () => import('@/pages/Reports/EmailLogs'));
 const Taxes = lazyWithPreload('/reports/taxes', () => import('@/pages/Reports/Taxes'));
+const WeighbridgeScreen = lazyWithPreload('/reports/weighbridge', () => import('@/pages/Reports/WeighbridgeScreen'));
 const Payments = lazyWithPreload('/transactions/payments', () => import('@/pages/Payments'));
 const Receipts = lazyWithPreload('/transactions/receipts', () => import('@/pages/Receipts'));
 const SaleDues = lazyWithPreload('/reports/sale-dues', () => import('@/pages/SaleDues'));
@@ -213,6 +214,8 @@ export default function App() {
                         <Route path="/reports/taxes" element={<Taxes />} />
                         <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
                         <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
+                        <Route path="/reports/weighbridge" element={<WeighbridgeScreen />} />
+                        <Route path="/weighbridge" element={<Navigate to="/reports/weighbridge" replace />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="/settings/due-today" element={<Navigate to="/sales/dues-today" replace />} />
                         <Route path="/settings/dues-today" element={<Navigate to="/sales/dues-today" replace />} />

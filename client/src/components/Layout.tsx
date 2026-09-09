@@ -136,6 +136,7 @@ const sections: NavSection[] = [
   {
     heading: 'Reports',
     items: [
+      { to: '/reports/weighbridge', label: 'Weighbridge (Kata)', icon: Scale },
       { to: '/reports/taxes', label: 'Taxes', icon: Scale },
       { to: '/reports/irn-ewb', label: 'IRN/EWB', icon: FileText },
       { to: '/reports/email-logs', label: 'Email Logs', icon: Mail },

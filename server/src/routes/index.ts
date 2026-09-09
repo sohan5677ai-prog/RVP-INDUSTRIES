@@ -42,6 +42,7 @@ import { handleResendWebhook } from '../controllers/resendWebhook.controller.js'
 import { globalSearch } from '../controllers/search.controller.js';
 import subscriptionRoutes from './subscription.routes.js';
 import archiveRoutes from './archive.routes.js';
+import weighbridgeRoutes from './weighbridge.routes.js';
 const router = Router();
 
 // Public
@@ -130,6 +131,7 @@ router.use('/chat', chatRoutes);
 router.use('/users', userRoutes);
 router.use('/', taxproRoutes);
 router.use('/', archiveRoutes);
+router.use('/weighbridge', weighbridgeRoutes);
 
 router.get('/search', asyncHandler(globalSearch));
 

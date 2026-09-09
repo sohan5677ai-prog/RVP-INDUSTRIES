@@ -8,12 +8,14 @@ import { shortDate } from '@/lib/format';
 interface WeighbridgeSlipModalProps {
   ticket: WeighbridgeTicket | null;
   companyProfile?: CompanyProfile | null;
+  snapshots?: { cam1?: string; cam2?: string } | null;
   onClose: () => void;
 }
 
 export default function WeighbridgeSlipModal({
   ticket,
   companyProfile,
+  snapshots,
   onClose,
 }: WeighbridgeSlipModalProps) {
   const printRef = useRef<HTMLDivElement>(null);
@@ -145,6 +147,33 @@ export default function WeighbridgeSlipModal({
               <span className="block text-[9px] text-zinc-400">Computer Generated Slip</span>
             </div>
           </div>
+
+          {/* Vehicle CCTV Snapshots (If available) */}
+          {(snapshots?.cam1 || snapshots?.cam2) && (
+            <div className="pt-2 pb-4 border-t border-dashed border-zinc-300">
+              <div className="text-[9px] text-zinc-500 font-sans mb-1.5 uppercase font-bold tracking-wider">
+                Vehicle CCTV Camera Verification
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {snapshots.cam1 && (
+                  <div className="border border-zinc-300 rounded-xs overflow-hidden bg-zinc-100">
+                    <img src={snapshots.cam1} alt="Camera 1 - Entry" className="w-full h-20 object-cover" />
+                    <div className="text-[8px] bg-zinc-200 px-1 py-0.5 text-zinc-700 font-mono">
+                      CAM 1: ENTRY
+                    </div>
+                  </div>
+                )}
+                {snapshots.cam2 && (
+                  <div className="border border-zinc-300 rounded-xs overflow-hidden bg-zinc-100">
+                    <img src={snapshots.cam2} alt="Camera 2 - Exit" className="w-full h-20 object-cover" />
+                    <div className="text-[8px] bg-zinc-200 px-1 py-0.5 text-zinc-700 font-mono">
+                      CAM 2: EXIT / PLATFORM
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Signature lines */}
           <div className="pt-6 flex justify-between text-[10px] font-sans text-zinc-600">

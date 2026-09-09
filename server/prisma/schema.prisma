@@ -340,6 +340,14 @@ model CreditNote {
   status         NoteStatus    @default(ISSUED)
   createdAt      DateTime      @default(now())
 
+  // E-Invoice (IRN) details
+  irn              String?
+  irnAckNo         String?
+  irnAckDate       DateTime?
+  irnSignedQr      String?
+  irnStatus        String? // 'GENERATED', 'CANCELLED'
+  irnCancelledDate DateTime?
+
   emailLogs EmailLog[]
 
   @@unique([noteFy, noteSeq])
@@ -364,6 +372,14 @@ model DebitNote {
   totalAmount    Decimal       @db.Decimal(14, 2)
   status         NoteStatus    @default(ISSUED)
   createdAt      DateTime      @default(now())
+
+  // E-Invoice (IRN) details
+  irn              String?
+  irnAckNo         String?
+  irnAckDate       DateTime?
+  irnSignedQr      String?
+  irnStatus        String? // 'GENERATED', 'CANCELLED'
+  irnCancelledDate DateTime?
 
   emailLogs EmailLog[]
 

@@ -607,6 +607,12 @@ interface NoteBase {
   totalAmount: string;
   status: NoteStatus;
   createdAt: string;
+  irn?: string | null;
+  irnAckNo?: string | null;
+  irnAckDate?: string | null;
+  irnSignedQr?: string | null;
+  irnStatus?: 'GENERATED' | 'CANCELLED' | null;
+  irnCancelledDate?: string | null;
 }
 
 export type CreditNote = NoteBase;

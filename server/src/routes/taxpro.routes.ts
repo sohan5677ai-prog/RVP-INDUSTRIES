@@ -89,25 +89,42 @@ const ewbSchema = z.object({
 router.get(
   '/taxpro/list',
   asyncHandler(async (req, res) => {
-    // Currently, only SaleDispatches have IRNs/EWBs
-    const sales = await prisma.saleDispatch.findMany({
-      where: {
-        OR: [
-          { irn: { not: null } },
-          { ewbNumber: { not: null } },
-        ],
-      },
-      include: {
-        saleOrder: {
-          include: {
-            buyer: true,
+    const [sales, creditNotes, debitNotes] = await Promise.all([
+      prisma.saleDispatch.findMany({
+        where: {
+          OR: [
+            { irn: { not: null } },
+            { ewbNumber: { not: null } },
+          ],
+        },
+        include: {
+          saleOrder: {
+            include: {
+              buyer: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.creditNote.findMany({
+        where: { irn: { not: null } },
+        include: {
+          party: true,
+          saleDispatch: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.debitNote.findMany({
+        where: { irn: { not: null } },
+        include: {
+          party: true,
+          saleDispatch: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
-    res.json({ sales, purchases: [] });
+    res.json({ sales, purchases: [], creditNotes, debitNotes });
   })
 );
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Mail, FileText, FileMinus2, ReceiptText, Trash2 } from 'lucide-react';
+import { Plus, Mail, FileText, FileMinus2, ReceiptText, Trash2, QrCode, Ban } from 'lucide-react';
 import { api, getErrorMessage, getToken } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
@@ -41,6 +41,9 @@ function NotesTable({
   sendingId,
   onDelete,
   deletingId,
+  onGenerateIrn,
+  generatingIrnId,
+  onOpenCancelModal,
 }: {
   kind: NoteKind;
   notes: (CreditNote | DebitNote)[];
@@ -49,6 +52,9 @@ function NotesTable({
   sendingId: string | null;
   onDelete: (id: string, noteNumber: string) => void;
   deletingId: string | null;
+  onGenerateIrn: (id: string) => void;
+  generatingIrnId: string | null;
+  onOpenCancelModal: (note: CreditNote | DebitNote) => void;
 }) {
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows = [] } = usePagedRows(notes, 50);
 
@@ -65,15 +71,16 @@ function NotesTable({
             <TableHead className="text-right">GST</TableHead>
             <TableHead className="text-right">Total</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>e-Invoice</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading && (
-            <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
+            <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">Loading…</TableCell></TableRow>
           )}
           {!isLoading && notes.length === 0 && (
-            <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">No {kind === 'CREDIT' ? 'credit' : 'debit'} notes yet.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">No {kind === 'CREDIT' ? 'credit' : 'debit'} notes yet.</TableCell></TableRow>
           )}
           {pageRows.map((n) => (
             <TableRow key={n.id}>
@@ -87,7 +94,77 @@ function NotesTable({
               <TableCell>
                 <Badge variant={n.status === 'CANCELLED' ? 'destructive' : 'success'}>{n.status}</Badge>
               </TableCell>
+              <TableCell>
+                {n.irnStatus === 'GENERATED' ? (
+                  <div className="flex flex-col items-start gap-0.5">
+                    <Badge variant="success" className="gap-1 text-[11px] font-normal py-0">
+                      <QrCode className="h-3 w-3" /> IRN Active
+                    </Badge>
+                    <span
+                      className="font-mono text-[10px] text-muted-foreground cursor-pointer hover:text-foreground hover:underline"
+                      title={`Ack No: ${n.irnAckNo ?? '-'}\nAck Date: ${n.irnAckDate ? shortDate(n.irnAckDate) : '-'}\nClick to copy IRN:\n${n.irn}`}
+                      onClick={() => {
+                        if (n.irn) {
+                          navigator.clipboard.writeText(n.irn);
+                          toast.success('IRN copied to clipboard');
+                        }
+                      }}
+                    >
+                      {n.irn ? `${n.irn.slice(0, 7)}…${n.irn.slice(-5)}` : ''}
+                    </span>
+                  </div>
+                ) : n.irnStatus === 'CANCELLED' ? (
+                  <Badge variant="destructive" className="gap-1 text-[11px] font-normal py-0">
+                    <Ban className="h-3 w-3" /> Cancelled
+                  </Badge>
+                ) : n.party?.gstin ? (
+                  <span className="text-xs text-muted-foreground">Pending</span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground italic" title="Party has no GSTIN on file">
+                    Unregistered
+                  </span>
+                )}
+              </TableCell>
               <TableCell className="text-right space-x-1.5 whitespace-nowrap">
+                {n.irnStatus === 'GENERATED' ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                    onClick={() => onOpenCancelModal(n)}
+                  >
+                    <Ban className="h-3.5 w-3.5 mr-1" /> Cancel IRN
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                    disabled={
+                      generatingIrnId === n.id ||
+                      !n.party?.gstin ||
+                      n.status === 'CANCELLED' ||
+                      n.irnStatus === 'CANCELLED'
+                    }
+                    title={
+                      n.status === 'CANCELLED'
+                        ? 'Note is cancelled'
+                        : n.irnStatus === 'CANCELLED'
+                        ? 'IRN was cancelled'
+                        : !n.party?.gstin
+                        ? 'Party has no GSTIN on file'
+                        : 'Generate government e-Invoice (IRN)'
+                    }
+                    onClick={() => onGenerateIrn(n.id)}
+                  >
+                    {generatingIrnId === n.id ? (
+                      <span className="animate-spin mr-1">⏳</span>
+                    ) : (
+                      <QrCode className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    e-Invoice
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={() => openNotePdf(kind, n.id)}>
                   <FileText className="h-3.5 w-3.5 mr-1.5" /> PDF
                 </Button>
@@ -104,7 +181,12 @@ function NotesTable({
                   size="sm"
                   variant="outline"
                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                  disabled={deletingId === n.id}
+                  disabled={deletingId === n.id || n.irnStatus === 'GENERATED'}
+                  title={
+                    n.irnStatus === 'GENERATED'
+                      ? 'Cancel the active e-Invoice IRN before deleting'
+                      : undefined
+                  }
                   onClick={() => {
                     if (window.confirm(`Are you sure you want to delete ${kind === 'CREDIT' ? 'credit' : 'debit'} note ${n.noteNumber}?`)) {
                       onDelete(n.id, n.noteNumber);
@@ -305,6 +387,45 @@ export default function CreditDebitNotes() {
     onSettled: () => setDeletingId(null),
   });
 
+  const [generatingIrnId, setGeneratingIrnId] = useState<string | null>(null);
+  const generateIrnMutation = useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: NoteKind }) =>
+      api<{ updated: CreditNote | DebitNote; message: string }>(
+        `/${kind === 'CREDIT' ? 'credit-notes' : 'debit-notes'}/${id}/einvoice`,
+        { method: 'POST' }
+      ),
+    onMutate: ({ id }) => setGeneratingIrnId(id),
+    onSuccess: (res, vars) => {
+      qc.invalidateQueries({ queryKey: [vars.kind === 'CREDIT' ? 'credit-notes' : 'debit-notes'] });
+      qc.invalidateQueries({ queryKey: ['taxpro-report'] });
+      toast.success(res.message || 'e-Invoice IRN generated successfully');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+    onSettled: () => setGeneratingIrnId(null),
+  });
+
+  const [cancelTarget, setCancelTarget] = useState<{ note: CreditNote | DebitNote; kind: NoteKind } | null>(null);
+  const [cancelReason, setCancelReason] = useState('1');
+  const [cancelRemarks, setCancelRemarks] = useState('Cancelled from ERP');
+
+  const cancelIrnMutation = useMutation({
+    mutationFn: () =>
+      api<{ updated: CreditNote | DebitNote; message: string }>(
+        `/${cancelTarget!.kind === 'CREDIT' ? 'credit-notes' : 'debit-notes'}/${cancelTarget!.note.id}/einvoice/cancel`,
+        {
+          method: 'POST',
+          body: { cancelReason, cancelRemarks },
+        }
+      ),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: [cancelTarget!.kind === 'CREDIT' ? 'credit-notes' : 'debit-notes'] });
+      qc.invalidateQueries({ queryKey: ['taxpro-report'] });
+      toast.success(res.message || 'e-Invoice IRN cancelled successfully');
+      setCancelTarget(null);
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   function raiseNote(item: PendingCreditNote) {
     setTab('CREDIT');
     setPartyId(item.partyId);
@@ -364,6 +485,13 @@ export default function CreditDebitNotes() {
             onSend={(id) => sendMutation.mutate({ id, kind: 'CREDIT' })}
             onDelete={(id) => deleteMutation.mutate({ id, kind: 'CREDIT' })}
             deletingId={deletingId}
+            onGenerateIrn={(id) => generateIrnMutation.mutate({ id, kind: 'CREDIT' })}
+            generatingIrnId={generatingIrnId}
+            onOpenCancelModal={(note) => {
+              setCancelReason('1');
+              setCancelRemarks('Cancelled from ERP');
+              setCancelTarget({ note, kind: 'CREDIT' });
+            }}
           />
         </TabsContent>
         <TabsContent value="DEBIT">
@@ -375,9 +503,70 @@ export default function CreditDebitNotes() {
             onSend={(id) => sendMutation.mutate({ id, kind: 'DEBIT' })}
             onDelete={(id) => deleteMutation.mutate({ id, kind: 'DEBIT' })}
             deletingId={deletingId}
+            onGenerateIrn={(id) => generateIrnMutation.mutate({ id, kind: 'DEBIT' })}
+            generatingIrnId={generatingIrnId}
+            onOpenCancelModal={(note) => {
+              setCancelReason('1');
+              setCancelRemarks('Cancelled from ERP');
+              setCancelTarget({ note, kind: 'DEBIT' });
+            }}
           />
         </TabsContent>
       </Tabs>
+
+      {/* Cancel IRN Dialog */}
+      <Dialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel e-Invoice IRN</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Cancel active IRN for {cancelTarget?.kind === 'CREDIT' ? 'Credit' : 'Debit'} Note{' '}
+              <strong className="text-foreground">{cancelTarget?.note.noteNumber}</strong>.
+            </p>
+            <div className="p-3 bg-muted rounded-md text-xs space-y-1">
+              <div><span className="text-muted-foreground">Party:</span> {cancelTarget?.note.party?.name}</div>
+              <div><span className="text-muted-foreground">Total:</span> {cancelTarget ? rupees(cancelTarget.note.totalAmount) : ''}</div>
+              <div className="font-mono break-all"><span className="text-muted-foreground">IRN:</span> {cancelTarget?.note.irn}</div>
+            </div>
+            <div className="space-y-2">
+              <Label>Cancellation Reason</Label>
+              <Select value={cancelReason} onValueChange={setCancelReason}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select reason" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 - Duplicate</SelectItem>
+                  <SelectItem value="2">2 - Data Entry Mistake</SelectItem>
+                  <SelectItem value="3">3 - Order Cancelled</SelectItem>
+                  <SelectItem value="4">4 - Others</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Remarks</Label>
+              <Input
+                placeholder="Reason for cancellation"
+                value={cancelRemarks}
+                onChange={(e) => setCancelRemarks(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelTarget(null)}>
+              Dismiss
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={cancelIrnMutation.isPending}
+              onClick={() => cancelIrnMutation.mutate()}
+            >
+              {cancelIrnMutation.isPending ? 'Cancelling…' : 'Cancel IRN'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">

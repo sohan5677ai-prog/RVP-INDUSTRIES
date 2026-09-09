@@ -57,6 +57,13 @@ export interface NotePdfData {
   totalAmount: number;
   reason?: string | null;
   referenceInvoiceNumber?: string | null; // legacy alias
+  irn?: {
+    irn: string;
+    ackNo?: string | null;
+    ackDate?: Date | null;
+    signedQr?: string | null;
+    qrPngBuffer?: Buffer;
+  } | null;
 }
 
 const mm = (v: number) => (v * 72) / 25.4;
@@ -166,11 +173,51 @@ export function renderNotePdf(data: NotePdfData): Promise<Buffer> {
       return txt(v, x + keyW + mm(3), y, w - keyW - mm(3), { bold: !plain });
     };
 
-    let y = PAGE.margin;
+    const hardWrap = (s: string, w: number, o?: Opt): string => {
+      doc.font(fontFor(o)).fontSize(o?.size ?? BASE);
+      return s.split('\n').map((line) => {
+        if (doc.widthOfString(line) <= w) return line;
+        const out: string[] = [];
+        let cur = '';
+        for (const ch of line) {
+          if (cur && doc.widthOfString(cur + ch) > w) { out.push(cur); cur = ch; } else cur += ch;
+        }
+        if (cur) out.push(cur);
+        return out.join('\n');
+      }).join('\n');
+    };
 
-    // Document Title: "Tax Invoice" centered at the top
-    txt('Tax Invoice', LEFT, y, W, { bold: true, size: TITLE, align: 'center' });
-    y += hgt('Tax Invoice', W, { bold: true, size: TITLE }) + mm(4);
+    let y = PAGE.margin;
+    const titleText = data.kind === 'CREDIT' ? 'Credit Note' : 'Debit Note';
+    const QR = mm(28);
+
+    if (data.irn) {
+      const qrX = RIGHT - QR;
+      const headW = qrX - mm(6) - LEFT;
+
+      txt(titleText, LEFT, y, headW, { bold: true, size: TITLE, align: 'center' });
+      let iy = y + hgt(titleText, headW, { bold: true, size: TITLE }) + mm(5);
+
+      const keyW = mm(17);
+      const valW = headW - keyW - mm(3);
+      const irnRows: [string, string][] = [
+        ['IRN', hardWrap(data.irn.irn, valW, { bold: true })],
+        ['Ack No.', data.irn.ackNo || '-'],
+        ['Ack Date', data.irn.ackDate ? fmtDate(data.irn.ackDate) : '-'],
+      ];
+      for (const [k, v] of irnRows) {
+        iy = keyed(k, v, LEFT, iy, headW, keyW) + mm(1.2);
+      }
+
+      txt('e-Invoice', qrX, y, QR, { bold: true, align: 'center' });
+      const qrTop = y + hgt('e-Invoice', QR, { bold: true }) + mm(1.5);
+      if (data.irn.qrPngBuffer) doc.image(data.irn.qrPngBuffer, qrX, qrTop, { width: QR, height: QR });
+
+      y = Math.max(iy, qrTop + QR) + mm(4);
+    } else {
+      txt(titleText, LEFT, y, W, { bold: true, size: TITLE, align: 'center' });
+      y += hgt(titleText, W, { bold: true, size: TITLE }) + mm(4);
+    }
 
     // Header Table: Left (Seller / Consignee / Buyer) + Right (7-Row Meta Grid)
     const headerTop = y;

@@ -9,6 +9,24 @@ import { getCompanyProfileRow } from './settings.controller.js';
 import { emailService } from '../services/email.service.js';
 import { resolveProductHsn } from '../lib/calc.js';
 import { creditNoteEmailHtml, debitNoteEmailHtml } from '../lib/emailTemplates.js';
+import { TaxproService } from '../services/taxpro.service.js';
+import { qrPngBuffer } from '../lib/qrcode.js';
+import { z } from 'zod';
+
+async function runTaxpro<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new HttpError(502, message);
+  }
+}
+
+const cancelNoteSchema = z.object({
+  cancelReason: z.string().default('1'),
+  cancelRemarks: z.string().optional().default('Cancelled from ERP'),
+});
 
 const PRODUCT_FALLBACK: Record<string, string> = {
   PAPPU: 'Tamarind Seed Kernel',
@@ -237,6 +255,13 @@ async function buildNotePdfData(kind: Kind, id: string) {
     totalAmount: Number(row.totalAmount),
     reason: row.reason,
     referenceInvoiceNumber: origInvNo,
+    irn: row.irn ? {
+      irn: row.irn,
+      ackNo: row.irnAckNo,
+      ackDate: row.irnAckDate,
+      signedQr: row.irnSignedQr,
+      qrPngBuffer: row.irnSignedQr ? await qrPngBuffer(row.irnSignedQr) : undefined,
+    } : null,
   };
 
   return { row, company, pdfData };
@@ -400,4 +425,60 @@ export async function listPendingCreditNotes(_req: Request, res: Response) {
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+export function generateNoteEinvoice(kind: Kind) {
+  return async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const note = await (model(kind) as any).findUnique({
+      where: { id },
+      include: { party: true },
+    });
+    if (!note) throw new HttpError(404, `${kind === 'CREDIT' ? 'Credit' : 'Debit'} note not found`);
+    if (note.status === 'CANCELLED') throw new HttpError(400, 'Cannot generate e-Invoice for a cancelled note');
+    if (note.irn && note.irnStatus !== 'CANCELLED') {
+      throw new HttpError(400, 'Active E-Invoice IRN already generated for this note');
+    }
+
+    const result = await runTaxpro(() => TaxproService.generateNoteIRN(id, kind));
+
+    const updated = await (model(kind) as any).update({
+      where: { id },
+      data: {
+        irn: result.irn,
+        irnAckNo: result.ackNo,
+        irnAckDate: result.ackDate,
+        irnSignedQr: result.signedQr,
+        irnStatus: 'GENERATED',
+      },
+      include: { party: true, saleDispatch: true },
+    });
+
+    res.json({ updated, message: result.message });
+  };
+}
+
+export function cancelNoteEinvoice(kind: Kind) {
+  return async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { cancelReason, cancelRemarks } = cancelNoteSchema.parse(req.body);
+
+    const note = await (model(kind) as any).findUnique({ where: { id } });
+    if (!note) throw new HttpError(404, `${kind === 'CREDIT' ? 'Credit' : 'Debit'} note not found`);
+    if (!note.irn) throw new HttpError(400, 'No E-Invoice found to cancel');
+    if (note.irnStatus === 'CANCELLED') throw new HttpError(400, 'E-Invoice is already cancelled');
+
+    const result = await runTaxpro(() => TaxproService.cancelNoteIRN(id, kind, cancelReason, cancelRemarks));
+
+    const updated = await (model(kind) as any).update({
+      where: { id },
+      data: {
+        irnStatus: 'CANCELLED',
+        irnCancelledDate: result.cancelledDate,
+      },
+      include: { party: true, saleDispatch: true },
+    });
+
+    res.json({ updated, message: result.message });
+  };
 }

@@ -199,11 +199,7 @@ export class TaxproService {
               msg = `1017: Incorrect user id/User does not exists. Please verify: 1) Is your NIC E-Invoice API User created under GSP "TaxPro / Chartered Information Systems" on the NIC E-Invoice Portal? 2) Is "Sandbox Mode" correctly toggled in Settings? [${msg}]`;
             }
             const err: any = new Error(msg);
-            if (isTransientNicError) {
-              err.isBusinessError = false;
-            } else if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
-              err.isBusinessError = true;
-            }
+            err.isBusinessError = !isTransientNicError;
             err.errorDetails = json.ErrorDetails;
             throw err;
           }
@@ -645,6 +641,264 @@ export class TaxproService {
       };
     } catch (err: any) {
       logger.error('TaxPro IRN Cancellation Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Formats a Credit Note or Debit Note into the NIC E-Invoice JSON payload (schema v1.1).
+   */
+  public static async prepareNoteEInvoicePayload(noteId: string, kind: 'CREDIT' | 'DEBIT') {
+    const note = await (kind === 'CREDIT' ? (prisma.creditNote as any) : (prisma.debitNote as any)).findUnique({
+      where: { id: noteId },
+      include: {
+        party: {
+          include: { addresses: true },
+        },
+        saleDispatch: {
+          include: {
+            saleOrder: {
+              include: {
+                buyer: {
+                  include: { addresses: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    }) as any;
+
+    if (!note) throw new Error(`${kind === 'CREDIT' ? 'Credit' : 'Debit'} note not found`);
+
+    const company = await getCompanyProfileRow();
+    if (!company.gstin) throw new Error('Company GSTIN is not set in Settings');
+
+    const party = note.party;
+    const dispatch = note.saleDispatch;
+    const order = dispatch?.saleOrder;
+    const addressDetails = order ? await resolveOrderEffectiveDetails(order) : null;
+
+    const effectiveBuyerGstin = (addressDetails?.effectiveGstin || order?.buyerGstin || party.gstin || '').trim();
+    if (!effectiveBuyerGstin) {
+      throw new Error(`Party "${party.name}" has no GSTIN on file. E-Invoice (IRN) requires a registered B2B GSTIN.`);
+    }
+
+    const dispatchFrom = this.dispatchFromDetails(company as any);
+    const sellerAddr = this.formatNICAddress(dispatchFrom.addr1, 'Factory premises');
+    const sellerLoc = this.formatNICPlace(dispatchFrom.place, 'Punganur');
+    const sellerStateCode = company.gstin.slice(0, 2);
+
+    const buyerAddr = this.formatNICAddress(
+      addressDetails?.effectiveAddress || order?.buyerAddress || party.address,
+      'Buyer address',
+    );
+    const buyerLoc = this.formatNICPlace(
+      addressDetails?.effectiveCity || order?.buyerCity || party.city || party.state,
+      'Town',
+    );
+    const buyerPincode = Number(addressDetails?.effectivePincode || order?.buyerPincode || party.pincode) || 0;
+    const buyerStateCode = effectiveBuyerGstin.slice(0, 2);
+    const isSameState = sellerStateCode === buyerStateCode;
+
+    // Commodity / HSN resolution
+    let hsn = '120799';
+    let description = `${kind === 'CREDIT' ? 'Credit Note' : 'Debit Note'} - ${note.reason}`;
+    if (order?.product) {
+      const taxInfo = await prisma.productTaxInfo.findUnique({ where: { product: order.product } });
+      const rawHsn = resolveProductHsn(order.buyer || party, taxInfo, order.gstExempt);
+      hsn = this.requireHsn(rawHsn, order.product);
+      description = taxInfo?.description || `${order.product} ${kind === 'CREDIT' ? 'Credit' : 'Debit'} Note`;
+    } else {
+      hsn = this.requireHsn(hsn, 'Tamarind Goods');
+    }
+
+    const taxableValue = Number(note.taxableValue);
+    const gstRate = Number(note.gstRate);
+    const gstAmount = Math.round(taxableValue * gstRate) / 100;
+    const totalAmount = Math.round((taxableValue + gstAmount) * 100) / 100;
+
+    const cgstAmt = isSameState ? Math.round((gstAmount / 2) * 100) / 100 : 0;
+    const sgstAmt = isSameState ? Math.round((gstAmount / 2) * 100) / 100 : 0;
+    const igstAmt = isSameState ? 0 : gstAmount;
+
+    // Quantity / Rate derivation
+    let qty = 1;
+    let unit = 'OTH';
+    let unitPrice = taxableValue;
+
+    if (dispatch?.shortageKg && dispatch.shortageKg > 0) {
+      qty = dispatch.shortageKg;
+      unit = 'KGS';
+      unitPrice = Math.round((taxableValue / qty) * 100) / 100;
+    } else if (order?.ratePerKg && Number(order.ratePerKg) > 0) {
+      const rate = Number(order.ratePerKg);
+      const derivedQty = Math.round(taxableValue / rate);
+      if (derivedQty > 0) {
+        qty = derivedQty;
+        unit = 'KGS';
+        unitPrice = rate;
+      }
+    }
+
+    const origInvNo = dispatch?.invoiceNumber;
+    const origInvDate = dispatch?.invoiceDate || dispatch?.dispatchDate || note.noteDate;
+
+    return {
+      Version: '1.1',
+      TranDtls: { TaxSch: 'GST', SupTyp: 'B2B', RegRev: 'N', IgstOnIntra: 'N' },
+      DocDtls: {
+        Typ: kind === 'CREDIT' ? 'CRN' : 'DBN',
+        No: note.noteNumber,
+        Dt: this.formatNICDate(note.noteDate || new Date()),
+      },
+      SellerDtls: {
+        Gstin: company.gstin,
+        LglNm: company.name.slice(0, 100),
+        Addr1: sellerAddr.addr1,
+        ...(sellerAddr.addr2 || dispatchFrom.addr2 ? { Addr2: (sellerAddr.addr2 || dispatchFrom.addr2).slice(0, 100) } : {}),
+        Loc: sellerLoc,
+        Pin: dispatchFrom.pincode,
+        Stcd: sellerStateCode,
+      },
+      BuyerDtls: {
+        Gstin: effectiveBuyerGstin,
+        LglNm: party.name.slice(0, 100),
+        Pos: buyerStateCode,
+        Addr1: buyerAddr.addr1,
+        ...(buyerAddr.addr2 ? { Addr2: buyerAddr.addr2 } : {}),
+        Loc: buyerLoc,
+        Pin: buyerPincode,
+        Stcd: buyerStateCode,
+      },
+      ...(origInvNo ? {
+        RefDtls: {
+          PrecDocDtls: [
+            {
+              InvNo: origInvNo,
+              InvDt: this.formatNICDate(origInvDate),
+            },
+          ],
+        },
+      } : {}),
+      ItemList: [
+        {
+          SlNo: '1',
+          PrdDesc: description.slice(0, 100),
+          IsServc: 'N',
+          HsnCd: hsn,
+          Qty: qty,
+          Unit: unit,
+          UnitPrice: unitPrice,
+          TotAmt: taxableValue,
+          Discount: 0,
+          AssAmt: taxableValue,
+          GstRt: gstRate,
+          CgstAmt: cgstAmt,
+          SgstAmt: sgstAmt,
+          IgstAmt: igstAmt,
+          TotItemVal: totalAmount,
+        },
+      ],
+      ValDtls: {
+        AssVal: taxableValue,
+        CgstVal: cgstAmt,
+        SgstVal: sgstAmt,
+        IgstVal: igstAmt,
+        TotInvVal: totalAmount,
+      },
+    };
+  }
+
+  /**
+   * Authenticates and generates an E-Invoice (IRN) for a Credit Note or Debit Note via TaxPro GSP.
+   */
+  public static async generateNoteIRN(noteId: string, kind: 'CREDIT' | 'DEBIT') {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const payload = await this.prepareNoteEInvoicePayload(noteId, kind);
+
+    if (isMock) {
+      const irn = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+      const ackNo = String(100000000000 + Math.floor(Math.random() * 900000000000));
+      const qrData = `IRN:${irn}|GSTIN:${payload.SellerDtls.Gstin}|DocType:${payload.DocDtls.Typ}|DocNo:${payload.DocDtls.No}|Amt:${payload.ValDtls.TotInvVal}|Date:${payload.DocDtls.Dt}`;
+      return {
+        success: true,
+        irn,
+        ackNo,
+        ackDate: new Date(),
+        signedQr: qrData,
+        message: `Simulated IRN generated for ${kind === 'CREDIT' ? 'Credit' : 'Debit'} Note (TaxPro credentials not configured)`,
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) =>
+        this.request(company.taxproSandbox, '/eicore/dec/v1.03/Invoice?QrCodeSize=250', {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          body: JSON.stringify(payload),
+        }));
+
+      const data = this.parseData(json.Data);
+      return {
+        success: true,
+        irn: data.Irn,
+        ackNo: String(data.AckNo),
+        ackDate: this.parseNicDate(data.AckDt),
+        signedQr: data.SignedQRCode,
+        signedInvoice: data.SignedInvoice,
+        message: company.taxproSandbox
+          ? `${kind === 'CREDIT' ? 'Credit' : 'Debit'} Note IRN generated (SANDBOX)`
+          : `${kind === 'CREDIT' ? 'Credit' : 'Debit'} Note IRN generated successfully`,
+      };
+    } catch (err: any) {
+      logger.error(`TaxPro ${kind} Note IRN Generation Error:`, err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Cancels an already generated E-Invoice (IRN) for a Credit Note or Debit Note. Allowed within 24h of ack.
+   */
+  public static async cancelNoteIRN(
+    noteId: string,
+    kind: 'CREDIT' | 'DEBIT',
+    cancelReason: string,
+    cancelRemarks: string,
+  ) {
+    const note = await (kind === 'CREDIT' ? (prisma.creditNote as any) : (prisma.debitNote as any)).findUnique({ where: { id: noteId } });
+    if (!note || !note.irn) throw new Error(`IRN not found on ${kind === 'CREDIT' ? 'credit' : 'debit'} note`);
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const payload = {
+      Irn: note.irn,
+      CnlRsn: cancelReason || '1', // 1-Duplicate, 2-Data Entry Mistake, 3-Order Cancelled, 4-Others
+      CnlRem: cancelRemarks || 'Cancelled from ERP system',
+    };
+
+    if (isMock) {
+      return { success: true, cancelledDate: new Date(), message: 'Simulated IRN cancelled (credentials not configured)' };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) =>
+        this.request(company.taxproSandbox, '/eicore/dec/v1.03/Invoice/Cancel', {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { AuthToken: token }),
+          body: JSON.stringify(payload),
+        }));
+      const data = this.parseData(json.Data) || {};
+      return {
+        success: true,
+        cancelledDate: data.CancelDate ? this.parseNicDate(data.CancelDate) : new Date(),
+        message: `${kind === 'CREDIT' ? 'Credit' : 'Debit'} Note IRN cancelled successfully`,
+      };
+    } catch (err: any) {
+      logger.error(`TaxPro ${kind} Note IRN Cancellation Error:`, err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }

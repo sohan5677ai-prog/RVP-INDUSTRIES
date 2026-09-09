@@ -5,21 +5,32 @@ import {
   Scale,
   Printer,
   RotateCcw,
-  Save,
   Clock,
   Video,
   Search,
   Wifi,
   WifiOff,
-  Zap,
+  Truck,
+  FileText,
+  Calendar,
+  User,
+  Package,
+  CreditCard,
+  Phone,
+  Tag,
+  CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useScale } from '@/lib/scaleContext';
 import type { Party, CompanyProfile, WeighbridgeTicket } from '@/lib/types';
+import { PageHeader } from '@/components/PageHeader';
+import { StatCard } from '@/components/StatCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -51,6 +62,17 @@ const MATERIALS = [
   'NALLA POKKULU',
   'BLACK SEED',
   'OTHER',
+];
+
+const VEHICLE_TYPES = [
+  { value: 'LORRY', label: 'Lorry / Truck (10-14 Wheeler)' },
+  { value: 'TRAILER', label: 'Heavy Trailer (18-22 Wheeler)' },
+  { value: 'TRACTOR', label: 'Tractor / Trolley' },
+  { value: 'TIPPER', label: 'Tipper' },
+  { value: 'TEMPO', label: 'Tempo / 407 / Pickup' },
+  { value: 'AUTO', label: 'Small Commercial (Auto / Ape)' },
+  { value: 'TANKER', label: 'Liquid / Oil Tanker' },
+  { value: 'OTHER', label: 'Other Vehicle' },
 ];
 
 interface CctvLiveBoxProps {
@@ -88,7 +110,6 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
     }, delayMs);
   }, [camNumber]);
 
-  // If parent triggers refresh, immediately fetch fresh frame
   useEffect(() => {
     if (refreshTrigger) {
       setFrameUrl(`/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`);
@@ -96,48 +117,47 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
   }, [refreshTrigger, camNumber]);
 
   return (
-    <div className="rounded-lg bg-black border border-zinc-800 h-36 relative overflow-hidden flex items-center justify-center group shadow-inner">
+    <div className="rounded-xl bg-stone-950 border border-border/80 h-40 relative overflow-hidden flex items-center justify-center group shadow-md">
       <img
         src={frameUrl}
         alt={`Camera ${camNumber} - ${label}`}
         onLoad={() => {
           errCountRef.current = 0;
           setIsOnline(true);
-          triggerNextFrame(350); // Fetch next frame smoothly after 350ms
+          triggerNextFrame(400); // 400ms smooth snapshot refresh
         }}
         onError={() => {
           errCountRef.current += 1;
           if (errCountRef.current >= 3) {
             setIsOnline(false);
           }
-          triggerNextFrame(1200); // Retry smoothly
+          triggerNextFrame(1500);
         }}
-        className={cn('w-full h-full object-cover', !isOnline && 'opacity-20')}
+        className={cn('w-full h-full object-cover transition-opacity duration-300', !isOnline && 'opacity-25')}
       />
 
       {!isOnline && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center text-zinc-500 font-mono text-[10px] bg-black/80">
-          <Video className="h-6 w-6 text-red-500/60 mb-1" />
-          <span className="text-zinc-400 font-semibold">{label} ({cameraIp})</span>
-          <span className="text-[9px] text-red-400 mt-0.5">Connecting to camera...</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center bg-stone-950/85 backdrop-blur-xs text-stone-400">
+          <Video className="h-6 w-6 text-rose-500/70 mb-1.5 animate-pulse" />
+          <span className="font-semibold text-xs text-stone-200">{label}</span>
+          <span className="text-[10px] text-stone-400 font-mono mt-0.5">{cameraIp}</span>
+          <span className="text-[10px] text-amber-400 font-mono mt-1">Connecting to camera...</span>
         </div>
       )}
 
-      {/* CP PLUS On-Screen Display (OSD) Overlay */}
-      <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-        <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
+      {/* Elegant OSD Overlay */}
+      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none">
+        <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-bold text-amber-400 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
           {label}
         </span>
-        <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
+        <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-medium text-stone-200 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
           {currentTime}
         </span>
       </div>
 
-      <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-        <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
-          CP PLUS Cam
-        </span>
-        <span className="text-[8px] font-mono text-emerald-400/80 bg-black/60 px-1 rounded">
+      {/* Camera IP watermark pill */}
+      <div className="absolute bottom-2 left-2 pointer-events-none">
+        <span className="text-[9px] font-mono text-stone-400 bg-stone-900/60 px-1.5 py-0.5 rounded">
           {cameraIp}
         </span>
       </div>
@@ -147,799 +167,1035 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
 
 export default function WeighbridgeScreen() {
   const { user } = useAuth();
-  const qc = useQueryClient();
-  const { isConnected, liveWeight, isStable, connect } = useScale();
+  const queryClient = useQueryClient();
+  const scale = useScale();
 
-  // Live running clock
-  const [currentTime, setCurrentTime] = useState<string>('');
-  const [currentDate, setCurrentDate] = useState<string>('');
+  // Active view tab: 'entry' | 'pending' | 'history'
+  const [activeTab, setActiveTab] = useState<'entry' | 'pending' | 'history'>('entry');
+
+  // Form states
+  const [vehicleNumber, setVehicleNumber] = useState<string>('');
+  const [vehicleType, setVehicleType] = useState<string>('LORRY');
+  const [tripType, setTripType] = useState<'FIRST' | 'SECOND' | 'SINGLE'>('FIRST');
+  const [partyName, setPartyName] = useState<string>('');
+  const [material, setMaterial] = useState<string>('PAPPU');
+  const [loadType, setLoadType] = useState<'LOAD' | 'EMPTY'>('LOAD');
+  const [billType, setBillType] = useState<'CASH' | 'CREDIT' | 'FREE'>('CASH');
+  const [charges, setCharges] = useState<string>('100');
+  const [driverMobile, setDriverMobile] = useState<string>('');
+  const [remarks, setRemarks] = useState<string>('');
+
+  // Weight tracking states
+  const [firstWeight, setFirstWeight] = useState<number | null>(null);
+  const [manualWeightInput, setManualWeightInput] = useState<string>('');
+  const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
+  const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
+
+  // Cameras & Snapshot triggers
+  const [camRefreshTrigger, setCamRefreshTrigger] = useState<number>(0);
+  const [activeSnapshots, setActiveSnapshots] = useState<{ cam1?: string; cam2?: string } | null>(null);
+
+  // Active Slip Modal
+  const [slipModalTicket, setSlipModalTicket] = useState<WeighbridgeTicket | null>(null);
+
+  // Search & Filter in History tab
+  const [historySearch, setHistorySearch] = useState<string>('');
+
+  // Clock
+  const [clockString, setClockString] = useState<string>('');
+  const [dateString, setDateString] = useState<string>('');
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTime(now.toLocaleTimeString('en-US', { hour12: true }));
-      const dd = String(now.getDate()).padStart(2, '0');
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const yyyy = now.getFullYear();
-      setCurrentDate(`${dd}-${mm}-${yyyy}`);
+      setClockString(
+        now.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+        })
+      );
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      setDateString(`${day}-${month}-${year}`);
     };
     updateTime();
-    const timer = setInterval(updateTime, 1000);
-    return () => clearInterval(timer);
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Queries
-  const { data: nextNumberData } = useQuery<{ nextTicketNo: number }>({
-    queryKey: ['weighbridge-next-number'],
-    queryFn: () => api('/weighbridge/next-number'),
-    staleTime: 5000,
+  // Fetch next ticket number
+  const { data: ticketNumData } = useQuery({
+    queryKey: ['weighbridge-next-ticket'],
+    queryFn: () => api<{ nextTicketNo: number }>('/weighbridge/tickets/next-number'),
+    refetchInterval: 15000,
   });
 
-  const { data: tickets = [], isLoading: ticketsLoading } = useQuery<WeighbridgeTicket[]>({
-    queryKey: ['weighbridge-tickets'],
-    queryFn: () => api('/weighbridge/tickets?limit=50'),
+  const nextTicketNo = ticketNumData?.nextTicketNo ?? 2808;
+
+  // Fetch pending trucks (awaiting second weight)
+  const { data: pendingTickets = [], refetch: refetchPending } = useQuery<WeighbridgeTicket[]>({
+    queryKey: ['weighbridge-pending'],
+    queryFn: () => api<WeighbridgeTicket[]>('/weighbridge/tickets/pending'),
     refetchInterval: 10000,
   });
 
-  const { data: pendingTrucks = [] } = useQuery<WeighbridgeTicket[]>({
-    queryKey: ['weighbridge-pending'],
-    queryFn: () => api('/weighbridge/pending'),
-    refetchInterval: 5000,
+  // Fetch all tickets for history
+  const { data: allTickets = [], refetch: refetchHistory } = useQuery<WeighbridgeTicket[]>({
+    queryKey: ['weighbridge-tickets', historySearch],
+    queryFn: () =>
+      api<WeighbridgeTicket[]>(
+        `/weighbridge/tickets?limit=100${historySearch ? `&search=${encodeURIComponent(historySearch)}` : ''}`
+      ),
   });
 
+  // Fetch ERP parties for auto-complete suggestions
   const { data: parties = [] } = useQuery<Party[]>({
     queryKey: ['parties'],
-    queryFn: () => api('/parties'),
+    queryFn: () => api<Party[]>('/parties'),
   });
 
+  // Fetch Company Profile for Print Header
   const { data: companyProfile } = useQuery<CompanyProfile>({
     queryKey: ['company-profile'],
-    queryFn: () => api('/settings/profile'),
+    queryFn: () => api<CompanyProfile>('/company-profile'),
   });
 
-  // Form State
-  const [ticketNo, setTicketNo] = useState<string>('');
-  const [vehicleNumber, setVehicleNumber] = useState<string>('');
-  const [vehicleType, setVehicleType] = useState<string>('LORRY');
-  const [tripType, setTripType] = useState<string>('SECOND'); // FIRST, SECOND, SINGLE
-  const [selectedPartyName, setSelectedPartyName] = useState<string>('');
-  const [mobileNumber, setMobileNumber] = useState<string>('');
-  const [material, setMaterial] = useState<string>('PAPPU');
-  const [loadType, setLoadType] = useState<string>('LOAD'); // LOAD, EMPTY
-  const [billType, setBillType] = useState<string>('CASH'); // CASH, CREDIT
-  const [kataFeeAmount, setKataFeeAmount] = useState<string>('100');
-  const [remarks, setRemarks] = useState<string>('');
-
-  // Weights
-  const [firstWeight, setFirstWeight] = useState<string>('');
-  const [manualCurrentWeight, setManualCurrentWeight] = useState<string>('');
-  const [lockCurrentToScale, setLockCurrentToScale] = useState<boolean>(true);
-
-  // Selected existing ticket for completing 2nd weight
-  const [activePendingTicketId, setActivePendingTicketId] = useState<string | null>(null);
-
-  // Slip Printing
-  const [printSlipTicket, setPrintSlipTicket] = useState<WeighbridgeTicket | null>(null);
-
-  // CP PLUS Network CCTV Camera State (192.168.1.101 & 192.168.1.102)
-  const [cameraRefreshKey, setCameraRefreshKey] = useState<number>(Date.now());
-  const [snapshots, setSnapshots] = useState<{ cam1?: string; cam2?: string }>({});
-
-  // Capture snapshots from both cameras (calls backend snapshot endpoints)
-  const captureCurrentSnapshots = useCallback(async () => {
-    const ts = Date.now();
-    const snap1 = `/api/weighbridge/cctv/snapshot?cam=1&t=${ts}`;
-    const snap2 = `/api/weighbridge/cctv/snapshot?cam=2&t=${ts}`;
-    const result = { cam1: snap1, cam2: snap2 };
-    setSnapshots(result);
-    return result;
-  }, []);
-
-  const reloadCameras = useCallback(() => {
-    setCameraRefreshKey(Date.now());
-    toast.success('Refreshing CP PLUS camera feeds...');
-  }, []);
-
-  // Search in ticket history
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Auto-fill ticket number when next number loads
-  useEffect(() => {
-    if (nextNumberData?.nextTicketNo && !ticketNo && !activePendingTicketId) {
-      setTicketNo(String(nextNumberData.nextTicketNo));
+  // Current weight from scale or manual input
+  const currentLiveWeight = useMemo(() => {
+    if (isManualOverride) {
+      const parsed = parseFloat(manualWeightInput);
+      return isNaN(parsed) ? 0 : parsed;
     }
-  }, [nextNumberData, ticketNo, activePendingTicketId]);
+    return scale.liveWeight ?? 0;
+  }, [isManualOverride, manualWeightInput, scale.liveWeight]);
 
-  // Current weight resolution: uses live COM4 reading if locked & connected, else manual input
-  const resolvedCurrentWeight = useMemo(() => {
-    if (lockCurrentToScale && isConnected && liveWeight != null) {
-      return liveWeight;
+  // Net weight calculation
+  const calculatedNetWeight = useMemo(() => {
+    if (tripType === 'SECOND' && firstWeight != null) {
+      return Math.abs(currentLiveWeight - firstWeight);
     }
-    const parsed = parseInt(manualCurrentWeight, 10);
-    return isNaN(parsed) ? (liveWeight ?? 0) : parsed;
-  }, [lockCurrentToScale, isConnected, liveWeight, manualCurrentWeight]);
+    if (tripType === 'SINGLE') {
+      return currentLiveWeight;
+    }
+    return null;
+  }, [tripType, firstWeight, currentLiveWeight]);
 
-  // Nett Weight Calculation: |Current - First|
-  const calculatedNettWeight = useMemo(() => {
-    const first = parseInt(firstWeight, 10);
-    if (isNaN(first)) return null;
-    return Math.abs(resolvedCurrentWeight - first);
-  }, [firstWeight, resolvedCurrentWeight]);
-
-  // Load a pending ticket into the form for 2nd weight
-  const selectPendingTruck = useCallback((t: WeighbridgeTicket) => {
-    setActivePendingTicketId(t.id);
-    setTicketNo(String(t.ticketNo));
-    setVehicleNumber(t.vehicleNumber);
-    setVehicleType(t.vehicleType);
-    setTripType('SECOND');
-    setSelectedPartyName(t.partyName || '');
-    setMobileNumber(t.partyMobile || '');
-    setMaterial(t.material || 'PAPPU');
-    setLoadType(t.loadType === 'EMPTY' ? 'LOAD' : 'EMPTY'); // Toggle to opposite
-    setFirstWeight(String(t.firstWeightKg ?? ''));
-    setKataFeeAmount(String(t.amount || 100));
-    setLockCurrentToScale(true);
-    toast.info(`Loaded Ticket #${t.ticketNo} (${t.vehicleNumber}) - Ready for Second Weight`);
-  }, []);
+  // Daily statistics for KPI cards
+  const stats = useMemo(() => {
+    const today = new Date().toDateString();
+    const todayTickets = allTickets.filter((t) => new Date(t.createdAt).toDateString() === today);
+    const totalTodayKg = todayTickets.reduce((sum, t) => sum + (t.netWeightKg || t.firstWeightKg || 0), 0);
+    const totalTodayFees = todayTickets.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    return {
+      todayCount: todayTickets.length,
+      todayTonnes: (totalTodayKg / 1000).toFixed(2),
+      pendingCount: pendingTickets.length,
+      todayFees: totalTodayFees,
+    };
+  }, [allTickets, pendingTickets]);
 
   // Reset form
-  const clearForm = useCallback(() => {
-    setActivePendingTicketId(null);
-    setTicketNo(nextNumberData?.nextTicketNo ? String(nextNumberData.nextTicketNo) : '');
+  const handleResetForm = useCallback(() => {
     setVehicleNumber('');
     setVehicleType('LORRY');
-    setTripType('SECOND');
-    setSelectedPartyName('');
-    setMobileNumber('');
+    setTripType('FIRST');
+    setPartyName('');
     setMaterial('PAPPU');
     setLoadType('LOAD');
     setBillType('CASH');
-    setKataFeeAmount('100');
-    setFirstWeight('');
-    setManualCurrentWeight('');
-    setLockCurrentToScale(true);
+    setCharges('100');
+    setDriverMobile('');
     setRemarks('');
-  }, [nextNumberData]);
+    setFirstWeight(null);
+    setManualWeightInput('');
+    setPendingTicketId(null);
+    setActiveSnapshots(null);
+  }, []);
 
-  // Create or Update Ticket Mutation
-  const saveTicketMutation = useMutation({
+  // Pick pending truck for 2nd weight
+  const handleSelectPendingTruck = useCallback((ticket: WeighbridgeTicket) => {
+    setPendingTicketId(ticket.id);
+    setVehicleNumber(ticket.vehicleNumber);
+    setVehicleType(ticket.vehicleType || 'LORRY');
+    setTripType('SECOND');
+    setPartyName(ticket.partyName || '');
+    setMaterial(ticket.material || 'PAPPU');
+    setLoadType(ticket.loadType === 'LOAD' ? 'EMPTY' : 'LOAD');
+    setFirstWeight(ticket.firstWeightKg);
+    setCharges(ticket.amount != null ? String(ticket.amount) : '100');
+    setRemarks(ticket.remarks || '');
+    setActiveTab('entry');
+    toast.info(`Loaded truck ${ticket.vehicleNumber} (First Weight: ${ticket.firstWeightKg} Kg)`);
+  }, []);
+
+  // Save ticket mutation
+  const saveMutation = useMutation({
     mutationFn: async () => {
       if (!vehicleNumber.trim()) {
-        throw new Error('Please enter vehicle number');
+        throw new Error('Vehicle number is mandatory');
+      }
+      if (currentLiveWeight <= 0) {
+        throw new Error('Weight must be greater than 0 kg');
       }
 
-      await captureCurrentSnapshots();
+      // Freeze snapshots
+      const ts = Date.now();
+      const snap1 = `/api/weighbridge/cctv/snapshot?cam=1&t=${ts}`;
+      const snap2 = `/api/weighbridge/cctv/snapshot?cam=2&t=${ts}`;
+      const snapObj = { cam1: snap1, cam2: snap2 };
+      setActiveSnapshots(snapObj);
 
-      if (activePendingTicketId) {
-        // Complete second weight
-        return api(`/weighbridge/tickets/${activePendingTicketId}/second-weight`, {
-          method: 'POST',
-          body: {
-            secondWeightKg: resolvedCurrentWeight,
+      if (tripType === 'SECOND' && pendingTicketId) {
+        // Complete second weighment
+        const res = await api<WeighbridgeTicket>(`/weighbridge/tickets/${pendingTicketId}/second-weight`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            secondWeight: currentLiveWeight,
             loadType,
             remarks,
-          },
+          }),
         });
+        return { ticket: res, snapshots: snapObj };
       } else {
-        // Create new ticket
-        return api<WeighbridgeTicket>('/weighbridge/tickets', {
+        // Create initial ticket (First weight or Single weight)
+        const res = await api<WeighbridgeTicket>('/weighbridge/tickets', {
           method: 'POST',
-          body: {
+          body: JSON.stringify({
             vehicleNumber: vehicleNumber.trim().toUpperCase(),
             vehicleType,
             tripType,
-            partyName: selectedPartyName || null,
-            partyMobile: mobileNumber || null,
+            partyName: partyName.trim(),
             material,
             loadType,
             billType,
-            amount: Number(kataFeeAmount) || 100,
-            firstWeightKg: tripType === 'FIRST' ? resolvedCurrentWeight : (parseInt(firstWeight, 10) || null),
-            secondWeightKg: tripType === 'SECOND' ? resolvedCurrentWeight : null,
-            remarks: remarks || null,
-          },
+            amount: parseFloat(charges) || 0,
+            firstWeightKg: currentLiveWeight,
+            driverMobile: driverMobile.trim(),
+            remarks: remarks.trim(),
+            operatorName: user?.name || 'OPERATOR',
+          }),
         });
+        return { ticket: res, snapshots: snapObj };
       }
     },
-    onSuccess: (saved: any) => {
-      toast.success(`Ticket #${saved.ticketNo} saved successfully!`);
-      qc.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
-      qc.invalidateQueries({ queryKey: ['weighbridge-pending'] });
-      qc.invalidateQueries({ queryKey: ['weighbridge-next-number'] });
+    onSuccess: ({ ticket, snapshots }) => {
+      toast.success(`Ticket #${ticket.ticketNo} saved successfully!`);
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
 
-      // Open printable slip
-      setPrintSlipTicket(saved);
-      clearForm();
+      // Open print slip modal automatically
+      setSlipModalTicket(ticket);
+      setActiveSnapshots(snapshots);
+
+      // Reset form if completed
+      if (tripType !== 'FIRST') {
+        handleResetForm();
+      } else {
+        // Prepare next ticket
+        handleResetForm();
+      }
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast.error(getErrorMessage(err));
     },
   });
 
-  // Keyboard shortcut F12 to save ticket
+  // Global Keyboard Shortcuts (F12 = Save, F4 = Pending, Esc = Clear)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F12') {
         e.preventDefault();
-        saveTicketMutation.mutate();
+        saveMutation.mutate();
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        setActiveTab((prev) => (prev === 'pending' ? 'entry' : 'pending'));
+      } else if (e.key === 'Escape') {
+        if (!slipModalTicket) {
+          handleResetForm();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [saveTicketMutation]);
-
-  // Filtered tickets
-  const filteredTickets = useMemo(() => {
-    if (!searchQuery.trim()) return tickets;
-    const q = searchQuery.toLowerCase().trim();
-    return tickets.filter(
-      (t) =>
-        t.vehicleNumber.toLowerCase().includes(q) ||
-        String(t.ticketNo).includes(q) ||
-        (t.partyName && t.partyName.toLowerCase().includes(q)) ||
-        (t.material && t.material.toLowerCase().includes(q))
-    );
-  }, [tickets, searchQuery]);
+  }, [saveMutation, slipModalTicket, handleResetForm]);
 
   return (
-    <div className="space-y-6 select-none font-sans">
-      {/* ── Main Weighbridge Station Console ── */}
-      <div className="rounded-xl border border-zinc-700/60 bg-zinc-900 text-zinc-100 shadow-2xl overflow-hidden">
-        {/* Top Header Bar (Legacy Terminal Style) */}
-        <div className="bg-zinc-950 px-5 py-2.5 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-4 text-xs font-mono">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-500 uppercase">Login User:</span>
-              <span className="font-bold text-emerald-400">{user?.name || 'ADMIN'}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-500 uppercase">Date:</span>
-              <span className="font-bold text-zinc-200">{currentDate}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-500 uppercase">Time:</span>
-              <span className="font-bold text-red-400 tracking-wider bg-red-950/40 px-2 py-0.5 rounded border border-red-800/40">
-                {currentTime}
-              </span>
-            </div>
-          </div>
-
-          {/* Scale Connection Badge */}
-          <div className="flex items-center gap-3">
-            {isConnected ? (
-              <div className="flex items-center gap-2 bg-emerald-950/60 text-emerald-400 px-3 py-1 rounded-full border border-emerald-800/50 text-[11px] font-semibold">
-                <Wifi className="h-3 w-3" />
-                <span>COM4 (2400 baud) · LIVE</span>
-              </div>
-            ) : (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => connect()}
-                className="bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 text-xs h-7 gap-1.5"
-              >
-                <WifiOff className="h-3 w-3 text-amber-400" />
-                Connect COM4
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* ── Main Station Body ── */}
-        <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 bg-gradient-to-b from-zinc-900 to-zinc-950">
-          {/* Left Column: Transaction Entry (7 Cols) */}
-          <div className="lg:col-span-7 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Scale className="h-4 w-4 text-emerald-400" />
-                <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-200">
-                  Transaction Entry Screen
-                </h3>
-              </div>
-              {activePendingTicketId && (
-                <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-xs font-mono">
-                  Completing Second Weight for Ticket #{ticketNo}
-                </Badge>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Ticket No */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Ticket No</Label>
-                <Input
-                  value={ticketNo}
-                  onChange={(e) => setTicketNo(e.target.value)}
-                  className="bg-zinc-950 border-zinc-700 font-mono font-bold text-red-400 h-9"
-                  placeholder="2807"
-                />
-              </div>
-
-              {/* Vehicle No */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400 flex items-center justify-between">
-                  <span>Vehicle No *</span>
-                  <span className="text-[10px] text-zinc-500 uppercase">e.g. GJ36T8660</span>
-                </Label>
-                <Input
-                  value={vehicleNumber}
-                  onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-                  className="bg-zinc-950 border-zinc-700 font-mono font-bold text-zinc-100 uppercase h-9 tracking-wider"
-                  placeholder="GJ36T8660"
-                  required
-                />
-              </div>
-
-              {/* Vehicle Type */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Vehicle Type</Label>
-                <Select value={vehicleType} onValueChange={setVehicleType}>
-                  <SelectTrigger className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
-                    <SelectItem value="LORRY">LORRY</SelectItem>
-                    <SelectItem value="TRACTOR">TRACTOR</SelectItem>
-                    <SelectItem value="AUTO">AUTO / PICKUP</SelectItem>
-                    <SelectItem value="TANKER">TANKER</SelectItem>
-                    <SelectItem value="OTHER">OTHER</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Trip Type */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Trip Type</Label>
-                <Select value={tripType} onValueChange={setTripType} disabled={!!activePendingTicketId}>
-                  <SelectTrigger className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
-                    <SelectItem value="SECOND">Second Weight (Gross - Tare = Net)</SelectItem>
-                    <SelectItem value="FIRST">First Weight (Inward / Empty Tare)</SelectItem>
-                    <SelectItem value="SINGLE">Single Weighment (No Net)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Customer / Party Name */}
-              <div className="space-y-1 md:col-span-2">
-                <Label className="text-xs font-mono text-zinc-400">Cust. Name (Party)</Label>
-                <Input
-                  list="weighbridge-parties"
-                  value={selectedPartyName}
-                  onChange={(e) => setSelectedPartyName(e.target.value)}
-                  className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9 uppercase font-mono"
-                  placeholder="COLOURTEX INDUSTRIES"
-                />
-                <datalist id="weighbridge-parties">
-                  {parties.map((p) => (
-                    <option key={p.id} value={p.name} />
-                  ))}
-                </datalist>
-              </div>
-
-              {/* Mobile Number */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Mobile No</Label>
-                <Input
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value)}
-                  className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9 font-mono"
-                  placeholder="9876543210"
-                />
-              </div>
-
-              {/* Material */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Material</Label>
-                <Input
-                  list="weighbridge-materials"
-                  value={material}
-                  onChange={(e) => setMaterial(e.target.value.toUpperCase())}
-                  className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9 font-mono uppercase"
-                  placeholder="PAPPU"
-                />
-                <datalist id="weighbridge-materials">
-                  {MATERIALS.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              </div>
-
-              {/* Load Type */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Load Type</Label>
-                <Select value={loadType} onValueChange={setLoadType}>
-                  <SelectTrigger className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9 font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
-                    <SelectItem value="LOAD">LOAD (Loaded Consignment)</SelectItem>
-                    <SelectItem value="EMPTY">EMPTY (Tare Vehicle)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Bill Type */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Bill Type</Label>
-                <Select value={billType} onValueChange={setBillType}>
-                  <SelectTrigger className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9 font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
-                    <SelectItem value="CASH">Cash</SelectItem>
-                    <SelectItem value="CREDIT">Credit</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Amount (Kata Fee) */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Amount (Fee ₹)</Label>
-                <Input
-                  type="number"
-                  value={kataFeeAmount}
-                  onChange={(e) => setKataFeeAmount(e.target.value)}
-                  className="bg-zinc-950 border-zinc-700 font-mono font-bold text-emerald-400 h-9"
-                  placeholder="100"
-                />
-              </div>
-
-              {/* Remarks */}
-              <div className="space-y-1">
-                <Label className="text-xs font-mono text-zinc-400">Remarks</Label>
-                <Input
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  className="bg-zinc-950 border-zinc-700 text-zinc-100 h-9 font-mono"
-                  placeholder="Optional notes"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Giant Digital Readout & Weights (5 Cols) */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-4">
-            {/* ── Giant 7-Segment Digital Readout (Direct Photo Replica) ── */}
-            <div className="rounded-xl bg-black border-2 border-zinc-800 p-5 shadow-[inset_0_0_20px_rgba(0,0,0,0.9)] relative overflow-hidden">
-              <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 mb-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                  SCALE INDICATOR (COM4)
-                </span>
-                <span className={cn('font-bold uppercase tracking-wider', isStable ? 'text-emerald-400' : 'text-amber-400')}>
-                  {isStable ? 'STABLE' : 'MOTION'}
-                </span>
-              </div>
-
-              {/* Giant Red Digits */}
-              <div className="text-right py-3 select-none">
-                <span className="font-mono text-6xl md:text-7xl font-extrabold tracking-widest text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.7)]">
-                  {resolvedCurrentWeight.toLocaleString('en-IN')}
-                </span>
-                <span className="text-lg font-bold text-red-600/80 ml-2 font-mono">KG</span>
-              </div>
-
-              {/* Lock / Live Sync Controls */}
-              <div className="mt-2 pt-2 border-t border-zinc-900 flex items-center justify-between text-xs font-mono">
-                <button
-                  type="button"
-                  onClick={() => setLockCurrentToScale((prev) => !prev)}
-                  className={cn(
-                    'flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border transition-colors',
-                    lockCurrentToScale
-                      ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-400'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400'
-                  )}
-                >
-                  <Zap className="h-3 w-3" />
-                  {lockCurrentToScale ? 'Live Sync Active' : 'Manual Override'}
-                </button>
-                <span className="text-zinc-500 text-[10px]">
-                  {lockCurrentToScale ? 'Updating automatically' : 'Fixed weight'}
-                </span>
-              </div>
-            </div>
-
-            {/* ── Two CCTV / Platform Viewboxes (Matching Photo) ── */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                <span className="flex items-center gap-1.5 font-semibold text-zinc-300">
-                  <Video className="h-3.5 w-3.5 text-red-500" />
-                  CP PLUS CCTV LIVE (192.168.1.101 / 102)
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Live Network Feed
-                  </span>
-                  <button
-                    type="button"
-                    onClick={reloadCameras}
-                    title="Reconnect feeds"
-                    className="text-[10px] text-zinc-400 hover:text-zinc-200 underline flex items-center gap-1"
-                  >
-                    <RotateCcw className="h-2.5 w-2.5" />
-                    Refresh
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <CctvLiveBox
-                  camNumber={1}
-                  cameraIp="192.168.1.101"
-                  label="CAM 1: ENTRY"
-                  currentTime={currentTime}
-                  refreshTrigger={cameraRefreshKey}
-                />
-                <CctvLiveBox
-                  camNumber={2}
-                  cameraIp="192.168.1.102"
-                  label="CAM 2: EXIT"
-                  currentTime={currentTime}
-                  refreshTrigger={cameraRefreshKey}
-                />
-              </div>
-            </div>
-
-            {/* ── Weight Calculations Matrix ── */}
-            <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-4 font-mono space-y-2.5">
-              {/* First Weigh */}
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-red-400 font-bold uppercase tracking-wider">First Weigh:</span>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    type="number"
-                    value={firstWeight}
-                    onChange={(e) => setFirstWeight(e.target.value)}
-                    placeholder="0"
-                    className="w-28 h-7 text-right bg-black border-zinc-700 text-red-400 font-mono font-bold text-sm px-2"
-                  />
-                  <span className="text-[10px] text-zinc-500">KG</span>
-                </div>
-              </div>
-
-              {/* Current (Second Weigh) */}
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-emerald-400 font-bold uppercase tracking-wider">Current:</span>
-                <div className="flex items-center gap-1.5">
-                  {lockCurrentToScale ? (
-                    <span className="w-28 text-right font-mono font-bold text-emerald-400 text-sm py-0.5 px-2 bg-black rounded border border-zinc-700">
-                      {resolvedCurrentWeight.toLocaleString('en-IN')}
-                    </span>
-                  ) : (
-                    <Input
-                      type="number"
-                      value={manualCurrentWeight}
-                      onChange={(e) => setManualCurrentWeight(e.target.value)}
-                      placeholder="0"
-                      className="w-28 h-7 text-right bg-black border-zinc-700 text-emerald-400 font-mono font-bold text-sm px-2"
-                    />
-                  )}
-                  <span className="text-[10px] text-zinc-500">KG</span>
-                </div>
-              </div>
-
-              {/* Nett Weight */}
-              <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
-                <span className="text-cyan-400 font-extrabold uppercase tracking-wider text-sm">
-                  Nett Weight:
-                </span>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="font-mono font-black text-xl text-cyan-400 tracking-wider">
-                    {calculatedNettWeight != null ? calculatedNettWeight.toLocaleString('en-IN') : '0'}
-                  </span>
-                  <span className="text-xs font-bold text-cyan-500">KG</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Bottom Action Toolbar (Photo Replica Buttons) ── */}
-        <div className="bg-zinc-950 px-6 py-3 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-6 pb-12">
+      {/* Editorial Page Header matching ERP */}
+      <PageHeader
+        icon={Scale}
+        title="Weighbridge (Kata)"
+        description="Electronic weighbridge recording, digital LED indicator stream, and CP PLUS dual CCTV camera verification."
+        actions={
           <div className="flex flex-wrap items-center gap-2">
-            {/* Save (F12) */}
-            <Button
-              size="sm"
-              onClick={() => saveTicketMutation.mutate()}
-              disabled={saveTicketMutation.isPending}
-              className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs gap-1.5 shadow-md shadow-emerald-950"
-            >
-              <Save className="h-4 w-4" />
-              <span>Save (F12)</span>
-            </Button>
-
-            {/* Clear / New */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={clearForm}
-              className="h-9 px-4 bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700 font-mono text-xs gap-1.5"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Clear</span>
-            </Button>
-
-            {/* Re-Print Last Ticket */}
-            {tickets.length > 0 && (
+            {/* Serial Indicator Connect Button */}
+            {scale.isSupported && (
               <Button
-                size="sm"
                 variant="outline"
-                onClick={() => setPrintSlipTicket(tickets[0])}
-                className="h-9 px-4 bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700 font-mono text-xs gap-1.5"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                <span>Re-Print #{tickets[0].ticketNo}</span>
-              </Button>
-            )}
-          </div>
-
-          {/* Pending trucks counter / quick pill */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-zinc-400">
-              Pending Second Weight: <strong className="text-amber-400">{pendingTrucks.length}</strong> trucks inside
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Pending Trucks Section (Awaiting Second Weight) ── */}
-      {pendingTrucks.length > 0 && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-semibold text-xs uppercase tracking-wider">
-              <Clock className="h-4 w-4" />
-              <span>Trucks Awaiting Second Weight ({pendingTrucks.length})</span>
-            </div>
-            <span className="text-[11px] text-muted-foreground">Click any truck to load & complete weighment</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-            {pendingTrucks.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => selectPendingTruck(t)}
+                size="sm"
+                onClick={() => {
+                  if (scale.isConnected) scale.disconnect();
+                  else scale.connect();
+                }}
                 className={cn(
-                  'p-3 rounded-lg border text-left transition-all hover:scale-[1.01]',
-                  activePendingTicketId === t.id
-                    ? 'border-amber-500 bg-amber-500/20 shadow-md ring-1 ring-amber-400'
-                    : 'border-border bg-card hover:bg-accent'
+                  'h-9 gap-2 font-medium transition-colors',
+                  scale.isConnected
+                    ? 'border-emerald-600/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+                    : 'text-muted-foreground'
                 )}
               >
-                <div className="flex justify-between items-start">
-                  <span className="font-mono font-bold text-sm text-foreground">{t.vehicleNumber}</span>
-                  <span className="text-[10px] font-mono font-semibold text-muted-foreground">#{t.ticketNo}</span>
+                {scale.isConnected ? (
+                  <>
+                    <Wifi className="h-4 w-4 text-emerald-500 animate-pulse" />
+                    <span>Scale Connected (COM4)</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-4 w-4 text-stone-400" />
+                    <span>Connect COM4</span>
+                  </>
+                )}
+              </Button>
+            )}
+
+            {/* Pending Trucks Counter Button */}
+            <Button
+              variant={activeTab === 'pending' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setActiveTab('pending')}
+              className="h-9 gap-2 font-medium"
+            >
+              <Truck className="h-4 w-4" />
+              <span>Pending Trucks</span>
+              {pendingTickets.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-stone-950">
+                  {pendingTickets.length}
+                </span>
+              )}
+            </Button>
+          </div>
+        }
+      />
+
+      {/* KPI Stat Cards matching RVP ERP */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Today's Tickets"
+          value={stats.todayCount}
+          icon={FileText}
+          tone="amber"
+          hint="Total tickets generated today"
+        />
+        <StatCard
+          label="Today's Weighment"
+          value={`${stats.todayTonnes} MT`}
+          icon={Scale}
+          tone="forest"
+          hint="Net cargo weighed today"
+        />
+        <StatCard
+          label="Pending 2nd Weigh"
+          value={stats.pendingCount}
+          icon={Truck}
+          tone="clay"
+          hint="Trucks awaiting gross/tare"
+        />
+        <StatCard
+          label="Kata Fees Collected"
+          value={`₹ ${stats.todayFees.toLocaleString('en-IN')}`}
+          icon={CreditCard}
+          tone="gold"
+          hint="Today's weighment charges"
+        />
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-1 border-b border-border pb-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab('entry')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            activeTab === 'entry'
+              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Scale className="h-4 w-4" />
+          <span>Weighment Entry Screen (F2)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('pending')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            activeTab === 'pending'
+              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Truck className="h-4 w-4" />
+          <span>Pending 2nd Weight Trucks (F4)</span>
+          {pendingTickets.length > 0 && (
+            <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400">
+              {pendingTickets.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('history')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            activeTab === 'history'
+              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Clock className="h-4 w-4" />
+          <span>Ticket Register & Reprint</span>
+        </button>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          TAB 1: WEIGHMENT TRANSACTION ENTRY SCREEN
+         ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'entry' && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          {/* Main Transaction Entry Form (Left 7 Cols) */}
+          <Card className="lg:col-span-7 border-border shadow-sm">
+            <CardHeader className="pb-4 border-b border-border/60">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-mono font-bold text-sm">
+                    #{nextTicketNo}
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold text-foreground">
+                      Transaction Entry Screen
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      {pendingTicketId
+                        ? `Completing Second Weight for Ticket #${nextTicketNo}`
+                        : 'Capture vehicle weight, customer, and cargo details'}
+                    </CardDescription>
+                  </div>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground truncate">{t.partyName || t.material || 'Lorry'}</div>
-                <div className="mt-1 flex justify-between items-center text-[11px] font-mono">
-                  <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                    1st: {t.firstWeightKg?.toLocaleString('en-IN')} kg
+
+                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-muted/40 px-2.5 py-1 rounded-lg border border-border/50">
+                  <Calendar className="h-3.5 w-3.5 text-primary" />
+                  <span>{dateString}</span>
+                  <span className="text-border">|</span>
+                  <Clock className="h-3.5 w-3.5 text-primary" />
+                  <span className="font-semibold text-foreground">{clockString}</span>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="pt-5 space-y-5">
+              {/* Form Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Vehicle Number */}
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Truck className="h-3.5 w-3.5 text-primary" />
+                      Vehicle Number *
+                    </span>
+                    <span className="text-[10px] font-normal text-muted-foreground">e.g. KA01AS1009 / AP39V1234</span>
+                  </Label>
+                  <Input
+                    value={vehicleNumber}
+                    onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
+                    placeholder="ENTER VEHICLE NUMBER"
+                    className="font-mono text-base font-bold tracking-wider uppercase h-11 bg-background"
+                    autoFocus
+                  />
+                </div>
+
+                {/* Vehicle Type */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Vehicle Type
+                  </Label>
+                  <Select value={vehicleType} onValueChange={setVehicleType}>
+                    <SelectTrigger className="h-10 bg-background">
+                      <SelectValue placeholder="Select vehicle type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {VEHICLE_TYPES.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Trip Type */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Trip Type
+                  </Label>
+                  <Select
+                    value={tripType}
+                    onValueChange={(val: any) => {
+                      setTripType(val);
+                      if (val === 'FIRST') setFirstWeight(null);
+                    }}
+                  >
+                    <SelectTrigger className="h-10 bg-background font-medium">
+                      <SelectValue placeholder="Select trip type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="FIRST">1st Weight (Gross / Inward)</SelectItem>
+                      <SelectItem value="SECOND">2nd Weight (Tare / Net Final)</SelectItem>
+                      <SelectItem value="SINGLE">Single Direct Weight</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Party Name (with autocomplete datalist) */}
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <User className="h-3.5 w-3.5 text-primary" />
+                      Customer / Party Name
+                    </span>
+                    <span className="text-[10px] font-normal text-muted-foreground">Supplier or Buyer name</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      list="party-suggestions"
+                      value={partyName}
+                      onChange={(e) => setPartyName(e.target.value)}
+                      placeholder="Type customer or supplier name (e.g. SOHAM AGRO)"
+                      className="h-10 bg-background uppercase"
+                    />
+                    <datalist id="party-suggestions">
+                      {parties.map((p) => (
+                        <option key={p.id} value={p.name} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+
+                {/* Material Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Package className="h-3.5 w-3.5 text-primary" />
+                    Material / Commodity
+                  </Label>
+                  <Select value={material} onValueChange={setMaterial}>
+                    <SelectTrigger className="h-10 bg-background font-medium">
+                      <SelectValue placeholder="Select material" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MATERIALS.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Load Type */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Load Condition
+                  </Label>
+                  <Select value={loadType} onValueChange={(v: any) => setLoadType(v)}>
+                    <SelectTrigger className="h-10 bg-background font-medium">
+                      <SelectValue placeholder="Select condition" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LOAD">LOAD (Loaded Consignment)</SelectItem>
+                      <SelectItem value="EMPTY">EMPTY (Empty Tare Truck)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Kata Fee (Charges) */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Tag className="h-3.5 w-3.5 text-primary" />
+                    Weighment Fee (₹)
+                  </Label>
+                  <Input
+                    type="number"
+                    value={charges}
+                    onChange={(e) => setCharges(e.target.value)}
+                    placeholder="100"
+                    className="h-10 bg-background font-mono font-bold"
+                  />
+                </div>
+
+                {/* Driver Mobile */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5 text-primary" />
+                    Driver Mobile No
+                  </Label>
+                  <Input
+                    type="tel"
+                    value={driverMobile}
+                    onChange={(e) => setDriverMobile(e.target.value)}
+                    placeholder="10-digit mobile number"
+                    className="h-10 bg-background font-mono"
+                    maxLength={10}
+                  />
+                </div>
+
+                {/* Remarks */}
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Remarks (Optional)
+                  </Label>
+                  <Input
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    placeholder="e.g. Delivery directly to Warehouse #2"
+                    className="h-10 bg-background"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons Bar */}
+              <div className="pt-4 border-t border-border flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleResetForm}
+                    className="gap-1.5 text-xs h-10"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+                    Clear (Esc)
+                  </Button>
+
+                  {pendingTickets.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setActiveTab('pending')}
+                      className="gap-1.5 text-xs h-10"
+                    >
+                      <Truck className="h-3.5 w-3.5" />
+                      Pick Pending ({pendingTickets.length})
+                    </Button>
+                  )}
+                </div>
+
+                <Button
+                  type="button"
+                  onClick={() => saveMutation.mutate()}
+                  disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim()}
+                  className="h-11 px-6 font-bold gap-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-transform active:scale-98"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>Save Ticket & Print (F12)</span>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Right Column (5 Cols): Scale Readout & CP PLUS Live Cameras */}
+          <div className="lg:col-span-5 space-y-6">
+            {/* 1. Digital Scale Instrument Panel */}
+            <div className="relative rounded-2xl bg-gradient-to-b from-stone-900 to-stone-950 border border-stone-800 text-stone-100 p-5 shadow-lg overflow-hidden">
+              {/* Radial ambient glow */}
+              <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              {/* Top readout status row */}
+              <div className="flex items-center justify-between mb-3 text-xs font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className={cn(
+                      'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
+                      scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
+                    )} />
+                    <span className={cn(
+                      'relative inline-flex rounded-full h-2.5 w-2.5',
+                      scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
+                    )} />
                   </span>
-                  <span className="text-muted-foreground/60">{new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="font-bold tracking-wider text-stone-300">
+                    SCALE INDICATOR (COM4)
+                  </span>
                 </div>
-              </button>
-            ))}
+
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
+                    scale.isStable
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  )}>
+                    {scale.isStable ? 'STABLE' : 'IN MOTION'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Large Digital Weight Display */}
+              <div className="py-2 text-center select-none">
+                <div className="flex items-baseline justify-center gap-2">
+                  <span className="font-mono font-black text-6xl text-amber-400 tracking-tight drop-shadow-[0_0_20px_rgba(251,191,36,0.3)]">
+                    {currentLiveWeight.toLocaleString('en-IN')}
+                  </span>
+                  <span className="font-mono font-bold text-xl text-stone-400">
+                    KG
+                  </span>
+                </div>
+
+                {/* Sub-readout in metric tonnes */}
+                <div className="text-stone-400 font-mono text-xs mt-1">
+                  ≈ {(currentLiveWeight / 1000).toFixed(3)} Metric Tonnes (MT)
+                </div>
+              </div>
+
+              {/* Manual Override input if scale is offline */}
+              <div className="mt-4 pt-3 border-t border-stone-800/80 flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsManualOverride((m) => !m)}
+                  className="text-stone-400 hover:text-stone-200 transition-colors underline text-[11px]"
+                >
+                  {isManualOverride ? 'Switch to Live COM4 Serial Sync' : 'Manual Weight Entry (COM offline)'}
+                </button>
+
+                {isManualOverride && (
+                  <div className="flex items-center gap-1.5 w-32">
+                    <Input
+                      type="number"
+                      value={manualWeightInput}
+                      onChange={(e) => setManualWeightInput(e.target.value)}
+                      placeholder="0 kg"
+                      className="h-7 text-xs bg-stone-900 border-stone-700 text-stone-100 font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 3 Weight Breakdown Pills */}
+              <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-stone-800 text-center text-xs font-mono">
+                <div className="bg-stone-900/80 p-2 rounded-lg border border-stone-800">
+                  <span className="block text-[10px] text-stone-400 font-sans">1st Weight</span>
+                  <span className="font-bold text-stone-200">
+                    {firstWeight != null ? `${firstWeight} Kg` : '-'}
+                  </span>
+                </div>
+                <div className="bg-stone-900/80 p-2 rounded-lg border border-stone-800">
+                  <span className="block text-[10px] text-stone-400 font-sans">2nd Weight</span>
+                  <span className="font-bold text-stone-200">
+                    {tripType === 'SECOND' ? `${currentLiveWeight} Kg` : '-'}
+                  </span>
+                </div>
+                <div className="bg-stone-900/80 p-2 rounded-lg border border-stone-800">
+                  <span className="block text-[10px] text-amber-400 font-sans font-semibold">Net Weight</span>
+                  <span className="font-bold text-amber-400">
+                    {calculatedNetWeight != null ? `${calculatedNetWeight} Kg` : '-'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. CP PLUS Live Dual CCTV Cameras */}
+            <Card className="border-border shadow-sm">
+              <CardHeader className="pb-3 border-b border-border/60">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Video className="h-4 w-4 text-primary" />
+                    <CardTitle className="text-sm font-bold text-foreground">
+                      CP PLUS Live Dual Cameras
+                    </CardTitle>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Live Feed
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      onClick={() => setCamRefreshTrigger(Date.now())}
+                      title="Manual Camera Refresh"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="pt-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <CctvLiveBox
+                    camNumber={1}
+                    cameraIp="192.168.1.101"
+                    label="CAM 1: ENTRY"
+                    currentTime={clockString}
+                    refreshTrigger={camRefreshTrigger}
+                  />
+                  <CctvLiveBox
+                    camNumber={2}
+                    cameraIp="192.168.1.102"
+                    label="CAM 2: EXIT"
+                    currentTime={clockString}
+                    refreshTrigger={camRefreshTrigger}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground text-center font-mono">
+                  Photos are automatically captured & stamped onto the slip on Save (F12)
+                </p>
+              </CardContent>
+            </Card>
           </div>
         </div>
       )}
 
-      {/* ── Weighbridge Tickets Log & Report Table ── */}
-      <div className="rounded-xl border border-border bg-card shadow-sm p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Weighbridge Daily Register</h3>
-            <p className="text-xs text-muted-foreground">All first and second weighments recorded at RVP weighbridge</p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
-              <Input
-                placeholder="Search ticket or vehicle..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-xs w-56 bg-background"
-              />
+      {/* ─────────────────────────────────────────────────────────────
+          TAB 2: PENDING TRUCKS (Awaiting Second Weight)
+         ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'pending' && (
+        <Card className="border-border shadow-sm">
+          <CardHeader className="border-b border-border/60">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-bold text-foreground">
+                  Pending Trucks Awaiting Second Weighment
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Trucks that completed initial weighment (Gross or Tare) and are currently in the yard.
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchPending()}
+                className="h-8 gap-1.5 text-xs"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh List
+              </Button>
             </div>
-          </div>
-        </div>
+          </CardHeader>
 
-        <div className="rounded-lg border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40 text-[11px] uppercase font-mono">
-                <TableHead className="w-16">Ticket</TableHead>
-                <TableHead>Date & Time</TableHead>
-                <TableHead>Vehicle No</TableHead>
-                <TableHead>Party / Customer</TableHead>
-                <TableHead>Material</TableHead>
-                <TableHead className="text-right">1st Wt (kg)</TableHead>
-                <TableHead className="text-right">2nd Wt (kg)</TableHead>
-                <TableHead className="text-right font-bold">Nett (kg)</TableHead>
-                <TableHead className="text-right">Fee (₹)</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody className="text-xs font-mono">
-              {ticketsLoading ? (
+          <CardContent className="p-0">
+            {pendingTickets.length === 0 ? (
+              <div className="p-12 text-center">
+                <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
+                <h3 className="font-semibold text-sm text-foreground">All Trucks Cleared</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  No trucks are currently awaiting second weighment in the yard.
+                </p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-20">Ticket #</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Vehicle No</TableHead>
+                    <TableHead>Customer / Party</TableHead>
+                    <TableHead>Material</TableHead>
+                    <TableHead>Condition</TableHead>
+                    <TableHead className="text-right">1st Weight</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pendingTickets.map((t) => (
+                    <TableRow key={t.id} className="hover:bg-muted/30">
+                      <TableCell className="font-mono font-bold text-primary">
+                        #{t.ticketNo}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {new Date(t.createdAt).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </TableCell>
+                      <TableCell className="font-mono font-bold text-foreground">
+                        {t.vehicleNumber}
+                      </TableCell>
+                      <TableCell className="font-medium text-xs">
+                        {t.partyName || '-'}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <Badge variant="outline" className="font-normal text-[10px]">
+                          {t.material || 'OTHER'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <Badge
+                          variant={t.loadType === 'LOAD' ? 'default' : 'secondary'}
+                          className="text-[10px]"
+                        >
+                          {t.loadType}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono font-bold text-xs">
+                        {t.firstWeightKg != null ? `${t.firstWeightKg.toLocaleString('en-IN')} Kg` : '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSelectPendingTruck(t)}
+                          className="h-8 gap-1 text-xs font-semibold"
+                        >
+                          <Scale className="h-3.5 w-3.5" />
+                          Complete 2nd Weight
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          TAB 3: TICKET REGISTER & HISTORY
+         ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'history' && (
+        <Card className="border-border shadow-sm">
+          <CardHeader className="border-b border-border/60">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-bold text-foreground">
+                  Weighbridge Ticket Register
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Search past tickets, view camera snapshots, and reprint weighment certificates.
+                </CardDescription>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="relative w-64">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    placeholder="Search vehicle, ticket, party..."
+                    className="h-9 pl-9 text-xs bg-background"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchHistory()}
+                  className="h-9 gap-1 text-xs"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
-                    Loading weighbridge tickets...
-                  </TableCell>
+                  <TableHead className="w-20">Ticket #</TableHead>
+                  <TableHead>Date & Time</TableHead>
+                  <TableHead>Vehicle No</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Material</TableHead>
+                  <TableHead className="text-right">1st (Kg)</TableHead>
+                  <TableHead className="text-right">2nd (Kg)</TableHead>
+                  <TableHead className="text-right">Net Weight</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ) : filteredTickets.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
-                    No weighbridge tickets recorded yet.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredTickets.map((t) => (
+              </TableHeader>
+              <TableBody>
+                {allTickets.map((t) => (
                   <TableRow key={t.id} className="hover:bg-muted/30">
-                    <TableCell className="font-bold text-foreground">#{t.ticketNo}</TableCell>
-                    <TableCell className="text-muted-foreground text-[11px]">
-                      {shortDate(t.createdAt)} {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <TableCell className="font-mono font-bold text-primary">
+                      #{t.ticketNo}
                     </TableCell>
-                    <TableCell className="font-bold text-foreground tracking-wide">{t.vehicleNumber}</TableCell>
-                    <TableCell className="max-w-[150px] truncate">{t.partyName || '-'}</TableCell>
-                    <TableCell>{t.material || '-'}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {t.firstWeightKg != null ? t.firstWeightKg.toLocaleString('en-IN') : '-'}
+                    <TableCell className="text-xs text-muted-foreground">
+                      {shortDate(t.createdAt)}{' '}
+                      <span className="text-[10px]">
+                        {new Date(t.createdAt).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {t.secondWeightKg != null ? t.secondWeightKg.toLocaleString('en-IN') : '-'}
+                    <TableCell className="font-mono font-bold text-foreground">
+                      {t.vehicleNumber}
                     </TableCell>
-                    <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">
-                      {t.netWeightKg != null ? t.netWeightKg.toLocaleString('en-IN') : '-'}
+                    <TableCell className="font-medium text-xs truncate max-w-[140px]">
+                      {t.partyName || '-'}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">₹{Number(t.amount || 0).toFixed(0)}</TableCell>
+                    <TableCell className="text-xs">
+                      <Badge variant="outline" className="text-[10px] font-normal">
+                        {t.material || 'OTHER'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {t.firstWeightKg?.toLocaleString('en-IN') || '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {t.secondWeightKg?.toLocaleString('en-IN') || '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                      {t.netWeightKg != null
+                        ? `${t.netWeightKg.toLocaleString('en-IN')} Kg`
+                        : `${t.firstWeightKg?.toLocaleString('en-IN') || 0} Kg`}
+                    </TableCell>
                     <TableCell>
-                      {t.status === 'COMPLETED' ? (
-                        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px]">
-                          Completed
-                        </Badge>
-                      ) : t.status === 'PENDING_SECOND' ? (
-                        <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px]">
-                          1st Wt Done
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-destructive text-[10px]">
-                          Cancelled
-                        </Badge>
-                      )}
+                      <Badge
+                        variant={t.status === 'COMPLETED' ? 'default' : 'secondary'}
+                        className="text-[10px]"
+                      >
+                        {t.status}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button
-                        size="xs"
                         variant="ghost"
-                        onClick={() => setPrintSlipTicket(t)}
-                        title="Print Kata Slip"
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                        size="sm"
+                        onClick={() => {
+                          setSlipModalTicket(t);
+                          setActiveSnapshots({
+                            cam1: `/api/weighbridge/cctv/snapshot?cam=1&t=${Date.now()}`,
+                            cam2: `/api/weighbridge/cctv/snapshot?cam=2&t=${Date.now()}`,
+                          });
+                        }}
+                        className="h-7 px-2 text-xs gap-1"
+                        title="Print Weighment Certificate Slip"
                       >
-                        <Printer className="h-3.5 w-3.5" />
+                        <Printer className="h-3.5 w-3.5 text-primary" />
+                        Slip
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* ── Printable Slip Modal ── */}
+      {/* Official Printable Weighbridge Slip Modal */}
       <WeighbridgeSlipModal
-        ticket={printSlipTicket}
+        ticket={slipModalTicket}
         companyProfile={companyProfile}
-        snapshots={snapshots}
-        onClose={() => setPrintSlipTicket(null)}
+        snapshots={activeSnapshots}
+        onClose={() => setSlipModalTicket(null)}
       />
     </div>
   );

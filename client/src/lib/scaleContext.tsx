@@ -68,7 +68,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   });
 
   const portRef = useRef<WebSerialPort | null>(null);
-  const readerRef = useRef<ReadableStreamDefaultReader<string> | null>(null);
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const keepReadingRef = useRef<boolean>(false);
   const recentReadingsRef = useRef<number[]>([]);
 
@@ -89,69 +89,101 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
   /**
    * Process and parse raw serial stream from scale indicator.
-   * Weighbridge format tested: 7 digits zero-padded + ETX (♥), e.g. "0000000♥" (0kg) or "0000020♥" (20kg)
+   * Weighbridge format: packets ending in ETX (♥ / 0x03), CR, or LF containing digits (e.g. "000020♥" or "0000040♥")
    */
   const processChunk = useCallback((textChunk: string, bufferRef: { current: string }) => {
     bufferRef.current += textChunk;
-    setRawText(textChunk.slice(-20));
 
-    // Look for 7-digit pattern (e.g. 0000020, 0015420)
-    const matches = bufferRef.current.match(/\d{7}/g);
-    if (matches && matches.length > 0) {
-      const latestMatch = matches[matches.length - 1];
-      const parsed = parseInt(latestMatch, 10);
+    // Show friendly preview in UI (render \x03 as ♥ and newlines as ↵)
+    const preview = bufferRef.current.slice(-25).replace(/\x03/g, '♥').replace(/[\r\n]+/g, '↵');
+    setRawText(preview);
 
-      if (!isNaN(parsed)) {
-        setLiveWeight(parsed);
-        setLastUpdated(new Date());
+    // Split accumulated buffer into frames by ETX (\x03), STX (\x02), CR, or LF
+    const frames = bufferRef.current.split(/[\x02\x03\r\n\x04]+/);
 
-        // Track stability (last 4 readings within +/- 2 kg)
-        const recent = recentReadingsRef.current;
-        recent.push(parsed);
-        if (recent.length > 5) recent.shift();
+    let parsedWeight: number | null = null;
 
-        if (recent.length >= 3) {
-          const min = Math.min(...recent);
-          const max = Math.max(...recent);
-          setIsStable(max - min <= 2);
+    // If we have completed frames (frames before the current open tail)
+    if (frames.length > 1) {
+      for (let i = frames.length - 2; i >= 0; i--) {
+        const frame = frames[i].trim();
+        const numMatch = frame.match(/\d{2,8}/);
+        if (numMatch) {
+          const val = parseInt(numMatch[0], 10);
+          if (!isNaN(val)) {
+            parsedWeight = val;
+            break;
+          }
         }
       }
+      // Retain only the incomplete tail
+      bufferRef.current = frames[frames.length - 1];
+    }
 
-      // Truncate buffer up to the latest match to prevent unbounded memory growth
-      const lastIndex = bufferRef.current.lastIndexOf(latestMatch);
-      if (lastIndex !== -1) {
-        bufferRef.current = bufferRef.current.slice(lastIndex + 7);
+    // Fallback: If no delimiter was found, match any sequence of 4-8 digits
+    if (parsedWeight == null) {
+      const directMatches = bufferRef.current.match(/\d{4,8}/g);
+      if (directMatches && directMatches.length > 0) {
+        const latest = directMatches[directMatches.length - 1];
+        const val = parseInt(latest, 10);
+        if (!isNaN(val)) {
+          parsedWeight = val;
+          const idx = bufferRef.current.lastIndexOf(latest);
+          if (idx !== -1) {
+            bufferRef.current = bufferRef.current.slice(idx + latest.length);
+          }
+        }
       }
     }
 
-    // Keep buffer reasonably small if no 7-digit patterns are finding boundaries
-    if (bufferRef.current.length > 200) {
-      bufferRef.current = bufferRef.current.slice(-60);
+    if (parsedWeight != null) {
+      setLiveWeight(parsedWeight);
+      setLastUpdated(new Date());
+
+      // Track stability (last 4 readings within +/- 2 kg)
+      const recent = recentReadingsRef.current;
+      recent.push(parsedWeight);
+      if (recent.length > 5) recent.shift();
+
+      if (recent.length >= 3) {
+        const min = Math.min(...recent);
+        const max = Math.max(...recent);
+        setIsStable(max - min <= 2);
+      }
+    }
+
+    // Prevent buffer memory leak
+    if (bufferRef.current.length > 150) {
+      bufferRef.current = bufferRef.current.slice(-30);
     }
   }, []);
 
   /**
-   * Continuous read loop from Web Serial port.
+   * Continuous read loop directly on Uint8Array to avoid TransformStream buffering/stalls.
    */
   const startReading = useCallback(async (port: WebSerialPort) => {
     if (!port.readable) return;
 
     keepReadingRef.current = true;
-    const textDecoder = new TextDecoderStream();
-    const readableStreamClosed = (port.readable as any).pipeTo(textDecoder.writable).catch(() => {
-      /* stream closed */
-    });
-    const reader = textDecoder.readable.getReader();
+    const reader = port.readable.getReader();
     readerRef.current = reader;
-
+    const decoder = new TextDecoder('utf-8', { fatal: false });
     const bufferRef = { current: '' };
 
     try {
+      // Assert DTR and RTS signals so the RS232-USB bridge continuously streams
+      try {
+        await (port as any).setSignals?.({ dataTerminalReady: true, requestToSend: true });
+      } catch {
+        /* ignore if device doesn't support signal manipulation */
+      }
+
       while (keepReadingRef.current) {
         const { value, done } = await reader.read();
         if (done) break;
-        if (value) {
-          processChunk(value, bufferRef);
+        if (value && value.length > 0) {
+          const textChunk = decoder.decode(value, { stream: true });
+          processChunk(textChunk, bufferRef);
         }
       }
     } catch (err: any) {
@@ -160,8 +192,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         setError(err?.message || 'Error reading scale data');
       }
     } finally {
-      reader.releaseLock();
-      await readableStreamClosed;
+      try {
+        reader.releaseLock();
+      } catch {}
     }
   }, [processChunk]);
 

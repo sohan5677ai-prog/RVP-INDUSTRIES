@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -52,6 +52,93 @@ const MATERIALS = [
   'BLACK SEED',
   'OTHER',
 ];
+
+interface CctvLiveBoxProps {
+  camNumber: 1 | 2;
+  cameraIp: string;
+  label: string;
+  currentTime: string;
+  refreshTrigger?: number;
+}
+
+function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }: CctvLiveBoxProps) {
+  const [frameUrl, setFrameUrl] = useState<string>(
+    `/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`
+  );
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const triggerNextFrame = useCallback((delayMs: number) => {
+    if (!mountedRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (mountedRef.current) {
+        setFrameUrl(`/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`);
+      }
+    }, delayMs);
+  }, [camNumber]);
+
+  // If parent triggers refresh, immediately fetch fresh frame
+  useEffect(() => {
+    if (refreshTrigger) {
+      setFrameUrl(`/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`);
+    }
+  }, [refreshTrigger, camNumber]);
+
+  return (
+    <div className="rounded-lg bg-black border border-zinc-800 h-36 relative overflow-hidden flex items-center justify-center group shadow-inner">
+      <img
+        src={frameUrl}
+        alt={`Camera ${camNumber} - ${label}`}
+        onLoad={() => {
+          setIsOnline(true);
+          triggerNextFrame(250); // Fetch next frame smoothly after 250ms
+        }}
+        onError={() => {
+          setIsOnline(false);
+          triggerNextFrame(2000); // Retry after 2s if camera network blip
+        }}
+        className={cn('w-full h-full object-cover', !isOnline && 'opacity-20')}
+      />
+
+      {!isOnline && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center text-zinc-500 font-mono text-[10px] bg-black/80">
+          <Video className="h-6 w-6 text-red-500/60 mb-1" />
+          <span className="text-zinc-400 font-semibold">{label} ({cameraIp})</span>
+          <span className="text-[9px] text-red-400 mt-0.5">Connecting to camera...</span>
+        </div>
+      )}
+
+      {/* CP PLUS On-Screen Display (OSD) Overlay */}
+      <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+        <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
+          {label}
+        </span>
+        <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
+          {currentTime}
+        </span>
+      </div>
+
+      <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+        <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
+          CP PLUS Cam
+        </span>
+        <span className="text-[8px] font-mono text-emerald-400/80 bg-black/60 px-1 rounded">
+          {cameraIp}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function WeighbridgeScreen() {
   const { user } = useAuth();
@@ -130,13 +217,8 @@ export default function WeighbridgeScreen() {
   const [printSlipTicket, setPrintSlipTicket] = useState<WeighbridgeTicket | null>(null);
 
   // CP PLUS Network CCTV Camera State (192.168.1.101 & 192.168.1.102)
-  const [cam1Connected, setCam1Connected] = useState<boolean>(true);
-  const [cam2Connected, setCam2Connected] = useState<boolean>(true);
   const [cameraRefreshKey, setCameraRefreshKey] = useState<number>(Date.now());
   const [snapshots, setSnapshots] = useState<{ cam1?: string; cam2?: string }>({});
-
-  const stream1Url = useMemo(() => `/api/weighbridge/cctv/stream?cam=1&t=${cameraRefreshKey}`, [cameraRefreshKey]);
-  const stream2Url = useMemo(() => `/api/weighbridge/cctv/stream?cam=2&t=${cameraRefreshKey}`, [cameraRefreshKey]);
 
   // Capture snapshots from both cameras (calls backend snapshot endpoints)
   const captureCurrentSnapshots = useCallback(async () => {
@@ -149,8 +231,6 @@ export default function WeighbridgeScreen() {
   }, []);
 
   const reloadCameras = useCallback(() => {
-    setCam1Connected(true);
-    setCam2Connected(true);
     setCameraRefreshKey(Date.now());
     toast.success('Refreshing CP PLUS camera feeds...');
   }, []);
@@ -584,101 +664,20 @@ export default function WeighbridgeScreen() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {/* Camera 1: Front / Entry */}
-                <div className="rounded-lg bg-black border border-zinc-800 h-36 relative overflow-hidden flex items-center justify-center group shadow-inner">
-                  {cam1Connected ? (
-                    <img
-                      src={stream1Url}
-                      alt="Camera 1 - Entry"
-                      onError={() => setCam1Connected(false)}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center p-2 text-center text-zinc-500 font-mono text-[10px]">
-                      <Video className="h-6 w-6 text-red-500/60 mb-1" />
-                      <span className="text-zinc-400 font-semibold">Camera 1 (192.168.1.101)</span>
-                      <span className="text-[9px] text-red-400 mt-0.5">Stream disconnected</span>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => {
-                          setCam1Connected(true);
-                          setCameraRefreshKey(Date.now());
-                        }}
-                        className="h-5 text-[9px] mt-1.5"
-                      >
-                        Retry
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* CP PLUS On-Screen Display (OSD) Overlay */}
-                  <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-                    <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
-                      CAM 1: ENTRY
-                    </span>
-                    <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
-                      {currentTime}
-                    </span>
-                  </div>
-
-                  <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-                    <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
-                      CP PLUS Cam
-                    </span>
-                    <span className="text-[8px] font-mono text-emerald-400/80 bg-black/60 px-1 rounded">
-                      192.168.1.101
-                    </span>
-                  </div>
-                </div>
-
-                {/* Camera 2: Platform / Exit */}
-                <div className="rounded-lg bg-black border border-zinc-800 h-36 relative overflow-hidden flex items-center justify-center group shadow-inner">
-                  {cam2Connected ? (
-                    <img
-                      src={stream2Url}
-                      alt="Camera 2 - Exit"
-                      onError={() => setCam2Connected(false)}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center p-2 text-center text-zinc-500 font-mono text-[10px]">
-                      <Video className="h-6 w-6 text-red-500/60 mb-1" />
-                      <span className="text-zinc-400 font-semibold">Camera 2 (192.168.1.102)</span>
-                      <span className="text-[9px] text-red-400 mt-0.5">Stream disconnected</span>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => {
-                          setCam2Connected(true);
-                          setCameraRefreshKey(Date.now());
-                        }}
-                        className="h-5 text-[9px] mt-1.5"
-                      >
-                        Retry
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* CP PLUS On-Screen Display (OSD) Overlay */}
-                  <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-                    <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
-                      CAM 2: EXIT
-                    </span>
-                    <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
-                      {currentTime}
-                    </span>
-                  </div>
-
-                  <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-                    <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
-                      CP PLUS Cam
-                    </span>
-                    <span className="text-[8px] font-mono text-emerald-400/80 bg-black/60 px-1 rounded">
-                      192.168.1.102
-                    </span>
-                  </div>
-                </div>
+                <CctvLiveBox
+                  camNumber={1}
+                  cameraIp="192.168.1.101"
+                  label="CAM 1: ENTRY"
+                  currentTime={currentTime}
+                  refreshTrigger={cameraRefreshKey}
+                />
+                <CctvLiveBox
+                  camNumber={2}
+                  cameraIp="192.168.1.102"
+                  label="CAM 2: EXIT"
+                  currentTime={currentTime}
+                  refreshTrigger={cameraRefreshKey}
+                />
               </div>
             </div>
 

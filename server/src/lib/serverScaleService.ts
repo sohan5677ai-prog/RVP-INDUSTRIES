@@ -11,6 +11,7 @@ export interface ScaleReading {
   port: string;
   baudRate: number;
   error?: string | null;
+  availablePorts?: Array<{ path: string; manufacturer?: string; friendlyName?: string }>;
 }
 
 type ScaleListener = (reading: ScaleReading) => void;
@@ -32,6 +33,7 @@ class ServerScaleService {
     port: process.env.SCALE_COM_PORT || 'COM4',
     baudRate: Number(process.env.SCALE_BAUD_RATE || 2400),
     error: null,
+    availablePorts: [],
   };
 
   private buffer: string = '';
@@ -55,7 +57,7 @@ class ServerScaleService {
 
   public subscribe(listener: ScaleListener): () => void {
     this.listeners.add(listener);
-    // Send immediate initial state
+    // Immediately emit latest cached reading
     listener(this.getReading());
     return () => this.listeners.delete(listener);
   }
@@ -102,11 +104,21 @@ class ServerScaleService {
         autoOpen: false,
       });
 
-      port.open((err) => {
+      port.open(async (err) => {
         this.isConnecting = false;
         if (err) {
           this.currentReading.isConnected = false;
-          this.currentReading.error = err.message;
+          this.currentReading.error = `Could not open ${this.portName}: ${err.message}`;
+          
+          try {
+            const ports = await SerialPort.list();
+            this.currentReading.availablePorts = ports.map((p: any) => ({
+              path: p.path,
+              manufacturer: p.manufacturer,
+              friendlyName: p.friendlyName || p.path,
+            }));
+          } catch {}
+
           this.notifyListeners();
           this.scheduleReconnect(4000);
           return;

@@ -122,6 +122,12 @@ app.get("/api/weighbridge/scale/live", (req, res, next) => {
 app.get("/api/weighbridge/scale/stream", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.streamLiveScaleHandler(req, res)).catch(next);
 });
+app.get("/api/weighbridge/scale/ports", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.listScalePortsHandler(req, res)).catch(next);
+});
+app.post("/api/weighbridge/scale/config", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.configScalePortHandler(req, res)).catch(next);
+});
 
 app.use("/api", apiLimiter, apiRoutes);
 

@@ -39,6 +39,11 @@ interface ScaleContextType {
   setAutoConnect: (enable: boolean) => void;
   connect: () => Promise<boolean>;
   disconnect: () => Promise<void>;
+  isServerStreaming: boolean;
+  hardwareConnected: boolean;
+  serverPort: string;
+  availablePorts: Array<{ path: string; manufacturer?: string; friendlyName?: string }>;
+  switchServerPort: (port: string, baudRate?: number) => Promise<boolean>;
 }
 
 const ScaleContext = createContext<ScaleContextType | undefined>(undefined);
@@ -56,6 +61,12 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   const [isStable, setIsStable] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Universal Server Network Broadcast states
+  const [isServerStreaming, setIsServerStreaming] = useState<boolean>(false);
+  const [hardwareConnected, setHardwareConnected] = useState<boolean>(false);
+  const [serverPort, setServerPort] = useState<string>('COM4');
+  const [availablePorts, setAvailablePorts] = useState<Array<{ path: string; manufacturer?: string; friendlyName?: string }>>([]);
 
   const [baudRate, setBaudRateState] = useState<number>(() => {
     const saved = localStorage.getItem(STORAGE_BAUD_RATE);
@@ -369,8 +380,13 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
           if (isCancelled) return;
           try {
             const data = JSON.parse(event.data);
+            setIsServerStreaming(true);
+            if (data.port) setServerPort(data.port);
+            if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
+
             // If local Web Serial port is NOT active, use the server broadcast
             if (!portRef.current) {
+              setHardwareConnected(!!data.isConnected);
               if (data.isConnected) {
                 setLiveWeight(data.liveWeight);
                 setIsStable(data.isStable);
@@ -399,12 +415,21 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
                 const res = await fetch('/api/weighbridge/scale/live');
                 if (res.ok) {
                   const data = await res.json();
+                  setIsServerStreaming(true);
+                  if (data.port) setServerPort(data.port);
+                  if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
+                  setHardwareConnected(!!data.isConnected);
+
                   if (!portRef.current && data.isConnected) {
                     setLiveWeight(data.liveWeight);
                     setIsStable(data.isStable);
                     setRawText(data.rawText || `${data.liveWeight} kg`);
                     setLastUpdated(new Date(data.lastUpdated || Date.now()));
                     setIsConnected(true);
+                    setError(null);
+                  } else if (!portRef.current && !data.isConnected) {
+                    setIsConnected(false);
+                    if (data.error) setError(data.error);
                   }
                 }
               } catch {}
@@ -423,6 +448,21 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const switchServerPort = useCallback(async (port: string, rate?: number): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/weighbridge/scale/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port, baudRate: rate || baudRate }),
+      });
+      if (res.ok) {
+        toast.success(`Server scale port switched to ${port}`);
+        return true;
+      }
+    } catch {}
+    return false;
+  }, [baudRate]);
+
   return (
     <ScaleContext.Provider
       value={{
@@ -440,6 +480,11 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         setAutoConnect,
         connect,
         disconnect,
+        isServerStreaming,
+        hardwareConnected,
+        serverPort,
+        availablePorts,
+        switchServerPort,
       }}
     >
       {children}

@@ -8,8 +8,6 @@ import {
   Clock,
   Video,
   Search,
-  Wifi,
-  WifiOff,
   Truck,
   FileText,
   Calendar,
@@ -450,35 +448,29 @@ export default function WeighbridgeScreen() {
         description="Electronic weighbridge recording, digital LED indicator stream, and CP PLUS dual CCTV camera verification."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {/* Serial Indicator Connect Button */}
-            {scale.isSupported && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (scale.isConnected) scale.disconnect();
-                  else scale.connect();
-                }}
-                className={cn(
-                  'h-9 gap-2 font-medium transition-colors',
-                  scale.isConnected
-                    ? 'border-emerald-600/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
-                    : 'text-muted-foreground'
-                )}
-              >
-                {scale.isConnected ? (
-                  <>
-                    <Wifi className="h-4 w-4 text-emerald-500 animate-pulse" />
-                    <span>Scale Connected (COM4)</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="h-4 w-4 text-stone-400" />
-                    <span>Connect COM4</span>
-                  </>
-                )}
-              </Button>
-            )}
+            {/* Universal Scale Network Hub Status Badge */}
+            <div className="flex items-center">
+              {scale.hardwareConnected ? (
+                <div
+                  className="flex items-center gap-2 h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-mono font-medium shadow-sm"
+                  title="Live Scale Stream broadcasted from server COM4 to all devices on network"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                  <span>Scale Hub: Online ({scale.serverPort || 'COM4'})</span>
+                </div>
+              ) : (
+                <div
+                  className="flex items-center gap-2 h-9 px-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-medium shadow-sm"
+                  title="Server is broadcasting across network, but USB RS-232 cable is not detected on COM4"
+                >
+                  <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Scale Hub: Offline ({scale.serverPort || 'COM4'} not detected)</span>
+                </div>
+              )}
+            </div>
 
             {/* Pending Trucks Counter Button */}
             <Button
@@ -871,7 +863,11 @@ export default function WeighbridgeScreen() {
                     )} />
                   </span>
                   <span className="font-bold tracking-wider text-stone-300">
-                    {isManualOverride ? 'MANUAL OVERRIDE' : 'SCALE INDICATOR (COM4)'}
+                    {isManualOverride
+                      ? 'MANUAL OVERRIDE'
+                      : scale.hardwareConnected
+                        ? `SCALE INDICATOR (${scale.serverPort || 'COM4'})`
+                        : `SCALE INDICATOR (${scale.serverPort || 'COM4'} OFFLINE)`}
                   </span>
                 </div>
 
@@ -911,11 +907,19 @@ export default function WeighbridgeScreen() {
                       'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
                       isNoDls
                         ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                        : scale.isStable
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : !scale.hardwareConnected
+                          ? 'bg-stone-800 text-stone-400 border border-stone-700'
+                          : scale.isStable
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                     )}>
-                      {isNoDls ? 'NO DLS' : scale.isStable ? 'STABLE' : 'IN MOTION'}
+                      {isNoDls
+                        ? 'NO DLS'
+                        : !scale.hardwareConnected
+                          ? 'OFFLINE'
+                          : scale.isStable
+                            ? 'STABLE'
+                            : 'IN MOTION'}
                     </span>
                   )}
                 </div>
@@ -980,6 +984,13 @@ export default function WeighbridgeScreen() {
                     <span>≈ {(currentLiveWeight / 1000).toFixed(3)} Metric Tonnes (MT)</span>
                     <span className="text-stone-500 text-[10px]">· Click to override (F8)</span>
                   </div>
+
+                  {!scale.hardwareConnected && (
+                    <div className="text-amber-400/90 font-mono text-[11px] mt-1.5 flex items-center justify-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span>USB-RS232 Cable not detected on {scale.serverPort || 'COM4'} · Click here or press F8 to enter manually</span>
+                    </div>
+                  )}
                 </div>
               )}
 

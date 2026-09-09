@@ -2646,22 +2646,56 @@ export class TaxproService {
       const monthNum = parseInt(period.slice(0, 2), 10);
       const yearNum = parseInt(period.slice(2), 10);
 
-      // We query dates across the month from NIC Inward registry (action=GetEwayBillsofOtherParty)
+      // 1. Identify priority dates from ERP Books (dates when stock arrived at RVP)
+      const startDate = new Date(Date.UTC(yearNum, monthNum - 1, 1));
+      const endDate = new Date(Date.UTC(yearNum, monthNum, 0, 23, 59, 59));
+      const knownStockIns = await prisma.stockIn.findMany({
+        where: { arrivalDate: { gte: startDate, lte: endDate } },
+        select: { arrivalDate: true },
+        take: 50,
+      });
+
+      const priorityDates = new Set<string>();
+      for (const s of knownStockIns) {
+        if (s.arrivalDate) {
+          const d = new Date(s.arrivalDate);
+          priorityDates.add(`${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`);
+          // Also check the dispatch date (1 day before arrival)
+          const prev = new Date(d);
+          prev.setDate(prev.getDate() - 1);
+          if (prev.getMonth() + 1 === monthNum) {
+            priorityDates.add(`${String(prev.getDate()).padStart(2, '0')}/${String(prev.getMonth() + 1).padStart(2, '0')}/${prev.getFullYear()}`);
+          }
+        }
+      }
+
+      // 2. Add remaining dates of the month
       const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
-      const datesToQuery: string[] = [];
+      const allDates: string[] = [];
       for (let day = 1; day <= daysInMonth; day++) {
-        datesToQuery.push(
+        allDates.push(
           `${String(day).padStart(2, '0')}/${String(monthNum).padStart(2, '0')}/${yearNum}`
         );
       }
 
+      // Prioritize known arrival dates first, then other calendar dates
+      const sortedDates = [
+        ...Array.from(priorityDates),
+        ...allDates.filter((d) => !priorityDates.has(d)),
+      ];
+
       const allInwardItems: any[] = [];
+      const seenEwbs = new Set<string>();
 
       await this.withAuth(company, company.gstin || '', async (token) => {
-        // Query dates in small concurrency batches (5 per batch) for fast response
-        const batchSize = 5;
-        for (let i = 0; i < datesToQuery.length; i += batchSize) {
-          const batch = datesToQuery.slice(i, i + batchSize);
+        // Query in parallel batches of 8 with an overall time cap of 12 seconds to prevent gateway timeouts
+        const batchSize = 8;
+        const startTime = Date.now();
+
+        for (let i = 0; i < sortedDates.length; i += batchSize) {
+          if (Date.now() - startTime > 12_000) break; // Time budget exceeded, return what was found
+
+          const batch = sortedDates.slice(i, i + batchSize);
           await Promise.allSettled(
             batch.map(async (dateStr) => {
               try {
@@ -2683,12 +2717,16 @@ export class TaxproService {
                   ? parsed.ewayBills
                   : [];
 
-                if (items.length > 0) {
-                  allInwardItems.push(...items);
+                for (const itm of items) {
+                  const key = String(itm.ewbNo || itm.docNo || '');
+                  if (key && !seenEwbs.has(key)) {
+                    seenEwbs.add(key);
+                    allInwardItems.push(itm);
+                  }
                 }
               } catch (err: any) {
-                // Error 325 (no records on date) or 366 (today's bills not yet available) are normal and non-fatal
-                logger.debug(`Inward query for date ${dateStr}: ${err.message}`);
+                // Non-fatal date response (code 325: no records; 366: today's bills)
+                logger.debug(`Inward query for ${dateStr}: ${err.message}`);
               }
             })
           );
@@ -2704,12 +2742,30 @@ export class TaxproService {
         const trdnm = String(item.fromTrdName || item.fromTradeName || ctin).trim();
         const inum = String(item.docNo || item.ewayBillNo || '').trim();
         const idt = String(item.docDate || item.ewayBillDate || '').slice(0, 10);
-        const txval = Number(item.totalValue || item.taxableAmount || 0);
-        const cgst = Number(item.cgstValue || 0);
-        const sgst = Number(item.sgstValue || 0);
-        const igst = Number(item.igstValue || 0);
+
+        const val = Number(item.totInvValue || item.totalValue || 0);
+        let txval = Number(item.totalValue || item.taxableAmount || 0);
+        let cgst = Number(item.cgstValue || 0);
+        let sgst = Number(item.sgstValue || 0);
+        let igst = Number(item.igstValue || 0);
         const cess = Number(item.cessValue || 0);
-        const val = Number(item.totInvValue || item.totalValue || (txval + cgst + sgst + igst + cess));
+
+        // Compute 5% GST breakdown when NIC provides gross invoice value
+        if (val > 0 && txval === 0 && cgst === 0 && sgst === 0 && igst === 0) {
+          const fromState = ctin.slice(0, 2);
+          const toState = (company.gstin || '37').slice(0, 2);
+          txval = Math.round((val / 1.05) * 100) / 100;
+          const tax = Math.round((val - txval) * 100) / 100;
+          if (fromState === toState) {
+            cgst = Math.round((tax / 2) * 100) / 100;
+            sgst = Math.round((tax / 2) * 100) / 100;
+            igst = 0;
+          } else {
+            igst = tax;
+            cgst = 0;
+            sgst = 0;
+          }
+        }
 
         let entry = supplierMap.get(ctin);
         if (!entry) {

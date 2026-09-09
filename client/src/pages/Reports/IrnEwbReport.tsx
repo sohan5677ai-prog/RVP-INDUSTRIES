@@ -71,6 +71,62 @@ function getYesterdayDdMmYyyy() {
   return `${day}/${month}/${year}`;
 }
 
+export function renderEwbCountdown(validUpto: string | Date | null | undefined, isCancelled = false) {
+  if (!validUpto) return <span className="text-[11px] text-muted-foreground">—</span>;
+  const dStr = typeof validUpto === 'string' ? validUpto : validUpto.toISOString();
+  if (isCancelled) return <span className="text-[11px] text-muted-foreground line-through">{shortDate(dStr)}</span>;
+
+  const target = new Date(validUpto).getTime();
+  const now = Date.now();
+  const diffMs = target - now;
+
+  if (diffMs < 0) {
+    const hoursAgo = Math.floor(Math.abs(diffMs) / (1000 * 60 * 60));
+    const minsAgo = Math.floor((Math.abs(diffMs) % (1000 * 60 * 60)) / (1000 * 60));
+    const within8h = hoursAgo < 8;
+
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs font-mono">{shortDate(dStr)}</span>
+        <Badge variant="destructive" className="text-[10px] py-0 px-1 font-semibold gap-1 inline-flex items-center w-fit">
+          <AlertTriangle className="w-2.5 h-2.5" /> Expired {hoursAgo}h {minsAgo}m ago
+        </Badge>
+        {within8h && (
+          <span className="text-[9px] font-bold text-amber-600 animate-pulse">
+            ⚠️ Extend allowed (within 8h)
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  const hoursLeft = Math.floor(diffMs / (1000 * 60 * 60));
+  const minsLeft = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (hoursLeft < 8) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs font-mono">{shortDate(dStr)}</span>
+        <Badge className="bg-amber-500 text-white hover:bg-amber-600 text-[10px] py-0 px-1 font-semibold gap-1 animate-pulse inline-flex items-center w-fit">
+          <Clock className="w-2.5 h-2.5" /> Expiring in {hoursLeft}h {minsLeft}m
+        </Badge>
+        <span className="text-[9px] font-medium text-amber-600">
+          Eligible for 1-Click Extension
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-mono">{shortDate(dStr)}</span>
+      <Badge variant="outline" className="text-[10px] py-0 px-1 text-emerald-700 bg-emerald-50 border-emerald-300 font-medium inline-flex items-center w-fit">
+        Valid: {hoursLeft}h left
+      </Badge>
+    </div>
+  );
+}
+
 export default function IrnEwbReport() {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -588,10 +644,7 @@ export default function IrnEwbReport() {
                           <div className="text-[11px] text-muted-foreground truncate max-w-[120px]">{s.transport?.name || s.transportProvider || '-'}</div>
                         </TableCell>
                         <TableCell>
-                          <div className="text-xs font-mono">{s.ewbValidUpto ? shortDate(s.ewbValidUpto) : '-'}</div>
-                          {s.ewbValidUpto && new Date(s.ewbValidUpto) < new Date() && !isCancelled && (
-                            <span className="text-[10px] text-amber-600 font-semibold">Expired</span>
-                          )}
+                          {renderEwbCountdown(s.ewbValidUpto, isCancelled)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={isCancelled ? 'destructive' : 'default'}>
@@ -610,7 +663,19 @@ export default function IrnEwbReport() {
                               <Button size="sm" variant="outline" className="border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openUpdateVeh(s)} title="Update vehicle on NIC (Part-B / VEHEWB)">
                                 <Truck className="h-3.5 w-3.5 mr-1" /> Update Lorry
                               </Button>
-                              <Button size="sm" variant="outline" className="border-amber-200 text-amber-700 hover:bg-amber-50" onClick={() => openExtendVal(s)} title="Extend validity due to transit delay (EXTENDVALIDITY)">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className={
+                                  s.ewbValidUpto &&
+                                  (new Date(s.ewbValidUpto).getTime() - Date.now() <= 8 * 3600 * 1000) &&
+                                  (new Date(s.ewbValidUpto).getTime() - Date.now() >= -8 * 3600 * 1000)
+                                    ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold shadow-sm animate-pulse"
+                                    : "border-amber-200 text-amber-700 hover:bg-amber-50"
+                                }
+                                onClick={() => openExtendVal(s)}
+                                title="Extend validity due to transit delay (EXTENDVALIDITY)"
+                              >
                                 <Clock className="h-3.5 w-3.5 mr-1" /> Extend
                               </Button>
                             </>

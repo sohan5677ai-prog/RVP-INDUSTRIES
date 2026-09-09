@@ -13,8 +13,10 @@ import {
   Loader2,
   Compass,
   Printer,
+  Clock,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
+import { renderEwbCountdown } from '@/pages/Reports/IrnEwbReport';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { PageHeader } from '@/components/PageHeader';
@@ -194,6 +196,27 @@ export default function DeliveryChallans() {
     onError: (err) => toast.error(getErrorMessage(err) || 'Failed to cancel E-Way Bill'),
   });
 
+  // Extend Validity State & Mutation
+  const [extendModalChallan, setExtendModalChallan] = useState<DeliveryChallan | null>(null);
+  const [extVehicleNo, setExtVehicleNo] = useState('');
+  const [extFromPlace, setExtFromPlace] = useState('');
+  const [extFromPincode, setExtFromPincode] = useState(517247);
+  const [extFromState, setExtFromState] = useState(37);
+  const [extDistance, setExtDistance] = useState(50);
+  const [extReason, setExtReason] = useState('1');
+  const [extRemarks, setExtRemarks] = useState('Transit delay extension');
+
+  const extendEwbMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) =>
+      api(`/delivery-challans/${id}/ewb/extend-validity`, { method: 'POST', body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['delivery-challans'] });
+      toast.success('Delivery Challan E-Way Bill validity extended successfully');
+      setExtendModalChallan(null);
+    },
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to extend E-Way Bill validity'),
+  });
+
   const handleAutoDistance = async (fromPin: number | string, tPin: number | string) => {
     if (!fromPin || !tPin) return;
     setFetchingDistance(true);
@@ -369,17 +392,13 @@ export default function DeliveryChallans() {
                     <div className="flex flex-col gap-0.5">
                       <Badge
                         variant={c.ewbStatus === 'CANCELLED' ? 'destructive' : 'default'}
-                        className={`text-[10px] py-0 px-1 font-mono ${
+                        className={`text-[10px] py-0 px-1 font-mono w-fit ${
                           c.ewbStatus === 'GENERATED' ? 'bg-emerald-600 text-white' : ''
                         }`}
                       >
                         EWB: {c.ewbNumber}
                       </Badge>
-                      {c.ewbValidUpto && c.ewbStatus !== 'CANCELLED' && (
-                        <span className="text-[10px] text-muted-foreground">
-                          Valid till {shortDate(c.ewbValidUpto)}
-                        </span>
-                      )}
+                      {renderEwbCountdown(c.ewbValidUpto, c.ewbStatus === 'CANCELLED')}
                     </div>
                   ) : (
                     <Badge variant="secondary" className="text-[10px] py-0 font-normal">
@@ -416,16 +435,35 @@ export default function DeliveryChallans() {
                       </Button>
                     )}
                     {c.ewbNumber && c.ewbStatus === 'GENERATED' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => setCancelModalChallan(c)}
-                        title="Cancel E-Way Bill"
-                      >
-                        <Ban className="h-3.5 w-3.5" />
-                        Cancel EWB
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                          onClick={() => {
+                            setExtendModalChallan(c);
+                            setExtVehicleNo(c.vehicleNumber || '');
+                            setExtFromPlace(c.fromPlace || 'Punganur');
+                            setExtFromPincode(c.fromPincode || 517247);
+                            setExtFromState(c.fromStateCode || 37);
+                            setExtDistance(c.distanceKm || 50);
+                          }}
+                          title="Extend Validity (Transit Delay)"
+                        >
+                          <Clock className="h-3 w-3" />
+                          Extend
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setCancelModalChallan(c)}
+                          title="Cancel E-Way Bill"
+                        >
+                          <Ban className="h-3.5 w-3.5" />
+                          Cancel
+                        </Button>
+                      </>
                     )}
                   </div>
                 </TableCell>
@@ -815,6 +853,120 @@ export default function DeliveryChallans() {
             >
               {cancelEwbMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Confirm Cancellation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Extend Validity Modal */}
+      <Dialog open={!!extendModalChallan} onOpenChange={(open) => !open && setExtendModalChallan(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-600" />
+              Extend E-Way Bill Validity
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="bg-muted/40 p-3 rounded-lg text-xs space-y-1">
+              <div><span className="font-semibold">Challan:</span> {extendModalChallan?.challanNumber}</div>
+              <div><span className="font-semibold">Active EWB:</span> {extendModalChallan?.ewbNumber}</div>
+              {extendModalChallan?.ewbValidUpto && (
+                <div><span className="font-semibold">Current Expiry:</span> {shortDate(extendModalChallan.ewbValidUpto)}</div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Vehicle Number</Label>
+              <Input
+                value={extVehicleNo}
+                onChange={(e) => setExtVehicleNo(e.target.value.toUpperCase())}
+                placeholder="e.g. AP04TT1234"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Current Location / Place</Label>
+                <Input
+                  value={extFromPlace}
+                  onChange={(e) => setExtFromPlace(e.target.value)}
+                  placeholder="Transit place"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Current Pincode</Label>
+                <Input
+                  type="number"
+                  value={extFromPincode}
+                  onChange={(e) => setExtFromPincode(Number(e.target.value))}
+                  placeholder="517247"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Remaining Distance to Destination (KM)</Label>
+              <Input
+                type="number"
+                value={extDistance}
+                onChange={(e) => setExtDistance(Number(e.target.value))}
+                placeholder="Remaining km"
+              />
+              <span className="text-[11px] text-muted-foreground">Each 200 km extends validity by 1 additional day.</span>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Reason for Extension</Label>
+              <Select value={extReason} onValueChange={setExtReason}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 - Natural Calamity</SelectItem>
+                  <SelectItem value="2">2 - Law and Order Situation</SelectItem>
+                  <SelectItem value="4">4 - Transshipment Delay</SelectItem>
+                  <SelectItem value="5">5 - Accident</SelectItem>
+                  <SelectItem value="99">99 - Other Transit Delay / Traffic</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Remarks</Label>
+              <Input
+                value={extRemarks}
+                onChange={(e) => setExtRemarks(e.target.value)}
+                placeholder="Brief reason for transit delay"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExtendModalChallan(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+              disabled={extendEwbMutation.isPending}
+              onClick={() => {
+                if (extendModalChallan) {
+                  extendEwbMutation.mutate({
+                    id: extendModalChallan.id,
+                    body: {
+                      vehicleNo: extVehicleNo,
+                      fromPlace: extFromPlace,
+                      fromPincode: extFromPincode,
+                      fromState: extFromState,
+                      remainingDistance: extDistance,
+                      extnRsnCode: extReason,
+                      extnRemarks: extRemarks,
+                    },
+                  });
+                }
+              }}
+            >
+              {extendEwbMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Extend Validity
             </Button>
           </DialogFooter>
         </DialogContent>

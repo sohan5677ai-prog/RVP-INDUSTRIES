@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Users, MapPin, CheckCircle2, Sparkles, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, MapPin, CheckCircle2, Sparkles, Loader2, AlertCircle, ShieldCheck, FileCheck2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PartyAddress } from '@/lib/types';
@@ -279,6 +279,56 @@ export default function Parties() {
     }
   };
 
+  // Feature 2: Vendor Return Filing Status Tracker
+  const [filingParty, setFilingParty] = useState<Party | null>(null);
+  const [loadingFiling, setLoadingFiling] = useState(false);
+  const [filingResult, setFilingResult] = useState<any>(null);
+
+  const handleOpenFiling = async (p: Party) => {
+    if (!p.gstin) return;
+    setFilingParty(p);
+    setLoadingFiling(true);
+    setFilingResult(null);
+    try {
+      const res = await api<any>(`/taxpro/filing-status/${encodeURIComponent(p.gstin.trim().toUpperCase())}`);
+      setFilingResult(res);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err) || 'Failed to fetch return filing status');
+    } finally {
+      setLoadingFiling(false);
+    }
+  };
+
+  // Feature 4: Bulk GSTIN Master Audit
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditResult, setAuditResult] = useState<any>(null);
+  const [auditFilter, setAuditFilter] = useState<'ALL' | 'CANCELLED' | 'MISMATCH'>('ALL');
+
+  const handleRunAudit = async () => {
+    setAuditModalOpen(true);
+    setAuditLoading(true);
+    try {
+      const res = await api<any>('/taxpro/audit-parties', { method: 'POST' });
+      setAuditResult(res);
+      toast.success(`GSTIN Audit Complete: ${res.totalChecked} parties checked`);
+    } catch (err: any) {
+      toast.error(getErrorMessage(err) || 'Failed to execute GSTIN audit');
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const syncPartyNameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api(`/parties/${id}`, { method: 'PUT', body: { name } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['parties'] });
+      toast.success('Party name updated to official GST portal trade name');
+    },
+    onError: (err: any) => toast.error(getErrorMessage(err) || 'Failed to update party name'),
+  });
+
   function addAddress() {
     setAddresses((prev) => [
       ...prev,
@@ -551,6 +601,9 @@ export default function Parties() {
               columns={PARTY_EXPORT_COLUMNS}
               rows={filteredParties ?? []}
             />
+            <Button variant="outline" className="gap-1.5 shadow-sm" onClick={handleRunAudit}>
+              <ShieldCheck className="h-4 w-4 text-sky-600" /> Audit All GSTINs
+            </Button>
             <Button onClick={openCreate}>
               <Plus className="h-4 w-4 mr-2" /> New Party
             </Button>
@@ -657,7 +710,22 @@ export default function Parties() {
                   )}
                 </TableCell>
                 <TableCell>{p.state ?? '-'}</TableCell>
-                <TableCell className="font-sans text-xs font-medium tracking-wide">{p.gstin ?? '-'}</TableCell>
+                <TableCell className="font-sans text-xs font-medium tracking-wide">
+                  <div className="flex items-center gap-1.5">
+                    <span>{p.gstin ?? '—'}</span>
+                    {p.gstin && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50"
+                        onClick={() => handleOpenFiling(p)}
+                        title="View GSTR Return Filing History"
+                      >
+                        <FileCheck2 className="h-3.5 w-3.5 text-indigo-600" />
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="text-xs">
                   {Number(p.openingBalance || 0) > 0 ? (
                     <span className="font-medium tabular-nums">
@@ -1531,6 +1599,228 @@ export default function Parties() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Feature 2: Vendor Return Filing Status Dialog */}
+      <Dialog open={!!filingParty} onOpenChange={(v) => !v && setFilingParty(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileCheck2 className="h-5 w-5 text-indigo-600" />
+              GST Return Filing History (GSTR-1 & GSTR-3B)
+            </DialogTitle>
+          </DialogHeader>
+
+          {loadingFiling ? (
+            <div className="py-12 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+              <span>Fetching taxpayer filing timeline from TaxPro GSP...</span>
+            </div>
+          ) : filingResult ? (
+            <div className="space-y-4">
+              <div className="p-4 rounded-xl border bg-muted/30 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">Party Name</div>
+                  <div className="font-bold text-base">{filingParty?.name}</div>
+                  <div className="text-xs font-mono text-muted-foreground mt-0.5">{filingParty?.gstin}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Compliance Rating</div>
+                  <div className="mt-1">
+                    {filingResult.complianceStatus === 'REGULAR' ? (
+                      <Badge className="bg-emerald-600 text-white gap-1 py-1 px-2.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> 🟢 Safe Vendor (GSTR-3B Filed)
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="gap-1 py-1 px-2.5">
+                        <AlertTriangle className="w-3.5 h-3.5" /> 🔴 Non-Compliant / At Risk
+                      </Badge>
+                    )}
+                  </div>
+                  {filingResult.lastGstr3bDate && (
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Last 3B: {filingResult.lastGstr3bPeriod} on {filingResult.lastGstr3bDate}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground">
+                Official return filing records submitted to the GST portal over the past financial year.
+              </div>
+
+              <div className="rounded-lg border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Return</TableHead>
+                      <TableHead>Period</TableHead>
+                      <TableHead>Date of Filing</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>ARN / Ref</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(filingResult.filings || []).map((f: any, idx: number) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-bold">{f.ret_typ || f.rtntype}</TableCell>
+                        <TableCell className="font-mono text-xs">{f.ret_prd}</TableCell>
+                        <TableCell className="text-xs">{f.dof || '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant={f.status === 'Filed' ? 'default' : 'secondary'} className={f.status === 'Filed' ? 'bg-emerald-600 text-white text-[10px]' : 'text-[10px]'}>
+                            {f.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-[11px] text-muted-foreground">{f.arn || '—'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-muted-foreground">No filing details found.</div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFilingParty(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Feature 4: Bulk GSTIN Master Audit Dialog */}
+      <Dialog open={auditModalOpen} onOpenChange={setAuditModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-sky-600" />
+              Master Party GSTIN Audit & Hygiene Check
+            </DialogTitle>
+          </DialogHeader>
+
+          {auditLoading ? (
+            <div className="py-16 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <Loader2 className="h-9 w-9 animate-spin text-sky-600" />
+              <span className="font-medium text-sm">Verifying all party GSTINs against live NIC Master registry...</span>
+              <span className="text-xs text-muted-foreground">Checking Active / Cancelled status and official Legal Trade Names</span>
+            </div>
+          ) : auditResult ? (
+            <div className="space-y-4">
+              {/* Summary stat cards */}
+              <div className="grid grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl border bg-card">
+                  <div className="text-xs text-muted-foreground">Total Checked</div>
+                  <div className="text-2xl font-bold mt-0.5">{auditResult.totalChecked}</div>
+                </div>
+                <div className="p-3 rounded-xl border bg-card">
+                  <div className="text-xs text-emerald-600 font-medium">Active GSTINs</div>
+                  <div className="text-2xl font-bold mt-0.5 text-emerald-600">{auditResult.activeCount}</div>
+                </div>
+                <div className="p-3 rounded-xl border bg-card">
+                  <div className="text-xs text-rose-600 font-medium">Cancelled / Suspended</div>
+                  <div className="text-2xl font-bold mt-0.5 text-rose-600">{auditResult.cancelledCount}</div>
+                </div>
+                <div className="p-3 rounded-xl border bg-card">
+                  <div className="text-xs text-amber-600 font-medium">Name Mismatches</div>
+                  <div className="text-2xl font-bold mt-0.5 text-amber-600">{auditResult.mismatchCount}</div>
+                </div>
+              </div>
+
+              {/* Filter Tabs */}
+              <div className="flex items-center gap-2 border-b pb-2">
+                <Button
+                  size="sm"
+                  variant={auditFilter === 'ALL' ? 'default' : 'outline'}
+                  onClick={() => setAuditFilter('ALL')}
+                  className="h-8 text-xs"
+                >
+                  All Checked ({auditResult.totalChecked})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={auditFilter === 'CANCELLED' ? 'default' : 'outline'}
+                  onClick={() => setAuditFilter('CANCELLED')}
+                  className="h-8 text-xs gap-1 text-rose-600"
+                >
+                  <AlertTriangle className="h-3 w-3" /> Cancelled / Suspended ({auditResult.cancelledCount})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={auditFilter === 'MISMATCH' ? 'default' : 'outline'}
+                  onClick={() => setAuditFilter('MISMATCH')}
+                  className="h-8 text-xs gap-1 text-amber-600"
+                >
+                  Name Mismatches ({auditResult.mismatchCount})
+                </Button>
+              </div>
+
+              {/* Results table */}
+              <div className="rounded-lg border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>ERP Party Name</TableHead>
+                      <TableHead>GSTIN</TableHead>
+                      <TableHead>Portal Legal / Trade Name</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(auditResult.results || [])
+                      .filter((r: any) => {
+                        if (auditFilter === 'CANCELLED') return r.isCancelled;
+                        if (auditFilter === 'MISMATCH') return r.isMismatch;
+                        return true;
+                      })
+                      .map((r: any) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="font-semibold text-xs">{r.name}</TableCell>
+                          <TableCell className="font-mono text-xs">{r.gstin}</TableCell>
+                          <TableCell className="text-xs">
+                            <div>{r.portalLegalName || '—'}</div>
+                            {r.portalTradeName && r.portalTradeName !== r.portalLegalName && (
+                              <div className="text-[11px] text-muted-foreground">{r.portalTradeName}</div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={r.isCancelled ? 'destructive' : 'default'}
+                              className={!r.isCancelled ? 'bg-emerald-600 text-white text-[10px]' : 'text-[10px]'}
+                            >
+                              {r.portalStatus}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {r.isMismatch && (r.portalTradeName || r.portalLegalName) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1 text-indigo-600 hover:bg-indigo-50"
+                                onClick={() =>
+                                  syncPartyNameMutation.mutate({
+                                    id: r.id,
+                                    name: r.portalTradeName || r.portalLegalName,
+                                  })
+                                }
+                                disabled={syncPartyNameMutation.isPending}
+                              >
+                                <RefreshCw className="h-3 w-3" /> Sync Name
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAuditModalOpen(false)}>Close</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

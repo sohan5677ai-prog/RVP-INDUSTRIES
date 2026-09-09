@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Receipt, ArrowUpRight, ArrowDownLeft, Scale, FileMinus2, FilePlus2, Building2, FileCheck2 } from 'lucide-react';
+import { Receipt, ArrowUpRight, ArrowDownLeft, Scale, FileMinus2, FilePlus2, Building2, FileCheck2, FileSpreadsheet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import type { GstReport as GstReportData, GstSalesLine, GstNoteLine, GstPurchaseLine } from '@/lib/types';
@@ -81,6 +81,12 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
             data && (
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="outline" asChild className="gap-1.5 shadow-sm">
+                  <Link to="/reports/taxes?tab=gstr1">
+                    <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
+                    <span>GSTR-1 & HSN</span>
+                  </Link>
+                </Button>
+                <Button size="sm" variant="outline" asChild className="gap-1.5 shadow-sm">
                   <Link to="/reports/taxes?tab=gstr2b">
                     <FileCheck2 className="w-4 h-4 text-emerald-600" />
                     <span>GSTR-2B Reconciliation</span>
@@ -95,6 +101,12 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">Output tax on sales and input tax credit on purchases - reconciled for your GSTR filing.</p>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" asChild className="gap-1.5 shadow-sm">
+              <Link to="/reports/taxes?tab=gstr1">
+                <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
+                <span>GSTR-1 & HSN</span>
+              </Link>
+            </Button>
             <Button size="sm" variant="outline" asChild className="gap-1.5 shadow-sm">
               <Link to="/reports/taxes?tab=gstr2b">
                 <FileCheck2 className="w-4 h-4 text-emerald-600" />

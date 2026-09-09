@@ -14,6 +14,7 @@ import {
   Coins,
   ShieldCheck,
   ShieldAlert,
+  Loader2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
@@ -160,7 +161,12 @@ export default function Gstr2bReconciliation() {
       alert(res.message || 'Synced GSTR-2B via TaxPro successfully!');
     },
     onError: (err: any) => {
-      setSyncMsg(err.message || 'TaxPro sync failed');
+      const msg = err.message || 'TaxPro sync failed';
+      if (/internal server error/i.test(msg)) {
+        setSyncMsg('The government NIC gateway is currently busy or taking a moment to respond. Please click "Sync GSTR-2B" again.');
+      } else {
+        setSyncMsg(msg);
+      }
     },
   });
 
@@ -600,6 +606,16 @@ export default function Gstr2bReconciliation() {
                 Tip: For full monthly return statements (all B2B invoices + credit notes), you can also import the 1-click official GSTR-2B JSON downloaded from gst.gov.in.
               </p>
             </div>
+
+            {syncMutation.isPending && (
+              <div className="py-3 px-4 rounded-lg bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 flex items-center gap-3 text-xs text-sky-800 dark:text-sky-300">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-sky-600" />
+                <div className="space-y-0.5">
+                  <div className="font-semibold">Querying Live Government Registry...</div>
+                  <div className="text-[11px] text-sky-700 dark:text-sky-400">Fetching inward supplier purchase records for {syncPeriod}</div>
+                </div>
+              </div>
+            )}
 
             {syncMsg && (
               <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 p-2.5 rounded-md leading-relaxed">

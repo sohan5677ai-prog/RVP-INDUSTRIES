@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Users, MapPin, CheckCircle2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, MapPin, CheckCircle2, Sparkles, Loader2, AlertCircle } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Party, PartyAddress } from '@/lib/types';
@@ -220,6 +220,64 @@ export default function Parties() {
 
   const [addresses, setAddresses] = useState<PartyAddress[]>([]);
   const [hasMultipleAddresses, setHasMultipleAddresses] = useState(false);
+  const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
+  const [gstinVerifiedInfo, setGstinVerifiedInfo] = useState<{
+    status: string;
+    legalName?: string;
+    tradeName?: string;
+  } | null>(null);
+
+  const handleVerifyGstin = async (gstinValue?: string) => {
+    const raw = (gstinValue || form.getValues('gstin') || '').trim().toUpperCase();
+    if (!raw) {
+      toast.error('Please enter a GSTIN first');
+      return;
+    }
+    if (raw.length !== 15) {
+      toast.error('GSTIN must be 15 characters (e.g. 29AAAAA0000A1Z5)');
+      return;
+    }
+    setGstinLookupLoading(true);
+    try {
+      const res = await api<any>(`/taxpro/gstin/${encodeURIComponent(raw)}`);
+      if (res && res.success) {
+        setGstinVerifiedInfo({
+          status: res.status || 'ACT',
+          legalName: res.legalName,
+          tradeName: res.tradeName,
+        });
+
+        // Autofill fields if empty or user updating
+        const currentName = form.getValues('name');
+        if (!currentName && (res.tradeName || res.legalName)) {
+          form.setValue('name', res.tradeName || res.legalName);
+        }
+        if (res.address1 && !form.getValues('address')) {
+          form.setValue('address', res.address1);
+        }
+        if (res.place && !form.getValues('city')) {
+          form.setValue('city', res.place);
+        }
+        if (res.pincode && !form.getValues('pincode')) {
+          form.setValue('pincode', res.pincode);
+        }
+        if (res.stateCode) {
+          const matched = INDIAN_STATES.find((s) =>
+            s.value.toLowerCase().includes(res.place?.toLowerCase() || '')
+          );
+          if (matched && !form.getValues('state')) {
+            form.setValue('state', matched.value);
+          }
+        }
+
+        toast.success(`GSTIN Verified: ${res.legalName || res.tradeName || raw} (${res.status === 'ACT' ? 'Active' : 'Cancelled'})`);
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err, 'Failed to verify GSTIN'));
+    } finally {
+      setGstinLookupLoading(false);
+    }
+  };
 
   function addAddress() {
     setAddresses((prev) => [
@@ -262,6 +320,7 @@ export default function Parties() {
     setEditing(null);
     form.reset(emptyParty);
     setHasMultipleAddresses(false);
+    setGstinVerifiedInfo(null);
     setAddresses([
       {
         label: 'Registered Office',
@@ -282,6 +341,7 @@ export default function Parties() {
 
   function openEdit(p: Party) {
     setEditing(p);
+    setGstinVerifiedInfo(null);
     form.reset({
       name: p.name,
       nickname: p.nickname ?? '',
@@ -992,10 +1052,63 @@ export default function Parties() {
                       name="gstin"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Primary GSTIN</FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. 37ABCDE1234F1Z5" {...field} />
-                          </FormControl>
+                          <div className="flex items-center justify-between">
+                            <FormLabel>Primary GSTIN</FormLabel>
+                            {gstinVerifiedInfo && (
+                              <Badge
+                                variant={gstinVerifiedInfo.status === 'ACT' ? 'default' : 'destructive'}
+                                className={`text-[10px] py-0 px-1.5 h-4 flex items-center gap-1 font-medium ${
+                                  gstinVerifiedInfo.status === 'ACT' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''
+                                }`}
+                              >
+                                {gstinVerifiedInfo.status === 'ACT' ? (
+                                  <>
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    Active
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertCircle className="h-3 w-3" />
+                                    Cancelled
+                                  </>
+                                )}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <FormControl>
+                              <Input
+                                placeholder="e.g. 37ABCDE1234F1Z5"
+                                className="uppercase font-mono text-xs"
+                                {...field}
+                                onChange={(e) => {
+                                  field.onChange(e.target.value.toUpperCase());
+                                  if (gstinVerifiedInfo) setGstinVerifiedInfo(null);
+                                }}
+                              />
+                            </FormControl>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0 gap-1.5 h-9 text-xs font-medium text-primary hover:text-primary hover:bg-primary/5"
+                              disabled={gstinLookupLoading || !field.value}
+                              onClick={() => handleVerifyGstin(field.value)}
+                              title="Verify GSTIN with Government Portal and auto-fill party details"
+                            >
+                              {gstinLookupLoading ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                              ) : (
+                                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                              )}
+                              <span>Verify & Autofill</span>
+                            </Button>
+                          </div>
+                          {gstinVerifiedInfo?.legalName && (
+                            <p className="text-[11px] text-muted-foreground truncate" title={gstinVerifiedInfo.legalName}>
+                              Legal Name: <span className="font-medium text-foreground">{gstinVerifiedInfo.legalName}</span>
+                            </p>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}

@@ -266,6 +266,32 @@ export default function IrnEwbReport() {
     }
   }
 
+  // Consolidated E-Way Bill (CEWB) State & Mutation
+  const [cewbModalOpen, setCewbModalOpen] = useState(false);
+  const [cewbVehicle, setCewbVehicle] = useState('');
+  const [cewbFromPlace, setCewbFromPlace] = useState('Punganur');
+  const [cewbFromState, setCewbFromState] = useState(37);
+  const [cewbEwbInput, setCewbEwbInput] = useState('');
+  const [selectedEwbsForCewb, setSelectedEwbsForCewb] = useState<string[]>([]);
+
+  const { data: cewbList = [], isLoading: loadingCewb } = useQuery<any[]>({
+    queryKey: ['consolidated-ewb'],
+    queryFn: () => api('/taxpro/consolidated-ewb'),
+  });
+
+  const cewbMutation = useMutation({
+    mutationFn: (body: any) => api('/taxpro/consolidated-ewb', { method: 'POST', body }),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['consolidated-ewb'] });
+      toast.success(res.message || 'Consolidated E-Way Bill generated');
+      setCewbModalOpen(false);
+      setSelectedEwbsForCewb([]);
+      setCewbEwbInput('');
+      setCewbVehicle('');
+    },
+    onError: (err) => toast.error(getErrorMessage(err, 'Failed to generate Consolidated EWB')),
+  });
+
   // Transporter Lookup Handler
   async function handleTransporterLookup() {
     if (!transporterGstin.trim()) return;
@@ -417,6 +443,9 @@ export default function IrnEwbReport() {
           </TabsTrigger>
           <TabsTrigger value="emaillog" className="rounded-lg gap-2">
             <Mail className="h-4 w-4" /> Email Logs
+          </TabsTrigger>
+          <TabsTrigger value="cewb" className="rounded-lg gap-2">
+            <Truck className="h-4 w-4" /> Consolidated EWBs ({cewbList.length})
           </TabsTrigger>
         </TabsList>
 
@@ -802,8 +831,197 @@ export default function IrnEwbReport() {
               </TableBody>
             </Table>
           </div>
+        {/* ── TAB 6: Consolidated E-Way Bills (CEWB) ─────────────────────────── */}
+        <TabsContent value="cewb" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">Consolidated E-Way Bills (CEWB)</h3>
+              <p className="text-xs text-muted-foreground">
+                Bundle multiple consignments and active E-Way Bills onto a single carrier vehicle for transit compliance.
+              </p>
+            </div>
+            <Button onClick={() => setCewbModalOpen(true)} className="gap-2">
+              <Truck className="h-4 w-4" /> Generate Consolidated EWB
+            </Button>
+          </div>
+
+          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead>CEWB No.</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Vehicle No.</TableHead>
+                  <TableHead>From Location</TableHead>
+                  <TableHead>Bundled EWBs</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loadingCewb ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      Loading Consolidated E-Way Bills...
+                    </TableCell>
+                  </TableRow>
+                ) : cewbList.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      No Consolidated E-Way Bills generated yet. Click "Generate Consolidated EWB" to bundle active bills.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  cewbList.map((c: any) => {
+                    const ewbs: string[] = Array.isArray(c.ewbNumbers) ? c.ewbNumbers : [];
+                    return (
+                      <TableRow key={c.id}>
+                        <TableCell className="font-mono font-semibold text-xs text-primary">{c.cEwbNumber}</TableCell>
+                        <TableCell className="text-xs">{shortDate(c.cEwbDate)}</TableCell>
+                        <TableCell className="font-mono font-medium text-xs uppercase">{c.vehicleNumber}</TableCell>
+                        <TableCell className="text-xs">{c.fromPlace} (State {c.fromState})</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {ewbs.map((no) => (
+                              <Badge key={no} variant="outline" className="font-mono text-[10px]">
+                                {no}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="default" className="bg-emerald-600 text-white text-[10px]">
+                            {c.status || 'ACTIVE'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </TabsContent>
       </Tabs>
+
+      {/* ── Generate Consolidated EWB Dialog ─────────────────────────────────── */}
+      <Dialog open={cewbModalOpen} onOpenChange={setCewbModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Generate Consolidated E-Way Bill (CEWB)</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="text-xs text-muted-foreground">
+              NIC form EWB-02: Consolidates multiple individual E-Way Bills for transport in one vehicle.
+            </div>
+
+            <div>
+              <Label>Vehicle Number *</Label>
+              <Input
+                placeholder="e.g. AP03TC1234"
+                className="uppercase font-mono"
+                value={cewbVehicle}
+                onChange={(e) => setCewbVehicle(e.target.value.toUpperCase())}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>From Place *</Label>
+                <Input
+                  value={cewbFromPlace}
+                  onChange={(e) => setCewbFromPlace(e.target.value)}
+                  placeholder="e.g. Punganur"
+                />
+              </div>
+              <div>
+                <Label>From State Code *</Label>
+                <Input
+                  type="number"
+                  value={cewbFromState}
+                  onChange={(e) => setCewbFromState(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Select Active E-Way Bills to Bundle</Label>
+              <div className="max-h-36 overflow-y-auto border rounded-lg p-2 space-y-1 bg-muted/20">
+                {ewbSales.filter((s) => s.ewbNumber && s.ewbStatus !== 'CANCELLED').length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">No active dispatches with EWBs found.</p>
+                ) : (
+                  ewbSales
+                    .filter((s) => s.ewbNumber && s.ewbStatus !== 'CANCELLED')
+                    .map((s) => {
+                      const no = String(s.ewbNumber);
+                      const checked = selectedEwbsForCewb.includes(no);
+                      return (
+                        <label
+                          key={s.id}
+                          className="flex items-center gap-2 text-xs p-1 rounded hover:bg-muted cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedEwbsForCewb((prev) =>
+                                checked ? prev.filter((x) => x !== no) : [...prev, no]
+                              );
+                            }}
+                          />
+                          <span className="font-mono font-medium">{no}</span>
+                          <span className="text-muted-foreground text-[11px] truncate">
+                            ({s.saleOrder?.buyer?.name || 'Buyer'} - {s.invoiceNumber || 'Inv'})
+                          </span>
+                        </label>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+
+            <div>
+              <Label>Or Enter EWB Numbers Manually (Comma separated)</Label>
+              <Input
+                placeholder="e.g. 211234567890, 211234567891"
+                value={cewbEwbInput}
+                onChange={(e) => setCewbEwbInput(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCewbModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                cewbMutation.isPending ||
+                !cewbVehicle.trim() ||
+                (selectedEwbsForCewb.length === 0 && !cewbEwbInput.trim())
+              }
+              onClick={() => {
+                const manual = cewbEwbInput
+                  .split(/[, \n]+/)
+                  .map((x) => x.trim())
+                  .filter((x) => /^\d{12}$/.test(x));
+                const allEwbs = Array.from(new Set([...selectedEwbsForCewb, ...manual]));
+                if (allEwbs.length === 0) {
+                  toast.error('Please select or enter at least one valid 12-digit E-Way Bill');
+                  return;
+                }
+                cewbMutation.mutate({
+                  vehicleNo: cewbVehicle.trim(),
+                  fromPlace: cewbFromPlace.trim(),
+                  fromState: cewbFromState,
+                  ewbNumbers: allEwbs,
+                });
+              }}
+            >
+              {cewbMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Bundle & Generate CEWB
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Live Info Modal ─────────────────────────────────────────────────── */}
       <Dialog open={!!liveInfo} onOpenChange={(v) => !v && setLiveInfo(null)}>

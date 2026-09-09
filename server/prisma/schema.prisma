@@ -472,6 +472,17 @@ model StockIn {
   // At verification the lorry's ₹80/t hamali share - normally recovered from the
   // transporter - is instead deducted from the party's net payable.
   selfVehicle       Boolean       @default(false)
+  // Inward E-Way Bill details (for URP / unregistered supplier inward supplies)
+  ewbNumber         String?
+  ewbDate           DateTime?
+  ewbValidUpto      DateTime?
+  ewbStatus         String? // 'GENERATED', 'CANCELLED'
+  ewbCancelledDate  DateTime?
+  ewbDistance       Int?
+  ewbTransMode      String?
+  ewbVehicleType    String?
+  ewbTransDocNo     String?
+  ewbTransDocDate   DateTime?
   createdAt         DateTime      @default(now())
   purchase          Purchase?
 
@@ -2192,3 +2203,103 @@ model WeighbridgeTicket {
   @@index([status])
   @@index([createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// Delivery Challan
+// Internal stock transfers, job work, supply on approval, exhibition, etc.
+// ---------------------------------------------------------------------------
+model DeliveryChallan {
+  id               String    @id @default(cuid())
+  challanNumber    String    @unique // e.g. "CHL/26-27/0001"
+  challanSeq       Int
+  challanFy        String    // e.g. "2026-27"
+  challanDate      DateTime
+  challanType      String    @default("OTHERS") // "JOB_WORK", "SUPPLY_ON_APPROVAL", "FOR_EXHIBITION", "OTHERS"
+  subType          String    @default("OTHERS") // "JOB_WORK", "SKD_CKD", "RECIPIENT_NOT_KNOWN", "FOR_EXHIBITION", "LINE_SALES", "OTHERS"
+
+  // From Details (Default: RVP factory/godown)
+  fromName         String
+  fromGstin        String?
+  fromAddress      String
+  fromPlace        String
+  fromPincode      Int
+  fromStateCode    Int
+
+  // To Details (Godown, Job Worker, or Party)
+  toName           String
+  toGstin          String?   // 'URP' if unregistered
+  toAddress        String
+  toPlace          String
+  toPincode        Int
+  toStateCode      Int
+
+  // Items itemized as JSON: [{ productName, hsnCode, quantity, unit, taxableAmount, gstRate, cgstAmount, sgstAmount, igstAmount }]
+  items            Json
+  totalValue       Decimal   @db.Decimal(14, 2)
+  taxableValue     Decimal   @db.Decimal(14, 2)
+  cgstAmount       Decimal   @default(0) @db.Decimal(12, 2)
+  sgstAmount       Decimal   @default(0) @db.Decimal(12, 2)
+  igstAmount       Decimal   @default(0) @db.Decimal(12, 2)
+
+  // Transport details
+  transporterId    String?
+  transporterName  String?
+  transporterGstin String?
+  vehicleNumber    String?
+  transDocNo      String?
+  transDocDate     DateTime?
+  transMode        String    @default("1") // "1" = Road
+  vehicleType      String    @default("R") // "R" = Regular
+  distanceKm       Int       @default(0)
+
+  // E-Way Bill details
+  ewbNumber        String?
+  ewbDate          DateTime?
+  ewbValidUpto     DateTime?
+  ewbStatus        String?   // 'GENERATED', 'CANCELLED'
+  ewbCancelledDate DateTime?
+
+  remarks          String?
+  status           String    @default("ACTIVE") // 'ACTIVE', 'CANCELLED'
+  createdBy        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([challanFy, challanSeq])
+  @@index([challanDate])
+  @@index([ewbNumber])
+  @@index([status])
+}
+
+model ChallanSerialCounter {
+  id         String @id @default(cuid())
+  fy         String @unique
+  lastSerial Int    @default(0)
+}
+
+// ---------------------------------------------------------------------------
+// Consolidated E-Way Bill (CEWB)
+// Bundles multiple active E-Way Bills onto a single carrier vehicle
+// ---------------------------------------------------------------------------
+model ConsolidatedEwb {
+  id            String    @id @default(cuid())
+  cEwbNumber    String    @unique
+  cEwbDate      DateTime  @default(now())
+  vehicleNumber String
+  fromPlace     String
+  fromState     Int       // State code (e.g. 29 for Karnataka, 37 for AP)
+  transMode     String    @default("1") // "1" = Road
+  transDocNo   String?
+  transDocDate  DateTime?
+  // List of E-Way Bill numbers bundled in this CEWB: string[]
+  ewbNumbers    Json
+  remarks       String?
+  status        String    @default("ACTIVE") // 'ACTIVE', 'CANCELLED'
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([vehicleNumber])
+  @@index([cEwbDate])
+  @@index([status])
+}
+

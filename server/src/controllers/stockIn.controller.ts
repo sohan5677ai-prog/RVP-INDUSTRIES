@@ -687,3 +687,19 @@ export async function createColdStorageBatch(req: Request, res: Response) {
 
   res.json({ results });
 }
+
+export async function generateStockInInwardEwb(req: Request, res: Response) {
+  const { id } = req.params;
+  const { TaxproService } = await import('../services/taxpro.service.js');
+  const result = await TaxproService.generateInwardPurchaseEwb(id, req.body || {});
+  res.json(result);
+}
+
+export async function cancelStockInInwardEwb(req: Request, res: Response) {
+  const { id } = req.params;
+  const { cancelReason, cancelRemarks } = req.body || {};
+  const { TaxproService } = await import('../services/taxpro.service.js');
+  const result = await TaxproService.cancelStockInEwb(id, cancelReason || '1', cancelRemarks || 'Cancelled from ERP');
+  res.json(result);
+}
+

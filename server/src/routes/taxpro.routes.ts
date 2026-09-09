@@ -579,5 +579,61 @@ router.post(
   })
 );
 
+// Master GSTIN Lookup & Auto-fill API
+router.get(
+  '/taxpro/gstin/:gstin',
+  asyncHandler(async (req, res) => {
+    const { gstin } = req.params;
+    const result = await runTaxpro(() => TaxproService.lookupGstin(gstin));
+    res.json(result);
+  })
+);
+
+// Official PIN-to-PIN Distance API
+router.get(
+  '/taxpro/distance',
+  asyncHandler(async (req, res) => {
+    const fromPin = req.query.fromPin as string;
+    const toPin = req.query.toPin as string;
+    if (!fromPin || !toPin) throw new HttpError(400, 'fromPin and toPin query parameters are required');
+    const distance = await runTaxpro(() => TaxproService.getOfficialDistance(fromPin, toPin));
+    res.json({ success: true, fromPin, toPin, distance });
+  })
+);
+
+// Consolidated E-Way Bill: Generation
+const consolidatedEwbSchema = z.object({
+  vehicleNo: z.string().min(1, 'Vehicle number is required'),
+  fromPlace: z.string().min(1, 'From place is required'),
+  fromState: z.coerce.number().int(),
+  transMode: z.string().default('1'),
+  transDocNo: z.string().optional(),
+  transDocDate: z.string().optional(),
+  ewbNumbers: z.array(z.union([z.string(), z.number()])).min(1, 'At least one E-Way Bill is required'),
+  remarks: z.string().optional(),
+});
+
+router.post(
+  '/taxpro/consolidated-ewb',
+  asyncHandler(async (req, res) => {
+    const parsed = consolidatedEwbSchema.parse(req.body);
+    const result = await runTaxpro(() => TaxproService.generateConsolidatedEwb(parsed));
+    res.json(result);
+  })
+);
+
+// Consolidated E-Way Bill: List
+router.get(
+  '/taxpro/consolidated-ewb',
+  asyncHandler(async (req, res) => {
+    const list = await prisma.consolidatedEwb.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    res.json(list);
+  })
+);
+
 export default router;
+
 

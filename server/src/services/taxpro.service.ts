@@ -1732,5 +1732,673 @@ export class TaxproService {
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
+
+  /**
+   * Looks up GSTIN details (Legal Name, Trade Name, Address, Status, etc.) from NIC/TaxPro GSP Master API.
+   * If sandbox / mock or if credentials missing, returns simulated/fallback verified data.
+   */
+  public static async lookupGstin(gstin: string) {
+    const rawGstin = (gstin || '').trim().toUpperCase();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(rawGstin)) {
+      throw new Error('Invalid GSTIN format. Expected 15 characters (e.g. 29AAAAA0000A1Z5)');
+    }
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock) {
+      return {
+        success: true,
+        gstin: rawGstin,
+        legalName: 'TEST ENTERPRISE PVT LTD',
+        tradeName: 'TEST ENTERPRISE',
+        status: 'ACT',
+        taxpayerType: 'Regular',
+        address1: 'Plot No. 42, Industrial Area, Phase 1',
+        address2: 'Near Ring Road',
+        place: 'Bengaluru',
+        pincode: '560058',
+        stateCode: parseInt(rawGstin.slice(0, 2), 10) || 29,
+        state: 'Karnataka',
+        message: 'Simulated GSTIN details (mock mode)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/Master?${this.ewbQueryString(company, company.gstin || '', 'GetGSTINDetails', { authtoken: token, gstin: rawGstin })}`
+          : `/v1.03/dec/Master?action=GetGSTINDetails&authtoken=${encodeURIComponent(token)}&gstin=${encodeURIComponent(rawGstin)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const statusStr = (data.status || data.Status || data.sts || 'ACT').toUpperCase();
+      return {
+        success: true,
+        gstin: rawGstin,
+        legalName: data.legalName || data.lgnm || data.tradeNam || data.TradeName || '',
+        tradeName: data.tradeName || data.tradeNam || data.lgnm || data.legalName || '',
+        status: statusStr.startsWith('ACT') ? 'ACT' : 'CNL',
+        taxpayerType: data.taxpayerType || data.dty || 'Regular',
+        address1: [data.bno, data.bnm, data.st].filter(Boolean).join(', ') || data.address1 || data.addrBnm || '',
+        address2: data.loc || data.address2 || '',
+        place: data.loc || data.dst || data.place || '',
+        pincode: String(data.pncd || data.pincode || ''),
+        stateCode: parseInt(data.stcd || rawGstin.slice(0, 2), 10) || 0,
+        raw: data,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro GSTIN Lookup Error:', err);
+      if (company.taxproSandbox) {
+        return {
+          success: true,
+          gstin: rawGstin,
+          legalName: `Party (${rawGstin})`,
+          tradeName: `Party (${rawGstin})`,
+          status: 'ACT',
+          taxpayerType: 'Regular',
+          address1: 'Main Market Road',
+          address2: '',
+          place: 'City',
+          pincode: '517247',
+          stateCode: parseInt(rawGstin.slice(0, 2), 10) || 37,
+          message: 'Sandbox fallback GSTIN lookup result',
+        };
+      }
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Retrieves official PIN-to-PIN distance from TaxPro / NIC Master API.
+   * Eliminates distance deviation rejections when raising E-Way Bills.
+   */
+  public static async getOfficialDistance(fromPin: string | number, toPin: string | number): Promise<number | null> {
+    const fPin = String(fromPin).replace(/\D/g, '');
+    const tPin = String(toPin).replace(/\D/g, '');
+    if (!/^[1-9][0-9]{5}$/.test(fPin) || !/^[1-9][0-9]{5}$/.test(tPin)) return null;
+
+    const company = await getCompanyProfileRow();
+    if (this.credsMissing(company)) return null;
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/Master?${this.ewbQueryString(company, company.gstin || '', 'GetDistance', { authtoken: token, fromPincode: fPin, toPincode: tPin })}`
+          : `/v1.03/dec/Master?action=GetDistance&authtoken=${encodeURIComponent(token)}&fromPincode=${fPin}&toPincode=${tPin}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data);
+      const dist = Number(data?.distance ?? data?.Distance ?? data);
+      if (Number.isFinite(dist) && dist > 0) {
+        return Math.round(dist);
+      }
+      return null;
+    } catch (err: any) {
+      logger.warn(`TaxPro GetDistance failed (${fPin} -> ${tPin}): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Universal EWB cancellation by number.
+   */
+  public static async cancelEwbNumber(ewbNo: string | number, cancelReason: string, cancelRemarks: string) {
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const payload = {
+      ewbNo: Number(ewbNo),
+      cancelRsnCode: Number(cancelReason || '1'),
+      cancelRmrk: cancelRemarks || 'Cancelled from ERP system',
+    };
+
+    if (isMock) {
+      return { success: true, cancelledDate: new Date(), message: 'Simulated E-Way Bill cancelled (mock mode)' };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'CANEWB', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=CANEWB&authtoken=${encodeURIComponent(token)}`;
+        const headers = this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token });
+
+        return this.request(company.taxproSandbox, ewbPath, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const cancelDate = data.CancelDate || data.cancelDate || data.cancel_date;
+      return {
+        success: true,
+        cancelledDate: cancelDate ? this.parseNicDate(cancelDate) : new Date(),
+        message: 'E-Way Bill cancelled successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro CANEWB Error:', err);
+      const msg = String(err?.message || '');
+      if (/412|already.*cancel|multi.*vehicle/i.test(msg)) {
+        return {
+          success: true,
+          cancelledDate: new Date(),
+          message: 'E-Way Bill is already cancelled on the government portal (NIC 412)',
+        };
+      }
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Generates a Consolidated E-Way Bill (CEWB) on NIC to bundle multiple active EWBs on one vehicle.
+   */
+  public static async generateConsolidatedEwb(params: {
+    vehicleNo: string;
+    fromPlace: string;
+    fromState: number;
+    transMode?: string;
+    transDocNo?: string;
+    transDocDate?: string;
+    ewbNumbers: (string | number)[];
+    remarks?: string;
+  }) {
+    if (!params.vehicleNo) throw new Error('Vehicle number is required for Consolidated E-Way Bill');
+    if (!params.ewbNumbers || params.ewbNumbers.length === 0) {
+      throw new Error('At least one E-Way Bill number is required');
+    }
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const vehNo = params.vehicleNo.toUpperCase().replace(/\s+/g, '');
+    const payload = {
+      vehicleNo: vehNo,
+      fromPlace: params.fromPlace.slice(0, 50),
+      fromState: Number(params.fromState),
+      transMode: params.transMode || '1',
+      transDocNo: params.transDocNo || undefined,
+      transDocDate: params.transDocDate ? this.formatNICDate(new Date(params.transDocDate)) : undefined,
+      tripshtDtls: params.ewbNumbers.map((no) => ({ ewbNo: Number(no) })),
+    };
+
+    if (isMock) {
+      const cEwbNo = String(700000000000 + Math.floor(Math.random() * 200000000000));
+      const record = await prisma.consolidatedEwb.create({
+        data: {
+          cEwbNumber: cEwbNo,
+          cEwbDate: new Date(),
+          vehicleNumber: vehNo,
+          fromPlace: params.fromPlace,
+          fromState: Number(params.fromState),
+          transMode: params.transMode || '1',
+          transDocNo: params.transDocNo,
+          transDocDate: params.transDocDate ? new Date(params.transDocDate) : null,
+          ewbNumbers: params.ewbNumbers.map(String),
+          remarks: params.remarks,
+        },
+      });
+      return {
+        success: true,
+        cEwbNumber: cEwbNo,
+        cEwbDate: record.cEwbDate,
+        record,
+        message: 'Simulated Consolidated E-Way Bill generated (mock mode)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GENCEWB', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=GENCEWB&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify(payload),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const cEwbNo = String(data.cEwbNo || data.cEWBNo || data.CEwbNo);
+      const cEwbDate = data.cEWBDate || data.cEwbDate ? this.parseNicDate(data.cEWBDate || data.cEwbDate) : new Date();
+
+      const record = await prisma.consolidatedEwb.create({
+        data: {
+          cEwbNumber: cEwbNo,
+          cEwbDate,
+          vehicleNumber: vehNo,
+          fromPlace: params.fromPlace,
+          fromState: Number(params.fromState),
+          transMode: params.transMode || '1',
+          transDocNo: params.transDocNo,
+          transDocDate: params.transDocDate ? new Date(params.transDocDate) : null,
+          ewbNumbers: params.ewbNumbers.map(String),
+          remarks: params.remarks,
+        },
+      });
+
+      return {
+        success: true,
+        cEwbNumber: cEwbNo,
+        cEwbDate,
+        record,
+        message: 'Consolidated E-Way Bill generated successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro GENCEWB Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Generates a Standalone E-Way Bill for a Delivery Challan (Outward, subSupplyType e.g. Job Work / Transfer / Others).
+   */
+  public static async generateDeliveryChallanEwb(challanId: string, transportDetails: {
+    transporterId?: string;
+    transporterName?: string;
+    transDistance?: number;
+    transMode?: string;
+    vehicleNumber?: string;
+    vehicleType?: string;
+    transDocNo?: string;
+    transDocDt?: string;
+  }) {
+    const challan = await prisma.deliveryChallan.findUnique({ where: { id: challanId } });
+    if (!challan) throw new Error('Delivery Challan not found');
+    if (challan.status === 'CANCELLED') throw new Error('Cannot generate E-Way Bill for a cancelled challan');
+    if (challan.ewbNumber && challan.ewbStatus !== 'CANCELLED') {
+      throw new Error(`E-Way Bill ${challan.ewbNumber} already active on this challan`);
+    }
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const vehNo = (transportDetails.vehicleNumber || challan.vehicleNumber || '').toUpperCase().replace(/\s+/g, '');
+    const transMode = transportDetails.transMode || challan.transMode || '1';
+
+    let subSupplyType = '8';
+    let subSupplyDesc = 'Delivery Challan';
+    if (challan.challanType === 'JOB_WORK' || challan.subType === 'JOB_WORK') {
+      subSupplyType = '3';
+      subSupplyDesc = 'Job Work Movement';
+    } else if (challan.challanType === 'FOR_EXHIBITION' || challan.subType === 'FOR_EXHIBITION') {
+      subSupplyType = '6';
+      subSupplyDesc = 'For Exhibition';
+    } else if (challan.challanType === 'SUPPLY_ON_APPROVAL') {
+      subSupplyType = '8';
+      subSupplyDesc = 'Supply on Approval';
+    } else if (challan.challanType === 'GODOWN_TRANSFER') {
+      subSupplyType = '8';
+      subSupplyDesc = 'Godown Transfer';
+    }
+
+    const items = (Array.isArray(challan.items) ? challan.items : []) as any[];
+    const itemList = items.map((item, index) => ({
+      itemNo: index + 1,
+      productName: String(item.productName || 'Goods').slice(0, 100),
+      productDesc: String(item.productName || 'Goods').slice(0, 100),
+      hsnCode: Number(String(item.hsnCode || '120799').slice(0, 8)),
+      quantity: Number(item.quantity) || 1,
+      qtyUnit: String(item.unit || 'KGS').toUpperCase(),
+      taxableAmount: Number(item.taxableAmount) || 0,
+      cgstRate: Number(item.gstRate ? Number(item.gstRate) / 2 : 0),
+      sgstRate: Number(item.gstRate ? Number(item.gstRate) / 2 : 0),
+      igstRate: Number(item.igstRate || 0),
+      cessRate: 0,
+    }));
+
+    const distance = Number(transportDetails.transDistance || challan.distanceKm) || 0;
+
+    const payload: Record<string, any> = {
+      supplyType: 'O',
+      subSupplyType,
+      subSupplyDesc,
+      docType: 'CHL',
+      docNo: challan.challanNumber,
+      docDate: this.formatNICDate(challan.challanDate),
+      fromGstin: challan.fromGstin || company.gstin,
+      fromTrdName: challan.fromName || company.name || 'RVP Industries',
+      fromAddr1: challan.fromAddress.slice(0, 100),
+      fromPlace: challan.fromPlace.slice(0, 50),
+      fromPincode: Number(challan.fromPincode),
+      actFromStateCode: Number(challan.fromStateCode),
+      fromStateCode: Number(challan.fromStateCode),
+      toGstin: challan.toGstin || 'URP',
+      toTrdName: challan.toName.slice(0, 100),
+      toAddr1: challan.toAddress.slice(0, 100),
+      toPlace: challan.toPlace.slice(0, 50),
+      toPincode: Number(challan.toPincode),
+      actToStateCode: Number(challan.toStateCode),
+      toStateCode: Number(challan.toStateCode),
+      transactionType: 1,
+      totalValue: Number(challan.totalValue),
+      cgstValue: Number(challan.cgstAmount),
+      sgstValue: Number(challan.sgstAmount),
+      igstValue: Number(challan.igstAmount),
+      cessValue: 0,
+      totInvValue: Number(challan.totalValue),
+      transDistance: distance,
+      transMode,
+      itemList,
+    };
+
+    if (transMode === '1' && vehNo) {
+      payload.vehicleNo = vehNo;
+      payload.vehicleType = transportDetails.vehicleType || challan.vehicleType || 'R';
+    }
+    if (transportDetails.transporterId) payload.transporterId = transportDetails.transporterId;
+    if (transportDetails.transporterName) payload.transporterName = transportDetails.transporterName;
+    if (transportDetails.transDocNo) payload.transDocNo = transportDetails.transDocNo;
+    if (transportDetails.transDocDt) payload.transDocDate = this.formatNICDate(new Date(transportDetails.transDocDt));
+
+    if (isMock) {
+      const ewbNo = String(300000000000 + Math.floor(Math.random() * 600000000000));
+      const validUpto = new Date();
+      const days = Math.max(1, Math.ceil((distance || 100) / 200));
+      validUpto.setDate(validUpto.getDate() + days);
+
+      const updated = await prisma.deliveryChallan.update({
+        where: { id: challanId },
+        data: {
+          ewbNumber: ewbNo,
+          ewbDate: new Date(),
+          ewbValidUpto: validUpto,
+          ewbStatus: 'GENERATED',
+          distanceKm: distance,
+          vehicleNumber: vehNo || challan.vehicleNumber,
+        },
+      });
+
+      return {
+        success: true,
+        ewbNumber: ewbNo,
+        ewbDate: updated.ewbDate,
+        ewbValidUpto: validUpto,
+        distance,
+        challan: updated,
+        message: 'Simulated Delivery Challan E-Way Bill generated (mock mode)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GENEWAYBILL', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=GENEWAYBILL&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify(payload),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const ewbNo = String(data.ewayBillNo || data.EwbNo || data.ewbNo);
+      const ewbDate = data.ewayBillDate || data.EwbDt ? this.parseNicDate(data.ewayBillDate || data.EwbDt) : new Date();
+      const validUpto = data.validUpto ? this.parseNicDate(data.validUpto) : new Date(Date.now() + 86400000 * 2);
+
+      const updated = await prisma.deliveryChallan.update({
+        where: { id: challanId },
+        data: {
+          ewbNumber: ewbNo,
+          ewbDate,
+          ewbValidUpto: validUpto,
+          ewbStatus: 'GENERATED',
+          distanceKm: distance,
+          vehicleNumber: vehNo || challan.vehicleNumber,
+        },
+      });
+
+      return {
+        success: true,
+        ewbNumber: ewbNo,
+        ewbDate,
+        ewbValidUpto: validUpto,
+        distance,
+        challan: updated,
+        message: 'Delivery Challan E-Way Bill generated successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro Delivery Challan EWB Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Cancels E-Way Bill on a Delivery Challan.
+   */
+  public static async cancelDeliveryChallanEwb(challanId: string, cancelReason: string, cancelRemarks: string) {
+    const challan = await prisma.deliveryChallan.findUnique({ where: { id: challanId } });
+    if (!challan || !challan.ewbNumber) throw new Error('Delivery Challan or EWB not found');
+
+    const result = await this.cancelEwbNumber(challan.ewbNumber, cancelReason, cancelRemarks);
+
+    const updated = await prisma.deliveryChallan.update({
+      where: { id: challanId },
+      data: {
+        ewbStatus: 'CANCELLED',
+        ewbCancelledDate: result.cancelledDate,
+      },
+    });
+
+    return {
+      success: true,
+      cancelledDate: result.cancelledDate,
+      challan: updated,
+      message: result.message,
+    };
+  }
+
+  /**
+   * Generates an Inward E-Way Bill for raw materials arriving from unregistered suppliers (URP).
+   */
+  public static async generateInwardPurchaseEwb(stockInId: string, transportDetails: {
+    transporterId?: string;
+    transporterName?: string;
+    transDistance?: number;
+    transMode?: string;
+    vehicleNumber?: string;
+    vehicleType?: string;
+    transDocNo?: string;
+    transDocDt?: string;
+  }) {
+    const stockIn = await prisma.stockIn.findUnique({
+      where: { id: stockInId },
+      include: {
+        purchaseOrder: {
+          include: { party: true },
+        },
+      },
+    });
+    if (!stockIn) throw new Error('Stock-in record not found');
+    if (stockIn.ewbNumber && stockIn.ewbStatus !== 'CANCELLED') {
+      throw new Error(`E-Way Bill ${stockIn.ewbNumber} already active on this stock-in`);
+    }
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const party = stockIn.purchaseOrder.party;
+    const vehNo = (transportDetails.vehicleNumber || stockIn.lorryNumber || '').toUpperCase().replace(/\s+/g, '');
+    const transMode = transportDetails.transMode || '1';
+
+    const dispatchFrom = this.dispatchFromDetails(company);
+    const weightKg = stockIn.rvpKataKg || stockIn.billingWeightKg || 1000;
+    const ratePerKg = Number(stockIn.billingRatePerKg || stockIn.purchaseOrder.pricePerKg) || 10;
+    const taxableAmount = Math.round(weightKg * ratePerKg);
+
+    const distance = Number(transportDetails.transDistance) || stockIn.ewbDistance || 100;
+
+    const payload: Record<string, any> = {
+      supplyType: 'I',
+      subSupplyType: '8',
+      subSupplyDesc: 'Inward purchase from unregistered supplier',
+      docType: 'INV',
+      docNo: stockIn.invoiceNumber || `SI-${stockIn.id.slice(-6)}`,
+      docDate: this.formatNICDate(stockIn.arrivalDate),
+      fromGstin: party.gstin || 'URP',
+      fromTrdName: (party.name || 'Unregistered Farmer/Supplier').slice(0, 100),
+      fromAddr1: (party.address || 'Agricultural Area').slice(0, 100),
+      fromPlace: (party.city || 'Rural').slice(0, 50),
+      fromPincode: Number(party.pincode) || 517247,
+      actFromStateCode: 37,
+      fromStateCode: 37,
+      toGstin: company.gstin,
+      toTrdName: company.name || 'RVP Industries',
+      toAddr1: dispatchFrom.addr1,
+      toPlace: dispatchFrom.place,
+      toPincode: dispatchFrom.pincode,
+      actToStateCode: 37,
+      toStateCode: 37,
+      transactionType: 1,
+      totalValue: taxableAmount,
+      cgstValue: 0,
+      sgstValue: 0,
+      igstValue: 0,
+      cessValue: 0,
+      totInvValue: taxableAmount,
+      transDistance: distance,
+      transMode,
+      itemList: [
+        {
+          itemNo: 1,
+          productName: 'TAMARIND SEED (RAW MATERIAL)',
+          productDesc: 'TAMARIND SEED (RAW MATERIAL)',
+          hsnCode: 120799,
+          quantity: weightKg,
+          qtyUnit: 'KGS',
+          taxableAmount,
+          cgstRate: 0,
+          sgstRate: 0,
+          igstRate: 0,
+          cessRate: 0,
+        },
+      ],
+    };
+
+    if (transMode === '1' && vehNo) {
+      payload.vehicleNo = vehNo;
+      payload.vehicleType = transportDetails.vehicleType || 'R';
+    }
+    if (transportDetails.transporterId) payload.transporterId = transportDetails.transporterId;
+    if (transportDetails.transporterName) payload.transporterName = transportDetails.transporterName;
+    if (transportDetails.transDocNo) payload.transDocNo = transportDetails.transDocNo;
+    if (transportDetails.transDocDt) payload.transDocDate = this.formatNICDate(new Date(transportDetails.transDocDt));
+
+    if (isMock) {
+      const ewbNo = String(400000000000 + Math.floor(Math.random() * 500000000000));
+      const validUpto = new Date();
+      const days = Math.max(1, Math.ceil(distance / 200));
+      validUpto.setDate(validUpto.getDate() + days);
+
+      const updated = await prisma.stockIn.update({
+        where: { id: stockInId },
+        data: {
+          ewbNumber: ewbNo,
+          ewbDate: new Date(),
+          ewbValidUpto: validUpto,
+          ewbStatus: 'GENERATED',
+          ewbDistance: distance,
+          ewbTransMode: transMode,
+          ewbVehicleType: transportDetails.vehicleType || 'R',
+          ewbTransDocNo: transportDetails.transDocNo,
+          ewbTransDocDate: transportDetails.transDocDt ? new Date(transportDetails.transDocDt) : null,
+        },
+      });
+
+      return {
+        success: true,
+        ewbNumber: ewbNo,
+        ewbDate: updated.ewbDate,
+        ewbValidUpto: validUpto,
+        distance,
+        stockIn: updated,
+        message: 'Simulated Inward Purchase E-Way Bill generated (mock mode)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GENEWAYBILL', { authtoken: token })}`
+          : `/v1.03/dec/ewayapi?action=GENEWAYBILL&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify(payload),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const ewbNo = String(data.ewayBillNo || data.EwbNo || data.ewbNo);
+      const ewbDate = data.ewayBillDate || data.EwbDt ? this.parseNicDate(data.ewayBillDate || data.EwbDt) : new Date();
+      const validUpto = data.validUpto ? this.parseNicDate(data.validUpto) : new Date(Date.now() + 86400000 * 2);
+
+      const updated = await prisma.stockIn.update({
+        where: { id: stockInId },
+        data: {
+          ewbNumber: ewbNo,
+          ewbDate,
+          ewbValidUpto: validUpto,
+          ewbStatus: 'GENERATED',
+          ewbDistance: distance,
+          ewbTransMode: transMode,
+          ewbVehicleType: transportDetails.vehicleType || 'R',
+          ewbTransDocNo: transportDetails.transDocNo,
+          ewbTransDocDate: transportDetails.transDocDt ? new Date(transportDetails.transDocDt) : null,
+        },
+      });
+
+      return {
+        success: true,
+        ewbNumber: ewbNo,
+        ewbDate,
+        ewbValidUpto: validUpto,
+        distance,
+        stockIn: updated,
+        message: 'Inward Purchase E-Way Bill generated successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro Inward Purchase EWB Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Cancels Inward E-Way Bill on a StockIn record.
+   */
+  public static async cancelStockInEwb(stockInId: string, cancelReason: string, cancelRemarks: string) {
+    const stockIn = await prisma.stockIn.findUnique({ where: { id: stockInId } });
+    if (!stockIn || !stockIn.ewbNumber) throw new Error('Stock-in record or EWB not found');
+
+    const result = await this.cancelEwbNumber(stockIn.ewbNumber, cancelReason, cancelRemarks);
+
+    const updated = await prisma.stockIn.update({
+      where: { id: stockInId },
+      data: {
+        ewbStatus: 'CANCELLED',
+        ewbCancelledDate: result.cancelledDate,
+      },
+    });
+
+    return {
+      success: true,
+      cancelledDate: result.cancelledDate,
+      stockIn: updated,
+      message: result.message,
+    };
+  }
 }
+
 

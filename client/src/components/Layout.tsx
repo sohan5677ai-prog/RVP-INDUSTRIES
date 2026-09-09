@@ -129,6 +129,7 @@ const sections: NavSection[] = [
       { to: '/sales/tps', label: 'TPS (Brokens)', icon: Wheat },
       { to: '/sales/byproducts', label: 'Tamarind Byproducts', icon: Recycle },
       { to: '/sales/notes', label: 'Credit/Debit Notes', icon: FileMinus2 },
+      { to: '/delivery-challans', label: 'Delivery Challans', icon: Truck },
       { to: '/sales/dues-today', label: 'Dues on this Day', icon: CalendarClock },
       { to: '/sales/internal-weight', label: 'Internal Weight', icon: Scale },
     ],

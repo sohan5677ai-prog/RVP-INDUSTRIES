@@ -2,7 +2,7 @@ import React, { Fragment, useMemo, useRef, useState, useEffect, useCallback } fr
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X, Ban, Compass } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { usePasteImage, readImageFromClipboard } from '@/lib/usePasteImage';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
@@ -642,7 +642,7 @@ function StockInFormDialog({
 
 
 const StockInGroupRow = React.memo(({
-  groupId, po, rows, isOpen, toggleGroup, openEdit, deleteMutationMutate
+  groupId, po, rows, isOpen, toggleGroup, openEdit, deleteMutationMutate, onOpenInwardEwb, onCancelInwardEwb
 }: any) => {
   const totalRvp = rows.reduce((sum: number, r: any) => sum + r.rvpFirstWeightKg, 0);
   const totalBilling = rows.reduce((sum: number, r: any) => sum + r.billingWeightKg, 0);
@@ -716,6 +716,14 @@ const StockInGroupRow = React.memo(({
                         : <Badge variant="warning">Awaiting</Badge>}
                       <Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge>
                       {s.selfVehicle && <Badge variant="soft">Self vehicle</Badge>}
+                      {s.ewbNumber && (
+                        <Badge
+                          variant={s.ewbStatus === 'CANCELLED' ? 'destructive' : 'default'}
+                          className={`font-mono text-[10px] ${s.ewbStatus === 'GENERATED' ? 'bg-emerald-600 text-white' : ''}`}
+                        >
+                          Inward EWB: {s.ewbNumber}
+                        </Badge>
+                      )}
                     </PanelTitle>
                     <PanelMeta>
                       <span>{shortDate(s.arrivalDate)}</span><PanelDot />
@@ -753,6 +761,32 @@ const StockInGroupRow = React.memo(({
                 }
                 actions={
                   <>
+                    {!s.ewbNumber && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-primary hover:bg-primary/5 text-xs gap-1"
+                        onClick={(e: any) => {
+                          e.stopPropagation();
+                          onOpenInwardEwb(s);
+                        }}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> Inward EWB
+                      </Button>
+                    )}
+                    {s.ewbNumber && s.ewbStatus === 'GENERATED' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-rose-600 hover:bg-rose-50 text-xs gap-1"
+                        onClick={(e: any) => {
+                          e.stopPropagation();
+                          onCancelInwardEwb(s);
+                        }}
+                      >
+                        <Ban className="h-3.5 w-3.5" /> Cancel EWB
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
@@ -800,6 +834,71 @@ export default function StockIn() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'AWAITING' | 'PURCHASED'>('ALL');
   const [partyFilter, setPartyFilter] = useState('ALL');
+
+  // Inward E-Way Bill dialog states
+  const [inwardEwbTarget, setInwardEwbTarget] = useState<StockInRow | null>(null);
+  const [cancelInwardEwbTarget, setCancelInwardEwbTarget] = useState<StockInRow | null>(null);
+  const [inwardVehicle, setInwardVehicle] = useState('');
+  const [inwardDistance, setInwardDistance] = useState<number>(100);
+  const [inwardTransporterId, setInwardTransporterId] = useState('');
+  const [inwardTransporterName, setInwardTransporterName] = useState('');
+  const [fetchingInwardDist, setFetchingInwardDist] = useState(false);
+  const [cancelInwardReason, setCancelInwardReason] = useState('1');
+  const [cancelInwardRemarks, setCancelInwardRemarks] = useState('Cancelled from ERP');
+
+  const openInwardEwb = (s: StockInRow) => {
+    setInwardEwbTarget(s);
+    setInwardVehicle(s.lorryNumber || '');
+    setInwardDistance(s.ewbDistance || 100);
+    setInwardTransporterId('');
+    setInwardTransporterName('');
+  };
+
+  const openCancelInwardEwb = (s: StockInRow) => {
+    setCancelInwardEwbTarget(s);
+    setCancelInwardReason('1');
+    setCancelInwardRemarks('Cancelled from ERP');
+  };
+
+  const generateInwardEwbMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) =>
+      api(`/stock-in/${id}/inward-ewb`, { method: 'POST', body }),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['stock-in'] });
+      toast.success(res.message || 'Inward E-Way Bill generated');
+      setInwardEwbTarget(null);
+    },
+    onError: (err) => toast.error(getErrorMessage(err, 'Failed to generate Inward E-Way Bill')),
+  });
+
+  const cancelInwardEwbMutation = useMutation({
+    mutationFn: ({ id, cancelReason, cancelRemarks }: { id: string; cancelReason: string; cancelRemarks: string }) =>
+      api(`/stock-in/${id}/inward-ewb/cancel`, { method: 'POST', body: { cancelReason, cancelRemarks } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stock-in'] });
+      toast.success('Inward E-Way Bill cancelled');
+      setCancelInwardEwbTarget(null);
+    },
+    onError: (err) => toast.error(getErrorMessage(err, 'Failed to cancel Inward E-Way Bill')),
+  });
+
+  const handleAutoInwardDistance = async () => {
+    const partyPin = inwardEwbTarget?.purchaseOrder?.party?.pincode || '560001';
+    setFetchingInwardDist(true);
+    try {
+      const res = await api<any>(`/taxpro/distance?fromPin=${partyPin}&toPin=517247`);
+      if (res?.distance && res.distance > 0) {
+        setInwardDistance(res.distance);
+        toast.success(`Official distance resolved: ${res.distance} km`);
+      } else {
+        toast.info('Could not auto-resolve distance. Please enter approx km.');
+      }
+    } catch {
+      toast.info('Distance auto-lookup unavailable.');
+    } finally {
+      setFetchingInwardDist(false);
+    }
+  };
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['stock-in'],
@@ -1020,6 +1119,8 @@ export default function StockIn() {
                 toggleGroup={toggleGroup}
                 openEdit={openEdit}
                 deleteMutationMutate={deleteMutation.mutate}
+                onOpenInwardEwb={openInwardEwb}
+                onCancelInwardEwb={openCancelInwardEwb}
               />
             ))}
           </TableBody>
@@ -1047,6 +1148,170 @@ export default function StockIn() {
 
       
       {urpOpen && <UrpStockInDialog open={urpOpen} onOpenChange={setUrpOpen} />}
+
+      {/* Dialog: Generate Inward E-Way Bill */}
+      <Dialog open={Boolean(inwardEwbTarget)} onOpenChange={(o) => !o && setInwardEwbTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Generate Inward Purchase E-Way Bill</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="p-3 bg-muted/40 rounded-lg text-xs space-y-1">
+              <div>
+                Supplier:{' '}
+                <span className="font-semibold text-foreground">
+                  {inwardEwbTarget?.purchaseOrder?.party?.name || 'Unregistered Supplier'}
+                </span>
+              </div>
+              <div>
+                Invoice / Slip No:{' '}
+                <span className="font-semibold text-foreground">{inwardEwbTarget?.invoiceNumber || '—'}</span>
+              </div>
+              <div>
+                Arrived Weight:{' '}
+                <span className="font-semibold text-foreground">
+                  {kg(inwardEwbTarget?.rvpKataKg || inwardEwbTarget?.billingWeightKg || 0)}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <Label>Vehicle Number (Lorry)</Label>
+              <Input
+                placeholder="e.g. AP04TT1234"
+                className="uppercase font-mono"
+                value={inwardVehicle}
+                onChange={(e) => setInwardVehicle(e.target.value.toUpperCase())}
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <Label>Distance (KM)</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 text-[11px] gap-1 text-primary p-0"
+                  disabled={fetchingInwardDist}
+                  onClick={handleAutoInwardDistance}
+                >
+                  {fetchingInwardDist ? <Loader2 className="h-3 w-3 animate-spin" /> : <Compass className="h-3 w-3" />}
+                  Official PIN Distance
+                </Button>
+              </div>
+              <Input
+                type="number"
+                value={inwardDistance || ''}
+                onChange={(e) => setInwardDistance(Number(e.target.value))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Transporter GSTIN (Optional)</Label>
+                <Input
+                  placeholder="15-digit GSTIN"
+                  value={inwardTransporterId}
+                  onChange={(e) => setInwardTransporterId(e.target.value.toUpperCase())}
+                />
+              </div>
+              <div>
+                <Label>Transporter Name (Optional)</Label>
+                <Input
+                  placeholder="Carrier Name"
+                  value={inwardTransporterName}
+                  onChange={(e) => setInwardTransporterName(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInwardEwbTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={generateInwardEwbMutation.isPending || !inwardVehicle}
+              onClick={() => {
+                if (inwardEwbTarget) {
+                  generateInwardEwbMutation.mutate({
+                    id: inwardEwbTarget.id,
+                    body: {
+                      vehicleNumber: inwardVehicle,
+                      transDistance: inwardDistance,
+                      transporterId: inwardTransporterId || undefined,
+                      transporterName: inwardTransporterName || undefined,
+                    },
+                  });
+                }
+              }}
+            >
+              {generateInwardEwbMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Generate Inward EWB
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Cancel Inward E-Way Bill */}
+      <Dialog open={Boolean(cancelInwardEwbTarget)} onOpenChange={(o) => !o && setCancelInwardEwbTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel Inward E-Way Bill</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 rounded-lg text-xs space-y-1">
+              <div className="font-semibold text-rose-800 dark:text-rose-300">
+                Cancel Inward EWB {cancelInwardEwbTarget?.ewbNumber}
+              </div>
+              <div className="text-rose-700 dark:text-rose-400">
+                Cancel on the government portal within 24 hours of generation.
+              </div>
+            </div>
+
+            <div>
+              <Label>Cancellation Reason</Label>
+              <Select value={cancelInwardReason} onValueChange={setCancelInwardReason}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 - Duplicate E-Way Bill</SelectItem>
+                  <SelectItem value="2">2 - Purchase Cancelled</SelectItem>
+                  <SelectItem value="3">3 - Data Entry Mistake</SelectItem>
+                  <SelectItem value="4">4 - Others</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Remarks</Label>
+              <Input value={cancelInwardRemarks} onChange={(e) => setCancelInwardRemarks(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelInwardEwbTarget(null)}>
+              Back
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={cancelInwardEwbMutation.isPending}
+              onClick={() => {
+                if (cancelInwardEwbTarget) {
+                  cancelInwardEwbMutation.mutate({
+                    id: cancelInwardEwbTarget.id,
+                    cancelReason: cancelInwardReason,
+                    cancelRemarks: cancelInwardRemarks,
+                  });
+                }
+              }}
+            >
+              {cancelInwardEwbMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Confirm Cancellation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -20,6 +20,8 @@ import {
   updateStockIn,
   deleteStockIn,
   extractStockInInvoice,
+  generateStockInInwardEwb,
+  cancelStockInInwardEwb,
 } from '../controllers/stockIn.controller.js';
 import {
   createPurchase,
@@ -59,6 +61,8 @@ router.post('/stock-in', upload.single('invoice'), asyncHandler(createStockIn));
 router.post('/stock-in/urp', upload.single('invoice'), asyncHandler(createUrpStockIn));
 router.put('/stock-in/:id', upload.single('invoice'), asyncHandler(updateStockIn));
 router.delete('/stock-in/:id', asyncHandler(deleteStockIn));
+router.post('/stock-in/:id/inward-ewb', asyncHandler(generateStockInInwardEwb));
+router.post('/stock-in/:id/inward-ewb/cancel', asyncHandler(cancelStockInInwardEwb));
 
 // Purchase
 router.get('/purchases', asyncHandler(listPurchases));

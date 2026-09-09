@@ -8,10 +8,8 @@ import {
   Trash2,
   Ban,
   CheckCircle2,
-  AlertCircle,
   Sparkles,
   Loader2,
-  Printer,
   Compass,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
@@ -168,7 +166,7 @@ export default function DeliveryChallans() {
       toast.success('Delivery Challan created successfully');
       setCreateOpen(false);
     },
-    onError: (err) => toast.error(getErrorMessage(err, 'Failed to create Delivery Challan')),
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to create Delivery Challan'),
   });
 
   const ewbMutation = useMutation({
@@ -179,7 +177,7 @@ export default function DeliveryChallans() {
       toast.success(res.message || 'E-Way Bill generated successfully');
       setEwbModalChallan(null);
     },
-    onError: (err) => toast.error(getErrorMessage(err, 'Failed to generate E-Way Bill')),
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to generate E-Way Bill'),
   });
 
   const cancelEwbMutation = useMutation({
@@ -190,7 +188,7 @@ export default function DeliveryChallans() {
       toast.success('E-Way Bill cancelled successfully');
       setCancelModalChallan(null);
     },
-    onError: (err) => toast.error(getErrorMessage(err, 'Failed to cancel E-Way Bill')),
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to cancel E-Way Bill'),
   });
 
   const handleAutoDistance = async (fromPin: number | string, tPin: number | string) => {
@@ -306,10 +304,10 @@ export default function DeliveryChallans() {
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard title="Total Challans" value={totalCount} icon={FileText} />
-        <StatCard title="Active Movements" value={activeCount} icon={Truck} variant="emerald" />
-        <StatCard title="Total Value Moved" value={rupees(totalVal)} icon={CheckCircle2} />
-        <StatCard title="Active E-Way Bills" value={ewbCount} icon={Sparkles} variant="indigo" />
+        <StatCard label="Total Challans" value={totalCount} icon={FileText} tone="taupe" />
+        <StatCard label="Active Movements" value={activeCount} icon={Truck} tone="forest" />
+        <StatCard label="Total Value Moved" value={rupees(totalVal)} icon={CheckCircle2} tone="gold" />
+        <StatCard label="Active E-Way Bills" value={ewbCount} icon={Sparkles} tone="amber" />
       </div>
 
       {/* Challans Table */}

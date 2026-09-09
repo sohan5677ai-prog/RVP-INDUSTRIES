@@ -273,7 +273,7 @@ export default function Parties() {
         toast.success(`GSTIN Verified: ${res.legalName || res.tradeName || raw} (${res.status === 'ACT' ? 'Active' : 'Cancelled'})`);
       }
     } catch (err: any) {
-      toast.error(getErrorMessage(err, 'Failed to verify GSTIN'));
+      toast.error(getErrorMessage(err) || 'Failed to verify GSTIN');
     } finally {
       setGstinLookupLoading(false);
     }

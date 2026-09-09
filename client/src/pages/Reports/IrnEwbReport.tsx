@@ -17,6 +17,7 @@ import {
   ArrowDownLeft,
   Building2,
   Info,
+  Loader2,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { shortDate, rupees } from '@/lib/format';
@@ -289,7 +290,7 @@ export default function IrnEwbReport() {
       setCewbEwbInput('');
       setCewbVehicle('');
     },
-    onError: (err) => toast.error(getErrorMessage(err, 'Failed to generate Consolidated EWB')),
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to generate Consolidated EWB'),
   });
 
   // Transporter Lookup Handler
@@ -831,6 +832,8 @@ export default function IrnEwbReport() {
               </TableBody>
             </Table>
           </div>
+        </TabsContent>
+
         {/* ── TAB 6: Consolidated E-Way Bills (CEWB) ─────────────────────────── */}
         <TabsContent value="cewb" className="space-y-4">
           <div className="flex items-center justify-between">

@@ -6,6 +6,7 @@ build/
 !.env.example
 *.log
 npm-debug.log*
+*.tsbuildinfo
 
 # Prisma
 server/prisma/*.db

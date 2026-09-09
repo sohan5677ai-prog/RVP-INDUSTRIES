@@ -429,6 +429,16 @@ export interface StockIn {
   loadingLocation: 'RVP' | 'PGR COLD' | 'Murugan' | 'KNM Multi';
   freightCharge: string;
   selfVehicle: boolean;
+  ewbNumber?: string | null;
+  ewbDate?: string | null;
+  ewbValidUpto?: string | null;
+  ewbStatus?: string | null;
+  ewbCancelledDate?: string | null;
+  ewbDistance?: number | null;
+  ewbTransMode?: string | null;
+  ewbVehicleType?: string | null;
+  ewbTransDocNo?: string | null;
+  ewbTransDocDate?: string | null;
   createdAt: string;
   purchase?: Purchase | null;
   purchaseOrder?: (PurchaseOrder & { party?: Party }) | null;

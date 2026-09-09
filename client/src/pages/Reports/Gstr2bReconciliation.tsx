@@ -11,7 +11,6 @@ import {
   Download,
   Calendar,
   FileSpreadsheet,
-  Building2,
   Coins,
   ShieldCheck,
   ShieldAlert,
@@ -24,7 +23,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
@@ -77,19 +76,6 @@ interface ReconciliationSummary {
   rows: ReconciliationRow[];
 }
 
-interface ImportedPeriod {
-  id: string;
-  financialPeriod: string;
-  financialYear: string;
-  month: number;
-  year: number;
-  importSource: string;
-  totalInvoices: number;
-  totalTaxable: string | number;
-  totalItc: string | number;
-  uploadedAt: string;
-}
-
 const Num = ({ v, bold, tone }: { v?: number | null; bold?: boolean; tone?: 'green' | 'red' | 'amber' | 'blue' }) => {
   if (v == null || Math.abs(v) < 0.005) return <span className="text-muted-foreground font-mono">–</span>;
   const color =
@@ -135,11 +121,6 @@ export default function Gstr2bReconciliation() {
   const { data, isLoading, refetch } = useQuery<ReconciliationSummary>({
     queryKey: ['gstr2b-reconciliation', period],
     queryFn: () => api<ReconciliationSummary>(`/gstr2b/reconciliation?period=${period}`),
-  });
-
-  const { data: importedPeriods } = useQuery<ImportedPeriod[]>({
-    queryKey: ['gstr2b-periods'],
-    queryFn: () => api<ImportedPeriod[]>('/gstr2b/periods'),
   });
 
   // JSON Upload Mutation
@@ -443,7 +424,6 @@ export default function Gstr2bReconciliation() {
                   const isMatched = row.status === 'MATCHED';
                   const isMissing2b = row.status === 'MISSING_IN_2B';
                   const isMissingBooks = row.status === 'MISSING_IN_BOOKS';
-                  const isMismatch = row.status.startsWith('MISMATCH');
 
                   return (
                     <TableRow key={row.id} className="hover:bg-muted/30">

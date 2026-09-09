@@ -868,7 +868,7 @@ export default function StockIn() {
       toast.success(res.message || 'Inward E-Way Bill generated');
       setInwardEwbTarget(null);
     },
-    onError: (err) => toast.error(getErrorMessage(err, 'Failed to generate Inward E-Way Bill')),
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to generate Inward E-Way Bill'),
   });
 
   const cancelInwardEwbMutation = useMutation({
@@ -879,7 +879,7 @@ export default function StockIn() {
       toast.success('Inward E-Way Bill cancelled');
       setCancelInwardEwbTarget(null);
     },
-    onError: (err) => toast.error(getErrorMessage(err, 'Failed to cancel Inward E-Way Bill')),
+    onError: (err) => toast.error(getErrorMessage(err) || 'Failed to cancel Inward E-Way Bill'),
   });
 
   const handleAutoInwardDistance = async () => {

@@ -228,3 +228,66 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
     res.status(502).json({ error: err.message || 'Snapshot failed' });
   }
 }
+
+/**
+ * Get instant snapshot of current scale weight from COM port.
+ */
+export async function getLiveScaleHandler(_req: Request, res: Response) {
+  const { getServerScaleService } = await import('../lib/serverScaleService.js');
+  const service = getServerScaleService();
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json(service.getReading());
+}
+
+/**
+ * Server-Sent Events (SSE) stream for sub-50ms real-time live weight broadcasting.
+ */
+export async function streamLiveScaleHandler(req: Request, res: Response) {
+  const { getServerScaleService } = await import('../lib/serverScaleService.js');
+  const service = getServerScaleService();
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  const unsubscribe = service.subscribe((reading) => {
+    res.write(`data: ${JSON.stringify(reading)}\n\n`);
+  });
+
+  req.on('close', () => {
+    unsubscribe();
+  });
+}
+
+/**
+ * List all available COM serial ports on Windows machine.
+ */
+export async function listScalePortsHandler(_req: Request, res: Response) {
+  const { getServerScaleService } = await import('../lib/serverScaleService.js');
+  const service = getServerScaleService();
+  const ports = await service.listPorts();
+  res.json({
+    activePort: service.getPortName(),
+    activeBaudRate: service.getBaudRate(),
+    reading: service.getReading(),
+    ports,
+  });
+}
+
+/**
+ * Dynamically reconfigure COM port or baud rate.
+ */
+export async function configScalePortHandler(req: Request, res: Response) {
+  const { port, baudRate } = req.body;
+  if (!port) {
+    throw new HttpError(400, 'Port name is required (e.g. COM4)');
+  }
+  const { getServerScaleService } = await import('../lib/serverScaleService.js');
+  const service = getServerScaleService();
+  await service.setConfig(String(port), baudRate ? Number(baudRate) : undefined);
+  res.json({ success: true, reading: service.getReading() });
+}

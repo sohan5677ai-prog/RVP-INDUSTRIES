@@ -115,6 +115,14 @@ app.get("/api/weighbridge/cctv/stream", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.streamCctvHandler(req, res)).catch(next);
 });
 
+// Scale serial live streaming endpoints bypass general API rate limiter
+app.get("/api/weighbridge/scale/live", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.getLiveScaleHandler(req, res)).catch(next);
+});
+app.get("/api/weighbridge/scale/stream", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.streamLiveScaleHandler(req, res)).catch(next);
+});
+
 app.use("/api", apiLimiter, apiRoutes);
 
 // Error handler must be registered last.

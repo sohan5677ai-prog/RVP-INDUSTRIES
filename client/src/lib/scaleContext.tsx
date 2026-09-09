@@ -351,6 +351,78 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
+  /**
+   * Background Network Stream: Automatically receive live scale weight from server COM4.
+   * This broadcasts live weight to ALL computers and mobile devices on the network!
+   */
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let isCancelled = false;
+
+    const connectSSE = () => {
+      if (isCancelled) return;
+      try {
+        es = new EventSource('/api/weighbridge/scale/stream');
+
+        es.onmessage = (event) => {
+          if (isCancelled) return;
+          try {
+            const data = JSON.parse(event.data);
+            // If local Web Serial port is NOT active, use the server broadcast
+            if (!portRef.current) {
+              if (data.isConnected) {
+                setLiveWeight(data.liveWeight);
+                setIsStable(data.isStable);
+                setRawText(data.rawText || `${data.liveWeight} kg`);
+                setLastUpdated(new Date(data.lastUpdated || Date.now()));
+                setIsConnected(true);
+                setError(null);
+              } else {
+                if (data.error) setError(data.error);
+                setIsConnected(false);
+              }
+            }
+          } catch {}
+        };
+
+        es.onerror = () => {
+          if (es) {
+            es.close();
+            es = null;
+          }
+          // Start polling fallback every 800ms if SSE drops
+          if (!pollInterval && !isCancelled) {
+            pollInterval = setInterval(async () => {
+              if (portRef.current || isCancelled) return;
+              try {
+                const res = await fetch('/api/weighbridge/scale/live');
+                if (res.ok) {
+                  const data = await res.json();
+                  if (!portRef.current && data.isConnected) {
+                    setLiveWeight(data.liveWeight);
+                    setIsStable(data.isStable);
+                    setRawText(data.rawText || `${data.liveWeight} kg`);
+                    setLastUpdated(new Date(data.lastUpdated || Date.now()));
+                    setIsConnected(true);
+                  }
+                }
+              } catch {}
+            }, 800);
+          }
+        };
+      } catch {}
+    };
+
+    connectSSE();
+
+    return () => {
+      isCancelled = true;
+      if (es) es.close();
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, []);
+
   return (
     <ScaleContext.Provider
       value={{

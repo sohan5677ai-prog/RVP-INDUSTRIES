@@ -15,6 +15,21 @@ const router = Router();
 
 router.get('/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/cctv/snapshot', asyncHandler(snapshotCctvHandler));
+
+// Scale serial live streaming routes
+router.get('/scale/live', (req, res, next) => {
+  import('../controllers/weighbridge.controller.js').then((m) => m.getLiveScaleHandler(req, res)).catch(next);
+});
+router.get('/scale/stream', (req, res, next) => {
+  import('../controllers/weighbridge.controller.js').then((m) => m.streamLiveScaleHandler(req, res)).catch(next);
+});
+router.get('/scale/ports', (req, res, next) => {
+  import('../controllers/weighbridge.controller.js').then((m) => m.listScalePortsHandler(req, res)).catch(next);
+});
+router.post('/scale/config', (req, res, next) => {
+  import('../controllers/weighbridge.controller.js').then((m) => m.configScalePortHandler(req, res)).catch(next);
+});
+
 router.get('/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets', asyncHandler(getTicketsHandler));
 router.get('/pending', asyncHandler(getPendingSecondWeightHandler));

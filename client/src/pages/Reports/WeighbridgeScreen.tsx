@@ -68,6 +68,7 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef<boolean>(true);
+  const errCountRef = useRef<number>(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -100,12 +101,16 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
         src={frameUrl}
         alt={`Camera ${camNumber} - ${label}`}
         onLoad={() => {
+          errCountRef.current = 0;
           setIsOnline(true);
-          triggerNextFrame(250); // Fetch next frame smoothly after 250ms
+          triggerNextFrame(350); // Fetch next frame smoothly after 350ms
         }}
         onError={() => {
-          setIsOnline(false);
-          triggerNextFrame(2000); // Retry after 2s if camera network blip
+          errCountRef.current += 1;
+          if (errCountRef.current >= 3) {
+            setIsOnline(false);
+          }
+          triggerNextFrame(1200); // Retry smoothly
         }}
         className={cn('w-full h-full object-cover', !isOnline && 'opacity-20')}
       />

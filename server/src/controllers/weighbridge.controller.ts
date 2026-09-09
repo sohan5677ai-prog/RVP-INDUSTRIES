@@ -220,7 +220,9 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
   try {
     const buf = await getCameraSnapshot(camNum);
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(buf);
   } catch (err: any) {
     res.status(502).json({ error: err.message || 'Snapshot failed' });

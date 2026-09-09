@@ -18,7 +18,8 @@ export async function syncGstr2b(req: Request, res: Response) {
       return res.status(400).json({ error: 'Valid 6-digit return period required (e.g. 082026 for Aug 2026)' });
     }
 
-    const result = await Gstr2bReconciliationService.syncFromTaxPro(period);
+    const mode = req.body?.mode === 'live' ? 'live' : 'sandbox';
+    const result = await Gstr2bReconciliationService.syncFromTaxPro(period, mode);
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: err.message || 'Failed to sync GSTR-2B via TaxPro' });

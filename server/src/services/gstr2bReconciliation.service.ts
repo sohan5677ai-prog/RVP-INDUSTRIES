@@ -394,8 +394,8 @@ export class Gstr2bReconciliationService {
   /**
    * Syncs official GSTR-2B via TaxPro GSP (using sandbox/mock safety).
    */
-  public static async syncFromTaxPro(period: string) {
-    const res = await TaxproService.fetchGstr2b(period);
+  public static async syncFromTaxPro(period: string, mode: 'live' | 'sandbox' = 'sandbox') {
+    const res = await TaxproService.fetchGstr2b(period, mode);
     const parsed = this.parseGstr2bJson(res.data);
     const effectivePeriod = parsed.period || period;
     const saveResult = await this.saveGstr2bImport(effectivePeriod, 'TAXPRO_API', parsed.entries);

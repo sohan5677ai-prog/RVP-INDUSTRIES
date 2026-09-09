@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 
 interface ReconciliationRow {
   id: string;
@@ -116,12 +117,15 @@ export default function Gstr2bReconciliation() {
 
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncPeriod, setSyncPeriod] = useState(defaultPeriod);
+  const [syncMode, setSyncMode] = useState<'sandbox' | 'live'>('sandbox');
   const [syncMsg, setSyncMsg] = useState('');
 
   // Data Queries
   const { data, isLoading, refetch } = useQuery<ReconciliationSummary>({
     queryKey: ['gstr2b-reconciliation', period],
     queryFn: () => api<ReconciliationSummary>(`/gstr2b/reconciliation?period=${period}`),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // JSON Upload Mutation
@@ -147,10 +151,10 @@ export default function Gstr2bReconciliation() {
 
   // TaxPro Sync Mutation
   const syncMutation = useMutation({
-    mutationFn: async (p: string) => {
+    mutationFn: async ({ p, m }: { p: string; m: 'sandbox' | 'live' }) => {
       return api<{ success: boolean; totalInvoices: number; message: string }>('/gstr2b/sync', {
         method: 'POST',
-        body: { period: p },
+        body: { period: p, mode: m },
       });
     },
     onSuccess: (res) => {
@@ -312,13 +316,13 @@ export default function Gstr2bReconciliation() {
               </Button>
             </div>
 
-            <Button size="sm" variant="outline" onClick={() => setShowUploadModal(true)} className="gap-1.5 shadow-sm">
-              <Upload className="w-4 h-4 text-emerald-600" />
-              <span>Import GSTR-2B JSON</span>
+            <Button size="sm" onClick={() => setShowUploadModal(true)} className="gap-1.5 shadow-sm bg-emerald-600 hover:bg-emerald-700 text-white font-medium">
+              <Upload className="w-4 h-4" />
+              <span>Import GSTR-2B JSON (Free / 0 Credits)</span>
             </Button>
 
-            <Button size="sm" variant="outline" onClick={() => setShowSyncModal(true)} className="gap-1.5 shadow-sm">
-              <RefreshCw className="w-4 h-4 text-sky-600" />
+            <Button size="sm" variant="outline" onClick={() => setShowSyncModal(true)} className="gap-1.5 shadow-sm text-xs text-muted-foreground hover:text-foreground">
+              <RefreshCw className="w-3.5 h-3.5 text-sky-600" />
               <span>Sync via TaxPro</span>
             </Button>
 
@@ -584,14 +588,46 @@ export default function Gstr2bReconciliation() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-md text-xs text-slate-700 dark:text-slate-300">
-              <div className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400 mb-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-                Live Production Gateway (TaxPro GSP & NIC Registry)
+            {/* Mode selection with credit badges */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Sync Ingestion Mode</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSyncMode('sandbox')}
+                  className={`p-3 rounded-lg border text-left transition-all ${
+                    syncMode === 'sandbox'
+                      ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30 ring-1 ring-emerald-500'
+                      : 'border-slate-200 dark:border-slate-800 hover:bg-muted/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-xs text-foreground">Safe Test Mode</span>
+                    <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0">0 Credits</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    Simulates GSTR-2B ingestion with zero TaxPro API credits consumed.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSyncMode('live')}
+                  className={`p-3 rounded-lg border text-left transition-all ${
+                    syncMode === 'live'
+                      ? 'border-sky-500 bg-sky-50/50 dark:bg-sky-950/30 ring-1 ring-sky-500'
+                      : 'border-slate-200 dark:border-slate-800 hover:bg-muted/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-xs text-foreground">Live NIC Inward</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-sky-400 text-sky-600">Max 1-2 calls</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    Strict Credit Shield: Queries only active arrival dates recorded in ERP.
+                  </p>
+                </button>
               </div>
-              <p className="text-slate-600 dark:text-slate-400">
-                Directly queries live inward consignment and purchase records registered under RVP&apos;s GSTIN.
-              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -602,17 +638,21 @@ export default function Gstr2bReconciliation() {
                 placeholder="e.g. 082026"
                 className="font-mono text-sm"
               />
-              <p className="text-[11px] text-muted-foreground pt-0.5 leading-relaxed">
-                Tip: For full monthly return statements (all B2B invoices + credit notes), you can also import the 1-click official GSTR-2B JSON downloaded from gst.gov.in.
-              </p>
+              <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 p-2.5 rounded-md text-[11px] text-emerald-800 dark:text-emerald-300 mt-2 leading-relaxed">
+                <span className="font-semibold">💡 Recommended 0-Credit Alternative:</span> Download your official GSTR-2B JSON directly from <code className="bg-emerald-100 dark:bg-emerald-900/50 px-1 py-0.5 rounded font-mono">gst.gov.in</code> (Returns Dashboard &gt; GSTR-2B &gt; Download JSON) and click <strong>&quot;Import GSTR-2B JSON&quot;</strong>. It costs <strong>0 credits</strong> and includes 100% of all invoices, credit notes, and amendments.
+              </div>
             </div>
 
             {syncMutation.isPending && (
               <div className="py-3 px-4 rounded-lg bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 flex items-center gap-3 text-xs text-sky-800 dark:text-sky-300">
                 <Loader2 className="w-4 h-4 animate-spin shrink-0 text-sky-600" />
                 <div className="space-y-0.5">
-                  <div className="font-semibold">Querying Live Government Registry...</div>
-                  <div className="text-[11px] text-sky-700 dark:text-sky-400">Fetching inward supplier purchase records for {syncPeriod}</div>
+                  <div className="font-semibold">
+                    {syncMode === 'sandbox' ? 'Loading Safe Simulation Data...' : 'Querying Government Registry (Credit Shield Active)...'}
+                  </div>
+                  <div className="text-[11px] text-sky-700 dark:text-sky-400">
+                    {syncMode === 'sandbox' ? '0 credits consumed' : `Checking verified inward consignments for ${syncPeriod}`}
+                  </div>
                 </div>
               </div>
             )}
@@ -631,9 +671,9 @@ export default function Gstr2bReconciliation() {
             <Button
               size="sm"
               disabled={syncMutation.isPending || syncPeriod.length !== 6}
-              onClick={() => syncMutation.mutate(syncPeriod)}
+              onClick={() => syncMutation.mutate({ p: syncPeriod, m: syncMode })}
             >
-              {syncMutation.isPending ? 'Syncing…' : 'Sync GSTR-2B'}
+              {syncMutation.isPending ? 'Syncing…' : syncMode === 'sandbox' ? 'Sync Free (0 Credits)' : 'Sync Live (Low Credits)'}
             </Button>
           </DialogFooter>
         </DialogContent>

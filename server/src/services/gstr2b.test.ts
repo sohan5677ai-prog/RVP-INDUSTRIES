@@ -319,7 +319,9 @@ describe('GSTR-2B Purchase ITC Automated Reconciliation', () => {
         ],
       });
 
-      const res = await TaxproService.fetchGstr2b('082026');
+      mockCompany.taxproSandbox = false;
+      const res = await TaxproService.fetchGstr2b('082026', 'live');
+      mockCompany.taxproSandbox = true;
       expect(res.success).toBe(true);
       expect(res.period).toBe('082026');
       expect(res.data.docdata.b2b.length).toBeGreaterThan(0);

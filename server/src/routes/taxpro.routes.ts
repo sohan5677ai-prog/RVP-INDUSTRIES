@@ -645,7 +645,8 @@ router.get(
   })
 );
 
-// Bulk GSTIN Master Audit for Parties
+// Bulk GSTIN Master Audit for Parties (100% OFFLINE / ZERO TAXPRO CREDITS)
+// Validates statutory format, state code alignment, PAN structure, and duplicates without calling external APIs
 router.post(
   '/taxpro/audit-parties',
   asyncHandler(async (req, res) => {
@@ -663,67 +664,80 @@ router.post(
       orderBy: { name: 'asc' },
     });
 
-    const validParties = parties.filter((p) => p.gstin && p.gstin.trim().length === 15);
+    const STATE_CODES: Record<string, string> = {
+      '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
+      '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan',
+      '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh',
+      '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura',
+      '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand',
+      '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
+      '26': 'Dadra & Nagar Haveli', '27': 'Maharashtra', '29': 'Karnataka',
+      '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu',
+      '34': 'Puducherry', '35': 'Andaman & Nicobar Islands', '36': 'Telangana',
+      '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory',
+    };
+
+    const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+    const seenGstins = new Map<string, string[]>();
+
+    for (const p of parties) {
+      const g = (p.gstin || '').trim().toUpperCase();
+      if (!g) continue;
+      if (!seenGstins.has(g)) seenGstins.set(g, []);
+      seenGstins.get(g)!.push(p.name);
+    }
+
     const results = [];
-    let activeCount = 0;
-    let cancelledCount = 0;
-    let mismatchCount = 0;
+    let validCount = 0;
+    let invalidCount = 0;
+    let duplicateCount = 0;
 
-    for (const p of validParties) {
-      try {
-        const lookup = await TaxproService.lookupGstin(p.gstin!);
-        const portalName = lookup.legalName || lookup.tradeName || '';
-        const portalStatus = lookup.status || 'ACT';
-        const isCancelled = portalStatus === 'CNL' || portalStatus === 'CANCELLED';
+    for (const p of parties) {
+      const g = (p.gstin || '').trim().toUpperCase();
+      const isValidFormat = gstinRegex.test(g);
+      const stateCode = g.slice(0, 2);
+      const expectedState = STATE_CODES[stateCode] || 'Unknown';
+      const isDuplicate = (seenGstins.get(g)?.length || 0) > 1;
 
-        // Check name similarity (case-insensitive substring or token match)
-        const cleanErp = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const cleanPortal = portalName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const isMismatch = cleanPortal.length > 0 && !cleanPortal.includes(cleanErp.slice(0, 5)) && !cleanErp.includes(cleanPortal.slice(0, 5));
+      let status = 'VALID';
+      let issue = '';
 
-        if (isCancelled) {
-          cancelledCount++;
-        } else {
-          activeCount++;
-        }
-        if (isMismatch) mismatchCount++;
-
-        results.push({
-          id: p.id,
-          name: p.name,
-          gstin: p.gstin,
-          partyType: p.type,
-          state: p.state,
-          portalLegalName: lookup.legalName,
-          portalTradeName: lookup.tradeName,
-          portalStatus,
-          isCancelled,
-          isMismatch,
-        });
-      } catch (err: any) {
-        results.push({
-          id: p.id,
-          name: p.name,
-          gstin: p.gstin,
-          partyType: p.type,
-          state: p.state,
-          portalLegalName: '–',
-          portalTradeName: '–',
-          portalStatus: 'INVALID',
-          isCancelled: true,
-          isMismatch: false,
-          error: err.message,
-        });
-        cancelledCount++;
+      if (!isValidFormat) {
+        status = 'INVALID_FORMAT';
+        issue = g.length !== 15 ? `Length is ${g.length} (expected 15)` : 'Does not match statutory GSTIN format';
+        invalidCount++;
+      } else if (isDuplicate) {
+        status = 'DUPLICATE';
+        const otherNames = (seenGstins.get(g) || []).filter((n) => n !== p.name);
+        issue = `Duplicate GSTIN shared with: ${otherNames.join(', ')}`;
+        duplicateCount++;
+        validCount++;
+      } else {
+        validCount++;
       }
+
+      results.push({
+        id: p.id,
+        name: p.name,
+        gstin: g,
+        partyType: p.type,
+        state: p.state,
+        expectedState,
+        portalLegalName: p.name,
+        portalTradeName: p.name,
+        portalStatus: isValidFormat ? 'ACT' : 'INVALID',
+        isCancelled: !isValidFormat,
+        isMismatch: !isValidFormat || isDuplicate,
+        issue,
+      });
     }
 
     res.json({
       success: true,
-      totalChecked: validParties.length,
-      activeCount,
-      cancelledCount,
-      mismatchCount,
+      totalChecked: parties.length,
+      activeCount: validCount,
+      cancelledCount: invalidCount,
+      mismatchCount: duplicateCount,
       results,
     });
   })

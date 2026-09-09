@@ -602,7 +602,7 @@ export default function Parties() {
               rows={filteredParties ?? []}
             />
             <Button variant="outline" className="gap-1.5 shadow-sm" onClick={handleRunAudit}>
-              <ShieldCheck className="h-4 w-4 text-sky-600" /> Audit All GSTINs
+              <ShieldCheck className="h-4 w-4 text-sky-600" /> Verify GSTIN Formats (Offline)
             </Button>
             <Button onClick={openCreate}>
               <Plus className="h-4 w-4 mr-2" /> New Party
@@ -1689,21 +1689,21 @@ export default function Parties() {
         </DialogContent>
       </Dialog>
 
-      {/* Feature 4: Bulk GSTIN Master Audit Dialog */}
+      {/* Feature 4: Bulk GSTIN Master Audit Dialog (100% Offline / Zero API Credits) */}
       <Dialog open={auditModalOpen} onOpenChange={setAuditModalOpen}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-sky-600" />
-              Master Party GSTIN Audit & Hygiene Check
+              Party GSTIN Format & Hygiene Check (0 Credits / Offline)
             </DialogTitle>
           </DialogHeader>
 
           {auditLoading ? (
             <div className="py-16 flex flex-col items-center justify-center gap-3 text-muted-foreground">
               <Loader2 className="h-9 w-9 animate-spin text-sky-600" />
-              <span className="font-medium text-sm">Verifying all party GSTINs against live NIC Master registry...</span>
-              <span className="text-xs text-muted-foreground">Checking Active / Cancelled status and official Legal Trade Names</span>
+              <span className="font-medium text-sm">Auditing party GSTIN statutory structure and state alignments...</span>
+              <span className="text-xs text-muted-foreground">Running 100% offline verification (0 TaxPro API credits consumed)</span>
             </div>
           ) : auditResult ? (
             <div className="space-y-4">
@@ -1762,7 +1762,7 @@ export default function Parties() {
                     <TableRow className="bg-muted/50">
                       <TableHead>ERP Party Name</TableHead>
                       <TableHead>GSTIN</TableHead>
-                      <TableHead>Portal Legal / Trade Name</TableHead>
+                      <TableHead>Verification Details / State</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Action</TableHead>
                     </TableRow>
@@ -1779,10 +1779,9 @@ export default function Parties() {
                           <TableCell className="font-semibold text-xs">{r.name}</TableCell>
                           <TableCell className="font-mono text-xs">{r.gstin}</TableCell>
                           <TableCell className="text-xs">
-                            <div>{r.portalLegalName || '—'}</div>
-                            {r.portalTradeName && r.portalTradeName !== r.portalLegalName && (
-                              <div className="text-[11px] text-muted-foreground">{r.portalTradeName}</div>
-                            )}
+                            <div className={r.issue ? 'text-amber-600 font-medium' : 'text-muted-foreground'}>
+                              {r.issue || `State: ${r.expectedState || '—'}`}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Badge

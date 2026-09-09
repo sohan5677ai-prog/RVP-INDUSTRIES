@@ -44,6 +44,7 @@ import subscriptionRoutes from './subscription.routes.js';
 import archiveRoutes from './archive.routes.js';
 import weighbridgeRoutes from './weighbridge.routes.js';
 import deliveryChallanRoutes from './deliveryChallan.routes.js';
+import gstr2bRoutes from './gstr2b.routes.js';
 import { streamCctvHandler, snapshotCctvHandler } from '../controllers/weighbridge.controller.js';
 const router = Router();
 
@@ -139,6 +140,7 @@ router.use('/', taxproRoutes);
 router.use('/', archiveRoutes);
 router.use('/weighbridge', weighbridgeRoutes);
 router.use('/delivery-challans', deliveryChallanRoutes);
+router.use('/gstr2b', gstr2bRoutes);
 
 router.get('/search', asyncHandler(globalSearch));
 

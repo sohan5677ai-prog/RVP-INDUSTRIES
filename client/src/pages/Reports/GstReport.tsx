@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Receipt, ArrowUpRight, ArrowDownLeft, Scale, FileMinus2, FilePlus2, Building2 } from 'lucide-react';
+import { Receipt, ArrowUpRight, ArrowDownLeft, Scale, FileMinus2, FilePlus2, Building2, FileCheck2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { rupees, shortDate } from '@/lib/format';
 import type { GstReport as GstReportData, GstSalesLine, GstNoteLine, GstPurchaseLine } from '@/lib/types';
@@ -9,6 +10,7 @@ import { StatCard } from '@/components/StatCard';
 import { PeriodFilter, periodFor, fyLabel } from '@/components/PeriodFilter';
 import { ExportButtons } from '@/components/ExportButtons';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { ExportColumn } from '@/lib/export';
@@ -78,6 +80,12 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
           actions={
             data && (
               <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" asChild className="gap-1.5 shadow-sm">
+                  <Link to="/reports/taxes?tab=gstr2b">
+                    <FileCheck2 className="w-4 h-4 text-emerald-600" />
+                    <span>GSTR-2B Reconciliation</span>
+                  </Link>
+                </Button>
                 <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
               </div>
             )
@@ -86,7 +94,15 @@ export default function GstReport({ embedded = false }: { embedded?: boolean } =
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">Output tax on sales and input tax credit on purchases - reconciled for your GSTR filing.</p>
-          <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" asChild className="gap-1.5 shadow-sm">
+              <Link to="/reports/taxes?tab=gstr2b">
+                <FileCheck2 className="w-4 h-4 text-emerald-600" />
+                <span>GSTR-2B Reconciliation</span>
+              </Link>
+            </Button>
+            <PeriodFilter fy={fy} month={month} onFyChange={setFy} onMonthChange={setMonth} />
+          </div>
         </div>
       )}
 

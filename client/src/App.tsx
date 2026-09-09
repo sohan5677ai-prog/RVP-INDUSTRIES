@@ -215,6 +215,8 @@ export default function App() {
                         <Route path="/reports/email-logs" element={<EmailLogs />} />
                         <Route path="/reports/taxes" element={<Taxes />} />
                         <Route path="/reports/gst" element={<Navigate to="/reports/taxes?tab=gst" replace />} />
+                        <Route path="/reports/gstr2b" element={<Navigate to="/reports/taxes?tab=gstr2b" replace />} />
+                        <Route path="/gstr2b" element={<Navigate to="/reports/taxes?tab=gstr2b" replace />} />
                         <Route path="/reports/tds" element={<Navigate to="/reports/taxes?tab=tds" replace />} />
                         <Route path="/reports/weighbridge" element={<WeighbridgeScreen />} />
                         <Route path="/weighbridge" element={<Navigate to="/reports/weighbridge" replace />} />

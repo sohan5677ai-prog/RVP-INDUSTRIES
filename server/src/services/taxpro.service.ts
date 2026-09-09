@@ -2399,6 +2399,100 @@ export class TaxproService {
       message: result.message,
     };
   }
+
+  /**
+   * Fetches official GSTR-2B statement from TaxPro GSP Returns API.
+   * If mock mode / sandbox mode or credentials missing, returns realistic simulated GSTR-2B data
+   * (zero production credits consumed).
+   */
+  public static async fetchGstr2b(returnPeriod: string) {
+    const period = returnPeriod.replace(/[^0-9]/g, ''); // e.g. "082026"
+    if (period.length !== 6) {
+      throw new Error('Invalid return period. Expected MMYYYY format (e.g. 082026 for August 2026)');
+    }
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock) {
+      const suppliers = await prisma.party.findMany({
+        where: { type: 'SUPPLIER', gstin: { not: null } },
+        take: 10,
+        select: { gstin: true, name: true },
+      });
+
+      const month = parseInt(period.slice(0, 2), 10);
+      const year = parseInt(period.slice(2), 10);
+      const simulatedB2b = suppliers.map((s, idx) => {
+        const invNo = `INV/${year}/${100 + idx}`;
+        const txval = 50000 + idx * 25000;
+        const igst = Math.round(txval * 0.05);
+        return {
+          ctin: s.gstin!,
+          trdnm: s.name,
+          inv: [
+            {
+              inum: invNo,
+              idt: `${String(10 + idx).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`,
+              val: txval + igst,
+              pos: '37',
+              rev: 'N',
+              itcavl: 'Y',
+              items: [
+                {
+                  num: 1,
+                  txval,
+                  rt: 5.0,
+                  igst,
+                  cgst: 0,
+                  sgst: 0,
+                  cess: 0,
+                },
+              ],
+            },
+          ],
+        };
+      });
+
+      return {
+        success: true,
+        period,
+        data: {
+          gstin: company.gstin || '37AABCR1234F1Z5',
+          fp: period,
+          docdata: {
+            b2b: simulatedB2b,
+            b2ba: [],
+            cdnr: [],
+            cdnra: [],
+          },
+        },
+        message: 'Simulated GSTR-2B return data (mock/sandbox mode - 0 credits consumed)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const path = company.taxproSandbox
+          ? `/gstapi/dec/v1.0/returns/gstr2b?${this.ewbQueryString(company, company.gstin || '', 'GSTR2B', { authtoken: token, return_period: period })}`
+          : `/v1.0/dec/returns/gstr2b?action=GSTR2B&authtoken=${encodeURIComponent(token)}&return_period=${encodeURIComponent(period)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json;
+      return {
+        success: true,
+        period,
+        data,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro GSTR2B Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
 }
 
 

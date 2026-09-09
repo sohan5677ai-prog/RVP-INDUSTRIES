@@ -2303,3 +2303,50 @@ model ConsolidatedEwb {
   @@index([status])
 }
 
+// ---------------------------------------------------------------------------
+// GSTR-2B Purchase ITC Automated Reconciliation
+// Tracks official GSTR-2B monthly statements imported from TaxPro or GST portal JSON
+// ---------------------------------------------------------------------------
+model Gstr2bImport {
+  id              String        @id @default(cuid())
+  financialPeriod String        // e.g. "082026" (MMYYYY format)
+  financialYear   String        // e.g. "2026-27"
+  month           Int           // 1 to 12
+  year            Int           // e.g. 2026
+  importSource    String        // "TAXPRO_API" | "JSON_UPLOAD"
+  uploadedAt      DateTime      @default(now())
+  totalInvoices   Int           @default(0)
+  totalTaxable    Decimal       @default(0) @db.Decimal(14, 2)
+  totalItc        Decimal       @default(0) @db.Decimal(14, 2)
+  entries         Gstr2bEntry[]
+
+  @@unique([financialPeriod, importSource])
+  @@index([financialPeriod])
+  @@index([financialYear])
+}
+
+model Gstr2bEntry {
+  id              String        @id @default(cuid())
+  import          Gstr2bImport  @relation(fields: [importId], references: [id], onDelete: Cascade)
+  importId        String
+  supplierGstin   String
+  supplierName    String?
+  docType         String        @default("INV") // "INV", "CRN", "DBN"
+  invoiceNumber   String
+  invoiceDate     DateTime
+  taxableValue    Decimal       @db.Decimal(14, 2)
+  igst            Decimal       @default(0) @db.Decimal(12, 2)
+  cgst            Decimal       @default(0) @db.Decimal(12, 2)
+  sgst            Decimal       @default(0) @db.Decimal(12, 2)
+  cess            Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount     Decimal       @db.Decimal(14, 2)
+  itcAvailable    Boolean       @default(true)
+  filingDate      DateTime?
+  sourceSection   String        @default("B2B") // "B2B", "B2BA", "CDNR", "CDNRA"
+
+  @@index([importId])
+  @@index([supplierGstin])
+  @@index([invoiceNumber])
+  @@index([supplierGstin, invoiceNumber])
+}
+

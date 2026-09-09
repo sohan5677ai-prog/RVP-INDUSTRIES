@@ -105,6 +105,8 @@ app.get("/api/health/db", async (_req, res) => {
   } finally {
     clearTimeout(timer);
   }
+});
+
 // CCTV live snapshot & stream endpoints bypass general API rate limiter
 app.get("/api/weighbridge/cctv/snapshot", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.snapshotCctvHandler(req, res)).catch(next);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -12,7 +12,6 @@ import {
   Wifi,
   WifiOff,
   Zap,
-  Camera,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -130,141 +129,30 @@ export default function WeighbridgeScreen() {
   // Slip Printing
   const [printSlipTicket, setPrintSlipTicket] = useState<WeighbridgeTicket | null>(null);
 
-  // USB CCTV Cameras State
-  const cam1VideoRef = useRef<HTMLVideoElement>(null);
-  const cam2VideoRef = useRef<HTMLVideoElement>(null);
-  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-  const [cam1DeviceId, setCam1DeviceId] = useState<string>(() => localStorage.getItem('rvp_wb_cam1_id') || '');
-  const [cam2DeviceId, setCam2DeviceId] = useState<string>(() => localStorage.getItem('rvp_wb_cam2_id') || '');
-  const [isCamerasActive, setIsCamerasActive] = useState<boolean>(false);
-  const [cam1Error, setCam1Error] = useState<string | null>(null);
-  const [cam2Error, setCam2Error] = useState<string | null>(null);
+  // CP PLUS Network CCTV Camera State (192.168.1.101 & 192.168.1.102)
+  const [cam1Connected, setCam1Connected] = useState<boolean>(true);
+  const [cam2Connected, setCam2Connected] = useState<boolean>(true);
+  const [cameraRefreshKey, setCameraRefreshKey] = useState<number>(Date.now());
   const [snapshots, setSnapshots] = useState<{ cam1?: string; cam2?: string }>({});
 
-  // List available video capture devices
-  const refreshVideoDevices = useCallback(async () => {
-    try {
-      if (!navigator.mediaDevices?.enumerateDevices) return [];
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-      setVideoDevices(videoInputs);
-      return videoInputs;
-    } catch (err) {
-      console.error('Failed to list video devices:', err);
-      return [];
-    }
-  }, []);
+  const stream1Url = useMemo(() => `/api/weighbridge/cctv/stream?cam=1&t=${cameraRefreshKey}`, [cameraRefreshKey]);
+  const stream2Url = useMemo(() => `/api/weighbridge/cctv/stream?cam=2&t=${cameraRefreshKey}`, [cameraRefreshKey]);
 
-  // Helper to start stream onto a video element
-  const startCameraStream = useCallback(async (deviceId: string | undefined, videoEl: HTMLVideoElement | null) => {
-    if (!videoEl) return null;
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId ? { deviceId: { exact: deviceId } } : true,
-        audio: false,
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      videoEl.srcObject = stream;
-      await videoEl.play().catch(() => {});
-      return stream;
-    } catch (err: any) {
-      console.error('Camera stream error:', err);
-      throw err;
-    }
-  }, []);
-
-  // Start USB cameras
-  const enableCameras = useCallback(async () => {
-    try {
-      // Trigger browser camera permission prompt if needed
-      const testStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      testStream.getTracks().forEach((t) => t.stop());
-
-      const vInputs = await refreshVideoDevices();
-      setIsCamerasActive(true);
-
-      const firstId = cam1DeviceId || vInputs[0]?.deviceId || '';
-      const secondId = cam2DeviceId || (vInputs.length > 1 ? vInputs[1]?.deviceId : firstId) || '';
-
-      if (!cam1DeviceId && firstId) {
-        setCam1DeviceId(firstId);
-        localStorage.setItem('rvp_wb_cam1_id', firstId);
-      }
-      if (!cam2DeviceId && secondId) {
-        setCam2DeviceId(secondId);
-        localStorage.setItem('rvp_wb_cam2_id', secondId);
-      }
-
-      if (cam1VideoRef.current) {
-        setCam1Error(null);
-        startCameraStream(firstId, cam1VideoRef.current).catch((e) => setCam1Error(e.message || 'Error'));
-      }
-      if (cam2VideoRef.current) {
-        setCam2Error(null);
-        startCameraStream(secondId, cam2VideoRef.current).catch((e) => setCam2Error(e.message || 'Error'));
-      }
-      toast.success('USB CCTV Cameras streaming live');
-    } catch (err: any) {
-      toast.error('Could not activate cameras: ' + (err.message || 'Check USB connection / browser permission'));
-    }
-  }, [cam1DeviceId, cam2DeviceId, refreshVideoDevices, startCameraStream]);
-
-  // Switch Camera 1 device
-  const changeCam1 = useCallback((id: string) => {
-    setCam1DeviceId(id);
-    localStorage.setItem('rvp_wb_cam1_id', id);
-    if (cam1VideoRef.current) {
-      const curr = cam1VideoRef.current.srcObject as MediaStream | null;
-      curr?.getTracks().forEach((t) => t.stop());
-      setCam1Error(null);
-      startCameraStream(id, cam1VideoRef.current).catch((e) => setCam1Error(e.message));
-    }
-  }, [startCameraStream]);
-
-  // Switch Camera 2 device
-  const changeCam2 = useCallback((id: string) => {
-    setCam2DeviceId(id);
-    localStorage.setItem('rvp_wb_cam2_id', id);
-    if (cam2VideoRef.current) {
-      const curr = cam2VideoRef.current.srcObject as MediaStream | null;
-      curr?.getTracks().forEach((t) => t.stop());
-      setCam2Error(null);
-      startCameraStream(id, cam2VideoRef.current).catch((e) => setCam2Error(e.message));
-    }
-  }, [startCameraStream]);
-
-  // Capture snapshots from both cameras
-  const captureCurrentSnapshots = useCallback(() => {
-    const grab = (v: HTMLVideoElement | null) => {
-      if (!v || v.videoWidth === 0) return undefined;
-      const canvas = document.createElement('canvas');
-      canvas.width = v.videoWidth;
-      canvas.height = v.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return undefined;
-      ctx.drawImage(v, 0, 0);
-      return canvas.toDataURL('image/jpeg', 0.85);
-    };
-
-    const s1 = grab(cam1VideoRef.current);
-    const s2 = grab(cam2VideoRef.current);
-    const result = { cam1: s1, cam2: s2 };
+  // Capture snapshots from both cameras (calls backend snapshot endpoints)
+  const captureCurrentSnapshots = useCallback(async () => {
+    const ts = Date.now();
+    const snap1 = `/api/weighbridge/cctv/snapshot?cam=1&t=${ts}`;
+    const snap2 = `/api/weighbridge/cctv/snapshot?cam=2&t=${ts}`;
+    const result = { cam1: snap1, cam2: snap2 };
     setSnapshots(result);
     return result;
   }, []);
 
-  // Cleanup camera streams on unmount
-  useEffect(() => {
-    return () => {
-      if (cam1VideoRef.current) {
-        const s = cam1VideoRef.current.srcObject as MediaStream | null;
-        s?.getTracks().forEach((t) => t.stop());
-      }
-      if (cam2VideoRef.current) {
-        const s = cam2VideoRef.current.srcObject as MediaStream | null;
-        s?.getTracks().forEach((t) => t.stop());
-      }
-    };
+  const reloadCameras = useCallback(() => {
+    setCam1Connected(true);
+    setCam2Connected(true);
+    setCameraRefreshKey(Date.now());
+    toast.success('Refreshing CP PLUS camera feeds...');
   }, []);
 
   // Search in ticket history
@@ -335,6 +223,8 @@ export default function WeighbridgeScreen() {
       if (!vehicleNumber.trim()) {
         throw new Error('Please enter vehicle number');
       }
+
+      await captureCurrentSnapshots();
 
       if (activePendingTicketId) {
         // Complete second weight
@@ -672,162 +562,122 @@ export default function WeighbridgeScreen() {
             {/* ── Two CCTV / Platform Viewboxes (Matching Photo) ── */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                <span className="flex items-center gap-1 font-semibold text-zinc-300">
+                <span className="flex items-center gap-1.5 font-semibold text-zinc-300">
                   <Video className="h-3.5 w-3.5 text-red-500" />
-                  CCTV CAMERAS (CP PLUS)
+                  CP PLUS CCTV LIVE (192.168.1.101 / 102)
                 </span>
-                {!isCamerasActive ? (
-                  <Button
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Live Network Feed
+                  </span>
+                  <button
                     type="button"
-                    size="xs"
-                    onClick={enableCameras}
-                    className="h-6 px-2 text-[10px] gap-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono"
+                    onClick={reloadCameras}
+                    title="Reconnect feeds"
+                    className="text-[10px] text-zinc-400 hover:text-zinc-200 underline flex items-center gap-1"
                   >
-                    <Camera className="h-3 w-3" />
-                    Start USB Cameras
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Live Feed
-                    </span>
-                    <button
-                      type="button"
-                      onClick={captureCurrentSnapshots}
-                      title="Test photo snapshot"
-                      className="text-[10px] text-zinc-400 hover:text-zinc-200 underline flex items-center gap-0.5"
-                    >
-                      <Camera className="h-2.5 w-2.5" />
-                      Snap
-                    </button>
-                  </div>
-                )}
+                    <RotateCcw className="h-2.5 w-2.5" />
+                    Refresh
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 {/* Camera 1: Front / Entry */}
-                <div className="rounded-lg bg-black border border-zinc-800 h-32 relative overflow-hidden flex items-center justify-center group shadow-inner">
-                  <video
-                    ref={cam1VideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className={cn('w-full h-full object-cover', (!isCamerasActive || !!cam1Error) && 'hidden')}
-                  />
-
-                  {(!isCamerasActive || !!cam1Error) && (
+                <div className="rounded-lg bg-black border border-zinc-800 h-36 relative overflow-hidden flex items-center justify-center group shadow-inner">
+                  {cam1Connected ? (
+                    <img
+                      src={stream1Url}
+                      alt="Camera 1 - Entry"
+                      onError={() => setCam1Connected(false)}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
                     <div className="flex flex-col items-center justify-center p-2 text-center text-zinc-500 font-mono text-[10px]">
-                      <Video className="h-6 w-6 text-zinc-700 mb-1" />
-                      <span className="text-zinc-400 font-semibold">Camera 1 (Entry)</span>
-                      {cam1Error ? (
-                        <span className="text-[9px] text-red-400 mt-1 max-w-[130px] truncate">{cam1Error}</span>
-                      ) : (
-                        <span className="text-[9px] text-zinc-600 mt-0.5">Click Start USB Cameras</span>
-                      )}
+                      <Video className="h-6 w-6 text-red-500/60 mb-1" />
+                      <span className="text-zinc-400 font-semibold">Camera 1 (192.168.1.101)</span>
+                      <span className="text-[9px] text-red-400 mt-0.5">Stream disconnected</span>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          setCam1Connected(true);
+                          setCameraRefreshKey(Date.now());
+                        }}
+                        className="h-5 text-[9px] mt-1.5"
+                      >
+                        Retry
+                      </Button>
                     </div>
                   )}
 
                   {/* CP PLUS On-Screen Display (OSD) Overlay */}
-                  {isCamerasActive && !cam1Error && (
-                    <>
-                      {/* Top OSD Bar: Camera Label & Live Timestamp */}
-                      <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-                        <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
-                          CAM 1: ENTRY
-                        </span>
-                        <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
-                          {currentTime}
-                        </span>
-                      </div>
+                  <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                    <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
+                      CAM 1: ENTRY
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
+                      {currentTime}
+                    </span>
+                  </div>
 
-                      {/* Bottom OSD Bar: CP PLUS Cam & Device Selector */}
-                      <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between">
-                        <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
-                          CP PLUS Cam
-                        </span>
-
-                        {videoDevices.length > 1 && (
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            <select
-                              value={cam1DeviceId}
-                              onChange={(e) => changeCam1(e.target.value)}
-                              className="bg-black/80 border border-zinc-700 text-zinc-200 text-[9px] font-mono rounded px-1 py-0.5 max-w-[100px] truncate cursor-pointer"
-                              title="Select USB Video Device"
-                            >
-                              {videoDevices.map((d, i) => (
-                                <option key={d.deviceId || i} value={d.deviceId}>
-                                  {d.label || `Camera ${i + 1}`}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                  <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                    <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
+                      CP PLUS Cam
+                    </span>
+                    <span className="text-[8px] font-mono text-emerald-400/80 bg-black/60 px-1 rounded">
+                      192.168.1.101
+                    </span>
+                  </div>
                 </div>
 
                 {/* Camera 2: Platform / Exit */}
-                <div className="rounded-lg bg-black border border-zinc-800 h-32 relative overflow-hidden flex items-center justify-center group shadow-inner">
-                  <video
-                    ref={cam2VideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className={cn('w-full h-full object-cover', (!isCamerasActive || !!cam2Error) && 'hidden')}
-                  />
-
-                  {(!isCamerasActive || !!cam2Error) && (
+                <div className="rounded-lg bg-black border border-zinc-800 h-36 relative overflow-hidden flex items-center justify-center group shadow-inner">
+                  {cam2Connected ? (
+                    <img
+                      src={stream2Url}
+                      alt="Camera 2 - Exit"
+                      onError={() => setCam2Connected(false)}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
                     <div className="flex flex-col items-center justify-center p-2 text-center text-zinc-500 font-mono text-[10px]">
-                      <Video className="h-6 w-6 text-zinc-700 mb-1" />
-                      <span className="text-zinc-400 font-semibold">Camera 2 (Exit)</span>
-                      {cam2Error ? (
-                        <span className="text-[9px] text-red-400 mt-1 max-w-[130px] truncate">{cam2Error}</span>
-                      ) : (
-                        <span className="text-[9px] text-zinc-600 mt-0.5">Platform View</span>
-                      )}
+                      <Video className="h-6 w-6 text-red-500/60 mb-1" />
+                      <span className="text-zinc-400 font-semibold">Camera 2 (192.168.1.102)</span>
+                      <span className="text-[9px] text-red-400 mt-0.5">Stream disconnected</span>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          setCam2Connected(true);
+                          setCameraRefreshKey(Date.now());
+                        }}
+                        className="h-5 text-[9px] mt-1.5"
+                      >
+                        Retry
+                      </Button>
                     </div>
                   )}
 
                   {/* CP PLUS On-Screen Display (OSD) Overlay */}
-                  {isCamerasActive && !cam2Error && (
-                    <>
-                      {/* Top OSD Bar: Camera Label & Live Timestamp */}
-                      <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
-                        <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
-                          CAM 2: EXIT
-                        </span>
-                        <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
-                          {currentTime}
-                        </span>
-                      </div>
+                  <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                    <span className="bg-black/60 backdrop-blur-xs text-[9px] font-mono font-bold text-emerald-400 px-1 py-0.5 rounded">
+                      CAM 2: EXIT
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,1)]">
+                      {currentTime}
+                    </span>
+                  </div>
 
-                      {/* Bottom OSD Bar: CP PLUS Cam & Device Selector */}
-                      <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between">
-                        <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
-                          CP PLUS Cam
-                        </span>
-
-                        {videoDevices.length > 1 && (
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            <select
-                              value={cam2DeviceId}
-                              onChange={(e) => changeCam2(e.target.value)}
-                              className="bg-black/80 border border-zinc-700 text-zinc-200 text-[9px] font-mono rounded px-1 py-0.5 max-w-[100px] truncate cursor-pointer"
-                              title="Select USB Video Device"
-                            >
-                              {videoDevices.map((d, i) => (
-                                <option key={d.deviceId || i} value={d.deviceId}>
-                                  {d.label || `Camera ${i + 1}`}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                  <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                    <span className="text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,1)] tracking-wider">
+                      CP PLUS Cam
+                    </span>
+                    <span className="text-[8px] font-mono text-emerald-400/80 bg-black/60 px-1 rounded">
+                      192.168.1.102
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

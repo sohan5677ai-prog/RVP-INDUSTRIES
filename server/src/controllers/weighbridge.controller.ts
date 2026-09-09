@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
+import { streamCameraMjpeg, getCameraSnapshot } from '../lib/cctvService.js';
 
 const STARTING_TICKET_NUMBER = 2807;
 
@@ -201,4 +202,27 @@ export async function cancelTicketHandler(req: Request, res: Response) {
   });
 
   res.json(updated);
+}
+
+/**
+ * Stream live continuous MJPEG video from CP PLUS CCTV camera.
+ */
+export async function streamCctvHandler(req: Request, res: Response) {
+  const camNum = req.query.cam === '2' ? 2 : 1;
+  await streamCameraMjpeg(camNum, res);
+}
+
+/**
+ * Capture single high-res JPEG snapshot from CP PLUS CCTV camera.
+ */
+export async function snapshotCctvHandler(req: Request, res: Response) {
+  const camNum = req.query.cam === '2' ? 2 : 1;
+  try {
+    const buf = await getCameraSnapshot(camNum);
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(buf);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message || 'Snapshot failed' });
+  }
 }

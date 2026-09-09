@@ -43,12 +43,17 @@ import { globalSearch } from '../controllers/search.controller.js';
 import subscriptionRoutes from './subscription.routes.js';
 import archiveRoutes from './archive.routes.js';
 import weighbridgeRoutes from './weighbridge.routes.js';
+import { streamCctvHandler, snapshotCctvHandler } from '../controllers/weighbridge.controller.js';
 const router = Router();
 
 // Public
 router.use('/auth', authRoutes);
 // Public maintenance status endpoint for polling, unauthenticated screens & pre-login checks
 router.get('/system/maintenance/status', asyncHandler(getMaintenanceStatusHandler));
+
+// Weighbridge CCTV direct streaming & snapshots for <img> tags
+router.get('/weighbridge/cctv/stream', asyncHandler(streamCctvHandler));
+router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
 
 // Resend email delivery/tracking webhook (public - Resend calls this, Svix signed)
 router.post('/webhooks/resend', webhookLimiter, asyncHandler(handleResendWebhook));

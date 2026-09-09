@@ -43,6 +43,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { InvoiceDocument, InvoiceStyles, parseInvoiceLayout } from '@/components/InvoiceDocument';
 import { usePagedRows } from '@/lib/usePagedRows';
+import ScaleCaptureButton from '@/components/ScaleCaptureButton';
 
 const GST_RATE = 0.05;
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -1785,7 +1786,14 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <p className="text-[11px] text-muted-foreground">The date this lorry was actually dispatched.</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Tonnage from kata (tonnes)</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Tonnage from kata (tonnes)</Label>
+                <ScaleCaptureButton
+                  unit="tonnes"
+                  tonnesDecimals={3}
+                  onCapture={(_val, formatted) => setDispatchTonnes(formatted)}
+                />
+              </div>
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />
               <p className="text-[11px] text-muted-foreground">
                 {isPappu
@@ -1809,15 +1817,22 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   <Label className="text-xs">
                     Internal weight (tonnes) <span className="font-normal text-muted-foreground">(internal purpose only)</span>
                   </Label>
-                  {internalWeightDefaultTonnes > 0 && (
-                    <button
-                      type="button"
-                      className="text-[11px] text-primary hover:underline"
-                      onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
-                    >
-                      Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <ScaleCaptureButton
+                      unit="tonnes"
+                      tonnesDecimals={3}
+                      onCapture={(_val, formatted) => setInternalWeightTonnes(formatted)}
+                    />
+                    {internalWeightDefaultTonnes > 0 && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-primary hover:underline"
+                        onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
+                      >
+                        Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <Input
                   type="number"

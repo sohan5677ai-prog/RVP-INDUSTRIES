@@ -16,6 +16,7 @@ import type { ExportColumn } from '@/lib/export';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { cn } from '@/lib/utils';
+import ScaleCaptureButton from '@/components/ScaleCaptureButton';
 
 /** A single flattened row: one dispatch with its parent order info inlined. */
 interface WeightRow {
@@ -305,6 +306,12 @@ export default function InternalWeight() {
                             }}
                             className="w-28 h-8 text-right font-mono text-sm"
                             autoFocus
+                          />
+                          <ScaleCaptureButton
+                            unit="tonnes"
+                            tonnesDecimals={3}
+                            size="sm"
+                            onCapture={(_val, formatted) => setEditValue(formatted)}
                           />
                           <Button
                             size="xs"

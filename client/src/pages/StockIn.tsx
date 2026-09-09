@@ -28,6 +28,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { Combobox } from '@/components/ui/combobox';
 import { UrpStockInDialog } from '@/components/UrpStockInDialog';
 import { ExportButtons } from '@/components/ExportButtons';
+import ScaleCaptureButton from '@/components/ScaleCaptureButton';
 import {
   ExpandPanel,
   Figure,
@@ -524,7 +525,13 @@ function StockInFormDialog({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="rvpFirst">RVP first weight (kg)</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="rvpFirst">RVP first weight (kg)</Label>
+                  <ScaleCaptureButton
+                    unit="kg"
+                    onCapture={(_val, formatted) => setRvpFirstWeightKg(formatted)}
+                  />
+                </div>
                 <Input id="rvpFirst" type="number" value={rvpFirstWeightKg} onChange={(e) => setRvpFirstWeightKg(e.target.value)} required />
               </div>
               <div className="space-y-2">

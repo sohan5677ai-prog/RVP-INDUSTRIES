@@ -57,6 +57,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import SupportButton from '@/components/SupportButton';
 import FloatingNotesWidget from '@/components/FloatingNotesWidget';
 import DeveloperMaintenanceBanner from '@/components/DeveloperMaintenanceBanner';
+import ScaleTopBarWidget from '@/components/ScaleTopBarWidget';
 import { preloadRoute } from '@/lib/preload';
 import SupportAnnouncements from '@/components/SupportAnnouncements';
 import FestivalReminders from '@/components/FestivalReminders';
@@ -448,6 +449,7 @@ export default function Layout() {
             </button>
 
             <DeveloperMaintenanceBanner />
+            <ScaleTopBarWidget />
             <SupportButton pageLabel={current?.label ?? 'Home'} />
             <ThemeToggle />
           </div>

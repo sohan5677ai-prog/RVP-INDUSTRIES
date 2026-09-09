@@ -12,7 +12,7 @@ export async function syncGstr2b(req: Request, res: Response) {
     const result = await Gstr2bReconciliationService.syncFromTaxPro(period);
     return res.json(result);
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Failed to sync GSTR-2B via TaxPro' });
+    return res.status(400).json({ error: err.message || 'Failed to sync GSTR-2B via TaxPro' });
   }
 }
 

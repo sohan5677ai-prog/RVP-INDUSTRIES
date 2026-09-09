@@ -8,6 +8,7 @@ import {
   cancelDeliveryChallan,
   generateChallanEwbHandler,
   cancelChallanEwbHandler,
+  extendChallanEwbValidityHandler,
 } from '../controllers/deliveryChallan.controller.js';
 
 const router = Router();
@@ -19,5 +20,6 @@ router.put('/:id', asyncHandler(updateDeliveryChallan));
 router.post('/:id/cancel', asyncHandler(cancelDeliveryChallan));
 router.post('/:id/ewb', asyncHandler(generateChallanEwbHandler));
 router.post('/:id/ewb/cancel', asyncHandler(cancelChallanEwbHandler));
+router.post('/:id/ewb/extend-validity', asyncHandler(extendChallanEwbValidityHandler));
 
 export default router;

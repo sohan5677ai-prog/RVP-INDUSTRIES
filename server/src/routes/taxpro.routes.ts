@@ -634,6 +634,101 @@ router.get(
   })
 );
 
+// Supplier Return Filing Status Tracker (GSTR-1, GSTR-3B history)
+router.get(
+  '/taxpro/filing-status/:gstin',
+  asyncHandler(async (req, res) => {
+    const { gstin } = req.params;
+    const fy = req.query.fy as string | undefined;
+    const result = await runTaxpro(() => TaxproService.getTaxpayerFiling(gstin, fy));
+    res.json(result);
+  })
+);
+
+// Bulk GSTIN Master Audit for Parties
+router.post(
+  '/taxpro/audit-parties',
+  asyncHandler(async (req, res) => {
+    const parties = await prisma.party.findMany({
+      where: {
+        gstin: { not: null },
+      },
+      select: {
+        id: true,
+        name: true,
+        gstin: true,
+        state: true,
+        type: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const validParties = parties.filter((p) => p.gstin && p.gstin.trim().length === 15);
+    const results = [];
+    let activeCount = 0;
+    let cancelledCount = 0;
+    let mismatchCount = 0;
+
+    for (const p of validParties) {
+      try {
+        const lookup = await TaxproService.lookupGstin(p.gstin!);
+        const portalName = lookup.legalName || lookup.tradeName || '';
+        const portalStatus = lookup.status || 'ACT';
+        const isCancelled = portalStatus === 'CNL' || portalStatus === 'CANCELLED';
+
+        // Check name similarity (case-insensitive substring or token match)
+        const cleanErp = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const cleanPortal = portalName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const isMismatch = cleanPortal.length > 0 && !cleanPortal.includes(cleanErp.slice(0, 5)) && !cleanErp.includes(cleanPortal.slice(0, 5));
+
+        if (isCancelled) {
+          cancelledCount++;
+        } else {
+          activeCount++;
+        }
+        if (isMismatch) mismatchCount++;
+
+        results.push({
+          id: p.id,
+          name: p.name,
+          gstin: p.gstin,
+          partyType: p.type,
+          state: p.state,
+          portalLegalName: lookup.legalName,
+          portalTradeName: lookup.tradeName,
+          portalStatus,
+          isCancelled,
+          isMismatch,
+        });
+      } catch (err: any) {
+        results.push({
+          id: p.id,
+          name: p.name,
+          gstin: p.gstin,
+          partyType: p.type,
+          state: p.state,
+          portalLegalName: '–',
+          portalTradeName: '–',
+          portalStatus: 'INVALID',
+          isCancelled: true,
+          isMismatch: false,
+          error: err.message,
+        });
+        cancelledCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      totalChecked: validParties.length,
+      activeCount,
+      cancelledCount,
+      mismatchCount,
+      results,
+    });
+  })
+);
+
 export default router;
 
 

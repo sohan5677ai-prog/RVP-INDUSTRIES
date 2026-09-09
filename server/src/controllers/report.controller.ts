@@ -428,3 +428,320 @@ export async function getTdsReport(req: Request, res: Response) {
     },
   });
 }
+
+// ── GSTR-1 & HSN Table 12 Report ─────────────────────────────────────────────
+export async function getGstr1Report(req: Request, res: Response) {
+  const { from, to } = resolvePeriod(req);
+  const company = await prisma.companyProfile.findUnique({ where: { id: 'default' } });
+  const homeStateCode = company?.stateCode ?? null;
+  const gstin = company?.gstin || '';
+
+  const isIntraState = (partyGstin: string | null | undefined): boolean => {
+    const partyCode = stateCodeFromGstin(partyGstin);
+    return !!homeStateCode && !!partyCode && partyCode === homeStateCode;
+  };
+
+  const splitTax = (gst: number, intra: boolean) => ({
+    igst: intra ? 0 : r2(gst),
+    cgst: intra ? r2(gst / 2) : 0,
+    sgst: intra ? r2(gst / 2) : 0,
+  });
+
+  const taxRows = await prisma.productTaxInfo.findMany();
+  const taxMap = new Map(taxRows.map((t) => [t.product, t]));
+
+  // Dispatches in period
+  const dispatches = await prisma.saleDispatch.findMany({
+    where: {
+      gstAmount: { gt: 0 },
+      OR: [
+        { invoiceDate: { gte: from, lte: to } },
+        { AND: [{ invoiceDate: null }, { dispatchDate: { gte: from, lte: to } }] },
+      ],
+    },
+    include: { saleOrder: { include: { buyer: true } } },
+    orderBy: { dispatchDate: 'asc' },
+  });
+
+  // Credit notes and Debit notes
+  const creditNotes = await prisma.creditNote.findMany({
+    where: { status: 'ISSUED', noteDate: { gte: from, lte: to } },
+    include: { party: true, saleDispatch: true },
+    orderBy: { noteDate: 'asc' },
+  });
+
+  const debitNotes = await prisma.debitNote.findMany({
+    where: { status: 'ISSUED', noteDate: { gte: from, lte: to } },
+    include: { party: true, saleDispatch: true },
+    orderBy: { noteDate: 'asc' },
+  });
+
+  // Delivery Challans for Table 13
+  const challans = await prisma.deliveryChallan.findMany({
+    where: { challanDate: { gte: from, lte: to } },
+    orderBy: { challanDate: 'asc' },
+  });
+
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const fpMonth = from.getMonth() + 1;
+  const fpYear = from.getFullYear();
+  const fp = `${pad2(fpMonth)}${fpYear}`;
+
+  const b2bMap = new Map<string, any[]>();
+  const b2csMap = new Map<string, any>();
+  const hsnMap = new Map<string, any>();
+
+  for (const d of dispatches) {
+    const buyer = d.saleOrder.buyer;
+    const buyerGstin = (buyer.gstin || '').trim().toUpperCase();
+    const rate = Number(d.saleOrder.ratePerKg);
+    const taxable = r2(d.weightKg * rate);
+    const gst = r2(Number(d.gstAmount));
+    const intra = isIntraState(buyerGstin);
+    const tax = splitTax(gst, intra);
+    const invTotal = r2(taxable + gst);
+    const gstRate = taxable > 0 ? Math.round((gst / taxable) * 100) : 5;
+    const taxDate = d.invoiceDate ?? d.dispatchDate;
+    const idt = `${pad2(taxDate.getDate())}-${pad2(taxDate.getMonth() + 1)}-${taxDate.getFullYear()}`;
+    const inum = d.invoiceNumber || (d.invoiceSeq && d.invoiceFy ? `${d.invoiceSeq}/${d.invoiceFy}` : `DISP-${d.id.slice(-6)}`);
+    const pos = (stateCodeFromGstin(buyerGstin) || String(company?.stateCode || '37')).padStart(2, '0');
+
+    // Aggregate Table 12 HSN
+    const taxInfo = taxMap.get(d.saleOrder.product as any);
+    const hsnCode = taxInfo?.hsn?.replace(/\D/g, '') || '12099990';
+    const productDesc = taxInfo?.description || `${d.saleOrder.product} Sale`;
+
+    const hsnKey = `${hsnCode}_${gstRate}`;
+    const hsnRow = hsnMap.get(hsnKey) || {
+      num: hsnMap.size + 1,
+      hsn_sc: hsnCode,
+      desc: productDesc,
+      uqc: 'KGS',
+      qty: 0,
+      val: 0,
+      txval: 0,
+      iamt: 0,
+      camt: 0,
+      samt: 0,
+      csamt: 0,
+      rt: gstRate,
+    };
+    hsnRow.qty = r2(hsnRow.qty + d.weightKg);
+    hsnRow.txval = r2(hsnRow.txval + taxable);
+    hsnRow.val = r2(hsnRow.val + invTotal);
+    hsnRow.iamt = r2(hsnRow.iamt + tax.igst);
+    hsnRow.camt = r2(hsnRow.camt + tax.cgst);
+    hsnRow.samt = r2(hsnRow.samt + tax.sgst);
+    hsnMap.set(hsnKey, hsnRow);
+
+    const isRegistered = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(buyerGstin);
+
+    if (isRegistered) {
+      const invObj = {
+        inum,
+        idt,
+        val: invTotal,
+        pos,
+        rchrg: 'N',
+        etin: '',
+        inv_typ: 'R',
+        itms: [
+          {
+            num: 1,
+            itm_det: {
+              rt: gstRate,
+              txval: taxable,
+              ...(intra ? { camt: tax.cgst, samt: tax.sgst } : { iamt: tax.igst }),
+              csamt: 0,
+            },
+          },
+        ],
+      };
+      const list = b2bMap.get(buyerGstin) || [];
+      list.push(invObj);
+      b2bMap.set(buyerGstin, list);
+    } else {
+      const b2csKey = `${intra ? 'INTRA' : 'INTER'}_${pos}_${gstRate}`;
+      const existing = b2csMap.get(b2csKey) || {
+        sply_ty: intra ? 'INTRA' : 'INTER',
+        pos,
+        typ: 'OE',
+        rt: gstRate,
+        txval: 0,
+        iamt: 0,
+        camt: 0,
+        samt: 0,
+        csamt: 0,
+      };
+      existing.txval = r2(existing.txval + taxable);
+      existing.iamt = r2(existing.iamt + tax.igst);
+      existing.camt = r2(existing.camt + tax.cgst);
+      existing.samt = r2(existing.samt + tax.sgst);
+      b2csMap.set(b2csKey, existing);
+    }
+  }
+
+  const b2b = Array.from(b2bMap.entries()).map(([ctin, inv]) => ({
+    ctin,
+    cflag: 'N',
+    inv,
+  }));
+
+  const b2cs = Array.from(b2csMap.values());
+
+  // Table 9B: CDNR (Credit/Debit Notes to Registered)
+  const cdnrMap = new Map<string, any[]>();
+  const processNote = (n: any, ntty: 'C' | 'D') => {
+    const partyGstin = (n.party?.gstin || '').trim().toUpperCase();
+    const isRegistered = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(partyGstin);
+    if (!isRegistered) return;
+
+    const taxable = r2(Number(n.taxableValue || 0));
+    const gst = r2(Number(n.gstAmount || 0));
+    const intra = isIntraState(partyGstin);
+    const tax = splitTax(gst, intra);
+    const total = r2(Number(n.totalAmount || 0));
+    const rate = Number(n.gstRate || 5);
+    const pos = (stateCodeFromGstin(partyGstin) || String(company?.stateCode || '37')).padStart(2, '0');
+    const ndt = `${pad2(n.noteDate.getDate())}-${pad2(n.noteDate.getMonth() + 1)}-${n.noteDate.getFullYear()}`;
+
+    const ntObj = {
+      nt_num: n.noteNumber,
+      nt_dt: ndt,
+      val: total,
+      pos,
+      rchrg: 'N',
+      ntty,
+      itms: [
+        {
+          num: 1,
+          itm_det: {
+            rt: rate,
+            txval: taxable,
+            ...(intra ? { camt: tax.cgst, samt: tax.sgst } : { iamt: tax.igst }),
+            csamt: 0,
+          },
+        },
+      ],
+    };
+    const list = cdnrMap.get(partyGstin) || [];
+    list.push(ntObj);
+    cdnrMap.set(partyGstin, list);
+  };
+
+  creditNotes.forEach((cn) => processNote(cn, 'C'));
+  debitNotes.forEach((dn) => processNote(dn, 'D'));
+
+  const cdnr = Array.from(cdnrMap.entries()).map(([ctin, nt]) => ({
+    ctin,
+    cflag: 'N',
+    nt,
+  }));
+
+  const hsnList = Array.from(hsnMap.values());
+
+  const minMax = (items: { num?: string | null }[]) => {
+    const valid = items.map((i) => i.num).filter(Boolean) as string[];
+    if (valid.length === 0) return { from: '—', to: '—', total: 0 };
+    return { from: valid[0], to: valid[valid.length - 1], total: valid.length };
+  };
+
+  const invRange = minMax(dispatches.map((d) => ({ num: d.invoiceNumber })));
+  const cnRange = minMax(creditNotes.map((c) => ({ num: c.noteNumber })));
+  const dnRange = minMax(debitNotes.map((d) => ({ num: d.noteNumber })));
+  const dcRange = minMax(challans.map((c) => ({ num: c.challanNumber })));
+
+  const doc_det = [
+    {
+      doc_num: 1,
+      doc_typ: 'Invoices for outward supply',
+      docs: [
+        {
+          num: 1,
+          from: invRange.from,
+          to: invRange.to,
+          totnum: invRange.total,
+          canc: 0,
+          net_issue: invRange.total,
+        },
+      ],
+    },
+    {
+      doc_num: 4,
+      doc_typ: 'Credit Note',
+      docs: [
+        {
+          num: 1,
+          from: cnRange.from,
+          to: cnRange.to,
+          totnum: cnRange.total,
+          canc: 0,
+          net_issue: cnRange.total,
+        },
+      ],
+    },
+    {
+      doc_num: 5,
+      doc_typ: 'Debit Note',
+      docs: [
+        {
+          num: 1,
+          from: dnRange.from,
+          to: dnRange.to,
+          totnum: dnRange.total,
+          canc: 0,
+          net_issue: dnRange.total,
+        },
+      ],
+    },
+    {
+      doc_num: 6,
+      doc_typ: 'Delivery Challan',
+      docs: [
+        {
+          num: 1,
+          from: dcRange.from,
+          to: dcRange.to,
+          totnum: dcRange.total,
+          canc: challans.filter((c) => c.status === 'CANCELLED').length,
+          net_issue: challans.filter((c) => c.status !== 'CANCELLED').length,
+        },
+      ],
+    },
+  ];
+
+  const offlineJson = {
+    gstin,
+    fp,
+    version: 'GST1.0',
+    hash: 'hash',
+    b2b,
+    b2cs,
+    cdnr,
+    hsn: { data: hsnList },
+    doc_issue: { doc_det },
+  };
+
+  const summary = {
+    fp,
+    period: { from: from.toISOString(), to: to.toISOString() },
+    b2bInvoicesCount: dispatches.filter((d) => /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test((d.saleOrder.buyer.gstin || '').trim())).length,
+    b2csInvoicesCount: dispatches.filter((d) => !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test((d.saleOrder.buyer.gstin || '').trim())).length,
+    creditNotesCount: creditNotes.length,
+    debitNotesCount: debitNotes.length,
+    totalTaxableValue: r2(hsnList.reduce((acc, h) => acc + h.txval, 0)),
+    totalIgst: r2(hsnList.reduce((acc, h) => acc + h.iamt, 0)),
+    totalCgst: r2(hsnList.reduce((acc, h) => acc + h.camt, 0)),
+    totalSgst: r2(hsnList.reduce((acc, h) => acc + h.samt, 0)),
+    totalTax: r2(hsnList.reduce((acc, h) => acc + h.iamt + h.camt + h.samt, 0)),
+    totalInvoiceValue: r2(hsnList.reduce((acc, h) => acc + h.val, 0)),
+    hsnTable: hsnList,
+    docTable: doc_det,
+  };
+
+  res.json({
+    success: true,
+    summary,
+    offlineJson,
+  });
+}

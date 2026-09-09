@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -11,6 +12,7 @@ import {
   Sparkles,
   Loader2,
   Compass,
+  Printer,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -90,6 +92,7 @@ const CHALLAN_TYPES = [
 
 export default function DeliveryChallans() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [ewbModalChallan, setEwbModalChallan] = useState<DeliveryChallan | null>(null);
@@ -391,6 +394,16 @@ export default function DeliveryChallans() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => navigate(`/delivery-challans/${c.id}/print`)}
+                      title="Print Official Delivery Challan (Rule 55)"
+                    >
+                      <Printer className="h-3 w-3" />
+                      Print
+                    </Button>
                     {!c.ewbNumber && c.status !== 'CANCELLED' && (
                       <Button
                         size="sm"

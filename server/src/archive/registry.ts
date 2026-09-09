@@ -105,6 +105,7 @@ const TABLES: ArchiveModel[] = [
 
   { name: 'SaleOrder', delegate: 'saleOrder', cls: 'TXN', order: 60, dateField: 'saleDate' },
   { name: 'SaleDispatch', delegate: 'saleDispatch', cls: 'TXN', order: 70, dateField: 'dispatchDate' },
+  { name: 'DeliveryChallan', delegate: 'deliveryChallan', cls: 'TXN', order: 75, dateField: 'challanDate' },
   { name: 'SaleAllocation', delegate: 'saleAllocation', cls: 'DERIVED', order: 80,
     scopeVia: (r) => ({ saleOrder: { saleDate: between(r) } }) },
 
@@ -155,7 +156,12 @@ const TABLES: ArchiveModel[] = [
   { name: 'EmailLog', delegate: 'emailLog', cls: 'LOG', order: 350, dateField: 'sentAt' },
   { name: 'WhatsAppLog', delegate: 'whatsAppLog', cls: 'LOG', order: 360, dateField: 'createdAt' },
   { name: 'TransportConfirmation', delegate: 'transportConfirmation', cls: 'LOG', order: 370, dateField: 'createdAt' },
+  { name: 'ConsolidatedEwb', delegate: 'consolidatedEwb', cls: 'LOG', order: 372, dateField: 'createdAt' },
+  { name: 'WeighbridgeTicket', delegate: 'weighbridgeTicket', cls: 'LOG', order: 373, dateField: 'createdAt' },
+  { name: 'Gstr2bImport', delegate: 'gstr2bImport', cls: 'LOG', order: 374, dateField: 'uploadedAt' },
   { name: 'DriverKataSubmission', delegate: 'driverKataSubmission', cls: 'LOG', order: 375, dateField: 'createdAt' },
+  { name: 'Gstr2bEntry', delegate: 'gstr2bEntry', cls: 'DERIVED', order: 376,
+    scopeVia: (r) => ({ import: { uploadedAt: between(r) } }) },
   { name: 'WishBroadcast', delegate: 'wishBroadcast', cls: 'LOG', order: 380, dateField: 'createdAt' },
 ];
 
@@ -167,6 +173,8 @@ const COUNTERS: ArchiveModel[] = [
   { name: 'PoSerialCounter', delegate: 'poSerialCounter', cls: 'COUNTER', order: 10,
     counter: { field: 'fy', format: 'short' } },
   { name: 'NoteSerialCounter', delegate: 'noteSerialCounter', cls: 'COUNTER', order: 20,
+    counter: { field: 'fy', format: 'long' } },
+  { name: 'ChallanSerialCounter', delegate: 'challanSerialCounter', cls: 'COUNTER', order: 30,
     counter: { field: 'fy', format: 'long' } },
 ];
 

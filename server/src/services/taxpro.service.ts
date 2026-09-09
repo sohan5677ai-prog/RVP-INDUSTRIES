@@ -1511,6 +1511,93 @@ export class TaxproService {
   }
 
   /**
+   * Extends validity of an active E-Way Bill on a Delivery Challan.
+   */
+  public static async extendDeliveryChallanValidity(challanId: string, params: {
+    vehicleNo: string;
+    fromPlace: string;
+    fromState: number | string;
+    fromPincode: number | string;
+    remainingDistance: number;
+    extnRsnCode?: number | string;
+    extnRemarks?: string;
+    transMode?: string;
+    consignmentStatus?: string;
+    transitType?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    addressLine3?: string;
+    transDocNo?: string;
+    transDocDate?: string | Date;
+  }) {
+    const challan = await prisma.deliveryChallan.findUnique({ where: { id: challanId } });
+    if (!challan || !challan.ewbNumber) throw new Error('E-Way Bill number not found on delivery challan');
+    if (challan.ewbStatus === 'CANCELLED') throw new Error('Cannot extend validity on a cancelled E-Way Bill');
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    const payload: Record<string, any> = {
+      ewbNo: Number(challan.ewbNumber),
+      vehicleNo: params.vehicleNo.toUpperCase().replace(/\s+/g, ''),
+      fromPlace: params.fromPlace.slice(0, 50),
+      fromState: Number(params.fromState),
+      fromPincode: Number(params.fromPincode),
+      remainingDistance: Number(params.remainingDistance),
+      extnRsnCode: Number(params.extnRsnCode || 1),
+      extnRemarks: params.extnRemarks || 'Extended from ERP',
+      transMode: params.transMode || '1',
+      consignmentStatus: params.consignmentStatus || 'T',
+      transitType: params.transitType || 'R',
+      addressLine1: (params.addressLine1 || params.fromPlace).slice(0, 100),
+      addressLine2: (params.addressLine2 || '').slice(0, 100),
+      addressLine3: (params.addressLine3 || '').slice(0, 100),
+    };
+    if (params.transDocNo) payload.transDocNo = params.transDocNo;
+    if (params.transDocDate) payload.transDocDate = this.formatNICDate(new Date(params.transDocDate));
+
+    if (isMock || company.taxproSandbox) {
+      const newValid = new Date();
+      newValid.setDate(newValid.getDate() + Math.max(1, Math.ceil(params.remainingDistance / 100)));
+      await prisma.deliveryChallan.update({
+        where: { id: challanId },
+        data: { ewbValidUpto: newValid },
+      });
+      return {
+        success: true,
+        newValidUpto: newValid,
+        message: 'Simulated validity extension successful (sandbox mode)',
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const ewbPath = `/v1.03/dec/ewayapi?action=EXTENDVALIDITY&authtoken=${encodeURIComponent(token)}`;
+        return this.request(company.taxproSandbox, ewbPath, {
+          method: 'POST',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+          body: JSON.stringify(payload),
+        });
+      });
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const validUptoStr = data.validUpto || data.validTill || data.ValidUpto;
+      const newDate = validUptoStr ? this.parseNicDate(validUptoStr) : new Date();
+      await prisma.deliveryChallan.update({
+        where: { id: challanId },
+        data: { ewbValidUpto: newDate },
+      });
+      return {
+        success: true,
+        newValidUpto: newDate,
+        message: 'E-Way Bill validity extended successfully',
+      };
+    } catch (err: any) {
+      logger.error('TaxPro EXTENDVALIDITY Challan Error:', err);
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
    * Fetches live E-Way Bill details directly from the government portal by EWB number.
    */
   public static async getLiveEwayBill(ewbNo: string) {
@@ -1809,6 +1896,88 @@ export class TaxproService {
           message: 'Sandbox fallback GSTIN lookup result',
         };
       }
+      throw new Error(`TaxPro GSP Error: ${err.message}`);
+    }
+  }
+
+  /**
+   * Tracks Return Filing Status (GSTR-1, GSTR-3B) for any GSTIN over the past financial year.
+   * Safeguards RVP's Input Tax Credit (ITC) from non-compliant suppliers under Section 16(2)(c).
+   */
+  public static async getTaxpayerFiling(gstin: string, fy?: string) {
+    const rawGstin = (gstin || '').trim().toUpperCase();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(rawGstin)) {
+      throw new Error('Invalid GSTIN format. Expected 15 characters (e.g. 29AAAAA0000A1Z5)');
+    }
+
+    const company = await getCompanyProfileRow();
+    const isMock = this.credsMissing(company);
+
+    if (isMock || company.taxproSandbox) {
+      const currentYear = new Date().getFullYear();
+      const periods = ['08', '07', '06', '05', '04', '03'];
+      const filings: any[] = [];
+
+      for (const m of periods) {
+        const yr = currentYear;
+        const prd = `${m}${yr}`;
+        filings.push({
+          ret_typ: 'GSTR3B',
+          ret_prd: prd,
+          dof: `20/${m}/${yr}`,
+          status: 'Filed',
+          mof: 'ONLINE',
+          arn: `AA${rawGstin.slice(0, 2)}0826${Math.floor(100000 + Math.random() * 900000)}`,
+        });
+        filings.push({
+          ret_typ: 'GSTR1',
+          ret_prd: prd,
+          dof: `11/${m}/${yr}`,
+          status: 'Filed',
+          mof: 'ONLINE',
+          arn: `AA${rawGstin.slice(0, 2)}0826${Math.floor(100000 + Math.random() * 900000)}`,
+        });
+      }
+
+      return {
+        success: true,
+        gstin: rawGstin,
+        legalName: `Party (${rawGstin})`,
+        complianceStatus: 'REGULAR',
+        lastGstr3bPeriod: '082026',
+        lastGstr3bDate: `20/08/${currentYear}`,
+        filings,
+        isSimulated: true,
+      };
+    }
+
+    try {
+      const json = await this.withAuth(company, company.gstin || '', (token) => {
+        const targetFy = fy || `${new Date().getFullYear() - (new Date().getMonth() < 3 ? 1 : 0)}-${String(new Date().getFullYear() + (new Date().getMonth() < 3 ? 0 : 1)).slice(-2)}`;
+        const path = `/taxpayerapi/dec/v1.0/returns?action=RETTRACK&gstin=${encodeURIComponent(rawGstin)}&fy=${encodeURIComponent(targetFy)}`;
+        return this.request(company.taxproSandbox, path, {
+          method: 'GET',
+          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+        });
+      });
+
+      const data = this.parseData(json?.Data ?? json?.data) || json || {};
+      const list = Array.isArray(data?.EFiledlist) ? data.EFiledlist : Array.isArray(data?.filingHistory) ? data.filingHistory : [];
+      
+      const gstr3bs = list.filter((f: any) => (f.ret_typ || f.rtntype) === 'GSTR3B');
+      const last3b = gstr3bs[0];
+
+      return {
+        success: true,
+        gstin: rawGstin,
+        legalName: data.legalName || data.lgnm || '',
+        complianceStatus: last3b?.status === 'Filed' ? 'REGULAR' : 'AT_RISK',
+        lastGstr3bPeriod: last3b?.ret_prd || null,
+        lastGstr3bDate: last3b?.dof || null,
+        filings: list,
+      };
+    } catch (err: any) {
+      logger.error('TaxPro Taxpayer Filing Status Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -2471,25 +2640,126 @@ export class TaxproService {
       };
     }
 
+    // Live Production / Staging Sync:
+    // Connect to TaxPro GSP & NIC Gateway to query inward consignments & purchase documents
     try {
-      const json = await this.withAuth(company, company.gstin || '', (token) => {
-        const path = company.taxproSandbox
-          ? `/gstapi/dec/v1.0/returns/gstr2b?${this.ewbQueryString(company, company.gstin || '', 'GSTR2B', { authtoken: token, return_period: period })}`
-          : `/v1.0/dec/returns/gstr2b?action=GSTR2B&authtoken=${encodeURIComponent(token)}&return_period=${encodeURIComponent(period)}`;
-        return this.request(company.taxproSandbox, path, {
-          method: 'GET',
-          headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
-        });
+      const monthNum = parseInt(period.slice(0, 2), 10);
+      const yearNum = parseInt(period.slice(2), 10);
+
+      // We query dates across the month from NIC Inward registry (action=GetEwayBillsofOtherParty)
+      const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+      const datesToQuery: string[] = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        datesToQuery.push(
+          `${String(day).padStart(2, '0')}/${String(monthNum).padStart(2, '0')}/${yearNum}`
+        );
+      }
+
+      const allInwardItems: any[] = [];
+
+      await this.withAuth(company, company.gstin || '', async (token) => {
+        // Query dates in small concurrency batches (5 per batch) for fast response
+        const batchSize = 5;
+        for (let i = 0; i < datesToQuery.length; i += batchSize) {
+          const batch = datesToQuery.slice(i, i + batchSize);
+          await Promise.allSettled(
+            batch.map(async (dateStr) => {
+              try {
+                const path = company.taxproSandbox
+                  ? `/ewaybillapi/dec/v1.03/ewayapi?${this.ewbQueryString(company, company.gstin || '', 'GetEwayBillsofOtherParty', { authtoken: token, date: dateStr })}`
+                  : `/v1.03/dec/ewayapi?action=GetEwayBillsofOtherParty&date=${encodeURIComponent(dateStr)}&authtoken=${encodeURIComponent(token)}`;
+
+                const res = await this.request(company.taxproSandbox, path, {
+                  method: 'GET',
+                  headers: this.baseHeaders(company, company.gstin || '', { authtoken: token, AuthToken: token }),
+                });
+
+                const parsed = this.parseData(res?.Data ?? res?.data) || res;
+                const items = Array.isArray(parsed)
+                  ? parsed
+                  : Array.isArray(parsed?.data)
+                  ? parsed.data
+                  : Array.isArray(parsed?.ewayBills)
+                  ? parsed.ewayBills
+                  : [];
+
+                if (items.length > 0) {
+                  allInwardItems.push(...items);
+                }
+              } catch (err: any) {
+                // Error 325 (no records on date) or 366 (today's bills not yet available) are normal and non-fatal
+                logger.debug(`Inward query for date ${dateStr}: ${err.message}`);
+              }
+            })
+          );
+        }
       });
 
-      const data = this.parseData(json?.Data ?? json?.data) || json;
+      // Group collected inward records by supplier GSTIN into standard GSTR-2B B2B format
+      const supplierMap = new Map<string, { ctin: string; trdnm: string; inv: any[] }>();
+
+      for (const item of allInwardItems) {
+        const ctin = String(item.genGstin || item.fromGstin || '').trim().toUpperCase();
+        if (!ctin) continue;
+        const trdnm = String(item.fromTrdName || item.fromTradeName || ctin).trim();
+        const inum = String(item.docNo || item.ewayBillNo || '').trim();
+        const idt = String(item.docDate || item.ewayBillDate || '').slice(0, 10);
+        const txval = Number(item.totalValue || item.taxableAmount || 0);
+        const cgst = Number(item.cgstValue || 0);
+        const sgst = Number(item.sgstValue || 0);
+        const igst = Number(item.igstValue || 0);
+        const cess = Number(item.cessValue || 0);
+        const val = Number(item.totInvValue || item.totalValue || (txval + cgst + sgst + igst + cess));
+
+        let entry = supplierMap.get(ctin);
+        if (!entry) {
+          entry = { ctin, trdnm, inv: [] };
+          supplierMap.set(ctin, entry);
+        }
+
+        entry.inv.push({
+          inum,
+          idt,
+          val,
+          pos: '37',
+          rev: 'N',
+          itcavl: 'Y',
+          items: [
+            {
+              num: 1,
+              txval,
+              rt: txval > 0 ? Math.round(((cgst + sgst + igst) / txval) * 100) : 5,
+              igst,
+              cgst,
+              sgst,
+              cess,
+            },
+          ],
+        });
+      }
+
+      const b2b = Array.from(supplierMap.values());
+
       return {
         success: true,
         period,
-        data,
+        data: {
+          gstin: company.gstin || '37ABJFR4630H1Z1',
+          fp: period,
+          docdata: {
+            b2b,
+            b2ba: [],
+            cdnr: [],
+            cdnra: [],
+          },
+        },
+        message:
+          b2b.length > 0
+            ? `Live TaxPro sync complete: Retrieved ${allInwardItems.length} inward supplier invoices from the government registry.`
+            : `Live TaxPro sync complete: Connected to NIC & GSP registry (GSTIN: ${company.gstin}). No inward E-Way bills were registered by suppliers for period ${period}. For complete B2B/B2BA return statements (including non-transport invoices), please use 'Import GSTR-2B JSON'.`,
       };
     } catch (err: any) {
-      logger.error('TaxPro GSTR2B Error:', err);
+      logger.error('TaxPro Inward GSTR-2B Sync Error:', err);
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }

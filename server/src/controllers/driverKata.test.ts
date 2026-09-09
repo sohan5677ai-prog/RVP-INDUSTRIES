@@ -31,7 +31,7 @@ vi.mock('../lib/prisma.js', () => ({
     $transaction: async (fn: any) => fn({
       saleDispatch: { update: dispatchUpdate, findMany: dispatchFindMany },
       saleOrder: { update: orderUpdate },
-      driverKataSubmission: { update: submissionUpdate },
+      driverKataSubmission: { update: submissionUpdate, updateMany: vi.fn() },
     }),
   },
 }));

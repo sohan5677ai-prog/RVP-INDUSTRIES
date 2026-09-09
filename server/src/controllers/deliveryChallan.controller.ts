@@ -218,3 +218,9 @@ export async function cancelChallanEwbHandler(req: Request, res: Response) {
   const result = await TaxproService.cancelDeliveryChallanEwb(id, cancelReason || '1', cancelRemarks || 'Cancelled from ERP');
   res.json(result);
 }
+
+export async function extendChallanEwbValidityHandler(req: Request, res: Response) {
+  const { id } = req.params;
+  const result = await TaxproService.extendDeliveryChallanValidity(id, req.body || {});
+  res.json(result);
+}

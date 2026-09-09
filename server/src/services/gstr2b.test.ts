@@ -294,5 +294,38 @@ describe('GSTR-2B Purchase ITC Automated Reconciliation', () => {
       expect(res.data.docdata.b2b.length).toBeGreaterThan(0);
       expect(res.message).toContain('0 credits consumed');
     });
+
+    it('connects to live production TaxPro & NIC registry when credentials exist', async () => {
+      // Mock live credentials
+      vi.spyOn(TaxproService as any, 'credsMissing').mockReturnValue(false);
+      vi.spyOn(TaxproService as any, 'withAuth').mockImplementation(async (...args: any[]) => {
+        return args[2]('fake-auth-token');
+      });
+      vi.spyOn(TaxproService as any, 'request').mockResolvedValue({
+        status: '1',
+        data: [
+          {
+            genGstin: '37AAAPL1234F1Z1',
+            fromTrdName: 'LIVE AGRO SUPPLIER',
+            docNo: 'INV-2026-99',
+            docDate: '15/08/2026',
+            totalValue: 50000,
+            cgstValue: 1250,
+            sgstValue: 1250,
+            igstValue: 0,
+            cessValue: 0,
+            totInvValue: 52500,
+          },
+        ],
+      });
+
+      const res = await TaxproService.fetchGstr2b('082026');
+      expect(res.success).toBe(true);
+      expect(res.period).toBe('082026');
+      expect(res.data.docdata.b2b.length).toBeGreaterThan(0);
+      expect(res.data.docdata.b2b[0].ctin).toBe('37AAAPL1234F1Z1');
+      expect(res.data.docdata.b2b[0].inv[0].inum).toBe('INV-2026-99');
+      expect(res.message).toContain('Live TaxPro sync complete');
+    });
   });
 });

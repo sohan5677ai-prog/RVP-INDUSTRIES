@@ -77,6 +77,7 @@ const SalesProduct = lazyWithPreload(
 const Husk = lazyWithPreload('/sales/husk', () => import('@/pages/Husk'));
 const CreditDebitNotes = lazyWithPreload('/sales/notes', () => import('@/pages/CreditDebitNotes'));
 const DeliveryChallans = lazyWithPreload('/delivery-challans', () => import('@/pages/DeliveryChallans'));
+const DeliveryChallanView = lazyWithPreload('/delivery-challans/:id/print', () => import('@/pages/DeliveryChallanView'));
 const ByproductSales = lazyWithPreload(
   ['/sales/byproducts', '/sales/shell', '/sales/waste'],
   () => import('@/pages/ByproductSales')
@@ -182,6 +183,7 @@ export default function App() {
                         <Route path="/sales/husk" element={<Husk />} />
                         <Route path="/sales/notes" element={<CreditDebitNotes />} />
                         <Route path="/delivery-challans" element={<DeliveryChallans />} />
+                        <Route path="/delivery-challans/:id/print" element={<DeliveryChallanView />} />
                         <Route path="/sales/tps" element={<SalesProduct product="TPS" />} />
                         <Route path="/sales/byproducts" element={<ByproductSales />} />
                         <Route path="/sales/shell" element={<ByproductSales />} />

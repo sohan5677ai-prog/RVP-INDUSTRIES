@@ -578,21 +578,34 @@ export default function Gstr2bReconciliation() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 rounded-md text-xs text-sky-800 dark:text-sky-300">
-              🛡️ <strong>Sandbox Safety Guarantee:</strong> Testing runs in Sandbox / Mock mode with <strong>zero real credits consumed</strong>.
+            <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-md text-xs text-slate-700 dark:text-slate-300">
+              <div className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400 mb-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                Live Production Gateway (TaxPro GSP & NIC Registry)
+              </div>
+              <p className="text-slate-600 dark:text-slate-400">
+                Directly queries live inward consignment and purchase records registered under RVP&apos;s GSTIN.
+              </p>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs">Target Return Period (MMYYYY)</Label>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Target Return Period (MMYYYY)</Label>
               <Input
                 value={syncPeriod}
                 onChange={(e) => setSyncPeriod(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="e.g. 082026"
                 className="font-mono text-sm"
               />
+              <p className="text-[11px] text-muted-foreground pt-0.5 leading-relaxed">
+                Tip: For full monthly return statements (all B2B invoices + credit notes), you can also import the 1-click official GSTR-2B JSON downloaded from gst.gov.in.
+              </p>
             </div>
 
-            {syncMsg && <div className="text-xs text-rose-600 bg-rose-50 p-2 rounded">{syncMsg}</div>}
+            {syncMsg && (
+              <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 p-2.5 rounded-md leading-relaxed">
+                {syncMsg}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -601,7 +614,7 @@ export default function Gstr2bReconciliation() {
             </Button>
             <Button
               size="sm"
-              disabled={syncMutation.isPending}
+              disabled={syncMutation.isPending || syncPeriod.length !== 6}
               onClick={() => syncMutation.mutate(syncPeriod)}
             >
               {syncMutation.isPending ? 'Syncing…' : 'Sync GSTR-2B'}

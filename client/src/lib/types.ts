@@ -717,6 +717,8 @@ export interface LorryConfirmation {
 export interface CompanyProfile {
   id: string;
   name: string;
+  legalName?: string | null;
+  tradeName?: string | null;
   address: string | null;
   gstin: string | null;
   stateName: string | null;

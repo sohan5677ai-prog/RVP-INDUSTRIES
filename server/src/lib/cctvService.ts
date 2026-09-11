@@ -149,15 +149,16 @@ export function setCameraBroadcast(camNum: 1 | 2, buf: Buffer): void {
 export function getCctvStatus() {
   const now = Date.now();
   const getStatus = (num: 1 | 2) => {
+    const cfg = CAMERAS[num];
     const b = latestBroadcastFrames[num];
     const isFresh = b ? now - b.timestamp < 30000 : false;
-    const cfg = CAMERAS[num];
+    const encPass = encodeURIComponent(cfg.pass);
     return {
       cam: num,
       ip: cfg.ip,
       port: cfg.port,
-      rtspUrl: `rtsp://${cfg.user}:${cfg.pass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=1`,
-      rtspHdUrl: `rtsp://${cfg.user}:${cfg.pass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=0`,
+      rtspUrl: `rtsp://${cfg.user}:${encPass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=1`,
+      rtspHdUrl: `rtsp://${cfg.user}:${encPass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=0`,
       online: isFresh || (globalFeedManager?.getLatestFrame(num) != null && (globalFeedManager?.getConsecutiveErrors(num) ?? 0) === 0),
       lastSeen: b?.timestamp || null,
       ageMs: b ? now - b.timestamp : null,

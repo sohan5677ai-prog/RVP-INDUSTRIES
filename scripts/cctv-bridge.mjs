@@ -17,7 +17,8 @@ import { spawn } from 'child_process';
 const CONFIG = {
   cloudApiUrl: process.env.CLOUD_API_URL || 'https://rvp-server.onrender.com/api',
   localPort: Number(process.env.BRIDGE_LOCAL_PORT || 4000),
-  pollIntervalMs: 800, // ~1.2 FPS per camera (optimal balance of smoothness & network efficiency)
+  pollIntervalMs: 100, // 100ms for ~10 FPS real-time ultra-smooth playback
+  cloudBroadcastIntervalMs: 600, // broadcast to cloud every 600ms to avoid saturating WAN uplink
   cameras: {
     1: {
       label: 'CAM 1: ENTRY',
@@ -26,7 +27,8 @@ const CONFIG = {
       user: process.env.CCTV_CAM1_USER || 'admin',
       pass: process.env.CCTV_CAM1_PASS || 'admin@123',
       channel: 1,
-      rtspUrl: process.env.CCTV_CAM1_RTSP || 'rtsp://admin:admin@123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=1',
+      rtspUrl: process.env.CCTV_CAM1_RTSP || 'rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=1',
+      rtspHdUrl: process.env.CCTV_CAM1_RTSP_HD || 'rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0',
     },
     2: {
       label: 'CAM 2: EXIT',
@@ -35,7 +37,8 @@ const CONFIG = {
       user: process.env.CCTV_CAM2_USER || 'admin',
       pass: process.env.CCTV_CAM2_PASS || 'admin@123',
       channel: 1,
-      rtspUrl: process.env.CCTV_CAM2_RTSP || 'rtsp://admin:admin@123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1',
+      rtspUrl: process.env.CCTV_CAM2_RTSP || 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1',
+      rtspHdUrl: process.env.CCTV_CAM2_RTSP_HD || 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0',
     },
   },
 };
@@ -260,6 +263,7 @@ async function startCameraLoop(camNum) {
   const cfg = CONFIG.cameras[camNum];
   let consecutiveErrors = 0;
   let lastLoggedSuccess = 0;
+  let lastCloudBroadcast = 0;
 
   while (true) {
     try {
@@ -270,10 +274,11 @@ async function startCameraLoop(camNum) {
         method: result.method,
       };
 
-      // Push to cloud asynchronously
-      broadcastToCloud(camNum, result.buffer).catch((err) => {
-        // Cloud broadcast dropped (e.g. cloud sleeping or network glitch)
-      });
+      // Push to cloud throttled every cloudBroadcastIntervalMs
+      if (Date.now() - lastCloudBroadcast >= (CONFIG.cloudBroadcastIntervalMs || 600)) {
+        lastCloudBroadcast = Date.now();
+        broadcastToCloud(camNum, result.buffer).catch(() => {});
+      }
 
       if (Date.now() - lastLoggedSuccess > 10000 || consecutiveErrors > 0) {
         console.log(`[CCTV-BRIDGE] Cam ${camNum} (${cfg.label}): Live (${(result.buffer.length / 1024).toFixed(1)} KB via ${result.method})`);
@@ -287,10 +292,11 @@ async function startCameraLoop(camNum) {
       if (consecutiveErrors === 1 || consecutiveErrors % 10 === 0) {
         console.warn(`[CCTV-BRIDGE] Cam ${camNum} (${cfg.label}) warning: ${err.message}`);
       }
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 1000));
     }
   }
 }
+
 
 /**
  * Start embedded local HTTP server

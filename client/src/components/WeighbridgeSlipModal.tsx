@@ -62,10 +62,6 @@ export default function WeighbridgeSlipModal({
 
   if (!ticket) return null;
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   // Extract / calculate weights
   const firstWeight = ticket.firstWeightKg ?? null;
   const secondWeight = ticket.secondWeightKg ?? null;
@@ -121,6 +117,285 @@ export default function WeighbridgeSlipModal({
   const formattedCharges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
 
   const isStationeryMode = calibration.printMode === 'stationery';
+
+  // Isolated Single-Page Print Handler (Guarantees exactly 1 page in Chrome)
+  const handlePrint = () => {
+    // 1. Clean up any existing print iframe
+    const oldIframe = document.getElementById('rvp-kata-print-frame');
+    if (oldIframe) {
+      oldIframe.remove();
+    }
+
+    // 2. Prepare HTML for printing
+    const printDocHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Weighment Slip #${ticket.ticketNo}</title>
+  <style>
+    @page {
+      size: 210mm 150mm;
+      margin: 0;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 210mm;
+      height: 150mm;
+      max-width: 210mm;
+      max-height: 150mm;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #ffffff;
+      color: #000000;
+      font-family: Arial, Helvetica, sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sheet {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 210mm;
+      height: 150mm;
+      max-width: 210mm;
+      max-height: 150mm;
+      overflow: hidden;
+      transform: translate(${calibration.offsetXmm}mm, ${calibration.offsetYmm}mm);
+    }
+    .val {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-family: monospace, 'Courier New', Courier, sans-serif;
+      font-weight: 900;
+      color: #000000;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .val-sans {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-family: Arial, Helvetica, sans-serif;
+      font-weight: 800;
+      color: #000000;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cam-box {
+      position: absolute;
+      overflow: hidden;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f5f5f5;
+    }
+    .cam-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .cam-stamp {
+      position: absolute;
+      bottom: 2px;
+      left: 4px;
+      background: rgba(0,0,0,0.65);
+      color: #ffffff;
+      font-family: monospace;
+      font-size: 8px;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    ${!isStationeryMode ? `
+      <!-- Plain paper duplicate borders and headers -->
+      <div style="position: absolute; inset: 3mm; border: 2px solid #dc2626; border-radius: 8px; pointer-events: none;">
+        <div style="position: absolute; top: 2mm; left: 0; right: 0; text-align: center;">
+          <h1 style="font-size: 23px; font-weight: 900; color: #b91c1c; font-family: serif; text-transform: uppercase;">RVP WEIGH BRIDGE</h1>
+          <div style="display: inline-block; background: #facc15; font-size: 9px; font-weight: 900; padding: 1px 10px; border-radius: 10px;">GOVT APPROVED</div>
+          <p style="font-size: 9.5px; font-weight: 600; color: #27272a; margin-top: 2px;">3/86, New By-Pass Road, Near Rajuluru, BG Palli, PUNGANUR - 517 247, Chittoor Dist., A.P.</p>
+          <p style="font-size: 9.5px; font-weight: 700; color: #18181b;">Ph : 91215 53909, 94909 21002</p>
+        </div>
+        <div style="position: absolute; top: 36mm; left: 2mm; width: 64mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
+          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">S. No.</div>
+        </div>
+        <div style="position: absolute; top: 36mm; left: 69mm; width: 60mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
+          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">DATE</div>
+        </div>
+        <div style="position: absolute; top: 36mm; left: 132mm; width: 63.5mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
+          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">TIME</div>
+        </div>
+        <div style="position: absolute; top: 46.5mm; left: 2mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
+        <div style="position: absolute; top: 46.5mm; left: 100.5mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
+        <div style="position: absolute; top: 97.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">VEHICLE NO.</div>
+        <div style="position: absolute; top: 97.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">1ST WEIGHT</div>
+        <div style="position: absolute; top: 97.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">2ND WEIGHT</div>
+        <div style="position: absolute; top: 97.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">NET WEIGHT</div>
+        <div style="position: absolute; top: 102mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 102mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 102mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 102mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 113.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">PARTY NAME</div>
+        <div style="position: absolute; top: 113.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">MATERIAL</div>
+        <div style="position: absolute; top: 113.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">CHARGES</div>
+        <div style="position: absolute; top: 113.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">SIGNATURE</div>
+        <div style="position: absolute; top: 118mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 118mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 118mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 118mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 130mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px;">
+          <div><span style="background: #b91c1c; color: white; font-weight: 900; padding: 2px 6px; font-size: 10px;">100 TON</span> <span style="font-size: 7.5px; color: #3f3f46; font-weight: 600;">Weigh Bridge Manufactured by : Sri Modern Weigh System. Cell 98430 55760</span></div>
+          <div style="font-weight: 900; color: #b91c1c; font-size: 10px;">THANK YOU! VISIT AGAIN!!</div>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- 1. S. No. -->
+    <div class="val" style="top: 36mm; left: 23mm; width: 45mm; height: 8.5mm; font-size: 16px; letter-spacing: 1px;">
+      ${ticket.ticketNo}
+    </div>
+
+    <!-- 2. DATE -->
+    <div class="val" style="top: 36mm; left: 89mm; width: 44mm; height: 8.5mm; font-size: 14px;">
+      ${formattedDate}
+    </div>
+
+    <!-- 3. TIME -->
+    <div class="val" style="top: 36mm; left: 154mm; width: 48mm; height: 8.5mm; font-size: 14px;">
+      ${formattedTime}
+    </div>
+
+    <!-- 4. CCTV Camera 1 -->
+    <div class="cam-box" style="top: 47mm; left: 4mm; width: 96mm; height: 49mm;">
+      ${cam1Url && !cam1Failed ? `<img src="${cam1Url}" alt="CAM 1" /><div class="cam-stamp">CP IP Cam 1 · ${formattedDate} ${formattedTime}</div>` : ''}
+    </div>
+
+    <!-- 5. CCTV Camera 2 -->
+    <div class="cam-box" style="top: 47mm; left: 106mm; width: 96mm; height: 49mm;">
+      ${cam2Url && !cam2Failed ? `<img src="${cam2Url}" alt="CAM 2" /><div class="cam-stamp">CP IP Cam 2 · ${formattedDate} ${formattedTime}</div>` : ''}
+    </div>
+
+    <!-- 6. Vehicle No. -->
+    <div class="val" style="top: 102.5mm; left: 4mm; width: 48mm; height: 9.5mm; font-size: 15px; letter-spacing: 0.5px;">
+      ${ticket.vehicleNumber}
+    </div>
+
+    <!-- 7. 1st Weight -->
+    <div class="val" style="top: 102.5mm; left: 55mm; width: 48mm; height: 9.5mm; font-size: 15px;">
+      ${formatWeight(firstWeight)}
+    </div>
+
+    <!-- 8. 2nd Weight -->
+    <div class="val" style="top: 102.5mm; left: 106mm; width: 48mm; height: 9.5mm; font-size: 15px;">
+      ${secondWeight != null ? formatWeight(secondWeight) : (ticket.tripType === 'FIRST' ? '-' : formatWeight(firstWeight))}
+    </div>
+
+    <!-- 9. Net Weight -->
+    <div class="val" style="top: 102.5mm; left: 157mm; width: 48mm; height: 9.5mm; font-size: 15px;">
+      ${netWeight != null ? formatWeight(netWeight) : '-'}
+    </div>
+
+    <!-- 10. Party Name -->
+    <div class="val-sans" style="top: 118mm; left: 4mm; width: 48mm; height: 9.5mm; font-size: 13px; padding: 0 2px;">
+      ${ticket.partyName || '-'}
+    </div>
+
+    <!-- 11. Material -->
+    <div class="val-sans" style="top: 118mm; left: 55mm; width: 48mm; height: 9.5mm; font-size: 13px; padding: 0 2px;">
+      ${formattedMaterial}
+    </div>
+
+    <!-- 12. Charges -->
+    <div class="val" style="top: 118mm; left: 106mm; width: 48mm; height: 9.5mm; font-size: 14px;">
+      ${formattedCharges}
+    </div>
+  </div>
+</body>
+</html>`;
+
+    // 3. Create isolated 210mm x 150mm iframe
+    const iframe = document.createElement('iframe');
+    iframe.id = 'rvp-kata-print-frame';
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '-9999px';
+    iframe.style.width = '210mm';
+    iframe.style.height = '150mm';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    doc.write(printDocHtml);
+    doc.close();
+
+    const triggerIframePrint = () => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (err) {
+        console.error('Iframe print error, falling back to window.print', err);
+        window.print();
+      }
+    };
+
+    // Ensure images are fully loaded before firing print preview
+    const imgs = doc.images;
+    if (!imgs || imgs.length === 0) {
+      setTimeout(triggerIframePrint, 150);
+    } else {
+      let loaded = 0;
+      const total = imgs.length;
+      const done = () => {
+        loaded++;
+        if (loaded >= total) {
+          setTimeout(triggerIframePrint, 150);
+        }
+      };
+      for (let i = 0; i < total; i++) {
+        if (imgs[i].complete) {
+          loaded++;
+        } else {
+          imgs[i].onload = done;
+          imgs[i].onerror = done;
+        }
+      }
+      if (loaded >= total) {
+        setTimeout(triggerIframePrint, 150);
+      }
+    }
+  };
+
+  // Keyboard shortcut listener for F12 or Ctrl+P while slip modal is active
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey && (e.key === 'p' || e.key === 'P')) || e.key === 'F12') {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePrint();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [ticket, calibration, cam1Url, cam2Url, cam1Failed, cam2Failed, isStationeryMode]);
+
 
   return (
     <Dialog open={!!ticket} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -288,33 +563,65 @@ export default function WeighbridgeSlipModal({
             }
             @media print {
               html, body {
-                background: transparent !important;
+                background: #ffffff !important;
                 color: #000000 !important;
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 210mm !important;
                 height: 150mm !important;
+                max-width: 210mm !important;
+                max-height: 150mm !important;
+                overflow: hidden !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
               }
-              body * {
+              body > * {
                 visibility: hidden !important;
+              }
+              [data-radix-portal] {
+                visibility: visible !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 210mm !important;
+                height: 150mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              div[role="dialog"] {
+                visibility: visible !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                transform: none !important;
+                width: 210mm !important;
+                height: 150mm !important;
+                max-width: 210mm !important;
+                max-height: 150mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: #ffffff !important;
+                overflow: hidden !important;
               }
               #rvp-kata-print-container,
               #rvp-kata-print-container * {
                 visibility: visible !important;
               }
               #rvp-kata-print-container {
-                position: fixed !important;
+                position: absolute !important;
                 left: 0 !important;
                 top: 0 !important;
                 width: 210mm !important;
                 height: 150mm !important;
+                max-width: 210mm !important;
+                max-height: 150mm !important;
                 box-shadow: none !important;
                 border: none !important;
                 margin: 0 !important;
                 padding: 0 !important;
-                background: transparent !important;
+                background: #ffffff !important;
                 overflow: hidden !important;
                 page-break-after: avoid !important;
                 page-break-inside: avoid !important;
@@ -425,49 +732,49 @@ export default function WeighbridgeSlipModal({
                   </div>
                 </div>
 
-                {/* Two Photo Frames Artwork Outline (Top: 46.5mm, Height: 49mm) */}
-                <div className="absolute top-[46.5mm] left-[2mm] w-[95mm] h-[49mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
-                <div className="absolute top-[46.5mm] left-[100.5mm] w-[95mm] h-[49mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
+                {/* Two Photo Frames Artwork Outline (Top: 47mm, Height: 49mm) */}
+                <div className="absolute top-[47mm] left-[4mm] w-[96mm] h-[49mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
+                <div className="absolute top-[47mm] left-[106mm] w-[96mm] h-[49mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
 
                 {/* ROW 1: Orange Headers (Top: 97.5mm) */}
-                <div className="absolute top-[97.5mm] left-[2mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[97.5mm] left-[4mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Vehicle No.
                 </div>
-                <div className="absolute top-[97.5mm] left-[51mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[97.5mm] left-[55mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   1st Weight
                 </div>
-                <div className="absolute top-[97.5mm] left-[100mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[97.5mm] left-[106mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   2nd Weight
                 </div>
-                <div className="absolute top-[97.5mm] left-[149mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[97.5mm] left-[157mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Net Weight
                 </div>
 
                 {/* ROW 1: Cell Outlines (Top: 102mm) */}
-                <div className="absolute top-[102mm] left-[2mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[102mm] left-[51mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[102mm] left-[100mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[102mm] left-[149mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[102mm] left-[4mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[102mm] left-[55mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[102mm] left-[106mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[102mm] left-[157mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
 
                 {/* ROW 2: Orange Headers (Top: 113.5mm) */}
-                <div className="absolute top-[113.5mm] left-[2mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[113.5mm] left-[4mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Party Name
                 </div>
-                <div className="absolute top-[113.5mm] left-[51mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[113.5mm] left-[55mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Material
                 </div>
-                <div className="absolute top-[113.5mm] left-[100mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[113.5mm] left-[106mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Charges
                 </div>
-                <div className="absolute top-[113.5mm] left-[149mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[113.5mm] left-[157mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Signature
                 </div>
 
                 {/* ROW 2: Cell Outlines (Top: 118mm) */}
-                <div className="absolute top-[118mm] left-[2mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[118mm] left-[51mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[118mm] left-[100mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[118mm] left-[149mm] w-[46.5mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[118mm] left-[4mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[118mm] left-[55mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[118mm] left-[106mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[118mm] left-[157mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
 
                 {/* Footer Strip (Top: 130mm) */}
                 <div className="absolute top-[130mm] left-[2mm] right-[2mm] flex items-center justify-between text-[8.5px]">
@@ -494,29 +801,29 @@ export default function WeighbridgeSlipModal({
                ═════════════════════════════════════════════════════════════════ */}
             <div className="absolute inset-0 pointer-events-none">
               
-              {/* 1. S. No. (e.g. '2879') - sits inside white box next to 'S. No.' tag */}
-              <div className="absolute top-[39mm] left-[22mm] w-[46mm] h-[8.5mm] flex items-center justify-center">
+              {/* 1. S. No. (e.g. '2807') */}
+              <div className="absolute top-[36mm] left-[23mm] w-[45mm] h-[8.5mm] flex items-center justify-center">
                 <span className="font-mono font-black text-base text-black tracking-wider">
                   {ticket.ticketNo}
                 </span>
               </div>
 
-              {/* 2. DATE (e.g. '01-09-2026') - sits inside white box next to 'DATE' tag */}
-              <div className="absolute top-[39mm] left-[89mm] w-[43mm] h-[8.5mm] flex items-center justify-center">
+              {/* 2. DATE (e.g. '09-09-2026') */}
+              <div className="absolute top-[36mm] left-[89mm] w-[44mm] h-[8.5mm] flex items-center justify-center">
                 <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedDate}
                 </span>
               </div>
 
-              {/* 3. TIME (e.g. '12:50:04 PM') - sits inside white box next to 'TIME' tag */}
-              <div className="absolute top-[39mm] left-[152mm] w-[46mm] h-[8.5mm] flex items-center justify-center">
+              {/* 3. TIME (e.g. '01:26:21 pm') */}
+              <div className="absolute top-[36mm] left-[154mm] w-[48mm] h-[8.5mm] flex items-center justify-center">
                 <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedTime}
                 </span>
               </div>
 
               {/* 4. CCTV Camera 1 (Left: Truck Entry / Front angle) */}
-              <div className="absolute top-[49.5mm] left-[5mm] w-[95mm] h-[49mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
+              <div className="absolute top-[47mm] left-[4mm] w-[96mm] h-[49mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
                 {cam1Url && !cam1Failed ? (
                   <img
                     src={cam1Url}
@@ -545,7 +852,7 @@ export default function WeighbridgeSlipModal({
               </div>
 
               {/* 5. CCTV Camera 2 (Right: Truck Platform / Rear angle) */}
-              <div className="absolute top-[49.5mm] left-[103.5mm] w-[95mm] h-[49mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
+              <div className="absolute top-[47mm] left-[106mm] w-[96mm] h-[49mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
                 {cam2Url && !cam2Failed ? (
                   <img
                     src={cam2Url}
@@ -578,22 +885,22 @@ export default function WeighbridgeSlipModal({
                   Sits inside the white boxes under Row 1 Orange Headers
                  ═════════════════════════════════════════════════════════════ */}
               
-              {/* 6. Vehicle No. (e.g. 'TN28BF7423') */}
-              <div className="absolute top-[105mm] left-[5mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 6. Vehicle No. (e.g. 'AP39UX9999') */}
+              <div className="absolute top-[102.5mm] left-[4mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider uppercase truncate">
                   {ticket.vehicleNumber}
                 </span>
               </div>
 
-              {/* 7. 1st Weight (e.g. '44350-Kg') */}
-              <div className="absolute top-[105mm] left-[54mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 7. 1st Weight (e.g. '0-Kg') */}
+              <div className="absolute top-[102.5mm] left-[55mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider">
                   {formatWeight(firstWeight)}
                 </span>
               </div>
 
-              {/* 8. 2nd Weight (e.g. '11550-Kg' or '-' if first trip only) */}
-              <div className="absolute top-[105mm] left-[103mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 8. 2nd Weight (e.g. '-' or '<wt>-Kg') */}
+              <div className="absolute top-[102.5mm] left-[106mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider">
                   {secondWeight != null
                     ? formatWeight(secondWeight)
@@ -603,8 +910,8 @@ export default function WeighbridgeSlipModal({
                 </span>
               </div>
 
-              {/* 9. Net Weight (e.g. '32800-Kg') */}
-              <div className="absolute top-[105mm] left-[152mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 9. Net Weight (e.g. '-') */}
+              <div className="absolute top-[102.5mm] left-[157mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm sm:text-base text-black tracking-wider">
                   {netWeight != null ? formatWeight(netWeight) : '-'}
                 </span>
@@ -615,22 +922,22 @@ export default function WeighbridgeSlipModal({
                   Sits inside the white boxes under Row 2 Orange Headers
                  ═════════════════════════════════════════════════════════════ */}
 
-              {/* 10. Party Name (e.g. 'KNM STOCKAT') */}
-              <div className="absolute top-[121mm] left-[5mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 10. Party Name */}
+              <div className="absolute top-[118mm] left-[4mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wide uppercase truncate">
                   {ticket.partyName || '-'}
                 </span>
               </div>
 
-              {/* 11. Material (e.g. '.SEED') */}
-              <div className="absolute top-[121mm] left-[54mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 11. Material (e.g. '.PAPPU' or '.SEED') */}
+              <div className="absolute top-[118mm] left-[55mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wider uppercase truncate">
                   {formattedMaterial}
                 </span>
               </div>
 
-              {/* 12. Charges (e.g. '₹ 1.00') */}
-              <div className="absolute top-[121mm] left-[103mm] w-[46.5mm] h-[9.5mm] flex items-center justify-center px-1">
+              {/* 12. Charges (e.g. '₹ 100.00') */}
+              <div className="absolute top-[118mm] left-[106mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wide">
                   {formattedCharges}
                 </span>

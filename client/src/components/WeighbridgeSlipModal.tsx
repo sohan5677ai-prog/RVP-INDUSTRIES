@@ -12,7 +12,7 @@ interface WeighbridgeSlipModalProps {
   onClose: () => void;
 }
 
-const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v3';
+const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v4';
 
 interface PrinterCalibration {
   offsetXmm: number;
@@ -124,7 +124,8 @@ export default function WeighbridgeSlipModal({
 
   return (
     <Dialog open={!!ticket} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[920px] w-[96vw] p-0 overflow-hidden print:m-0 print:p-0 print:border-none print:shadow-none bg-background text-foreground">
+      <DialogContent className="!max-w-[940px] sm:!max-w-[940px] md:!max-w-[940px] w-[98vw] max-h-[96vh] p-0 overflow-hidden print:!m-0 print:!p-0 print:!border-none print:!shadow-none bg-background text-foreground">
+
         {/* Top Modal Controls Header (Hidden in Print) */}
         <div className="p-4 border-b border-border bg-card/60 flex flex-wrap items-center justify-between gap-3 print:hidden">
           <div className="flex items-center gap-2">

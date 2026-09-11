@@ -1,7 +1,22 @@
-export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
+export const API_BASE = (
+  import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== '/api'
+    ? import.meta.env.VITE_API_URL
+    : typeof window !== 'undefined' &&
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1'
+    ? 'https://rvp-server.onrender.com/api'
+    : '/api'
+).replace(/\/+$/, '');
 
 export function getScaleApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    return `https://rvp-server.onrender.com/api${cleanPath}`;
+  }
   return `${API_BASE}${cleanPath}`;
 }
 

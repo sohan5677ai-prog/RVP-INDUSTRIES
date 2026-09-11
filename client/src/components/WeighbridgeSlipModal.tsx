@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Printer, Sliders, FileText, Layers } from 'lucide-react';
+import { Printer, Sliders, FileText, Layers, Eye, EyeOff } from 'lucide-react';
 import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -12,12 +12,12 @@ interface WeighbridgeSlipModalProps {
   onClose: () => void;
 }
 
-const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v1';
+const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v2';
 
 interface PrinterCalibration {
   offsetXmm: number;
   offsetYmm: number;
-  printMode: 'stationery' | 'plain'; // 'stationery' = only values/photos on pre-printed paper; 'plain' = full artwork
+  printMode: 'stationery' | 'plain'; // 'stationery' = only 11 values/photos on pre-printed paper; 'plain' = full artwork
 }
 
 export default function WeighbridgeSlipModal({
@@ -34,11 +34,12 @@ export default function WeighbridgeSlipModal({
     return {
       offsetXmm: 0,
       offsetYmm: 0,
-      printMode: 'stationery',
+      printMode: 'stationery', // Default to pre-printed stationery
     };
   });
 
   const [showCalibrationBar, setShowCalibrationBar] = useState<boolean>(false);
+  const [showScreenGuide, setShowScreenGuide] = useState<boolean>(true);
 
   useEffect(() => {
     try {
@@ -90,6 +91,22 @@ export default function WeighbridgeSlipModal({
     hour12: true,
   });
 
+  // Helper to format weight strictly as '<weight>-Kg' matching the physical slip
+  const formatWeight = (val: number | null | undefined): string => {
+    if (val == null || isNaN(val)) return '-';
+    return `${Math.round(val)}-Kg`;
+  };
+
+  // Format Material with dot prefix if needed (e.g. '.SEED')
+  const formattedMaterial = ticket.material
+    ? ticket.material.startsWith('.')
+      ? ticket.material.toUpperCase()
+      : `.${ticket.material.toUpperCase()}`
+    : '-';
+
+  // Format Charges as '₹ 1.00'
+  const formattedCharges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
+
   const isStationeryMode = calibration.printMode === 'stationery';
 
   return (
@@ -106,7 +123,7 @@ export default function WeighbridgeSlipModal({
                 Weighment Slip #{ticket.ticketNo} ({ticket.vehicleNumber})
               </DialogTitle>
               <p className="text-[11px] text-muted-foreground">
-                Official Kata Weighment Certificate & Camera Verification
+                Pre-Printed Slip Overlay (Only 11 Dynamic Values & 2 CCTV Snapshots Print)
               </p>
             </div>
           </div>
@@ -123,7 +140,7 @@ export default function WeighbridgeSlipModal({
                     ? 'bg-background text-primary font-semibold shadow-xs'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
-                title="Prints only dynamic values & CCTV photos on your physical pre-printed stationery"
+                title="Prints only the 11 dynamic fields & 2 CCTV photos onto your physical pre-printed stationery"
               >
                 <Layers className="h-3.5 w-3.5 text-amber-500" />
                 Pre-Printed Slip
@@ -137,12 +154,26 @@ export default function WeighbridgeSlipModal({
                     ? 'bg-background text-primary font-semibold shadow-xs'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
-                title="Prints full duplicate with RVP logo, orange borders and text onto blank paper"
+                title="Prints full duplicate with RVP logo, orange headers and borders onto blank paper"
               >
                 <FileText className="h-3.5 w-3.5 text-emerald-500" />
                 Plain Paper
               </button>
             </div>
+
+            {/* Screen Guide Toggle (in pre-printed mode) */}
+            {isStationeryMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowScreenGuide((g) => !g)}
+                className="h-8 gap-1 text-xs"
+                title={showScreenGuide ? 'Hide background guide on screen' : 'Show background guide on screen'}
+              >
+                {showScreenGuide ? <EyeOff className="h-3.5 w-3.5 text-stone-500" /> : <Eye className="h-3.5 w-3.5 text-primary" />}
+                <span>{showScreenGuide ? 'Hide Guide' : 'Show Guide'}</span>
+              </Button>
+            )}
 
             {/* Calibration Toggle */}
             <Button
@@ -152,7 +183,7 @@ export default function WeighbridgeSlipModal({
               className={cn('h-8 gap-1.5 text-xs font-medium', showCalibrationBar && 'border-primary text-primary')}
             >
               <Sliders className="h-3.5 w-3.5" />
-              Adjust Alignment
+              Adjust (mm)
             </Button>
 
             {/* Main Print Button */}
@@ -185,16 +216,16 @@ export default function WeighbridgeSlipModal({
                   variant="outline"
                   size="icon"
                   className="h-6 w-6 text-xs"
-                  onClick={() => setCalibration((c) => ({ ...c, offsetXmm: c.offsetXmm - 1 }))}
+                  onClick={() => setCalibration((c) => ({ ...c, offsetXmm: c.offsetXmm - 0.5 }))}
                 >
                   -
                 </Button>
-                <span className="font-mono font-bold w-10 text-center">{calibration.offsetXmm} mm</span>
+                <span className="font-mono font-bold w-12 text-center">{calibration.offsetXmm} mm</span>
                 <Button
                   variant="outline"
                   size="icon"
                   className="h-6 w-6 text-xs"
-                  onClick={() => setCalibration((c) => ({ ...c, offsetXmm: c.offsetXmm + 1 }))}
+                  onClick={() => setCalibration((c) => ({ ...c, offsetXmm: c.offsetXmm + 0.5 }))}
                 >
                   +
                 </Button>
@@ -206,16 +237,16 @@ export default function WeighbridgeSlipModal({
                   variant="outline"
                   size="icon"
                   className="h-6 w-6 text-xs"
-                  onClick={() => setCalibration((c) => ({ ...c, offsetYmm: c.offsetYmm - 1 }))}
+                  onClick={() => setCalibration((c) => ({ ...c, offsetYmm: c.offsetYmm - 0.5 }))}
                 >
                   -
                 </Button>
-                <span className="font-mono font-bold w-10 text-center">{calibration.offsetYmm} mm</span>
+                <span className="font-mono font-bold w-12 text-center">{calibration.offsetYmm} mm</span>
                 <Button
                   variant="outline"
                   size="icon"
                   className="h-6 w-6 text-xs"
-                  onClick={() => setCalibration((c) => ({ ...c, offsetYmm: c.offsetYmm + 1 }))}
+                  onClick={() => setCalibration((c) => ({ ...c, offsetYmm: c.offsetYmm + 0.5 }))}
                 >
                   +
                 </Button>
@@ -238,25 +269,29 @@ export default function WeighbridgeSlipModal({
           {/* Print Stylesheet Injector */}
           <style>{`
             @page {
-              size: 210mm 148mm; /* A5 Landscape / Indian Weighbridge Stationery */
+              size: 210mm 148mm; /* Standard Half-Sheet A5 Landscape / Weighbridge Stationery */
               margin: 0;
             }
             @media print {
-              body {
-                background: #ffffff !important;
+              html, body {
+                background: transparent !important;
                 color: #000000 !important;
                 margin: 0 !important;
                 padding: 0 !important;
+                width: 210mm !important;
+                height: 148mm !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
               }
               body * {
-                visibility: hidden;
+                visibility: hidden !important;
               }
               #rvp-kata-print-container,
               #rvp-kata-print-container * {
-                visibility: visible;
+                visibility: visible !important;
               }
               #rvp-kata-print-container {
-                position: absolute !important;
+                position: fixed !important;
                 left: 0 !important;
                 top: 0 !important;
                 width: 210mm !important;
@@ -264,13 +299,21 @@ export default function WeighbridgeSlipModal({
                 box-shadow: none !important;
                 border: none !important;
                 margin: 0 !important;
-                background: #ffffff !important;
+                padding: 0 !important;
+                background: transparent !important;
+                overflow: hidden !important;
+                page-break-after: avoid !important;
+                page-break-inside: avoid !important;
               }
-              /* Hide static pre-printed artwork if printing on stationery */
+              /* In pre-printed stationery mode: strip ALL borders, backgrounds, titles and labels */
               ${isStationeryMode ? `
-                .rvp-stationery-artwork {
+                .rvp-stationery-artwork,
+                .rvp-stationery-artwork * {
                   display: none !important;
                   visibility: hidden !important;
+                }
+                #rvp-kata-print-container {
+                  background: transparent !important;
                 }
               ` : ''}
             }
@@ -278,7 +321,7 @@ export default function WeighbridgeSlipModal({
 
           {/* 
             Exact Stationery Document Sheet
-            Standard Landscape dimensions: 210mm x 148mm (A5 Landscape)
+            Standard Landscape dimensions: 210mm x 148mm
           */}
           <div
             id="rvp-kata-print-container"
@@ -291,18 +334,19 @@ export default function WeighbridgeSlipModal({
           >
             {/* ═════════════════════════════════════════════════════════════════
                 LAYER 1: PRE-PRINTED STATIONERY ARTWORK 
-                (Orange frames, Ganesha, RVP header, Address, 100 TON, labels)
-                - In 'plain' mode: fully opaque and printed.
-                - In 'stationery' mode: printed as HIDDEN, shown on-screen with 20% opacity as watermark guide.
+                (Matches user's physical paper: RVP header, Ganesha, 24h dial, 
+                 yellow S. No./Date/Time tags, 4x2 orange table headers, 100 TON)
+                - In 'stationery' mode: HIDDEN during print; shown on-screen as watermark guide.
+                - In 'plain' mode: fully printed in sharp color.
                ═════════════════════════════════════════════════════════════════ */}
             <div
               className={cn(
                 'rvp-stationery-artwork absolute inset-0 pointer-events-none p-3',
-                isStationeryMode && 'opacity-25 print:hidden'
+                isStationeryMode && (!showScreenGuide ? 'hidden' : 'opacity-30 print:hidden')
               )}
             >
-              {/* Outer decorative double red/orange border */}
-              <div className="w-full h-full border-2 border-red-600 rounded-lg p-1 relative flex flex-col justify-between">
+              {/* Outer decorative red/orange border */}
+              <div className="w-full h-full border-2 border-red-600 rounded-lg p-1.5 relative flex flex-col justify-between">
                 
                 {/* Header Row */}
                 <div className="flex items-center justify-between px-2 pt-0.5">
@@ -320,10 +364,10 @@ export default function WeighbridgeSlipModal({
 
                   {/* Center Title & Government Approved */}
                   <div className="text-center flex-1 px-2">
-                    <h1 className="text-[21px] font-black tracking-tight text-red-700 leading-tight uppercase font-serif">
+                    <h1 className="text-[22px] font-black tracking-tight text-red-700 leading-tight uppercase font-serif">
                       RVP WEIGH BRIDGE
                     </h1>
-                    <div className="inline-block bg-yellow-400 text-black px-2.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider border border-yellow-500 shadow-2xs">
+                    <div className="inline-block bg-yellow-400 text-black px-3 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider border border-yellow-500 shadow-2xs">
                       GOVT APPROVED
                     </div>
                     <p className="text-[9.5px] font-semibold text-zinc-800 leading-snug mt-0.5">
@@ -344,90 +388,86 @@ export default function WeighbridgeSlipModal({
                   </div>
                 </div>
 
-                {/* Metadata 3-Boxes Ribbon Outline */}
-                <div className="grid grid-cols-12 gap-2 px-1 mt-1">
-                  <div className="col-span-3 border border-red-500 rounded-md h-9 overflow-hidden flex flex-col">
-                    <div className="bg-yellow-400/90 text-red-900 text-[8.5px] font-black text-center py-0.5 uppercase border-b border-red-400">
+                {/* Metadata Row (S. No., DATE, TIME) */}
+                <div className="grid grid-cols-12 gap-2 px-1 mt-0.5">
+                  {/* S. No. Box */}
+                  <div className="col-span-4 border-2 border-amber-500 rounded-md h-8 flex items-center overflow-hidden bg-white">
+                    <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
                       S. No.
                     </div>
+                    <div className="flex-1 h-full" />
                   </div>
-                  <div className="col-span-5 border border-red-500 rounded-md h-9 overflow-hidden flex flex-col">
-                    <div className="bg-yellow-400/90 text-red-900 text-[8.5px] font-black text-center py-0.5 uppercase border-b border-red-400">
+
+                  {/* DATE Box */}
+                  <div className="col-span-4 border-2 border-amber-500 rounded-md h-8 flex items-center overflow-hidden bg-white">
+                    <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
                       DATE
                     </div>
+                    <div className="flex-1 h-full" />
                   </div>
-                  <div className="col-span-4 border border-red-500 rounded-md h-9 overflow-hidden flex flex-col">
-                    <div className="bg-yellow-400/90 text-red-900 text-[8.5px] font-black text-center py-0.5 uppercase border-b border-red-400">
+
+                  {/* TIME Box */}
+                  <div className="col-span-4 border-2 border-amber-500 rounded-md h-8 flex items-center overflow-hidden bg-white">
+                    <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
                       TIME
                     </div>
+                    <div className="flex-1 h-full" />
                   </div>
                 </div>
 
                 {/* Two Photo Frames Outline */}
-                <div className="grid grid-cols-2 gap-2 px-1 mt-1 h-[47mm]">
-                  <div className="border-2 border-red-500 rounded-lg overflow-hidden flex items-center justify-center bg-red-50/20" />
-                  <div className="border-2 border-red-500 rounded-lg overflow-hidden flex items-center justify-center bg-red-50/20" />
+                <div className="grid grid-cols-2 gap-2 px-1 mt-1 h-[48mm]">
+                  <div className="border-2 border-red-500 rounded-lg overflow-hidden flex items-center justify-center bg-red-50/10" />
+                  <div className="border-2 border-red-500 rounded-lg overflow-hidden flex items-center justify-center bg-red-50/10" />
                 </div>
 
-                {/* Data Grid Outline with Orange Header Bars */}
-                <div className="grid grid-cols-12 gap-2 px-1 mt-1 text-[9px]">
-                  {/* Column 1: Vehicle & Party */}
-                  <div className="col-span-5 space-y-1">
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
+                {/* 4-Columns x 2-Rows Data Table Outline */}
+                <div className="px-1 mt-0.5 space-y-1 text-[9px]">
+                  {/* ROW 1: Vehicle No. | 1st Weight | 2nd Weight | Net Weight */}
+                  <div>
+                    <div className="grid grid-cols-4 gap-1 mb-0.5">
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
                         Vehicle No.
                       </div>
-                      <div className="h-6" />
-                    </div>
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
-                        Party Name
-                      </div>
-                      <div className="h-6" />
-                    </div>
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
-                        Material
-                      </div>
-                      <div className="h-6" />
-                    </div>
-                  </div>
-
-                  {/* Column 2: Weights Breakdown */}
-                  <div className="col-span-4 space-y-1">
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
                         1st Weight
                       </div>
-                      <div className="h-6" />
-                    </div>
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
                         2nd Weight
                       </div>
-                      <div className="h-6" />
-                    </div>
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
-                        Charges
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
+                        Net Weight
                       </div>
-                      <div className="h-6" />
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      <div className="border border-red-500 rounded-b-md h-7" />
+                      <div className="border border-red-500 rounded-b-md h-7" />
+                      <div className="border border-red-500 rounded-b-md h-7" />
+                      <div className="border border-red-500 rounded-b-md h-7" />
                     </div>
                   </div>
 
-                  {/* Column 3: Net Weight & Signature */}
-                  <div className="col-span-3 space-y-1">
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
-                        Net Weight
+                  {/* ROW 2: Party Name | Material | Charges | Signature */}
+                  <div>
+                    <div className="grid grid-cols-4 gap-1 mb-0.5">
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
+                        Party Name
                       </div>
-                      <div className="h-6" />
-                    </div>
-                    <div className="border border-red-500 rounded-md overflow-hidden">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8px] px-2 py-0.5 uppercase text-center">
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
+                        Material
+                      </div>
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
+                        Charges
+                      </div>
+                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
                         Signature
                       </div>
-                      <div className="h-14" />
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      <div className="border border-red-500 rounded-b-md h-7" />
+                      <div className="border border-red-500 rounded-b-md h-7" />
+                      <div className="border border-red-500 rounded-b-md h-7" />
+                      <div className="border border-red-500 rounded-b-md h-7" />
                     </div>
                   </div>
                 </div>
@@ -443,7 +483,7 @@ export default function WeighbridgeSlipModal({
                     </span>
                   </div>
                   <div className="font-black text-red-700 tracking-wider text-[10px]">
-                    THANK YOU! VISIT AGAIN!
+                    THANK YOU! VISIT AGAIN!!
                   </div>
                 </div>
 
@@ -451,37 +491,51 @@ export default function WeighbridgeSlipModal({
             </div>
 
             {/* ═════════════════════════════════════════════════════════════════
-                LAYER 2: DYNAMIC VALUES & CCTV CAMERA PHOTOS
-                - Positioned with absolute millimeter coordinates to align 
-                  directly into the physical pre-printed boxes.
-                - Printed in sharp black text & crisp uncompressed photos!
+                LAYER 2: ONLY THE 11 DYNAMIC FIELDS & 2 CCTV CAMERA SNAPSHOTS
+                - Positioned with precise millimeter coordinates to align directly
+                  inside the physical boxes on the pre-printed paper.
+                - 1. S. No.
+                - 2. Date
+                - 3. Time
+                - 4 & 5. 2 CCTV Camera Snapshots
+                - 6. Vehicle No.
+                - 7. 1st Weight
+                - 8. 2nd Weight
+                - 9. Net Weight
+                - 10. Party Name
+                - 11. Material
+                - 12. Charges
                ═════════════════════════════════════════════════════════════════ */}
-            <div className="absolute inset-0 p-3 pointer-events-none">
-              {/* Metadata Row Values */}
-              <div className="absolute top-[28mm] left-[6mm] w-[45mm] h-[8mm] flex items-center justify-center">
-                <span className="font-mono font-black text-sm text-black tracking-wider">
+            <div className="absolute inset-0 pointer-events-none">
+              
+              {/* 1. S. No. (e.g. '2879') */}
+              <div className="absolute top-[28mm] left-[23mm] w-[46mm] h-[8mm] flex items-center justify-center">
+                <span className="font-mono font-black text-base text-black tracking-wider">
                   {ticket.ticketNo}
                 </span>
               </div>
 
-              <div className="absolute top-[28mm] left-[54mm] w-[80mm] h-[8mm] flex items-center justify-center">
-                <span className="font-mono font-black text-xs text-black tracking-wider">
+              {/* 2. DATE (e.g. '01-09-2026') */}
+              <div className="absolute top-[28mm] left-[89mm] w-[46mm] h-[8mm] flex items-center justify-center">
+                <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedDate}
                 </span>
               </div>
 
-              <div className="absolute top-[28mm] left-[138mm] w-[65mm] h-[8mm] flex items-center justify-center">
-                <span className="font-mono font-black text-xs text-black tracking-wider">
+              {/* 3. TIME (e.g. '12:50:04 PM') */}
+              <div className="absolute top-[28mm] left-[155mm] w-[48mm] h-[8mm] flex items-center justify-center">
+                <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedTime}
                 </span>
               </div>
 
-              {/* Photos Zone */}
-              <div className="absolute top-[37.5mm] left-[6mm] w-[96mm] h-[46mm] rounded-lg overflow-hidden bg-black flex items-center justify-center">
+              {/* 4 & 5. TWO CCTV CAMERA SNAPSHOTS (SIDE-BY-SIDE) */}
+              {/* CCTV Camera 1 (Left: Truck entry / front angle) */}
+              <div className="absolute top-[38mm] left-[6mm] w-[96mm] h-[48mm] rounded-lg overflow-hidden bg-black flex items-center justify-center">
                 {snapshots?.cam1 ? (
                   <img
                     src={snapshots.cam1}
-                    alt="Cam 1 Entry"
+                    alt="CCTV Cam 1 Snapshot"
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -495,11 +549,12 @@ export default function WeighbridgeSlipModal({
                 </div>
               </div>
 
-              <div className="absolute top-[37.5mm] left-[106mm] w-[96mm] h-[46mm] rounded-lg overflow-hidden bg-black flex items-center justify-center">
+              {/* CCTV Camera 2 (Right: Truck platform / rear angle) */}
+              <div className="absolute top-[38mm] left-[106mm] w-[96mm] h-[48mm] rounded-lg overflow-hidden bg-black flex items-center justify-center">
                 {snapshots?.cam2 ? (
                   <img
                     src={snapshots.cam2}
-                    alt="Cam 2 Exit"
+                    alt="CCTV Cam 2 Snapshot"
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -513,56 +568,68 @@ export default function WeighbridgeSlipModal({
                 </div>
               </div>
 
-              {/* Column 1 Data: Vehicle No, Party Name, Material */}
-              <div className="absolute top-[88.5mm] left-[6mm] w-[77mm] h-[10mm] flex items-center justify-center px-2">
-                <span className="font-mono font-black text-base text-black tracking-widest uppercase truncate">
+              {/* ═════════════════════════════════════════════════════════════
+                  ROW 1: Vehicle No. | 1st Weight | 2nd Weight | Net Weight
+                 ═════════════════════════════════════════════════════════════ */}
+              
+              {/* 6. Vehicle No. (e.g. 'TN28BF7423') */}
+              <div className="absolute top-[94mm] left-[6mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+                <span className="font-mono font-black text-sm text-black tracking-wider uppercase truncate">
                   {ticket.vehicleNumber}
                 </span>
               </div>
 
-              <div className="absolute top-[101.5mm] left-[6mm] w-[77mm] h-[10mm] flex items-center justify-center px-2">
+              {/* 7. 1st Weight (e.g. '44350-Kg') */}
+              <div className="absolute top-[94mm] left-[55mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+                <span className="font-mono font-black text-sm text-black tracking-wider">
+                  {formatWeight(firstWeight)}
+                </span>
+              </div>
+
+              {/* 8. 2nd Weight (e.g. '11550-Kg' or '-' if first trip only) */}
+              <div className="absolute top-[94mm] left-[104mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+                <span className="font-mono font-black text-sm text-black tracking-wider">
+                  {secondWeight != null
+                    ? formatWeight(secondWeight)
+                    : ticket.tripType === 'FIRST'
+                    ? '-'
+                    : formatWeight(firstWeight)}
+                </span>
+              </div>
+
+              {/* 9. Net Weight (e.g. '32800-Kg') */}
+              <div className="absolute top-[94mm] left-[153mm] w-[51mm] h-[8mm] flex items-center justify-center px-1">
+                <span className="font-mono font-black text-sm sm:text-base text-black tracking-wider">
+                  {netWeight != null ? formatWeight(netWeight) : '-'}
+                </span>
+              </div>
+
+              {/* ═════════════════════════════════════════════════════════════
+                  ROW 2: Party Name | Material | Charges | Signature
+                 ═════════════════════════════════════════════════════════════ */}
+
+              {/* 10. Party Name (e.g. 'KNM STOCKAT') */}
+              <div className="absolute top-[108mm] left-[6mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wide uppercase truncate">
                   {ticket.partyName || '-'}
                 </span>
               </div>
 
-              <div className="absolute top-[114.5mm] left-[6mm] w-[77mm] h-[10mm] flex items-center justify-center px-2">
+              {/* 11. Material (e.g. '.SEED') */}
+              <div className="absolute top-[108mm] left-[55mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wider uppercase truncate">
-                  {ticket.material || '-'}
+                  {formattedMaterial}
                 </span>
               </div>
 
-              {/* Column 2 Data: 1st Weight, 2nd Weight, Charges */}
-              <div className="absolute top-[88.5mm] left-[87mm] w-[63mm] h-[10mm] flex items-center justify-center px-2">
-                <span className="font-mono font-black text-sm text-black tracking-wider">
-                  {firstWeight != null ? `${firstWeight.toLocaleString('en-IN')} Kg` : '-'}
-                </span>
-              </div>
-
-              <div className="absolute top-[101.5mm] left-[87mm] w-[63mm] h-[10mm] flex items-center justify-center px-2">
-                <span className="font-mono font-black text-sm text-black tracking-wider">
-                  {secondWeight != null ? `${secondWeight.toLocaleString('en-IN')} Kg` : (ticket.tripType === 'FIRST' ? '-' : `${firstWeight?.toLocaleString('en-IN') || 0} Kg`)}
-                </span>
-              </div>
-
-              <div className="absolute top-[114.5mm] left-[87mm] w-[63mm] h-[10mm] flex items-center justify-center px-2">
+              {/* 12. Charges (e.g. '₹ 1.00') */}
+              <div className="absolute top-[108mm] left-[104mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wide">
-                  ₹ {Number(ticket.amount || 0).toFixed(2)}
+                  {formattedCharges}
                 </span>
               </div>
 
-              {/* Column 3 Data: Net Weight & Signature */}
-              <div className="absolute top-[88.5mm] left-[153mm] w-[50mm] h-[10mm] flex items-center justify-center px-1">
-                <span className="font-mono font-black text-base text-black tracking-tight">
-                  {netWeight != null ? `${netWeight.toLocaleString('en-IN')} Kg` : '-'}
-                </span>
-              </div>
-
-              <div className="absolute top-[102mm] left-[153mm] w-[50mm] h-[22mm] flex items-end justify-center pb-1">
-                <span className="text-[9px] font-mono text-zinc-400">
-                  {ticket.operatorName || 'OPERATOR'}
-                </span>
-              </div>
+              {/* Signature column is purposefully BLANK (for physical handwritten signature) */}
 
             </div>
           </div>
@@ -574,8 +641,8 @@ export default function WeighbridgeSlipModal({
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
             <span>
               {isStationeryMode
-                ? 'Printing in Stationery Overlay Mode (Only photos & text will print on your pre-printed stationery)'
-                : 'Printing Full Duplicate (Complete slip with logo, address & orange borders will print on plain paper)'}
+                ? 'Pre-Printed Stationery Mode Active: Only the 11 dynamic fields & 2 CCTV photos will print.'
+                : 'Plain Paper Mode Active: Full certificate with RVP logo, headers and borders will print.'}
             </span>
           </div>
 
@@ -592,3 +659,4 @@ export default function WeighbridgeSlipModal({
     </Dialog>
   );
 }
+

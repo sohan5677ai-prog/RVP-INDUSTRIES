@@ -133,7 +133,7 @@ export default function WeighbridgeSlipModal({
   <title>Weighment Slip #${ticket.ticketNo}</title>
   <style>
     @page {
-      size: 210mm 150mm;
+      size: A4 portrait; /* Exactly matches Crystal Reports driver: A4 210 x 297 mm Portrait */
       margin: 0mm;
     }
     * {
@@ -143,9 +143,9 @@ export default function WeighbridgeSlipModal({
     }
     html, body {
       width: 210mm;
-      height: 150mm;
+      height: 297mm;
       max-width: 210mm;
-      max-height: 150mm;
+      max-height: 297mm;
       margin: 0;
       padding: 0;
       overflow: hidden;
@@ -162,7 +162,7 @@ export default function WeighbridgeSlipModal({
       top: 0;
       left: 0;
       width: 210mm;
-      height: 150mm;
+      height: 150mm; /* Top 150mm corresponding to the physical pre-printed slip */
       max-width: 210mm;
       max-height: 150mm;
       overflow: hidden;
@@ -564,8 +564,8 @@ export default function WeighbridgeSlipModal({
           {/* Print Stylesheet Injector */}
           <style>{`
             @page {
-              size: 210mm 150mm; /* Exactly 21cm breadth x 15cm length */
-              margin: 0;
+              size: A4 portrait; /* Exactly matches Crystal Reports driver: A4 210 x 297 mm Portrait */
+              margin: 0mm;
             }
             @media print {
               html, body {
@@ -574,9 +574,9 @@ export default function WeighbridgeSlipModal({
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 210mm !important;
-                height: 150mm !important;
+                height: 297mm !important;
                 max-width: 210mm !important;
-                max-height: 150mm !important;
+                max-height: 297mm !important;
                 overflow: hidden !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;

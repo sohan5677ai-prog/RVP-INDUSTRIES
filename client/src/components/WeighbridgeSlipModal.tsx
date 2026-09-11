@@ -135,7 +135,7 @@ export default function WeighbridgeSlipModal({
   <style>
     @page {
       size: 210mm 150mm;
-      margin: 0;
+      margin: 0mm;
     }
     * {
       box-sizing: border-box;
@@ -152,7 +152,9 @@ export default function WeighbridgeSlipModal({
       overflow: hidden;
       background: #ffffff;
       color: #000000;
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: 'Courier New', Courier, monospace, Arial, sans-serif;
+      text-rendering: geometricPrecision;
+      -webkit-font-smoothing: antialiased;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -173,11 +175,12 @@ export default function WeighbridgeSlipModal({
       align-items: center;
       justify-content: center;
       text-align: center;
-      font-family: monospace, 'Courier New', Courier, sans-serif;
+      font-family: 'Courier New', Courier, monospace;
       font-weight: 900;
       color: #000000;
       line-height: 1;
       white-space: nowrap;
+      letter-spacing: 0.5px;
     }
     .val-sans {
       position: absolute;
@@ -185,18 +188,19 @@ export default function WeighbridgeSlipModal({
       align-items: center;
       justify-content: center;
       text-align: center;
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: Arial, Helvetica, 'Segoe UI', sans-serif;
       font-weight: 800;
       color: #000000;
       line-height: 1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      letter-spacing: 0.2px;
     }
     .cam-box {
       position: absolute;
       overflow: hidden;
-      border-radius: 4px;
+      border-radius: 2px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -206,6 +210,8 @@ export default function WeighbridgeSlipModal({
       width: 100%;
       height: 100%;
       object-fit: cover;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
     }
     .cam-stamp {
       position: absolute;
@@ -213,7 +219,7 @@ export default function WeighbridgeSlipModal({
       left: 4px;
       background: rgba(0,0,0,0.65);
       color: #ffffff;
-      font-family: monospace;
+      font-family: 'Courier New', Courier, monospace;
       font-size: 8px;
       padding: 1px 4px;
       border-radius: 2px;
@@ -432,7 +438,7 @@ export default function WeighbridgeSlipModal({
                 title="Prints only the 11 dynamic fields & 2 CCTV photos onto your physical pre-printed stationery"
               >
                 <Layers className="h-3.5 w-3.5 text-amber-500" />
-                Pre-Printed Slip
+                Crystal Plain 2 (Stationery)
               </button>
               <button
                 type="button"

@@ -271,62 +271,62 @@ export default function WeighbridgeSlipModal({
     ` : ''}
 
     <!-- 1. S. No. -->
-    <div class="val" style="top: 36mm; left: 23mm; width: 45mm; height: 8.5mm; font-size: 16px; letter-spacing: 1px;">
+    <div class="val" style="top: 43.5mm; left: 23mm; width: 45mm; height: 8mm; font-size: 16px; letter-spacing: 1px;">
       ${ticket.ticketNo}
     </div>
 
     <!-- 2. DATE -->
-    <div class="val" style="top: 36mm; left: 89mm; width: 44mm; height: 8.5mm; font-size: 14px;">
+    <div class="val" style="top: 43.5mm; left: 89mm; width: 44mm; height: 8mm; font-size: 14px;">
       ${formattedDate}
     </div>
 
     <!-- 3. TIME -->
-    <div class="val" style="top: 36mm; left: 154mm; width: 48mm; height: 8.5mm; font-size: 14px;">
+    <div class="val" style="top: 43.5mm; left: 154mm; width: 48mm; height: 8mm; font-size: 14px;">
       ${formattedTime}
     </div>
 
     <!-- 4. CCTV Camera 1 -->
-    <div class="cam-box" style="top: 47mm; left: 4mm; width: 96mm; height: 49mm;">
+    <div class="cam-box" style="top: 53.5mm; left: 4mm; width: 96mm; height: 52mm;">
       ${cam1Url && !cam1Failed ? `<img src="${cam1Url}" alt="CAM 1" /><div class="cam-stamp">CP IP Cam 1 · ${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
     <!-- 5. CCTV Camera 2 -->
-    <div class="cam-box" style="top: 47mm; left: 106mm; width: 96mm; height: 49mm;">
+    <div class="cam-box" style="top: 53.5mm; left: 106mm; width: 96mm; height: 52mm;">
       ${cam2Url && !cam2Failed ? `<img src="${cam2Url}" alt="CAM 2" /><div class="cam-stamp">CP IP Cam 2 · ${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
     <!-- 6. Vehicle No. -->
-    <div class="val" style="top: 102.5mm; left: 4mm; width: 48mm; height: 9.5mm; font-size: 15px; letter-spacing: 0.5px;">
+    <div class="val" style="top: 113.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 15px; letter-spacing: 0.5px;">
       ${ticket.vehicleNumber}
     </div>
 
     <!-- 7. 1st Weight -->
-    <div class="val" style="top: 102.5mm; left: 55mm; width: 48mm; height: 9.5mm; font-size: 15px;">
+    <div class="val" style="top: 113.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 15px;">
       ${formatWeight(firstWeight)}
     </div>
 
     <!-- 8. 2nd Weight -->
-    <div class="val" style="top: 102.5mm; left: 106mm; width: 48mm; height: 9.5mm; font-size: 15px;">
+    <div class="val" style="top: 113.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px;">
       ${secondWeight != null ? formatWeight(secondWeight) : (ticket.tripType === 'FIRST' ? '-' : formatWeight(firstWeight))}
     </div>
 
     <!-- 9. Net Weight -->
-    <div class="val" style="top: 102.5mm; left: 157mm; width: 48mm; height: 9.5mm; font-size: 15px;">
+    <div class="val" style="top: 113.5mm; left: 157mm; width: 48mm; height: 7.5mm; font-size: 15px;">
       ${netWeight != null ? formatWeight(netWeight) : '-'}
     </div>
 
     <!-- 10. Party Name -->
-    <div class="val-sans" style="top: 118mm; left: 4mm; width: 48mm; height: 9.5mm; font-size: 13px; padding: 0 2px;">
+    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">
       ${ticket.partyName || '-'}
     </div>
 
     <!-- 11. Material -->
-    <div class="val-sans" style="top: 118mm; left: 55mm; width: 48mm; height: 9.5mm; font-size: 13px; padding: 0 2px;">
+    <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">
       ${formattedMaterial}
     </div>
 
     <!-- 12. Charges -->
-    <div class="val" style="top: 118mm; left: 106mm; width: 48mm; height: 9.5mm; font-size: 14px;">
+    <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 14px;">
       ${formattedCharges}
     </div>
   </div>
@@ -717,73 +717,73 @@ export default function WeighbridgeSlipModal({
                   </div>
                 </div>
 
-                {/* S. No. Box Artwork Outline (Top: 36mm) */}
-                <div className="absolute top-[36mm] left-[2mm] w-[64mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
+                {/* S. No. Box Artwork Outline (Top: 43mm) */}
+                <div className="absolute top-[43mm] left-[2mm] w-[64mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
                   <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
                     S. No.
                   </div>
                 </div>
 
-                {/* DATE Box Artwork Outline (Top: 36mm) */}
-                <div className="absolute top-[36mm] left-[69mm] w-[60mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
+                {/* DATE Box Artwork Outline (Top: 43mm) */}
+                <div className="absolute top-[43mm] left-[69mm] w-[60mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
                   <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
                     DATE
                   </div>
                 </div>
 
-                {/* TIME Box Artwork Outline (Top: 36mm) */}
-                <div className="absolute top-[36mm] left-[132mm] w-[63.5mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
+                {/* TIME Box Artwork Outline (Top: 43mm) */}
+                <div className="absolute top-[43mm] left-[132mm] w-[63.5mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
                   <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
                     TIME
                   </div>
                 </div>
 
-                {/* Two Photo Frames Artwork Outline (Top: 47mm, Height: 49mm) */}
-                <div className="absolute top-[47mm] left-[4mm] w-[96mm] h-[49mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
-                <div className="absolute top-[47mm] left-[106mm] w-[96mm] h-[49mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
+                {/* Two Photo Frames Artwork Outline (Top: 53.5mm, Height: 52mm) */}
+                <div className="absolute top-[53.5mm] left-[4mm] w-[96mm] h-[52mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
+                <div className="absolute top-[53.5mm] left-[106mm] w-[96mm] h-[52mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
 
-                {/* ROW 1: Orange Headers (Top: 97.5mm) */}
-                <div className="absolute top-[97.5mm] left-[4mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                {/* ROW 1: Orange Headers (Top: 107mm) */}
+                <div className="absolute top-[107mm] left-[4mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Vehicle No.
                 </div>
-                <div className="absolute top-[97.5mm] left-[55mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[107mm] left-[55mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   1st Weight
                 </div>
-                <div className="absolute top-[97.5mm] left-[106mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[107mm] left-[106mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   2nd Weight
                 </div>
-                <div className="absolute top-[97.5mm] left-[157mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[107mm] left-[157mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Net Weight
                 </div>
 
-                {/* ROW 1: Cell Outlines (Top: 102mm) */}
-                <div className="absolute top-[102mm] left-[4mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[102mm] left-[55mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[102mm] left-[106mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[102mm] left-[157mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                {/* ROW 1: Cell Outlines (Top: 111.5mm) */}
+                <div className="absolute top-[111.5mm] left-[4mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[111.5mm] left-[55mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[111.5mm] left-[106mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[111.5mm] left-[157mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
 
-                {/* ROW 2: Orange Headers (Top: 113.5mm) */}
-                <div className="absolute top-[113.5mm] left-[4mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                {/* ROW 2: Orange Headers (Top: 122mm) */}
+                <div className="absolute top-[122mm] left-[4mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Party Name
                 </div>
-                <div className="absolute top-[113.5mm] left-[55mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[122mm] left-[55mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Material
                 </div>
-                <div className="absolute top-[113.5mm] left-[106mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[122mm] left-[106mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Charges
                 </div>
-                <div className="absolute top-[113.5mm] left-[157mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                <div className="absolute top-[122mm] left-[157mm] w-[48mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
                   Signature
                 </div>
 
-                {/* ROW 2: Cell Outlines (Top: 118mm) */}
-                <div className="absolute top-[118mm] left-[4mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[118mm] left-[55mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[118mm] left-[106mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
-                <div className="absolute top-[118mm] left-[157mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                {/* ROW 2: Cell Outlines (Top: 126.5mm) */}
+                <div className="absolute top-[126.5mm] left-[4mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[126.5mm] left-[55mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[126.5mm] left-[106mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[126.5mm] left-[157mm] w-[48mm] h-[9.5mm] border border-red-500 rounded-b-md" />
 
-                {/* Footer Strip (Top: 130mm) */}
-                <div className="absolute top-[130mm] left-[2mm] right-[2mm] flex items-center justify-between text-[8.5px]">
+                {/* Footer Strip (Top: 137mm) */}
+                <div className="absolute top-[137mm] left-[2mm] right-[2mm] flex items-center justify-between text-[8.5px]">
                   <div className="flex items-center gap-2">
                     <div className="bg-red-700 text-white font-black px-2 py-0.5 rounded-xs text-[10px] tracking-wider">
                       100 TON
@@ -808,28 +808,28 @@ export default function WeighbridgeSlipModal({
             <div className="absolute inset-0 pointer-events-none">
               
               {/* 1. S. No. (e.g. '2807') */}
-              <div className="absolute top-[36mm] left-[23mm] w-[45mm] h-[8.5mm] flex items-center justify-center">
+              <div className="absolute top-[43.5mm] left-[23mm] w-[45mm] h-[8mm] flex items-center justify-center">
                 <span className="font-mono font-black text-base text-black tracking-wider">
                   {ticket.ticketNo}
                 </span>
               </div>
 
               {/* 2. DATE (e.g. '09-09-2026') */}
-              <div className="absolute top-[36mm] left-[89mm] w-[44mm] h-[8.5mm] flex items-center justify-center">
+              <div className="absolute top-[43.5mm] left-[89mm] w-[44mm] h-[8mm] flex items-center justify-center">
                 <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedDate}
                 </span>
               </div>
 
               {/* 3. TIME (e.g. '01:26:21 pm') */}
-              <div className="absolute top-[36mm] left-[154mm] w-[48mm] h-[8.5mm] flex items-center justify-center">
+              <div className="absolute top-[43.5mm] left-[154mm] w-[48mm] h-[8mm] flex items-center justify-center">
                 <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedTime}
                 </span>
               </div>
 
               {/* 4. CCTV Camera 1 (Left: Truck Entry / Front angle) */}
-              <div className="absolute top-[47mm] left-[4mm] w-[96mm] h-[49mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
+              <div className="absolute top-[53.5mm] left-[4mm] w-[96mm] h-[52mm] rounded-xs overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
                 {cam1Url && !cam1Failed ? (
                   <img
                     src={cam1Url}
@@ -858,7 +858,7 @@ export default function WeighbridgeSlipModal({
               </div>
 
               {/* 5. CCTV Camera 2 (Right: Truck Platform / Rear angle) */}
-              <div className="absolute top-[47mm] left-[106mm] w-[96mm] h-[49mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
+              <div className="absolute top-[53.5mm] left-[106mm] w-[96mm] h-[52mm] rounded-xs overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
                 {cam2Url && !cam2Failed ? (
                   <img
                     src={cam2Url}
@@ -892,21 +892,21 @@ export default function WeighbridgeSlipModal({
                  ═════════════════════════════════════════════════════════════ */}
               
               {/* 6. Vehicle No. (e.g. 'AP39UX9999') */}
-              <div className="absolute top-[102.5mm] left-[4mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[113.5mm] left-[4mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider uppercase truncate">
                   {ticket.vehicleNumber}
                 </span>
               </div>
 
               {/* 7. 1st Weight (e.g. '0-Kg') */}
-              <div className="absolute top-[102.5mm] left-[55mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[113.5mm] left-[55mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider">
                   {formatWeight(firstWeight)}
                 </span>
               </div>
 
               {/* 8. 2nd Weight (e.g. '-' or '<wt>-Kg') */}
-              <div className="absolute top-[102.5mm] left-[106mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[113.5mm] left-[106mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider">
                   {secondWeight != null
                     ? formatWeight(secondWeight)
@@ -917,7 +917,7 @@ export default function WeighbridgeSlipModal({
               </div>
 
               {/* 9. Net Weight (e.g. '-') */}
-              <div className="absolute top-[102.5mm] left-[157mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[113.5mm] left-[157mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm sm:text-base text-black tracking-wider">
                   {netWeight != null ? formatWeight(netWeight) : '-'}
                 </span>
@@ -929,21 +929,21 @@ export default function WeighbridgeSlipModal({
                  ═════════════════════════════════════════════════════════════ */}
 
               {/* 10. Party Name */}
-              <div className="absolute top-[118mm] left-[4mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[128.5mm] left-[4mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wide uppercase truncate">
                   {ticket.partyName || '-'}
                 </span>
               </div>
 
               {/* 11. Material (e.g. '.PAPPU' or '.SEED') */}
-              <div className="absolute top-[118mm] left-[55mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[128.5mm] left-[55mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wider uppercase truncate">
                   {formattedMaterial}
                 </span>
               </div>
 
               {/* 12. Charges (e.g. '₹ 100.00') */}
-              <div className="absolute top-[118mm] left-[106mm] w-[48mm] h-[9.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[128.5mm] left-[106mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wide">
                   {formattedCharges}
                 </span>

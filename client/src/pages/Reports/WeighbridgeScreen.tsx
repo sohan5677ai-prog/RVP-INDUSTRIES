@@ -26,7 +26,6 @@ import {
   Copy,
   Check,
   Download,
-  ExternalLink,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';

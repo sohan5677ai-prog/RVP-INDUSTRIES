@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Printer, Sliders, FileText, Layers, Eye, EyeOff } from 'lucide-react';
+import { Printer, Sliders, FileText, Layers, Eye, EyeOff, Video } from 'lucide-react';
 import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -12,7 +12,7 @@ interface WeighbridgeSlipModalProps {
   onClose: () => void;
 }
 
-const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v2';
+const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v3';
 
 interface PrinterCalibration {
   offsetXmm: number;
@@ -40,6 +40,19 @@ export default function WeighbridgeSlipModal({
 
   const [showCalibrationBar, setShowCalibrationBar] = useState<boolean>(false);
   const [showScreenGuide, setShowScreenGuide] = useState<boolean>(true);
+
+  // Camera images with automatic fallback to cloud/server relay
+  const [cam1Url, setCam1Url] = useState<string | null>(null);
+  const [cam2Url, setCam2Url] = useState<string | null>(null);
+  const [cam1Failed, setCam1Failed] = useState(false);
+  const [cam2Failed, setCam2Failed] = useState(false);
+
+  useEffect(() => {
+    setCam1Url(snapshots?.cam1 || '/api/weighbridge/cctv/snapshot?cam=1');
+    setCam2Url(snapshots?.cam2 || '/api/weighbridge/cctv/snapshot?cam=2');
+    setCam1Failed(false);
+    setCam2Failed(false);
+  }, [snapshots, ticket?.id]);
 
   useEffect(() => {
     try {
@@ -111,7 +124,7 @@ export default function WeighbridgeSlipModal({
 
   return (
     <Dialog open={!!ticket} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-4xl p-0 overflow-hidden print:m-0 print:p-0 print:border-none print:shadow-none bg-background text-foreground">
+      <DialogContent className="max-w-[920px] w-[96vw] p-0 overflow-hidden print:m-0 print:p-0 print:border-none print:shadow-none bg-background text-foreground">
         {/* Top Modal Controls Header (Hidden in Print) */}
         <div className="p-4 border-b border-border bg-card/60 flex flex-wrap items-center justify-between gap-3 print:hidden">
           <div className="flex items-center gap-2">
@@ -265,7 +278,7 @@ export default function WeighbridgeSlipModal({
         )}
 
         {/* Modal Body / Print Preview Container */}
-        <div className="p-4 sm:p-6 overflow-auto bg-stone-200/60 dark:bg-stone-950/60 flex items-center justify-center print:p-0 print:bg-transparent">
+        <div className="p-3 sm:p-5 overflow-x-auto flex items-center justify-center bg-stone-200/80 dark:bg-stone-900/80 print:p-0 print:bg-transparent">
           {/* Print Stylesheet Injector */}
           <style>{`
             @page {
@@ -320,36 +333,38 @@ export default function WeighbridgeSlipModal({
           `}</style>
 
           {/* 
-            Exact Stationery Document Sheet
-            Standard Landscape dimensions: 210mm x 148mm
+            Exact Stationery Document Sheet (Standard 210mm x 148mm)
+            Both the artwork template and the dynamic values share identical millimeter coordinates.
           */}
           <div
             id="rvp-kata-print-container"
             style={{
               width: '210mm',
               height: '148mm',
+              minWidth: '210mm',
+              minHeight: '148mm',
               transform: `translate(${calibration.offsetXmm}mm, ${calibration.offsetYmm}mm)`,
             }}
-            className="relative bg-white text-black font-sans box-border shadow-xl rounded-sm print:rounded-none select-text overflow-hidden"
+            className="relative bg-white text-black font-sans box-border shadow-2xl rounded-sm print:rounded-none select-text overflow-hidden"
           >
             {/* ═════════════════════════════════════════════════════════════════
-                LAYER 1: PRE-PRINTED STATIONERY ARTWORK 
-                (Matches user's physical paper: RVP header, Ganesha, 24h dial, 
-                 yellow S. No./Date/Time tags, 4x2 orange table headers, 100 TON)
+                LAYER 1: PRE-PRINTED STATIONERY ARTWORK
+                Matches user's physical paper: RVP header, Ganesha, 24h dial, 
+                yellow S. No./Date/Time tags, 4x2 orange headers, and 100 TON.
                 - In 'stationery' mode: HIDDEN during print; shown on-screen as watermark guide.
                 - In 'plain' mode: fully printed in sharp color.
                ═════════════════════════════════════════════════════════════════ */}
             <div
               className={cn(
-                'rvp-stationery-artwork absolute inset-0 pointer-events-none p-3',
-                isStationeryMode && (!showScreenGuide ? 'hidden' : 'opacity-30 print:hidden')
+                'rvp-stationery-artwork absolute inset-0 pointer-events-none p-[3mm]',
+                isStationeryMode && (!showScreenGuide ? 'hidden' : 'opacity-35 print:hidden')
               )}
             >
-              {/* Outer decorative red/orange border */}
-              <div className="w-full h-full border-2 border-red-600 rounded-lg p-1.5 relative flex flex-col justify-between">
+              {/* Outer double red border */}
+              <div className="w-full h-full border-2 border-red-600 rounded-lg p-[1.5mm] relative">
                 
-                {/* Header Row */}
-                <div className="flex items-center justify-between px-2 pt-0.5">
+                {/* Header (Top 4mm to 36mm) */}
+                <div className="absolute top-[2mm] left-[2mm] right-[2mm] h-[34mm] flex items-center justify-between px-2">
                   {/* Ganesha Sacred Motif */}
                   <div className="w-16 h-16 shrink-0 flex items-center justify-center">
                     <svg viewBox="0 0 100 100" className="w-14 h-14 text-red-600 fill-current">
@@ -364,7 +379,7 @@ export default function WeighbridgeSlipModal({
 
                   {/* Center Title & Government Approved */}
                   <div className="text-center flex-1 px-2">
-                    <h1 className="text-[22px] font-black tracking-tight text-red-700 leading-tight uppercase font-serif">
+                    <h1 className="text-[23px] font-black tracking-tight text-red-700 leading-tight uppercase font-serif">
                       RVP WEIGH BRIDGE
                     </h1>
                     <div className="inline-block bg-yellow-400 text-black px-3 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider border border-yellow-500 shadow-2xs">
@@ -388,92 +403,73 @@ export default function WeighbridgeSlipModal({
                   </div>
                 </div>
 
-                {/* Metadata Row (S. No., DATE, TIME) */}
-                <div className="grid grid-cols-12 gap-2 px-1 mt-0.5">
-                  {/* S. No. Box */}
-                  <div className="col-span-4 border-2 border-amber-500 rounded-md h-8 flex items-center overflow-hidden bg-white">
-                    <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
-                      S. No.
-                    </div>
-                    <div className="flex-1 h-full" />
-                  </div>
-
-                  {/* DATE Box */}
-                  <div className="col-span-4 border-2 border-amber-500 rounded-md h-8 flex items-center overflow-hidden bg-white">
-                    <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
-                      DATE
-                    </div>
-                    <div className="flex-1 h-full" />
-                  </div>
-
-                  {/* TIME Box */}
-                  <div className="col-span-4 border-2 border-amber-500 rounded-md h-8 flex items-center overflow-hidden bg-white">
-                    <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
-                      TIME
-                    </div>
-                    <div className="flex-1 h-full" />
+                {/* S. No. Box Artwork Outline (Top: 36.5mm) */}
+                <div className="absolute top-[36.5mm] left-[2mm] w-[64mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
+                  <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
+                    S. No.
                   </div>
                 </div>
 
-                {/* Two Photo Frames Outline */}
-                <div className="grid grid-cols-2 gap-2 px-1 mt-1 h-[48mm]">
-                  <div className="border-2 border-red-500 rounded-lg overflow-hidden flex items-center justify-center bg-red-50/10" />
-                  <div className="border-2 border-red-500 rounded-lg overflow-hidden flex items-center justify-center bg-red-50/10" />
-                </div>
-
-                {/* 4-Columns x 2-Rows Data Table Outline */}
-                <div className="px-1 mt-0.5 space-y-1 text-[9px]">
-                  {/* ROW 1: Vehicle No. | 1st Weight | 2nd Weight | Net Weight */}
-                  <div>
-                    <div className="grid grid-cols-4 gap-1 mb-0.5">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        Vehicle No.
-                      </div>
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        1st Weight
-                      </div>
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        2nd Weight
-                      </div>
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        Net Weight
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1">
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                    </div>
-                  </div>
-
-                  {/* ROW 2: Party Name | Material | Charges | Signature */}
-                  <div>
-                    <div className="grid grid-cols-4 gap-1 mb-0.5">
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        Party Name
-                      </div>
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        Material
-                      </div>
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        Charges
-                      </div>
-                      <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] py-0.5 uppercase text-center rounded-t-xs">
-                        Signature
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1">
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                      <div className="border border-red-500 rounded-b-md h-7" />
-                    </div>
+                {/* DATE Box Artwork Outline (Top: 36.5mm) */}
+                <div className="absolute top-[36.5mm] left-[69mm] w-[60mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
+                  <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
+                    DATE
                   </div>
                 </div>
 
-                {/* Footer Strip */}
-                <div className="flex items-center justify-between px-2 pt-0.5 text-[8.5px]">
+                {/* TIME Box Artwork Outline (Top: 36.5mm) */}
+                <div className="absolute top-[36.5mm] left-[132mm] w-[63.5mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
+                  <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2.5 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
+                    TIME
+                  </div>
+                </div>
+
+                {/* Two Photo Frames Artwork Outline (Top: 47mm, Height: 48mm) */}
+                <div className="absolute top-[47mm] left-[2mm] w-[95mm] h-[48mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
+                <div className="absolute top-[47mm] left-[100.5mm] w-[95mm] h-[48mm] border-2 border-red-500 rounded-lg overflow-hidden bg-red-50/10" />
+
+                {/* ROW 1: Orange Headers (Top: 97mm) */}
+                <div className="absolute top-[97mm] left-[2mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  Vehicle No.
+                </div>
+                <div className="absolute top-[97mm] left-[51mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  1st Weight
+                </div>
+                <div className="absolute top-[97mm] left-[100mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  2nd Weight
+                </div>
+                <div className="absolute top-[97mm] left-[149mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  Net Weight
+                </div>
+
+                {/* ROW 1: Cell Outlines (Top: 101.5mm) */}
+                <div className="absolute top-[101.5mm] left-[2mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[101.5mm] left-[51mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[101.5mm] left-[100mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[101.5mm] left-[149mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+
+                {/* ROW 2: Orange Headers (Top: 112.5mm) */}
+                <div className="absolute top-[112.5mm] left-[2mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  Party Name
+                </div>
+                <div className="absolute top-[112.5mm] left-[51mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  Material
+                </div>
+                <div className="absolute top-[112.5mm] left-[100mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  Charges
+                </div>
+                <div className="absolute top-[112.5mm] left-[149mm] w-[46.5mm] h-[4.5mm] bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold text-[8.5px] flex items-center justify-center uppercase rounded-t-xs">
+                  Signature
+                </div>
+
+                {/* ROW 2: Cell Outlines (Top: 117mm) */}
+                <div className="absolute top-[117mm] left-[2mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[117mm] left-[51mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[117mm] left-[100mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+                <div className="absolute top-[117mm] left-[149mm] w-[46.5mm] h-[9mm] border border-red-500 rounded-b-md" />
+
+                {/* Footer Strip (Top: 128mm) */}
+                <div className="absolute top-[128mm] left-[2mm] right-[2mm] flex items-center justify-between text-[8.5px]">
                   <div className="flex items-center gap-2">
                     <div className="bg-red-700 text-white font-black px-2 py-0.5 rounded-xs text-[10px] tracking-wider">
                       100 TON
@@ -491,103 +487,112 @@ export default function WeighbridgeSlipModal({
             </div>
 
             {/* ═════════════════════════════════════════════════════════════════
-                LAYER 2: ONLY THE 11 DYNAMIC FIELDS & 2 CCTV CAMERA SNAPSHOTS
-                - Positioned with precise millimeter coordinates to align directly
-                  inside the physical boxes on the pre-printed paper.
-                - 1. S. No.
-                - 2. Date
-                - 3. Time
-                - 4 & 5. 2 CCTV Camera Snapshots
-                - 6. Vehicle No.
-                - 7. 1st Weight
-                - 8. 2nd Weight
-                - 9. Net Weight
-                - 10. Party Name
-                - 11. Material
-                - 12. Charges
+                LAYER 2: THE 11 DYNAMIC FIELDS & 2 CCTV CAMERA SNAPSHOTS
+                Placed at the EXACT millimeter coordinates so values sit squarely
+                inside the physical boxes on your pre-printed stationery slip!
                ═════════════════════════════════════════════════════════════════ */}
             <div className="absolute inset-0 pointer-events-none">
               
-              {/* 1. S. No. (e.g. '2879') */}
-              <div className="absolute top-[28mm] left-[23mm] w-[46mm] h-[8mm] flex items-center justify-center">
+              {/* 1. S. No. (e.g. '2879') - sits inside white box next to 'S. No.' tag */}
+              <div className="absolute top-[39.5mm] left-[22mm] w-[46mm] h-[8.5mm] flex items-center justify-center">
                 <span className="font-mono font-black text-base text-black tracking-wider">
                   {ticket.ticketNo}
                 </span>
               </div>
 
-              {/* 2. DATE (e.g. '01-09-2026') */}
-              <div className="absolute top-[28mm] left-[89mm] w-[46mm] h-[8mm] flex items-center justify-center">
+              {/* 2. DATE (e.g. '01-09-2026') - sits inside white box next to 'DATE' tag */}
+              <div className="absolute top-[39.5mm] left-[89mm] w-[43mm] h-[8.5mm] flex items-center justify-center">
                 <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedDate}
                 </span>
               </div>
 
-              {/* 3. TIME (e.g. '12:50:04 PM') */}
-              <div className="absolute top-[28mm] left-[155mm] w-[48mm] h-[8mm] flex items-center justify-center">
+              {/* 3. TIME (e.g. '12:50:04 PM') - sits inside white box next to 'TIME' tag */}
+              <div className="absolute top-[39.5mm] left-[152mm] w-[46mm] h-[8.5mm] flex items-center justify-center">
                 <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
                   {formattedTime}
                 </span>
               </div>
 
-              {/* 4 & 5. TWO CCTV CAMERA SNAPSHOTS (SIDE-BY-SIDE) */}
-              {/* CCTV Camera 1 (Left: Truck entry / front angle) */}
-              <div className="absolute top-[38mm] left-[6mm] w-[96mm] h-[48mm] rounded-lg overflow-hidden bg-black flex items-center justify-center">
-                {snapshots?.cam1 ? (
+              {/* 4. CCTV Camera 1 (Left: Truck Entry / Front angle) */}
+              <div className="absolute top-[50mm] left-[5mm] w-[95mm] h-[48mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
+                {cam1Url && !cam1Failed ? (
                   <img
-                    src={snapshots.cam1}
-                    alt="CCTV Cam 1 Snapshot"
+                    src={cam1Url}
+                    alt="CCTV Cam 1"
+                    onError={() => {
+                      if (!cam1Url.includes('/api/weighbridge/cctv/snapshot')) {
+                        setCam1Url('/api/weighbridge/cctv/snapshot?cam=1');
+                      } else {
+                        setCam1Failed(true);
+                      }
+                    }}
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="text-[10px] text-zinc-400 font-mono text-center">
-                    [CP PLUS CAM 1 - ENTRY]
+                  <div className="flex flex-col items-center justify-center text-stone-400 text-xs font-mono gap-1 print:hidden">
+                    <Video className="h-5 w-5 opacity-40" />
+                    <span>[CAM 1 ENTRY]</span>
                   </div>
                 )}
-                {/* OSD Stamp inside camera photo matching CP PLUS photo */}
-                <div className="absolute bottom-1 left-1.5 bg-black/60 text-white font-mono text-[8px] px-1 py-0.2 rounded-xs pointer-events-none">
-                  CP IP Cam 1 · {formattedDate} {formattedTime}
-                </div>
+                {/* CP PLUS OSD Stamp */}
+                {!cam1Failed && (
+                  <div className="absolute bottom-1 left-1.5 bg-black/60 text-white font-mono text-[8px] px-1 py-0.2 rounded-xs pointer-events-none">
+                    CP IP Cam 1 · {formattedDate} {formattedTime}
+                  </div>
+                )}
               </div>
 
-              {/* CCTV Camera 2 (Right: Truck platform / rear angle) */}
-              <div className="absolute top-[38mm] left-[106mm] w-[96mm] h-[48mm] rounded-lg overflow-hidden bg-black flex items-center justify-center">
-                {snapshots?.cam2 ? (
+              {/* 5. CCTV Camera 2 (Right: Truck Platform / Rear angle) */}
+              <div className="absolute top-[50mm] left-[103.5mm] w-[95mm] h-[48mm] rounded-lg overflow-hidden flex items-center justify-center bg-stone-100 print:bg-transparent">
+                {cam2Url && !cam2Failed ? (
                   <img
-                    src={snapshots.cam2}
-                    alt="CCTV Cam 2 Snapshot"
+                    src={cam2Url}
+                    alt="CCTV Cam 2"
+                    onError={() => {
+                      if (!cam2Url.includes('/api/weighbridge/cctv/snapshot')) {
+                        setCam2Url('/api/weighbridge/cctv/snapshot?cam=2');
+                      } else {
+                        setCam2Failed(true);
+                      }
+                    }}
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="text-[10px] text-zinc-400 font-mono text-center">
-                    [CP PLUS CAM 2 - EXIT]
+                  <div className="flex flex-col items-center justify-center text-stone-400 text-xs font-mono gap-1 print:hidden">
+                    <Video className="h-5 w-5 opacity-40" />
+                    <span>[CAM 2 EXIT]</span>
                   </div>
                 )}
-                {/* OSD Stamp inside camera photo matching CP PLUS photo */}
-                <div className="absolute bottom-1 left-1.5 bg-black/60 text-white font-mono text-[8px] px-1 py-0.2 rounded-xs pointer-events-none">
-                  CP IP Cam 2 · {formattedDate} {formattedTime}
-                </div>
+                {/* CP PLUS OSD Stamp */}
+                {!cam2Failed && (
+                  <div className="absolute bottom-1 left-1.5 bg-black/60 text-white font-mono text-[8px] px-1 py-0.2 rounded-xs pointer-events-none">
+                    CP IP Cam 2 · {formattedDate} {formattedTime}
+                  </div>
+                )}
               </div>
 
               {/* ═════════════════════════════════════════════════════════════
-                  ROW 1: Vehicle No. | 1st Weight | 2nd Weight | Net Weight
+                  ROW 1 DATA: Vehicle No. | 1st Weight | 2nd Weight | Net Weight
+                  Sits inside the white boxes under Row 1 Orange Headers
                  ═════════════════════════════════════════════════════════════ */}
               
               {/* 6. Vehicle No. (e.g. 'TN28BF7423') */}
-              <div className="absolute top-[94mm] left-[6mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[104.5mm] left-[5mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider uppercase truncate">
                   {ticket.vehicleNumber}
                 </span>
               </div>
 
               {/* 7. 1st Weight (e.g. '44350-Kg') */}
-              <div className="absolute top-[94mm] left-[55mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[104.5mm] left-[54mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider">
                   {formatWeight(firstWeight)}
                 </span>
               </div>
 
               {/* 8. 2nd Weight (e.g. '11550-Kg' or '-' if first trip only) */}
-              <div className="absolute top-[94mm] left-[104mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[104.5mm] left-[103mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wider">
                   {secondWeight != null
                     ? formatWeight(secondWeight)
@@ -598,38 +603,39 @@ export default function WeighbridgeSlipModal({
               </div>
 
               {/* 9. Net Weight (e.g. '32800-Kg') */}
-              <div className="absolute top-[94mm] left-[153mm] w-[51mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[104.5mm] left-[152mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm sm:text-base text-black tracking-wider">
                   {netWeight != null ? formatWeight(netWeight) : '-'}
                 </span>
               </div>
 
               {/* ═════════════════════════════════════════════════════════════
-                  ROW 2: Party Name | Material | Charges | Signature
+                  ROW 2 DATA: Party Name | Material | Charges | Signature
+                  Sits inside the white boxes under Row 2 Orange Headers
                  ═════════════════════════════════════════════════════════════ */}
 
               {/* 10. Party Name (e.g. 'KNM STOCKAT') */}
-              <div className="absolute top-[108mm] left-[6mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[120mm] left-[5mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wide uppercase truncate">
                   {ticket.partyName || '-'}
                 </span>
               </div>
 
               {/* 11. Material (e.g. '.SEED') */}
-              <div className="absolute top-[108mm] left-[55mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[120mm] left-[54mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs text-black tracking-wider uppercase truncate">
                   {formattedMaterial}
                 </span>
               </div>
 
               {/* 12. Charges (e.g. '₹ 1.00') */}
-              <div className="absolute top-[108mm] left-[104mm] w-[47mm] h-[8mm] flex items-center justify-center px-1">
+              <div className="absolute top-[120mm] left-[103mm] w-[46.5mm] h-[9mm] flex items-center justify-center px-1">
                 <span className="font-mono font-black text-sm text-black tracking-wide">
                   {formattedCharges}
                 </span>
               </div>
 
-              {/* Signature column is purposefully BLANK (for physical handwritten signature) */}
+              {/* Signature is purposefully left BLANK for manual pen signing */}
 
             </div>
           </div>
@@ -659,4 +665,5 @@ export default function WeighbridgeSlipModal({
     </Dialog>
   );
 }
+
 

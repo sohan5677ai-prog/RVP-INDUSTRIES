@@ -80,6 +80,60 @@ class ServerScaleService {
     return await SerialPort.list();
   }
 
+  private remoteWatchdogTimer: NodeJS.Timeout | null = null;
+  private isRemoteActive: boolean = false;
+
+  public updateClientReading(reading: {
+    liveWeight: number;
+    isStable: boolean;
+    rawText?: string;
+    port?: string;
+    baudRate?: number;
+  }) {
+    this.isRemoteActive = true;
+    if (this.remoteWatchdogTimer) {
+      clearTimeout(this.remoteWatchdogTimer);
+    }
+    // If no remote packet for 6 seconds and local serialPort isn't open, mark disconnected
+    this.remoteWatchdogTimer = setTimeout(() => {
+      this.isRemoteActive = false;
+      this.remoteWatchdogTimer = null;
+      if (!this.serialPort || !this.serialPort.isOpen) {
+        this.currentReading.isConnected = false;
+        this.currentReading.error = 'Remote scale stream timed out (Terminal offline)';
+        this.notifyListeners();
+      }
+    }, 6000);
+
+    const weight = Math.round(Number(reading.liveWeight) || 0);
+    this.currentReading = {
+      ...this.currentReading,
+      liveWeight: weight,
+      isStable: !!reading.isStable,
+      rawText: reading.rawText || `${weight} kg`,
+      lastUpdated: Date.now(),
+      isConnected: true,
+      port: reading.port || this.portName,
+      baudRate: reading.baudRate || this.baudRate,
+      error: null,
+    };
+
+    this.notifyListeners();
+  }
+
+  public reportClientDisconnect(err?: string) {
+    if (this.remoteWatchdogTimer) {
+      clearTimeout(this.remoteWatchdogTimer);
+      this.remoteWatchdogTimer = null;
+    }
+    this.isRemoteActive = false;
+    if (!this.serialPort || !this.serialPort.isOpen) {
+      this.currentReading.isConnected = false;
+      this.currentReading.error = err || 'Scale disconnected from terminal';
+      this.notifyListeners();
+    }
+  }
+
   public start() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -107,8 +161,10 @@ class ServerScaleService {
       port.open(async (err) => {
         this.isConnecting = false;
         if (err) {
-          this.currentReading.isConnected = false;
-          this.currentReading.error = `Could not open ${this.portName}: ${err.message}`;
+          if (!this.isRemoteActive) {
+            this.currentReading.isConnected = false;
+            this.currentReading.error = `Could not open ${this.portName}: ${err.message}`;
+          }
           
           try {
             const ports = await SerialPort.list();
@@ -119,8 +175,10 @@ class ServerScaleService {
             }));
           } catch {}
 
-          this.notifyListeners();
-          this.scheduleReconnect(4000);
+          if (!this.isRemoteActive) {
+            this.notifyListeners();
+          }
+          this.scheduleReconnect(5000);
           return;
         }
 
@@ -136,25 +194,31 @@ class ServerScaleService {
 
         port.on('error', (portErr) => {
           logger.warn(`[scale] Port ${this.portName} error: ${portErr.message}`);
-          this.currentReading.isConnected = false;
-          this.currentReading.error = portErr.message;
-          this.notifyListeners();
-          this.scheduleReconnect(3000);
+          if (!this.isRemoteActive) {
+            this.currentReading.isConnected = false;
+            this.currentReading.error = portErr.message;
+            this.notifyListeners();
+          }
+          this.scheduleReconnect(4000);
         });
 
         port.on('close', () => {
           logger.info(`[scale] Port ${this.portName} closed.`);
-          this.currentReading.isConnected = false;
-          this.notifyListeners();
-          this.scheduleReconnect(3000);
+          if (!this.isRemoteActive) {
+            this.currentReading.isConnected = false;
+            this.notifyListeners();
+          }
+          this.scheduleReconnect(4000);
         });
       });
     } catch (e: any) {
       this.isConnecting = false;
-      this.currentReading.isConnected = false;
-      this.currentReading.error = e.message;
-      this.notifyListeners();
-      this.scheduleReconnect(4000);
+      if (!this.isRemoteActive) {
+        this.currentReading.isConnected = false;
+        this.currentReading.error = e.message;
+        this.notifyListeners();
+      }
+      this.scheduleReconnect(5000);
     }
   }
 

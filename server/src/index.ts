@@ -128,6 +128,9 @@ app.get("/api/weighbridge/scale/ports", (req, res, next) => {
 app.post("/api/weighbridge/scale/config", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.configScalePortHandler(req, res)).catch(next);
 });
+app.post("/api/weighbridge/scale/broadcast", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.broadcastScaleReadingHandler(req, res)).catch(next);
+});
 
 app.use("/api", apiLimiter, apiRoutes);
 

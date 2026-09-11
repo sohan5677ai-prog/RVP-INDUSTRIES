@@ -29,6 +29,9 @@ router.get('/scale/ports', (req, res, next) => {
 router.post('/scale/config', (req, res, next) => {
   import('../controllers/weighbridge.controller.js').then((m) => m.configScalePortHandler(req, res)).catch(next);
 });
+router.post('/scale/broadcast', (req, res, next) => {
+  import('../controllers/weighbridge.controller.js').then((m) => m.broadcastScaleReadingHandler(req, res)).catch(next);
+});
 
 router.get('/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets', asyncHandler(getTicketsHandler));

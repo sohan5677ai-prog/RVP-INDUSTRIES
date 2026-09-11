@@ -291,3 +291,27 @@ export async function configScalePortHandler(req: Request, res: Response) {
   await service.setConfig(String(port), baudRate ? Number(baudRate) : undefined);
   res.json({ success: true, reading: service.getReading() });
 }
+
+/**
+ * Broadcast live scale weight pushed from a terminal (e.g. Kata Cabin via Web Serial).
+ */
+export async function broadcastScaleReadingHandler(req: Request, res: Response) {
+  const { liveWeight, isStable, rawText, port, isConnected, error } = req.body;
+  const { getServerScaleService } = await import('../lib/serverScaleService.js');
+  const service = getServerScaleService();
+
+  if (isConnected === false) {
+    service.reportClientDisconnect(error);
+  } else {
+    service.updateClientReading({
+      liveWeight: Number(liveWeight),
+      isStable: !!isStable,
+      rawText: rawText ? String(rawText) : undefined,
+      port: port ? String(port) : undefined,
+    });
+  }
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ success: true, reading: service.getReading() });
+}
+

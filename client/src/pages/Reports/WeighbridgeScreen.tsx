@@ -450,21 +450,23 @@ export default function WeighbridgeScreen() {
           <div className="flex flex-wrap items-center gap-2">
             {/* Universal Scale Network Hub Status Badge */}
             <div className="flex items-center">
-              {scale.hardwareConnected ? (
+              {scale.isScaleOnline ? (
                 <div
                   className="flex items-center gap-2 h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-mono font-medium shadow-sm"
-                  title="Live Scale Stream broadcasted from server COM4 to all devices on network"
+                  title="Live Scale Stream active and broadcasted universally across network"
                 >
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                   </span>
-                  <span>Scale Hub: Online ({scale.serverPort || 'COM4'})</span>
+                  <span>
+                    Scale Hub: Online ({scale.serverPort || 'COM4'}{scale.connectionMode === 'LOCAL_USB' ? ' · USB' : ' · NET'})
+                  </span>
                 </div>
               ) : (
                 <div
                   className="flex items-center gap-2 h-9 px-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-medium shadow-sm"
-                  title="Server is broadcasting across network, but USB RS-232 cable is not detected on COM4"
+                  title="Scale not detected on USB or network"
                 >
                   <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
                   <span>Scale Hub: Offline ({scale.serverPort || 'COM4'} not detected)</span>
@@ -865,8 +867,8 @@ export default function WeighbridgeScreen() {
                   <span className="font-bold tracking-wider text-stone-300">
                     {isManualOverride
                       ? 'MANUAL OVERRIDE'
-                      : scale.hardwareConnected
-                        ? `SCALE INDICATOR (${scale.serverPort || 'COM4'})`
+                      : scale.isScaleOnline
+                        ? `SCALE INDICATOR (${scale.serverPort || 'COM4'}${scale.connectionMode === 'LOCAL_USB' ? ' · USB' : ''})`
                         : `SCALE INDICATOR (${scale.serverPort || 'COM4'} OFFLINE)`}
                   </span>
                 </div>
@@ -907,7 +909,7 @@ export default function WeighbridgeScreen() {
                       'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
                       isNoDls
                         ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                        : !scale.hardwareConnected
+                        : !scale.isScaleOnline
                           ? 'bg-stone-800 text-stone-400 border border-stone-700'
                           : scale.isStable
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -915,7 +917,7 @@ export default function WeighbridgeScreen() {
                     )}>
                       {isNoDls
                         ? 'NO DLS'
-                        : !scale.hardwareConnected
+                        : !scale.isScaleOnline
                           ? 'OFFLINE'
                           : scale.isStable
                             ? 'STABLE'
@@ -985,7 +987,7 @@ export default function WeighbridgeScreen() {
                     <span className="text-stone-500 text-[10px]">· Click to override (F8)</span>
                   </div>
 
-                  {!scale.hardwareConnected && (
+                  {!scale.isScaleOnline && (
                     <div className="text-amber-400/90 font-mono text-[11px] mt-1.5 flex items-center justify-center gap-1.5">
                       <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
                       <span>USB-RS232 Cable not detected on {scale.serverPort || 'COM4'} · Click here or press F8 to enter manually</span>

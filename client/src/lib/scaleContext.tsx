@@ -24,11 +24,16 @@ interface WebSerialPort {
   removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
 }
 
-interface ScaleContextType {
+export type ScaleConnectionMode = 'LOCAL_USB' | 'NETWORK_STREAM' | 'OFFLINE';
+
+export interface ScaleContextType {
   isSupported: boolean;
-  isConnected: boolean;
+  isConnected: boolean; // local or remote connection is active
+  isLocalConnected: boolean; // true if USB cable is directly plugged into this PC
+  isScaleOnline: boolean; // true if ANY live scale feed is online
+  connectionMode: ScaleConnectionMode;
   isConnecting: boolean;
-  liveWeight: number | null; // in kg (e.g. 20)
+  liveWeight: number | null; // in kg (e.g. 80)
   rawText: string;
   isStable: boolean;
   lastUpdated: Date | null;
@@ -55,6 +60,7 @@ const DEFAULT_BAUD_RATE = 2400;
 export function ScaleProvider({ children }: { children: ReactNode }) {
   const [isSupported, setIsSupported] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isLocalConnected, setIsLocalConnected] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [liveWeight, setLiveWeight] = useState<number | null>(null);
   const [rawText, setRawText] = useState<string>('');
@@ -83,6 +89,14 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   const keepReadingRef = useRef<boolean>(false);
   const recentReadingsRef = useRef<number[]>([]);
 
+  // Throttle broadcast to universal server hub
+  const lastBroadcastRef = useRef<{
+    time: number;
+    weight: number | null;
+    isStable: boolean;
+  }>({ time: 0, weight: null, isStable: false });
+  const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const setBaudRate = (rate: number) => {
     setBaudRateState(rate);
     localStorage.setItem(STORAGE_BAUD_RATE, String(rate));
@@ -99,8 +113,68 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * Broadcast live scale reading from this PC to the universal server stream.
+   * This transmits live weight to all other computers on the factory/mill network!
+   */
+  const broadcastReading = useCallback((weight: number, stable: boolean, raw: string) => {
+    const now = Date.now();
+    const last = lastBroadcastRef.current;
+    const weightChanged = last.weight !== weight || last.isStable !== stable;
+    const timeElapsed = now - last.time;
+
+    const doSend = async () => {
+      lastBroadcastRef.current = { time: Date.now(), weight, isStable: stable };
+      try {
+        await fetch('/api/weighbridge/scale/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            liveWeight: weight,
+            isStable: stable,
+            rawText: raw,
+            port: serverPort || 'COM4',
+            isConnected: true,
+          }),
+        });
+      } catch {
+        /* ignore network hiccups during high frequency streaming */
+      }
+    };
+
+    if (weightChanged && timeElapsed >= 150) {
+      if (broadcastTimerRef.current) {
+        clearTimeout(broadcastTimerRef.current);
+        broadcastTimerRef.current = null;
+      }
+      doSend();
+    } else if (weightChanged) {
+      if (!broadcastTimerRef.current) {
+        broadcastTimerRef.current = setTimeout(() => {
+          broadcastTimerRef.current = null;
+          doSend();
+        }, Math.max(20, 150 - timeElapsed));
+      }
+    } else if (timeElapsed >= 800) {
+      doSend();
+    }
+  }, [serverPort]);
+
+  const reportDisconnect = useCallback(async () => {
+    try {
+      await fetch('/api/weighbridge/scale/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isConnected: false,
+          error: 'USB scale disconnected from Kata Cabin terminal',
+        }),
+      });
+    } catch {}
+  }, []);
+
+  /**
    * Process and parse raw serial stream from scale indicator.
-   * Weighbridge format: packets ending in ETX (♥ / 0x03), CR, or LF containing digits (e.g. "000020♥" or "0000040♥")
+   * Weighbridge format: packets ending in ETX (♥ / 0x03), CR, or LF containing digits (e.g. "000080♥" or "0000040♥")
    */
   const processChunk = useCallback((textChunk: string, bufferRef: { current: string }) => {
     bufferRef.current += textChunk;
@@ -156,18 +230,23 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       recent.push(parsedWeight);
       if (recent.length > 5) recent.shift();
 
+      let stable = false;
       if (recent.length >= 3) {
         const min = Math.min(...recent);
         const max = Math.max(...recent);
-        setIsStable(max - min <= 2);
+        stable = max - min <= 2;
+        setIsStable(stable);
       }
+
+      // Broadcast universally to server for all other PCs!
+      broadcastReading(parsedWeight, stable, preview);
     }
 
     // Prevent buffer memory leak
     if (bufferRef.current.length > 150) {
       bufferRef.current = bufferRef.current.slice(-30);
     }
-  }, []);
+  }, [broadcastReading]);
 
   /**
    * Continuous read loop directly on Uint8Array to avoid TransformStream buffering/stalls.
@@ -226,11 +305,13 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
       portRef.current = port;
       setIsConnected(true);
+      setIsLocalConnected(true);
       setIsConnecting(false);
 
       // Handle device disconnect event (unplugged USB)
       const onDisconnect = () => {
         disconnect();
+        reportDisconnect();
         toast.info('Scale disconnected');
       };
       port.addEventListener('disconnect', onDisconnect);
@@ -240,16 +321,18 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       console.error('Failed to open scale port:', err);
       setIsConnected(false);
+      setIsLocalConnected(false);
       setIsConnecting(false);
       const msg = err?.message || String(err);
       if (msg.includes('already open')) {
         setIsConnected(true);
+        setIsLocalConnected(true);
         return true;
       }
       setError(msg);
       return false;
     }
-  }, [baudRate, startReading]);
+  }, [baudRate, startReading, reportDisconnect]);
 
   /**
    * Connect to scale. Prompts user if not previously granted, or uses existing port.
@@ -318,11 +401,13 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       console.error('Error closing scale port:', err);
     } finally {
       setIsConnected(false);
+      setIsLocalConnected(false);
       setIsConnecting(false);
       setLiveWeight(null);
       setIsStable(false);
+      reportDisconnect();
     }
-  }, []);
+  }, [reportDisconnect]);
 
   /**
    * Auto-connect on startup if previously granted permission.
@@ -363,7 +448,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * Background Network Stream: Automatically receive live scale weight from server COM4.
+   * Background Network Stream: Automatically receive live scale weight from server broadcast.
    * This broadcasts live weight to ALL computers and mobile devices on the network!
    */
   useEffect(() => {
@@ -383,10 +468,10 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
             setIsServerStreaming(true);
             if (data.port) setServerPort(data.port);
             if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
+            setHardwareConnected(!!data.isConnected);
 
-            // If local Web Serial port is NOT active, use the server broadcast
+            // If local Web Serial port is NOT active on THIS machine, use the server broadcast
             if (!portRef.current) {
-              setHardwareConnected(!!data.isConnected);
               if (data.isConnected) {
                 setLiveWeight(data.liveWeight);
                 setIsStable(data.isStable);
@@ -463,11 +548,22 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     return false;
   }, [baudRate]);
 
+  // Unified status: Online if either local USB is connected OR server stream has live scale connected
+  const isScaleOnline = isLocalConnected || hardwareConnected || (liveWeight != null && liveWeight > 0 && !error);
+  const connectionMode: ScaleConnectionMode = isLocalConnected
+    ? 'LOCAL_USB'
+    : (hardwareConnected || isServerStreaming) && liveWeight != null
+    ? 'NETWORK_STREAM'
+    : 'OFFLINE';
+
   return (
     <ScaleContext.Provider
       value={{
         isSupported,
-        isConnected,
+        isConnected: isConnected || isLocalConnected,
+        isLocalConnected,
+        isScaleOnline,
+        connectionMode,
         isConnecting,
         liveWeight,
         rawText,

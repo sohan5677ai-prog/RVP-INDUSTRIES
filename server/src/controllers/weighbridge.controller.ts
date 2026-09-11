@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
-import { streamCameraMjpeg, getCameraSnapshot } from '../lib/cctvService.js';
+import { streamCameraMjpeg, getCameraSnapshot, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 
 const STARTING_TICKET_NUMBER = 2807;
 
@@ -227,6 +227,40 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
   } catch (err: any) {
     res.status(502).json({ error: err.message || 'Snapshot failed' });
   }
+}
+
+/**
+ * Ingest live CCTV camera frame broadcast from Kata Cabin bridge.
+ */
+export async function broadcastCctvHandler(req: Request, res: Response) {
+  const { cam, image } = req.body;
+  const camNum = cam === 2 || cam === '2' ? 2 : 1;
+  if (!image || typeof image !== 'string') {
+    throw new HttpError(400, 'Base64 image string is required');
+  }
+
+  const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
+  const buf = Buffer.from(cleanBase64, 'base64');
+  if (buf.length < 200) {
+    throw new HttpError(400, 'Invalid image buffer size');
+  }
+
+  setCameraBroadcast(camNum, buf);
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ success: true, cam: camNum, size: buf.length, timestamp: Date.now() });
+}
+
+/**
+ * Diagnostic status endpoint for cameras & bridge health.
+ */
+export async function getCctvStatusHandler(_req: Request, res: Response) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json(getCctvStatus());
 }
 
 /**

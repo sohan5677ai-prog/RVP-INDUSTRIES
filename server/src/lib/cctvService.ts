@@ -121,6 +121,55 @@ async function fetchCameraSnapshotFromDevice(cfg: CameraConfig): Promise<Buffer>
   });
 }
 
+interface BroadcastFrame {
+  buffer: Buffer;
+  timestamp: number;
+}
+
+const latestBroadcastFrames: Record<1 | 2, BroadcastFrame | null> = {
+  1: null,
+  2: null,
+};
+
+/**
+ * Ingest live camera frame broadcast from Kata Cabin local bridge
+ */
+export function setCameraBroadcast(camNum: 1 | 2, buf: Buffer): void {
+  latestBroadcastFrames[camNum] = {
+    buffer: buf,
+    timestamp: Date.now(),
+  };
+  const manager = getFeedManager();
+  manager.setDirectFrame(camNum, buf);
+}
+
+/**
+ * Get full diagnostic CCTV connection and stream status
+ */
+export function getCctvStatus() {
+  const now = Date.now();
+  const getStatus = (num: 1 | 2) => {
+    const b = latestBroadcastFrames[num];
+    const isFresh = b ? now - b.timestamp < 30000 : false;
+    const cfg = CAMERAS[num];
+    return {
+      cam: num,
+      ip: cfg.ip,
+      port: cfg.port,
+      rtspUrl: `rtsp://${cfg.user}:${cfg.pass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=1`,
+      rtspHdUrl: `rtsp://${cfg.user}:${cfg.pass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=0`,
+      online: isFresh || (globalFeedManager?.getLatestFrame(num) != null && (globalFeedManager?.getConsecutiveErrors(num) ?? 0) === 0),
+      lastSeen: b?.timestamp || null,
+      ageMs: b ? now - b.timestamp : null,
+      sizeBytes: b?.buffer?.length || 0,
+    };
+  };
+  return {
+    cam1: getStatus(1),
+    cam2: getStatus(2),
+  };
+}
+
 /**
  * Background Polling Manager that keeps the latest camera frame in memory
  * and serves it instantly (< 1ms) without overloading CP PLUS firmware.
@@ -139,6 +188,15 @@ class CameraFeedManager {
     return this.latestFrames[camNum];
   }
 
+  getConsecutiveErrors(camNum: 1 | 2): number {
+    return this.consecutiveErrors[camNum];
+  }
+
+  setDirectFrame(camNum: 1 | 2, frame: Buffer) {
+    this.latestFrames[camNum] = frame;
+    this.consecutiveErrors[camNum] = 0;
+  }
+
   private async pollLoop(camNum: 1 | 2) {
     if (this.isPolling[camNum]) return;
     this.isPolling[camNum] = true;
@@ -146,6 +204,14 @@ class CameraFeedManager {
     const cfg = CAMERAS[camNum];
 
     while (this.isPolling[camNum]) {
+      // If we recently received a broadcast frame from the local Kata cabin bridge,
+      // skip local polling to save CPU and bandwidth
+      const broadcast = latestBroadcastFrames[camNum];
+      if (broadcast && Date.now() - broadcast.timestamp < 15000) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+
       try {
         const frame = await fetchCameraSnapshotFromDevice(cfg);
         this.latestFrames[camNum] = frame;
@@ -153,15 +219,16 @@ class CameraFeedManager {
           logger.info(`[cctv] Cam ${camNum} (${cfg.ip}) connected & capturing live frames (${frame.length} bytes)`);
           this.consecutiveErrors[camNum] = 0;
         }
-        // Smooth 350ms interval between frames (~3 FPS, perfect for web CCTV & rock-solid)
-        await new Promise((r) => setTimeout(r, 350));
+        // Smooth 400ms interval between frames (~2.5 FPS)
+        await new Promise((r) => setTimeout(r, 400));
       } catch (err: any) {
         this.consecutiveErrors[camNum]++;
-        if (this.consecutiveErrors[camNum] === 1 || this.consecutiveErrors[camNum] % 10 === 0) {
-          logger.warn(`[cctv] Cam ${camNum} poll warning: ${err.message}`);
+        if (this.consecutiveErrors[camNum] === 1 || this.consecutiveErrors[camNum] % 50 === 0) {
+          logger.warn(`[cctv] Cam ${camNum} poll notice: ${err.message}`);
         }
-        // Wait 1.5s on error before retrying
-        await new Promise((r) => setTimeout(r, 1500));
+        // Back off gradually on error (up to 5s if in cloud where local camera is unroutable)
+        const backoff = Math.min(5000, 1500 + this.consecutiveErrors[camNum] * 500);
+        await new Promise((r) => setTimeout(r, backoff));
       }
     }
   }
@@ -181,15 +248,32 @@ function getFeedManager(): CameraFeedManager {
  * Get latest live JPEG frame instantly from in-memory buffer (sub-millisecond)
  */
 export async function getCameraSnapshot(camNum: 1 | 2): Promise<Buffer> {
+  // Priority 1: Check fresh broadcast frame received from Kata cabin bridge
+  const broadcast = latestBroadcastFrames[camNum];
+  if (broadcast && broadcast.buffer && broadcast.buffer.length > 500 && Date.now() - broadcast.timestamp < 45000) {
+    return broadcast.buffer;
+  }
+
+  // Priority 2: In-memory poller frame (if running locally on LAN)
   const manager = getFeedManager();
   const cached = manager.getLatestFrame(camNum);
-  if (cached && cached.length > 1000) {
+  if (cached && cached.length > 500) {
     return cached;
   }
 
-  // If memory buffer hasn't received first frame yet, try direct device fetch
+  // Priority 3: Direct fetch from device if reachable on LAN
   const cfg = CAMERAS[camNum];
-  return await fetchCameraSnapshotFromDevice(cfg);
+  try {
+    const direct = await fetchCameraSnapshotFromDevice(cfg);
+    manager.setDirectFrame(camNum, direct);
+    return direct;
+  } catch (err: any) {
+    // Priority 4: If direct fetch failed (e.g. cloud server), return older broadcast if exists
+    if (broadcast && broadcast.buffer && broadcast.buffer.length > 500) {
+      return broadcast.buffer;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -205,3 +289,4 @@ export async function streamCameraMjpeg(camNum: 1 | 2, clientRes: Response): Pro
   });
   clientRes.end(frame);
 }
+

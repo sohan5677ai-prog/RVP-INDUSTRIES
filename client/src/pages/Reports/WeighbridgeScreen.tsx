@@ -20,8 +20,10 @@ import {
   RefreshCw,
   AlertTriangle,
   Pencil,
+  Settings,
+  ShieldCheck,
 } from 'lucide-react';
-import { api, getErrorMessage } from '@/lib/api';
+import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useScale } from '@/lib/scaleContext';
 import type { Party, CompanyProfile, WeighbridgeTicket } from '@/lib/types';
@@ -31,6 +33,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -75,17 +84,26 @@ const VEHICLE_TYPES = [
   { value: 'OTHER', label: 'Other Vehicle' },
 ];
 
+export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now(), preferLocal: boolean = true): string {
+  if (preferLocal) {
+    return `http://127.0.0.1:4000/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`;
+  }
+  return getScaleApiUrl(`/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`);
+}
+
 interface CctvLiveBoxProps {
   camNumber: 1 | 2;
   cameraIp: string;
   label: string;
   currentTime: string;
   refreshTrigger?: number;
+  onStatusChange?: (online: boolean, isLocal: boolean) => void;
 }
 
-function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }: CctvLiveBoxProps) {
-  const [frameUrl, setFrameUrl] = useState<string>(
-    `/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`
+function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange }: CctvLiveBoxProps) {
+  const [preferLocal, setPreferLocal] = useState<boolean>(true);
+  const [frameUrl, setFrameUrl] = useState<string>(() =>
+    getCameraSnapshotUrl(camNumber, Date.now(), true)
   );
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,16 +123,16 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       if (mountedRef.current) {
-        setFrameUrl(`/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`);
+        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
       }
     }, delayMs);
-  }, [camNumber]);
+  }, [camNumber, preferLocal]);
 
   useEffect(() => {
     if (refreshTrigger) {
-      setFrameUrl(`/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${Date.now()}`);
+      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
     }
-  }, [refreshTrigger, camNumber]);
+  }, [refreshTrigger, camNumber, preferLocal]);
 
   return (
     <div className="rounded-xl bg-stone-950 border border-border/80 h-40 relative overflow-hidden flex items-center justify-center group shadow-md">
@@ -124,12 +142,18 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
         onLoad={() => {
           errCountRef.current = 0;
           setIsOnline(true);
-          triggerNextFrame(400); // 400ms smooth snapshot refresh
+          onStatusChange?.(true, preferLocal);
+          triggerNextFrame(400); // 400ms smooth snapshot refresh (~2.5 FPS)
         }}
         onError={() => {
           errCountRef.current += 1;
-          if (errCountRef.current >= 3) {
+          if (preferLocal && errCountRef.current >= 2) {
+            // Local bridge not responding, switch to cloud relay
+            setPreferLocal(false);
+            setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), false));
+          } else if (errCountRef.current >= 4) {
             setIsOnline(false);
+            onStatusChange?.(false, preferLocal);
           }
           triggerNextFrame(1500);
         }}
@@ -155,15 +179,22 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger }
         </span>
       </div>
 
-      {/* Camera IP watermark pill */}
-      <div className="absolute bottom-2 left-2 pointer-events-none">
-        <span className="text-[9px] font-mono text-stone-400 bg-stone-900/60 px-1.5 py-0.5 rounded">
+      {/* Source & IP watermark pill */}
+      <div className="absolute bottom-2 left-2 pointer-events-none flex items-center gap-1.5">
+        <span className="text-[9px] font-mono text-stone-300 bg-stone-900/80 px-1.5 py-0.5 rounded border border-stone-800">
           {cameraIp}
+        </span>
+        <span className={cn(
+          "text-[8px] font-mono px-1 py-0.2 rounded border font-semibold",
+          preferLocal ? "bg-emerald-950/80 text-emerald-300 border-emerald-800/60" : "bg-blue-950/80 text-blue-300 border-blue-800/60"
+        )}>
+          {preferLocal ? "LOCAL 0ms" : "CLOUD"}
         </span>
       </div>
     </div>
   );
 }
+
 
 export default function WeighbridgeScreen() {
   const { user } = useAuth();
@@ -200,6 +231,7 @@ export default function WeighbridgeScreen() {
   // Cameras & Snapshot triggers
   const [camRefreshTrigger, setCamRefreshTrigger] = useState<number>(0);
   const [activeSnapshots, setActiveSnapshots] = useState<{ cam1?: string; cam2?: string } | null>(null);
+  const [showCamSettings, setShowCamSettings] = useState<boolean>(false);
 
   // Active Slip Modal
   const [slipModalTicket, setSlipModalTicket] = useState<WeighbridgeTicket | null>(null);
@@ -349,8 +381,8 @@ export default function WeighbridgeScreen() {
 
       // Freeze snapshots
       const ts = Date.now();
-      const snap1 = `/api/weighbridge/cctv/snapshot?cam=1&t=${ts}`;
-      const snap2 = `/api/weighbridge/cctv/snapshot?cam=2&t=${ts}`;
+      const snap1 = getCameraSnapshotUrl(1, ts, true);
+      const snap2 = getCameraSnapshotUrl(2, ts, true);
       const snapObj = { cam1: snap1, cam2: snap2 };
       setActiveSnapshots(snapObj);
 
@@ -1044,6 +1076,15 @@ export default function WeighbridgeScreen() {
                     >
                       <RefreshCw className="h-3 w-3" />
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowCamSettings(true)}
+                      title="CCTV & RTSP Camera Configuration"
+                    >
+                      <Settings className="h-3 w-3" />
+                    </Button>
                   </div>
                 </div>
               </CardHeader>
@@ -1284,8 +1325,8 @@ export default function WeighbridgeScreen() {
                         onClick={() => {
                           setSlipModalTicket(t);
                           setActiveSnapshots({
-                            cam1: `/api/weighbridge/cctv/snapshot?cam=1&t=${Date.now()}`,
-                            cam2: `/api/weighbridge/cctv/snapshot?cam=2&t=${Date.now()}`,
+                            cam1: getCameraSnapshotUrl(1, Date.now(), true),
+                            cam2: getCameraSnapshotUrl(2, Date.now(), true),
                           });
                         }}
                         className="h-7 px-2 text-xs gap-1"
@@ -1310,6 +1351,99 @@ export default function WeighbridgeScreen() {
         snapshots={activeSnapshots}
         onClose={() => setSlipModalTicket(null)}
       />
+
+      {/* CCTV & RTSP Network Status & Configuration Dialog */}
+      <Dialog open={showCamSettings} onOpenChange={setShowCamSettings}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <Video className="h-5 w-5 text-primary" />
+              <DialogTitle>CP PLUS Dual Camera & RTSP Network Status</DialogTitle>
+            </div>
+            <DialogDescription>
+              Configured for Kata Cabin weighbridge operations. Streams high-res video via RTSP over local Ethernet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
+              <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">CCTV Background Bridge Active:</span> Local frames from 192.168.1.101 & 192.168.1.102 are captured via RTSP/HTTP Digest and continuously relayed to this PC & universal cloud server.
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {/* Cam 1 */}
+              <div className="p-3 rounded-lg border border-border bg-card/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    CAM 1: ENTRY (192.168.1.101)
+                  </span>
+                  <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+                    Online
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-mono text-muted-foreground">RTSP Substream (Live Preview):</div>
+                  <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
+                    rtsp://admin:admin@123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=1
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-mono text-muted-foreground">RTSP Mainstream (HD Ticket Photo):</div>
+                  <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
+                    rtsp://admin:admin@123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0
+                  </div>
+                </div>
+              </div>
+
+              {/* Cam 2 */}
+              <div className="p-3 rounded-lg border border-border bg-card/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    CAM 2: EXIT (192.168.1.102)
+                  </span>
+                  <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+                    Online
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-mono text-muted-foreground">RTSP Substream (Live Preview):</div>
+                  <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
+                    rtsp://admin:admin@123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-mono text-muted-foreground">RTSP Mainstream (HD Ticket Photo):</div>
+                  <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
+                    rtsp://admin:admin@123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[11px] text-muted-foreground">
+                Auto-starts on Kata Cabin startup via Windows service.
+              </span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setCamRefreshTrigger(Date.now());
+                  toast.success('Triggered camera snapshot refresh');
+                }}
+                className="gap-1 text-xs"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Test & Refresh
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

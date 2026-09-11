@@ -122,6 +122,12 @@ app.get("/api/weighbridge/cctv/snapshot", (req, res, next) => {
 app.get("/api/weighbridge/cctv/stream", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.streamCctvHandler(req, res)).catch(next);
 });
+app.post("/api/weighbridge/cctv/broadcast", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.broadcastCctvHandler(req, res)).catch(next);
+});
+app.get("/api/weighbridge/cctv/status", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.getCctvStatusHandler(req, res)).catch(next);
+});
 
 // Scale serial live streaming endpoints bypass general API rate limiter
 app.get("/api/weighbridge/scale/live", (req, res, next) => {

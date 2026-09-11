@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react';
 import { toast } from 'sonner';
+import { getScaleApiUrl } from '@/lib/api';
 
 interface SerialPortInfo {
   usbVendorId?: number;
@@ -125,7 +126,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     const doSend = async () => {
       lastBroadcastRef.current = { time: Date.now(), weight, isStable: stable };
       try {
-        await fetch('/api/weighbridge/scale/broadcast', {
+        const url = getScaleApiUrl('/weighbridge/scale/broadcast');
+        await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -161,7 +163,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
   const reportDisconnect = useCallback(async () => {
     try {
-      await fetch('/api/weighbridge/scale/broadcast', {
+      const url = getScaleApiUrl('/weighbridge/scale/broadcast');
+      await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -174,7 +177,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
   /**
    * Process and parse raw serial stream from scale indicator.
-   * Weighbridge format: packets ending in ETX (♥ / 0x03), CR, or LF containing digits (e.g. "000080♥" or "0000040♥")
+   * Weighbridge format: packets ending in ETX (♥ / 0x03), CR, or LF containing digits (e.g. "000080♥" or "0000000♥")
    */
   const processChunk = useCallback((textChunk: string, bufferRef: { current: string }) => {
     bufferRef.current += textChunk;
@@ -317,6 +320,10 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       port.addEventListener('disconnect', onDisconnect);
 
       startReading(port);
+
+      // Immediately notify server that terminal is online
+      broadcastReading(0, true, '000000');
+
       return true;
     } catch (err: any) {
       console.error('Failed to open scale port:', err);
@@ -332,7 +339,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       setError(msg);
       return false;
     }
-  }, [baudRate, startReading, reportDisconnect]);
+  }, [baudRate, startReading, reportDisconnect, broadcastReading]);
 
   /**
    * Connect to scale. Prompts user if not previously granted, or uses existing port.
@@ -449,82 +456,85 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
   /**
    * Background Network Stream: Automatically receive live scale weight from server broadcast.
-   * This broadcasts live weight to ALL computers and mobile devices on the network!
+   * Dual-Sync Architecture:
+   * 1. Continuous 600ms polling guarantees reliable updates across all devices, mobile phones, and proxies.
+   * 2. SSE provides instantaneous sub-50ms push updates where supported.
    */
   useEffect(() => {
     let es: EventSource | null = null;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let isCancelled = false;
 
-    const connectSSE = () => {
-      if (isCancelled) return;
+    const streamUrl = getScaleApiUrl('/weighbridge/scale/stream');
+    const liveUrl = getScaleApiUrl('/weighbridge/scale/live');
+
+    const fetchLiveScale = async () => {
+      if (portRef.current || isCancelled) return;
       try {
-        es = new EventSource('/api/weighbridge/scale/stream');
+        const res = await fetch(liveUrl, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          setIsServerStreaming(true);
+          if (data.port) setServerPort(data.port);
+          if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
+          setHardwareConnected(!!data.isConnected);
 
-        es.onmessage = (event) => {
-          if (isCancelled) return;
-          try {
-            const data = JSON.parse(event.data);
-            setIsServerStreaming(true);
-            if (data.port) setServerPort(data.port);
-            if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
-            setHardwareConnected(!!data.isConnected);
-
-            // If local Web Serial port is NOT active on THIS machine, use the server broadcast
-            if (!portRef.current) {
-              if (data.isConnected) {
-                setLiveWeight(data.liveWeight);
-                setIsStable(data.isStable);
-                setRawText(data.rawText || `${data.liveWeight} kg`);
-                setLastUpdated(new Date(data.lastUpdated || Date.now()));
-                setIsConnected(true);
-                setError(null);
-              } else {
-                if (data.error) setError(data.error);
-                setIsConnected(false);
-              }
+          if (!portRef.current) {
+            if (data.isConnected) {
+              setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
+              setIsStable(!!data.isStable);
+              setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
+              setLastUpdated(new Date(data.lastUpdated || Date.now()));
+              setIsConnected(true);
+              setError(null);
+            } else {
+              if (data.error) setError(data.error);
+              setIsConnected(false);
             }
-          } catch {}
-        };
-
-        es.onerror = () => {
-          if (es) {
-            es.close();
-            es = null;
           }
-          // Start polling fallback every 800ms if SSE drops
-          if (!pollInterval && !isCancelled) {
-            pollInterval = setInterval(async () => {
-              if (portRef.current || isCancelled) return;
-              try {
-                const res = await fetch('/api/weighbridge/scale/live');
-                if (res.ok) {
-                  const data = await res.json();
-                  setIsServerStreaming(true);
-                  if (data.port) setServerPort(data.port);
-                  if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
-                  setHardwareConnected(!!data.isConnected);
-
-                  if (!portRef.current && data.isConnected) {
-                    setLiveWeight(data.liveWeight);
-                    setIsStable(data.isStable);
-                    setRawText(data.rawText || `${data.liveWeight} kg`);
-                    setLastUpdated(new Date(data.lastUpdated || Date.now()));
-                    setIsConnected(true);
-                    setError(null);
-                  } else if (!portRef.current && !data.isConnected) {
-                    setIsConnected(false);
-                    if (data.error) setError(data.error);
-                  }
-                }
-              } catch {}
-            }, 800);
-          }
-        };
+        }
       } catch {}
     };
 
-    connectSSE();
+    // Immediate initial sync
+    fetchLiveScale();
+
+    // Fast polling every 600ms to guarantee network updates across all client machines
+    pollInterval = setInterval(fetchLiveScale, 600);
+
+    // Parallel Server-Sent Events (SSE) for low latency
+    try {
+      es = new EventSource(streamUrl);
+
+      es.onmessage = (event) => {
+        if (isCancelled || portRef.current) return;
+        try {
+          const data = JSON.parse(event.data);
+          setIsServerStreaming(true);
+          if (data.port) setServerPort(data.port);
+          if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
+          setHardwareConnected(!!data.isConnected);
+
+          if (!portRef.current) {
+            if (data.isConnected) {
+              setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
+              setIsStable(!!data.isStable);
+              setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
+              setLastUpdated(new Date(data.lastUpdated || Date.now()));
+              setIsConnected(true);
+              setError(null);
+            } else {
+              if (data.error) setError(data.error);
+              setIsConnected(false);
+            }
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        // SSE error (e.g. proxy timeout) - fast polling interval handles updates seamlessly!
+      };
+    } catch {}
 
     return () => {
       isCancelled = true;
@@ -535,7 +545,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
   const switchServerPort = useCallback(async (port: string, rate?: number): Promise<boolean> => {
     try {
-      const res = await fetch('/api/weighbridge/scale/config', {
+      const url = getScaleApiUrl('/weighbridge/scale/config');
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ port, baudRate: rate || baudRate }),
@@ -548,11 +559,11 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     return false;
   }, [baudRate]);
 
-  // Unified status: Online if either local USB is connected OR server stream has live scale connected
-  const isScaleOnline = isLocalConnected || hardwareConnected || (liveWeight != null && liveWeight > 0 && !error);
+  // Unified status: Online if either local USB is connected OR universal network stream is receiving live weight
+  const isScaleOnline = isLocalConnected || hardwareConnected;
   const connectionMode: ScaleConnectionMode = isLocalConnected
     ? 'LOCAL_USB'
-    : (hardwareConnected || isServerStreaming) && liveWeight != null
+    : hardwareConnected
     ? 'NETWORK_STREAM'
     : 'OFFLINE';
 

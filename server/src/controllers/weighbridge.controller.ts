@@ -311,6 +311,9 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
     });
   }
 
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, reading: service.getReading() });
 }

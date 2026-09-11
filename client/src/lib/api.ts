@@ -1,4 +1,11 @@
-const BASE = import.meta.env.VITE_API_URL ?? '/api';
+export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
+
+export function getScaleApiUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE}${cleanPath}`;
+}
+
+const BASE = API_BASE;
 
 const TOKEN_KEY = 'rvp_token';
 

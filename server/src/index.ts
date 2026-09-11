@@ -29,8 +29,16 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
 app.use(helmet());
 app.use(cors({
   origin: (origin, cb) => {
-    // No Origin header (server-to-server calls, health checks) - allow.
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // No Origin header (server-to-server calls, health checks, curl) - allow.
+    if (!origin) return cb(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1')
+    ) {
+      return cb(null, true);
+    }
     cb(new Error(`Origin ${origin} not allowed by CORS`));
   },
 }));

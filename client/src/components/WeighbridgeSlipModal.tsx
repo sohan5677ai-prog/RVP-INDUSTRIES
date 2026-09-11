@@ -60,25 +60,23 @@ export default function WeighbridgeSlipModal({
     } catch {}
   }, [calibration]);
 
-  if (!ticket) return null;
-
-  // Extract / calculate weights
-  const firstWeight = ticket.firstWeightKg ?? null;
-  const secondWeight = ticket.secondWeightKg ?? null;
+  // Extract / calculate weights safely (all hooks run unconditionally)
+  const firstWeight = ticket?.firstWeightKg ?? null;
+  const secondWeight = ticket?.secondWeightKg ?? null;
 
   let grossWeight: number | null = null;
   let tareWeight: number | null = null;
-  let netWeight = ticket.netWeightKg ?? null;
+  let netWeight = ticket?.netWeightKg ?? null;
 
   if (firstWeight != null && secondWeight != null) {
     grossWeight = Math.max(firstWeight, secondWeight);
     tareWeight = Math.min(firstWeight, secondWeight);
     netWeight = grossWeight - tareWeight;
   } else if (firstWeight != null && netWeight == null) {
-    if (ticket.tripType === 'SINGLE') {
+    if (ticket?.tripType === 'SINGLE') {
       grossWeight = firstWeight;
       netWeight = firstWeight;
-    } else if (ticket.loadType === 'LOAD') {
+    } else if (ticket?.loadType === 'LOAD') {
       grossWeight = firstWeight;
     } else {
       tareWeight = firstWeight;
@@ -86,7 +84,7 @@ export default function WeighbridgeSlipModal({
   }
 
   // Format Date (DD-MM-YYYY)
-  const ticketDateObj = new Date(ticket.createdAt);
+  const ticketDateObj = ticket?.createdAt ? new Date(ticket.createdAt) : new Date();
   const day = String(ticketDateObj.getDate()).padStart(2, '0');
   const month = String(ticketDateObj.getMonth() + 1).padStart(2, '0');
   const year = ticketDateObj.getFullYear();
@@ -107,19 +105,20 @@ export default function WeighbridgeSlipModal({
   };
 
   // Format Material with dot prefix if needed (e.g. '.SEED')
-  const formattedMaterial = ticket.material
+  const formattedMaterial = ticket?.material
     ? ticket.material.startsWith('.')
       ? ticket.material.toUpperCase()
       : `.${ticket.material.toUpperCase()}`
     : '-';
 
   // Format Charges as '₹ 1.00'
-  const formattedCharges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
+  const formattedCharges = `₹ ${Number(ticket?.amount || 0).toFixed(2)}`;
 
   const isStationeryMode = calibration.printMode === 'stationery';
 
   // Isolated Single-Page Print Handler (Guarantees exactly 1 page in Chrome)
   const handlePrint = () => {
+    if (!ticket) return;
     // 1. Clean up any existing print iframe
     const oldIframe = document.getElementById('rvp-kata-print-frame');
     if (oldIframe) {
@@ -399,9 +398,10 @@ export default function WeighbridgeSlipModal({
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [ticket, calibration, cam1Url, cam2Url, cam1Failed, cam2Failed, isStationeryMode]);
 
+  // All hooks have executed unconditionally above
+  if (!ticket) return null;
 
   return (
     <Dialog open={!!ticket} onOpenChange={(open) => { if (!open) onClose(); }}>

@@ -48,8 +48,17 @@ export default function WeighbridgeSlipModal({
   const [cam2Failed, setCam2Failed] = useState(false);
 
   useEffect(() => {
-    setCam1Url(snapshots?.cam1 || '/api/weighbridge/cctv/snapshot?cam=1');
-    setCam2Url(snapshots?.cam2 || '/api/weighbridge/cctv/snapshot?cam=2');
+    const resolveCamUrl = (url: string | undefined, cam: 1 | 2) => {
+      const now = Date.now();
+      if (!url) return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
+      if (url.includes('127.0.0.1:4000') && window.location.hostname !== '127.0.0.1' && window.location.hostname !== 'localhost') {
+        return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
+      }
+      return url;
+    };
+
+    setCam1Url(resolveCamUrl(snapshots?.cam1, 1));
+    setCam2Url(resolveCamUrl(snapshots?.cam2, 2));
     setCam1Failed(false);
     setCam2Failed(false);
   }, [snapshots, ticket?.id]);
@@ -96,7 +105,7 @@ export default function WeighbridgeSlipModal({
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
-  });
+  }).toUpperCase();
 
   // Helper to format weight strictly as '<weight>-Kg' matching the physical slip
   const formatWeight = (val: number | null | undefined): string => {

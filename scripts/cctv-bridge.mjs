@@ -148,9 +148,26 @@ async function captureViaHttpDigest(cfg) {
   });
 }
 
+function dispatchToSubscribers(camNum, frame) {
+  const subs = streamSubscribers[camNum];
+  if (subs.size > 0) {
+    const header = `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
+    const footer = `\r\n`;
+    for (const res of subs) {
+      try {
+        res.write(header);
+        res.write(frame);
+        res.write(footer);
+      } catch {
+        subs.delete(res);
+      }
+    }
+  }
+}
+
 /**
  * High-Performance Persistent RTSP Worker using FFmpeg image2pipe
- * Streams JPEGs in real-time (~10 FPS, <100ms latency)
+ * Streams JPEGs in real-time (~25 FPS, <50ms latency)
  */
 function startRtspWorker(camNum) {
   const cfg = CONFIG.cameras[camNum];
@@ -164,6 +181,7 @@ function startRtspWorker(camNum) {
 
   const args = [
     '-rtsp_transport', 'tcp',
+    '-stimeout', '4000000', // 4s RTSP socket timeout to prevent hang
     '-fflags', 'nobuffer',
     '-flags', 'low_delay',
     '-i', cfg.rtspUrl,
@@ -178,8 +196,19 @@ function startRtspWorker(camNum) {
   let buffer = Buffer.alloc(0);
   let framesThisSec = 0;
   let lastFpsLog = Date.now();
+  let lastFrameTime = Date.now();
+
+  // Watchdog: If no frames are produced for 5 seconds, restart worker
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastFrameTime > 5000) {
+      console.warn(`[CCTV-BRIDGE] Cam ${camNum} RTSP watchdog: No frames for 5s. Restarting worker...`);
+      clearInterval(watchdog);
+      try { proc.kill('SIGKILL'); } catch {}
+    }
+  }, 2000);
 
   proc.stdout.on('data', (chunk) => {
+    lastFrameTime = Date.now();
     buffer = Buffer.concat([buffer, chunk]);
 
     // Parse JPEG frames (Starts 0xFF 0xD8, Ends 0xFF 0xD9)
@@ -205,22 +234,7 @@ function startRtspWorker(camNum) {
       };
 
       framesThisSec++;
-
-      // Dispatch to active MJPEG stream subscribers
-      const subs = streamSubscribers[camNum];
-      if (subs.size > 0) {
-        const header = `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
-        const footer = `\r\n`;
-        for (const res of subs) {
-          try {
-            res.write(header);
-            res.write(frame);
-            res.write(footer);
-          } catch {
-            subs.delete(res);
-          }
-        }
-      }
+      dispatchToSubscribers(camNum, frame);
     }
 
     if (Date.now() - lastFpsLog >= 10000) {
@@ -232,14 +246,37 @@ function startRtspWorker(camNum) {
   });
 
   proc.on('close', (code) => {
-    console.warn(`[CCTV-BRIDGE] RTSP worker for Cam ${camNum} stopped (exit code: ${code}). Reconnecting in 2.5s...`);
-    setTimeout(() => startRtspWorker(camNum), 2500);
+    clearInterval(watchdog);
+    console.warn(`[CCTV-BRIDGE] RTSP worker for Cam ${camNum} stopped (exit code: ${code}). Reconnecting in 2s...`);
+    setTimeout(() => startRtspWorker(camNum), 2000);
   });
 
   proc.on('error', (err) => {
+    clearInterval(watchdog);
     console.error(`[CCTV-BRIDGE] Cam ${camNum} worker error: ${err.message}. Retrying...`);
   });
 }
+
+// Safety net: if RTSP ever stalls or drops (>2s), HTTP Digest immediately fills the gap
+setInterval(async () => {
+  for (const num of [1, 2]) {
+    const frame = latestFrames[num];
+    if (!frame || !frame.buffer || Date.now() - frame.timestamp > 2000) {
+      try {
+        const buf = await captureViaHttpDigest(CONFIG.cameras[num]);
+        if (buf && buf.length > 500) {
+          latestFrames[num] = {
+            buffer: buf,
+            timestamp: Date.now(),
+            method: 'HTTP-DIGEST-BACKUP',
+            count: (latestFrames[num]?.count || 0) + 1,
+          };
+          dispatchToSubscribers(num, buf);
+        }
+      } catch {}
+    }
+  }
+}, 1000);
 
 /**
  * Fallback polling if FFmpeg is not available

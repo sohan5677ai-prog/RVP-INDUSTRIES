@@ -89,7 +89,8 @@ const VEHICLE_TYPES = [
 ];
 
 export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now(), preferLocal: boolean = true): string {
-  if (preferLocal) {
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  if (preferLocal && !isHttps) {
     return `http://127.0.0.1:4000/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`;
   }
   return getScaleApiUrl(`/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`);
@@ -97,10 +98,13 @@ export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now(), 
 
 export async function captureCamSnapshotBase64(camNumber: 1 | 2): Promise<string | null> {
   const ts = Date.now();
-  const urls = [
-    getCameraSnapshotUrl(camNumber, ts, true),
-    getCameraSnapshotUrl(camNumber, ts, false),
-  ];
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const urls = isHttps
+    ? [getCameraSnapshotUrl(camNumber, ts, false)]
+    : [
+        getCameraSnapshotUrl(camNumber, ts, true),
+        getCameraSnapshotUrl(camNumber, ts, false),
+      ];
   for (const url of urls) {
     try {
       const ctrl = new AbortController();
@@ -254,8 +258,40 @@ interface CctvFullViewDialogProps {
 
 function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: CctvFullViewDialogProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [streamError, setStreamError] = useState(false);
-  const [streamKey, setStreamKey] = useState(() => Date.now());
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const [preferLocal, setPreferLocal] = useState<boolean>(() => !isHttps);
+  const [frameUrl, setFrameUrl] = useState<string>('');
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef<boolean>(true);
+  const errCountRef = useRef<number>(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const triggerNextFrame = useCallback((delayMs: number) => {
+    if (!mountedRef.current || !camNumber) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (mountedRef.current && camNumber) {
+        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
+      }
+    }, delayMs);
+  }, [camNumber, preferLocal]);
+
+  // Whenever camNumber or preferLocal changes, load frame immediately
+  useEffect(() => {
+    if (camNumber) {
+      errCountRef.current = 0;
+      setIsOnline(true);
+      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
+    }
+  }, [camNumber, preferLocal]);
 
   if (!camNumber) return null;
 
@@ -263,11 +299,6 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
   const label = camNumber === 1 ? 'CAM 1: ENTRY' : 'CAM 2: EXIT';
   const rtspSub = `rtsp://admin:admin%40123@${cameraIp}:554/cam/realmonitor?channel=1&subtype=1`;
   const rtspMain = `rtsp://admin:admin%40123@${cameraIp}:554/cam/realmonitor?channel=1&subtype=0`;
-
-  // Native live MJPEG stream on local port 4000, fallback to rapid snapshot polling
-  const liveStreamUrl = !streamError 
-    ? `http://127.0.0.1:4000/api/weighbridge/cctv/stream?cam=${camNumber}&k=${streamKey}`
-    : getCameraSnapshotUrl(camNumber, streamKey, true);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -278,7 +309,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
 
   const handleDownloadSnapshot = () => {
     const a = document.createElement('a');
-    a.href = getCameraSnapshotUrl(camNumber, Date.now(), true);
+    a.href = frameUrl || getCameraSnapshotUrl(camNumber, Date.now(), preferLocal);
     a.download = `WEIGHBRIDGE_${label.replace(/[^A-Za-z0-9]/g, '_')}_${Date.now()}.jpg`;
     document.body.appendChild(a);
     a.click();
@@ -310,13 +341,9 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
             <div className="flex items-center bg-stone-950 border border-stone-800 rounded-lg p-0.5">
               <button
                 type="button"
-                onClick={() => {
-                  setStreamError(false);
-                  setStreamKey(Date.now());
-                  onSelectCam(1);
-                }}
+                onClick={() => onSelectCam(1)}
                 className={cn(
-                  "px-3 py-1 text-xs font-semibold rounded-md transition-all",
+                  "px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer",
                   camNumber === 1 
                     ? "bg-amber-500 text-stone-950 shadow-xs" 
                     : "text-stone-400 hover:text-stone-200"
@@ -326,13 +353,9 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setStreamError(false);
-                  setStreamKey(Date.now());
-                  onSelectCam(2);
-                }}
+                onClick={() => onSelectCam(2)}
                 className={cn(
-                  "px-3 py-1 text-xs font-semibold rounded-md transition-all",
+                  "px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer",
                   camNumber === 2 
                     ? "bg-amber-500 text-stone-950 shadow-xs" 
                     : "text-stone-400 hover:text-stone-200"
@@ -346,18 +369,43 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
 
         {/* Video Canvas Container */}
         <div className="relative aspect-video max-h-[68vh] w-full bg-black flex items-center justify-center overflow-hidden select-none">
-          <img
-            key={`${camNumber}-${streamKey}`}
-            src={liveStreamUrl}
-            alt={label}
-            onError={() => {
-              if (!streamError) {
-                setStreamError(true);
-                setStreamKey(Date.now());
-              }
-            }}
-            className="w-full h-full object-contain"
-          />
+          {frameUrl ? (
+            <img
+              key={`${camNumber}-${preferLocal ? 'local' : 'cloud'}`}
+              src={frameUrl}
+              alt={label}
+              onLoad={() => {
+                errCountRef.current = 0;
+                setIsOnline(true);
+                triggerNextFrame(preferLocal ? 100 : 350);
+              }}
+              onError={() => {
+                errCountRef.current += 1;
+                if (preferLocal && errCountRef.current >= 1) {
+                  setPreferLocal(false);
+                  setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), false));
+                } else if (errCountRef.current >= 4) {
+                  setIsOnline(false);
+                }
+                triggerNextFrame(1500);
+              }}
+              className={cn("w-full h-full object-contain transition-opacity duration-200", !isOnline && "opacity-25")}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center text-stone-400 gap-2">
+              <RefreshCw className="h-6 w-6 animate-spin text-amber-400" />
+              <span className="text-xs font-mono">Loading stream...</span>
+            </div>
+          )}
+
+          {!isOnline && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-stone-950/85 backdrop-blur-xs text-stone-400">
+              <Video className="h-8 w-8 text-rose-500/70 mb-2 animate-pulse" />
+              <span className="font-semibold text-sm text-stone-200">{label}</span>
+              <span className="text-xs text-stone-400 font-mono mt-0.5">{cameraIp}</span>
+              <span className="text-xs text-amber-400 font-mono mt-1.5">Connecting to camera feed...</span>
+            </div>
+          )}
 
           {/* OSD Top Bar */}
           <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
@@ -365,7 +413,14 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-xs font-bold font-mono text-emerald-400 uppercase tracking-wider">LIVE FEED</span>
               <span className="text-[11px] text-stone-400 font-mono">| 25 FPS</span>
-              <span className="text-[10px] text-amber-300 font-mono bg-amber-950/60 px-1 py-0.5 rounded border border-amber-700/40">&lt;50ms LATENCY</span>
+              <span className={cn(
+                "text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold",
+                preferLocal
+                  ? "text-emerald-300 bg-emerald-950/60 border-emerald-700/40"
+                  : "text-blue-300 bg-blue-950/60 border-blue-700/40"
+              )}>
+                {preferLocal ? "LOCAL <50ms" : "CLOUD RELAY"}
+              </span>
             </div>
 
             <div className="bg-stone-950/80 backdrop-blur-md px-2.5 py-1 rounded-md border border-stone-700/60 text-xs font-mono font-medium text-stone-200 shadow-md">

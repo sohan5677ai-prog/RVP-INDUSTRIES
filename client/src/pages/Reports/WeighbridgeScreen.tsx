@@ -556,16 +556,28 @@ export default function WeighbridgeScreen() {
   // Fetch next ticket number
   const { data: ticketNumData } = useQuery({
     queryKey: ['weighbridge-next-ticket'],
-    queryFn: () => api<{ nextTicketNo: number }>('/weighbridge/tickets/next-number'),
+    queryFn: async () => {
+      try {
+        return await api<{ nextTicketNo: number }>('/weighbridge/next-number');
+      } catch {
+        return await api<{ nextTicketNo: number }>('/weighbridge/tickets/next-number');
+      }
+    },
     refetchInterval: 15000,
   });
 
   const nextTicketNo = ticketNumData?.nextTicketNo ?? 2808;
 
   // Fetch pending trucks (awaiting second weight)
-  const { data: pendingTickets = [], refetch: refetchPending } = useQuery<WeighbridgeTicket[]>({
+  const { data: rawPendingTickets = [], refetch: refetchPending } = useQuery<WeighbridgeTicket[]>({
     queryKey: ['weighbridge-pending'],
-    queryFn: () => api<WeighbridgeTicket[]>('/weighbridge/tickets/pending'),
+    queryFn: async () => {
+      try {
+        return await api<WeighbridgeTicket[]>('/weighbridge/pending');
+      } catch {
+        return await api<WeighbridgeTicket[]>('/weighbridge/tickets/pending');
+      }
+    },
     refetchInterval: 10000,
   });
 
@@ -577,6 +589,15 @@ export default function WeighbridgeScreen() {
         `/weighbridge/tickets?limit=100${historySearch ? `&search=${encodeURIComponent(historySearch)}` : ''}`
       ),
   });
+
+  // Resilient pending tickets list: combines direct pending query with
+  // any tickets in allTickets that have PENDING_SECOND status
+  const pendingTickets = useMemo(() => {
+    if (rawPendingTickets && rawPendingTickets.length > 0) {
+      return rawPendingTickets;
+    }
+    return allTickets.filter((t) => t.status === 'PENDING_SECOND');
+  }, [rawPendingTickets, allTickets]);
 
   // Fetch ERP parties for auto-complete suggestions
   const { data: parties = [] } = useQuery<Party[]>({

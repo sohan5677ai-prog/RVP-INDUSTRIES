@@ -40,8 +40,10 @@ router.post('/scale/broadcast', (req, res, next) => {
 });
 
 router.get('/next-number', asyncHandler(getNextTicketNumberHandler));
+router.get('/tickets/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets', asyncHandler(getTicketsHandler));
 router.get('/pending', asyncHandler(getPendingSecondWeightHandler));
+router.get('/tickets/pending', asyncHandler(getPendingSecondWeightHandler));
 router.post('/tickets', asyncHandler(createTicketHandler));
 router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));

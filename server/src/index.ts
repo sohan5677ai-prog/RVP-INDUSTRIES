@@ -44,7 +44,7 @@ app.use(cors({
 }));
 app.use(
   express.json({
-    limit: '2mb',
+    limit: '15mb',
     // Stash the raw request body so the Razorpay webhook can verify its HMAC
     // signature over the exact bytes Razorpay signed (JSON.stringify of the
     // parsed body would not byte-match).

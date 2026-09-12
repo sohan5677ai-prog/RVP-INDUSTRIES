@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
+import { logger } from '../lib/logger.js';
 import { streamCameraMjpeg, getCameraSnapshot, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
 
@@ -112,8 +113,42 @@ export async function createTicketHandler(req: Request, res: Response) {
   });
   const ticketNo = latest ? latest.ticketNo + 1 : STARTING_TICKET_NUMBER;
 
-  const firstWeight = firstWeightKg != null ? Number(firstWeightKg) : null;
-  const secondWeight = secondWeightKg != null ? Number(secondWeightKg) : null;
+  const firstWeight = firstWeightKg != null ? Number(firstWeightKg) : (req.body.firstWeight != null ? Number(req.body.firstWeight) : null);
+  const secondWeight = secondWeightKg != null ? Number(secondWeightKg) : (req.body.secondWeight != null ? Number(req.body.secondWeight) : null);
+
+  // If operator is submitting 2nd weight on an existing pending ticket
+  if (tripType === 'SECOND') {
+    const existingPending = await prisma.weighbridgeTicket.findFirst({
+      where: { vehicleNumber: cleanVehNo, status: 'PENDING_SECOND' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existingPending) {
+      const secondWeightNum = Number(secondWeight ?? firstWeight ?? 0);
+      const firstWeightExisting = existingPending.firstWeightKg ?? 0;
+      const netWeight = Math.abs(secondWeightNum - firstWeightExisting);
+
+      const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
+        saveWeighbridgeSnapshot(existingPending.ticketNo, 1, snapCam1, true),
+        saveWeighbridgeSnapshot(existingPending.ticketNo, 2, snapCam2, true),
+      ]);
+
+      const updated = await prisma.weighbridgeTicket.update({
+        where: { id: existingPending.id },
+        data: {
+          secondWeightKg: secondWeightNum,
+          secondWeighedAt: new Date(),
+          netWeightKg: netWeight,
+          status: 'COMPLETED',
+          tripType: 'SECOND',
+          ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
+          ...(remarks ? { remarks: remarks.trim() } : {}),
+          secondCam1PhotoUrl,
+          secondCam2PhotoUrl,
+        },
+      });
+      return res.status(200).json(updated);
+    }
+  }
 
   let netWeight: number | null = null;
   if (firstWeight != null && secondWeight != null) {
@@ -170,9 +205,11 @@ export async function createTicketHandler(req: Request, res: Response) {
  */
 export async function completeSecondWeightHandler(req: Request, res: Response) {
   const { id } = req.params;
-  const { secondWeightKg, loadType, remarks, snapCam1, snapCam2 } = req.body;
+  const { secondWeightKg, secondWeight, partyName, material, amount, loadType, remarks, snapCam1, snapCam2 } = req.body;
+  const weightVal = secondWeightKg ?? secondWeight ?? req.body.weight ?? req.body.liveWeight;
 
-  if (secondWeightKg == null || isNaN(Number(secondWeightKg))) {
+  if (weightVal == null || isNaN(Number(weightVal))) {
+    logger.warn(`Second weight missing or invalid in completeSecondWeightHandler (id=${id})`, req.body);
     throw new HttpError(400, 'Second weight (kg) is required');
   }
 
@@ -184,9 +221,9 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
     throw new HttpError(404, 'Weighbridge ticket not found');
   }
 
-  const secondWeight = Number(secondWeightKg);
+  const secondWeightNum = Number(weightVal);
   const firstWeight = existing.firstWeightKg ?? 0;
-  const netWeight = Math.abs(secondWeight - firstWeight);
+  const netWeight = Math.abs(secondWeightNum - firstWeight);
 
   // Capture snapshots for the second weighment
   const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
@@ -197,11 +234,14 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   const updated = await prisma.weighbridgeTicket.update({
     where: { id },
     data: {
-      secondWeightKg: secondWeight,
+      secondWeightKg: secondWeightNum,
       secondWeighedAt: new Date(),
       netWeightKg: netWeight,
       status: 'COMPLETED',
       tripType: 'SECOND',
+      ...(partyName ? { partyName: String(partyName).trim() } : {}),
+      ...(material ? { material: String(material).trim() } : {}),
+      ...(amount != null && !isNaN(Number(amount)) ? { amount: Number(amount) } : {}),
       ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
       ...(remarks ? { remarks: remarks.trim() } : {}),
       secondCam1PhotoUrl,

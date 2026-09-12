@@ -699,14 +699,26 @@ export default function WeighbridgeScreen() {
       const snapObj = { cam1: localSnap1, cam2: localSnap2 };
       setActiveSnapshots(snapObj);
 
-      if (tripType === 'SECOND' && pendingTicketId) {
+      const activePendingId =
+        pendingTicketId ||
+        (tripType === 'SECOND'
+          ? pendingTickets.find(
+              (p) => p.vehicleNumber.toUpperCase() === vehicleNumber.trim().toUpperCase()
+            )?.id
+          : null);
+
+      if (tripType === 'SECOND' && activePendingId) {
         // Complete second weighment
-        const res = await api<WeighbridgeTicket>(`/weighbridge/tickets/${pendingTicketId}/second-weight`, {
+        const res = await api<WeighbridgeTicket>(`/weighbridge/tickets/${activePendingId}/second-weight`, {
           method: 'PATCH',
           body: JSON.stringify({
+            secondWeightKg: currentLiveWeight,
             secondWeight: currentLiveWeight,
+            partyName: partyName.trim() || undefined,
+            material: material || undefined,
+            amount: parseFloat(charges) || undefined,
             loadType,
-            remarks,
+            remarks: remarks.trim() || undefined,
             snapCam1: snap1Base64,
             snapCam2: snap2Base64,
           }),
@@ -731,7 +743,9 @@ export default function WeighbridgeScreen() {
             loadType,
             billType,
             amount: parseFloat(charges) || 0,
-            firstWeightKg: currentLiveWeight,
+            firstWeightKg: tripType === 'SECOND' ? (firstWeight ?? currentLiveWeight) : currentLiveWeight,
+            secondWeightKg: tripType === 'SECOND' ? currentLiveWeight : undefined,
+            secondWeight: tripType === 'SECOND' ? currentLiveWeight : undefined,
             driverMobile: driverMobile.trim(),
             remarks: remarks.trim(),
             operatorName: user?.name || 'OPERATOR',

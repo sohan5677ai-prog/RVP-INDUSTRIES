@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { streamCameraMjpeg, getCameraSnapshot, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
+import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
 
 const STARTING_TICKET_NUMBER = 2807;
 
@@ -94,6 +95,8 @@ export async function createTicketHandler(req: Request, res: Response) {
     secondWeightKg,
     netWeightKg: providedNet,
     remarks,
+    snapCam1,
+    snapCam2,
   } = req.body;
 
   if (!vehicleNumber?.trim()) {
@@ -117,6 +120,9 @@ export async function createTicketHandler(req: Request, res: Response) {
     netWeight = Math.abs(secondWeight - firstWeight);
   } else if (providedNet != null) {
     netWeight = Number(providedNet);
+  } else if (firstWeight != null) {
+    // For first weighment (or single weighment), net weight defaults to first weight
+    netWeight = firstWeight;
   }
 
   const isPending = tripType === 'FIRST' && secondWeight == null;
@@ -124,6 +130,12 @@ export async function createTicketHandler(req: Request, res: Response) {
 
   const user = (req as any).user;
   const operatorName = user?.name || 'ADMIN';
+
+  // Capture and persist CCTV snapshots taken during this kata weighment
+  const [cam1PhotoUrl, cam2PhotoUrl] = await Promise.all([
+    saveWeighbridgeSnapshot(ticketNo, 1, snapCam1, false),
+    saveWeighbridgeSnapshot(ticketNo, 2, snapCam2, false),
+  ]);
 
   const ticket = await prisma.weighbridgeTicket.create({
     data: {
@@ -145,6 +157,8 @@ export async function createTicketHandler(req: Request, res: Response) {
       status,
       operatorName,
       remarks: remarks?.trim() || null,
+      cam1PhotoUrl,
+      cam2PhotoUrl,
     },
   });
 
@@ -156,7 +170,7 @@ export async function createTicketHandler(req: Request, res: Response) {
  */
 export async function completeSecondWeightHandler(req: Request, res: Response) {
   const { id } = req.params;
-  const { secondWeightKg, loadType, remarks } = req.body;
+  const { secondWeightKg, loadType, remarks, snapCam1, snapCam2 } = req.body;
 
   if (secondWeightKg == null || isNaN(Number(secondWeightKg))) {
     throw new HttpError(400, 'Second weight (kg) is required');
@@ -174,6 +188,12 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   const firstWeight = existing.firstWeightKg ?? 0;
   const netWeight = Math.abs(secondWeight - firstWeight);
 
+  // Capture snapshots for the second weighment
+  const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
+    saveWeighbridgeSnapshot(existing.ticketNo, 1, snapCam1, true),
+    saveWeighbridgeSnapshot(existing.ticketNo, 2, snapCam2, true),
+  ]);
+
   const updated = await prisma.weighbridgeTicket.update({
     where: { id },
     data: {
@@ -184,10 +204,27 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       tripType: 'SECOND',
       ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
       ...(remarks ? { remarks: remarks.trim() } : {}),
+      secondCam1PhotoUrl,
+      secondCam2PhotoUrl,
     },
   });
 
   res.json(updated);
+}
+
+/**
+ * Serve locally stored weighbridge snapshot files.
+ */
+export async function getStoredSnapshotHandler(req: Request, res: Response) {
+  const { filename } = req.params;
+  const filePath = getLocalSnapshotPath(filename);
+  if (!filePath) {
+    res.status(404).send('Snapshot not found');
+    return;
+  }
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(filePath);
 }
 
 /**

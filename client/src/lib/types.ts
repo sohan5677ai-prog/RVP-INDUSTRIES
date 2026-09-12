@@ -1419,6 +1419,10 @@ export interface WeighbridgeTicket {
   status: 'PENDING_SECOND' | 'COMPLETED' | 'CANCELLED' | string;
   operatorName: string | null;
   remarks: string | null;
+  cam1PhotoUrl?: string | null;
+  cam2PhotoUrl?: string | null;
+  secondCam1PhotoUrl?: string | null;
+  secondCam2PhotoUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -95,6 +95,34 @@ export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now(), 
   return getScaleApiUrl(`/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`);
 }
 
+export async function captureCamSnapshotBase64(camNumber: 1 | 2): Promise<string | null> {
+  const ts = Date.now();
+  const urls = [
+    getCameraSnapshotUrl(camNumber, ts, true),
+    getCameraSnapshotUrl(camNumber, ts, false),
+  ];
+  for (const url of urls) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const resp = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const blob = await resp.blob();
+        if (blob && blob.size > 500) {
+          return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 interface CctvLiveBoxProps {
   camNumber: 1 | 2;
   cameraIp: string;
@@ -585,11 +613,14 @@ export default function WeighbridgeScreen() {
         throw new Error('Weight must be greater than 0 kg');
       }
 
-      // Freeze snapshots
-      const ts = Date.now();
-      const snap1 = getCameraSnapshotUrl(1, ts, true);
-      const snap2 = getCameraSnapshotUrl(2, ts, true);
-      const snapObj = { cam1: snap1, cam2: snap2 };
+      // Capture live snapshots at the exact moment of kata (weighment)
+      const [snap1Base64, snap2Base64] = await Promise.all([
+        captureCamSnapshotBase64(1),
+        captureCamSnapshotBase64(2),
+      ]);
+      const localSnap1 = snap1Base64 || getCameraSnapshotUrl(1, Date.now(), true);
+      const localSnap2 = snap2Base64 || getCameraSnapshotUrl(2, Date.now(), true);
+      const snapObj = { cam1: localSnap1, cam2: localSnap2 };
       setActiveSnapshots(snapObj);
 
       if (tripType === 'SECOND' && pendingTicketId) {
@@ -600,9 +631,17 @@ export default function WeighbridgeScreen() {
             secondWeight: currentLiveWeight,
             loadType,
             remarks,
+            snapCam1: snap1Base64,
+            snapCam2: snap2Base64,
           }),
         });
-        return { ticket: res, snapshots: snapObj };
+        return {
+          ticket: res,
+          snapshots: {
+            cam1: res.secondCam1PhotoUrl || res.cam1PhotoUrl || snap1Base64 || localSnap1,
+            cam2: res.secondCam2PhotoUrl || res.cam2PhotoUrl || snap2Base64 || localSnap2,
+          },
+        };
       } else {
         // Create initial ticket (First weight or Single weight)
         const res = await api<WeighbridgeTicket>('/weighbridge/tickets', {
@@ -620,9 +659,17 @@ export default function WeighbridgeScreen() {
             driverMobile: driverMobile.trim(),
             remarks: remarks.trim(),
             operatorName: user?.name || 'OPERATOR',
+            snapCam1: snap1Base64,
+            snapCam2: snap2Base64,
           }),
         });
-        return { ticket: res, snapshots: snapObj };
+        return {
+          ticket: res,
+          snapshots: {
+            cam1: res.cam1PhotoUrl || snap1Base64 || localSnap1,
+            cam2: res.cam2PhotoUrl || snap2Base64 || localSnap2,
+          },
+        };
       }
     },
     onSuccess: ({ ticket, snapshots }) => {
@@ -1533,8 +1580,8 @@ export default function WeighbridgeScreen() {
                         onClick={() => {
                           setSlipModalTicket(t);
                           setActiveSnapshots({
-                            cam1: getCameraSnapshotUrl(1, Date.now(), true),
-                            cam2: getCameraSnapshotUrl(2, Date.now(), true),
+                            cam1: t.secondCam1PhotoUrl || t.cam1PhotoUrl || undefined,
+                            cam2: t.secondCam2PhotoUrl || t.cam2PhotoUrl || undefined,
                           });
                         }}
                         className="h-7 px-2 text-xs gap-1"

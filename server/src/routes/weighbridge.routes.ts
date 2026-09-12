@@ -11,6 +11,7 @@ import {
   snapshotCctvHandler,
   broadcastCctvHandler,
   getCctvStatusHandler,
+  getStoredSnapshotHandler,
 } from '../controllers/weighbridge.controller.js';
 
 const router = Router();
@@ -19,6 +20,7 @@ router.get('/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/cctv/snapshot', asyncHandler(snapshotCctvHandler));
 router.post('/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/cctv/status', asyncHandler(getCctvStatusHandler));
+router.get('/snapshots/:filename', asyncHandler(getStoredSnapshotHandler));
 
 // Scale serial live streaming routes
 router.get('/scale/live', (req, res, next) => {
@@ -42,6 +44,7 @@ router.get('/tickets', asyncHandler(getTicketsHandler));
 router.get('/pending', asyncHandler(getPendingSecondWeightHandler));
 router.post('/tickets', asyncHandler(createTicketHandler));
 router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
+router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/cancel', asyncHandler(cancelTicketHandler));
 
 export default router;

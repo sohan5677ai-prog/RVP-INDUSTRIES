@@ -48,20 +48,30 @@ export default function WeighbridgeSlipModal({
   const [cam2Failed, setCam2Failed] = useState(false);
 
   useEffect(() => {
-    const resolveCamUrl = (url: string | undefined, cam: 1 | 2) => {
-      const now = Date.now();
-      if (!url) return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
+    // Priority 1: Stored photo on ticket or explicit snapshot passed in
+    const rawCam1 = snapshots?.cam1 || ticket?.cam1PhotoUrl || null;
+    const rawCam2 = snapshots?.cam2 || ticket?.cam2PhotoUrl || null;
+
+    const resolveCamUrl = (url: string | null, cam: 1 | 2) => {
+      if (!url) {
+        const now = Date.now();
+        return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
+      }
+      if (url.startsWith('/api/')) {
+        return url;
+      }
       if (url.includes('127.0.0.1:4000') && window.location.hostname !== '127.0.0.1' && window.location.hostname !== 'localhost') {
+        const now = Date.now();
         return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
       }
       return url;
     };
 
-    setCam1Url(resolveCamUrl(snapshots?.cam1, 1));
-    setCam2Url(resolveCamUrl(snapshots?.cam2, 2));
+    setCam1Url(resolveCamUrl(rawCam1, 1));
+    setCam2Url(resolveCamUrl(rawCam2, 2));
     setCam1Failed(false);
     setCam2Failed(false);
-  }, [snapshots, ticket?.id]);
+  }, [snapshots, ticket?.id, ticket?.cam1PhotoUrl, ticket?.cam2PhotoUrl]);
 
   useEffect(() => {
     try {
@@ -81,10 +91,13 @@ export default function WeighbridgeSlipModal({
     grossWeight = Math.max(firstWeight, secondWeight);
     tareWeight = Math.min(firstWeight, secondWeight);
     netWeight = grossWeight - tareWeight;
-  } else if (firstWeight != null && netWeight == null) {
+  } else if (firstWeight != null) {
+    // When only first weight is present, net weight must also display the first weight
+    if (netWeight == null) {
+      netWeight = firstWeight;
+    }
     if (ticket?.tripType === 'SINGLE') {
       grossWeight = firstWeight;
-      netWeight = firstWeight;
     } else if (ticket?.loadType === 'LOAD') {
       grossWeight = firstWeight;
     } else {

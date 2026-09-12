@@ -122,16 +122,12 @@ export default function WeighbridgeSlipModal({
 
   // Helper to format weight strictly as '<weight>-Kg' matching the physical slip
   const formatWeight = (val: number | null | undefined): string => {
-    if (val == null || isNaN(val)) return '-';
+    if (val == null || isNaN(val)) return '';
     return `${Math.round(val)}-Kg`;
   };
 
-  // Format Material with dot prefix if needed (e.g. '.SEED')
-  const formattedMaterial = ticket?.material
-    ? ticket.material.startsWith('.')
-      ? ticket.material.toUpperCase()
-      : `.${ticket.material.toUpperCase()}`
-    : '-';
+  // Format Material matching physical slip (e.g. 'SEED' or 'PAPPU')
+  const formattedMaterial = ticket?.material ? ticket.material.trim().toUpperCase() : '';
 
   // Format Charges as '₹ 1.00'
   const formattedCharges = `₹ ${Number(ticket?.amount || 0).toFixed(2)}`;
@@ -173,7 +169,7 @@ export default function WeighbridgeSlipModal({
       overflow: hidden;
       background: #ffffff;
       color: #000000;
-      font-family: 'Courier New', Courier, monospace, Arial, sans-serif;
+      font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', Tahoma, sans-serif;
       text-rendering: geometricPrecision;
       -webkit-font-smoothing: antialiased;
       -webkit-print-color-adjust: exact;
@@ -196,12 +192,12 @@ export default function WeighbridgeSlipModal({
       align-items: center;
       justify-content: center;
       text-align: center;
-      font-family: 'Courier New', Courier, monospace;
-      font-weight: 900;
+      font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', Tahoma, sans-serif;
+      font-weight: 800;
       color: #000000;
       line-height: 1;
       white-space: nowrap;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
     .val-sans {
       position: absolute;
@@ -209,7 +205,7 @@ export default function WeighbridgeSlipModal({
       align-items: center;
       justify-content: center;
       text-align: center;
-      font-family: Arial, Helvetica, 'Segoe UI', sans-serif;
+      font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', Tahoma, sans-serif;
       font-weight: 800;
       color: #000000;
       line-height: 1;
@@ -237,11 +233,12 @@ export default function WeighbridgeSlipModal({
     .cam-stamp {
       position: absolute;
       bottom: 2px;
-      left: 4px;
+      right: 4px;
       background: rgba(0,0,0,0.65);
       color: #ffffff;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 8px;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 8.5px;
+      font-weight: 700;
       padding: 1px 4px;
       border-radius: 2px;
     }
@@ -253,102 +250,102 @@ export default function WeighbridgeSlipModal({
       <!-- Plain paper duplicate borders and headers -->
       <div style="position: absolute; inset: 3mm; border: 2px solid #dc2626; border-radius: 8px; pointer-events: none;">
         <div style="position: absolute; top: 2mm; left: 0; right: 0; text-align: center;">
-          <h1 style="font-size: 23px; font-weight: 900; color: #b91c1c; font-family: serif; text-transform: uppercase;">RVP WEIGH BRIDGE</h1>
-          <div style="display: inline-block; background: #facc15; font-size: 9px; font-weight: 900; padding: 1px 10px; border-radius: 10px;">GOVT APPROVED</div>
-          <p style="font-size: 9.5px; font-weight: 600; color: #27272a; margin-top: 2px;">3/86, New By-Pass Road, Near Rajuluru, BG Palli, PUNGANUR - 517 247, Chittoor Dist., A.P.</p>
-          <p style="font-size: 9.5px; font-weight: 700; color: #18181b;">Ph : 91215 53909, 94909 21002</p>
+          <h1 style="font-size: 23px; font-weight: 900; color: #b91c1c; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; text-transform: uppercase; letter-spacing: 0.5px;">RVP WEIGH BRIDGE</h1>
+          <div style="display: inline-block; background: #facc15; font-size: 9px; font-weight: 900; padding: 1px 10px; border-radius: 10px; font-family: Arial, sans-serif;">GOVT APPROVED</div>
+          <p style="font-size: 9.5px; font-weight: 700; color: #27272a; margin-top: 2px; font-family: Arial, sans-serif;">3/86, New By-Pass Road, Near Rajuluru, BG Palli, PUNGANUR - 517 247, Chittoor Dist., A.P.</p>
+          <p style="font-size: 9.5px; font-weight: 800; color: #18181b; font-family: Arial, sans-serif;">Ph : 91215 53909, 94909 21002</p>
         </div>
         <div style="position: absolute; top: 36mm; left: 2mm; width: 64mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
-          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">S. No.</div>
+          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b; font-family: Arial, sans-serif;">S. No.</div>
         </div>
         <div style="position: absolute; top: 36mm; left: 69mm; width: 60mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
-          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">DATE</div>
+          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b; font-family: Arial, sans-serif;">DATE</div>
         </div>
         <div style="position: absolute; top: 36mm; left: 132mm; width: 63.5mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
-          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">TIME</div>
+          <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b; font-family: Arial, sans-serif;">TIME</div>
         </div>
         <div style="position: absolute; top: 46.5mm; left: 2mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
         <div style="position: absolute; top: 46.5mm; left: 100.5mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
-        <div style="position: absolute; top: 97.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">VEHICLE NO.</div>
-        <div style="position: absolute; top: 97.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">1ST WEIGHT</div>
-        <div style="position: absolute; top: 97.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">2ND WEIGHT</div>
-        <div style="position: absolute; top: 97.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">NET WEIGHT</div>
+        <div style="position: absolute; top: 97.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">VEHICLE NO.</div>
+        <div style="position: absolute; top: 97.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">1ST WEIGHT</div>
+        <div style="position: absolute; top: 97.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">2ND WEIGHT</div>
+        <div style="position: absolute; top: 97.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">NET WEIGHT</div>
         <div style="position: absolute; top: 102mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
         <div style="position: absolute; top: 102mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
         <div style="position: absolute; top: 102mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
         <div style="position: absolute; top: 102mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 113.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">PARTY NAME</div>
-        <div style="position: absolute; top: 113.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">MATERIAL</div>
-        <div style="position: absolute; top: 113.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">CHARGES</div>
-        <div style="position: absolute; top: 113.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">SIGNATURE</div>
+        <div style="position: absolute; top: 113.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">PARTY NAME</div>
+        <div style="position: absolute; top: 113.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">MATERIAL</div>
+        <div style="position: absolute; top: 113.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">CHARGES</div>
+        <div style="position: absolute; top: 113.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">SIGNATURE</div>
         <div style="position: absolute; top: 118mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
         <div style="position: absolute; top: 118mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
         <div style="position: absolute; top: 118mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
         <div style="position: absolute; top: 118mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 130mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px;">
-          <div><span style="background: #b91c1c; color: white; font-weight: 900; padding: 2px 6px; font-size: 10px;">100 TON</span> <span style="font-size: 7.5px; color: #3f3f46; font-weight: 600;">Weigh Bridge Manufactured by : Sri Modern Weigh System. Cell 98430 55760</span></div>
+        <div style="position: absolute; top: 130mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px; font-family: Arial, sans-serif;">
+          <div><span style="background: #b91c1c; color: white; font-weight: 900; padding: 2px 6px; font-size: 10px;">100 TON</span> <span style="font-size: 7.5px; color: #3f3f46; font-weight: 700;">Weigh Bridge Manufactured by : Sri Modern Weigh System. Cell 98430 55760</span></div>
           <div style="font-weight: 900; color: #b91c1c; font-size: 10px;">THANK YOU! VISIT AGAIN!!</div>
         </div>
       </div>
     ` : ''}
 
     <!-- 1. S. No. -->
-    <div class="val" style="top: 43.5mm; left: 23mm; width: 45mm; height: 8mm; font-size: 16px; letter-spacing: 1px;">
+    <div class="val" style="top: 43.5mm; left: 23mm; width: 45mm; height: 8mm; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;">
       ${ticket.ticketNo}
     </div>
 
     <!-- 2. DATE -->
-    <div class="val" style="top: 43.5mm; left: 89mm; width: 44mm; height: 8mm; font-size: 14px;">
+    <div class="val" style="top: 43.5mm; left: 89mm; width: 44mm; height: 8mm; font-size: 14px; font-weight: 800;">
       ${formattedDate}
     </div>
 
     <!-- 3. TIME -->
-    <div class="val" style="top: 43.5mm; left: 154mm; width: 48mm; height: 8mm; font-size: 14px;">
+    <div class="val" style="top: 43.5mm; left: 154mm; width: 48mm; height: 8mm; font-size: 14px; font-weight: 800;">
       ${formattedTime}
     </div>
 
     <!-- 4. CCTV Camera 1 -->
     <div class="cam-box" style="top: 53.5mm; left: 4mm; width: 96mm; height: 52mm;">
-      ${cam1Url && !cam1Failed ? `<img src="${cam1Url}" alt="CAM 1" /><div class="cam-stamp">CP IP Cam 1 · ${formattedDate} ${formattedTime}</div>` : ''}
+      ${cam1Url && !cam1Failed ? `<img src="${cam1Url}" alt="CAM 1" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
     <!-- 5. CCTV Camera 2 -->
     <div class="cam-box" style="top: 53.5mm; left: 106mm; width: 96mm; height: 52mm;">
-      ${cam2Url && !cam2Failed ? `<img src="${cam2Url}" alt="CAM 2" /><div class="cam-stamp">CP IP Cam 2 · ${formattedDate} ${formattedTime}</div>` : ''}
+      ${cam2Url && !cam2Failed ? `<img src="${cam2Url}" alt="CAM 2" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
     <!-- 6. Vehicle No. -->
-    <div class="val" style="top: 113.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 15px; letter-spacing: 0.5px;">
+    <div class="val" style="top: 113.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;">
       ${ticket.vehicleNumber}
     </div>
 
     <!-- 7. 1st Weight -->
-    <div class="val" style="top: 113.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 15px;">
-      ${formatWeight(firstWeight)}
+    <div class="val" style="top: 113.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800;">
+      ${firstWeight != null ? formatWeight(firstWeight) : ''}
     </div>
 
     <!-- 8. 2nd Weight -->
-    <div class="val" style="top: 113.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px;">
-      ${secondWeight != null ? formatWeight(secondWeight) : (ticket.tripType === 'FIRST' ? '-' : formatWeight(firstWeight))}
+    <div class="val" style="top: 113.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800;">
+      ${secondWeight != null ? formatWeight(secondWeight) : ''}
     </div>
 
     <!-- 9. Net Weight -->
-    <div class="val" style="top: 113.5mm; left: 157mm; width: 48mm; height: 7.5mm; font-size: 15px;">
-      ${netWeight != null ? formatWeight(netWeight) : '-'}
+    <div class="val" style="top: 113.5mm; left: 157mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800;">
+      ${netWeight != null ? formatWeight(netWeight) : ''}
     </div>
 
     <!-- 10. Party Name -->
-    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">
-      ${ticket.partyName || '-'}
+    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; font-weight: 800; padding: 0 2px;">
+      ${ticket.partyName || ''}
     </div>
 
     <!-- 11. Material -->
-    <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">
+    <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 14px; font-weight: 800; padding: 0 2px;">
       ${formattedMaterial}
     </div>
 
     <!-- 12. Charges -->
-    <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 14px;">
+    <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px; font-weight: 800;">
       ${formattedCharges}
     </div>
   </div>
@@ -831,21 +828,21 @@ export default function WeighbridgeSlipModal({
               
               {/* 1. S. No. (e.g. '2807') */}
               <div className="absolute top-[43.5mm] left-[23mm] w-[45mm] h-[8mm] flex items-center justify-center">
-                <span className="font-mono font-black text-base text-black tracking-wider">
+                <span className="font-sans font-black text-base text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {ticket.ticketNo}
                 </span>
               </div>
 
               {/* 2. DATE (e.g. '09-09-2026') */}
               <div className="absolute top-[43.5mm] left-[89mm] w-[44mm] h-[8mm] flex items-center justify-center">
-                <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
+                <span className="font-sans font-black text-sm text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {formattedDate}
                 </span>
               </div>
 
               {/* 3. TIME (e.g. '01:26:21 pm') */}
               <div className="absolute top-[43.5mm] left-[154mm] w-[48mm] h-[8mm] flex items-center justify-center">
-                <span className="font-mono font-black text-xs sm:text-sm text-black tracking-wider">
+                <span className="font-sans font-black text-sm text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {formattedTime}
                 </span>
               </div>
@@ -873,8 +870,8 @@ export default function WeighbridgeSlipModal({
                 )}
                 {/* CP PLUS OSD Stamp */}
                 {!cam1Failed && (
-                  <div className="absolute bottom-1 left-1.5 bg-black/60 text-white font-mono text-[8px] px-1 py-0.2 rounded-xs pointer-events-none">
-                    CP IP Cam 1 · {formattedDate} {formattedTime}
+                  <div className="absolute bottom-1 right-1.5 bg-black/65 text-white font-sans text-[8.5px] font-bold px-1.5 py-0.5 rounded-xs pointer-events-none" style={{ fontFamily: "Arial, sans-serif" }}>
+                    {formattedDate} {formattedTime}
                   </div>
                 )}
               </div>
@@ -902,8 +899,8 @@ export default function WeighbridgeSlipModal({
                 )}
                 {/* CP PLUS OSD Stamp */}
                 {!cam2Failed && (
-                  <div className="absolute bottom-1 left-1.5 bg-black/60 text-white font-mono text-[8px] px-1 py-0.2 rounded-xs pointer-events-none">
-                    CP IP Cam 2 · {formattedDate} {formattedTime}
+                  <div className="absolute bottom-1 right-1.5 bg-black/65 text-white font-sans text-[8.5px] font-bold px-1.5 py-0.5 rounded-xs pointer-events-none" style={{ fontFamily: "Arial, sans-serif" }}>
+                    {formattedDate} {formattedTime}
                   </div>
                 )}
               </div>
@@ -915,33 +912,29 @@ export default function WeighbridgeSlipModal({
               
               {/* 6. Vehicle No. (e.g. 'AP39UX9999') */}
               <div className="absolute top-[113.5mm] left-[4mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-mono font-black text-sm text-black tracking-wider uppercase truncate">
+                <span className="font-sans font-black text-base text-black tracking-wider uppercase truncate" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {ticket.vehicleNumber}
                 </span>
               </div>
 
-              {/* 7. 1st Weight (e.g. '0-Kg') */}
+              {/* 7. 1st Weight (e.g. '13810-Kg') */}
               <div className="absolute top-[113.5mm] left-[55mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-mono font-black text-sm text-black tracking-wider">
-                  {formatWeight(firstWeight)}
+                <span className="font-sans font-black text-base text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
+                  {firstWeight != null ? formatWeight(firstWeight) : ''}
                 </span>
               </div>
 
-              {/* 8. 2nd Weight (e.g. '-' or '<wt>-Kg') */}
+              {/* 8. 2nd Weight (e.g. '' or '<wt>-Kg') */}
               <div className="absolute top-[113.5mm] left-[106mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-mono font-black text-sm text-black tracking-wider">
-                  {secondWeight != null
-                    ? formatWeight(secondWeight)
-                    : ticket.tripType === 'FIRST'
-                    ? '-'
-                    : formatWeight(firstWeight)}
+                <span className="font-sans font-black text-base text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
+                  {secondWeight != null ? formatWeight(secondWeight) : ''}
                 </span>
               </div>
 
-              {/* 9. Net Weight (e.g. '-') */}
+              {/* 9. Net Weight (e.g. '13810-Kg') */}
               <div className="absolute top-[113.5mm] left-[157mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-mono font-black text-sm sm:text-base text-black tracking-wider">
-                  {netWeight != null ? formatWeight(netWeight) : '-'}
+                <span className="font-sans font-black text-base text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
+                  {netWeight != null ? formatWeight(netWeight) : ''}
                 </span>
               </div>
 
@@ -952,21 +945,21 @@ export default function WeighbridgeSlipModal({
 
               {/* 10. Party Name */}
               <div className="absolute top-[128.5mm] left-[4mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-sans font-black text-xs text-black tracking-wide uppercase truncate">
-                  {ticket.partyName || '-'}
+                <span className="font-sans font-black text-xs sm:text-sm text-black tracking-wide uppercase truncate" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
+                  {ticket.partyName || ''}
                 </span>
               </div>
 
-              {/* 11. Material (e.g. '.PAPPU' or '.SEED') */}
+              {/* 11. Material (e.g. 'SEED') */}
               <div className="absolute top-[128.5mm] left-[55mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-sans font-black text-xs text-black tracking-wider uppercase truncate">
+                <span className="font-sans font-black text-xs sm:text-sm text-black tracking-wider uppercase truncate" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {formattedMaterial}
                 </span>
               </div>
 
-              {/* 12. Charges (e.g. '₹ 100.00') */}
+              {/* 12. Charges (e.g. '₹ 1.00') */}
               <div className="absolute top-[128.5mm] left-[106mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-mono font-black text-sm text-black tracking-wide">
+                <span className="font-sans font-black text-sm sm:text-base text-black tracking-wide" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {formattedCharges}
                 </span>
               </div>

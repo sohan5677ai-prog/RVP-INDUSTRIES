@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { requireRole } from '../middleware/auth.js';
+import { upload } from '../lib/upload.js';
 import {
   listDrivers,
   createDriver,
@@ -15,6 +16,7 @@ import {
   previewRecipients,
   generateWishText,
   generateWishImageEndpoint,
+  uploadWishImageEndpoint,
   sendWishBroadcast,
   listWishHistory,
 } from '../controllers/wishes.controller.js';
@@ -40,6 +42,7 @@ router.patch('/wishes/transports/:id/phone', canManage, asyncHandler(updateTrans
 router.get('/wishes/recipients', asyncHandler(previewRecipients));
 router.post('/wishes/generate/text', asyncHandler(generateWishText));
 router.post('/wishes/generate/image', asyncHandler(generateWishImageEndpoint));
+router.post('/wishes/upload/image', upload.single('image'), asyncHandler(uploadWishImageEndpoint));
 
 router.post('/wishes/send', canManage, asyncHandler(sendWishBroadcast));
 router.get('/wishes/history', asyncHandler(listWishHistory));

@@ -3,7 +3,7 @@ import type { WishCategory } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { generateWishMessage, generateWishImage } from '../lib/gemini.js';
-import { uploadBufferToStorage } from '../lib/upload.js';
+import { uploadBufferToStorage, uploadFileToStorage } from '../lib/upload.js';
 import * as whatsappService from '../services/whatsapp.service.js';
 import { parseCompanyVehicles } from '../lib/calc.js';
 import {
@@ -309,6 +309,17 @@ export async function generateWishImageEndpoint(req: Request, res: Response) {
   const image = await generateWishImage(occasion, category);
   const ext = image.mimeType === 'image/jpeg' ? '.jpg' : '.png';
   const imageUrl = await uploadBufferToStorage(image.buffer, image.mimeType, ext);
+  res.json({ imageUrl });
+}
+
+export async function uploadWishImageEndpoint(req: Request, res: Response) {
+  if (!req.file) {
+    throw new HttpError(400, 'No image file uploaded');
+  }
+  if (!req.file.mimetype.startsWith('image/')) {
+    throw new HttpError(400, 'Only image files are allowed');
+  }
+  const imageUrl = await uploadFileToStorage(req.file);
   res.json({ imageUrl });
 }
 

@@ -17,6 +17,9 @@ import {
   Pencil,
   Check,
   X,
+  UploadCloud,
+  Loader2,
+  Trash2,
 } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { FESTIVALS, type FestivalItem } from '@/lib/festivals';
@@ -190,6 +193,9 @@ function WishComposer({
   const [includeOwners, setIncludeOwners] = useState(true);
   const [messageText, setMessageText] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageSource, setImageSource] = useState<'ai' | 'upload' | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const wireCategory = category === 'ALL' ? null : category;
   const isSelectedPartiesMode = targetMode === 'SELECTED_PARTIES';
@@ -234,15 +240,69 @@ function WishComposer({
     onSuccess: (d) => setMessageText(d.message),
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
+
   const genImage = useMutation({
     mutationFn: () =>
       api<{ imageUrl: string }>('/wishes/generate/image', {
         method: 'POST',
         body: { occasion, category: wireCategory },
       }),
-    onSuccess: (d) => setImageUrl(d.imageUrl),
+    onSuccess: (d) => {
+      setImageUrl(d.imageUrl);
+      setImageSource('ai');
+    },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
+
+  const uploadImage = useMutation({
+    mutationFn: async (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        throw new Error('Please select an image file (PNG, JPG, WEBP, etc.)');
+      }
+      const fd = new FormData();
+      fd.append('image', file);
+      return api<{ imageUrl: string }>('/wishes/upload/image', {
+        method: 'POST',
+        body: fd,
+        multipart: true,
+      });
+    },
+    onSuccess: (d) => {
+      setImageUrl(d.imageUrl);
+      setImageSource('upload');
+      toast.success('Custom picture uploaded successfully');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  function handleFileSelected(file: File | null) {
+    if (!file) return;
+    uploadImage.mutate(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function handleClearImage() {
+    setImageUrl(null);
+    setImageSource(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    toast.info('Picture removed');
+  }
+
+  function handlePaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          uploadImage.mutate(file);
+          toast.info('Uploading pasted image…');
+          return;
+        }
+      }
+    }
+  }
 
   function handleGenerate() {
     if (!occasion.trim()) {
@@ -250,7 +310,11 @@ function WishComposer({
       return;
     }
     genText.mutate();
-    genImage.mutate();
+    if (!imageUrl || imageSource === 'ai') {
+      genImage.mutate();
+    } else {
+      toast.info('Drafted new AI message while keeping your custom uploaded picture');
+    }
   }
 
   const send = useMutation({
@@ -300,7 +364,7 @@ function WishComposer({
 
   return (
     <>
-      <Card>
+      <Card onPaste={handlePaste}>
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40">
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-pink-500" />
@@ -618,58 +682,229 @@ function WishComposer({
             </div>
           )}
 
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              onClick={handleGenerate}
-              disabled={!occasion.trim() || genText.isPending || genImage.isPending}
-            >
-              <Sparkles className="h-4 w-4" />
-              {genText.isPending || genImage.isPending ? 'Generating…' : 'Generate message + image'}
-            </Button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+              {imageSource === 'upload' ? (
+                <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                  <UploadCloud className="h-3.5 w-3.5" /> Custom picture attached
+                </span>
+              ) : imageSource === 'ai' ? (
+                <span className="inline-flex items-center gap-1 font-medium text-pink-600 dark:text-pink-400">
+                  <Sparkles className="h-3.5 w-3.5" /> AI graphic attached
+                </span>
+              ) : (
+                <span>Upload your custom picture or generate one with AI</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => genText.mutate()}
+                disabled={!occasion.trim() || genText.isPending}
+                title="Generate wish message text with AI"
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1 text-pink-500" />
+                {genText.isPending ? 'Drafting message…' : 'Draft message only'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerate}
+                disabled={!occasion.trim() || genText.isPending || genImage.isPending}
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1 text-pink-500" />
+                {genText.isPending || genImage.isPending
+                  ? 'Generating…'
+                  : imageSource === 'upload'
+                  ? 'Draft message (keep picture)'
+                  : 'Generate message + image'}
+              </Button>
+            </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-[1fr_220px]">
+          <div className="grid gap-4 sm:grid-cols-[1fr_260px]">
             <div className="space-y-1.5">
-              <Label>Message</Label>
+              <div className="flex items-center justify-between">
+                <Label>Message</Label>
+                <button
+                  type="button"
+                  onClick={() => genText.mutate()}
+                  disabled={!occasion.trim() || genText.isPending}
+                  className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {genText.isPending ? 'Drafting…' : 'AI draft'}
+                </button>
+              </div>
               <textarea
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
                 placeholder="Generate or write the wish message here…"
-                rows={5}
+                rows={7}
                 className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
               />
               <p className="text-[11px] text-muted-foreground">
                 Sent as "🎉 Dear &lt;name&gt; ," + message body + "Warm regards, RVP INDUSTRIES PUNGANUR".
               </p>
             </div>
+
             <div className="space-y-1.5">
-              <Label>Image</Label>
-              <div className="flex aspect-square items-center justify-center overflow-hidden rounded-md border border-dashed border-input bg-muted/30">
-                {imageUrl ? (
-                  <img
-                    src={imageUrl}
-                    alt="Generated wish graphic"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <ImageIcon className="h-8 w-8 text-muted-foreground" />
+              <div className="flex items-center justify-between">
+                <Label>Attached Picture</Label>
+                {imageUrl && (
+                  <Badge
+                    variant={imageSource === 'upload' ? 'default' : 'secondary'}
+                    className="text-[10px] h-4 px-1.5 font-normal"
+                  >
+                    {imageSource === 'upload' ? '📷 Custom' : '🎨 AI Generated'}
+                  </Badge>
                 )}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => genImage.mutate()}
-                disabled={!occasion.trim() || genImage.isPending}
+
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleFileSelected(e.target.files?.[0] ?? null)}
+              />
+
+              {/* Dropzone / Preview Area */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  if (!imageUrl && !uploadImage.isPending && !genImage.isPending) {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) handleFileSelected(file);
+                }}
+                className={cn(
+                  'relative flex aspect-square items-center justify-center overflow-hidden rounded-md border-2 border-dashed transition-all',
+                  dragOver
+                    ? 'border-primary bg-primary/10 scale-[0.99]'
+                    : imageUrl
+                    ? 'border-border bg-muted/20'
+                    : 'border-input hover:border-primary/50 cursor-pointer bg-muted/20 hover:bg-muted/30'
+                )}
               >
-                <RefreshCw className="h-3.5 w-3.5" />{' '}
-                {genImage.isPending
-                  ? 'Generating…'
-                  : imageUrl
-                  ? 'Regenerate image'
-                  : 'Generate image'}
-              </Button>
+                {uploadImage.isPending ? (
+                  <div className="flex flex-col items-center gap-1.5 p-3 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    <span className="text-xs font-medium text-foreground">Uploading your picture…</span>
+                  </div>
+                ) : genImage.isPending ? (
+                  <div className="flex flex-col items-center gap-1.5 p-3 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-pink-500" />
+                    <span className="text-xs font-medium text-foreground">Generating AI graphic…</span>
+                  </div>
+                ) : imageUrl ? (
+                  <div className="group relative h-full w-full">
+                    <img
+                      src={imageUrl}
+                      alt="Wish graphic"
+                      className="h-full w-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="h-7 text-xs px-2.5 shadow-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        <UploadCloud className="h-3.5 w-3.5 mr-1" /> Replace Picture
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        className="h-7 text-xs px-2.5 shadow-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearImage();
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1 p-3 text-center">
+                    <UploadCloud className="h-7 w-7 text-muted-foreground/80" />
+                    <span className="text-xs font-medium text-foreground">
+                      Upload your picture
+                    </span>
+                    <span className="text-[10px] text-muted-foreground leading-tight">
+                      Click to browse, drag & drop, or paste (Ctrl+V)
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons below preview */}
+              <div className="grid grid-cols-2 gap-1.5 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs px-2"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadImage.isPending || genImage.isPending}
+                >
+                  <UploadCloud className="h-3.5 w-3.5 mr-1" />
+                  {imageUrl && imageSource === 'upload' ? 'Replace' : 'Upload Picture'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs px-2"
+                  onClick={() => genImage.mutate()}
+                  disabled={!occasion.trim() || genImage.isPending || uploadImage.isPending}
+                >
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                  {genImage.isPending
+                    ? 'Generating…'
+                    : imageUrl && imageSource === 'ai'
+                    ? 'Regen AI'
+                    : 'AI Generate'}
+                </Button>
+              </div>
+
+              {imageUrl && (
+                <div className="flex justify-center pt-0.5">
+                  <button
+                    type="button"
+                    onClick={handleClearImage}
+                    className="text-[11px] text-muted-foreground hover:text-destructive transition-colors inline-flex items-center gap-1"
+                  >
+                    <Trash2 className="h-3 w-3" /> Remove picture
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1000,7 +1235,30 @@ function WishHistorySection() {
             <TableBody>
               {data.map((b) => (
                 <TableRow key={b.id}>
-                  <TableCell className="font-medium">{b.occasion}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2.5">
+                      {b.imageUrl ? (
+                        <a
+                          href={b.imageUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Click to view full picture"
+                          className="shrink-0 group/thumb"
+                        >
+                          <img
+                            src={b.imageUrl}
+                            alt={b.occasion}
+                            className="h-8 w-8 rounded object-cover border border-border/70 group-hover/thumb:border-primary transition-colors"
+                          />
+                        </a>
+                      ) : (
+                        <div className="h-8 w-8 rounded bg-muted flex items-center justify-center text-muted-foreground shrink-0 border border-dashed">
+                          <ImageIcon className="h-3.5 w-3.5 opacity-60" />
+                        </div>
+                      )}
+                      <span>{b.occasion}</span>
+                    </div>
+                  </TableCell>
                   <TableCell>
                     {b.category ? WISH_CATEGORY_LABELS[b.category] : 'Everyone'}
                   </TableCell>

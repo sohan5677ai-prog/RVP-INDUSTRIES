@@ -126,6 +126,15 @@ interface BroadcastFrame {
   timestamp: number;
 }
 
+export interface CameraFrame {
+  buffer: Buffer;
+  timestamp: number;
+  source: 'CLOUD_RELAY' | 'SERVER_LAN';
+}
+
+const LIVE_RELAY_MAX_AGE_MS = 15_000;
+const SNAPSHOT_MAX_AGE_MS = 45_000;
+
 const latestBroadcastFrames: Record<1 | 2, BroadcastFrame | null> = {
   1: null,
   2: null,
@@ -151,18 +160,31 @@ export function getCctvStatus() {
   const getStatus = (num: 1 | 2) => {
     const cfg = CAMERAS[num];
     const b = latestBroadcastFrames[num];
-    const isFresh = b ? now - b.timestamp < 30000 : false;
+    const relayAgeMs = b ? now - b.timestamp : null;
+    const relayOnline = relayAgeMs != null && relayAgeMs < LIVE_RELAY_MAX_AGE_MS;
+    const serverFrame = globalFeedManager?.getLatestFrameInfo(num) ?? null;
+    const serverFrameAgeMs = serverFrame ? now - serverFrame.timestamp : null;
+    const serverLanOnline =
+      serverFrame?.source === 'SERVER_LAN' &&
+      serverFrameAgeMs != null &&
+      serverFrameAgeMs < LIVE_RELAY_MAX_AGE_MS &&
+      (globalFeedManager?.getConsecutiveErrors(num) ?? 0) === 0;
+
     return {
       cam: num,
       ip: cfg.ip,
       port: cfg.port,
-      online: isFresh || (globalFeedManager?.getLatestFrame(num) != null && (globalFeedManager?.getConsecutiveErrors(num) ?? 0) === 0),
+      online: relayOnline || serverLanOnline,
+      source: relayOnline ? 'CLOUD_RELAY' : serverLanOnline ? 'SERVER_LAN' : 'OFFLINE',
+      relayOnline,
+      serverLanOnline,
       lastSeen: b?.timestamp || null,
-      ageMs: b ? now - b.timestamp : null,
+      ageMs: relayAgeMs,
       sizeBytes: b?.buffer?.length || 0,
     };
   };
   return {
+    checkedAt: now,
     cam1: getStatus(1),
     cam2: getStatus(2),
   };
@@ -173,7 +195,7 @@ export function getCctvStatus() {
  * and serves it instantly (< 1ms) without overloading CP PLUS firmware.
  */
 class CameraFeedManager {
-  private latestFrames: Record<1 | 2, Buffer | null> = { 1: null, 2: null };
+  private latestFrames: Record<1 | 2, CameraFrame | null> = { 1: null, 2: null };
   private isPolling: Record<1 | 2, boolean> = { 1: false, 2: false };
   private consecutiveErrors: Record<1 | 2, number> = { 1: 0, 2: 0 };
 
@@ -183,6 +205,10 @@ class CameraFeedManager {
   }
 
   getLatestFrame(camNum: 1 | 2): Buffer | null {
+    return this.latestFrames[camNum]?.buffer ?? null;
+  }
+
+  getLatestFrameInfo(camNum: 1 | 2): CameraFrame | null {
     return this.latestFrames[camNum];
   }
 
@@ -190,8 +216,13 @@ class CameraFeedManager {
     return this.consecutiveErrors[camNum];
   }
 
-  setDirectFrame(camNum: 1 | 2, frame: Buffer) {
-    this.latestFrames[camNum] = frame;
+  setDirectFrame(
+    camNum: 1 | 2,
+    frame: Buffer,
+    source: CameraFrame['source'] = 'CLOUD_RELAY',
+    timestamp: number = Date.now()
+  ) {
+    this.latestFrames[camNum] = { buffer: frame, source, timestamp };
     this.consecutiveErrors[camNum] = 0;
   }
 
@@ -212,7 +243,11 @@ class CameraFeedManager {
 
       try {
         const frame = await fetchCameraSnapshotFromDevice(cfg);
-        this.latestFrames[camNum] = frame;
+        this.latestFrames[camNum] = {
+          buffer: frame,
+          timestamp: Date.now(),
+          source: 'SERVER_LAN',
+        };
         if (this.consecutiveErrors[camNum] > 0) {
           logger.info(`[cctv] Cam ${camNum} (${cfg.ip}) connected & capturing live frames (${frame.length} bytes)`);
           this.consecutiveErrors[camNum] = 0;
@@ -245,17 +280,33 @@ function getFeedManager(): CameraFeedManager {
 /**
  * Get latest live JPEG frame instantly from in-memory buffer (sub-millisecond)
  */
-export async function getCameraSnapshot(camNum: 1 | 2): Promise<Buffer> {
+export async function getCameraSnapshotWithMeta(
+  camNum: 1 | 2,
+  maxAgeMs: number = SNAPSHOT_MAX_AGE_MS
+): Promise<CameraFrame> {
+  const now = Date.now();
+
   // Priority 1: Check fresh broadcast frame received from Kata cabin bridge
   const broadcast = latestBroadcastFrames[camNum];
-  if (broadcast && broadcast.buffer && broadcast.buffer.length > 500 && Date.now() - broadcast.timestamp < 45000) {
-    return broadcast.buffer;
+  if (
+    broadcast &&
+    broadcast.buffer &&
+    broadcast.buffer.length > 500 &&
+    now - broadcast.timestamp < maxAgeMs
+  ) {
+    return {
+      buffer: broadcast.buffer,
+      timestamp: broadcast.timestamp,
+      source: 'CLOUD_RELAY',
+    };
   }
 
-  // Priority 2: In-memory poller frame (if running locally on LAN)
+  // Priority 2: Fresh in-memory poller frame (when the API itself is on the LAN).
+  // Never return an indefinitely stale cached image: a wrong-time photo is worse
+  // than an explicit camera-offline result on a legal weighment record.
   const manager = getFeedManager();
-  const cached = manager.getLatestFrame(camNum);
-  if (cached && cached.length > 500) {
+  const cached = manager.getLatestFrameInfo(camNum);
+  if (cached && cached.buffer.length > 500 && now - cached.timestamp < maxAgeMs) {
     return cached;
   }
 
@@ -263,27 +314,34 @@ export async function getCameraSnapshot(camNum: 1 | 2): Promise<Buffer> {
   const cfg = CAMERAS[camNum];
   try {
     const direct = await fetchCameraSnapshotFromDevice(cfg);
-    manager.setDirectFrame(camNum, direct);
-    return direct;
+    const timestamp = Date.now();
+    manager.setDirectFrame(camNum, direct, 'SERVER_LAN', timestamp);
+    return { buffer: direct, timestamp, source: 'SERVER_LAN' };
   } catch (err: any) {
-    // Priority 4: If direct fetch failed (e.g. cloud server), return older broadcast if exists
-    if (broadcast && broadcast.buffer && broadcast.buffer.length > 500) {
-      return broadcast.buffer;
-    }
-    throw err;
+    const relayDetail = broadcast
+      ? ` Last relay frame is ${Math.round((now - broadcast.timestamp) / 1000)}s old.`
+      : ' No relay frame has been received since this server started.';
+    throw new Error(`${err.message}.${relayDetail}`);
   }
+}
+
+export async function getCameraSnapshot(camNum: 1 | 2): Promise<Buffer> {
+  const frame = await getCameraSnapshotWithMeta(camNum);
+  return frame.buffer;
 }
 
 /**
  * Stream continuous live MJPEG video from CP PLUS camera to client response
  */
 export async function streamCameraMjpeg(camNum: 1 | 2, clientRes: Response): Promise<void> {
-  const frame = await getCameraSnapshot(camNum);
+  const frame = await getCameraSnapshotWithMeta(camNum);
   clientRes.writeHead(200, {
     'Content-Type': 'image/jpeg',
     'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Cross-Origin-Resource-Policy': 'cross-origin',
     'Access-Control-Allow-Origin': '*',
+    'X-Frame-Timestamp': String(frame.timestamp),
+    'X-Frame-Source': frame.source,
   });
-  clientRes.end(frame);
+  clientRes.end(frame.buffer);
 }

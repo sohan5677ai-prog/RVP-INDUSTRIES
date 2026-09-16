@@ -1,0 +1,7 @@
+{
+  "CLOUD_API_URL": "https://rvp-server.onrender.com/api",
+  "CCTV_BRIDGE_KEY": "replace-with-the-same-24-plus-character-secret-used-on-render",
+  "CCTV_CLOUD_FRAME_INTERVAL_MS": 1000,
+  "CCTV_CAM1_IP": "192.168.1.101",
+  "CCTV_CAM2_IP": "192.168.1.102"
+}

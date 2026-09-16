@@ -24,6 +24,9 @@ import {
   ShieldCheck,
   Maximize2,
   Download,
+  Cloud,
+  CloudOff,
+  IndianRupee,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -61,6 +64,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
 import WeighbridgeSlipModal from '@/components/WeighbridgeSlipModal';
+import './WeighbridgeScreen.css';
 
 const MATERIALS = [
   'PAPPU',
@@ -106,7 +110,7 @@ export async function captureCamSnapshotBase64(camNumber: 1 | 2): Promise<string
   for (const url of urls) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const timer = setTimeout(() => ctrl.abort(), isHttps ? 5000 : 1800);
       const resp = await fetch(url, { signal: ctrl.signal });
       clearTimeout(timer);
       if (resp.ok) {
@@ -133,10 +137,29 @@ interface CctvLiveBoxProps {
   refreshTrigger?: number;
   onStatusChange?: (online: boolean, isLocal: boolean) => void;
   onExpand?: (camNumber: 1 | 2) => void;
+  relayStatus?: CctvCameraStatus;
 }
 
-function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand }: CctvLiveBoxProps) {
-  const [preferLocal, setPreferLocal] = useState<boolean>(true);
+interface CctvCameraStatus {
+  cam: number;
+  online: boolean;
+  source: 'CLOUD_RELAY' | 'SERVER_LAN' | 'OFFLINE';
+  relayOnline: boolean;
+  lastSeen: number | null;
+  ageMs: number | null;
+  sizeBytes: number;
+}
+
+interface CctvStatusResponse {
+  checkedAt: number;
+  cam1: CctvCameraStatus;
+  cam2: CctvCameraStatus;
+}
+
+function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus }: CctvLiveBoxProps) {
+  const [preferLocal, setPreferLocal] = useState<boolean>(() =>
+    typeof window === 'undefined' || window.location.protocol !== 'https:'
+  );
   const [frameUrl, setFrameUrl] = useState<string>(() =>
     getCameraSnapshotUrl(camNumber, Date.now(), true)
   );
@@ -173,7 +196,7 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
     <div 
       onClick={() => onExpand?.(camNumber)}
       title="Click to open Full Live View"
-      className="rounded-xl bg-stone-950 border border-border/80 h-40 relative overflow-hidden flex items-center justify-center group shadow-md cursor-pointer hover:border-amber-500/60 transition-all duration-200"
+      className="kata-camera-frame relative flex h-48 cursor-pointer items-center justify-center overflow-hidden rounded-xl bg-stone-950 group"
     >
       <img
         src={frameUrl}
@@ -204,7 +227,9 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
           <Video className="h-6 w-6 text-rose-500/70 mb-1.5 animate-pulse" />
           <span className="font-semibold text-xs text-stone-200">{label}</span>
           <span className="text-[10px] text-stone-400 font-mono mt-0.5">{cameraIp}</span>
-          <span className="text-[10px] text-amber-400 font-mono mt-1">Connecting to camera...</span>
+          <span className="text-[10px] text-amber-400 font-mono mt-1">
+            {relayStatus?.lastSeen == null ? 'Cabin relay has not sent a frame' : 'Reconnecting to camera relay...'}
+          </span>
         </div>
       )}
 
@@ -231,9 +256,13 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
         </span>
         <span className={cn(
           "text-[8px] font-mono px-1 py-0.2 rounded border font-semibold",
-          preferLocal ? "bg-emerald-950/80 text-emerald-300 border-emerald-800/60" : "bg-blue-950/80 text-blue-300 border-blue-800/60"
+          preferLocal ? "bg-emerald-950/80 text-emerald-300 border-emerald-800/60" : relayStatus?.online ? "bg-blue-950/80 text-blue-300 border-blue-800/60" : "bg-rose-950/80 text-rose-300 border-rose-800/60"
         )}>
-          {preferLocal ? "LIVE 25fps" : "CLOUD"}
+          {preferLocal
+            ? 'LOCAL BRIDGE'
+            : relayStatus?.online
+              ? `CLOUD · ${Math.max(0, Math.round((relayStatus.ageMs || 0) / 1000))}s`
+              : 'CLOUD OFFLINE'}
         </span>
       </div>
 
@@ -578,6 +607,21 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     queryFn: () => api<CompanyProfile>('/company-profile'),
   });
 
+  const { data: cctvStatus, refetch: refetchCctvStatus } = useQuery<CctvStatusResponse>({
+    queryKey: ['weighbridge-cctv-status'],
+    queryFn: async () => {
+      const response = await fetch(getScaleApiUrl('/weighbridge/cctv/status'), {
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error('CCTV relay status unavailable');
+      return response.json();
+    },
+    refetchInterval: 5000,
+    retry: false,
+  });
+
+  const bothCamerasOnline = Boolean(cctvStatus?.cam1.online && cctvStatus?.cam2.online);
+
   // Current weight from scale or manual input
   const currentLiveWeight = useMemo(() => {
     if (isManualOverride) {
@@ -661,6 +705,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         captureCamSnapshotBase64(1),
         captureCamSnapshotBase64(2),
       ]);
+      if (!snap1Base64 || !snap2Base64) {
+        toast.warning('One or more browser snapshots were unavailable. The server will use the freshest cabin relay frame.');
+      }
       const localSnap1 = snap1Base64 || getCameraSnapshotUrl(1, Date.now(), true);
       const localSnap2 = snap2Base64 || getCameraSnapshotUrl(2, Date.now(), true);
       const snapObj = { cam1: localSnap1, cam2: localSnap2 };
@@ -782,7 +829,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   }, [saveMutation, slipModalTicket, handleResetForm, scale.liveWeight]);
 
   return (
-    <div className={cn('space-y-6 pb-12', cabinMode && 'min-h-screen bg-[#f7f3ea] px-4 py-5 sm:px-6 lg:px-8')}>
+    <div className={cn('kata-page space-y-5 pb-12', cabinMode && 'min-h-screen px-4 py-5 sm:px-6 lg:px-8')}>
       {/* Editorial Page Header matching ERP */}
       <PageHeader
         icon={Scale}
@@ -835,6 +882,39 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         }
       />
 
+      {activeTab === 'entry' && (
+        <section className="kata-operations-strip" aria-label="Live weighbridge status">
+          <div className="kata-ops-brand">
+            <span className="kata-eyebrow">Active weighment</span>
+            <strong>Ticket #{nextTicketNo}</strong>
+          </div>
+          <div className="kata-ops-cell">
+            <Calendar className="h-4 w-4" />
+            <span>{dateString}</span>
+            <b>{clockString}</b>
+          </div>
+          <div className="kata-ops-cell">
+            <Scale className="h-4 w-4" />
+            <span>Scale link</span>
+            <b className={scale.isScaleOnline ? 'text-emerald-700' : 'text-amber-700'}>
+              {scale.isScaleOnline ? 'Online' : 'Manual fallback'}
+            </b>
+          </div>
+          <button
+            type="button"
+            className="kata-ops-cell kata-relay-button"
+            onClick={() => refetchCctvStatus()}
+            title="Refresh cabin camera relay status"
+          >
+            {bothCamerasOnline ? <Cloud className="h-4 w-4" /> : <CloudOff className="h-4 w-4" />}
+            <span>Remote cameras</span>
+            <b className={bothCamerasOnline ? 'text-emerald-700' : 'text-rose-700'}>
+              {bothCamerasOnline ? 'Relay healthy' : 'Relay attention'}
+            </b>
+          </button>
+        </section>
+      )}
+
       {/* KPI cards belong in the ERP report; the cabin stays focused on the active truck. */}
       {!cabinMode && <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
@@ -868,7 +948,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       </div>}
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-1 border-b border-border pb-1">
+      <div className="kata-tabs flex items-center gap-1 border-b border-border pb-1">
         <button
           type="button"
           onClick={() => setActiveTab('entry')}
@@ -921,10 +1001,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           TAB 1: WEIGHMENT TRANSACTION ENTRY SCREEN
          ───────────────────────────────────────────────────────────── */}
       {activeTab === 'entry' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Main Transaction Entry Form (Left 7 Cols) */}
-          <Card className="lg:col-span-7 border-border shadow-sm">
-            <CardHeader className="pb-4 border-b border-border/60">
+        <div className="kata-entry-grid grid grid-cols-1 gap-5 lg:grid-cols-12">
+          {/* Main Transaction Entry Form */}
+          <Card className="kata-form-card lg:col-span-5 overflow-hidden border-border">
+            <CardHeader className="kata-card-heading pb-4 border-b border-border/60">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-mono font-bold text-sm">
@@ -1091,6 +1171,24 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   />
                 </div>
 
+                {/* Payment mode */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <CreditCard className="h-3.5 w-3.5 text-primary" />
+                    Payment Type
+                  </Label>
+                  <Select value={billType} onValueChange={(v: any) => setBillType(v)}>
+                    <SelectTrigger className="h-10 bg-background font-medium">
+                      <SelectValue placeholder="Select payment type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CASH">Cash</SelectItem>
+                      <SelectItem value="CREDIT">Credit / Due</SelectItem>
+                      <SelectItem value="FREE">No Charge</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Driver Mobile */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -1118,6 +1216,20 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     placeholder="e.g. Delivery directly to Warehouse #2"
                     className="h-10 bg-background"
                   />
+                </div>
+              </div>
+
+              <div className="kata-payment-display">
+                <div className="kata-payment-icon">
+                  <IndianRupee className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="kata-eyebrow">Payment display</span>
+                  <p>{billType === 'FREE' ? 'Complimentary weighment' : billType === 'CREDIT' ? 'Post to customer credit' : 'Collect at counter'}</p>
+                </div>
+                <div className="kata-payment-amount">
+                  <span>{billType}</span>
+                  <strong>₹{billType === 'FREE' ? '0' : Number(charges || 0).toLocaleString('en-IN')}</strong>
                 </div>
               </div>
 
@@ -1160,10 +1272,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             </CardContent>
           </Card>
 
-          {/* Right Column (5 Cols): Scale Readout & CP PLUS Live Cameras */}
-          <div className="lg:col-span-5 space-y-6">
+          {/* Instrument console: live weight and dual cameras */}
+          <div className="lg:col-span-7 space-y-5">
             {/* 1. Digital Scale Instrument Panel */}
-            <div className="relative rounded-2xl bg-gradient-to-b from-stone-900 to-stone-950 border border-stone-800 text-stone-100 p-5 shadow-lg overflow-hidden">
+            <div className="kata-scale-panel relative overflow-hidden rounded-2xl border border-stone-800 text-stone-100 p-5">
               {/* Radial ambient glow */}
               <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
 
@@ -1315,7 +1427,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   title="Click to manually override weight displayed in this box (F8)"
                 >
                   <div className="flex items-baseline justify-center gap-2">
-                    <span className="font-mono font-black text-6xl text-amber-400 tracking-tight drop-shadow-[0_0_20px_rgba(251,191,36,0.3)] transition-transform group-hover:scale-102">
+                    <span className="kata-weight-digits font-mono font-black text-amber-400 tracking-tight transition-transform group-hover:scale-102">
                       {currentLiveWeight.toLocaleString('en-IN')}
                     </span>
                     <span className="font-mono font-bold text-xl text-stone-400">
@@ -1362,8 +1474,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             </div>
 
             {/* 2. CP PLUS Live Dual CCTV Cameras */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border/60">
+            <Card className="kata-camera-card overflow-hidden border-border">
+              <CardHeader className="kata-card-heading pb-3 border-b border-border/60">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Video className="h-4 w-4 text-primary" />
@@ -1375,13 +1487,16 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Live Feed
+                      {bothCamerasOnline ? 'Relay healthy' : 'Relay attention'}
                     </span>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                      onClick={() => setCamRefreshTrigger(Date.now())}
+                      onClick={() => {
+                        setCamRefreshTrigger(Date.now());
+                        refetchCctvStatus();
+                      }}
                       title="Manual Camera Refresh"
                     >
                       <RefreshCw className="h-3 w-3" />
@@ -1400,6 +1515,19 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               </CardHeader>
 
               <CardContent className="pt-4 space-y-3">
+                {!bothCamerasOnline && (
+                  <div className="kata-relay-warning">
+                    <CloudOff className="h-4 w-4 shrink-0" />
+                    <div>
+                      <strong>Remote snapshot relay needs attention</strong>
+                      <p>
+                        {cctvStatus?.cam1.lastSeen == null && cctvStatus?.cam2.lastSeen == null
+                          ? 'The cloud server has not received a camera frame. Start the cabin bridge and verify its relay key.'
+                          : 'The latest frame is stale. Tickets can still be saved, but a current CCTV image cannot be guaranteed.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <CctvLiveBox
                     camNumber={1}
@@ -1408,6 +1536,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     currentTime={clockString}
                     refreshTrigger={camRefreshTrigger}
                     onExpand={(cam) => setExpandedCam(cam)}
+                    relayStatus={cctvStatus?.cam1}
                   />
                   <CctvLiveBox
                     camNumber={2}
@@ -1416,10 +1545,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     currentTime={clockString}
                     refreshTrigger={camRefreshTrigger}
                     onExpand={(cam) => setExpandedCam(cam)}
+                    relayStatus={cctvStatus?.cam2}
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground text-center font-mono">
-                  Click either camera for Full View • Photos are automatically stamped on Save (F12)
+                  Click either camera for full view · Every saved ticket uses the freshest relay frame and records its capture time
                 </p>
               </CardContent>
             </Card>
@@ -1686,10 +1816,20 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
-            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
-              <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+            <div className={cn(
+              'p-3 rounded-lg border text-xs flex items-start gap-2.5',
+              bothCamerasOnline
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-800 dark:text-rose-300'
+            )}>
+              {bothCamerasOnline
+                ? <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                : <CloudOff className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />}
               <div>
-                <span className="font-bold">CCTV Background Bridge Active:</span> Local frames from 192.168.1.101 & 192.168.1.102 are captured via low-latency RTSP FFmpeg pipes at 25 FPS and continuously relayed to this PC & universal cloud server.
+                <span className="font-bold">{bothCamerasOnline ? 'CCTV cloud relay active:' : 'CCTV cloud relay offline:'}</span>{' '}
+                {bothCamerasOnline
+                  ? 'Both cabin cameras are sending fresh frames to the ERP cloud, so remote ticket snapshots are available.'
+                  : 'The cloud is not receiving fresh frames from both cameras. Check the cabin bridge status before relying on remote snapshots.'}
               </div>
             </div>
 
@@ -1698,11 +1838,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div className="p-3 rounded-lg border border-border bg-card/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className={cn('h-2 w-2 rounded-full', cctvStatus?.cam1.online ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} />
                     CAM 1: ENTRY (192.168.1.101)
                   </span>
                   <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-                    Online • 25 FPS
+                    {cctvStatus?.cam1.online ? 'Cloud relay online' : 'Offline'}
                   </Badge>
                 </div>
                 <div className="space-y-1">
@@ -1723,11 +1863,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div className="p-3 rounded-lg border border-border bg-card/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className={cn('h-2 w-2 rounded-full', cctvStatus?.cam2.online ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} />
                     CAM 2: EXIT (192.168.1.102)
                   </span>
                   <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-                    Online • 25 FPS
+                    {cctvStatus?.cam2.online ? 'Cloud relay online' : 'Offline'}
                   </Badge>
                 </div>
                 <div className="space-y-1">

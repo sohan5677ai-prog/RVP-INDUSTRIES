@@ -5,6 +5,7 @@ build/
 .env.*
 !.env.example
 *.log
+scripts/cctv-bridge.config.json
 npm-debug.log*
 *.tsbuildinfo
 

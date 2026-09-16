@@ -16,35 +16,79 @@ import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
 import fs from 'fs';
+import path from 'path';
+import util from 'util';
+import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const LOG_DIR = path.resolve(SCRIPT_DIR, '../logs');
+const LOG_FILE = path.join(LOG_DIR, 'cctv-bridge.log');
+const LOCAL_CONFIG_FILE = process.env.CCTV_BRIDGE_CONFIG || path.join(SCRIPT_DIR, 'cctv-bridge.config.json');
+
+fs.mkdirSync(LOG_DIR, { recursive: true });
+try {
+  if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > 2 * 1024 * 1024) {
+    fs.renameSync(LOG_FILE, `${LOG_FILE}.previous`);
+  }
+} catch {}
+
+for (const level of ['log', 'warn', 'error']) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    original(...args);
+    try {
+      fs.appendFileSync(
+        LOG_FILE,
+        `${new Date().toISOString()} [${level.toUpperCase()}] ${util.format(...args)}\n`,
+        'utf8'
+      );
+    } catch {}
+  };
+}
+
+function loadLocalConfig() {
+  if (!fs.existsSync(LOCAL_CONFIG_FILE)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(LOCAL_CONFIG_FILE, 'utf8'));
+    console.log(`[CCTV-BRIDGE] Loaded local configuration: ${LOCAL_CONFIG_FILE}`);
+    return parsed;
+  } catch (err) {
+    console.error(`[CCTV-BRIDGE] Cannot read ${LOCAL_CONFIG_FILE}: ${err.message}`);
+    return {};
+  }
+}
+
+const LOCAL_CONFIG = loadLocalConfig();
+const setting = (name, fallback = '') => process.env[name] || LOCAL_CONFIG[name] || fallback;
+
 const CONFIG = {
-  cloudApiUrl: process.env.CLOUD_API_URL || 'https://rvp-server.onrender.com/api',
-  localPort: Number(process.env.BRIDGE_LOCAL_PORT || 4000),
+  cloudApiUrl: setting('CLOUD_API_URL', 'https://rvp-server.onrender.com/api').replace(/\/+$/, ''),
+  localPort: Number(setting('BRIDGE_LOCAL_PORT', 4000)),
   // One fresh frame per second is enough for a remote operating console and
   // avoids piling up uploads while Render is waking or the internet is slow.
-  cloudBroadcastIntervalMs: Number(process.env.CCTV_CLOUD_FRAME_INTERVAL_MS || 1000),
-  bridgeKey: process.env.CCTV_BRIDGE_KEY || '',
+  cloudBroadcastIntervalMs: Number(setting('CCTV_CLOUD_FRAME_INTERVAL_MS', 1000)),
+  bridgeKey: setting('CCTV_BRIDGE_KEY'),
   cameras: {
     1: {
       label: 'CAM 1: ENTRY',
-      ip: process.env.CCTV_CAM1_IP || '192.168.1.101',
+      ip: setting('CCTV_CAM1_IP', '192.168.1.101'),
       port: 80,
-      user: process.env.CCTV_CAM1_USER || 'admin',
-      pass: process.env.CCTV_CAM1_PASS || 'admin@123',
+      user: setting('CCTV_CAM1_USER', 'admin'),
+      pass: setting('CCTV_CAM1_PASS', 'admin@123'),
       channel: 1,
-      rtspUrl: process.env.CCTV_CAM1_RTSP || 'rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=1',
-      rtspHdUrl: process.env.CCTV_CAM1_RTSP_HD || 'rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0',
+      rtspUrl: setting('CCTV_CAM1_RTSP', 'rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=1'),
+      rtspHdUrl: setting('CCTV_CAM1_RTSP_HD', 'rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0'),
     },
     2: {
       label: 'CAM 2: EXIT',
-      ip: process.env.CCTV_CAM2_IP || '192.168.1.102',
+      ip: setting('CCTV_CAM2_IP', '192.168.1.102'),
       port: 80,
-      user: process.env.CCTV_CAM2_USER || 'admin',
-      pass: process.env.CCTV_CAM2_PASS || 'admin@123',
+      user: setting('CCTV_CAM2_USER', 'admin'),
+      pass: setting('CCTV_CAM2_PASS', 'admin@123'),
       channel: 1,
-      rtspUrl: process.env.CCTV_CAM2_RTSP || 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1',
-      rtspHdUrl: process.env.CCTV_CAM2_RTSP_HD || 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0',
+      rtspUrl: setting('CCTV_CAM2_RTSP', 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1'),
+      rtspHdUrl: setting('CCTV_CAM2_RTSP_HD', 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0'),
     },
   },
 };
@@ -79,8 +123,8 @@ const streamSubscribers = {
 };
 
 const cloudUpload = {
-  1: { inFlight: false, lastSuccessAt: 0, lastErrorAt: 0, lastError: null },
-  2: { inFlight: false, lastSuccessAt: 0, lastErrorAt: 0, lastError: null },
+  1: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0 },
+  2: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0 },
 };
 
 function md5(str) {
@@ -387,13 +431,16 @@ setInterval(() => {
     const upload = cloudUpload[num];
     if (frame && frame.buffer && Date.now() - frame.timestamp < 3000 && !upload.inFlight) {
       upload.inFlight = true;
+      upload.lastAttemptAt = Date.now();
       broadcastToCloud(num, frame.buffer)
         .then(() => {
           upload.lastSuccessAt = Date.now();
           upload.lastError = null;
+          upload.consecutiveErrors = 0;
         })
         .catch((err) => {
           upload.lastError = err.message;
+          upload.consecutiveErrors += 1;
           // Log at most once every 30s: a temporary network outage must not
           // fill the terminal's log or hide the useful RTSP diagnostics.
           if (Date.now() - upload.lastErrorAt > 30000) {
@@ -481,6 +528,9 @@ function startLocalServer() {
             method: latestFrames[1].method,
             ip: CONFIG.cameras[1].ip,
             cloudRelayOnline: Date.now() - cloudUpload[1].lastSuccessAt < 10000,
+            cloudRelayConfigured: CONFIG.bridgeKey.length >= 24,
+            cloudRelayLastAttempt: cloudUpload[1].lastAttemptAt || null,
+            cloudRelayLastSuccess: cloudUpload[1].lastSuccessAt || null,
             cloudRelayError: cloudUpload[1].lastError,
           },
           cam2: {
@@ -490,6 +540,9 @@ function startLocalServer() {
             method: latestFrames[2].method,
             ip: CONFIG.cameras[2].ip,
             cloudRelayOnline: Date.now() - cloudUpload[2].lastSuccessAt < 10000,
+            cloudRelayConfigured: CONFIG.bridgeKey.length >= 24,
+            cloudRelayLastAttempt: cloudUpload[2].lastAttemptAt || null,
+            cloudRelayLastSuccess: cloudUpload[2].lastSuccessAt || null,
             cloudRelayError: cloudUpload[2].lastError,
           },
         })
@@ -515,12 +568,18 @@ function startLocalServer() {
 
 console.log('================================================================');
 console.log('  RVP Industries - Kata Cabin CCTV Dual RTSP Stream Bridge      ');
-console.log(`  CAM 1: ${CONFIG.cameras[1].ip} -> ${CONFIG.cameras[1].rtspUrl}`);
-console.log(`  CAM 2: ${CONFIG.cameras[2].ip} -> ${CONFIG.cameras[2].rtspUrl}`);
+console.log(`  CAM 1: ${CONFIG.cameras[1].ip} -> RTSP configured`);
+console.log(`  CAM 2: ${CONFIG.cameras[2].ip} -> RTSP configured`);
 console.log(`  Local Endpoint: http://127.0.0.1:${CONFIG.localPort}/api/weighbridge/cctv/snapshot?cam=1`);
 console.log(`  Cloud Relay: ${CONFIG.cloudApiUrl}`);
+console.log(`  Cloud Relay Key: ${CONFIG.bridgeKey.length >= 24 ? 'configured' : 'MISSING / TOO SHORT'}`);
 console.log(`  FFmpeg engine: ${foundFfmpeg || 'NOT FOUND'}`);
+console.log(`  Log file: ${LOG_FILE}`);
 console.log('================================================================');
+
+if (CONFIG.bridgeKey.length < 24) {
+  console.error('[CCTV-BRIDGE] REMOTE SNAPSHOTS ARE DISABLED: configure CCTV_BRIDGE_KEY in scripts/cctv-bridge.config.json or as a Windows environment variable, then restart this bridge.');
+}
 
 startLocalServer();
 startRtspWorker(1);

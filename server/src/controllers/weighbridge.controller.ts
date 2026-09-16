@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
-import { streamCameraMjpeg, getCameraSnapshot, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
+import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
 
 function isTrustedCameraBridge(req: Request): boolean {
@@ -305,12 +305,15 @@ export async function streamCctvHandler(req: Request, res: Response) {
 export async function snapshotCctvHandler(req: Request, res: Response) {
   const camNum = req.query.cam === '2' ? 2 : 1;
   try {
-    const buf = await getCameraSnapshot(camNum);
+    const frame = await getCameraSnapshotWithMeta(camNum);
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(buf);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Frame-Timestamp, X-Frame-Source');
+    res.setHeader('X-Frame-Timestamp', String(frame.timestamp));
+    res.setHeader('X-Frame-Source', frame.source);
+    res.send(frame.buffer);
   } catch (err: any) {
     res.status(502).json({ error: err.message || 'Snapshot failed' });
   }

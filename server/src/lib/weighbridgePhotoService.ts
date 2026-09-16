@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getCameraSnapshot } from './cctvService.js';
+import { getCameraSnapshotWithMeta } from './cctvService.js';
 import { uploadBufferToStorage } from './upload.js';
 import { logger } from './logger.js';
 
@@ -26,6 +26,7 @@ export async function saveWeighbridgeSnapshot(
   isSecondWeight: boolean = false
 ): Promise<string | null> {
   let buffer: Buffer | null = null;
+  let capturedAt = Date.now();
 
   // 1. Try client-supplied base64 snapshot (captured at the instant user pressed Save)
   if (clientBase64 && typeof clientBase64 === 'string') {
@@ -34,6 +35,7 @@ export async function saveWeighbridgeSnapshot(
       const buf = Buffer.from(cleanBase64, 'base64');
       if (buf.length > 500) {
         buffer = buf;
+        capturedAt = Date.now();
       }
     } catch (err) {
       logger.warn(`[weighbridge] Failed to parse client base64 for Cam ${camNum}:`, err);
@@ -43,7 +45,12 @@ export async function saveWeighbridgeSnapshot(
   // 2. If client didn't supply frame or parsing failed, capture from server CCTV feed
   if (!buffer) {
     try {
-      buffer = await getCameraSnapshot(camNum);
+      const frame = await getCameraSnapshotWithMeta(camNum, 15_000);
+      buffer = frame.buffer;
+      capturedAt = frame.timestamp;
+      logger.info(
+        `[weighbridge] Ticket #${ticketNo} Cam ${camNum} captured from ${frame.source} (${Date.now() - frame.timestamp}ms old)`
+      );
     } catch (err: any) {
       logger.warn(`[weighbridge] Could not fetch server snapshot for Cam ${camNum} on ticket #${ticketNo}:`, err.message);
     }
@@ -55,8 +62,7 @@ export async function saveWeighbridgeSnapshot(
   }
 
   const prefix = isSecondWeight ? 'second_' : '';
-  const timestamp = Date.now();
-  const filename = `ticket_${ticketNo}_${prefix}cam${camNum}_${timestamp}.jpg`;
+  const filename = `ticket_${ticketNo}_${prefix}cam${camNum}_${capturedAt}.jpg`;
   const localFilePath = path.join(UPLOADS_DIR, filename);
 
   // 3. Save to local disk

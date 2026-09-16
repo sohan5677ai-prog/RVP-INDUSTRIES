@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
 import { api, ApiError } from '@/lib/api';
 import type { MaintenanceStatus } from '@/lib/types';
@@ -69,6 +69,12 @@ export default function Login() {
   const mins = Math.floor(secondsLeft / 60);
   const secs = secondsLeft % 60;
   const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+  const isActivatedCabin = Boolean(localStorage.getItem('rvp_kata_cabin_installation_key'));
+  const staffLoginRequested = new URLSearchParams(window.location.search).get('staff') === '1';
+  if (isActivatedCabin && !staffLoginRequested) {
+    return <Navigate to="/kata-cabin" replace />;
+  }
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950">

@@ -8,11 +8,13 @@ In **Users**, create a normal `USER` account with username `kata-cabin` (or choo
 
 ## 2. Configure the cloud server
 
-On the deployed API, set these two long random values (minimum 24 characters):
+On the deployed API, set the camera relay key (minimum 24 characters). The
+browser activation key is derived securely from the existing `JWT_SECRET`; a
+separate `KATA_CABIN_ACCESS_KEY` remains an optional override:
 
 ```text
 KATA_CABIN_USERNAME=kata-cabin
-KATA_CABIN_ACCESS_KEY=<a unique random secret>
+KATA_CABIN_ACCESS_KEY=<optional unique random override>
 CCTV_BRIDGE_KEY=<a different unique random secret>
 ```
 

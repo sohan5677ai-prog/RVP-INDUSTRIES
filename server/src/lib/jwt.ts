@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { createHmac } from 'crypto';
 import type { Role } from '@prisma/client';
 
 export interface JwtPayload {
@@ -42,4 +43,17 @@ export function signToken(payload: JwtPayload): string {
 
 export function verifyToken(token: string): JwtPayload {
   return jwt.verify(token, getSecret()) as JwtPayload;
+}
+
+/**
+ * Stable per-deployment cabin activation credential. It is derived from the
+ * JWT secret without exposing that master secret and can be overridden with a
+ * separately managed KATA_CABIN_ACCESS_KEY when desired.
+ */
+export function getKataCabinAccessKey(): string {
+  const configured = process.env.KATA_CABIN_ACCESS_KEY;
+  if (configured && configured.length >= 24) return configured;
+  return createHmac('sha256', getSecret())
+    .update('rvp-kata-cabin-activation-v1')
+    .digest('base64url');
 }

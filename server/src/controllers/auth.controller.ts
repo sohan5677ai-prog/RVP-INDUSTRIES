@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma.js';
-import { signToken } from '../lib/jwt.js';
+import { getKataCabinAccessKey, signToken } from '../lib/jwt.js';
 import { HttpError } from '../lib/httpError.js';
 import { loginSchema } from '../schemas/auth.schema.js';
 import {
@@ -125,7 +125,7 @@ export async function me(req: Request, res: Response) {
  */
 export async function kioskLogin(req: Request, res: Response) {
   const installationKey = req.header('x-kata-cabin-key');
-  if (!keysMatch(installationKey, process.env.KATA_CABIN_ACCESS_KEY)) {
+  if (!keysMatch(installationKey, getKataCabinAccessKey())) {
     throw new HttpError(401, 'Kata cabin is not activated');
   }
 

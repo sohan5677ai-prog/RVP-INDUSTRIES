@@ -5,6 +5,7 @@ import { subscriptionGate } from '../middleware/subscription.js';
 import { maintenanceGate } from '../middleware/maintenance.js';
 import { webhookLimiter, bulkImportLimiter } from '../middleware/rateLimit.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { HttpError } from '../lib/httpError.js';
 import { clearCache } from '../lib/cache.js';
 import authRoutes from './auth.routes.js';
 import { parseBulkImport } from '../controllers/bulkImport.controller.js';
@@ -80,6 +81,18 @@ router.use('/subscription', subscriptionRoutes);
 
 // Everything below requires a valid token.
 router.use(requireAuth);
+
+// A kata-cabin token is intentionally useful only for its compact operating
+// screen. It cannot be replayed to browse accounting, party, or user data.
+router.use((req, _res, next) => {
+  if (req.user?.scope !== 'KATA_CABIN') return next();
+  const isWeighbridge = req.path === '/weighbridge' || req.path.startsWith('/weighbridge/');
+  const isReadonlyCabinData = req.method === 'GET' && (req.path === '/parties' || req.path === '/company-profile');
+  if (!isWeighbridge && !isReadonlyCabinData) {
+    return next(new HttpError(403, 'This device is limited to Kata Cabin operations'));
+  }
+  next();
+});
 
 // Developer Maintenance Gate: when maintenance mode is active, non-developers
 // receive HTTP 503 with the live countdown and developer message. The DEVELOPER role bypasses.

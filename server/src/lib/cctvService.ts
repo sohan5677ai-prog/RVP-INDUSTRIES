@@ -152,13 +152,10 @@ export function getCctvStatus() {
     const cfg = CAMERAS[num];
     const b = latestBroadcastFrames[num];
     const isFresh = b ? now - b.timestamp < 30000 : false;
-    const encPass = encodeURIComponent(cfg.pass);
     return {
       cam: num,
       ip: cfg.ip,
       port: cfg.port,
-      rtspUrl: `rtsp://${cfg.user}:${encPass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=1`,
-      rtspHdUrl: `rtsp://${cfg.user}:${encPass}@${cfg.ip}:554/cam/realmonitor?channel=${cfg.channel}&subtype=0`,
       online: isFresh || (globalFeedManager?.getLatestFrame(num) != null && (globalFeedManager?.getConsecutiveErrors(num) ?? 0) === 0),
       lastSeen: b?.timestamp || null,
       ageMs: b ? now - b.timestamp : null,
@@ -290,4 +287,3 @@ export async function streamCameraMjpeg(camNum: 1 | 2, clientRes: Response): Pro
   });
   clientRes.end(frame);
 }
-

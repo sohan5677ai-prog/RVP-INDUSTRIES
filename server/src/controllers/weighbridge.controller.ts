@@ -1,9 +1,19 @@
 import { Request, Response } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { streamCameraMjpeg, getCameraSnapshot, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
+
+function isTrustedCameraBridge(req: Request): boolean {
+  const expected = process.env.CCTV_BRIDGE_KEY;
+  const received = req.header('x-cctv-bridge-key');
+  if (!expected || expected.length < 24 || !received) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const STARTING_TICKET_NUMBER = 2807;
 
@@ -164,7 +174,7 @@ export async function createTicketHandler(req: Request, res: Response) {
   const status = isPending ? 'PENDING_SECOND' : 'COMPLETED';
 
   const user = (req as any).user;
-  const operatorName = user?.name || 'ADMIN';
+  const operatorName = user?.name || (user?.scope === 'KATA_CABIN' ? 'Kata Cabin' : 'ADMIN');
 
   // Capture and persist CCTV snapshots taken during this kata weighment
   const [cam1PhotoUrl, cam2PhotoUrl] = await Promise.all([
@@ -310,6 +320,9 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
  * Ingest live CCTV camera frame broadcast from Kata Cabin bridge.
  */
 export async function broadcastCctvHandler(req: Request, res: Response) {
+  if (!isTrustedCameraBridge(req)) {
+    throw new HttpError(401, 'Untrusted CCTV bridge');
+  }
   const { cam, image } = req.body;
   const camNum = cam === 2 || cam === '2' ? 2 : 1;
   if (!image || typeof image !== 'string') {
@@ -428,4 +441,3 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, reading: service.getReading() });
 }
-

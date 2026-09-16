@@ -6,6 +6,10 @@ export interface JwtPayload {
   role: Role;
   /** UserSession row this token belongs to — one per signed-in device. */
   sid: string;
+  /** A deliberately narrow token issued to the permanently installed cabin screen. */
+  scope?: 'KATA_CABIN';
+  /** Kept in the signed token so kata tickets retain the dedicated operator name. */
+  name?: string;
 }
 
 let cachedSecret: string | undefined;

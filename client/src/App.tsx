@@ -45,6 +45,7 @@ function lazyWithPreload(paths: string | string[], importFn: () => Promise<any>)
 }
 
 const Login = lazyWithPreload('/login', () => import('@/pages/Login'));
+const KataCabin = lazyWithPreload('/kata-cabin', () => import('@/pages/KataCabin'));
 const Home = lazyWithPreload('/', () => import('@/pages/Home'));
 const Dashboard = lazyWithPreload('/dashboard', () => import('@/pages/Dashboard'));
 const Parties = lazyWithPreload('/parties', () => import('@/pages/Parties'));
@@ -148,6 +149,7 @@ export default function App() {
             <Suspense fallback={<Fallback />}>
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/kata-cabin" element={<KataCabin />} />
                 <Route element={<ProtectedRoute />}>
                   <Route element={<MaintenanceBoundary />}>
                     <Route element={<SubscriptionBoundary />}>

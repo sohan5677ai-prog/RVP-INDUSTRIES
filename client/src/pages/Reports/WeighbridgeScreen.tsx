@@ -23,8 +23,6 @@ import {
   Settings,
   ShieldCheck,
   Maximize2,
-  Copy,
-  Check,
   Download,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
@@ -257,7 +255,6 @@ interface CctvFullViewDialogProps {
 }
 
 function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: CctvFullViewDialogProps) {
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const [preferLocal, setPreferLocal] = useState<boolean>(() => !isHttps);
   const [frameUrl, setFrameUrl] = useState<string>('');
@@ -297,16 +294,6 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
 
   const cameraIp = camNumber === 1 ? '192.168.1.101' : '192.168.1.102';
   const label = camNumber === 1 ? 'CAM 1: ENTRY' : 'CAM 2: EXIT';
-  const rtspSub = `rtsp://admin:admin%40123@${cameraIp}:554/cam/realmonitor?channel=1&subtype=1`;
-  const rtspMain = `rtsp://admin:admin%40123@${cameraIp}:554/cam/realmonitor?channel=1&subtype=0`;
-
-  const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    toast.success('RTSP stream link copied to clipboard');
-    setTimeout(() => setCopiedKey(null), 2500);
-  };
-
   const handleDownloadSnapshot = () => {
     const a = document.createElement('a');
     a.href = frameUrl || getCameraSnapshotUrl(camNumber, Date.now(), preferLocal);
@@ -442,26 +429,6 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
             <Button
               variant="outline"
               size="sm"
-              onClick={() => copyToClipboard(rtspSub, 'sub')}
-              className="bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700 hover:text-white text-xs h-8 gap-1.5"
-            >
-              {copiedKey === 'sub' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-              <span>Copy RTSP Live Link</span>
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => copyToClipboard(rtspMain, 'main')}
-              className="bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700 hover:text-white text-xs h-8 gap-1.5"
-            >
-              {copiedKey === 'main' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-              <span>Copy HD Mainstream Link</span>
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
               onClick={handleDownloadSnapshot}
               className="bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700 hover:text-white text-xs h-8 gap-1.5"
             >
@@ -484,7 +451,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
 }
 
 
-export default function WeighbridgeScreen() {
+export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: boolean }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const scale = useScale();
@@ -815,12 +782,12 @@ export default function WeighbridgeScreen() {
   }, [saveMutation, slipModalTicket, handleResetForm, scale.liveWeight]);
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className={cn('space-y-6 pb-12', cabinMode && 'min-h-screen bg-[#f7f3ea] px-4 py-5 sm:px-6 lg:px-8')}>
       {/* Editorial Page Header matching ERP */}
       <PageHeader
         icon={Scale}
         title="Weighbridge (Kata)"
-        description="Electronic weighbridge recording, digital LED indicator stream, and CP PLUS dual CCTV camera verification."
+        description={cabinMode ? 'Dedicated cabin console · live scale, dual camera verification, and ticket printing.' : 'Electronic weighbridge recording, digital LED indicator stream, and CP PLUS dual CCTV camera verification.'}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* Universal Scale Network Hub Status Badge */}
@@ -868,8 +835,8 @@ export default function WeighbridgeScreen() {
         }
       />
 
-      {/* KPI Stat Cards matching RVP ERP */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* KPI cards belong in the ERP report; the cabin stays focused on the active truck. */}
+      {!cabinMode && <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           label="Today's Tickets"
           value={stats.todayCount}
@@ -898,7 +865,7 @@ export default function WeighbridgeScreen() {
           tone="gold"
           hint="Today's weighment charges"
         />
-      </div>
+      </div>}
 
       {/* Navigation Tabs */}
       <div className="flex items-center gap-1 border-b border-border pb-1">
@@ -1419,7 +1386,7 @@ export default function WeighbridgeScreen() {
                     >
                       <RefreshCw className="h-3 w-3" />
                     </Button>
-                    <Button
+                    {!cabinMode && <Button
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 text-muted-foreground hover:text-foreground"
@@ -1427,7 +1394,7 @@ export default function WeighbridgeScreen() {
                       title="CCTV & RTSP Camera Configuration"
                     >
                       <Settings className="h-3 w-3" />
-                    </Button>
+                    </Button>}
                   </div>
                 </div>
               </CardHeader>
@@ -1741,13 +1708,13 @@ export default function WeighbridgeScreen() {
                 <div className="space-y-1">
                   <div className="text-[11px] font-mono text-muted-foreground">RTSP Substream (Live Preview):</div>
                   <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
-                    rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=1
+                    Configured locally in the signed Kata Cabin bridge
                   </div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-[11px] font-mono text-muted-foreground">RTSP Mainstream (HD Ticket Photo):</div>
                   <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
-                    rtsp://admin:admin%40123@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0
+                    Access is restricted to the cabin LAN
                   </div>
                 </div>
               </div>
@@ -1766,13 +1733,13 @@ export default function WeighbridgeScreen() {
                 <div className="space-y-1">
                   <div className="text-[11px] font-mono text-muted-foreground">RTSP Substream (Live Preview):</div>
                   <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
-                    rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1
+                    Configured locally in the signed Kata Cabin bridge
                   </div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-[11px] font-mono text-muted-foreground">RTSP Mainstream (HD Ticket Photo):</div>
                   <div className="p-1.5 rounded bg-muted/70 text-[10px] font-mono select-all break-all">
-                    rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0
+                    Access is restricted to the cabin LAN
                   </div>
                 </div>
               </div>

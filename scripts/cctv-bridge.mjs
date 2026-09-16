@@ -21,7 +21,10 @@ import { spawn } from 'child_process';
 const CONFIG = {
   cloudApiUrl: process.env.CLOUD_API_URL || 'https://rvp-server.onrender.com/api',
   localPort: Number(process.env.BRIDGE_LOCAL_PORT || 4000),
-  cloudBroadcastIntervalMs: 600, // broadcast to cloud every 600ms
+  // One fresh frame per second is enough for a remote operating console and
+  // avoids piling up uploads while Render is waking or the internet is slow.
+  cloudBroadcastIntervalMs: Number(process.env.CCTV_CLOUD_FRAME_INTERVAL_MS || 1000),
+  bridgeKey: process.env.CCTV_BRIDGE_KEY || '',
   cameras: {
     1: {
       label: 'CAM 1: ENTRY',
@@ -73,6 +76,11 @@ const latestFrames = {
 const streamSubscribers = {
   1: new Set(),
   2: new Set(),
+};
+
+const cloudUpload = {
+  1: { inFlight: false, lastSuccessAt: 0, lastErrorAt: 0, lastError: null },
+  2: { inFlight: false, lastSuccessAt: 0, lastErrorAt: 0, lastError: null },
 };
 
 function md5(str) {
@@ -169,7 +177,7 @@ function dispatchToSubscribers(camNum, frame) {
  * High-Performance Persistent RTSP Worker using FFmpeg image2pipe
  * Streams JPEGs in real-time (~25 FPS, <50ms latency)
  */
-function startRtspWorker(camNum) {
+function startRtspWorker(camNum, useHd = false) {
   const cfg = CONFIG.cameras[camNum];
   if (!foundFfmpeg) {
     console.log(`[CCTV-BRIDGE] FFmpeg not found, falling back to HTTP Digest for Cam ${camNum}`);
@@ -177,31 +185,46 @@ function startRtspWorker(camNum) {
     return;
   }
 
-  console.log(`[CCTV-BRIDGE] Launching low-latency RTSP stream worker for Cam ${camNum} (${cfg.label})...`);
+  const streamUrl = useHd ? cfg.rtspHdUrl : cfg.rtspUrl;
+  const streamType = useHd ? 'Main-Stream (subtype=0)' : 'Sub-Stream (subtype=1)';
+  console.log(`[CCTV-BRIDGE] Launching RTSP worker for Cam ${camNum} (${cfg.label}) using ${streamType}...`);
 
   const args = [
     '-rtsp_transport', 'tcp',
-    '-stimeout', '4000000', // 4s RTSP socket timeout to prevent hang
+    '-probesize', '65536',          // Fast probe to prevent FFmpeg hanging 5-10s
+    '-analyzeduration', '1000000',  // 1s max analysis
+    '-stimeout', '5000000',         // 5s RTSP socket timeout
     '-fflags', 'nobuffer',
     '-flags', 'low_delay',
-    '-i', cfg.rtspUrl,
+    '-i', streamUrl,
     '-f', 'image2pipe',
     '-vcodec', 'mjpeg',
     '-q:v', '5',
+    '-r', '15',                    // Limit to 15 FPS to avoid CPU overload
     '-an',
     'pipe:1'
   ];
 
-  const proc = spawn(foundFfmpeg, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  const proc = spawn(foundFfmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let buffer = Buffer.alloc(0);
   let framesThisSec = 0;
   let lastFpsLog = Date.now();
   let lastFrameTime = Date.now();
+  let hasReceivedAnyFrames = false;
+  let stderrBuffer = '';
 
-  // Watchdog: If no frames are produced for 5 seconds, restart worker
+  proc.stderr.on('data', (d) => {
+    stderrBuffer = (stderrBuffer + d.toString()).slice(-800);
+  });
+
+  // Watchdog: 12 seconds grace for initial handshake/I-frame, 6 seconds once streaming
   const watchdog = setInterval(() => {
-    if (Date.now() - lastFrameTime > 5000) {
-      console.warn(`[CCTV-BRIDGE] Cam ${camNum} RTSP watchdog: No frames for 5s. Restarting worker...`);
+    const timeoutMs = hasReceivedAnyFrames ? 6000 : 12000;
+    if (Date.now() - lastFrameTime > timeoutMs) {
+      console.warn(`[CCTV-BRIDGE] Cam ${camNum} RTSP watchdog: No frames for ${timeoutMs / 1000}s. Restarting worker...`);
+      if (stderrBuffer) {
+        console.warn(`[CCTV-BRIDGE] Cam ${camNum} FFmpeg last log:\n${stderrBuffer.trim()}`);
+      }
       clearInterval(watchdog);
       try { proc.kill('SIGKILL'); } catch {}
     }
@@ -209,6 +232,7 @@ function startRtspWorker(camNum) {
 
   proc.stdout.on('data', (chunk) => {
     lastFrameTime = Date.now();
+    hasReceivedAnyFrames = true;
     buffer = Buffer.concat([buffer, chunk]);
 
     // Parse JPEG frames (Starts 0xFF 0xD8, Ends 0xFF 0xD9)
@@ -247,8 +271,13 @@ function startRtspWorker(camNum) {
 
   proc.on('close', (code) => {
     clearInterval(watchdog);
-    console.warn(`[CCTV-BRIDGE] RTSP worker for Cam ${camNum} stopped (exit code: ${code}). Reconnecting in 2s...`);
-    setTimeout(() => startRtspWorker(camNum), 2000);
+    console.warn(`[CCTV-BRIDGE] RTSP worker for Cam ${camNum} stopped (exit code: ${code}).`);
+    if (!hasReceivedAnyFrames && !useHd) {
+      console.warn(`[CCTV-BRIDGE] Sub-stream failed for Cam ${camNum}. Trying Main-stream (subtype=0) in 2s...`);
+      setTimeout(() => startRtspWorker(camNum, true), 2000);
+    } else {
+      setTimeout(() => startRtspWorker(camNum, false), 2000);
+    }
   });
 
   proc.on('error', (err) => {
@@ -303,6 +332,9 @@ async function startHttpPollingFallback(camNum) {
  * Push latest frame to cloud server broadcast endpoint
  */
 async function broadcastToCloud(camNum, buffer) {
+  if (!CONFIG.bridgeKey || CONFIG.bridgeKey.length < 24) {
+    throw new Error('CCTV_BRIDGE_KEY is missing or too short');
+  }
   const cloudUrl = `${CONFIG.cloudApiUrl}/weighbridge/cctv/broadcast`;
   const base64 = buffer.toString('base64');
   const payload = JSON.stringify({ cam: camNum, image: base64 });
@@ -321,6 +353,7 @@ async function broadcastToCloud(camNum, buffer) {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload),
+          'X-CCTV-Bridge-Key': CONFIG.bridgeKey,
         },
         timeout: 4000,
       },
@@ -351,8 +384,26 @@ async function broadcastToCloud(camNum, buffer) {
 setInterval(() => {
   for (const num of [1, 2]) {
     const frame = latestFrames[num];
-    if (frame && frame.buffer && Date.now() - frame.timestamp < 3000) {
-      broadcastToCloud(num, frame.buffer).catch(() => {});
+    const upload = cloudUpload[num];
+    if (frame && frame.buffer && Date.now() - frame.timestamp < 3000 && !upload.inFlight) {
+      upload.inFlight = true;
+      broadcastToCloud(num, frame.buffer)
+        .then(() => {
+          upload.lastSuccessAt = Date.now();
+          upload.lastError = null;
+        })
+        .catch((err) => {
+          upload.lastError = err.message;
+          // Log at most once every 30s: a temporary network outage must not
+          // fill the terminal's log or hide the useful RTSP diagnostics.
+          if (Date.now() - upload.lastErrorAt > 30000) {
+            upload.lastErrorAt = Date.now();
+            console.warn(`[CCTV-BRIDGE] Cloud relay Cam ${num}: ${err.message}`);
+          }
+        })
+        .finally(() => {
+          upload.inFlight = false;
+        });
     }
   }
 }, CONFIG.cloudBroadcastIntervalMs);
@@ -429,8 +480,8 @@ function startLocalServer() {
             sizeBytes: latestFrames[1].buffer?.length || 0,
             method: latestFrames[1].method,
             ip: CONFIG.cameras[1].ip,
-            rtsp: CONFIG.cameras[1].rtspUrl,
-            rtspHd: CONFIG.cameras[1].rtspHdUrl,
+            cloudRelayOnline: Date.now() - cloudUpload[1].lastSuccessAt < 10000,
+            cloudRelayError: cloudUpload[1].lastError,
           },
           cam2: {
             online: Date.now() - latestFrames[2].timestamp < 8000,
@@ -438,8 +489,8 @@ function startLocalServer() {
             sizeBytes: latestFrames[2].buffer?.length || 0,
             method: latestFrames[2].method,
             ip: CONFIG.cameras[2].ip,
-            rtsp: CONFIG.cameras[2].rtspUrl,
-            rtspHd: CONFIG.cameras[2].rtspHdUrl,
+            cloudRelayOnline: Date.now() - cloudUpload[2].lastSuccessAt < 10000,
+            cloudRelayError: cloudUpload[2].lastError,
           },
         })
       );

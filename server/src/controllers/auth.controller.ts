@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import { timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { signToken } from '../lib/jwt.js';
 import { HttpError } from '../lib/httpError.js';
@@ -15,6 +16,13 @@ import {
   isMaintenanceActive,
   formatMaintenanceStatus,
 } from '../services/maintenance.service.js';
+
+function keysMatch(received: string | undefined, expected: string | undefined): boolean {
+  if (!received || !expected || expected.length < 24) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 // Dummy hash so bcrypt.compare always runs, even for unknown usernames -
 // keeps response timing the same whether or not the account exists.
@@ -88,6 +96,19 @@ export async function login(req: Request, res: Response) {
 export async function me(req: Request, res: Response) {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
 
+  // The cabin is a fixed, supervised terminal. It has its own narrow token and
+  // never needs a staff password typed into the browser.
+  if (req.user.scope === 'KATA_CABIN') {
+    return res.json({
+      user: {
+        id: req.user.userId,
+        name: req.user.name || 'Kata Cabin',
+        username: process.env.KATA_CABIN_USERNAME || 'kata-cabin',
+        role: 'USER',
+      },
+    });
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: req.user.userId },
     select: { id: true, name: true, username: true, role: true, createdAt: true },
@@ -95,6 +116,36 @@ export async function me(req: Request, res: Response) {
   if (!user) throw new HttpError(404, 'User not found');
 
   res.json({ user });
+}
+
+/**
+ * Exchange the installation key held only by the kata-cabin browser for a
+ * short-lived, scoped token. This is not a password login and cannot be used
+ * to open the rest of the ERP.
+ */
+export async function kioskLogin(req: Request, res: Response) {
+  const installationKey = req.header('x-kata-cabin-key');
+  if (!keysMatch(installationKey, process.env.KATA_CABIN_ACCESS_KEY)) {
+    throw new HttpError(401, 'Kata cabin is not activated');
+  }
+
+  const username = process.env.KATA_CABIN_USERNAME || 'kata-cabin';
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true, name: true },
+  });
+  if (!user) {
+    throw new HttpError(503, `Create the dedicated '${username}' USER account before activating the kata cabin`);
+  }
+
+  const token = signToken({
+    userId: user.id,
+    role: 'USER',
+    sid: SERVICE_SESSION_ID,
+    scope: 'KATA_CABIN',
+    name: user.name,
+  });
+  res.json({ token, user: { id: user.id, name: user.name, username, role: 'USER' } });
 }
 
 /**

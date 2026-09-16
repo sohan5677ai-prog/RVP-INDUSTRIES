@@ -90,42 +90,30 @@ const VEHICLE_TYPES = [
   { value: 'OTHER', label: 'Other Vehicle' },
 ];
 
-export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now(), preferLocal: boolean = true): string {
-  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
-  if (preferLocal && !isHttps) {
-    return `http://127.0.0.1:4000/api/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`;
-  }
+export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now()): string {
+  // Always route through the cloud server so the Kata is accessible from anywhere
   return getScaleApiUrl(`/weighbridge/cctv/snapshot?cam=${camNumber}&t=${ts}`);
 }
 
 export async function captureCamSnapshotBase64(camNumber: 1 | 2): Promise<string | null> {
-  const ts = Date.now();
-  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
-  const urls = isHttps
-    ? [getCameraSnapshotUrl(camNumber, ts, false)]
-    : [
-        getCameraSnapshotUrl(camNumber, ts, true),
-        getCameraSnapshotUrl(camNumber, ts, false),
-      ];
-  for (const url of urls) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), isHttps ? 5000 : 1800);
-      const resp = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (resp.ok) {
-        const blob = await resp.blob();
-        if (blob && blob.size > 500) {
-          return await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        }
+  const url = getCameraSnapshotUrl(camNumber, Date.now());
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const resp = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (resp.ok) {
+      const blob = await resp.blob();
+      if (blob && blob.size > 500) {
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       }
-    } catch {}
-  }
+    }
+  } catch {}
   return null;
 }
 
@@ -157,11 +145,8 @@ interface CctvStatusResponse {
 }
 
 function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus }: CctvLiveBoxProps) {
-  const [preferLocal, setPreferLocal] = useState<boolean>(() =>
-    typeof window === 'undefined' || window.location.protocol !== 'https:'
-  );
   const [frameUrl, setFrameUrl] = useState<string>(() =>
-    getCameraSnapshotUrl(camNumber, Date.now(), true)
+    getCameraSnapshotUrl(camNumber, Date.now())
   );
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -181,16 +166,16 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       if (mountedRef.current) {
-        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
+        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
       }
     }, delayMs);
-  }, [camNumber, preferLocal]);
+  }, [camNumber]);
 
   useEffect(() => {
     if (refreshTrigger) {
-      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
+      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
     }
-  }, [refreshTrigger, camNumber, preferLocal]);
+  }, [refreshTrigger, camNumber]);
 
   return (
     <div 
@@ -204,18 +189,14 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
         onLoad={() => {
           errCountRef.current = 0;
           setIsOnline(true);
-          onStatusChange?.(true, preferLocal);
-          triggerNextFrame(preferLocal ? 100 : 350); // 100ms ultra-low latency local refresh (~10 FPS)
+          onStatusChange?.(true, false);
+          triggerNextFrame(350);
         }}
         onError={() => {
           errCountRef.current += 1;
-          if (preferLocal && errCountRef.current >= 2) {
-            // Local bridge not responding, switch to cloud relay
-            setPreferLocal(false);
-            setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), false));
-          } else if (errCountRef.current >= 4) {
+          if (errCountRef.current >= 4) {
             setIsOnline(false);
-            onStatusChange?.(false, preferLocal);
+            onStatusChange?.(false, false);
           }
           triggerNextFrame(1500);
         }}
@@ -256,13 +237,11 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
         </span>
         <span className={cn(
           "text-[8px] font-mono px-1 py-0.2 rounded border font-semibold",
-          preferLocal ? "bg-emerald-950/80 text-emerald-300 border-emerald-800/60" : relayStatus?.online ? "bg-blue-950/80 text-blue-300 border-blue-800/60" : "bg-rose-950/80 text-rose-300 border-rose-800/60"
+          relayStatus?.online ? "bg-blue-950/80 text-blue-300 border-blue-800/60" : "bg-rose-950/80 text-rose-300 border-rose-800/60"
         )}>
-          {preferLocal
-            ? 'LOCAL BRIDGE'
-            : relayStatus?.online
-              ? `CLOUD · ${Math.max(0, Math.round((relayStatus.ageMs || 0) / 1000))}s`
-              : 'CLOUD OFFLINE'}
+          {relayStatus?.online
+            ? `CLOUD · ${Math.max(0, Math.round((relayStatus.ageMs || 0) / 1000))}s`
+            : 'CLOUD OFFLINE'}
         </span>
       </div>
 
@@ -284,8 +263,6 @@ interface CctvFullViewDialogProps {
 }
 
 function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: CctvFullViewDialogProps) {
-  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
-  const [preferLocal, setPreferLocal] = useState<boolean>(() => !isHttps);
   const [frameUrl, setFrameUrl] = useState<string>('');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -305,19 +282,19 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       if (mountedRef.current && camNumber) {
-        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
+        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
       }
     }, delayMs);
-  }, [camNumber, preferLocal]);
+  }, [camNumber]);
 
-  // Whenever camNumber or preferLocal changes, load frame immediately
+  // Whenever camNumber changes, load frame immediately
   useEffect(() => {
     if (camNumber) {
       errCountRef.current = 0;
       setIsOnline(true);
-      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), preferLocal));
+      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
     }
-  }, [camNumber, preferLocal]);
+  }, [camNumber]);
 
   if (!camNumber) return null;
 
@@ -325,7 +302,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
   const label = camNumber === 1 ? 'CAM 1: ENTRY' : 'CAM 2: EXIT';
   const handleDownloadSnapshot = () => {
     const a = document.createElement('a');
-    a.href = frameUrl || getCameraSnapshotUrl(camNumber, Date.now(), preferLocal);
+    a.href = frameUrl || getCameraSnapshotUrl(camNumber, Date.now());
     a.download = `WEIGHBRIDGE_${label.replace(/[^A-Za-z0-9]/g, '_')}_${Date.now()}.jpg`;
     document.body.appendChild(a);
     a.click();
@@ -348,7 +325,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
                   <span className="text-xs font-normal font-mono text-stone-400">({cameraIp})</span>
                 </DialogTitle>
                 <DialogDescription className="text-xs text-stone-400">
-                  Real-time ultra-low latency RTSP camera feed
+                  Real-time cloud-relayed CCTV camera feed
                 </DialogDescription>
               </div>
             </div>
@@ -387,20 +364,17 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
         <div className="relative aspect-video max-h-[68vh] w-full bg-black flex items-center justify-center overflow-hidden select-none">
           {frameUrl ? (
             <img
-              key={`${camNumber}-${preferLocal ? 'local' : 'cloud'}`}
+              key={`${camNumber}-cloud`}
               src={frameUrl}
               alt={label}
               onLoad={() => {
                 errCountRef.current = 0;
                 setIsOnline(true);
-                triggerNextFrame(preferLocal ? 100 : 350);
+                triggerNextFrame(350);
               }}
               onError={() => {
                 errCountRef.current += 1;
-                if (preferLocal && errCountRef.current >= 1) {
-                  setPreferLocal(false);
-                  setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now(), false));
-                } else if (errCountRef.current >= 4) {
+                if (errCountRef.current >= 4) {
                   setIsOnline(false);
                 }
                 triggerNextFrame(1500);
@@ -428,14 +402,8 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
             <div className="flex items-center gap-2 bg-stone-950/80 backdrop-blur-md px-2.5 py-1 rounded-md border border-stone-700/60 shadow-md">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-xs font-bold font-mono text-emerald-400 uppercase tracking-wider">LIVE FEED</span>
-              <span className="text-[11px] text-stone-400 font-mono">| 25 FPS</span>
-              <span className={cn(
-                "text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold",
-                preferLocal
-                  ? "text-emerald-300 bg-emerald-950/60 border-emerald-700/40"
-                  : "text-blue-300 bg-blue-950/60 border-blue-700/40"
-              )}>
-                {preferLocal ? "LOCAL <50ms" : "CLOUD RELAY"}
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold text-blue-300 bg-blue-950/60 border-blue-700/40">
+                CLOUD RELAY
               </span>
             </div>
 
@@ -708,8 +676,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       if (!snap1Base64 || !snap2Base64) {
         toast.warning('One or more browser snapshots were unavailable. The server will use the freshest cabin relay frame.');
       }
-      const localSnap1 = snap1Base64 || getCameraSnapshotUrl(1, Date.now(), true);
-      const localSnap2 = snap2Base64 || getCameraSnapshotUrl(2, Date.now(), true);
+      const localSnap1 = snap1Base64 || getCameraSnapshotUrl(1, Date.now());
+      const localSnap2 = snap2Base64 || getCameraSnapshotUrl(2, Date.now());
       const snapObj = { cam1: localSnap1, cam2: localSnap2 };
       setActiveSnapshots(snapObj);
 

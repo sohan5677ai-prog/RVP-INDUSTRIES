@@ -60,10 +60,6 @@ export default function WeighbridgeSlipModal({
       if (url.startsWith('/api/')) {
         return url;
       }
-      if (url.includes('127.0.0.1:4000') && window.location.hostname !== '127.0.0.1' && window.location.hostname !== 'localhost') {
-        const now = Date.now();
-        return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
-      }
       return url;
     };
 

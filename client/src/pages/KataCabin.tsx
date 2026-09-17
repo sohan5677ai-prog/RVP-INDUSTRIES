@@ -17,6 +17,13 @@ export default function KataCabin() {
   useEffect(() => {
     const activate = async () => {
       const url = new URL(window.location.href);
+      if (url.searchParams.has('deactivate') || url.searchParams.get('deactivate') === '1') {
+        localStorage.removeItem(CABIN_KEY_STORAGE);
+        localStorage.removeItem('rvp_token');
+        window.location.href = '/login?staff=1';
+        return;
+      }
+
       const setupKey = url.searchParams.get('activate');
       if (setupKey) {
         localStorage.setItem(CABIN_KEY_STORAGE, setupKey);
@@ -68,6 +75,14 @@ export default function KataCabin() {
             : message}
         </p>
         {notActivated && <p className="mt-5 rounded-xl border border-stone-700 bg-stone-950/60 p-3 text-xs leading-5 text-stone-300">Open the private activation link supplied by the ERP administrator once. After that, this screen opens directly without a staff login.</p>}
+        <div className="mt-6 pt-4 border-t border-stone-800">
+          <a
+            href="/login?staff=1"
+            className="text-xs text-amber-400/80 hover:text-amber-300 underline underline-offset-4"
+          >
+            Switch to Staff / Admin Login
+          </a>
+        </div>
       </section>
     </main>
   );

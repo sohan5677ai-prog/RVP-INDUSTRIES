@@ -57,6 +57,7 @@ export default function Login() {
     setError(null);
     setSubmitting(true);
     try {
+      localStorage.removeItem('rvp_kata_cabin_installation_key');
       await login(username, password);
       navigate('/', { replace: true });
     } catch (err) {
@@ -70,8 +71,11 @@ export default function Login() {
   const secs = secondsLeft % 60;
   const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
-  const isActivatedCabin = Boolean(localStorage.getItem('rvp_kata_cabin_installation_key'));
   const staffLoginRequested = new URLSearchParams(window.location.search).get('staff') === '1';
+  if (staffLoginRequested) {
+    localStorage.removeItem('rvp_kata_cabin_installation_key');
+  }
+  const isActivatedCabin = Boolean(localStorage.getItem('rvp_kata_cabin_installation_key'));
   if (isActivatedCabin && !staffLoginRequested) {
     return <Navigate to="/kata-cabin" replace />;
   }

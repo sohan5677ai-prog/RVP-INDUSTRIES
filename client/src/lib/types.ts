@@ -1423,6 +1423,13 @@ export interface WeighbridgeTicket {
   cam2PhotoUrl?: string | null;
   secondCam1PhotoUrl?: string | null;
   secondCam2PhotoUrl?: string | null;
+  paymentStatus: 'PENDING' | 'PAID' | 'CREDIT' | 'NOT_REQUIRED' | string;
+  paidAmount: number;
+  paidAt: string | null;
+  paymentVerifiedBy: string | null;
+  paymentReference: string | null;
+  slipWhatsappSentAt: string | null;
+  secondWeightReminderSentAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

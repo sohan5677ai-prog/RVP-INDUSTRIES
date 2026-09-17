@@ -200,8 +200,8 @@ export function findCompanyVehicle(
 /** Helper to check if a vehicle is in the exempt company vehicles list */
 export function isVehicleExempt(vehicleNumber: string | null | undefined, companyVehiclesList: string | null | undefined): boolean {
   if (!vehicleNumber || !companyVehiclesList) return false;
-  const target = vehicleNumber.trim().toLowerCase();
-  return companyVehicleNumbers(companyVehiclesList).includes(target);
+  const target = normalizeLorryNumber(vehicleNumber);
+  return parseCompanyVehicles(companyVehiclesList).some((vehicle) => normalizeLorryNumber(vehicle.number) === target);
 }
 
 /** Hamali (unloading labour) charge in rupees. exact tonnes * rate (no tonne rounding). */
@@ -673,5 +673,4 @@ export function resolveProductHsn(
   const code = (gstExempt ? taxInfo?.hsnExempt || taxInfo?.hsn : taxInfo?.hsn) || fallback;
   return code;
 }
-
 

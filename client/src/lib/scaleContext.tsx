@@ -50,6 +50,10 @@ export interface ScaleContextType {
   serverPort: string;
   availablePorts: Array<{ path: string; manufacturer?: string; friendlyName?: string }>;
   switchServerPort: (port: string, baudRate?: number) => Promise<boolean>;
+  /** True when a DLC/hardware fault was recently detected but the scale has recovered */
+  recentFault: boolean;
+  /** Timestamp (ms) of the last DLC/hardware fault */
+  lastFaultTime: number | null;
 }
 
 const ScaleContext = createContext<ScaleContextType | undefined>(undefined);
@@ -74,6 +78,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   const [hardwareConnected, setHardwareConnected] = useState<boolean>(false);
   const [serverPort, setServerPort] = useState<string>('COM4');
   const [availablePorts, setAvailablePorts] = useState<Array<{ path: string; manufacturer?: string; friendlyName?: string }>>([]);
+  const [recentFault, setRecentFault] = useState<boolean>(false);
+  const [lastFaultTime, setLastFaultTime] = useState<number | null>(null);
 
   const [baudRate, setBaudRateState] = useState<number>(() => {
     const saved = localStorage.getItem(STORAGE_BAUD_RATE);
@@ -251,7 +257,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const numMatch = frame.match(/\d{2,8}/);
+        const numMatch = frame.match(/-?\d{2,8}/);
         if (numMatch) {
           const val = parseInt(numMatch[0], 10);
           if (!isNaN(val)) {
@@ -264,9 +270,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       bufferRef.current = frames[frames.length - 1];
     }
 
-    // Fallback: If no delimiter was found, match any sequence of 4-8 digits
+    // Fallback: If no delimiter was found, match any sequence of 4-8 digits (with optional leading minus)
     if (parsedWeight == null) {
-      const directMatches = bufferRef.current.match(/\d{4,8}/g);
+      const directMatches = bufferRef.current.match(/-?\d{4,8}/g);
       if (directMatches && directMatches.length > 0) {
         const latest = directMatches[directMatches.length - 1];
         const val = parseInt(latest, 10);
@@ -555,10 +561,14 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
                 setError(data.error || faultName);
                 setLiveWeight(null);
                 setIsStable(false);
+                setRecentFault(true);
+                setLastFaultTime(data.lastFaultTime || Date.now());
               } else {
                 setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
                 setIsStable(!!data.isStable);
                 setError(null);
+                setRecentFault(!!data.recentFault);
+                setLastFaultTime(data.lastFaultTime || null);
               }
               setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
               setLastUpdated(new Date(data.lastUpdated || Date.now()));
@@ -610,10 +620,14 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
                 setError(data.error || faultName);
                 setLiveWeight(null);
                 setIsStable(false);
+                setRecentFault(true);
+                setLastFaultTime(data.lastFaultTime || Date.now());
               } else {
                 setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
                 setIsStable(!!data.isStable);
                 setError(null);
+                setRecentFault(!!data.recentFault);
+                setLastFaultTime(data.lastFaultTime || null);
               }
               setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
               setLastUpdated(new Date(data.lastUpdated || Date.now()));
@@ -687,6 +701,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         serverPort,
         availablePorts,
         switchServerPort,
+        recentFault,
+        lastFaultTime,
       }}
     >
       {children}

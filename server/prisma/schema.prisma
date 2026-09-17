@@ -2200,11 +2200,19 @@ model WeighbridgeTicket {
   cam2PhotoUrl    String?
   secondCam1PhotoUrl String?
   secondCam2PhotoUrl String?
+  paymentStatus   String    @default("NOT_REQUIRED") // PENDING, PAID, CREDIT, NOT_REQUIRED
+  paidAmount      Decimal   @default(0) @db.Decimal(10, 2)
+  paidAt          DateTime?
+  paymentVerifiedBy String?
+  paymentReference String?
+  slipWhatsappSentAt DateTime?
+  secondWeightReminderSentAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   @@index([vehicleNumber])
   @@index([status])
+  @@index([paymentStatus])
   @@index([createdAt])
 }
 

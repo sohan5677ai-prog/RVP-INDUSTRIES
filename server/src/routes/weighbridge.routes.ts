@@ -19,6 +19,8 @@ import {
   getPendingPrintJobsHandler,
   completePrintJobHandler,
   getPrintAgentStatusHandler,
+  remindSecondWeightHandler,
+  verifyTicketPaymentHandler,
 } from '../controllers/weighbridge.controller.js';
 
 const router = Router();
@@ -56,6 +58,8 @@ router.post('/tickets', asyncHandler(createTicketHandler));
 router.patch('/tickets/:id', asyncHandler(updateTicketHandler));
 router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
+router.post('/tickets/:id/remind-second-weight', asyncHandler(remindSecondWeightHandler));
+router.post('/tickets/:id/verify-payment', asyncHandler(verifyTicketPaymentHandler));
 router.patch('/tickets/:id/cancel', asyncHandler(cancelTicketHandler));
 router.delete('/tickets/:id', asyncHandler(deleteTicketHandler));
 

@@ -5,7 +5,9 @@ import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
-import { calcKataFee, isVehicleExempt } from '../lib/calc.js';
+import { calcKataFee, findCompanyVehicle, isVehicleExempt } from '../lib/calc.js';
+import { renderWeighbridgeSlipPdf } from '../lib/weighbridgeSlipPdf.js';
+import { sendWeighbridgePaidSlip, sendWeighbridgeSecondWeightReminder } from '../services/whatsapp.service.js';
 
 function getExpectedBridgeKey(): string {
   if (process.env.CCTV_BRIDGE_KEY && process.env.CCTV_BRIDGE_KEY.length >= 24) {
@@ -34,6 +36,16 @@ async function calculateTicketFee(
   if (netWeightKg == null || netWeightKg <= 0 || billType.toUpperCase() === 'FREE') return 0;
   const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
   return calcKataFee(netWeightKg, isVehicleExempt(vehicleNumber, company?.companyVehicles));
+}
+
+function paymentStatusFor(amount: number, billType: string): string {
+  if (amount <= 0 || billType.toUpperCase() === 'FREE') return 'NOT_REQUIRED';
+  return billType.toUpperCase() === 'CREDIT' ? 'CREDIT' : 'PENDING';
+}
+
+function slipToken(id: string, paidAt: Date): string {
+  const secret = process.env.JWT_SECRET || 'rvp-default-kata-secret-key-2026';
+  return createHmac('sha256', secret).update(`weighbridge-slip:${id}:${paidAt.getTime()}`).digest('hex');
 }
 
 function readWeight(value: unknown, field: string): number | null {
@@ -219,6 +231,7 @@ export async function createTicketHandler(req: Request, res: Response) {
           tripType: 'SECOND',
           billType: finalBillType,
           amount: finalAmount,
+          paymentStatus: paymentStatusFor(finalAmount, finalBillType),
           ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
           ...(remarks ? { remarks: remarks.trim() } : {}),
           secondCam1PhotoUrl,
@@ -266,6 +279,7 @@ export async function createTicketHandler(req: Request, res: Response) {
       loadType: String(loadType).toUpperCase(),
       billType: String(billType).toUpperCase(),
       amount: computedAmount,
+      paymentStatus: status === 'COMPLETED' ? paymentStatusFor(computedAmount, String(billType)) : 'NOT_REQUIRED',
       firstWeightKg: firstWeight,
       secondWeightKg: secondWeight,
       netWeightKg: netWeight,
@@ -297,7 +311,7 @@ export async function createTicketHandler(req: Request, res: Response) {
  */
 export async function completeSecondWeightHandler(req: Request, res: Response) {
   const { id } = req.params;
-  const { secondWeightKg, secondWeight, partyName, material, loadType, billType, remarks, snapCam1, snapCam2 } = req.body;
+  const { secondWeightKg, secondWeight, partyName, partyMobile, material, loadType, billType, remarks, snapCam1, snapCam2 } = req.body;
   const weightVal = secondWeightKg ?? secondWeight ?? req.body.weight ?? req.body.liveWeight;
 
   if (weightVal == null || isNaN(Number(weightVal))) {
@@ -336,7 +350,9 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       tripType: 'SECOND',
       billType: finalBillType,
       amount: finalAmount,
+      paymentStatus: paymentStatusFor(finalAmount, finalBillType),
       ...(partyName ? { partyName: String(partyName).trim() } : {}),
+      ...(partyMobile ? { partyMobile: String(partyMobile).trim() } : {}),
       ...(material ? { material: String(material).trim() } : {}),
       ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
       ...(remarks ? { remarks: remarks.trim() } : {}),
@@ -414,6 +430,11 @@ export async function updateTicketHandler(req: Request, res: Response) {
       secondWeightKg: secondWeight,
       netWeightKg: netWeight,
       amount,
+      paymentStatus: status !== 'COMPLETED'
+        ? 'NOT_REQUIRED'
+        : existing.paymentStatus === 'PAID' && amount > 0
+          ? 'PAID'
+          : paymentStatusFor(amount, billType),
       status,
       firstWeighedAt: firstWeight != null ? (existing.firstWeighedAt ?? new Date()) : null,
       secondWeighedAt: secondWeight != null ? (existing.secondWeighedAt ?? new Date()) : null,
@@ -422,6 +443,102 @@ export async function updateTicketHandler(req: Request, res: Response) {
   });
 
   res.json(updated);
+}
+
+/** Remind both the driver and Hamali Team that this vehicle is awaiting its second weight. */
+export async function remindSecondWeightHandler(req: Request, res: Response) {
+  const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
+  if (!ticket) throw new HttpError(404, 'Weighbridge ticket not found');
+  if (ticket.status !== 'PENDING_SECOND') throw new HttpError(400, 'This ticket is no longer awaiting second weight');
+
+  const hamali = await prisma.party.findFirst({ where: { type: 'HAMALI_TEAM' }, select: { name: true, phone: true, phone2: true } });
+  const recipients = [
+    ticket.partyMobile ? { phone: ticket.partyMobile, label: 'Driver' } : null,
+    hamali?.phone ? { phone: hamali.phone, label: hamali.name || 'Hamali Team' } : null,
+    hamali?.phone2 ? { phone: hamali.phone2, label: hamali.name || 'Hamali Team' } : null,
+  ].filter((v): v is { phone: string; label: string } => Boolean(v?.phone));
+  if (!recipients.length) throw new HttpError(400, 'Add the driver mobile or Hamali Team phone number before sending a reminder');
+
+  const results = await Promise.all(recipients.map((recipient) => sendWeighbridgeSecondWeightReminder({
+    to: recipient.phone,
+    recipientLabel: recipient.label,
+    ticketId: ticket.id,
+    ticketNo: ticket.ticketNo,
+    vehicleNumber: ticket.vehicleNumber,
+    firstWeightKg: ticket.firstWeightKg || 0,
+    firstWeighedAt: ticket.firstWeighedAt,
+  })));
+  const sent = results.filter((result) => result.ok).length;
+  if (sent > 0) {
+    await prisma.weighbridgeTicket.update({ where: { id: ticket.id }, data: { secondWeightReminderSentAt: new Date() } });
+  }
+  res.json({ sent, attempted: recipients.length, results });
+}
+
+/** Verify counter payment, persist its audit trail, and WhatsApp the signed Kata slip to the driver. */
+export async function verifyTicketPaymentHandler(req: Request, res: Response) {
+  const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
+  if (!ticket) throw new HttpError(404, 'Weighbridge ticket not found');
+  if (ticket.status !== 'COMPLETED') throw new HttpError(400, 'Complete the second weight before verifying payment');
+  if (ticket.paymentStatus === 'PAID') throw new HttpError(400, 'Payment is already verified');
+
+  const due = Number(ticket.amount || 0);
+  const received = req.body.amount == null ? due : Number(req.body.amount);
+  if (!Number.isFinite(received) || received < 0) throw new HttpError(400, 'Payment amount must be zero or greater');
+  if (due > 0 && received !== due) throw new HttpError(400, `Payment must match the Kata charge of Rs. ${due}`);
+
+  const paidAt = new Date();
+  const user = (req as any).user;
+  let updated = await prisma.weighbridgeTicket.update({
+    where: { id: ticket.id },
+    data: {
+      paymentStatus: due > 0 ? 'PAID' : 'NOT_REQUIRED',
+      paidAmount: received,
+      paidAt,
+      paymentVerifiedBy: user?.name || user?.email || 'Kata Operator',
+      paymentReference: String(req.body.reference || (due > 0 ? 'CASH' : 'FREE')).trim().slice(0, 100),
+    },
+  });
+
+  let whatsapp: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, skipped: true, error: 'Driver mobile is missing' };
+  if (updated.partyMobile) {
+    const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+    const driver = findCompanyVehicle(updated.vehicleNumber, company?.companyVehicles);
+    const token = slipToken(updated.id, paidAt);
+    const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
+    const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}`;
+    whatsapp = await sendWeighbridgePaidSlip({
+      to: updated.partyMobile,
+      driverName: driver?.driverName || 'Driver',
+      ticketId: updated.id,
+      ticketNo: updated.ticketNo,
+      vehicleNumber: updated.vehicleNumber,
+      netWeightKg: updated.netWeightKg || 0,
+      amount: received,
+      slipUrl: url,
+    });
+    if (whatsapp.ok) {
+      updated = await prisma.weighbridgeTicket.update({ where: { id: updated.id }, data: { slipWhatsappSentAt: new Date() } });
+    }
+  }
+  res.json({ ticket: updated, whatsapp });
+}
+
+/** Public, unguessable document URL consumed by WhatsApp's media fetcher. */
+export async function downloadSignedWeighbridgeSlipHandler(req: Request, res: Response) {
+  const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
+  if (!ticket || !ticket.paidAt) throw new HttpError(404, 'Signed Kata slip not found');
+  const expected = slipToken(ticket.id, ticket.paidAt);
+  const received = String(req.query.token || '');
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) throw new HttpError(403, 'Invalid slip link');
+  const company = await prisma.companyProfile.findFirst({ select: { name: true, address: true, gstin: true, contact: true } });
+  const pdf = await renderWeighbridgeSlipPdf(ticket, company || { name: 'RVP INDUSTRIES', address: null, gstin: null, contact: null });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="Kata-Slip-${ticket.ticketNo}.pdf"`);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.send(pdf);
 }
 
 /**

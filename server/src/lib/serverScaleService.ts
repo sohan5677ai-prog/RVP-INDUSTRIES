@@ -137,17 +137,29 @@ class ServerScaleService {
           : 'NO DLC (Load Cell Signal Lost)';
     }
 
+    // Track fault timestamp for DLC cooldown
+    if (err) {
+      this.lastFaultTime = Date.now();
+      this.lastFaultLabel = upperRaw.includes('DLS') && !upperRaw.includes('DLC') ? 'NO DLS' : 'NO DLC';
+    }
+
     const weight = Math.round(Number(reading.liveWeight) || 0);
+    const now = Date.now();
+    const withinCooldown = !err && this.lastFaultTime > 0 && (now - this.lastFaultTime) < DLC_COOLDOWN_MS;
+
     this.currentReading = {
       ...this.currentReading,
       liveWeight: err ? 0 : weight,
       isStable: err ? false : !!reading.isStable,
       rawText: raw || `${weight} kg`,
-      lastUpdated: Date.now(),
+      lastUpdated: now,
       isConnected: true,
       port: reading.port || this.portName,
       baudRate: reading.baudRate || this.baudRate,
       error: err,
+      recentFault: !!err || withinCooldown,
+      recentFaultLabel: err ? this.lastFaultLabel : (withinCooldown ? this.lastFaultLabel : null),
+      lastFaultTime: this.lastFaultTime || null,
     };
 
     this.notifyListeners();

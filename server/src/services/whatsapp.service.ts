@@ -97,7 +97,9 @@ export type WaTemplateKey =
   | 'WISHES'
   // rvp_buyer_kata_alert (image header - buyer weighbridge slip): lorry, buyer, product, dispatched wt, kata wt, shortage
   | 'BUYER_KATA_ALERT'
-  | 'BUYER_KATA_ALERT_TEXT';
+  | 'BUYER_KATA_ALERT_TEXT'
+  | 'WEIGHBRIDGE_SECOND_REMINDER' // driver/hamali: role, vehicle, ticket, first weight/time
+  | 'WEIGHBRIDGE_PAID_SLIP'; // signed PDF: driver, ticket, vehicle, net weight, amount
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -783,6 +785,48 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
 
   const anyOk = results.some((r) => r.ok);
   return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error ?? 'Send failed' };
+}
+
+export function sendWeighbridgeSecondWeightReminder(args: {
+  to: string;
+  recipientLabel: string;
+  ticketId: string;
+  ticketNo: number;
+  vehicleNumber: string;
+  firstWeightKg: number;
+  firstWeighedAt: Date | null;
+}) {
+  const weighedAt = args.firstWeighedAt
+    ? args.firstWeighedAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })
+    : '-';
+  return sendWhatsAppTemplate({
+    templateKey: 'WEIGHBRIDGE_SECOND_REMINDER',
+    to: args.to,
+    variables: [args.recipientLabel, args.vehicleNumber, args.ticketNo, `${args.firstWeightKg.toLocaleString('en-IN')} kg at ${weighedAt}`],
+    relatedType: 'WEIGHBRIDGE_SECOND_REMINDER',
+    relatedId: args.ticketId,
+  });
+}
+
+export function sendWeighbridgePaidSlip(args: {
+  to: string;
+  driverName: string;
+  ticketId: string;
+  ticketNo: number;
+  vehicleNumber: string;
+  netWeightKg: number;
+  amount: number;
+  slipUrl: string;
+}) {
+  return sendWhatsAppTemplate({
+    templateKey: 'WEIGHBRIDGE_PAID_SLIP',
+    to: args.to,
+    variables: [args.driverName, args.ticketNo, args.vehicleNumber, `${args.netWeightKg.toLocaleString('en-IN')} kg`, `Rs. ${args.amount.toLocaleString('en-IN')}`],
+    mediaUrl: args.slipUrl,
+    documentFilename: `Kata-Slip-${args.ticketNo}-${args.vehicleNumber}.pdf`,
+    relatedType: 'WEIGHBRIDGE_PAID_SLIP',
+    relatedId: args.ticketId,
+  });
 }
 
 interface LocationSendArgs {

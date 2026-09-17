@@ -29,6 +29,9 @@ import {
   IndianRupee,
   Cable,
   Trash2,
+  Banknote,
+  MessageCircle,
+  BadgeCheck,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -500,8 +503,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const queryClient = useQueryClient();
   const scale = useScale();
 
-  // Active view tab: 'entry' | 'pending' | 'history'
-  const [activeTab, setActiveTab] = useState<'entry' | 'pending' | 'history'>('entry');
+  // Active view tab: entry -> pending second weight -> payment verification -> register
+  const [activeTab, setActiveTab] = useState<'entry' | 'pending' | 'payment' | 'history'>('entry');
 
   // Form states
   const [vehicleNumber, setVehicleNumber] = useState<string>('');
@@ -589,6 +592,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [historySearch, setHistorySearch] = useState<string>('');
   const [editingTicket, setEditingTicket] = useState<EditTicketDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WeighbridgeTicket | null>(null);
+  const [paymentTarget, setPaymentTarget] = useState<WeighbridgeTicket | null>(null);
+  const [paymentReference, setPaymentReference] = useState<string>('CASH');
 
   // Clock
   const [clockString, setClockString] = useState<string>('');
@@ -660,6 +665,15 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     }
     return allTickets.filter((t) => t.status === 'PENDING_SECOND');
   }, [rawPendingTickets, allTickets]);
+
+  const completedTickets = useMemo(
+    () => allTickets.filter((ticket) => ticket.status === 'COMPLETED'),
+    [allTickets],
+  );
+  const pendingPaymentCount = useMemo(
+    () => completedTickets.filter((ticket) => Number(ticket.amount || 0) > 0 && !ticket.paidAt).length,
+    [completedTickets],
+  );
 
   // Fetch ERP parties for auto-complete suggestions
   const { data: parties = [] } = useQuery<Party[]>({
@@ -926,6 +940,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             secondWeightKg: currentLiveWeight,
             secondWeight: currentLiveWeight,
             partyName: partyName.trim() || undefined,
+            partyMobile: driverMobile.trim() || undefined,
             material: material || undefined,
             billType,
             loadType,
@@ -991,12 +1006,45 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         setActiveSnapshots(snapshots);
       }
 
+      if (ticket.status === 'COMPLETED') {
+        setActiveTab('payment');
+        toast.info(Number(ticket.amount || 0) > 0
+          ? `Payment of ₹${Number(ticket.amount).toLocaleString('en-IN')} is awaiting verification.`
+          : 'KNM/free vehicle: no Kata charge. Release the signed slip from Payment Verification.');
+      }
+
       // Reset form
       handleResetForm();
     },
     onError: (err) => {
       toast.error(getErrorMessage(err));
     },
+  });
+
+  const reminderMutation = useMutation({
+    mutationFn: (ticket: WeighbridgeTicket) => api<{ sent: number; attempted: number }>(`/weighbridge/tickets/${ticket.id}/remind-second-weight`, { method: 'POST' }),
+    onSuccess: (result) => {
+      toast.success(`Second-weight reminder sent to ${result.sent} of ${result.attempted} recipient(s).`);
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const paymentMutation = useMutation({
+    mutationFn: (ticket: WeighbridgeTicket) => api<{ ticket: WeighbridgeTicket; whatsapp: { ok: boolean; skipped?: boolean; error?: string } }>(`/weighbridge/tickets/${ticket.id}/verify-payment`, {
+      method: 'POST',
+      body: JSON.stringify({ amount: Number(ticket.amount || 0), reference: paymentReference.trim() || (Number(ticket.amount || 0) > 0 ? 'CASH' : 'FREE') }),
+    }),
+    onSuccess: ({ ticket, whatsapp }) => {
+      toast.success(Number(ticket.amount || 0) > 0 ? `Payment verified for Ticket #${ticket.ticketNo}.` : `Free KNM ticket #${ticket.ticketNo} released.`);
+      if (whatsapp.ok) toast.success('Signed Kata slip sent to the driver on WhatsApp.');
+      else toast.warning(whatsapp.error || 'Payment saved, but the WhatsApp slip could not be sent.');
+      setPaymentTarget(null);
+      setPaymentReference('CASH');
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
   });
 
   const startEditingTicket = useCallback((ticket: WeighbridgeTicket) => {
@@ -1271,6 +1319,25 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           {pendingTickets.length > 0 && (
             <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400">
               {pendingTickets.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('payment')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            activeTab === 'payment'
+              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Banknote className="h-4 w-4" />
+          <span>Payment Verification</span>
+          {pendingPaymentCount > 0 && (
+            <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-400">
+              {pendingPaymentCount}
             </span>
           )}
         </button>
@@ -1570,22 +1637,39 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </div>
               )}
 
+              {/* DLC Cooldown Warning Banner — shows for 30s after DLC fault clears */}
+              {!isNoDls && scale.recentFault && (
+                <div className="mb-3.5 p-3 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-200 text-xs flex items-start gap-2.5 shadow-lg shadow-amber-950/30 animate-pulse">
+                  <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-amber-100 text-sm">⚠️ Recent DLC Fault Detected</div>
+                    <p className="text-xs text-amber-300/90 mt-1 leading-relaxed">
+                      A load cell signal loss was detected {scale.lastFaultTime ? `${Math.round((Date.now() - scale.lastFaultTime) / 1000)}s ago` : 'recently'}.
+                      The scale has recovered, but the current reading <strong>may be unreliable</strong>.
+                      Wait for the indicator to stabilize or verify against the physical display.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Top readout status row */}
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-xs font-mono">
                 <div className="flex items-center gap-2">
                   <span className="relative flex h-2.5 w-2.5">
                     <span className={cn(
                       'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
-                      isNoDls ? 'bg-red-400' : isManualOverride ? 'bg-amber-400' : scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
+                      isNoDls ? 'bg-red-400' : scale.recentFault ? 'bg-amber-400' : isManualOverride ? 'bg-amber-400' : scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
                     )} />
                     <span className={cn(
                       'relative inline-flex rounded-full h-2.5 w-2.5',
-                      isNoDls ? 'bg-red-500' : isManualOverride ? 'bg-amber-500' : scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
+                      isNoDls ? 'bg-red-500' : scale.recentFault ? 'bg-amber-500' : isManualOverride ? 'bg-amber-500' : scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
                     )} />
                   </span>
                   <span className="font-bold tracking-wider text-stone-300">
                     {isNoDls
                       ? `${noDlcLabel} (FAULT)`
+                      : scale.recentFault
+                      ? `⚠️ RECENTLY FAULTED (${scale.lastFaultTime ? `${Math.round((Date.now() - scale.lastFaultTime) / 1000)}s ago` : 'recovering'})`
                       : isManualOverride
                       ? 'MANUAL OVERRIDE'
                       : scale.isScaleOnline
@@ -1666,19 +1750,23 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       'px-2 py-1 rounded text-[10px] font-bold tracking-wider',
                       isNoDls
                         ? 'bg-red-500/20 text-red-400 border border-red-500/30 font-black'
-                        : !scale.isScaleOnline
-                          ? 'bg-stone-800 text-stone-400 border border-stone-700'
-                          : scale.isStable
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : scale.recentFault
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse'
+                          : !scale.isScaleOnline
+                            ? 'bg-stone-800 text-stone-400 border border-stone-700'
+                            : scale.isStable
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                     )}>
                       {isNoDls
                         ? noDlcLabel
-                        : !scale.isScaleOnline
-                          ? 'OFFLINE'
-                          : scale.isStable
-                            ? 'STABLE'
-                            : 'IN MOTION'}
+                        : scale.recentFault
+                          ? '⚠️ RECOVERING'
+                          : !scale.isScaleOnline
+                            ? 'OFFLINE'
+                            : scale.isStable
+                              ? 'STABLE'
+                              : 'IN MOTION'}
                     </span>
                   )}
                 </div>
@@ -1746,8 +1834,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   title="Click to manually override weight displayed in this box (F8)"
                 >
                   <div className="flex items-baseline justify-center gap-2">
-                    <span className="kata-weight-digits font-mono font-black text-amber-400 tracking-tight transition-transform group-hover:scale-102">
-                      {currentLiveWeight.toLocaleString('en-IN')}
+                    <span className={cn(
+                      'kata-weight-digits font-mono font-black tracking-tight transition-transform group-hover:scale-102',
+                      currentLiveWeight < 0 ? 'text-red-400 drop-shadow-[0_0_20px_rgba(239,68,68,0.5)]' : 'text-amber-400'
+                    )}>
+                      {currentLiveWeight < 0 ? `−${Math.abs(currentLiveWeight).toLocaleString('en-IN')}` : currentLiveWeight.toLocaleString('en-IN')}
                     </span>
                     <span className="font-mono font-bold text-xl text-stone-400">
                       KG
@@ -1755,7 +1846,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   </div>
 
                   {/* Sub-readout in metric tonnes */}
-                  <div className="text-stone-400 font-mono text-xs mt-1 flex items-center justify-center gap-2">
+                  <div className={cn(
+                    'font-mono text-xs mt-1 flex items-center justify-center gap-2',
+                    currentLiveWeight < 0 ? 'text-red-400' : 'text-stone-400'
+                  )}>
                     <span>≈ {(currentLiveWeight / 1000).toFixed(3)} Metric Tonnes (MT)</span>
                     <span className="text-stone-500 text-[10px]">· Click to override (F8)</span>
                   </div>
@@ -1961,14 +2055,27 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         {t.firstWeightKg != null ? `${t.firstWeightKg.toLocaleString('en-IN')} Kg` : '-'}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          onClick={() => handleSelectPendingTruck(t)}
-                          className="h-8 gap-1 text-xs font-semibold"
-                        >
-                          <Scale className="h-3.5 w-3.5" />
-                          Complete 2nd Weight
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => reminderMutation.mutate(t)}
+                            disabled={reminderMutation.isPending}
+                            className="h-8 gap-1 text-xs font-semibold text-emerald-700"
+                            title="WhatsApp the driver and Hamali Team"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            Remind Driver + Hamali
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleSelectPendingTruck(t)}
+                            className="h-8 gap-1 text-xs font-semibold"
+                          >
+                            <Scale className="h-3.5 w-3.5" />
+                            Complete 2nd Weight
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1980,7 +2087,64 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          TAB 3: TICKET REGISTER & HISTORY
+          TAB 3: PAYMENT VERIFICATION
+         ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'payment' && (
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card className="border-amber-500/20 bg-amber-500/5"><CardContent className="p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Awaiting collection</p>
+              <p className="mt-1 font-mono text-2xl font-black">₹{completedTickets.filter((t) => Number(t.amount || 0) > 0 && !t.paidAt).reduce((sum, t) => sum + Number(t.amount || 0), 0).toLocaleString('en-IN')}</p>
+              <p className="text-xs text-muted-foreground">{pendingPaymentCount} ticket(s) pending</p>
+            </CardContent></Card>
+            <Card className="border-emerald-500/20 bg-emerald-500/5"><CardContent className="p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Collected today</p>
+              <p className="mt-1 font-mono text-2xl font-black text-emerald-700">₹{completedTickets.filter((t) => t.paidAt && new Date(t.paidAt).toDateString() === new Date().toDateString()).reduce((sum, t) => sum + Number(t.paidAmount || 0), 0).toLocaleString('en-IN')}</p>
+              <p className="text-xs text-muted-foreground">Verified counter receipts</p>
+            </CardContent></Card>
+            <Card className="border-sky-500/20 bg-sky-500/5"><CardContent className="p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Free / KNM vehicles</p>
+              <p className="mt-1 font-mono text-2xl font-black text-sky-700">{completedTickets.filter((t) => Number(t.amount || 0) === 0).length}</p>
+              <p className="text-xs text-muted-foreground">₹0 Kata charge</p>
+            </CardContent></Card>
+          </div>
+
+          <Card className="border-border shadow-sm">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="text-base font-bold">Payment Verification &amp; Signed Slip Delivery</CardTitle>
+              <CardDescription className="text-xs">Verify the counter amount after second weight. Once verified, the signed Kata certificate is sent to the driver on WhatsApp.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Ticket</TableHead><TableHead>Vehicle</TableHead><TableHead>Driver mobile</TableHead><TableHead className="text-right">Net weight</TableHead><TableHead className="text-right">Kata charge</TableHead><TableHead>Payment</TableHead><TableHead>WhatsApp slip</TableHead><TableHead className="text-right">Action</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {completedTickets.map((ticket) => {
+                    const free = Number(ticket.amount || 0) === 0;
+                    const verified = Boolean(ticket.paidAt);
+                    return <TableRow key={ticket.id}>
+                      <TableCell className="font-mono font-bold text-primary">#{ticket.ticketNo}</TableCell>
+                      <TableCell className="font-mono font-bold">{ticket.vehicleNumber}{free && <Badge variant="outline" className="ml-2 border-sky-500/30 text-sky-700">KNM / FREE</Badge>}</TableCell>
+                      <TableCell className="font-mono text-xs">{ticket.partyMobile || <span className="text-rose-600">Missing</span>}</TableCell>
+                      <TableCell className="text-right font-mono">{Number(ticket.netWeightKg || 0).toLocaleString('en-IN')} kg</TableCell>
+                      <TableCell className="text-right font-mono font-bold">₹{Number(ticket.amount || 0).toLocaleString('en-IN')}</TableCell>
+                      <TableCell>{verified ? <Badge className="bg-emerald-600"><BadgeCheck className="mr-1 h-3 w-3" />{free ? 'FREE VERIFIED' : 'PAID'}</Badge> : <Badge variant="secondary">{free ? 'NO PAYMENT' : ticket.billType === 'CREDIT' ? 'CREDIT' : 'PENDING'}</Badge>}</TableCell>
+                      <TableCell>{ticket.slipWhatsappSentAt ? <span className="text-xs font-semibold text-emerald-700">Sent {new Date(ticket.slipWhatsappSentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span> : <span className="text-xs text-muted-foreground">Not sent</span>}</TableCell>
+                      <TableCell className="text-right">
+                        {verified ? <Button variant="ghost" size="sm" onClick={() => setSlipModalTicket(ticket)} className="h-8 gap-1 text-xs"><Printer className="h-3.5 w-3.5" />View slip</Button> : <Button size="sm" onClick={() => { setPaymentTarget(ticket); setPaymentReference(free ? 'FREE' : 'CASH'); }} className="h-8 gap-1 text-xs"><Banknote className="h-3.5 w-3.5" />{free ? 'Release Free Slip' : `Pay ₹${Number(ticket.amount || 0).toLocaleString('en-IN')}`}</Button>}
+                      </TableCell>
+                    </TableRow>;
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          TAB 4: TICKET REGISTER & HISTORY
          ───────────────────────────────────────────────────────────── */}
       {activeTab === 'history' && (
         <Card className="border-border shadow-sm">

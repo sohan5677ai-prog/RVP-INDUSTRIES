@@ -531,9 +531,13 @@ async function inspectPrinterState(target = null) {
     const state = await runPowerShellJson(
       "$printer = Get-Printer -Name $env:RVP_PRINTER_NAME -ErrorAction Stop; " +
       "$isUsb = [string]$printer.PortName -match '^USB'; " +
-      "$usbHw = if ($isUsb) { @(Get-PnpDevice -Class Printer -PresentOnly -ErrorAction SilentlyContinue).Count } else { 1 }; " +
+      "$usbHw = if ($isUsb) { " +
+      "  @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object { " +
+      "    $_.DeviceID -match 'USBPRINT' -or $_.Service -eq 'usbprint' -or ($_.CompatibleID -and $_.CompatibleID -contains 'USBPRINT') -or $_.DeviceID -match 'VID_04A9' " +
+      "  }).Count " +
+      "} else { 1 }; " +
       "$badJobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | " +
-      "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked|UserIntervention' }); " +
+      "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked|UserIntervention' -or (([int]$_.JobStatus -band 0x0002) -ne 0) }); " +
       "if ($badJobs.Count -gt 0) { $badJobs | Remove-PrintJob -ErrorAction SilentlyContinue; } " +
       "[pscustomobject]@{ " +
       "  printerStatus = [string]$printer.PrinterStatus; " +
@@ -596,22 +600,27 @@ async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 15000) {
   while (Date.now() - startedAt < timeoutMs) {
     const result = await runPowerShellJson(
       "$jobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction Stop | " +
-      "Select-Object Id,DocumentName,JobStatus,PagesPrinted,TotalPages); " +
+      "Select-Object Id, DocumentName, @{Name='JobStatus'; Expression={[string]$_.JobStatus}}, @{Name='StatusCode'; Expression={[int]$_.JobStatus}}, PagesPrinted, TotalPages); " +
       "if ($jobs.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject @($jobs) -Compress }",
       { RVP_PRINTER_NAME: printerName }
     );
     const jobs = Array.isArray(result) ? result : (result ? [result] : []);
 
-    const errorJob = jobs.find(j => /error|offline|paperout|blocked|userintervention/i.test(String(j.JobStatus || '')));
+    const errorJob = jobs.find(j => {
+      const statusStr = String(j.JobStatus || '');
+      const code = Number(j.StatusCode || 0);
+      const isErrorCode = (code & 0x0002) !== 0 || (code & 0x0020) !== 0 || (code & 0x0040) !== 0 || (code & 0x0400) !== 0;
+      return isErrorCode || /error|offline|paperout|blocked|userintervention/i.test(statusStr);
+    });
+
     if (errorJob) {
       // Purge error job from Windows Spooler so it doesn't stay stuck forever
       runPowerShellJson(
         "Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | " +
-        "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked' } | " +
         "Remove-PrintJob -ErrorAction SilentlyContinue",
         { RVP_PRINTER_NAME: printerName }
       ).catch(() => {});
-      throw new Error(`PRINTER_NOT_READY: Windows spooler reports ${errorJob.JobStatus} for ${printerName}. Check printer power and USB cable.`);
+      throw new Error(`PRINTER_NOT_READY: Windows spooler reports ${errorJob.JobStatus || 'Error'} for ${printerName}. Check printer power and USB cable.`);
     }
 
     if (jobs.length > 0) {
@@ -625,10 +634,14 @@ async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 15000) {
     await new Promise(resolve => setTimeout(resolve, 600));
   }
 
-  // If job was seen or sent, do not fail on spooler latency
+  // If the job is still stuck in the spooler after timeoutMs, DO NOT report success!
   if (sawJob) {
-    console.log(`[PRINT-AGENT] Print job spooled to Windows for ${printerName}.`);
-    return;
+    // Purge the stuck job so it doesn't block future print attempts
+    await runPowerShellJson(
+      "Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue",
+      { RVP_PRINTER_NAME: printerName }
+    ).catch(() => {});
+    throw new Error(`PRINTER_TIMEOUT: Print job remained stuck in Windows spooler for ${printerName} without printing. Check printer power, paper tray, and USB connection.`);
   }
 }
 

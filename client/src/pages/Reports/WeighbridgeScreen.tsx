@@ -815,7 +815,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
 
-      const isAgentAndPrinterReady = Boolean(printAgentStatus?.agentOnline && printAgentStatus?.printerReady);
+      const isAgentAndPrinterReady = Boolean(printAgentStatus?.agentOnline && printAgentStatus?.printerReady === true);
 
       if (isAgentAndPrinterReady) {
         toast.success(`🖨️ Ticket #${ticket.ticketNo} dispatched to ${printAgentStatus?.printerName || 'Cabin Printer'} (silent print).`, { duration: 4500 });
@@ -912,13 +912,13 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div
                 className={cn(
                   'flex items-center gap-2 h-9 px-3 rounded-lg border text-xs font-mono font-medium shadow-sm',
-                  printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false
+                  printAgentStatus?.agentOnline && printAgentStatus.printerReady === true
                     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
                     : printAgentStatus?.agentOnline
                       ? 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400'
                       : 'border-stone-500/30 bg-stone-500/10 text-stone-500 dark:text-stone-400'
                 )}
-                title={printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false
+                title={printAgentStatus?.agentOnline && printAgentStatus.printerReady === true
                   ? `${printAgentStatus.printerName || 'Cabin printer'} ready · ${printAgentStatus.pendingCount} pending jobs`
                   : printAgentStatus?.printerError || (printAgentStatus?.agentOnline
                     ? 'Cabin print agent is online, but the physical printer is not ready.'
@@ -926,10 +926,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               >
                 <Printer className="h-3.5 w-3.5" />
                 <span>
-                  {printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false
+                  {printAgentStatus?.agentOnline && printAgentStatus.printerReady === true
                     ? `${printAgentStatus.printerName || 'Cabin Printer'}: Ready${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
                     : printAgentStatus?.agentOnline
-                      ? `Cabin Printer: Check connection${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
+                      ? `${printAgentStatus.printerName || 'Cabin Printer'}: Check connection${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
                       : 'Cabin Printer: Offline'}
                 </span>
               </div>

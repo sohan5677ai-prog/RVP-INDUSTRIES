@@ -380,13 +380,13 @@ export function triggerDirectPrint(
 
 /**
  * Attempt 100% silent direct print via the local Kata Cabin print agent (port 4001).
- * Returns true if successfully received and spooled by the local agent with zero dialogs.
+ * Returns success: true if successfully received and spooled by the local agent with zero dialogs.
  */
 export async function triggerSilentLocalPrint(
   ticket: WeighbridgeTicket,
   calibration?: PrinterCalibration,
   snapshots?: { cam1?: string; cam2?: string } | null
-): Promise<boolean> {
+): Promise<{ success: boolean; error?: string; unreachable?: boolean }> {
   try {
     const savedCalib = calibration || (() => {
       try {
@@ -409,16 +409,15 @@ export async function triggerSilentLocalPrint(
     });
     clearTimeout(timer);
 
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        return true;
-      }
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return { success: true };
     }
-  } catch {
-    // Local agent not reachable from this browser
+    return { success: false, error: data.error || `HTTP ${res.status} print failure` };
+  } catch (err: any) {
+    // Local agent not reachable from this browser (e.g. office PC)
+    return { success: false, unreachable: true, error: err?.message };
   }
-  return false;
 }
 
 export default function WeighbridgeSlipModal({
@@ -1101,9 +1100,13 @@ export default function WeighbridgeSlipModal({
                 try {
                   toast.info(`🖨️ Sending Ticket #${ticket.ticketNo} to cabin printer...`, { duration: 3000 });
                   // 1. If running on cabin terminal with local print agent, print silently with 0 latency
-                  const silentOk = await triggerSilentLocalPrint(ticket, calibration, snapshots);
-                  if (silentOk) {
+                  const localRes = await triggerSilentLocalPrint(ticket, calibration, snapshots);
+                  if (localRes.success) {
                     toast.success(`🖨️ Ticket #${ticket.ticketNo} printed automatically on Cabin Printer!`);
+                    return;
+                  }
+                  if (!localRes.unreachable && localRes.error) {
+                    toast.error(`Cabin printer error: ${localRes.error}`, { duration: 6000 });
                     return;
                   }
 

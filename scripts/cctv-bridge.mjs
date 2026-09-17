@@ -560,7 +560,8 @@ function startLocalServer() {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.log(`[CCTV-BRIDGE] Local port ${CONFIG.localPort} in use. Continuing RTSP capture & background broadcast.`);
+      console.log(`[CCTV-BRIDGE] Local port ${CONFIG.localPort} already in use by an active bridge instance. Exiting duplicate process.`);
+      process.exit(0);
     } else {
       console.error('[CCTV-BRIDGE] Local server error:', err.message);
     }

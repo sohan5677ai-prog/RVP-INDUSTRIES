@@ -808,32 +808,31 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         };
       }
     },
-    onSuccess: ({ ticket }) => {
+    onSuccess: ({ ticket, snapshots }) => {
       toast.success(`Ticket #${ticket.ticketNo} saved successfully!`);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
 
-      // The server creates exactly one cloud print job for every saved ticket.
-      // The cabin agent is the sole consumer, so every device behaves identically
-      // and saving never opens a local browser preview or creates a duplicate print.
+      // Notify about cabin physical printer status
       if (printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false) {
-        toast.success(`🖨️ Ticket #${ticket.ticketNo} sent to ${printAgentStatus.printerName || 'Cabin Printer'}.`, { duration: 3500 });
+        toast.success(`🖨️ Ticket #${ticket.ticketNo} dispatched to ${printAgentStatus.printerName || 'Cabin Printer'}.`, { duration: 4000 });
       } else {
-        toast.warning(
-          `Ticket #${ticket.ticketNo} is saved and queued. ${printAgentStatus?.printerError || 'Cabin printer is currently offline.'}`,
-          { duration: 6500 }
-        );
+        toast.info(`🖨️ Opening weighment slip preview for Ticket #${ticket.ticketNo}...`, { duration: 4000 });
       }
 
-      // Reset form if completed
-      if (tripType !== 'FIRST') {
-        handleResetForm();
-      } else {
-        // Prepare next ticket
-        handleResetForm();
+      // In cabinMode with online printer, physical print happens automatically with zero popups!
+      // Otherwise, open preview modal for manual review/printing.
+      if (!cabinMode || !printAgentStatus?.agentOnline || printAgentStatus?.printerReady === false) {
+        setSlipModalTicket(ticket);
+        if (snapshots) {
+          setActiveSnapshots(snapshots);
+        }
       }
+
+      // Reset form
+      handleResetForm();
     },
     onError: (err) => {
       toast.error(getErrorMessage(err));

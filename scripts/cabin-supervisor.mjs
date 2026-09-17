@@ -121,6 +121,15 @@ function startService(key) {
     const uptimeSec = Math.round((Date.now() - svc.lastStarted) / 1000);
     log('warn', `${svc.name} exited (code: ${code}, signal: ${signal}) after ${uptimeSec}s uptime. Total restarts: ${svc.restartCount}`);
 
+    // The print agent deliberately exits with code 0 when another healthy
+    // instance already owns port 4001. Do not create an endless restart loop;
+    // the periodic health check below will start a replacement if that owner
+    // later disappears.
+    if (key === 'printer' && code === 0) {
+      log('log', 'An existing Cabin Print Agent owns port 4001; monitoring that instance.');
+      return;
+    }
+
     // Restart in 2 seconds
     svc.restartTimer = setTimeout(() => {
       startService(key);
@@ -177,7 +186,7 @@ setInterval(() => {
 
   // Also check Cabin Print Agent health on port 4001
   const printer = services.printer;
-  if (printer.proc && Date.now() - printer.lastStarted >= 10000) {
+  if (Date.now() - printer.lastStarted >= 10000) {
     const reqPrint = http.get('http://127.0.0.1:4001/status', { timeout: 5000 }, (res) => {
       let pData = '';
       res.on('data', (c) => { pData += c; });

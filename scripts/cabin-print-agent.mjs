@@ -532,22 +532,41 @@ async function inspectPrinterState(target = null) {
       "$printer = Get-Printer -Name $env:RVP_PRINTER_NAME -ErrorAction Stop; " +
       "$badJobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | " +
       "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked|UserIntervention' }); " +
-      "[pscustomobject]@{ printerStatus = [string]$printer.PrinterStatus; workOffline = [bool]$printer.WorkOffline; " +
+      "$usbDevices = if ([string]$printer.PortName -match '^USB') { " +
+      "@(Get-PnpDevice -PresentOnly -InstanceId 'USBPRINT*' -ErrorAction SilentlyContinue) " +
+      "} else { @('not-usb') }; " +
+      "[pscustomobject]@{ printerStatus = [string]$printer.PrinterStatus; portName = [string]$printer.PortName; " +
+      "workOffline = [bool]$printer.WorkOffline; usbDeviceCount = $usbDevices.Count; " +
       "badJobCount = $badJobs.Count; badJobStatus = if ($badJobs.Count) { [string]$badJobs[0].JobStatus } else { '' } } | ConvertTo-Json -Compress",
       { RVP_PRINTER_NAME: printer.name }
     );
     const printerStatus = String(state?.printerStatus || 'Unknown');
-    const notReady = Boolean(state?.workOffline) || Number(state?.badJobCount || 0) > 0 || /error|offline|paperout|notavailable/i.test(printerStatus);
+    const usbDisconnected = /^USB/i.test(String(state?.portName || '')) && Number(state?.usbDeviceCount || 0) === 0;
+    const notReady = usbDisconnected || Boolean(state?.workOffline) || Number(state?.badJobCount || 0) > 0 || /error|offline|paperout|notavailable/i.test(printerStatus);
     return {
       ...printer,
       ready: !notReady,
       error: notReady
-        ? `Printer ${printer.name} is not ready (${state?.badJobStatus || printerStatus}). Check power, paper and USB cable.`
+        ? usbDisconnected
+          ? `Printer ${printer.name} is installed, but Windows cannot detect its USB connection. Switch it on and reconnect the USB cable.`
+          : `Printer ${printer.name} is not ready (${state?.badJobStatus || printerStatus}). Check power, paper and USB cable.`
         : null,
     };
   } catch (err) {
     return { ...printer, ready: false, error: `Cannot read printer status: ${err.message}` };
   }
+}
+
+let cachedPrinterState = null;
+let cachedPrinterStateAt = 0;
+
+async function getCachedPrinterState(maxAgeMs = 10000) {
+  if (cachedPrinterState && Date.now() - cachedPrinterStateAt < maxAgeMs) {
+    return cachedPrinterState;
+  }
+  cachedPrinterState = await inspectPrinterState();
+  cachedPrinterStateAt = Date.now();
+  return cachedPrinterState;
 }
 
 async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 20000) {
@@ -614,6 +633,8 @@ async function printSlipHtml(html, ticketNo) {
   }
 
   const health = await inspectPrinterState(target);
+  cachedPrinterState = health;
+  cachedPrinterStateAt = Date.now();
   if (!health.ready) {
     throw new Error(`PRINTER_NOT_READY: ${health.error}`);
   }
@@ -676,7 +697,11 @@ const localServer = http.createServer(async (req, res) => {
   }
 
   if (req.url === '/status' && req.method === 'GET') {
-    const target = await inspectPrinterState();
+    // The poll loop refreshes this state every few seconds. Serving the cache
+    // keeps supervisor health checks instant and prevents false restarts while
+    // PowerShell is querying the Windows spooler.
+    const target = await getCachedPrinterState(15000);
+    cachedPrinterState = target;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'online',
@@ -757,7 +782,8 @@ async function pollAndPrint() {
   isProcessing = true;
 
   try {
-    const printerState = await inspectPrinterState();
+    const printerState = await getCachedPrinterState(10000);
+    cachedPrinterState = printerState;
     const agentHeaders = {
       'X-Print-Agent-Printer': encodeURIComponent(printerState.name || ''),
       'X-Print-Agent-Ready': printerState.ready ? 'true' : 'false',

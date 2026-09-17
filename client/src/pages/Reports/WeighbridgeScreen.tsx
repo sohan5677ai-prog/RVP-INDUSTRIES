@@ -27,6 +27,7 @@ import {
   Cloud,
   CloudOff,
   IndianRupee,
+  Cable,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -476,8 +477,30 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
   const manualInputRef = useRef<HTMLInputElement>(null);
 
-  // Manual toggle for NO DLC state, plus automatic detection from scale stream
-  const [manualNoDls, setManualNoDls] = useState<boolean>(false);
+  // Manual toggle for NO DLC state, initialized from localStorage so it persists across page refreshes
+  const [manualNoDls, setManualNoDls] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('rvp_kata_manual_no_dlc') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleNoDlc = useCallback(() => {
+    setManualNoDls((prev) => {
+      const next = !prev;
+      try {
+        if (next) {
+          localStorage.setItem('rvp_kata_manual_no_dlc', '1');
+          toast.warning('⚠️ Scale set to NO DLC (Load Cell Lost)');
+        } else {
+          localStorage.removeItem('rvp_kata_manual_no_dlc');
+          toast.success('Scale returned to standard mode');
+        }
+      } catch {}
+      return next;
+    });
+  }, []);
 
   const rawUpper = (scale.rawText || '').toUpperCase();
   const errUpper = (scale.error || '').toUpperCase();
@@ -492,7 +515,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       rawUpper.includes('NODL') ||
       rawUpper.includes('?') ||
       errUpper.includes('ERR') ||
-      rawUpper.includes('ERR')
+      rawUpper.includes('ERR') ||
+      errUpper.includes('OPEN') ||
+      rawUpper.includes('OPEN') ||
+      errUpper.includes('FAIL') ||
+      rawUpper.includes('FAIL')
   );
   const isNoDls = manualNoDls || detectedNoDlc;
 
@@ -1348,46 +1375,60 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
 
               {/* Hardware Fault / NO DLC Alert Banner */}
-              {isNoDls && !isManualOverride && (
-                <div className="mb-3.5 p-3 rounded-xl bg-red-500/15 border border-red-500/40 text-red-200 text-xs flex items-start justify-between gap-3 animate-pulse">
+              {isNoDls && (
+                <div className="mb-3.5 p-3.5 rounded-xl bg-red-500/15 border border-red-500/50 text-red-200 text-xs flex items-start justify-between gap-3 shadow-lg shadow-red-950/40">
                   <div className="flex items-start gap-2.5">
-                    <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                    <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5 animate-bounce" />
                     <div>
-                      <div className="font-bold text-red-200">Scale Hardware Alert: "{noDlcLabel}" (Load Cell Signal Lost)</div>
-                      <p className="text-[11px] text-red-300/85 mt-0.5 leading-relaxed">
-                        Power fluctuated or digital load cells are initializing. In your old software it showed 0; here you can manually type the weight from the physical display.
+                      <div className="font-bold text-red-100 text-sm">Scale Hardware Alert: "{noDlcLabel}" (Load Cell Signal Lost)</div>
+                      <p className="text-xs text-red-300/90 mt-1 leading-relaxed">
+                        The physical scale indicator is showing {noDlcLabel}. You can click <strong>Override (F8)</strong> or click the box below to manually type the weight from the physical display.
                       </p>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setIsManualOverride(true);
-                      setTimeout(() => manualInputRef.current?.focus(), 60);
-                    }}
-                    className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white shrink-0 gap-1.5 font-bold shadow-xs"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    Override (F8)
-                  </Button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!isManualOverride && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setIsManualOverride(true);
+                          setTimeout(() => manualInputRef.current?.focus(), 60);
+                        }}
+                        className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold font-mono h-7 px-2.5 gap-1 shadow-xs"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Override (F8)
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleNoDlc}
+                      className="text-red-300 hover:text-white hover:bg-red-500/20 text-xs font-mono h-7 px-2 border border-red-500/40"
+                    >
+                      Clear {noDlcLabel}
+                    </Button>
+                  </div>
                 </div>
               )}
 
               {/* Top readout status row */}
-              <div className="flex items-center justify-between mb-3 text-xs font-mono">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-xs font-mono">
                 <div className="flex items-center gap-2">
                   <span className="relative flex h-2.5 w-2.5">
                     <span className={cn(
                       'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
-                      isManualOverride ? 'bg-amber-400' : scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
+                      isNoDls ? 'bg-red-400' : isManualOverride ? 'bg-amber-400' : scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
                     )} />
                     <span className={cn(
                       'relative inline-flex rounded-full h-2.5 w-2.5',
-                      isManualOverride ? 'bg-amber-500' : scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
+                      isNoDls ? 'bg-red-500' : isManualOverride ? 'bg-amber-500' : scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
                     )} />
                   </span>
                   <span className="font-bold tracking-wider text-stone-300">
-                    {isManualOverride
+                    {isNoDls
+                      ? `${noDlcLabel} (FAULT)`
+                      : isManualOverride
                       ? 'MANUAL OVERRIDE'
                       : scale.isScaleOnline
                         ? `SCALE INDICATOR (${scale.serverPort || 'COM4'}${scale.connectionMode === 'LOCAL_USB' ? ' · USB' : ''})`
@@ -1395,7 +1436,43 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Connect USB button if Web Serial is supported and not connected locally */}
+                  {!scale.isLocalConnected && scale.isSupported && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const ok = await scale.connect();
+                          if (ok) toast.success('Scale connected to COM4!');
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Failed to connect scale USB');
+                        }
+                      }}
+                      className="h-7 px-2 text-[11px] font-mono font-bold bg-amber-500 hover:bg-amber-400 text-stone-950 flex items-center gap-1 shadow-xs animate-pulse"
+                      title="Click to connect browser directly to COM4 USB cable"
+                    >
+                      <Cable className="h-3 w-3" />
+                      Connect USB
+                    </Button>
+                  )}
+
+                  {/* NO DLC Toggle button */}
+                  <Button
+                    size="sm"
+                    onClick={toggleNoDlc}
+                    className={cn(
+                      "h-7 px-2.5 text-[11px] font-mono font-bold gap-1.5 border transition-all shadow-xs",
+                      isNoDls
+                        ? "bg-red-600 hover:bg-red-500 text-white border-red-400 animate-pulse shadow-red-500/40"
+                        : "text-red-400 hover:text-red-200 bg-red-950/40 hover:bg-red-900/60 border-red-800/80"
+                    )}
+                    title={isNoDls ? "Click to turn off NO DLC status" : "Click to activate NO DLC display"}
+                  >
+                    <AlertTriangle className="h-3 w-3" />
+                    {isNoDls ? `${noDlcLabel} ACTIVE` : noDlcLabel}
+                  </Button>
+
                   {isManualOverride ? (
                     <Button
                       variant="ghost"
@@ -1404,10 +1481,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         setIsManualOverride(false);
                         setManualWeightInput('');
                       }}
-                      className="h-6 px-2 text-[10px] font-mono text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 gap-1"
+                      className="h-7 px-2 text-[11px] font-mono text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 gap-1"
                     >
-                      <RotateCcw className="h-2.5 w-2.5" />
-                      Resume COM4 Sync
+                      <RotateCcw className="h-3 w-3" />
+                      Resume COM4
                     </Button>
                   ) : (
                     <Button
@@ -1418,35 +1495,19 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         setManualWeightInput(String(currentLiveWeight || ''));
                         setTimeout(() => manualInputRef.current?.focus(), 60);
                       }}
-                      className="h-6 px-2 text-[10px] font-mono text-stone-400 hover:text-stone-200 bg-stone-800/80 border border-stone-700/60 gap-1"
+                      className="h-7 px-2 text-[11px] font-mono text-stone-400 hover:text-stone-200 bg-stone-800/80 border border-stone-700/60 gap-1"
                       title="Manually override weight displayed in this box (F8)"
                     >
-                      <Pencil className="h-2.5 w-2.5" />
+                      <Pencil className="h-3 w-3" />
                       Override (F8)
                     </Button>
                   )}
 
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setManualNoDls((prev) => !prev)}
-                    className={cn(
-                      "h-6 px-2 text-[10px] font-mono gap-1 border transition-colors",
-                      isNoDls
-                        ? "bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30 font-bold"
-                        : "text-stone-400 hover:text-stone-200 bg-stone-800/80 border-stone-700/60"
-                    )}
-                    title={isNoDls ? "Click to exit NO DLC status" : "Click to mark scale as NO DLC"}
-                  >
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    {isNoDls ? `Exit ${noDlcLabel}` : 'NO DLC'}
-                  </Button>
-
                   {!isManualOverride && (
                     <span className={cn(
-                      'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
+                      'px-2 py-1 rounded text-[10px] font-bold tracking-wider',
                       isNoDls
-                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30 font-black'
                         : !scale.isScaleOnline
                           ? 'bg-stone-800 text-stone-400 border border-stone-700'
                           : scale.isStable
@@ -1468,24 +1529,38 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               {/* Large Digital Weight Display */}
               {isNoDls && !isManualOverride ? (
                 <div
-                  className="py-3 text-center select-none cursor-pointer group"
+                  className="py-6 text-center select-none cursor-pointer group bg-red-950/25 rounded-2xl border-2 border-red-500/50 hover:border-red-400 transition-all p-4 my-2 shadow-inner"
                   onClick={() => {
                     setIsManualOverride(true);
                     setTimeout(() => manualInputRef.current?.focus(), 60);
                   }}
                   title="Click to type weight manually (F8)"
                 >
-                  <span className="font-mono font-black text-6xl text-red-500 tracking-tight drop-shadow-[0_0_25px_rgba(239,68,68,0.5)] animate-pulse">
-                    {noDlcLabel}
-                  </span>
-                  <div className="text-red-400/90 font-mono text-xs mt-2 font-bold flex items-center justify-center gap-1.5">
-                    <span>Load Cell Signal Lost ({noDlcLabel})</span>
+                  <div className="flex items-center justify-center gap-3">
+                    <AlertTriangle className="h-10 w-10 text-red-500 animate-bounce" />
+                    <span className="font-mono font-black text-6xl md:text-7xl text-red-500 tracking-tight drop-shadow-[0_0_30px_rgba(239,68,68,0.7)] animate-pulse">
+                      {noDlcLabel}
+                    </span>
+                    <AlertTriangle className="h-10 w-10 text-red-500 animate-bounce" />
+                  </div>
+                  <div className="text-red-400 font-mono text-xs mt-3 font-bold flex flex-wrap items-center justify-center gap-2">
+                    <span className="bg-red-500/20 px-2.5 py-0.5 rounded-full border border-red-500/40">
+                      Digital Load Cell Signal Lost ({noDlcLabel})
+                    </span>
                     <span>·</span>
-                    <span className="underline underline-offset-2">Click to type weight manually (F8)</span>
+                    <span className="underline underline-offset-4 text-amber-300 hover:text-amber-200">
+                      Click here to enter weight manually (F8)
+                    </span>
                   </div>
                 </div>
               ) : isManualOverride ? (
                 <div className="py-2 text-center select-none">
+                  {isNoDls && (
+                    <div className="flex items-center justify-center gap-1.5 mb-1 text-[11px] font-mono font-bold text-red-400">
+                      <AlertTriangle className="h-3 w-3" />
+                      <span>{noDlcLabel} ACTIVE · Enter weight manually from physical scale below</span>
+                    </div>
+                  )}
                   <div className="flex items-baseline justify-center gap-2">
                     <input
                       ref={manualInputRef}
@@ -1499,7 +1574,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     <span className="font-mono font-bold text-xl text-stone-400">KG</span>
                   </div>
                   <div className="text-amber-400/90 font-mono text-xs mt-1">
-                    ✏️ Manual Override Active (Press F8 or click 'Resume COM4 Sync' to exit)
+                    ✏️ Manual Override Active (Press F8 or click 'Resume COM4' to exit)
                   </div>
                 </div>
               ) : (

@@ -117,7 +117,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
    * Broadcast live scale reading from this PC to the universal server stream.
    * This transmits live weight to all other computers on the factory/mill network!
    */
-  const broadcastReading = useCallback((weight: number, stable: boolean, raw: string) => {
+  const broadcastReading = useCallback((weight: number, stable: boolean, raw: string, err?: string | null) => {
     const now = Date.now();
     const last = lastBroadcastRef.current;
     const weightChanged = last.weight !== weight || last.isStable !== stable;
@@ -136,6 +136,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
             rawText: raw,
             port: serverPort || 'COM4',
             isConnected: true,
+            error: err || null,
           }),
         });
       } catch {
@@ -198,7 +199,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       upperBuffer.includes('NO DL') ||
       upperBuffer.includes('DLC') ||
       upperBuffer.includes('DLS') ||
-      upperBuffer.includes('?')
+      upperBuffer.includes('?') ||
+      upperBuffer.includes('OPEN') ||
+      upperBuffer.includes('FAIL')
     ) {
       const fault =
         upperBuffer.includes('DLS') && !upperBuffer.includes('DLC')
@@ -208,7 +211,10 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       setLiveWeight(null);
       setIsStable(false);
       setLastUpdated(new Date());
-      broadcastReading(0, false, fault);
+      broadcastReading(0, false, fault, fault);
+      if (bufferRef.current.length > 80) {
+        bufferRef.current = bufferRef.current.slice(-20);
+      }
       return;
     }
 
@@ -221,6 +227,30 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     if (frames.length > 1) {
       for (let i = frames.length - 2; i >= 0; i--) {
         const frame = frames[i].trim();
+        const upperFrame = frame.toUpperCase();
+        if (
+          upperFrame.includes('?') ||
+          upperFrame.includes('DLC') ||
+          upperFrame.includes('DLS') ||
+          upperFrame.includes('NO DL') ||
+          upperFrame.includes('NODL') ||
+          upperFrame.includes('ERR') ||
+          upperFrame.includes('OPEN') ||
+          upperFrame.includes('FAIL')
+        ) {
+          const fault =
+            upperFrame.includes('DLS') && !upperFrame.includes('DLC')
+              ? 'NO DLS'
+              : 'NO DLC';
+          setError(`${fault} (Load Cell Signal Lost)`);
+          setLiveWeight(null);
+          setIsStable(false);
+          setLastUpdated(new Date());
+          broadcastReading(0, false, fault, fault);
+          bufferRef.current = frames[frames.length - 1];
+          return;
+        }
+
         const numMatch = frame.match(/\d{2,8}/);
         if (numMatch) {
           const val = parseInt(numMatch[0], 10);
@@ -251,6 +281,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     }
 
     if (parsedWeight != null) {
+      setError(null);
       setLiveWeight(parsedWeight);
       setLastUpdated(new Date());
 
@@ -268,7 +299,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       }
 
       // Broadcast universally to server for all other PCs!
-      broadcastReading(parsedWeight, stable, preview);
+      broadcastReading(parsedWeight, stable, preview, null);
     }
 
     // Prevent buffer memory leak

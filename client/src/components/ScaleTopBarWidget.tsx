@@ -30,6 +30,22 @@ export default function ScaleTopBarWidget() {
     if (serverPort) setSelectedPort(serverPort);
   }, [serverPort]);
 
+  const rawUpper = (rawText || '').toUpperCase();
+  const errUpper = (error || '').toUpperCase();
+  const isNoDlc = Boolean(
+    errUpper.includes('DLC') ||
+    rawUpper.includes('DLC') ||
+    errUpper.includes('DLS') ||
+    rawUpper.includes('DLS') ||
+    errUpper.includes('NO DL') ||
+    rawUpper.includes('NO DL') ||
+    errUpper.includes('NODL') ||
+    rawUpper.includes('NODL') ||
+    rawUpper.includes('?') ||
+    errUpper.includes('ERR') ||
+    rawUpper.includes('ERR')
+  );
+
   // Close popover when clicking outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -58,15 +74,25 @@ export default function ScaleTopBarWidget() {
         onClick={() => setIsOpen((prev) => !prev)}
         className={cn(
           'flex items-center gap-2 h-9 px-3 rounded-lg border text-xs font-medium transition-all shadow-sm',
-          isScaleOnline
+          isNoDlc
+            ? 'bg-red-500/15 border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/25 animate-pulse'
+            : isScaleOnline
             ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20'
             : 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'
         )}
         title="Universal Weighbridge Scale Stream"
       >
-        <Scale className={cn('h-4 w-4', isScaleOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500')} />
+        <Scale className={cn('h-4 w-4', isNoDlc ? 'text-red-500' : isScaleOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500')} />
 
-        {isScaleOnline ? (
+        {isNoDlc ? (
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="font-mono font-black text-xs text-red-500 tracking-wider">NO DLC</span>
+            <span className="text-[9px] font-bold text-red-400 bg-red-500/20 px-1 py-0.2 rounded border border-red-500/30">
+              FAULT
+            </span>
+          </div>
+        ) : isScaleOnline ? (
           <div className="flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
               <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", isStable ? "bg-emerald-400" : "bg-amber-400")} />
@@ -101,7 +127,7 @@ export default function ScaleTopBarWidget() {
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border pb-2.5 mb-3">
             <div className="flex items-center gap-2">
-              <Radio className={cn("h-4 w-4", isScaleOnline ? "text-emerald-500 animate-pulse" : "text-amber-500")} />
+              <Radio className={cn("h-4 w-4", isNoDlc ? "text-red-500 animate-pulse" : isScaleOnline ? "text-emerald-500 animate-pulse" : "text-amber-500")} />
               <div>
                 <span className="text-xs font-bold text-foreground block">
                   Scale Network Stream
@@ -116,7 +142,11 @@ export default function ScaleTopBarWidget() {
               </div>
             </div>
             <div className="flex items-center gap-1">
-              {isScaleOnline ? (
+              {isNoDlc ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded-full border border-red-500/30 animate-pulse">
+                  <AlertTriangle className="h-2.5 w-2.5" /> Hardware Fault
+                </span>
+              ) : isScaleOnline ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                   <Wifi className="h-2.5 w-2.5" /> {connectionMode === 'LOCAL_USB' ? 'USB Live' : 'Hub Live'}
                 </span>
@@ -132,7 +162,12 @@ export default function ScaleTopBarWidget() {
           <div className="relative rounded-lg bg-zinc-950 p-4 border border-zinc-800 text-center font-mono overflow-hidden shadow-inner">
             <div className="flex justify-between items-center text-[10px] text-zinc-500 mb-1">
               <span className="flex items-center gap-1">
-                {isScaleOnline ? (
+                {isNoDlc ? (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-red-400 font-bold">FAULT · NO DLC</span>
+                  </>
+                ) : isScaleOnline ? (
                   <>
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="text-emerald-400 font-bold">
@@ -143,20 +178,30 @@ export default function ScaleTopBarWidget() {
                   <span className="text-amber-400/90 font-mono">SEARCHING {serverPort || 'COM4'}</span>
                 )}
               </span>
-              <span className={cn('font-semibold uppercase tracking-wider', isStable ? 'text-emerald-400' : 'text-amber-400')}>
-                {isScaleOnline ? (isStable ? 'STABLE' : 'MOTION') : 'OFFLINE'}
+              <span className={cn('font-semibold uppercase tracking-wider', isNoDlc ? 'text-red-400' : isStable ? 'text-emerald-400' : 'text-amber-400')}>
+                {isNoDlc ? 'FAULT' : isScaleOnline ? (isStable ? 'STABLE' : 'MOTION') : 'OFFLINE'}
               </span>
             </div>
 
             {/* Big Digital Readout */}
             <div className="py-2">
-              <span className={cn(
-                "text-5xl font-extrabold tracking-wider transition-colors",
-                isScaleOnline ? "text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.4)]" : "text-stone-500"
-              )}>
-                {liveWeight != null ? liveWeight.toLocaleString('en-IN') : '0'}
-              </span>
-              <span className="text-sm font-semibold text-stone-500 ml-2">KG</span>
+              {isNoDlc ? (
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-5xl font-extrabold tracking-wider text-red-500 animate-pulse drop-shadow-[0_0_20px_rgba(239,68,68,0.6)]">
+                    NO DLC
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <span className={cn(
+                    "text-5xl font-extrabold tracking-wider transition-colors",
+                    isScaleOnline ? "text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.4)]" : "text-stone-500"
+                  )}>
+                    {liveWeight != null ? liveWeight.toLocaleString('en-IN') : '0'}
+                  </span>
+                  <span className="text-sm font-semibold text-stone-500 ml-2">KG</span>
+                </>
+              )}
             </div>
 
             {/* Raw serial stream info */}

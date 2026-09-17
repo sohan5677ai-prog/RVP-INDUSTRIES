@@ -25,7 +25,9 @@ import https from 'https';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import ptp from 'pdf-to-printer';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.resolve(SCRIPT_DIR, '../logs');
@@ -65,10 +67,18 @@ function loadLocalConfig() {
 const LOCAL_CONFIG = loadLocalConfig();
 const setting = (name, fallback = '') => process.env[name] || LOCAL_CONFIG[name] || fallback;
 
+function getDefaultBridgeKey() {
+  const secret = process.env.JWT_SECRET || 'e4e783e85d137a23b282370d8dc67fd2a002425843a69ab32200fc5173040508';
+  return crypto.createHmac('sha256', secret).update('rvp-cctv-bridge-v1').digest('hex');
+}
+
 const CONFIG = {
   cloudApiUrl: setting('CLOUD_API_URL', 'https://rvp-server.onrender.com/api').replace(/\/+$/, ''),
-  pollIntervalMs: Number(setting('PRINT_POLL_INTERVAL_MS', 5000)),
+  pollIntervalMs: Number(setting('PRINT_POLL_INTERVAL_MS', 3000)),
   printMode: setting('PRINT_MODE', 'stationery'), // 'stationery' or 'plain'
+  bridgeKey: setting('CCTV_BRIDGE_KEY') || getDefaultBridgeKey(),
+  printerName: setting('CABIN_PRINTER_NAME', ''), // Optional specific printer name
+  localPort: Number(setting('PRINT_LOCAL_PORT', 4001)),
 };
 
 console.log('================================================================');
@@ -76,28 +86,91 @@ console.log('  RVP Industries - Kata Cabin Print Agent                       ');
 console.log(`  Cloud API: ${CONFIG.cloudApiUrl}`);
 console.log(`  Poll Interval: ${CONFIG.pollIntervalMs}ms`);
 console.log(`  Print Mode: ${CONFIG.printMode}`);
+console.log(`  Printer: ${CONFIG.printerName || '(System Default)'}`);
+console.log(`  Local Port: ${CONFIG.localPort}`);
 console.log(`  Log file: ${LOG_FILE}`);
 console.log('================================================================');
+
+function getKataCabinAccessKey() {
+  const configured = setting('KATA_CABIN_ACCESS_KEY');
+  if (configured && configured.length >= 24) return configured;
+  const secret = process.env.JWT_SECRET || 'e4e783e85d137a23b282370d8dc67fd2a002425843a69ab32200fc5173040508';
+  return crypto.createHmac('sha256', secret)
+    .update('rvp-kata-cabin-activation-v1')
+    .digest('base64url');
+}
+
+let cachedCabinToken = null;
+let lastCabinTokenFetch = 0;
+
+async function getCabinAuthToken() {
+  if (cachedCabinToken && Date.now() - lastCabinTokenFetch < 3600000) {
+    return cachedCabinToken;
+  }
+  try {
+    const key = getKataCabinAccessKey();
+    const res = await new Promise((resolve, reject) => {
+      const url = new URL(`${CONFIG.cloudApiUrl}/auth/kiosk`);
+      const isHttps = url.protocol === 'https:';
+      const lib = isHttps ? https : http;
+      const req = lib.request({
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Kata-Cabin-Key': key,
+        },
+        timeout: 10000,
+      }, (res) => {
+        let text = '';
+        res.on('data', c => { text += c; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(text)); } catch { resolve({}); }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+      req.end();
+    });
+
+    if (res && res.token) {
+      cachedCabinToken = res.token;
+      lastCabinTokenFetch = Date.now();
+      return cachedCabinToken;
+    }
+  } catch {}
+  return null;
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // HTTP helpers
 // ──────────────────────────────────────────────────────────────────────
 
-function httpRequest(method, urlStr, body = null) {
+async function httpRequest(method, urlStr, body = null) {
+  const token = await getCabinAuthToken();
+
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const isHttps = url.protocol === 'https:';
     const lib = isHttps ? https : http;
     
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-CCTV-Bridge-Key': CONFIG.bridgeKey,
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const options = {
       hostname: url.hostname,
       port: url.port || (isHttps ? 443 : 80),
       path: url.pathname + url.search,
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers,
       timeout: 15000,
     };
 
@@ -334,30 +407,20 @@ async function printSlipHtml(html, ticketNo) {
   const b = await ensureBrowser();
   
   if (!b) {
-    // Fallback: save HTML to a temp file and open with default browser
     const tempFile = path.join(SCRIPT_DIR, `temp_slip_${ticketNo}.html`);
     fs.writeFileSync(tempFile, html, 'utf8');
-    console.log(`[PRINT-AGENT] Saved slip to ${tempFile} (open manually to print)`);
-    
-    // Try opening with system default browser for printing
-    try {
-      const { exec } = await import('child_process');
-      exec(`start "" "${tempFile}"`, (err) => {
-        if (err) console.warn(`[PRINT-AGENT] Could not auto-open ${tempFile}: ${err.message}`);
-      });
-    } catch {}
-    return;
+    console.warn(`[PRINT-AGENT] Headless browser not found. Saved slip to ${tempFile}`);
+    throw new Error('Headless browser unavailable for PDF generation');
   }
 
   const page = await b.newPage();
   try {
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.setContent(html, { waitUntil: 'load', timeout: 15000 });
     
-    // Wait a bit for images to load from cloud
-    await new Promise(r => setTimeout(r, 2000));
+    // Wait a brief moment for images/fonts to render
+    await new Promise(r => setTimeout(r, 1500));
     
-    // Print to default printer
-    // Use PDF intermediate to trigger system print dialog
+    // Render exact 210mm x 150mm PDF
     const pdfBuffer = await page.pdf({
       width: '210mm',
       height: '150mm',
@@ -365,39 +428,95 @@ async function printSlipHtml(html, ticketNo) {
       margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
     });
 
-    // Save PDF and print via system
-    const pdfFile = path.join(SCRIPT_DIR, `temp_slip_${ticketNo}.pdf`);
+    const pdfFile = path.join(SCRIPT_DIR, `temp_slip_${ticketNo}_${Date.now()}.pdf`);
     fs.writeFileSync(pdfFile, pdfBuffer);
 
-    // Use Windows print command to send to default printer
-    const { exec } = await import('child_process');
-    await new Promise((resolve, reject) => {
-      // SumatraPDF silent print (if installed): SumatraPDF.exe -print-to-default "file.pdf"
-      // Fallback: PowerShell print
-      const cmd = `powershell -Command "Start-Process -FilePath '${pdfFile}' -Verb Print -WindowStyle Hidden"`;
-      exec(cmd, (err) => {
-        if (err) {
-          console.warn(`[PRINT-AGENT] PowerShell print failed, trying start /print: ${err.message}`);
-          // Fallback: Windows start /print command
-          exec(`start /min "" /print "${pdfFile}"`, (err2) => {
-            if (err2) reject(err2); else resolve();
-          });
-        } else {
-          resolve();
-        }
-      });
-    });
+    // Silent print directly to physical printer via SumatraPDF in pdf-to-printer
+    const printOptions = {
+      silent: true,
+    };
+    if (CONFIG.printerName) {
+      printOptions.printer = CONFIG.printerName;
+    }
 
-    console.log(`[PRINT-AGENT] ✅ Ticket #${ticketNo} sent to default printer.`);
-    
-    // Cleanup temp file after 30 seconds
+    console.log(`[PRINT-AGENT] 🖨️  Sending Ticket #${ticketNo} directly to ${CONFIG.printerName || 'default printer'} (silent print)...`);
+    await ptp.print(pdfFile, printOptions);
+    console.log(`[PRINT-AGENT] ✅ Ticket #${ticketNo} successfully printed.`);
+
+    // Cleanup temp file after 15 seconds
     setTimeout(() => {
       try { fs.unlinkSync(pdfFile); } catch {}
-    }, 30000);
+    }, 15000);
   } finally {
     await page.close();
   }
 }
+
+// Local HTTP Server for instant zero-latency print requests from local browser
+const localServer = http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (req.url === '/status' && req.method === 'GET') {
+    let defaultPrinter = 'Unknown';
+    try {
+      const p = await ptp.getDefaultPrinter();
+      defaultPrinter = p?.name || 'Default';
+    } catch {}
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'online', printer: defaultPrinter, configPrinter: CONFIG.printerName || null }));
+    return;
+  }
+
+  if (req.url === '/print' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        const ticket = payload.ticket;
+        if (!ticket) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'ticket is required' }));
+          return;
+        }
+        console.log(`[PRINT-AGENT] Direct local print request for Ticket #${ticket.ticketNo}`);
+        const html = payload.html || generateSlipHtml(ticket);
+        await printSlipHtml(html, ticket.ticketNo);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, ticketNo: ticket.ticketNo }));
+      } catch (err) {
+        console.error('[PRINT-AGENT] Direct local print failed:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end();
+});
+
+localServer.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(`[PRINT-AGENT] Port ${CONFIG.localPort} already in use. Another instance is already running.`);
+    process.exit(0);
+  } else {
+    console.error('[PRINT-AGENT] Local server error:', err.message);
+  }
+});
+
+localServer.listen(CONFIG.localPort, '127.0.0.1', () => {
+  console.log(`[PRINT-AGENT] Local instant print server listening at http://127.0.0.1:${CONFIG.localPort}`);
+});
 
 // ──────────────────────────────────────────────────────────────────────
 // Main Poll Loop

@@ -46,7 +46,17 @@ import archiveRoutes from './archive.routes.js';
 import weighbridgeRoutes from './weighbridge.routes.js';
 import deliveryChallanRoutes from './deliveryChallan.routes.js';
 import gstr2bRoutes from './gstr2b.routes.js';
-import { streamCctvHandler, snapshotCctvHandler, broadcastCctvHandler, getCctvStatusHandler } from '../controllers/weighbridge.controller.js';
+import {
+  streamCctvHandler,
+  snapshotCctvHandler,
+  broadcastCctvHandler,
+  getCctvStatusHandler,
+  queuePrintJobHandler,
+  getPendingPrintJobsHandler,
+  completePrintJobHandler,
+  getPrintAgentStatusHandler,
+  isTrustedCameraBridge,
+} from '../controllers/weighbridge.controller.js';
 const router = Router();
 
 // Public
@@ -59,6 +69,18 @@ router.get('/weighbridge/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
 router.post('/weighbridge/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/weighbridge/cctv/status', asyncHandler(getCctvStatusHandler));
+
+// Weighbridge Print Queue routes (authenticated via X-CCTV-Bridge-Key or Bearer JWT)
+const printQueueAuth = (req: any, res: any, next: any) => {
+  if (isTrustedCameraBridge(req)) {
+    return next();
+  }
+  requireAuth(req, res, next);
+};
+router.post('/weighbridge/print-queue', printQueueAuth, asyncHandler(queuePrintJobHandler));
+router.get('/weighbridge/print-queue/pending', printQueueAuth, asyncHandler(getPendingPrintJobsHandler));
+router.patch('/weighbridge/print-queue/:id/complete', printQueueAuth, asyncHandler(completePrintJobHandler));
+router.get('/weighbridge/print-queue/status', asyncHandler(getPrintAgentStatusHandler));
 
 // Resend email delivery/tracking webhook (public - Resend calls this, Svix signed)
 router.post('/webhooks/resend', webhookLimiter, asyncHandler(handleResendWebhook));

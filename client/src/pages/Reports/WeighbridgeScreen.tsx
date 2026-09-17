@@ -64,7 +64,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
-import WeighbridgeSlipModal, { triggerDirectPrint } from '@/components/WeighbridgeSlipModal';
+import WeighbridgeSlipModal, { triggerDirectPrint, triggerSilentLocalPrint } from '@/components/WeighbridgeSlipModal';
 import './WeighbridgeScreen.css';
 
 const MATERIALS = [
@@ -671,16 +671,32 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           isPrinting = true;
           for (const job of pendingJobs) {
             if (job.ticket) {
-              toast.info(`🖨️ Cabin Printer: Printing Ticket #${job.ticketNo} (from ${job.requestedBy || 'REMOTE'})...`);
-              await triggerDirectPrint(job.ticket);
-              await api(`/weighbridge/print-queue/${job.id}/complete`, {
-                method: 'PATCH',
-                body: JSON.stringify({ status: 'COMPLETED' }),
-              });
-              toast.success(`✅ Ticket #${job.ticketNo} printed!`);
-              queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
-              queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
-              await new Promise((r) => setTimeout(r, 2500));
+              // 1. First attempt direct silent print to local cabin agent (port 4001)
+              const silentOk = await triggerSilentLocalPrint(job.ticket);
+              if (silentOk) {
+                await api(`/weighbridge/print-queue/${job.id}/complete`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ status: 'COMPLETED' }),
+                });
+                toast.success(`✅ Ticket #${job.ticketNo} printed automatically on Cabin Printer!`);
+                queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
+                queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+              } else if (printAgentStatus?.agentOnline) {
+                // Background print agent is already polling the cloud and printing silently!
+                // Do NOT invoke browser print dialog. Just show notification.
+                toast.info(`🖨️ Cabin Printer: Ticket #${job.ticketNo} is printing automatically...`);
+              } else {
+                // Only if browser fallback is explicitly requested
+                if (localStorage.getItem('rvp_enable_browser_print_fallback') === '1') {
+                  await triggerDirectPrint(job.ticket);
+                  await api(`/weighbridge/print-queue/${job.id}/complete`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ status: 'COMPLETED' }),
+                  });
+                  toast.success(`✅ Ticket #${job.ticketNo} printed!`);
+                }
+              }
+              await new Promise((r) => setTimeout(r, 2000));
             }
           }
         }
@@ -692,7 +708,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     }, 3500);
 
     return () => clearInterval(interval);
-  }, [cabinMode, queryClient]);
+  }, [cabinMode, queryClient, printAgentStatus?.agentOnline]);
 
   const bothCamerasOnline = Boolean(cctvStatus?.cam1.online && cctvStatus?.cam2.online);
 
@@ -852,14 +868,20 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     },
     onSuccess: ({ ticket, snapshots }) => {
       toast.success(`Ticket #${ticket.ticketNo} saved successfully!`);
-      toast.info('🖨️ Slip queued for cabin printer', { duration: 3000 });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
 
-      // Open print slip modal automatically
-      setSlipModalTicket(ticket);
-      setActiveSnapshots(snapshots);
+      // In cabin mode, attempt instant silent print or let background agent print automatically
+      if (cabinMode) {
+        toast.info(`🖨️ Ticket #${ticket.ticketNo} printing automatically on Cabin Printer...`, { duration: 3500 });
+        triggerSilentLocalPrint(ticket, undefined, snapshots).catch(() => {});
+      } else {
+        toast.info('🖨️ Slip queued for cabin printer', { duration: 3000 });
+        // For non-cabin desktop screens, show the slip modal preview
+        setSlipModalTicket(ticket);
+        setActiveSnapshots(snapshots);
+      }
 
       // Reset form if completed
       if (tripType !== 'FIRST') {

@@ -14,7 +14,7 @@ function getExpectedBridgeKey(): string {
   return createHmac('sha256', secret).update('rvp-cctv-bridge-v1').digest('hex');
 }
 
-function isTrustedCameraBridge(req: Request): boolean {
+export function isTrustedCameraBridge(req: Request): boolean {
   const expected = getExpectedBridgeKey();
   const received = req.header('x-cctv-bridge-key');
   if (!received || received.length < 24) return false;
@@ -482,13 +482,17 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
  * Queue a ticket for printing on the cabin printer.
  */
 export async function queuePrintJobHandler(req: Request, res: Response) {
+  if (!isTrustedCameraBridge(req) && !(req as any).user) {
+    throw new HttpError(401, 'Unauthorized');
+  }
+
   const { ticketId, ticketNo } = req.body;
   if (!ticketId || !ticketNo) {
     throw new HttpError(400, 'ticketId and ticketNo are required');
   }
 
   const user = (req as any).user;
-  const requestedBy = user?.name || 'REMOTE';
+  const requestedBy = user?.name || (isTrustedCameraBridge(req) ? 'CABIN_BRIDGE' : 'REMOTE');
 
   const job = await prisma.printJob.create({
     data: {
@@ -508,7 +512,11 @@ let lastPrintAgentPollAt: number | null = null;
  * Fetch pending print jobs for the cabin agent to process.
  * The agent polls this endpoint every few seconds.
  */
-export async function getPendingPrintJobsHandler(_req: Request, res: Response) {
+export async function getPendingPrintJobsHandler(req: Request, res: Response) {
+  if (!isTrustedCameraBridge(req) && !(req as any).user) {
+    throw new HttpError(401, 'Unauthorized print agent');
+  }
+
   lastPrintAgentPollAt = Date.now();
 
   const jobs = await prisma.printJob.findMany({
@@ -535,6 +543,10 @@ export async function getPendingPrintJobsHandler(_req: Request, res: Response) {
  * Cabin agent marks a print job as completed or failed.
  */
 export async function completePrintJobHandler(req: Request, res: Response) {
+  if (!isTrustedCameraBridge(req) && !(req as any).user) {
+    throw new HttpError(401, 'Unauthorized print agent');
+  }
+
   const { id } = req.params;
   const { status, error } = req.body;
 

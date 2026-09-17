@@ -5,6 +5,7 @@ import { Printer, Sliders, FileText, Layers, Eye, EyeOff, Video, Send } from 'lu
 import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { toast } from 'sonner';
 
 /**
  * Resolve a camera image URL to an absolute URL that works everywhere,
@@ -375,6 +376,49 @@ export function triggerDirectPrint(
       resolve(false);
     }
   });
+}
+
+/**
+ * Attempt 100% silent direct print via the local Kata Cabin print agent (port 4001).
+ * Returns true if successfully received and spooled by the local agent with zero dialogs.
+ */
+export async function triggerSilentLocalPrint(
+  ticket: WeighbridgeTicket,
+  calibration?: PrinterCalibration,
+  snapshots?: { cam1?: string; cam2?: string } | null
+): Promise<boolean> {
+  try {
+    const savedCalib = calibration || (() => {
+      try {
+        const s = localStorage.getItem(STORAGE_CALIBRATION_KEY);
+        if (s) return JSON.parse(s);
+      } catch {}
+      return { offsetXmm: 0, offsetYmm: 0, printMode: 'stationery' as const };
+    })();
+
+    const html = renderTicketPrintHtml(ticket, savedCalib, snapshots);
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+
+    const res = await fetch('http://127.0.0.1:4001/print', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket, html }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.success) {
+        return true;
+      }
+    }
+  } catch {
+    // Local agent not reachable from this browser
+  }
+  return false;
 }
 
 export default function WeighbridgeSlipModal({
@@ -1055,18 +1099,25 @@ export default function WeighbridgeSlipModal({
               onClick={async () => {
                 if (!ticket) return;
                 try {
+                  // 1. If running on cabin terminal with local print agent, print silently with 0 latency
+                  const silentOk = await triggerSilentLocalPrint(ticket, calibration, snapshots);
+                  if (silentOk) {
+                    toast.success(`🖨️ Ticket #${ticket.ticketNo} printed automatically on Cabin Printer!`);
+                    return;
+                  }
+
+                  // 2. Queue for remote cabin print agent via cloud queue
                   await api('/weighbridge/print-queue', {
                     method: 'POST',
                     body: JSON.stringify({ ticketId: ticket.id, ticketNo: ticket.ticketNo }),
                   });
-                  // Toast will be handled by parent, but show inline feedback
-                  alert(`✅ Ticket #${ticket.ticketNo} sent to Cabin Printer!`);
+                  toast.success(`🖨️ Ticket #${ticket.ticketNo} queued for automatic cabin print!`);
                 } catch (err: any) {
-                  alert(`❌ Failed to queue print: ${err.message || 'Unknown error'}`);
+                  toast.error(`Failed to queue print: ${err.message || 'Unknown error'}`);
                 }
               }}
               className="h-7 text-xs gap-1.5 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-              title="Queue this ticket for printing on the cabin's physical printer"
+              title="Print automatically on the cabin's physical printer (no preview dialog)"
             >
               <Send className="h-3 w-3" />
               Send to Cabin Printer

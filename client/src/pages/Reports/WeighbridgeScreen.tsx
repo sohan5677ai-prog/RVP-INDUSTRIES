@@ -191,21 +191,21 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
           errCountRef.current = 0;
           setIsOnline(true);
           onStatusChange?.(true, false);
-          triggerNextFrame(350);
+          triggerNextFrame(850);
         }}
         onError={() => {
           errCountRef.current += 1;
-          if (errCountRef.current >= 4) {
+          if (errCountRef.current >= 8) {
             setIsOnline(false);
             onStatusChange?.(false, false);
           }
-          triggerNextFrame(1500);
+          triggerNextFrame(1200);
         }}
-        className={cn('w-full h-full object-cover transition-opacity duration-300', !isOnline && 'opacity-25')}
+        className={cn('w-full h-full object-cover transition-opacity duration-300', !isOnline && 'opacity-40')}
       />
 
       {!isOnline && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center bg-stone-950/85 backdrop-blur-xs text-stone-400">
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center bg-stone-950/80 backdrop-blur-xs text-stone-400">
           <Video className="h-6 w-6 text-rose-500/70 mb-1.5 animate-pulse" />
           <span className="font-semibold text-xs text-stone-200">{label}</span>
           <span className="text-[10px] text-stone-400 font-mono mt-0.5">{cameraIp}</span>
@@ -371,16 +371,16 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
               onLoad={() => {
                 errCountRef.current = 0;
                 setIsOnline(true);
-                triggerNextFrame(350);
+                triggerNextFrame(850);
               }}
               onError={() => {
                 errCountRef.current += 1;
-                if (errCountRef.current >= 4) {
+                if (errCountRef.current >= 8) {
                   setIsOnline(false);
                 }
-                triggerNextFrame(1500);
+                triggerNextFrame(1200);
               }}
-              className={cn("w-full h-full object-contain transition-opacity duration-200", !isOnline && "opacity-25")}
+              className={cn("w-full h-full object-contain transition-opacity duration-200", !isOnline && "opacity-40")}
             />
           ) : (
             <div className="flex flex-col items-center justify-center text-stone-400 gap-2">

@@ -47,6 +47,14 @@ for (const level of ['log', 'warn', 'error']) {
   };
 }
 
+// Global safety guards so network drops or closed sockets never terminate this process
+process.on('uncaughtException', (err) => {
+  console.error('[CCTV-BRIDGE] Uncaught exception (prevented crash):', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[CCTV-BRIDGE] Unhandled rejection (prevented crash):', reason?.message || reason);
+});
+
 function loadLocalConfig() {
   if (!fs.existsSync(LOCAL_CONFIG_FILE)) return {};
   try {
@@ -205,16 +213,34 @@ async function captureViaHttpDigest(cfg) {
   });
 }
 
+// Reusable Keep-Alive Agents for ultra-low latency & connection persistence
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 6,
+  keepAliveMsecs: 15000,
+  timeout: 8000,
+});
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 6,
+  keepAliveMsecs: 15000,
+  timeout: 8000,
+});
+
 function dispatchToSubscribers(camNum, frame) {
   const subs = streamSubscribers[camNum];
   if (subs.size > 0) {
     const header = `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
     const footer = `\r\n`;
-    for (const res of subs) {
+    for (const res of Array.from(subs)) {
       try {
-        res.write(header);
-        res.write(frame);
-        res.write(footer);
+        if (!res.writableEnded && !res.destroyed && res.writable) {
+          res.write(header);
+          res.write(frame);
+          res.write(footer);
+        } else {
+          subs.delete(res);
+        }
       } catch {
         subs.delete(res);
       }
@@ -399,14 +425,19 @@ async function broadcastToCloud(camNum, buffer) {
         port: urlObj.port || (isHttps ? 443 : 80),
         path: urlObj.pathname + urlObj.search,
         method: 'POST',
+        agent: isHttps ? httpsAgent : httpAgent,
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload),
           'X-CCTV-Bridge-Key': CONFIG.bridgeKey,
+          'Connection': 'keep-alive',
         },
-        timeout: 4000,
+        timeout: 6000,
       },
       (res) => {
+        res.on('error', (err) => {
+          reject(err);
+        });
         res.resume();
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(true);
@@ -416,9 +447,11 @@ async function broadcastToCloud(camNum, buffer) {
       }
     );
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      reject(err);
+    });
     req.on('timeout', () => {
-      req.destroy();
+      try { req.destroy(); } catch {}
       reject(new Error('Timeout'));
     });
 
@@ -468,6 +501,7 @@ function startLocalServer() {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     if (req.method === 'OPTIONS') {
@@ -509,12 +543,19 @@ function startLocalServer() {
 
       const frame = latestFrames[camNum];
       if (frame && frame.buffer) {
-        res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.buffer.length}\r\n\r\n`);
-        res.write(frame.buffer);
-        res.write('\r\n');
+        try {
+          res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.buffer.length}\r\n\r\n`);
+          res.write(frame.buffer);
+          res.write('\r\n');
+        } catch {
+          // ignore initial write errors
+        }
       }
 
       streamSubscribers[camNum].add(res);
+      res.on('error', () => {
+        streamSubscribers[camNum].delete(res);
+      });
       req.on('close', () => {
         streamSubscribers[camNum].delete(res);
       });

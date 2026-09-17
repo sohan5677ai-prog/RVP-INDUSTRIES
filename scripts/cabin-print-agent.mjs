@@ -57,6 +57,14 @@ for (const level of ['log', 'warn', 'error']) {
   };
 }
 
+// Global safety guards so network drops or print errors never terminate this process
+process.on('uncaughtException', (err) => {
+  console.error('[PRINT-AGENT] Uncaught exception (prevented crash):', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[PRINT-AGENT] Unhandled rejection (prevented crash):', reason?.message || reason);
+});
+
 function loadLocalConfig() {
   if (!fs.existsSync(LOCAL_CONFIG_FILE)) return {};
   try {

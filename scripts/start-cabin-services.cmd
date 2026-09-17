@@ -1,4 +1,7 @@
 @echo off
 cd /d "%~dp0\.."
-start /b node scripts/cctv-bridge.mjs
-start /b node scripts/cabin-print-agent.mjs
+if exist "C:\Program Files\nodejs\node.exe" (
+    "C:\Program Files\nodejs\node.exe" scripts\cabin-supervisor.mjs
+) else (
+    node scripts\cabin-supervisor.mjs
+)

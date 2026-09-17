@@ -297,27 +297,37 @@ function generateSlipHtml(ticket) {
 // Puppeteer Print Function
 // ──────────────────────────────────────────────────────────────────────
 
-let puppeteer = null;
 let browser = null;
 
 async function ensureBrowser() {
-  if (!puppeteer) {
-    try {
-      puppeteer = (await import('puppeteer')).default;
-    } catch {
-      console.error('[PRINT-AGENT] Puppeteer is not installed! Run: npm install puppeteer');
-      console.error('[PRINT-AGENT] Falling back to writing HTML file for manual printing.');
-      return null;
-    }
+  if (browser && browser.isConnected()) {
+    return browser;
   }
-  if (!browser || !browser.isConnected()) {
+
+  // 1. Try Playwright (included in repository dependencies)
+  try {
+    const pw = await import('playwright');
+    browser = await pw.chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    console.log('[PRINT-AGENT] Playwright Chromium launched for printing.');
+    return browser;
+  } catch {}
+
+  // 2. Try Puppeteer (if installed)
+  try {
+    const puppeteer = (await import('puppeteer')).default;
     browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
-    console.log('[PRINT-AGENT] Browser launched for printing.');
-  }
-  return browser;
+    console.log('[PRINT-AGENT] Puppeteer Chromium launched for printing.');
+    return browser;
+  } catch {}
+
+  console.warn('[PRINT-AGENT] Headless browser not found. Falling back to HTML file generation.');
+  return null;
 }
 
 async function printSlipHtml(html, ticketNo) {

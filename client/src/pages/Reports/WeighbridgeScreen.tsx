@@ -475,10 +475,33 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
 
   const manualInputRef = useRef<HTMLInputElement>(null);
-  const isNoDls = Boolean(
-    scale.error?.toUpperCase().includes('DLS') ||
-    scale.rawText?.toUpperCase().includes('DLS')
+
+  // Manual toggle for NO DLC state, plus automatic detection from scale stream
+  const [manualNoDls, setManualNoDls] = useState<boolean>(false);
+
+  const rawUpper = (scale.rawText || '').toUpperCase();
+  const errUpper = (scale.error || '').toUpperCase();
+  const detectedNoDlc = Boolean(
+    errUpper.includes('DLC') ||
+      rawUpper.includes('DLC') ||
+      errUpper.includes('DLS') ||
+      rawUpper.includes('DLS') ||
+      errUpper.includes('NO DL') ||
+      rawUpper.includes('NO DL') ||
+      errUpper.includes('NODL') ||
+      rawUpper.includes('NODL') ||
+      rawUpper.includes('?') ||
+      errUpper.includes('ERR') ||
+      rawUpper.includes('ERR')
   );
+  const isNoDls = manualNoDls || detectedNoDlc;
+
+  const noDlcLabel =
+    (errUpper.includes('DLS') || rawUpper.includes('DLS')) &&
+    !errUpper.includes('DLC') &&
+    !rawUpper.includes('DLC')
+      ? 'NO DLS'
+      : 'NO DLC';
 
   // Cameras & Snapshot triggers
   const [camRefreshTrigger, setCamRefreshTrigger] = useState<number>(0);
@@ -1324,15 +1347,15 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               {/* Radial ambient glow */}
               <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
 
-              {/* Hardware Fault / NO DLS Alert Banner */}
+              {/* Hardware Fault / NO DLC Alert Banner */}
               {isNoDls && !isManualOverride && (
                 <div className="mb-3.5 p-3 rounded-xl bg-red-500/15 border border-red-500/40 text-red-200 text-xs flex items-start justify-between gap-3 animate-pulse">
                   <div className="flex items-start gap-2.5">
                     <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
                     <div>
-                      <div className="font-bold text-red-200">Scale Hardware Alert: "NO DLS" (Load Cell Signal Lost)</div>
+                      <div className="font-bold text-red-200">Scale Hardware Alert: "{noDlcLabel}" (Load Cell Signal Lost)</div>
                       <p className="text-[11px] text-red-300/85 mt-0.5 leading-relaxed">
-                        Power fluctuated or load cells are initializing. In your old software it showed 0; here you can manually type the weight from the physical display.
+                        Power fluctuated or digital load cells are initializing. In your old software it showed 0; here you can manually type the weight from the physical display.
                       </p>
                     </div>
                   </div>
@@ -1403,6 +1426,22 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     </Button>
                   )}
 
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setManualNoDls((prev) => !prev)}
+                    className={cn(
+                      "h-6 px-2 text-[10px] font-mono gap-1 border transition-colors",
+                      isNoDls
+                        ? "bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30 font-bold"
+                        : "text-stone-400 hover:text-stone-200 bg-stone-800/80 border-stone-700/60"
+                    )}
+                    title={isNoDls ? "Click to exit NO DLC status" : "Click to mark scale as NO DLC"}
+                  >
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    {isNoDls ? `Exit ${noDlcLabel}` : 'NO DLC'}
+                  </Button>
+
                   {!isManualOverride && (
                     <span className={cn(
                       'px-2 py-0.5 rounded text-[10px] font-bold tracking-wider',
@@ -1415,7 +1454,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                             : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                     )}>
                       {isNoDls
-                        ? 'NO DLS'
+                        ? noDlcLabel
                         : !scale.isScaleOnline
                           ? 'OFFLINE'
                           : scale.isStable
@@ -1436,11 +1475,13 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   }}
                   title="Click to type weight manually (F8)"
                 >
-                  <span className="font-mono font-black text-5xl text-red-500 tracking-tight drop-shadow-[0_0_20px_rgba(239,68,68,0.4)]">
-                    NO DLS
+                  <span className="font-mono font-black text-6xl text-red-500 tracking-tight drop-shadow-[0_0_25px_rgba(239,68,68,0.5)] animate-pulse">
+                    {noDlcLabel}
                   </span>
-                  <div className="text-red-400/90 font-mono text-xs mt-1.5">
-                    Load Cell Signal Lost · Click here to type weight manually (F8)
+                  <div className="text-red-400/90 font-mono text-xs mt-2 font-bold flex items-center justify-center gap-1.5">
+                    <span>Load Cell Signal Lost ({noDlcLabel})</span>
+                    <span>·</span>
+                    <span className="underline underline-offset-2">Click to type weight manually (F8)</span>
                   </div>
                 </div>
               ) : isManualOverride ? (

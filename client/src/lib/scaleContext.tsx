@@ -186,6 +186,32 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     const preview = bufferRef.current.slice(-25).replace(/\x03/g, '♥').replace(/[\r\n]+/g, '↵');
     setRawText(preview);
 
+    // Check for hardware faults / NO DLC / NO DLS
+    const upperBuffer = bufferRef.current.toUpperCase();
+    if (
+      upperBuffer.includes('NO DLC') ||
+      upperBuffer.includes('NODLC') ||
+      upperBuffer.includes('NO-DLC') ||
+      upperBuffer.includes('NO DLS') ||
+      upperBuffer.includes('NODLS') ||
+      upperBuffer.includes('NO-DLS') ||
+      upperBuffer.includes('NO DL') ||
+      upperBuffer.includes('DLC') ||
+      upperBuffer.includes('DLS') ||
+      upperBuffer.includes('?')
+    ) {
+      const fault =
+        upperBuffer.includes('DLS') && !upperBuffer.includes('DLC')
+          ? 'NO DLS'
+          : 'NO DLC';
+      setError(`${fault} (Load Cell Signal Lost)`);
+      setLiveWeight(null);
+      setIsStable(false);
+      setLastUpdated(new Date());
+      broadcastReading(0, false, fault);
+      return;
+    }
+
     // Split accumulated buffer into frames by ETX (\x03), STX (\x02), CR, or LF
     const frames = bufferRef.current.split(/[\x02\x03\r\n\x04]+/);
 
@@ -481,12 +507,31 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
           if (!portRef.current) {
             if (data.isConnected) {
-              setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
-              setIsStable(!!data.isStable);
+              const rawUpper = (data.rawText || '').toUpperCase();
+              const hasFault = Boolean(
+                data.error ||
+                  rawUpper.includes('DLC') ||
+                  rawUpper.includes('DLS') ||
+                  rawUpper.includes('NO DL') ||
+                  rawUpper.includes('?')
+              );
+              const faultName =
+                rawUpper.includes('DLS') && !rawUpper.includes('DLC')
+                  ? 'NO DLS'
+                  : 'NO DLC';
+
+              if (hasFault) {
+                setError(data.error || faultName);
+                setLiveWeight(null);
+                setIsStable(false);
+              } else {
+                setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
+                setIsStable(!!data.isStable);
+                setError(null);
+              }
               setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
               setLastUpdated(new Date(data.lastUpdated || Date.now()));
               setIsConnected(true);
-              setError(null);
             } else {
               if (data.error) setError(data.error);
               setIsConnected(false);
@@ -517,12 +562,31 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
           if (!portRef.current) {
             if (data.isConnected) {
-              setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
-              setIsStable(!!data.isStable);
+              const rawUpper = (data.rawText || '').toUpperCase();
+              const hasFault = Boolean(
+                data.error ||
+                  rawUpper.includes('DLC') ||
+                  rawUpper.includes('DLS') ||
+                  rawUpper.includes('NO DL') ||
+                  rawUpper.includes('?')
+              );
+              const faultName =
+                rawUpper.includes('DLS') && !rawUpper.includes('DLC')
+                  ? 'NO DLS'
+                  : 'NO DLC';
+
+              if (hasFault) {
+                setError(data.error || faultName);
+                setLiveWeight(null);
+                setIsStable(false);
+              } else {
+                setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
+                setIsStable(!!data.isStable);
+                setError(null);
+              }
               setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
               setLastUpdated(new Date(data.lastUpdated || Date.now()));
               setIsConnected(true);
-              setError(null);
             } else {
               if (data.error) setError(data.error);
               setIsConnected(false);

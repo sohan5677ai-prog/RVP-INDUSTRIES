@@ -463,6 +463,7 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
       isStable: !!isStable,
       rawText: rawText ? String(rawText) : undefined,
       port: port ? String(port) : undefined,
+      error: error ? String(error) : undefined,
     });
   }
 

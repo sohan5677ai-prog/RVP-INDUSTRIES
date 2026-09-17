@@ -89,6 +89,7 @@ class ServerScaleService {
     rawText?: string;
     port?: string;
     baudRate?: number;
+    error?: string | null;
   }) {
     this.isRemoteActive = true;
     if (this.remoteWatchdogTimer) {
@@ -105,17 +106,34 @@ class ServerScaleService {
       }
     }, 6000);
 
+    const raw = reading.rawText || '';
+    const upperRaw = raw.toUpperCase();
+    let err = reading.error || null;
+    if (
+      !err &&
+      (upperRaw.includes('DLC') ||
+        upperRaw.includes('DLS') ||
+        upperRaw.includes('NO DL') ||
+        upperRaw.includes('NODL') ||
+        upperRaw.includes('?'))
+    ) {
+      err =
+        upperRaw.includes('DLS') && !upperRaw.includes('DLC')
+          ? 'NO DLS (Load Cell Signal Lost)'
+          : 'NO DLC (Load Cell Signal Lost)';
+    }
+
     const weight = Math.round(Number(reading.liveWeight) || 0);
     this.currentReading = {
       ...this.currentReading,
-      liveWeight: weight,
-      isStable: !!reading.isStable,
-      rawText: reading.rawText || `${weight} kg`,
+      liveWeight: err ? 0 : weight,
+      isStable: err ? false : !!reading.isStable,
+      rawText: raw || `${weight} kg`,
       lastUpdated: Date.now(),
       isConnected: true,
       port: reading.port || this.portName,
       baudRate: reading.baudRate || this.baudRate,
-      error: null,
+      error: err,
     };
 
     this.notifyListeners();
@@ -255,24 +273,32 @@ class ServerScaleService {
     const clean = raw.replace(/[^\x20-\x7E]/g, '').trim();
     if (!clean) return;
 
-    // Check for hardware faults or power surge error codes (e.g. "no dLs", "no dls", "oL", "Err 02")
+    // Check for hardware faults or power surge error codes (e.g. "no dlc", "no dls", "oL", "Err 02")
     const upper = clean.toUpperCase();
     if (
+      upper.includes('NO DLC') ||
+      upper.includes('NODLC') ||
+      upper.includes('NO-DLC') ||
       upper.includes('NO DLS') ||
       upper.includes('NODLS') ||
+      upper.includes('NO-DLS') ||
       upper.includes('NO DL') ||
       upper.includes('NO-DL') ||
+      upper.includes('DLC') ||
+      upper.includes('DLS') ||
       upper.includes('ERR') ||
       upper.includes('OVERLOAD') ||
       upper.includes('------') ||
       upper === 'OL'
     ) {
-      logger.warn(`[scale] Hardware fault indicator received: "${clean}"`);
+      const faultLabel =
+        upper.includes('DLS') && !upper.includes('DLC') ? 'NO DLS' : 'NO DLC';
+      logger.warn(`[scale] Hardware fault indicator received: "${clean}" (${faultLabel})`);
       this.currentReading = {
         ...this.currentReading,
         rawText: clean,
         lastUpdated: Date.now(),
-        error: upper.includes('DLS') || upper.includes('DL') ? 'NO DLS (Load Cell Signal Lost / Power Cut)' : `Scale Fault: ${clean}`,
+        error: `${faultLabel} (Load Cell Signal Lost / Power Cut)`,
       };
       this.notifyListeners();
       return;

@@ -12,6 +12,10 @@ import {
   broadcastCctvHandler,
   getCctvStatusHandler,
   getStoredSnapshotHandler,
+  queuePrintJobHandler,
+  getPendingPrintJobsHandler,
+  completePrintJobHandler,
+  getPrintAgentStatusHandler,
 } from '../controllers/weighbridge.controller.js';
 
 const router = Router();
@@ -48,5 +52,11 @@ router.post('/tickets', asyncHandler(createTicketHandler));
 router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/cancel', asyncHandler(cancelTicketHandler));
+
+// Print queue routes (for cabin print agent)
+router.post('/print-queue', asyncHandler(queuePrintJobHandler));
+router.get('/print-queue/pending', asyncHandler(getPendingPrintJobsHandler));
+router.patch('/print-queue/:id/complete', asyncHandler(completePrintJobHandler));
+router.get('/print-queue/status', asyncHandler(getPrintAgentStatusHandler));
 
 export default router;

@@ -99,7 +99,7 @@ export async function captureCamSnapshotBase64(camNumber: 1 | 2): Promise<string
   const url = getCameraSnapshotUrl(camNumber, Date.now());
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const timer = setTimeout(() => ctrl.abort(), 8000);
     const resp = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
     if (resp.ok) {
@@ -588,6 +588,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     retry: false,
   });
 
+  // Cabin print agent status
+  const { data: printAgentStatus } = useQuery<{ agentOnline: boolean; pendingCount: number }>({
+    queryKey: ['weighbridge-print-agent-status'],
+    queryFn: () => api<{ agentOnline: boolean; pendingCount: number }>('/weighbridge/print-queue/status'),
+    refetchInterval: 15000,
+    retry: false,
+  });
+
   const bothCamerasOnline = Boolean(cctvStatus?.cam1.online && cctvStatus?.cam2.online);
 
   // Current weight from scale or manual input
@@ -676,8 +684,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       if (!snap1Base64 || !snap2Base64) {
         toast.warning('One or more browser snapshots were unavailable. The server will use the freshest cabin relay frame.');
       }
-      const localSnap1 = snap1Base64 || getCameraSnapshotUrl(1, Date.now());
-      const localSnap2 = snap2Base64 || getCameraSnapshotUrl(2, Date.now());
+      const localSnap1 = snap1Base64 || `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=1&t=${Date.now()}`;
+      const localSnap2 = snap2Base64 || `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=2&t=${Date.now()}`;
       const snapObj = { cam1: localSnap1, cam2: localSnap2 };
       setActiveSnapshots(snapObj);
 
@@ -746,6 +754,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     },
     onSuccess: ({ ticket, snapshots }) => {
       toast.success(`Ticket #${ticket.ticketNo} saved successfully!`);
+      toast.info('🖨️ Slip queued for cabin printer', { duration: 3000 });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
@@ -806,7 +815,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* Universal Scale Network Hub Status Badge */}
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
               {scale.isScaleOnline ? (
                 <div
                   className="flex items-center gap-2 h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-mono font-medium shadow-sm"
@@ -829,6 +838,26 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <span>Scale Hub: Offline ({scale.serverPort || 'COM4'} not detected)</span>
                 </div>
               )}
+
+              {/* Cabin Printer Status Badge */}
+              <div
+                className={cn(
+                  'flex items-center gap-2 h-9 px-3 rounded-lg border text-xs font-mono font-medium shadow-sm',
+                  printAgentStatus?.agentOnline
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                    : 'border-stone-500/30 bg-stone-500/10 text-stone-500 dark:text-stone-400'
+                )}
+                title={printAgentStatus?.agentOnline
+                  ? `Cabin printer online · ${printAgentStatus.pendingCount} pending jobs`
+                  : 'Cabin print agent not detected. Start cabin-print-agent.mjs on the cabin PC.'}
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>
+                  {printAgentStatus?.agentOnline
+                    ? `Cabin Printer: Online${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
+                    : 'Cabin Printer: Offline'}
+                </span>
+              </div>
             </div>
 
             {/* Pending Trucks Counter Button */}
@@ -1734,9 +1763,16 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         size="sm"
                         onClick={() => {
                           setSlipModalTicket(t);
+                          // Resolve stored URLs to absolute cloud URLs for reliable reprint
+                          const resolvePrintUrl = (url?: string | null) => {
+                            if (!url) return undefined;
+                            if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) return url;
+                            if (url.startsWith('/api/')) return `https://rvp-server.onrender.com${url}`;
+                            return url;
+                          };
                           setActiveSnapshots({
-                            cam1: t.secondCam1PhotoUrl || t.cam1PhotoUrl || undefined,
-                            cam2: t.secondCam2PhotoUrl || t.cam2PhotoUrl || undefined,
+                            cam1: resolvePrintUrl(t.secondCam1PhotoUrl || t.cam1PhotoUrl),
+                            cam2: resolvePrintUrl(t.secondCam2PhotoUrl || t.cam2PhotoUrl),
                           });
                         }}
                         className="h-7 px-2 text-xs gap-1"

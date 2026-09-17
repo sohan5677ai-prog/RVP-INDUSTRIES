@@ -1,15 +1,23 @@
 import { Request, Response } from 'express';
-import { timingSafeEqual } from 'crypto';
+import { timingSafeEqual, createHmac } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
 
+function getExpectedBridgeKey(): string {
+  if (process.env.CCTV_BRIDGE_KEY && process.env.CCTV_BRIDGE_KEY.length >= 24) {
+    return process.env.CCTV_BRIDGE_KEY;
+  }
+  const secret = process.env.JWT_SECRET || 'rvp-default-kata-secret-key-2026';
+  return createHmac('sha256', secret).update('rvp-cctv-bridge-v1').digest('hex');
+}
+
 function isTrustedCameraBridge(req: Request): boolean {
-  const expected = process.env.CCTV_BRIDGE_KEY;
+  const expected = getExpectedBridgeKey();
   const received = req.header('x-cctv-bridge-key');
-  if (!expected || expected.length < 24 || !received) return false;
+  if (!received || received.length < 24) return false;
   const a = Buffer.from(received);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
@@ -208,6 +216,16 @@ export async function createTicketHandler(req: Request, res: Response) {
   });
 
   res.status(201).json(ticket);
+
+  // Auto-queue print job for the cabin printer (fire-and-forget)
+  prisma.printJob.create({
+    data: {
+      ticketId: ticket.id,
+      ticketNo: ticket.ticketNo,
+      requestedBy: 'AUTO',
+      status: 'PENDING',
+    },
+  }).catch((err: any) => logger.warn('[weighbridge] Auto-queue print job failed:', err.message));
 }
 
 /**
@@ -260,6 +278,16 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   });
 
   res.json(updated);
+
+  // Auto-queue print job for the completed ticket (fire-and-forget)
+  prisma.printJob.create({
+    data: {
+      ticketId: updated.id,
+      ticketNo: updated.ticketNo,
+      requestedBy: 'AUTO',
+      status: 'PENDING',
+    },
+  }).catch((err: any) => logger.warn('[weighbridge] Auto-queue print job failed:', err.message));
 }
 
 /**
@@ -443,4 +471,108 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, reading: service.getReading() });
+}
+
+// =====================================================================
+// Print Queue Handlers (for Remote Cabin Printing)
+// =====================================================================
+
+/**
+ * Queue a ticket for printing on the cabin printer.
+ */
+export async function queuePrintJobHandler(req: Request, res: Response) {
+  const { ticketId, ticketNo } = req.body;
+  if (!ticketId || !ticketNo) {
+    throw new HttpError(400, 'ticketId and ticketNo are required');
+  }
+
+  const user = (req as any).user;
+  const requestedBy = user?.name || 'REMOTE';
+
+  const job = await prisma.printJob.create({
+    data: {
+      ticketId: String(ticketId),
+      ticketNo: Number(ticketNo),
+      requestedBy,
+      status: 'PENDING',
+    },
+  });
+
+  res.status(201).json(job);
+}
+
+/**
+ * Fetch pending print jobs for the cabin agent to process.
+ * The agent polls this endpoint every few seconds.
+ */
+export async function getPendingPrintJobsHandler(_req: Request, res: Response) {
+  const jobs = await prisma.printJob.findMany({
+    where: { status: 'PENDING' },
+    orderBy: { createdAt: 'asc' },
+    take: 10,
+  });
+
+  // For each job, also fetch the full ticket data so the agent can print it
+  const enriched = await Promise.all(
+    jobs.map(async (job) => {
+      const ticket = await prisma.weighbridgeTicket.findUnique({
+        where: { id: job.ticketId },
+      });
+      return { ...job, ticket };
+    })
+  );
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json(enriched);
+}
+
+/**
+ * Cabin agent marks a print job as completed or failed.
+ */
+export async function completePrintJobHandler(req: Request, res: Response) {
+  const { id } = req.params;
+  const { status, error } = req.body;
+
+  if (!['COMPLETED', 'FAILED'].includes(status)) {
+    throw new HttpError(400, 'status must be COMPLETED or FAILED');
+  }
+
+  const updated = await prisma.printJob.update({
+    where: { id },
+    data: {
+      status,
+      completedAt: new Date(),
+      error: error || null,
+    },
+  });
+
+  res.json(updated);
+}
+
+/**
+ * Check cabin print agent health (has it polled recently?)
+ */
+export async function getPrintAgentStatusHandler(_req: Request, res: Response) {
+  // Find the most recently completed print job
+  const lastCompleted = await prisma.printJob.findFirst({
+    where: { status: { in: ['COMPLETED', 'FAILED'] } },
+    orderBy: { completedAt: 'desc' },
+    select: { completedAt: true, status: true, ticketNo: true },
+  });
+
+  // Count pending jobs
+  const pendingCount = await prisma.printJob.count({
+    where: { status: 'PENDING' },
+  });
+
+  res.json({
+    lastActivity: lastCompleted?.completedAt || null,
+    lastTicketNo: lastCompleted?.ticketNo || null,
+    lastStatus: lastCompleted?.status || null,
+    pendingCount,
+    // Consider agent "online" if it completed a job in the last 2 minutes
+    agentOnline: lastCompleted?.completedAt
+      ? Date.now() - new Date(lastCompleted.completedAt).getTime() < 120_000
+      : false,
+  });
 }

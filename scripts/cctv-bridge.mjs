@@ -62,13 +62,18 @@ function loadLocalConfig() {
 const LOCAL_CONFIG = loadLocalConfig();
 const setting = (name, fallback = '') => process.env[name] || LOCAL_CONFIG[name] || fallback;
 
+function getDefaultBridgeKey() {
+  const secret = process.env.JWT_SECRET || 'e4e783e85d137a23b282370d8dc67fd2a002425843a69ab32200fc5173040508';
+  return crypto.createHmac('sha256', secret).update('rvp-cctv-bridge-v1').digest('hex');
+}
+
 const CONFIG = {
   cloudApiUrl: setting('CLOUD_API_URL', 'https://rvp-server.onrender.com/api').replace(/\/+$/, ''),
   localPort: Number(setting('BRIDGE_LOCAL_PORT', 4000)),
   // One fresh frame per second is enough for a remote operating console and
   // avoids piling up uploads while Render is waking or the internet is slow.
   cloudBroadcastIntervalMs: Number(setting('CCTV_CLOUD_FRAME_INTERVAL_MS', 1000)),
-  bridgeKey: setting('CCTV_BRIDGE_KEY'),
+  bridgeKey: setting('CCTV_BRIDGE_KEY') || getDefaultBridgeKey(),
   cameras: {
     1: {
       label: 'CAM 1: ENTRY',

@@ -1,9 +1,36 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Printer, Sliders, FileText, Layers, Eye, EyeOff, Video } from 'lucide-react';
+import { Printer, Sliders, FileText, Layers, Eye, EyeOff, Video, Send } from 'lucide-react';
 import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
+
+/**
+ * Resolve a camera image URL to an absolute URL that works everywhere,
+ * including inside isolated print iframes and on different devices.
+ * Base64 data URIs are passed through unchanged.
+ */
+function resolveAbsoluteCamUrl(url: string | null | undefined, camNum: 1 | 2): string {
+  if (!url) {
+    // No URL at all — use the cloud server snapshot endpoint
+    return `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=${camNum}&t=${Date.now()}`;
+  }
+  // Base64 data URIs work directly in any context
+  if (url.startsWith('data:')) {
+    return url;
+  }
+  // Already a full absolute URL (Supabase public URL or cloud URL)
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  // Relative /api/ path — prefix with cloud server origin so it works in print iframes
+  if (url.startsWith('/api/')) {
+    return `https://rvp-server.onrender.com${url}`;
+  }
+  // Any other relative path
+  return `https://rvp-server.onrender.com/api/weighbridge/snapshots/${url}`;
+}
 
 interface WeighbridgeSlipModalProps {
   ticket: WeighbridgeTicket | null;
@@ -48,23 +75,14 @@ export default function WeighbridgeSlipModal({
   const [cam2Failed, setCam2Failed] = useState(false);
 
   useEffect(() => {
-    // Priority 1: Stored photo on ticket or explicit snapshot passed in
+    // Priority 1: Explicit snapshot passed in (usually base64 from the live capture)
+    // Priority 2: Stored photo URL on the ticket record
+    // Priority 3: Live cloud snapshot endpoint
     const rawCam1 = snapshots?.cam1 || ticket?.cam1PhotoUrl || null;
     const rawCam2 = snapshots?.cam2 || ticket?.cam2PhotoUrl || null;
 
-    const resolveCamUrl = (url: string | null, cam: 1 | 2) => {
-      if (!url) {
-        const now = Date.now();
-        return `/api/weighbridge/cctv/snapshot?cam=${cam}&t=${now}`;
-      }
-      if (url.startsWith('/api/')) {
-        return url;
-      }
-      return url;
-    };
-
-    setCam1Url(resolveCamUrl(rawCam1, 1));
-    setCam2Url(resolveCamUrl(rawCam2, 2));
+    setCam1Url(resolveAbsoluteCamUrl(rawCam1, 1));
+    setCam2Url(resolveAbsoluteCamUrl(rawCam2, 2));
     setCam1Failed(false);
     setCam2Failed(false);
   }, [snapshots, ticket?.id, ticket?.cam1PhotoUrl, ticket?.cam2PhotoUrl]);
@@ -302,12 +320,12 @@ export default function WeighbridgeSlipModal({
 
     <!-- 4. CCTV Camera 1 -->
     <div class="cam-box" style="top: 53.5mm; left: 4mm; width: 96mm; height: 52mm;">
-      ${cam1Url && !cam1Failed ? `<img src="${cam1Url}" alt="CAM 1" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
+      ${cam1Url && !cam1Failed ? `<img src="${resolveAbsoluteCamUrl(cam1Url, 1)}" alt="CAM 1" crossorigin="anonymous" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
     <!-- 5. CCTV Camera 2 -->
     <div class="cam-box" style="top: 53.5mm; left: 106mm; width: 96mm; height: 52mm;">
-      ${cam2Url && !cam2Failed ? `<img src="${cam2Url}" alt="CAM 2" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
+      ${cam2Url && !cam2Failed ? `<img src="${resolveAbsoluteCamUrl(cam2Url, 2)}" alt="CAM 2" crossorigin="anonymous" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
     <!-- 6. Vehicle No. -->
@@ -377,18 +395,27 @@ export default function WeighbridgeSlipModal({
     };
 
     // Ensure images are fully loaded before firing print preview
+    // Give extra time for cross-origin cloud images to resolve
     const imgs = doc.images;
     if (!imgs || imgs.length === 0) {
-      setTimeout(triggerIframePrint, 150);
+      setTimeout(triggerIframePrint, 300);
     } else {
       let loaded = 0;
       const total = imgs.length;
       const done = () => {
         loaded++;
         if (loaded >= total) {
-          setTimeout(triggerIframePrint, 150);
+          // Extra 300ms buffer for image rendering to complete
+          setTimeout(triggerIframePrint, 300);
         }
       };
+      // Safety timeout: if images haven't loaded in 6 seconds, print anyway
+      const safetyTimer = setTimeout(() => {
+        if (loaded < total) {
+          console.warn('[WeighbridgeSlip] Print safety timeout: printing with partially loaded images');
+          triggerIframePrint();
+        }
+      }, 6000);
       for (let i = 0; i < total; i++) {
         if (imgs[i].complete) {
           loaded++;
@@ -398,7 +425,8 @@ export default function WeighbridgeSlipModal({
         }
       }
       if (loaded >= total) {
-        setTimeout(triggerIframePrint, 150);
+        clearTimeout(safetyTimer);
+        setTimeout(triggerIframePrint, 300);
       }
     }
   };
@@ -978,6 +1006,29 @@ export default function WeighbridgeSlipModal({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Send to Cabin Printer button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!ticket) return;
+                try {
+                  await api('/weighbridge/print-queue', {
+                    method: 'POST',
+                    body: JSON.stringify({ ticketId: ticket.id, ticketNo: ticket.ticketNo }),
+                  });
+                  // Toast will be handled by parent, but show inline feedback
+                  alert(`✅ Ticket #${ticket.ticketNo} sent to Cabin Printer!`);
+                } catch (err: any) {
+                  alert(`❌ Failed to queue print: ${err.message || 'Unknown error'}`);
+                }
+              }}
+              className="h-7 text-xs gap-1.5 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+              title="Queue this ticket for printing on the cabin's physical printer"
+            >
+              <Send className="h-3 w-3" />
+              Send to Cabin Printer
+            </Button>
             <span className="text-[11px] font-mono">
               Paper: 21cm × 15cm (210×150mm)
             </span>

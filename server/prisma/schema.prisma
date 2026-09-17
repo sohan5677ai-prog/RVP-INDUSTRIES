@@ -2209,6 +2209,27 @@ model WeighbridgeTicket {
 }
 
 // ---------------------------------------------------------------------------
+// Weighbridge Print Job Queue
+// Enables remote printing: tickets saved from any device are queued here,
+// and the cabin print agent script polls for pending jobs and prints them
+// on the physical printer in the Kata Cabin.
+// ---------------------------------------------------------------------------
+model PrintJob {
+  id              String    @id @default(cuid())
+  ticketId        String    // WeighbridgeTicket.id
+  ticketNo        Int
+  status          String    @default("PENDING")  // PENDING, PRINTING, COMPLETED, FAILED
+  requestedBy     String?   // who triggered the print (operator name or 'AUTO')
+  requestedAt     DateTime  @default(now())
+  completedAt     DateTime?
+  error           String?
+  createdAt       DateTime  @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
 // Delivery Challan
 // Internal stock transfers, job work, supply on approval, exhibition, etc.
 // ---------------------------------------------------------------------------

@@ -22,6 +22,8 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: CCTV_BRIDGE_KEY
+        sync: false
       - key: CLIENT_ORIGIN
         sync: false
       - key: GEMINI_API_KEY

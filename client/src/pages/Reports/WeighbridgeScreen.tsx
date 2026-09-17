@@ -37,6 +37,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Combobox } from '@/components/ui/combobox';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -46,13 +47,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -64,6 +58,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
+import { calcKataFee, isVehicleExempt } from '@/lib/calc';
 import WeighbridgeSlipModal, { triggerDirectPrint } from '@/components/WeighbridgeSlipModal';
 import './WeighbridgeScreen.css';
 
@@ -90,6 +85,38 @@ const VEHICLE_TYPES = [
   { value: 'TANKER', label: 'Liquid / Oil Tanker' },
   { value: 'OTHER', label: 'Other Vehicle' },
 ];
+
+const TRIP_TYPE_OPTIONS = [
+  { value: 'FIRST', label: '1st Weight (Gross / Inward)' },
+  { value: 'SECOND', label: '2nd Weight (Tare / Net Final)' },
+  { value: 'SINGLE', label: 'Single Direct Weight' },
+];
+
+const LOAD_TYPE_OPTIONS = [
+  { value: 'LOAD', label: 'LOAD (Loaded Consignment)' },
+  { value: 'EMPTY', label: 'EMPTY (Empty Tare Truck)' },
+];
+
+const BILL_TYPE_OPTIONS = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CREDIT', label: 'Credit / Due' },
+  { value: 'FREE', label: 'No Charge' },
+];
+
+type EditTicketDraft = {
+  id: string;
+  vehicleNumber: string;
+  vehicleType: string;
+  tripType: string;
+  partyName: string;
+  partyMobile: string;
+  material: string;
+  loadType: string;
+  billType: string;
+  firstWeightKg: string;
+  secondWeightKg: string;
+  remarks: string;
+};
 
 export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now()): string {
   // Always route through the cloud server so the Kata is accessible from anywhere
@@ -465,7 +492,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [material, setMaterial] = useState<string>('PAPPU');
   const [loadType, setLoadType] = useState<'LOAD' | 'EMPTY'>('LOAD');
   const [billType, setBillType] = useState<'CASH' | 'CREDIT' | 'FREE'>('CASH');
-  const [charges, setCharges] = useState<string>('100');
+  const [charges, setCharges] = useState<string>('0');
   const [driverMobile, setDriverMobile] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
 
@@ -541,6 +568,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
   // Search & Filter in History tab
   const [historySearch, setHistorySearch] = useState<string>('');
+  const [editingTicket, setEditingTicket] = useState<EditTicketDraft | null>(null);
 
   // Clock
   const [clockString, setClockString] = useState<string>('');
@@ -624,6 +652,56 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     queryKey: ['company-profile'],
     queryFn: () => api<CompanyProfile>('/company-profile'),
   });
+
+  const vehicleOptions = useMemo(() => {
+    const latest = new Map<string, WeighbridgeTicket>();
+    for (const ticket of allTickets) {
+      const value = ticket.vehicleNumber.trim().toUpperCase();
+      if (value && !latest.has(value)) latest.set(value, ticket);
+    }
+    return Array.from(latest.values()).map((ticket) => ({
+      value: ticket.vehicleNumber.trim().toUpperCase(),
+      label: ticket.vehicleNumber.trim().toUpperCase(),
+      hint: ticket.partyName || ticket.material || undefined,
+    }));
+  }, [allTickets]);
+
+  const partyOptions = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const party of parties) names.set(party.name.trim().toUpperCase(), party.name.trim());
+    for (const ticket of allTickets) {
+      if (ticket.partyName?.trim()) names.set(ticket.partyName.trim().toUpperCase(), ticket.partyName.trim());
+    }
+    return Array.from(names.values())
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name }));
+  }, [parties, allTickets]);
+
+  const selectVehicle = useCallback((value: string) => {
+    const clean = value.toUpperCase();
+    setVehicleNumber(clean);
+    const previous = allTickets.find((ticket) => ticket.vehicleNumber.trim().toUpperCase() === clean);
+    if (!previous) return;
+    setVehicleType(previous.vehicleType || 'LORRY');
+    setPartyName(previous.partyName || '');
+    setMaterial(previous.material || 'PAPPU');
+    setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
+    setDriverMobile(previous.partyMobile || '');
+    setRemarks(previous.remarks || '');
+  }, [allTickets]);
+
+  const selectParty = useCallback((value: string) => {
+    setPartyName(value);
+    const previous = allTickets.find(
+      (ticket) => ticket.partyName?.trim().toUpperCase() === value.trim().toUpperCase(),
+    );
+    if (!previous) return;
+    setVehicleNumber(previous.vehicleNumber || '');
+    setVehicleType(previous.vehicleType || 'LORRY');
+    setMaterial(previous.material || 'PAPPU');
+    setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
+    setDriverMobile(previous.partyMobile || '');
+  }, [allTickets]);
 
   const { data: cctvStatus, refetch: refetchCctvStatus } = useQuery<CctvStatusResponse>({
     queryKey: ['weighbridge-cctv-status'],
@@ -727,6 +805,18 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     return null;
   }, [tripType, firstWeight, currentLiveWeight]);
 
+  const calculatedKataFee = useMemo(() => {
+    if (billType === 'FREE' || calculatedNetWeight == null || calculatedNetWeight <= 0) return 0;
+    return calcKataFee(
+      calculatedNetWeight,
+      isVehicleExempt(vehicleNumber, companyProfile?.companyVehicles),
+    );
+  }, [billType, calculatedNetWeight, vehicleNumber, companyProfile?.companyVehicles]);
+
+  useEffect(() => {
+    setCharges(String(calculatedKataFee));
+  }, [calculatedKataFee]);
+
   // Daily statistics for KPI cards
   const stats = useMemo(() => {
     const today = new Date().toDateString();
@@ -750,7 +840,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setMaterial('PAPPU');
     setLoadType('LOAD');
     setBillType('CASH');
-    setCharges('100');
+    setCharges('0');
     setDriverMobile('');
     setRemarks('');
     setFirstWeight(null);
@@ -769,7 +859,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setMaterial(ticket.material || 'PAPPU');
     setLoadType(ticket.loadType === 'LOAD' ? 'EMPTY' : 'LOAD');
     setFirstWeight(ticket.firstWeightKg);
-    setCharges(ticket.amount != null ? String(ticket.amount) : '100');
+    setBillType((ticket.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
+    setDriverMobile(ticket.partyMobile || '');
+    setCharges('0');
     setRemarks(ticket.remarks || '');
     setActiveTab('entry');
     toast.info(`Loaded truck ${ticket.vehicleNumber} (First Weight: ${ticket.firstWeightKg} Kg)`);
@@ -815,7 +907,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             secondWeight: currentLiveWeight,
             partyName: partyName.trim() || undefined,
             material: material || undefined,
-            amount: parseFloat(charges) || undefined,
+            billType,
             loadType,
             remarks: remarks.trim() || undefined,
             snapCam1: snap1Base64,
@@ -841,11 +933,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             material,
             loadType,
             billType,
-            amount: parseFloat(charges) || 0,
             firstWeightKg: tripType === 'SECOND' ? (firstWeight ?? currentLiveWeight) : currentLiveWeight,
             secondWeightKg: tripType === 'SECOND' ? currentLiveWeight : undefined,
             secondWeight: tripType === 'SECOND' ? currentLiveWeight : undefined,
-            driverMobile: driverMobile.trim(),
+            partyMobile: driverMobile.trim(),
             remarks: remarks.trim(),
             operatorName: user?.name || 'OPERATOR',
             snapCam1: snap1Base64,
@@ -887,6 +978,63 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       toast.error(getErrorMessage(err));
     },
   });
+
+  const startEditingTicket = useCallback((ticket: WeighbridgeTicket) => {
+    setEditingTicket({
+      id: ticket.id,
+      vehicleNumber: ticket.vehicleNumber,
+      vehicleType: ticket.vehicleType || 'LORRY',
+      tripType: ticket.tripType || 'FIRST',
+      partyName: ticket.partyName || '',
+      partyMobile: ticket.partyMobile || '',
+      material: ticket.material || 'PAPPU',
+      loadType: ticket.loadType || 'LOAD',
+      billType: ticket.billType || 'CASH',
+      firstWeightKg: ticket.firstWeightKg != null ? String(ticket.firstWeightKg) : '',
+      secondWeightKg: ticket.secondWeightKg != null ? String(ticket.secondWeightKg) : '',
+      remarks: ticket.remarks || '',
+    });
+  }, []);
+
+  const editMutation = useMutation({
+    mutationFn: async (draft: EditTicketDraft) => api<WeighbridgeTicket>(`/weighbridge/tickets/${draft.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        vehicleNumber: draft.vehicleNumber,
+        vehicleType: draft.vehicleType,
+        tripType: draft.tripType,
+        partyName: draft.partyName,
+        partyMobile: draft.partyMobile,
+        material: draft.material,
+        loadType: draft.loadType,
+        billType: draft.billType,
+        firstWeightKg: draft.firstWeightKg || null,
+        secondWeightKg: draft.secondWeightKg || null,
+        remarks: draft.remarks,
+      }),
+    }),
+    onSuccess: (ticket) => {
+      toast.success(`Ticket #${ticket.ticketNo} updated. Net weight and fee recalculated.`);
+      setEditingTicket(null);
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      setSlipModalTicket((current) => current?.id === ticket.id ? ticket : current);
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const editPreview = useMemo(() => {
+    if (!editingTicket) return { net: null as number | null, fee: 0 };
+    const first = Number(editingTicket.firstWeightKg);
+    const second = Number(editingTicket.secondWeightKg);
+    let net: number | null = null;
+    if (first > 0 && second > 0) net = Math.abs(first - second);
+    else if (editingTicket.tripType === 'SINGLE' && first > 0) net = first;
+    const fee = net && editingTicket.billType !== 'FREE'
+      ? calcKataFee(net, isVehicleExempt(editingTicket.vehicleNumber, companyProfile?.companyVehicles))
+      : 0;
+    return { net, fee };
+  }, [editingTicket, companyProfile?.companyVehicles]);
 
   // Global Keyboard Shortcuts (F12 = Save, F4 = Pending, F8 = Override, Esc = Clear)
   useEffect(() => {
@@ -1152,12 +1300,17 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     </span>
                     <span className="text-[10px] font-normal text-muted-foreground">e.g. KA01AS1009 / AP39V1234</span>
                   </Label>
-                  <Input
+                  <Combobox
+                    options={vehicleOptions}
                     value={vehicleNumber}
-                    onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
+                    onChange={selectVehicle}
                     placeholder="ENTER VEHICLE NUMBER"
+                    searchPlaceholder="Search or enter vehicle number…"
+                    emptyText="No saved vehicle found."
+                    allowCustomValue
+                    customValueLabel="Use vehicle"
+                    ariaLabel="Vehicle number"
                     className="font-mono text-base font-bold tracking-wider uppercase h-11 bg-background"
-                    autoFocus
                   />
                 </div>
 
@@ -1166,18 +1319,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Vehicle Type
                   </Label>
-                  <Select value={vehicleType} onValueChange={setVehicleType}>
-                    <SelectTrigger className="h-10 bg-background">
-                      <SelectValue placeholder="Select vehicle type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {VEHICLE_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Combobox options={VEHICLE_TYPES} value={vehicleType} onChange={setVehicleType}
+                    placeholder="Select vehicle type" searchPlaceholder="Search vehicle type…" ariaLabel="Vehicle type" className="bg-background" />
                 </div>
 
                 {/* Trip Type */}
@@ -1185,22 +1328,15 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Trip Type
                   </Label>
-                  <Select
+                  <Combobox
+                    options={TRIP_TYPE_OPTIONS}
                     value={tripType}
-                    onValueChange={(val: any) => {
-                      setTripType(val);
+                    onChange={(val) => {
+                      setTripType(val as 'FIRST' | 'SECOND' | 'SINGLE');
                       if (val === 'FIRST') setFirstWeight(null);
                     }}
-                  >
-                    <SelectTrigger className="h-10 bg-background font-medium">
-                      <SelectValue placeholder="Select trip type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="FIRST">1st Weight (Gross / Inward)</SelectItem>
-                      <SelectItem value="SECOND">2nd Weight (Tare / Net Final)</SelectItem>
-                      <SelectItem value="SINGLE">Single Direct Weight</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select trip type" searchPlaceholder="Search trip type…" ariaLabel="Trip type" className="bg-background font-medium"
+                  />
                 </div>
 
                 {/* Party Name (with autocomplete datalist) */}
@@ -1212,20 +1348,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     </span>
                     <span className="text-[10px] font-normal text-muted-foreground">Supplier or Buyer name</span>
                   </Label>
-                  <div className="relative">
-                    <Input
-                      list="party-suggestions"
-                      value={partyName}
-                      onChange={(e) => setPartyName(e.target.value)}
-                      placeholder="Type customer or supplier name (e.g. SOHAM AGRO)"
-                      className="h-10 bg-background uppercase"
-                    />
-                    <datalist id="party-suggestions">
-                      {parties.map((p) => (
-                        <option key={p.id} value={p.name} />
-                      ))}
-                    </datalist>
-                  </div>
+                  <Combobox options={partyOptions} value={partyName} onChange={selectParty}
+                    placeholder="Select customer or party" searchPlaceholder="Search or enter party name…"
+                    emptyText="No saved party found." allowCustomValue customValueLabel="Use party"
+                    ariaLabel="Customer or party name" className="bg-background uppercase" />
                 </div>
 
                 {/* Material Selection */}
@@ -1234,18 +1360,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     <Package className="h-3.5 w-3.5 text-primary" />
                     Material / Commodity
                   </Label>
-                  <Select value={material} onValueChange={setMaterial}>
-                    <SelectTrigger className="h-10 bg-background font-medium">
-                      <SelectValue placeholder="Select material" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MATERIALS.map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Combobox options={MATERIALS.map((m) => ({ value: m, label: m }))} value={material} onChange={setMaterial}
+                    placeholder="Select material" searchPlaceholder="Search material…" ariaLabel="Material" className="bg-background font-medium" />
                 </div>
 
                 {/* Load Type */}
@@ -1253,15 +1369,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Load Condition
                   </Label>
-                  <Select value={loadType} onValueChange={(v: any) => setLoadType(v)}>
-                    <SelectTrigger className="h-10 bg-background font-medium">
-                      <SelectValue placeholder="Select condition" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="LOAD">LOAD (Loaded Consignment)</SelectItem>
-                      <SelectItem value="EMPTY">EMPTY (Empty Tare Truck)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Combobox options={LOAD_TYPE_OPTIONS} value={loadType} onChange={(v) => setLoadType(v as 'LOAD' | 'EMPTY')}
+                    placeholder="Select condition" searchPlaceholder="Search load condition…" ariaLabel="Load condition" className="bg-background font-medium" />
                 </div>
 
                 {/* Kata Fee (Charges) */}
@@ -1273,10 +1382,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <Input
                     type="number"
                     value={charges}
-                    onChange={(e) => setCharges(e.target.value)}
-                    placeholder="100"
-                    className="h-10 bg-background font-mono font-bold"
+                    readOnly
+                    aria-readonly="true"
+                    className="h-10 bg-muted/50 font-mono font-bold"
                   />
+                  <p className="text-[10px] text-muted-foreground">Auto-calculated from final net weight after both weights are saved.</p>
                 </div>
 
                 {/* Payment mode */}
@@ -1285,16 +1395,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     <CreditCard className="h-3.5 w-3.5 text-primary" />
                     Payment Type
                   </Label>
-                  <Select value={billType} onValueChange={(v: any) => setBillType(v)}>
-                    <SelectTrigger className="h-10 bg-background font-medium">
-                      <SelectValue placeholder="Select payment type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CASH">Cash</SelectItem>
-                      <SelectItem value="CREDIT">Credit / Due</SelectItem>
-                      <SelectItem value="FREE">No Charge</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Combobox options={BILL_TYPE_OPTIONS} value={billType} onChange={(v) => setBillType(v as 'CASH' | 'CREDIT' | 'FREE')}
+                    placeholder="Select payment type" searchPlaceholder="Search payment type…" ariaLabel="Payment type" className="bg-background font-medium" />
                 </div>
 
                 {/* Driver Mobile */}
@@ -1333,11 +1435,17 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </div>
                 <div>
                   <span className="kata-eyebrow">Payment display</span>
-                  <p>{billType === 'FREE' ? 'Complimentary weighment' : billType === 'CREDIT' ? 'Post to customer credit' : 'Collect at counter'}</p>
+                  <p>{calculatedNetWeight == null
+                    ? 'Charge after second weight'
+                    : billType === 'FREE'
+                      ? 'Complimentary weighment'
+                      : billType === 'CREDIT'
+                        ? 'Post to customer credit'
+                        : 'Collect at counter'}</p>
                 </div>
                 <div className="kata-payment-amount">
                   <span>{billType}</span>
-                  <strong>₹{billType === 'FREE' ? '0' : Number(charges || 0).toLocaleString('en-IN')}</strong>
+                  <strong>{calculatedNetWeight == null ? 'Pending' : `₹${Number(charges || 0).toLocaleString('en-IN')}`}</strong>
                 </div>
               </div>
 
@@ -1885,6 +1993,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <TableHead className="text-right">1st (Kg)</TableHead>
                   <TableHead className="text-right">2nd (Kg)</TableHead>
                   <TableHead className="text-right">Net Weight</TableHead>
+                  <TableHead className="text-right">Charge</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -1926,6 +2035,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         ? `${t.netWeightKg.toLocaleString('en-IN')} Kg`
                         : `${t.firstWeightKg?.toLocaleString('en-IN') || 0} Kg`}
                     </TableCell>
+                    <TableCell className="text-right font-mono font-bold text-xs">
+                      ₹{Number(t.amount || 0).toLocaleString('en-IN')}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant={t.status === 'COMPLETED' ? 'default' : 'secondary'}
@@ -1935,29 +2047,36 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setSlipModalTicket(t);
-                          // Resolve stored URLs to absolute cloud URLs for reliable reprint
-                          const resolvePrintUrl = (url?: string | null) => {
-                            if (!url) return undefined;
-                            if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) return url;
-                            if (url.startsWith('/api/')) return `https://rvp-server.onrender.com${url}`;
-                            return url;
-                          };
-                          setActiveSnapshots({
-                            cam1: resolvePrintUrl(t.secondCam1PhotoUrl || t.cam1PhotoUrl),
-                            cam2: resolvePrintUrl(t.secondCam2PhotoUrl || t.cam2PhotoUrl),
-                          });
-                        }}
-                        className="h-7 px-2 text-xs gap-1"
-                        title="Print Weighment Certificate Slip"
-                      >
-                        <Printer className="h-3.5 w-3.5 text-primary" />
-                        Slip
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => startEditingTicket(t)}
+                          className="h-7 px-2 text-xs gap-1" title="Edit saved ticket">
+                          <Pencil className="h-3.5 w-3.5 text-amber-600" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSlipModalTicket(t);
+                            // Resolve stored URLs to absolute cloud URLs for reliable reprint
+                            const resolvePrintUrl = (url?: string | null) => {
+                              if (!url) return undefined;
+                              if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) return url;
+                              if (url.startsWith('/api/')) return `https://rvp-server.onrender.com${url}`;
+                              return url;
+                            };
+                            setActiveSnapshots({
+                              cam1: resolvePrintUrl(t.secondCam1PhotoUrl || t.cam1PhotoUrl),
+                              cam2: resolvePrintUrl(t.secondCam2PhotoUrl || t.cam2PhotoUrl),
+                            });
+                          }}
+                          className="h-7 px-2 text-xs gap-1"
+                          title="Print Weighment Certificate Slip"
+                        >
+                          <Printer className="h-3.5 w-3.5 text-primary" />
+                          Slip
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1966,6 +2085,99 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={editingTicket !== null} onOpenChange={(open) => !open && setEditingTicket(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit saved Kata ticket</DialogTitle>
+            <DialogDescription>
+              Correct either weight or any ticket detail. Net weight and the Kata charge are recalculated automatically.
+            </DialogDescription>
+          </DialogHeader>
+          {editingTicket && (
+            <div className="space-y-5 pt-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Vehicle number</Label>
+                  <Combobox options={vehicleOptions} value={editingTicket.vehicleNumber}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, vehicleNumber: value.toUpperCase() } : d)}
+                    searchPlaceholder="Search or enter vehicle…" allowCustomValue customValueLabel="Use vehicle" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Party name</Label>
+                  <Combobox options={partyOptions} value={editingTicket.partyName}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, partyName: value } : d)}
+                    searchPlaceholder="Search or enter party…" allowCustomValue customValueLabel="Use party" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>First weight (kg)</Label>
+                  <Input type="number" min="1" value={editingTicket.firstWeightKg}
+                    onChange={(e) => setEditingTicket((d) => d ? { ...d, firstWeightKg: e.target.value } : d)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Second weight (kg)</Label>
+                  <Input type="number" min="1" value={editingTicket.secondWeightKg}
+                    onChange={(e) => setEditingTicket((d) => d ? { ...d, secondWeightKg: e.target.value } : d)}
+                    placeholder="Awaiting second weight" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Vehicle type</Label>
+                  <Combobox options={VEHICLE_TYPES} value={editingTicket.vehicleType}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, vehicleType: value } : d)} searchPlaceholder="Search vehicle type…" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Trip type</Label>
+                  <Combobox options={TRIP_TYPE_OPTIONS} value={editingTicket.tripType}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, tripType: value } : d)} searchPlaceholder="Search trip type…" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Material</Label>
+                  <Combobox options={MATERIALS.map((m) => ({ value: m, label: m }))} value={editingTicket.material}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, material: value } : d)} searchPlaceholder="Search material…" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Load condition</Label>
+                  <Combobox options={LOAD_TYPE_OPTIONS} value={editingTicket.loadType}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, loadType: value } : d)} searchPlaceholder="Search load condition…" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Payment type</Label>
+                  <Combobox options={BILL_TYPE_OPTIONS} value={editingTicket.billType}
+                    onChange={(value) => setEditingTicket((d) => d ? { ...d, billType: value } : d)} searchPlaceholder="Search payment type…" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Driver mobile</Label>
+                  <Input value={editingTicket.partyMobile} maxLength={10}
+                    onChange={(e) => setEditingTicket((d) => d ? { ...d, partyMobile: e.target.value } : d)} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>Remarks</Label>
+                  <Input value={editingTicket.remarks}
+                    onChange={(e) => setEditingTicket((d) => d ? { ...d, remarks: e.target.value } : d)} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Recalculated net weight</p>
+                  <p className="mt-1 font-mono text-xl font-black">{editPreview.net == null ? 'Pending' : `${editPreview.net.toLocaleString('en-IN')} kg`}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Collect at counter</p>
+                  <p className="mt-1 font-mono text-xl font-black text-primary">₹{editPreview.fee.toLocaleString('en-IN')}</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditingTicket(null)}>Cancel</Button>
+                <Button onClick={() => editMutation.mutate(editingTicket)} disabled={editMutation.isPending || !editingTicket.vehicleNumber.trim() || !editingTicket.firstWeightKg}>
+                  {editMutation.isPending ? 'Saving…' : 'Save corrections'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Official Printable Weighbridge Slip Modal */}
       <WeighbridgeSlipModal

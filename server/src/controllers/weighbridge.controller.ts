@@ -5,6 +5,7 @@ import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
+import { calcKataFee, isVehicleExempt } from '../lib/calc.js';
 
 function getExpectedBridgeKey(): string {
   if (process.env.CCTV_BRIDGE_KEY && process.env.CCTV_BRIDGE_KEY.length >= 24) {
@@ -24,6 +25,25 @@ export function isTrustedCameraBridge(req: Request): boolean {
 }
 
 const STARTING_TICKET_NUMBER = 2807;
+
+async function calculateTicketFee(
+  netWeightKg: number | null,
+  vehicleNumber: string,
+  billType: string,
+): Promise<number> {
+  if (netWeightKg == null || netWeightKg <= 0 || billType.toUpperCase() === 'FREE') return 0;
+  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+  return calcKataFee(netWeightKg, isVehicleExempt(vehicleNumber, company?.companyVehicles));
+}
+
+function readWeight(value: unknown, field: string): number | null {
+  if (value == null || value === '') return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new HttpError(400, `${field} must be greater than 0 kg`);
+  }
+  return Math.round(parsed);
+}
 
 /**
  * Get next sequential weighbridge ticket number.
@@ -109,7 +129,6 @@ export async function createTicketHandler(req: Request, res: Response) {
     material,
     loadType = 'LOAD',
     billType = 'CASH',
-    amount = 100,
     firstWeightKg,
     secondWeightKg,
     netWeightKg: providedNet,
@@ -131,8 +150,8 @@ export async function createTicketHandler(req: Request, res: Response) {
   });
   const ticketNo = latest ? latest.ticketNo + 1 : STARTING_TICKET_NUMBER;
 
-  const firstWeight = firstWeightKg != null ? Number(firstWeightKg) : (req.body.firstWeight != null ? Number(req.body.firstWeight) : null);
-  const secondWeight = secondWeightKg != null ? Number(secondWeightKg) : (req.body.secondWeight != null ? Number(req.body.secondWeight) : null);
+  const firstWeight = readWeight(firstWeightKg ?? req.body.firstWeight, 'First weight');
+  const secondWeight = readWeight(secondWeightKg ?? req.body.secondWeight, 'Second weight');
 
   // If operator is submitting 2nd weight on an existing pending ticket
   if (tripType === 'SECOND') {
@@ -144,6 +163,9 @@ export async function createTicketHandler(req: Request, res: Response) {
       const secondWeightNum = Number(secondWeight ?? firstWeight ?? 0);
       const firstWeightExisting = existingPending.firstWeightKg ?? 0;
       const netWeight = Math.abs(secondWeightNum - firstWeightExisting);
+      if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
+      const finalBillType = String(billType || existingPending.billType || 'CASH').toUpperCase();
+      const finalAmount = await calculateTicketFee(netWeight, cleanVehNo, finalBillType);
 
       const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
         saveWeighbridgeSnapshot(existingPending.ticketNo, 1, snapCam1, true),
@@ -158,6 +180,8 @@ export async function createTicketHandler(req: Request, res: Response) {
           netWeightKg: netWeight,
           status: 'COMPLETED',
           tripType: 'SECOND',
+          billType: finalBillType,
+          amount: finalAmount,
           ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
           ...(remarks ? { remarks: remarks.trim() } : {}),
           secondCam1PhotoUrl,
@@ -180,6 +204,9 @@ export async function createTicketHandler(req: Request, res: Response) {
 
   const isPending = tripType === 'FIRST' && secondWeight == null;
   const status = isPending ? 'PENDING_SECOND' : 'COMPLETED';
+  const computedAmount = status === 'COMPLETED'
+    ? await calculateTicketFee(netWeight, cleanVehNo, String(billType))
+    : 0;
 
   const user = (req as any).user;
   const operatorName = user?.name || (user?.scope === 'KATA_CABIN' ? 'Kata Cabin' : 'ADMIN');
@@ -201,7 +228,7 @@ export async function createTicketHandler(req: Request, res: Response) {
       material: material?.trim() || null,
       loadType: String(loadType).toUpperCase(),
       billType: String(billType).toUpperCase(),
-      amount: Number(amount) || 100,
+      amount: computedAmount,
       firstWeightKg: firstWeight,
       secondWeightKg: secondWeight,
       netWeightKg: netWeight,
@@ -233,7 +260,7 @@ export async function createTicketHandler(req: Request, res: Response) {
  */
 export async function completeSecondWeightHandler(req: Request, res: Response) {
   const { id } = req.params;
-  const { secondWeightKg, secondWeight, partyName, material, amount, loadType, remarks, snapCam1, snapCam2 } = req.body;
+  const { secondWeightKg, secondWeight, partyName, material, loadType, billType, remarks, snapCam1, snapCam2 } = req.body;
   const weightVal = secondWeightKg ?? secondWeight ?? req.body.weight ?? req.body.liveWeight;
 
   if (weightVal == null || isNaN(Number(weightVal))) {
@@ -252,6 +279,9 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   const secondWeightNum = Number(weightVal);
   const firstWeight = existing.firstWeightKg ?? 0;
   const netWeight = Math.abs(secondWeightNum - firstWeight);
+  if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
+  const finalBillType = String(billType || existing.billType || 'CASH').toUpperCase();
+  const finalAmount = await calculateTicketFee(netWeight, existing.vehicleNumber, finalBillType);
 
   // Capture snapshots for the second weighment
   const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
@@ -267,9 +297,10 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       netWeightKg: netWeight,
       status: 'COMPLETED',
       tripType: 'SECOND',
+      billType: finalBillType,
+      amount: finalAmount,
       ...(partyName ? { partyName: String(partyName).trim() } : {}),
       ...(material ? { material: String(material).trim() } : {}),
-      ...(amount != null && !isNaN(Number(amount)) ? { amount: Number(amount) } : {}),
       ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
       ...(remarks ? { remarks: remarks.trim() } : {}),
       secondCam1PhotoUrl,
@@ -288,6 +319,72 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       status: 'PENDING',
     },
   }).catch((err: any) => logger.warn('[weighbridge] Auto-queue print job failed:', err.message));
+}
+
+/**
+ * Correct a saved ticket from the Ticket Register. Weight corrections always
+ * recompute net weight and the kata fee so the register, counter display and
+ * printed slip cannot disagree.
+ */
+export async function updateTicketHandler(req: Request, res: Response) {
+  const { id } = req.params;
+  const existing = await prisma.weighbridgeTicket.findUnique({ where: { id } });
+  if (!existing) throw new HttpError(404, 'Weighbridge ticket not found');
+
+  const vehicleNumber = String(req.body.vehicleNumber ?? existing.vehicleNumber).trim().toUpperCase();
+  if (!vehicleNumber) throw new HttpError(400, 'Vehicle number is required');
+
+  const firstWeight = readWeight(
+    Object.prototype.hasOwnProperty.call(req.body, 'firstWeightKg') ? req.body.firstWeightKg : existing.firstWeightKg,
+    'First weight',
+  );
+  const secondWeight = readWeight(
+    Object.prototype.hasOwnProperty.call(req.body, 'secondWeightKg') ? req.body.secondWeightKg : existing.secondWeightKg,
+    'Second weight',
+  );
+  const tripType = String(req.body.tripType ?? existing.tripType).toUpperCase();
+  const billType = String(req.body.billType ?? existing.billType).toUpperCase();
+
+  let netWeight: number | null = null;
+  let status = existing.status;
+  if (firstWeight != null && secondWeight != null) {
+    netWeight = Math.abs(firstWeight - secondWeight);
+    if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
+    status = 'COMPLETED';
+  } else if (tripType === 'SINGLE' && firstWeight != null) {
+    netWeight = firstWeight;
+    status = 'COMPLETED';
+  } else {
+    status = 'PENDING_SECOND';
+  }
+
+  const amount = status === 'COMPLETED'
+    ? await calculateTicketFee(netWeight, vehicleNumber, billType)
+    : 0;
+
+  const updated = await prisma.weighbridgeTicket.update({
+    where: { id },
+    data: {
+      vehicleNumber,
+      vehicleType: String(req.body.vehicleType ?? existing.vehicleType).toUpperCase(),
+      tripType,
+      partyName: String(req.body.partyName ?? existing.partyName ?? '').trim() || null,
+      partyMobile: String(req.body.partyMobile ?? existing.partyMobile ?? '').trim() || null,
+      material: String(req.body.material ?? existing.material ?? '').trim() || null,
+      loadType: String(req.body.loadType ?? existing.loadType).toUpperCase(),
+      billType,
+      firstWeightKg: firstWeight,
+      secondWeightKg: secondWeight,
+      netWeightKg: netWeight,
+      amount,
+      status,
+      firstWeighedAt: firstWeight != null ? (existing.firstWeighedAt ?? new Date()) : null,
+      secondWeighedAt: secondWeight != null ? (existing.secondWeighedAt ?? new Date()) : null,
+      remarks: String(req.body.remarks ?? existing.remarks ?? '').trim() || null,
+    },
+  });
+
+  res.json(updated);
 }
 
 /**

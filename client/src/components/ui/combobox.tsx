@@ -16,18 +16,22 @@ type ComboboxProps = {
   contentClassName?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  allowCustomValue?: boolean;
+  customValueLabel?: string;
 };
 
 /** Searchable single-select - a glass trigger over a filterable, frosted list. */
 export const Combobox = forwardRef<HTMLButtonElement, ComboboxProps>(function Combobox({
   options, value, onChange, placeholder = 'Select…', searchPlaceholder = 'Search…',
   emptyText = 'No matches.', className, contentClassName, disabled, ariaLabel,
+  allowCustomValue = false, customValueLabel = 'Use',
 }, ref) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const selected = options.find((o) => o.value === value);
+  const selected = options.find((o) => o.value === value)
+    ?? (allowCustomValue && value ? { value, label: value } : undefined);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return options;
@@ -78,7 +82,17 @@ export const Combobox = forwardRef<HTMLButtonElement, ComboboxProps>(function Co
           />
         </div>
         <div className="max-h-64 overflow-y-auto p-1">
-          {filtered.length === 0 ? (
+          {allowCustomValue && q.trim() && !options.some((o) => o.value.toLowerCase() === q.trim().toLowerCase()) && (
+            <button
+              type="button"
+              onClick={() => pick(q.trim())}
+              className="mb-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-primary/35 bg-primary/5 px-2.5 py-2 text-left text-sm font-medium text-primary hover:bg-primary/10"
+            >
+              <Check className="h-4 w-4 shrink-0" />
+              <span className="truncate">{customValueLabel} “{q.trim()}”</span>
+            </button>
+          )}
+          {filtered.length === 0 && !(allowCustomValue && q.trim()) ? (
             <div className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyText}</div>
           ) : (
             filtered.map((o) => (

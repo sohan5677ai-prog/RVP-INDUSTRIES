@@ -6,6 +6,7 @@ import {
   getPendingSecondWeightHandler,
   createTicketHandler,
   completeSecondWeightHandler,
+  updateTicketHandler,
   cancelTicketHandler,
   streamCctvHandler,
   snapshotCctvHandler,
@@ -49,6 +50,7 @@ router.get('/tickets', asyncHandler(getTicketsHandler));
 router.get('/pending', asyncHandler(getPendingSecondWeightHandler));
 router.get('/tickets/pending', asyncHandler(getPendingSecondWeightHandler));
 router.post('/tickets', asyncHandler(createTicketHandler));
+router.patch('/tickets/:id', asyncHandler(updateTicketHandler));
 router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/cancel', asyncHandler(cancelTicketHandler));

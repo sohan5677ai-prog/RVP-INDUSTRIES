@@ -501,11 +501,15 @@ export async function queuePrintJobHandler(req: Request, res: Response) {
   res.status(201).json(job);
 }
 
+let lastPrintAgentPollAt: number | null = null;
+
 /**
  * Fetch pending print jobs for the cabin agent to process.
  * The agent polls this endpoint every few seconds.
  */
 export async function getPendingPrintJobsHandler(_req: Request, res: Response) {
+  lastPrintAgentPollAt = Date.now();
+
   const jobs = await prisma.printJob.findMany({
     where: { status: 'PENDING' },
     orderBy: { createdAt: 'asc' },
@@ -565,14 +569,17 @@ export async function getPrintAgentStatusHandler(_req: Request, res: Response) {
     where: { status: 'PENDING' },
   });
 
+  const isPollingRecently = lastPrintAgentPollAt != null && Date.now() - lastPrintAgentPollAt < 30_000;
+  const isCompletedRecently = lastCompleted?.completedAt
+    ? Date.now() - new Date(lastCompleted.completedAt).getTime() < 120_000
+    : false;
+
   res.json({
-    lastActivity: lastCompleted?.completedAt || null,
+    lastActivity: lastCompleted?.completedAt || (lastPrintAgentPollAt ? new Date(lastPrintAgentPollAt) : null),
     lastTicketNo: lastCompleted?.ticketNo || null,
     lastStatus: lastCompleted?.status || null,
     pendingCount,
-    // Consider agent "online" if it completed a job in the last 2 minutes
-    agentOnline: lastCompleted?.completedAt
-      ? Date.now() - new Date(lastCompleted.completedAt).getTime() < 120_000
-      : false,
+    // Consider agent "online" if it polled in the last 30s or completed a job recently
+    agentOnline: isPollingRecently || isCompletedRecently,
   });
 }

@@ -63,7 +63,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
-import WeighbridgeSlipModal from '@/components/WeighbridgeSlipModal';
+import WeighbridgeSlipModal, { triggerDirectPrint } from '@/components/WeighbridgeSlipModal';
 import './WeighbridgeScreen.css';
 
 const MATERIALS = [
@@ -592,9 +592,57 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const { data: printAgentStatus } = useQuery<{ agentOnline: boolean; pendingCount: number }>({
     queryKey: ['weighbridge-print-agent-status'],
     queryFn: () => api<{ agentOnline: boolean; pendingCount: number }>('/weighbridge/print-queue/status'),
-    refetchInterval: 15000,
+    refetchInterval: 10000,
     retry: false,
   });
+
+  // Cabin Auto-Print Listener:
+  // When running on the Kata Cabin terminal (or when cabin receiver is active),
+  // automatically poll pending print jobs from the cloud and trigger silent physical print!
+  useEffect(() => {
+    const isReceiverActive = cabinMode || localStorage.getItem('rvp_cabin_auto_print_receiver') === '1';
+    if (!isReceiverActive) return;
+
+    let isPrinting = false;
+    const interval = setInterval(async () => {
+      if (isPrinting) return;
+      try {
+        const pendingJobs = await api<
+          Array<{
+            id: string;
+            ticketId: string;
+            ticketNo: number;
+            requestedBy?: string;
+            ticket?: WeighbridgeTicket;
+          }>
+        >('/weighbridge/print-queue/pending');
+
+        if (pendingJobs && pendingJobs.length > 0) {
+          isPrinting = true;
+          for (const job of pendingJobs) {
+            if (job.ticket) {
+              toast.info(`🖨️ Cabin Printer: Printing Ticket #${job.ticketNo} (from ${job.requestedBy || 'REMOTE'})...`);
+              await triggerDirectPrint(job.ticket);
+              await api(`/weighbridge/print-queue/${job.id}/complete`, {
+                method: 'PATCH',
+                body: JSON.stringify({ status: 'COMPLETED' }),
+              });
+              toast.success(`✅ Ticket #${job.ticketNo} printed!`);
+              queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
+              queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+              await new Promise((r) => setTimeout(r, 2500));
+            }
+          }
+        }
+      } catch {
+        // Ignore network interruptions
+      } finally {
+        isPrinting = false;
+      }
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [cabinMode, queryClient]);
 
   const bothCamerasOnline = Boolean(cctvStatus?.cam1.online && cctvStatus?.cam2.online);
 

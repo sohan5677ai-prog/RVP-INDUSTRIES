@@ -41,92 +41,43 @@ interface WeighbridgeSlipModalProps {
 
 const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v4';
 
-interface PrinterCalibration {
+export interface PrinterCalibration {
   offsetXmm: number;
   offsetYmm: number;
   printMode: 'stationery' | 'plain'; // 'stationery' = only 11 values/photos on pre-printed paper; 'plain' = full artwork
 }
 
-export default function WeighbridgeSlipModal({
-  ticket,
-  companyProfile: _companyProfile,
-  snapshots,
-  onClose,
-}: WeighbridgeSlipModalProps) {
-  const [calibration, setCalibration] = useState<PrinterCalibration>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_CALIBRATION_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return {
-      offsetXmm: 0,
-      offsetYmm: 0,
-      printMode: 'stationery', // Default to pre-printed stationery
-    };
-  });
-
-  const [showCalibrationBar, setShowCalibrationBar] = useState<boolean>(false);
-  const [showScreenGuide, setShowScreenGuide] = useState<boolean>(true);
-
-  // Camera images with automatic fallback to cloud/server relay
-  const [cam1Url, setCam1Url] = useState<string | null>(null);
-  const [cam2Url, setCam2Url] = useState<string | null>(null);
-  const [cam1Failed, setCam1Failed] = useState(false);
-  const [cam2Failed, setCam2Failed] = useState(false);
-
-  useEffect(() => {
-    // Priority 1: Explicit snapshot passed in (usually base64 from the live capture)
-    // Priority 2: Stored photo URL on the ticket record
-    // Priority 3: Live cloud snapshot endpoint
-    const rawCam1 = snapshots?.cam1 || ticket?.cam1PhotoUrl || null;
-    const rawCam2 = snapshots?.cam2 || ticket?.cam2PhotoUrl || null;
-
-    setCam1Url(resolveAbsoluteCamUrl(rawCam1, 1));
-    setCam2Url(resolveAbsoluteCamUrl(rawCam2, 2));
-    setCam1Failed(false);
-    setCam2Failed(false);
-  }, [snapshots, ticket?.id, ticket?.cam1PhotoUrl, ticket?.cam2PhotoUrl]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_CALIBRATION_KEY, JSON.stringify(calibration));
-    } catch {}
-  }, [calibration]);
-
-  // Extract / calculate weights safely (all hooks run unconditionally)
-  const firstWeight = ticket?.firstWeightKg ?? null;
-  const secondWeight = ticket?.secondWeightKg ?? null;
+export function renderTicketPrintHtml(
+  ticket: WeighbridgeTicket,
+  calibration: PrinterCalibration = { offsetXmm: 0, offsetYmm: 0, printMode: 'stationery' },
+  snapshots?: { cam1?: string; cam2?: string } | null
+): string {
+  const firstWeight = ticket.firstWeightKg ?? null;
+  const secondWeight = ticket.secondWeightKg ?? null;
 
   let grossWeight: number | null = null;
   let tareWeight: number | null = null;
-  let netWeight = ticket?.netWeightKg ?? null;
+  let netWeight = ticket.netWeightKg ?? null;
 
   if (firstWeight != null && secondWeight != null) {
     grossWeight = Math.max(firstWeight, secondWeight);
     tareWeight = Math.min(firstWeight, secondWeight);
     netWeight = grossWeight - tareWeight;
   } else if (firstWeight != null) {
-    // When only first weight is present, net weight must also display the first weight
-    if (netWeight == null) {
-      netWeight = firstWeight;
-    }
-    if (ticket?.tripType === 'SINGLE') {
-      grossWeight = firstWeight;
-    } else if (ticket?.loadType === 'LOAD') {
+    if (netWeight == null) netWeight = firstWeight;
+    if (ticket.tripType === 'SINGLE' || ticket.loadType === 'LOAD') {
       grossWeight = firstWeight;
     } else {
       tareWeight = firstWeight;
     }
   }
 
-  // Format Date (DD-MM-YYYY)
-  const ticketDateObj = ticket?.createdAt ? new Date(ticket.createdAt) : new Date();
+  const ticketDateObj = ticket.createdAt ? new Date(ticket.createdAt) : new Date();
   const day = String(ticketDateObj.getDate()).padStart(2, '0');
   const month = String(ticketDateObj.getMonth() + 1).padStart(2, '0');
   const year = ticketDateObj.getFullYear();
   const formattedDate = `${day}-${month}-${year}`;
 
-  // Format Time (hh:mm:ss AM/PM)
   const formattedTime = ticketDateObj.toLocaleTimeString('en-IN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -134,38 +85,28 @@ export default function WeighbridgeSlipModal({
     hour12: true,
   }).toUpperCase();
 
-  // Helper to format weight strictly as '<weight>-Kg' matching the physical slip
   const formatWeight = (val: number | null | undefined): string => {
     if (val == null || isNaN(val)) return '';
     return `${Math.round(val)}-Kg`;
   };
 
-  // Format Material matching physical slip (e.g. 'SEED' or 'PAPPU')
-  const formattedMaterial = ticket?.material ? ticket.material.trim().toUpperCase() : '';
-
-  // Format Charges as '₹ 1.00'
-  const formattedCharges = `₹ ${Number(ticket?.amount || 0).toFixed(2)}`;
-
+  const formattedMaterial = ticket.material ? ticket.material.trim().toUpperCase() : '';
+  const formattedCharges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
   const isStationeryMode = calibration.printMode === 'stationery';
 
-  // Isolated Single-Page Print Handler (Guarantees exactly 1 page in Chrome)
-  const handlePrint = () => {
-    if (!ticket) return;
-    // 1. Clean up any existing print iframe
-    const oldIframe = document.getElementById('rvp-kata-print-frame');
-    if (oldIframe) {
-      oldIframe.remove();
-    }
+  const rawCam1 = snapshots?.cam1 || ticket.cam1PhotoUrl || null;
+  const rawCam2 = snapshots?.cam2 || ticket.cam2PhotoUrl || null;
+  const cam1Url = resolveAbsoluteCamUrl(rawCam1, 1);
+  const cam2Url = resolveAbsoluteCamUrl(rawCam2, 2);
 
-    // 2. Prepare HTML for printing
-    const printDocHtml = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <title>Weighment Slip #${ticket.ticketNo}</title>
   <style>
     @page {
-      size: A4 portrait; /* Exactly matches Crystal Reports driver: A4 210 x 297 mm Portrait */
+      size: A4 portrait;
       margin: 0mm;
     }
     * {
@@ -194,7 +135,7 @@ export default function WeighbridgeSlipModal({
       top: 0;
       left: 0;
       width: 210mm;
-      height: 150mm; /* Top 150mm corresponding to the physical pre-printed slip */
+      height: 150mm;
       max-width: 210mm;
       max-height: 150mm;
       overflow: hidden;
@@ -261,7 +202,6 @@ export default function WeighbridgeSlipModal({
 <body>
   <div class="sheet">
     ${!isStationeryMode ? `
-      <!-- Plain paper duplicate borders and headers -->
       <div style="position: absolute; inset: 3mm; border: 2px solid #dc2626; border-radius: 8px; pointer-events: none;">
         <div style="position: absolute; top: 2mm; left: 0; right: 0; text-align: center;">
           <h1 style="font-size: 23px; font-weight: 900; color: #b91c1c; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; text-transform: uppercase; letter-spacing: 0.5px;">RVP WEIGH BRIDGE</h1>
@@ -303,132 +243,234 @@ export default function WeighbridgeSlipModal({
       </div>
     ` : ''}
 
-    <!-- 1. S. No. -->
     <div class="val" style="top: 43.5mm; left: 23mm; width: 45mm; height: 8mm; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;">
       ${ticket.ticketNo}
     </div>
 
-    <!-- 2. DATE -->
     <div class="val" style="top: 43.5mm; left: 89mm; width: 44mm; height: 8mm; font-size: 14px; font-weight: 800;">
       ${formattedDate}
     </div>
 
-    <!-- 3. TIME -->
     <div class="val" style="top: 43.5mm; left: 154mm; width: 48mm; height: 8mm; font-size: 14px; font-weight: 800;">
       ${formattedTime}
     </div>
 
-    <!-- 4. CCTV Camera 1 -->
     <div class="cam-box" style="top: 53.5mm; left: 4mm; width: 96mm; height: 52mm;">
-      ${cam1Url && !cam1Failed ? `<img src="${resolveAbsoluteCamUrl(cam1Url, 1)}" alt="CAM 1" crossorigin="anonymous" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
+      ${cam1Url ? `<img src="${cam1Url}" alt="CAM 1" crossorigin="anonymous" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
-    <!-- 5. CCTV Camera 2 -->
     <div class="cam-box" style="top: 53.5mm; left: 106mm; width: 96mm; height: 52mm;">
-      ${cam2Url && !cam2Failed ? `<img src="${resolveAbsoluteCamUrl(cam2Url, 2)}" alt="CAM 2" crossorigin="anonymous" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
+      ${cam2Url ? `<img src="${cam2Url}" alt="CAM 2" crossorigin="anonymous" /><div class="cam-stamp">${formattedDate} ${formattedTime}</div>` : ''}
     </div>
 
-    <!-- 6. Vehicle No. -->
     <div class="val" style="top: 113.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;">
       ${ticket.vehicleNumber}
     </div>
 
-    <!-- 7. 1st Weight -->
     <div class="val" style="top: 113.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800;">
       ${firstWeight != null ? formatWeight(firstWeight) : ''}
     </div>
 
-    <!-- 8. 2nd Weight -->
     <div class="val" style="top: 113.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800;">
       ${secondWeight != null ? formatWeight(secondWeight) : ''}
     </div>
 
-    <!-- 9. Net Weight -->
     <div class="val" style="top: 113.5mm; left: 157mm; width: 48mm; height: 7.5mm; font-size: 16px; font-weight: 800;">
       ${netWeight != null ? formatWeight(netWeight) : ''}
     </div>
 
-    <!-- 10. Party Name -->
     <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; font-weight: 800; padding: 0 2px;">
       ${ticket.partyName || ''}
     </div>
 
-    <!-- 11. Material -->
     <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 14px; font-weight: 800; padding: 0 2px;">
       ${formattedMaterial}
     </div>
 
-    <!-- 12. Charges -->
     <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px; font-weight: 800;">
       ${formattedCharges}
     </div>
   </div>
 </body>
 </html>`;
+}
 
-    // 3. Create isolated 210mm x 150mm iframe
-    const iframe = document.createElement('iframe');
-    iframe.id = 'rvp-kata-print-frame';
-    iframe.style.position = 'fixed';
-    iframe.style.left = '-9999px';
-    iframe.style.top = '-9999px';
-    iframe.style.width = '210mm';
-    iframe.style.height = '150mm';
-    iframe.style.border = '0';
-    document.body.appendChild(iframe);
+export function triggerDirectPrint(
+  ticket: WeighbridgeTicket,
+  calibration?: PrinterCalibration,
+  snapshots?: { cam1?: string; cam2?: string } | null
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const savedCalib = calibration || (() => {
+        try {
+          const s = localStorage.getItem('rvp_kata_printer_calibration_v4');
+          if (s) return JSON.parse(s);
+        } catch {}
+        return { offsetXmm: 0, offsetYmm: 0, printMode: 'stationery' as const };
+      })();
 
-    const doc = iframe.contentWindow?.document;
-    if (!doc) return;
+      const oldIframe = document.getElementById('rvp-kata-print-frame');
+      if (oldIframe) oldIframe.remove();
 
-    doc.open();
-    doc.write(printDocHtml);
-    doc.close();
+      const printDocHtml = renderTicketPrintHtml(ticket, savedCalib, snapshots);
 
-    const triggerIframePrint = () => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch (err) {
-        console.error('Iframe print error, falling back to window.print', err);
-        window.print();
+      const iframe = document.createElement('iframe');
+      iframe.id = 'rvp-kata-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '-9999px';
+      iframe.style.width = '210mm';
+      iframe.style.height = '150mm';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (!doc) {
+        resolve(false);
+        return;
       }
-    };
 
-    // Ensure images are fully loaded before firing print preview
-    // Give extra time for cross-origin cloud images to resolve
-    const imgs = doc.images;
-    if (!imgs || imgs.length === 0) {
-      setTimeout(triggerIframePrint, 300);
-    } else {
-      let loaded = 0;
-      const total = imgs.length;
-      const done = () => {
-        loaded++;
-        if (loaded >= total) {
-          // Extra 300ms buffer for image rendering to complete
-          setTimeout(triggerIframePrint, 300);
+      doc.open();
+      doc.write(printDocHtml);
+      doc.close();
+
+      const doPrint = () => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch {
+          window.print();
         }
+        resolve(true);
       };
-      // Safety timeout: if images haven't loaded in 6 seconds, print anyway
-      const safetyTimer = setTimeout(() => {
-        if (loaded < total) {
-          console.warn('[WeighbridgeSlip] Print safety timeout: printing with partially loaded images');
-          triggerIframePrint();
-        }
-      }, 6000);
-      for (let i = 0; i < total; i++) {
-        if (imgs[i].complete) {
+
+      const imgs = doc.images;
+      if (!imgs || imgs.length === 0) {
+        setTimeout(doPrint, 300);
+      } else {
+        let loaded = 0;
+        const total = imgs.length;
+        const done = () => {
           loaded++;
-        } else {
-          imgs[i].onload = done;
-          imgs[i].onerror = done;
+          if (loaded >= total) setTimeout(doPrint, 300);
+        };
+        const safetyTimer = setTimeout(() => {
+          if (loaded < total) doPrint();
+        }, 5000);
+        for (let i = 0; i < total; i++) {
+          if (imgs[i].complete) loaded++;
+          else {
+            imgs[i].onload = done;
+            imgs[i].onerror = done;
+          }
+        }
+        if (loaded >= total) {
+          clearTimeout(safetyTimer);
+          setTimeout(doPrint, 300);
         }
       }
-      if (loaded >= total) {
-        clearTimeout(safetyTimer);
-        setTimeout(triggerIframePrint, 300);
-      }
+    } catch (err) {
+      console.error('triggerDirectPrint error:', err);
+      resolve(false);
     }
+  });
+}
+
+export default function WeighbridgeSlipModal({
+  ticket,
+  companyProfile: _companyProfile,
+  snapshots,
+  onClose,
+}: WeighbridgeSlipModalProps) {
+  const [calibration, setCalibration] = useState<PrinterCalibration>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_CALIBRATION_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      offsetXmm: 0,
+      offsetYmm: 0,
+      printMode: 'stationery', // Default to pre-printed stationery
+    };
+  });
+
+  const [showCalibrationBar, setShowCalibrationBar] = useState<boolean>(false);
+  const [showScreenGuide, setShowScreenGuide] = useState<boolean>(true);
+
+  // Camera images with automatic fallback to cloud/server relay
+  const [cam1Url, setCam1Url] = useState<string | null>(null);
+  const [cam2Url, setCam2Url] = useState<string | null>(null);
+  const [cam1Failed, setCam1Failed] = useState(false);
+  const [cam2Failed, setCam2Failed] = useState(false);
+
+  useEffect(() => {
+    const rawCam1 = snapshots?.cam1 || ticket?.cam1PhotoUrl || null;
+    const rawCam2 = snapshots?.cam2 || ticket?.cam2PhotoUrl || null;
+
+    setCam1Url(resolveAbsoluteCamUrl(rawCam1, 1));
+    setCam2Url(resolveAbsoluteCamUrl(rawCam2, 2));
+    setCam1Failed(false);
+    setCam2Failed(false);
+  }, [snapshots, ticket?.id, ticket?.cam1PhotoUrl, ticket?.cam2PhotoUrl]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_CALIBRATION_KEY, JSON.stringify(calibration));
+    } catch {}
+  }, [calibration]);
+
+  // Extract / calculate weights safely (all hooks run unconditionally)
+  const firstWeight = ticket?.firstWeightKg ?? null;
+  const secondWeight = ticket?.secondWeightKg ?? null;
+
+  let grossWeight: number | null = null;
+  let tareWeight: number | null = null;
+  let netWeight = ticket?.netWeightKg ?? null;
+
+  if (firstWeight != null && secondWeight != null) {
+    grossWeight = Math.max(firstWeight, secondWeight);
+    tareWeight = Math.min(firstWeight, secondWeight);
+    netWeight = grossWeight - tareWeight;
+  } else if (firstWeight != null) {
+    if (netWeight == null) {
+      netWeight = firstWeight;
+    }
+    if (ticket?.tripType === 'SINGLE') {
+      grossWeight = firstWeight;
+    } else if (ticket?.loadType === 'LOAD') {
+      grossWeight = firstWeight;
+    } else {
+      tareWeight = firstWeight;
+    }
+  }
+
+  const ticketDateObj = ticket?.createdAt ? new Date(ticket.createdAt) : new Date();
+  const day = String(ticketDateObj.getDate()).padStart(2, '0');
+  const month = String(ticketDateObj.getMonth() + 1).padStart(2, '0');
+  const year = ticketDateObj.getFullYear();
+  const formattedDate = `${day}-${month}-${year}`;
+
+  const formattedTime = ticketDateObj.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  }).toUpperCase();
+
+  const formatWeight = (val: number | null | undefined): string => {
+    if (val == null || isNaN(val)) return '';
+    return `${Math.round(val)}-Kg`;
+  };
+
+  const formattedMaterial = ticket?.material ? ticket.material.trim().toUpperCase() : '';
+  const formattedCharges = `₹ ${Number(ticket?.amount || 0).toFixed(2)}`;
+  const isStationeryMode = calibration.printMode === 'stationery';
+
+  // Isolated Single-Page Print Handler (Guarantees exactly 1 page in Chrome)
+  const handlePrint = () => {
+    if (!ticket) return;
+    triggerDirectPrint(ticket, calibration, snapshots);
   };
 
   // Keyboard shortcut listener for F12 or Ctrl+P while slip modal is active

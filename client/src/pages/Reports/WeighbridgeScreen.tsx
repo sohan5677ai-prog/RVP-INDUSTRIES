@@ -64,7 +64,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
-import WeighbridgeSlipModal, { triggerDirectPrint, triggerSilentLocalPrint } from '@/components/WeighbridgeSlipModal';
+import WeighbridgeSlipModal from '@/components/WeighbridgeSlipModal';
 import './WeighbridgeScreen.css';
 
 const MATERIALS = [
@@ -639,76 +639,18 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   });
 
   // Cabin print agent status
-  const { data: printAgentStatus } = useQuery<{ agentOnline: boolean; pendingCount: number }>({
+  const { data: printAgentStatus } = useQuery<{
+    agentOnline: boolean;
+    pendingCount: number;
+    printerName?: string | null;
+    printerReady?: boolean | null;
+    printerError?: string | null;
+  }>({
     queryKey: ['weighbridge-print-agent-status'],
-    queryFn: () => api<{ agentOnline: boolean; pendingCount: number }>('/weighbridge/print-queue/status'),
+    queryFn: () => api('/weighbridge/print-queue/status'),
     refetchInterval: 10000,
     retry: false,
   });
-
-  // Cabin Auto-Print Listener:
-  // When running on the Kata Cabin terminal (or when cabin receiver is active),
-  // automatically poll pending print jobs from the cloud and trigger silent physical print!
-  useEffect(() => {
-    const isReceiverActive = cabinMode || localStorage.getItem('rvp_cabin_auto_print_receiver') === '1';
-    if (!isReceiverActive) return;
-
-    let isPrinting = false;
-    const interval = setInterval(async () => {
-      if (isPrinting) return;
-      try {
-        const pendingJobs = await api<
-          Array<{
-            id: string;
-            ticketId: string;
-            ticketNo: number;
-            requestedBy?: string;
-            ticket?: WeighbridgeTicket;
-          }>
-        >('/weighbridge/print-queue/pending');
-
-        if (pendingJobs && pendingJobs.length > 0) {
-          isPrinting = true;
-          for (const job of pendingJobs) {
-            if (job.ticket) {
-              // 1. First attempt direct silent print to local cabin agent (port 4001)
-              const silentOk = await triggerSilentLocalPrint(job.ticket);
-              if (silentOk) {
-                await api(`/weighbridge/print-queue/${job.id}/complete`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ status: 'COMPLETED' }),
-                });
-                toast.success(`✅ Ticket #${job.ticketNo} printed automatically on Cabin Printer!`);
-                queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
-                queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
-              } else if (printAgentStatus?.agentOnline) {
-                // Background print agent is already polling the cloud and printing silently!
-                // Do NOT invoke browser print dialog. Just show notification.
-                toast.info(`🖨️ Cabin Printer: Ticket #${job.ticketNo} is printing automatically...`);
-              } else {
-                // Only if browser fallback is explicitly requested
-                if (localStorage.getItem('rvp_enable_browser_print_fallback') === '1') {
-                  await triggerDirectPrint(job.ticket);
-                  await api(`/weighbridge/print-queue/${job.id}/complete`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ status: 'COMPLETED' }),
-                  });
-                  toast.success(`✅ Ticket #${job.ticketNo} printed!`);
-                }
-              }
-              await new Promise((r) => setTimeout(r, 2000));
-            }
-          }
-        }
-      } catch {
-        // Ignore network interruptions
-      } finally {
-        isPrinting = false;
-      }
-    }, 3500);
-
-    return () => clearInterval(interval);
-  }, [cabinMode, queryClient, printAgentStatus?.agentOnline]);
 
   const bothCamerasOnline = Boolean(cctvStatus?.cam1.online && cctvStatus?.cam2.online);
 
@@ -866,21 +808,23 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         };
       }
     },
-    onSuccess: ({ ticket, snapshots }) => {
+    onSuccess: ({ ticket }) => {
       toast.success(`Ticket #${ticket.ticketNo} saved successfully!`);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
 
-      // In cabin mode, attempt instant silent print or let background agent print automatically
-      if (cabinMode) {
-        toast.info(`🖨️ Ticket #${ticket.ticketNo} printing automatically on Cabin Printer...`, { duration: 3500 });
-        triggerSilentLocalPrint(ticket, undefined, snapshots).catch(() => {});
+      // The server creates exactly one cloud print job for every saved ticket.
+      // The cabin agent is the sole consumer, so every device behaves identically
+      // and saving never opens a local browser preview or creates a duplicate print.
+      if (printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false) {
+        toast.success(`🖨️ Ticket #${ticket.ticketNo} sent to ${printAgentStatus.printerName || 'Cabin Printer'}.`, { duration: 3500 });
       } else {
-        toast.info('🖨️ Slip queued for cabin printer', { duration: 3000 });
-        // For non-cabin desktop screens, show the slip modal preview
-        setSlipModalTicket(ticket);
-        setActiveSnapshots(snapshots);
+        toast.warning(
+          `Ticket #${ticket.ticketNo} is saved and queued. ${printAgentStatus?.printerError || 'Cabin printer is currently offline.'}`,
+          { duration: 6500 }
+        );
       }
 
       // Reset form if completed
@@ -963,19 +907,25 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div
                 className={cn(
                   'flex items-center gap-2 h-9 px-3 rounded-lg border text-xs font-mono font-medium shadow-sm',
-                  printAgentStatus?.agentOnline
+                  printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false
                     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                    : 'border-stone-500/30 bg-stone-500/10 text-stone-500 dark:text-stone-400'
+                    : printAgentStatus?.agentOnline
+                      ? 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400'
+                      : 'border-stone-500/30 bg-stone-500/10 text-stone-500 dark:text-stone-400'
                 )}
-                title={printAgentStatus?.agentOnline
-                  ? `Cabin printer online · ${printAgentStatus.pendingCount} pending jobs`
-                  : 'Cabin print agent not detected. Start cabin-print-agent.mjs on the cabin PC.'}
+                title={printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false
+                  ? `${printAgentStatus.printerName || 'Cabin printer'} ready · ${printAgentStatus.pendingCount} pending jobs`
+                  : printAgentStatus?.printerError || (printAgentStatus?.agentOnline
+                    ? 'Cabin print agent is online, but the physical printer is not ready.'
+                    : 'Cabin print agent not detected. Start cabin-print-agent.mjs on the cabin PC.')}
               >
                 <Printer className="h-3.5 w-3.5" />
                 <span>
-                  {printAgentStatus?.agentOnline
-                    ? `Cabin Printer: Online${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
-                    : 'Cabin Printer: Offline'}
+                  {printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false
+                    ? `${printAgentStatus.printerName || 'Cabin Printer'}: Ready${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
+                    : printAgentStatus?.agentOnline
+                      ? `Cabin Printer: Check connection${printAgentStatus.pendingCount > 0 ? ` (${printAgentStatus.pendingCount} queued)` : ''}`
+                      : 'Cabin Printer: Offline'}
                 </span>
               </div>
             </div>

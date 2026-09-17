@@ -507,6 +507,18 @@ export async function queuePrintJobHandler(req: Request, res: Response) {
 }
 
 let lastPrintAgentPollAt: number | null = null;
+let lastPrintAgentPrinter: string | null = null;
+let lastPrintAgentReady: boolean | null = null;
+let lastPrintAgentError: string | null = null;
+
+function decodePrintAgentHeader(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value).slice(0, 500);
+  } catch {
+    return value.slice(0, 500);
+  }
+}
 
 /**
  * Fetch pending print jobs for the cabin agent to process.
@@ -517,7 +529,13 @@ export async function getPendingPrintJobsHandler(req: Request, res: Response) {
     throw new HttpError(401, 'Unauthorized print agent');
   }
 
-  lastPrintAgentPollAt = Date.now();
+  if (isTrustedCameraBridge(req)) {
+    lastPrintAgentPollAt = Date.now();
+    lastPrintAgentPrinter = decodePrintAgentHeader(req.get('X-Print-Agent-Printer'));
+    const readyHeader = req.get('X-Print-Agent-Ready');
+    lastPrintAgentReady = readyHeader == null ? null : readyHeader === 'true';
+    lastPrintAgentError = decodePrintAgentHeader(req.get('X-Print-Agent-Error'));
+  }
 
   const jobs = await prisma.printJob.findMany({
     where: { status: 'PENDING' },
@@ -583,16 +601,15 @@ export async function getPrintAgentStatusHandler(_req: Request, res: Response) {
   });
 
   const isPollingRecently = lastPrintAgentPollAt != null && Date.now() - lastPrintAgentPollAt < 30_000;
-  const isCompletedRecently = lastCompleted?.completedAt
-    ? Date.now() - new Date(lastCompleted.completedAt).getTime() < 120_000
-    : false;
-
   res.json({
     lastActivity: lastCompleted?.completedAt || (lastPrintAgentPollAt ? new Date(lastPrintAgentPollAt) : null),
     lastTicketNo: lastCompleted?.ticketNo || null,
     lastStatus: lastCompleted?.status || null,
     pendingCount,
-    // Consider agent "online" if it polled in the last 30s or completed a job recently
-    agentOnline: isPollingRecently || isCompletedRecently,
+    // A historical completion must not make a stopped agent look online.
+    agentOnline: isPollingRecently,
+    printerName: isPollingRecently ? lastPrintAgentPrinter : null,
+    printerReady: isPollingRecently ? lastPrintAgentReady : false,
+    printerError: isPollingRecently ? lastPrintAgentError : 'Cabin print agent is offline.',
   });
 }

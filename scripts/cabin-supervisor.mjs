@@ -174,6 +174,41 @@ setInterval(() => {
       startService('cctv');
     }
   });
+
+  // Also check Cabin Print Agent health on port 4001
+  const printer = services.printer;
+  if (printer.proc && Date.now() - printer.lastStarted >= 10000) {
+    const reqPrint = http.get('http://127.0.0.1:4001/status', { timeout: 5000 }, (res) => {
+      let pData = '';
+      res.on('data', (c) => { pData += c; });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          printer.healthConsecutiveFailures = 0;
+        } else {
+          printer.healthConsecutiveFailures += 1;
+        }
+      });
+    });
+
+    reqPrint.on('error', (err) => {
+      printer.healthConsecutiveFailures += 1;
+      if (printer.healthConsecutiveFailures >= 3) {
+        log('warn', `Cabin Print Agent unresponsive on http://127.0.0.1:4001 (${err.message}). Restarting...`);
+        printer.healthConsecutiveFailures = 0;
+        startService('printer');
+      }
+    });
+
+    reqPrint.on('timeout', () => {
+      reqPrint.destroy();
+      printer.healthConsecutiveFailures += 1;
+      if (printer.healthConsecutiveFailures >= 3) {
+        log('warn', `Cabin Print Agent health check timed out 3 times. Restarting...`);
+        printer.healthConsecutiveFailures = 0;
+        startService('printer');
+      }
+    });
+  }
 }, 15000);
 
 // ─────────────────────────────────────────────────────────────────────────────

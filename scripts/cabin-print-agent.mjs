@@ -26,6 +26,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import ptp from 'pdf-to-printer';
 
@@ -156,7 +157,7 @@ async function getCabinAuthToken() {
 // HTTP helpers
 // ──────────────────────────────────────────────────────────────────────
 
-async function httpRequest(method, urlStr, body = null) {
+async function httpRequest(method, urlStr, body = null, extraHeaders = {}) {
   const token = await getCabinAuthToken();
 
   return new Promise((resolve, reject) => {
@@ -168,6 +169,7 @@ async function httpRequest(method, urlStr, body = null) {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'X-CCTV-Bridge-Key': CONFIG.bridgeKey,
+      ...extraHeaders,
     };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -411,9 +413,212 @@ async function ensureBrowser() {
   return null;
 }
 
+function isVirtualPrinterName(printerName) {
+  if (!printerName) return true;
+  const lower = String(printerName).toLowerCase();
+  return (
+    lower.includes('pdf') ||
+    lower.includes('onenote') ||
+    lower.includes('xps') ||
+    lower.includes('fax') ||
+    lower.includes('document writer') ||
+    lower.includes('cute') ||
+    lower.includes('foxit') ||
+    lower.includes('nitro') ||
+    lower.includes('portprompt')
+  );
+}
+
+async function resolveCabinPrinter() {
+  let allPrinters = [];
+  try {
+    allPrinters = await ptp.getPrinters();
+  } catch (err) {
+    console.warn('[PRINT-AGENT] Failed to list printers:', err.message);
+  }
+
+  // 1. If explicit printer specified in config
+  if (CONFIG.printerName) {
+    const matched = allPrinters.find(p => p.name.toLowerCase() === CONFIG.printerName.toLowerCase());
+    if (matched) {
+      return {
+        name: matched.name,
+        isVirtual: isVirtualPrinterName(matched.name),
+        allPrinters,
+      };
+    }
+    console.warn(`[PRINT-AGENT] Configured printer "${CONFIG.printerName}" not found in system.`);
+  }
+
+  // 2. Check default printer
+  let defaultPrinter = null;
+  try {
+    defaultPrinter = await ptp.getDefaultPrinter();
+  } catch {}
+
+  if (defaultPrinter && !isVirtualPrinterName(defaultPrinter.name)) {
+    return {
+      name: defaultPrinter.name,
+      isVirtual: false,
+      allPrinters,
+    };
+  }
+
+  // 3. If default printer is virtual, search for any physical printer installed
+  const physical = allPrinters.find(p => !isVirtualPrinterName(p.name));
+  if (physical) {
+    console.log(`[PRINT-AGENT] Auto-detected physical printer: "${physical.name}" (default is virtual: "${defaultPrinter?.name || 'none'}")`);
+    return {
+      name: physical.name,
+      isVirtual: false,
+      allPrinters,
+    };
+  }
+
+  // 4. Only virtual printers exist (e.g. Microsoft Print to PDF)
+  return {
+    name: defaultPrinter?.name || 'Microsoft Print to PDF',
+    isVirtual: true,
+    allPrinters,
+  };
+}
+
+function runPowerShellJson(script, env = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        windowsHide: true,
+        timeout: 10000,
+        env: { ...process.env, ...env },
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error((stderr || error.message || 'PowerShell command failed').trim()));
+          return;
+        }
+        const text = String(stdout || '').trim();
+        if (!text) {
+          resolve(null);
+          return;
+        }
+        try {
+          resolve(JSON.parse(text));
+        } catch {
+          reject(new Error(`Invalid printer status response: ${text}`));
+        }
+      }
+    );
+  });
+}
+
+async function inspectPrinterState(target = null) {
+  const printer = target || await resolveCabinPrinter();
+  if (printer.isVirtual) {
+    return {
+      ...printer,
+      ready: false,
+      error: `No physical printer is installed (selected: ${printer.name}).`,
+    };
+  }
+
+  if (process.platform !== 'win32') {
+    return { ...printer, ready: true, error: null };
+  }
+
+  try {
+    const state = await runPowerShellJson(
+      "$printer = Get-Printer -Name $env:RVP_PRINTER_NAME -ErrorAction Stop; " +
+      "$badJobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | " +
+      "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked|UserIntervention' }); " +
+      "[pscustomobject]@{ printerStatus = [string]$printer.PrinterStatus; workOffline = [bool]$printer.WorkOffline; " +
+      "badJobCount = $badJobs.Count; badJobStatus = if ($badJobs.Count) { [string]$badJobs[0].JobStatus } else { '' } } | ConvertTo-Json -Compress",
+      { RVP_PRINTER_NAME: printer.name }
+    );
+    const printerStatus = String(state?.printerStatus || 'Unknown');
+    const notReady = Boolean(state?.workOffline) || Number(state?.badJobCount || 0) > 0 || /error|offline|paperout|notavailable/i.test(printerStatus);
+    return {
+      ...printer,
+      ready: !notReady,
+      error: notReady
+        ? `Printer ${printer.name} is not ready (${state?.badJobStatus || printerStatus}). Check power, paper and USB cable.`
+        : null,
+    };
+  } catch (err) {
+    return { ...printer, ready: false, error: `Cannot read printer status: ${err.message}` };
+  }
+}
+
+async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 20000) {
+  if (process.platform !== 'win32') return;
+
+  const startedAt = Date.now();
+  let sawJob = false;
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await runPowerShellJson(
+      "$jobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction Stop | " +
+      "Where-Object { $_.DocumentName -eq $env:RVP_PRINT_DOCUMENT } | " +
+      "Select-Object Id,DocumentName,JobStatus,PagesPrinted,TotalPages); " +
+      "if ($jobs.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject @($jobs) -Compress }",
+      { RVP_PRINTER_NAME: printerName, RVP_PRINT_DOCUMENT: pdfFile }
+    );
+    const jobs = Array.isArray(result) ? result : (result ? [result] : []);
+
+    if (jobs.length === 0) {
+      if (sawJob || Date.now() - startedAt >= 3000) return;
+    } else {
+      sawJob = true;
+      const status = jobs.map(job => String(job.JobStatus || '')).join(', ');
+      if (/error|offline|paperout|blocked|userintervention/i.test(status)) {
+        throw new Error(`PRINTER_NOT_READY: Windows spooler reports ${status} for ${printerName}. Check printer power and USB cable.`);
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 750));
+  }
+
+  throw new Error(`PRINTER_NOT_READY: Print job stayed in the Windows spooler for more than ${Math.round(timeoutMs / 1000)} seconds on ${printerName}.`);
+}
+
+async function printWithTimeout(pdfFile, printOptions, timeoutMs = 15000) {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(async () => {
+      try {
+        if (process.platform === 'win32') {
+          const { exec } = await import('child_process');
+          exec('taskkill /F /IM SumatraPDF* /T');
+        }
+      } catch {}
+      reject(new Error(`Print spooler timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      ptp.print(pdfFile, printOptions),
+      timeoutPromise,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function printSlipHtml(html, ticketNo) {
+  const target = await resolveCabinPrinter();
+
+  if (target.isVirtual) {
+    console.warn(`[PRINT-AGENT] ⚠️ Cannot print silently: Target printer "${target.name}" is a virtual/PDF printer which requires an interactive file dialog.`);
+    throw new Error(`NO_PHYSICAL_PRINTER: Default printer "${target.name}" is a virtual PDF printer. Please connect a physical printer or use browser print.`);
+  }
+
+  const health = await inspectPrinterState(target);
+  if (!health.ready) {
+    throw new Error(`PRINTER_NOT_READY: ${health.error}`);
+  }
+
   const b = await ensureBrowser();
-  
   if (!b) {
     const tempFile = path.join(SCRIPT_DIR, `temp_slip_${ticketNo}.html`);
     fs.writeFileSync(tempFile, html, 'utf8');
@@ -422,11 +627,12 @@ async function printSlipHtml(html, ticketNo) {
   }
 
   const page = await b.newPage();
+  const pdfFile = path.join(SCRIPT_DIR, `temp_slip_${ticketNo}_${Date.now()}.pdf`);
   try {
     await page.setContent(html, { waitUntil: 'load', timeout: 15000 });
     
     // Wait a brief moment for images/fonts to render
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 1200));
     
     // Render exact 210mm x 150mm PDF
     const pdfBuffer = await page.pdf({
@@ -436,27 +642,24 @@ async function printSlipHtml(html, ticketNo) {
       margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
     });
 
-    const pdfFile = path.join(SCRIPT_DIR, `temp_slip_${ticketNo}_${Date.now()}.pdf`);
     fs.writeFileSync(pdfFile, pdfBuffer);
 
-    // Silent print directly to physical printer via SumatraPDF in pdf-to-printer
+    // Silent print directly to physical printer via SumatraPDF in pdf-to-printer with strict 15s timeout
     const printOptions = {
       silent: true,
+      printer: target.name,
     };
-    if (CONFIG.printerName) {
-      printOptions.printer = CONFIG.printerName;
-    }
 
-    console.log(`[PRINT-AGENT] 🖨️  Sending Ticket #${ticketNo} directly to ${CONFIG.printerName || 'default printer'} (silent print)...`);
-    await ptp.print(pdfFile, printOptions);
-    console.log(`[PRINT-AGENT] ✅ Ticket #${ticketNo} successfully printed.`);
-
-    // Cleanup temp file after 15 seconds
+    console.log(`[PRINT-AGENT] 🖨️  Sending Ticket #${ticketNo} directly to physical printer "${target.name}" (silent print)...`);
+    await printWithTimeout(pdfFile, printOptions, 15000);
+    await waitForWindowsSpooler(pdfFile, target.name);
+    console.log(`[PRINT-AGENT] ✅ Ticket #${ticketNo} accepted and completed by "${target.name}".`);
+  } finally {
+    await page.close().catch(() => {});
+    // Cleanup temp file after 10 seconds
     setTimeout(() => {
       try { fs.unlinkSync(pdfFile); } catch {}
-    }, 15000);
-  } finally {
-    await page.close();
+    }, 10000);
   }
 }
 
@@ -473,13 +676,18 @@ const localServer = http.createServer(async (req, res) => {
   }
 
   if (req.url === '/status' && req.method === 'GET') {
-    let defaultPrinter = 'Unknown';
-    try {
-      const p = await ptp.getDefaultPrinter();
-      defaultPrinter = p?.name || 'Default';
-    } catch {}
+    const target = await inspectPrinterState();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'online', printer: defaultPrinter, configPrinter: CONFIG.printerName || null }));
+    res.end(JSON.stringify({
+      status: 'online',
+      printer: target.name,
+      isVirtual: target.isVirtual,
+      canSilentPrint: target.ready,
+      printerReady: target.ready,
+      printerError: target.error,
+      configPrinter: CONFIG.printerName || null,
+      availablePrinters: target.allPrinters.map(p => p.name),
+    }));
     return;
   }
 
@@ -492,7 +700,7 @@ const localServer = http.createServer(async (req, res) => {
         const ticket = payload.ticket;
         if (!ticket) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'ticket is required' }));
+          res.end(JSON.stringify({ success: false, error: 'ticket is required' }));
           return;
         }
         console.log(`[PRINT-AGENT] Direct local print request for Ticket #${ticket.ticketNo}`);
@@ -502,8 +710,13 @@ const localServer = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: true, ticketNo: ticket.ticketNo }));
       } catch (err) {
         console.error('[PRINT-AGENT] Direct local print failed:', err.message);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+        const isVirtual = err.message?.includes('NO_PHYSICAL_PRINTER');
+        res.writeHead(isVirtual ? 422 : 500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: err.message,
+          noPhysicalPrinter: isVirtual,
+        }));
       }
     });
     return;
@@ -532,14 +745,32 @@ localServer.listen(CONFIG.localPort, '127.0.0.1', () => {
 
 let isProcessing = false;
 let consecutiveErrors = 0;
+const retryAfterByJobId = new Map();
+
+function isRetryablePrinterError(error) {
+  const message = String(error?.message || error || '');
+  return message.includes('NO_PHYSICAL_PRINTER') || message.includes('PRINTER_NOT_READY');
+}
 
 async function pollAndPrint() {
   if (isProcessing) return;
   isProcessing = true;
 
   try {
+    const printerState = await inspectPrinterState();
+    const agentHeaders = {
+      'X-Print-Agent-Printer': encodeURIComponent(printerState.name || ''),
+      'X-Print-Agent-Ready': printerState.ready ? 'true' : 'false',
+      'X-Print-Agent-Error': encodeURIComponent(printerState.error || ''),
+    };
+
     // 1. Fetch pending print jobs from cloud
-    const { status, data } = await httpRequest('GET', `${CONFIG.cloudApiUrl}/weighbridge/print-queue/pending`);
+    const { status, data } = await httpRequest(
+      'GET',
+      `${CONFIG.cloudApiUrl}/weighbridge/print-queue/pending`,
+      null,
+      agentHeaders
+    );
     
     if (status !== 200 || !Array.isArray(data)) {
       throw new Error(`Unexpected response: HTTP ${status}`);
@@ -560,6 +791,9 @@ async function pollAndPrint() {
 
     // 2. Process each job
     for (const job of data) {
+      const retryAfter = retryAfterByJobId.get(job.id) || 0;
+      if (retryAfter > Date.now()) continue;
+
       const ticket = job.ticket;
       if (!ticket) {
         console.warn(`[PRINT-AGENT] Job ${job.id} has no ticket data. Marking as failed.`);
@@ -580,9 +814,15 @@ async function pollAndPrint() {
         await httpRequest('PATCH', `${CONFIG.cloudApiUrl}/weighbridge/print-queue/${job.id}/complete`, {
           status: 'COMPLETED',
         });
+        retryAfterByJobId.delete(job.id);
         console.log(`[PRINT-AGENT] ✅ Ticket #${ticket.ticketNo} printed and marked complete.`);
       } catch (printErr) {
         console.error(`[PRINT-AGENT] ❌ Failed to print Ticket #${ticket.ticketNo}:`, printErr.message);
+        if (isRetryablePrinterError(printErr)) {
+          retryAfterByJobId.set(job.id, Date.now() + 30000);
+          console.warn(`[PRINT-AGENT] Ticket #${ticket.ticketNo} remains queued; retrying when the physical printer is ready.`);
+          continue;
+        }
         await httpRequest('PATCH', `${CONFIG.cloudApiUrl}/weighbridge/print-queue/${job.id}/complete`, {
           status: 'FAILED',
           error: printErr.message,

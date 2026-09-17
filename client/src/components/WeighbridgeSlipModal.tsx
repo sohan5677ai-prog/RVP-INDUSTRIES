@@ -399,7 +399,7 @@ export async function triggerSilentLocalPrint(
     const html = renderTicketPrintHtml(ticket, savedCalib, snapshots);
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3000);
+    const timer = setTimeout(() => ctrl.abort(), 12000);
 
     const res = await fetch('http://127.0.0.1:4001/print', {
       method: 'POST',

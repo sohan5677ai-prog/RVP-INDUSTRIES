@@ -519,7 +519,7 @@ async function inspectPrinterState(target = null) {
     return {
       ...printer,
       ready: false,
-      error: `No physical printer is installed (selected: ${printer.name}).`,
+      error: `Virtual/PDF printer selected (${printer.name}). Physical printer required for silent printing.`,
     };
   }
 
@@ -530,36 +530,56 @@ async function inspectPrinterState(target = null) {
   try {
     const state = await runPowerShellJson(
       "$printer = Get-Printer -Name $env:RVP_PRINTER_NAME -ErrorAction Stop; " +
+      "$isUsb = [string]$printer.PortName -match '^USB'; " +
+      "$usbHw = if ($isUsb) { @(Get-PnpDevice -Class Printer -PresentOnly -ErrorAction SilentlyContinue).Count } else { 1 }; " +
       "$badJobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | " +
       "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked|UserIntervention' }); " +
-      "[pscustomobject]@{ printerStatus = [string]$printer.PrinterStatus; portName = [string]$printer.PortName; " +
-      "workOffline = [bool]$printer.WorkOffline; " +
-      "badJobCount = $badJobs.Count; badJobStatus = if ($badJobs.Count) { [string]$badJobs[0].JobStatus } else { '' } } | ConvertTo-Json -Compress",
+      "if ($badJobs.Count -gt 0) { $badJobs | Remove-PrintJob -ErrorAction SilentlyContinue; } " +
+      "[pscustomobject]@{ " +
+      "  printerStatus = [string]$printer.PrinterStatus; " +
+      "  portName = [string]$printer.PortName; " +
+      "  workOffline = [bool]$printer.WorkOffline; " +
+      "  isUsb = $isUsb; " +
+      "  usbHardwareCount = $usbHw; " +
+      "  badJobCount = $badJobs.Count; " +
+      "  badJobStatus = if ($badJobs.Count) { [string]$badJobs[0].JobStatus } else { '' } " +
+      "} | ConvertTo-Json -Compress",
       { RVP_PRINTER_NAME: printer.name }
     );
+
     const printerStatus = String(state?.printerStatus || '0');
     const isOffline = Boolean(state?.workOffline) || /offline|notavailable/i.test(printerStatus);
+    const isError = /error/i.test(printerStatus) || (Number(state?.badJobCount || 0) > 0);
+    const usbMissing = Boolean(state?.isUsb) && Number(state?.usbHardwareCount || 0) === 0;
     const hasHardwareError = /paperout|dooropen/i.test(printerStatus);
-    const notReady = isOffline || hasHardwareError;
+
+    const notReady = isOffline || isError || usbMissing || hasHardwareError;
+
+    let errorMsg = null;
+    if (usbMissing) {
+      errorMsg = `Printer ${printer.name} is not connected via USB. Check that USB cable is firmly plugged into this PC and printer power is ON.`;
+    } else if (isOffline) {
+      errorMsg = `Printer ${printer.name} is marked offline in Windows. Check power switch and USB cable.`;
+    } else if (isError) {
+      errorMsg = `Printer ${printer.name} reports error (${state?.badJobStatus || printerStatus}). Check paper, cartridge, or spooler.`;
+    } else if (hasHardwareError) {
+      errorMsg = `Printer ${printer.name} reports hardware issue: ${printerStatus}. Check paper tray and cover.`;
+    }
+
     return {
       ...printer,
       ready: !notReady,
-      error: notReady
-        ? isOffline
-          ? `Printer ${printer.name} is marked offline in Windows. Please check power and USB cable.`
-          : `Printer ${printer.name} reports: ${printerStatus}. Check paper and cartridge.`
-        : null,
+      error: errorMsg,
     };
   } catch (err) {
-    // If PowerShell query fails, do not block printing; assume ready
-    return { ...printer, ready: true, error: null };
+    return { ...printer, ready: false, error: err.message };
   }
 }
 
 let cachedPrinterState = null;
 let cachedPrinterStateAt = 0;
 
-async function getCachedPrinterState(maxAgeMs = 10000) {
+async function getCachedPrinterState(maxAgeMs = 5000) {
   if (cachedPrinterState && Date.now() - cachedPrinterStateAt < maxAgeMs) {
     return cachedPrinterState;
   }
@@ -568,7 +588,7 @@ async function getCachedPrinterState(maxAgeMs = 10000) {
   return cachedPrinterState;
 }
 
-async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 20000) {
+async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 15000) {
   if (process.platform !== 'win32') return;
 
   const startedAt = Date.now();
@@ -576,29 +596,38 @@ async function waitForWindowsSpooler(pdfFile, printerName, timeoutMs = 20000) {
   while (Date.now() - startedAt < timeoutMs) {
     const result = await runPowerShellJson(
       "$jobs = @(Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction Stop | " +
-      "Where-Object { $_.DocumentName -eq $env:RVP_PRINT_DOCUMENT } | " +
       "Select-Object Id,DocumentName,JobStatus,PagesPrinted,TotalPages); " +
       "if ($jobs.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject @($jobs) -Compress }",
-      { RVP_PRINTER_NAME: printerName, RVP_PRINT_DOCUMENT: pdfFile }
+      { RVP_PRINTER_NAME: printerName }
     );
     const jobs = Array.isArray(result) ? result : (result ? [result] : []);
 
-    if (jobs.length === 0) {
-      if (sawJob || Date.now() - startedAt >= 2500) return;
-    } else {
-      sawJob = true;
-      const status = jobs.map(job => String(job.JobStatus || '')).join(', ');
-      if (/error|offline|paperout|blocked|userintervention/i.test(status)) {
-        throw new Error(`PRINTER_NOT_READY: Windows spooler reports ${status} for ${printerName}. Check printer power and USB cable.`);
-      }
+    const errorJob = jobs.find(j => /error|offline|paperout|blocked|userintervention/i.test(String(j.JobStatus || '')));
+    if (errorJob) {
+      // Purge error job from Windows Spooler so it doesn't stay stuck forever
+      runPowerShellJson(
+        "Get-PrintJob -PrinterName $env:RVP_PRINTER_NAME -ErrorAction SilentlyContinue | " +
+        "Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked' } | " +
+        "Remove-PrintJob -ErrorAction SilentlyContinue",
+        { RVP_PRINTER_NAME: printerName }
+      ).catch(() => {});
+      throw new Error(`PRINTER_NOT_READY: Windows spooler reports ${errorJob.JobStatus} for ${printerName}. Check printer power and USB cable.`);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 750));
+    if (jobs.length > 0) {
+      sawJob = true;
+    } else if (sawJob) {
+      // Job disappeared from spooler without error -> successfully sent to printer hardware!
+      console.log(`[PRINT-AGENT] Print job processed successfully by Windows for ${printerName}.`);
+      return;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 600));
   }
 
   // If job was seen or sent, do not fail on spooler latency
   if (sawJob) {
-    console.log(`[PRINT-AGENT] Print job spooled successfully to Windows for ${printerName}.`);
+    console.log(`[PRINT-AGENT] Print job spooled to Windows for ${printerName}.`);
     return;
   }
 }
@@ -810,8 +839,10 @@ async function pollAndPrint() {
     }
     consecutiveErrors = 0;
 
-    if (data.length === 0) {
-      // No pending jobs — normal idle
+    if (!printerState.ready) {
+      if (data.length > 0) {
+        console.warn(`[PRINT-AGENT] ⏸️  ${data.length} pending print job(s) queued, but physical printer is not ready: ${printerState.error}`);
+      }
       isProcessing = false;
       return;
     }

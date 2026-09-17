@@ -64,7 +64,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
-import WeighbridgeSlipModal from '@/components/WeighbridgeSlipModal';
+import WeighbridgeSlipModal, { triggerDirectPrint, triggerSilentLocalPrint } from '@/components/WeighbridgeSlipModal';
 import './WeighbridgeScreen.css';
 
 const MATERIALS = [
@@ -815,20 +815,25 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
 
-      // Notify about cabin physical printer status
-      if (printAgentStatus?.agentOnline && printAgentStatus.printerReady !== false) {
-        toast.success(`🖨️ Ticket #${ticket.ticketNo} dispatched to ${printAgentStatus.printerName || 'Cabin Printer'}.`, { duration: 4000 });
+      const isAgentAndPrinterReady = Boolean(printAgentStatus?.agentOnline && printAgentStatus?.printerReady);
+
+      if (isAgentAndPrinterReady) {
+        toast.success(`🖨️ Ticket #${ticket.ticketNo} dispatched to ${printAgentStatus?.printerName || 'Cabin Printer'} (silent print).`, { duration: 4500 });
+        // Attempt instant local silent print if running on cabin PC with agent
+        triggerSilentLocalPrint(ticket, undefined, snapshots).catch(() => {});
       } else {
-        toast.info(`🖨️ Opening weighment slip preview for Ticket #${ticket.ticketNo}...`, { duration: 4000 });
+        const reason = printAgentStatus?.agentOnline
+          ? (printAgentStatus?.printerError || 'Printer not connected via USB')
+          : 'Cabin print agent offline';
+        toast.warning(`🖨️ Cabin physical printer unavailable (${reason}). Opening browser print dialog...`, { duration: 6000 });
+        // Immediate fallback: trigger browser direct print so operator doesn't have to wait or click twice!
+        triggerDirectPrint(ticket, undefined, snapshots).catch(() => {});
       }
 
-      // In cabinMode with online printer, physical print happens automatically with zero popups!
-      // Otherwise, open preview modal for manual review/printing.
-      if (!cabinMode || !printAgentStatus?.agentOnline || printAgentStatus?.printerReady === false) {
-        setSlipModalTicket(ticket);
-        if (snapshots) {
-          setActiveSnapshots(snapshots);
-        }
+      // Always open the slip modal preview so operator can inspect certificate & photos
+      setSlipModalTicket(ticket);
+      if (snapshots) {
+        setActiveSnapshots(snapshots);
       }
 
       // Reset form
@@ -843,6 +848,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F12') {
+        if (slipModalTicket) return; // Prevent duplicate submit when viewing slip
         e.preventDefault();
         saveMutation.mutate();
       } else if (e.key === 'F4') {

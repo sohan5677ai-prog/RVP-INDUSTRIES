@@ -1099,6 +1099,7 @@ export default function WeighbridgeSlipModal({
               onClick={async () => {
                 if (!ticket) return;
                 try {
+                  toast.info(`🖨️ Sending Ticket #${ticket.ticketNo} to cabin printer...`, { duration: 3000 });
                   // 1. If running on cabin terminal with local print agent, print silently with 0 latency
                   const silentOk = await triggerSilentLocalPrint(ticket, calibration, snapshots);
                   if (silentOk) {
@@ -1111,7 +1112,7 @@ export default function WeighbridgeSlipModal({
                     method: 'POST',
                     body: JSON.stringify({ ticketId: ticket.id, ticketNo: ticket.ticketNo }),
                   });
-                  toast.success(`🖨️ Ticket #${ticket.ticketNo} queued for automatic cabin print!`);
+                  toast.success(`🖨️ Ticket #${ticket.ticketNo} queued in cabin print queue!`);
                 } catch (err: any) {
                   toast.error(`Failed to queue print: ${err.message || 'Unknown error'}`);
                 }

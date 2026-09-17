@@ -28,6 +28,7 @@ import { Combobox } from '@/components/ui/combobox';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { CompanyProfile } from '@/lib/types';
+import { useWeighbridgeMatch } from '@/lib/useWeighbridgeMatch';
 
 type PurchaseRow = Purchase & {
   stockIn?: StockIn & { purchaseOrder?: { party?: { name: string }; poNumber?: string; pricePerKg?: string; priceType?: 'BASE' | 'DELIVERY' } };
@@ -83,6 +84,19 @@ function PurchaseFormDialog({
   }, [open, editing]);
 
   const selected = available.find((s) => s.id === stockInId);
+  const linkedStockIn = editing?.stockIn ?? selected;
+  const { data: linkedKataTicket, isFetching: isMatchingKata } = useWeighbridgeMatch({
+    date: linkedStockIn?.arrivalDate?.slice(0, 10),
+    partyName: linkedStockIn?.purchaseOrder?.party?.name,
+    vehicleNumber: linkedStockIn?.lorryNumber,
+  });
+
+  useEffect(() => {
+    if (linkedKataTicket?.secondWeightKg) {
+      setRvpSecondWeight(String(linkedKataTicket.secondWeightKg));
+    }
+  }, [linkedKataTicket]);
+
   const rvpFirst = editing ? (editing.stockIn?.rvpFirstWeightKg ?? 0) : (selected?.rvpFirstWeightKg ?? 0);
   const lorryNumber = editing ? editing.stockIn?.lorryNumber : selected?.lorryNumber;
   const isCompanyVehicle = isVehicleExempt(lorryNumber, companyProfile?.companyVehicles);
@@ -151,6 +165,12 @@ function PurchaseFormDialog({
             <div className="space-y-2">
               <Label htmlFor="rvpSecond">RVP second weight / tare (kg)</Label>
               <Input id="rvpSecond" type="number" value={rvpSecondWeight} onChange={(e) => setRvpSecondWeight(e.target.value)} placeholder="e.g. 9500" required />
+              {isMatchingKata && <p className="text-[11px] text-muted-foreground">Checking the ticket register…</p>}
+              {linkedKataTicket?.secondWeightKg && (
+                <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                  Empty weight auto-filled from Kata ticket #{linkedKataTicket.ticketNo}
+                </p>
+              )}
             </div>
           )}
           <div className="space-y-2">

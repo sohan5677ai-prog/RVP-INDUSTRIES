@@ -12,9 +12,18 @@ export interface ScaleReading {
   baudRate: number;
   error?: string | null;
   availablePorts?: Array<{ path: string; manufacturer?: string; friendlyName?: string }>;
+  /** True when a DLC/hardware fault was detected recently but the scale has since recovered */
+  recentFault?: boolean;
+  /** Human-readable label for the recent fault (e.g. 'NO DLC') */
+  recentFaultLabel?: string | null;
+  /** Timestamp (ms) of the last DLC/hardware fault detection */
+  lastFaultTime?: number | null;
 }
 
 type ScaleListener = (reading: ScaleReading) => void;
+
+/** How long (ms) after a DLC/hardware fault clears before we stop showing the warning */
+const DLC_COOLDOWN_MS = 30_000;
 
 class ServerScaleService {
   private portName: string = process.env.SCALE_COM_PORT || 'COM4';
@@ -34,10 +43,15 @@ class ServerScaleService {
     baudRate: Number(process.env.SCALE_BAUD_RATE || 2400),
     error: null,
     availablePorts: [],
+    recentFault: false,
+    recentFaultLabel: null,
+    lastFaultTime: null,
   };
 
   private buffer: string = '';
   private recentWeights: number[] = [];
+  private lastFaultTime: number = 0;
+  private lastFaultLabel: string = '';
 
   constructor() {
     this.start();
@@ -294,11 +308,16 @@ class ServerScaleService {
       const faultLabel =
         upper.includes('DLS') && !upper.includes('DLC') ? 'NO DLS' : 'NO DLC';
       logger.warn(`[scale] Hardware fault indicator received: "${clean}" (${faultLabel})`);
+      this.lastFaultTime = Date.now();
+      this.lastFaultLabel = faultLabel;
       this.currentReading = {
         ...this.currentReading,
         rawText: clean,
         lastUpdated: Date.now(),
         error: `${faultLabel} (Load Cell Signal Lost / Power Cut)`,
+        recentFault: true,
+        recentFaultLabel: faultLabel,
+        lastFaultTime: this.lastFaultTime,
       };
       this.notifyListeners();
       return;
@@ -312,11 +331,12 @@ class ServerScaleService {
       isStable = false;
     }
 
-    // Extract numeric weight
-    // Indicators output formats like: "+  14170", "014170 kg", "ST,GS,+14170kg", "14170"
-    const match = clean.match(/[-+]?\s*(\d+(?:\.\d+)?)/);
+    // Extract numeric weight (preserve sign for negative readings)
+    // Indicators output formats like: "+  14170", "014170 kg", "ST,GS,+14170kg", "14170", "-  00020"
+    const match = clean.match(/([-+]?)\s*(\d+(?:\.\d+)?)/);
     if (match) {
-      const parsedWeight = parseFloat(match[1]);
+      const sign = match[1] === '-' ? -1 : 1;
+      const parsedWeight = sign * parseFloat(match[2]);
       if (!isNaN(parsedWeight)) {
         // Track recent readings to determine stability if indicator has no ST/US flag
         this.recentWeights.push(parsedWeight);
@@ -330,15 +350,22 @@ class ServerScaleService {
           }
         }
 
+        // Check if we are within the DLC cooldown window
+        const now = Date.now();
+        const withinCooldown = this.lastFaultTime > 0 && (now - this.lastFaultTime) < DLC_COOLDOWN_MS;
+
         this.currentReading = {
           liveWeight: Math.round(parsedWeight),
           isStable,
           rawText: clean,
-          lastUpdated: Date.now(),
+          lastUpdated: now,
           isConnected: true,
           port: this.portName,
           baudRate: this.baudRate,
           error: null,
+          recentFault: withinCooldown,
+          recentFaultLabel: withinCooldown ? this.lastFaultLabel : null,
+          lastFaultTime: this.lastFaultTime || null,
         };
 
         this.notifyListeners();

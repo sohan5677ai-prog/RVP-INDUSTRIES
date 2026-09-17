@@ -62,7 +62,7 @@ export async function getNextTicketNumberHandler(_req: Request, res: Response) {
  * List weighbridge tickets with search & filters.
  */
 export async function getTicketsHandler(req: Request, res: Response) {
-  const { search, status, fromDate, toDate, limit } = req.query;
+  const { search, status, fromDate, toDate, limit, all } = req.query;
 
   const where: any = {};
 
@@ -94,7 +94,7 @@ export async function getTicketsHandler(req: Request, res: Response) {
     }
   }
 
-  const take = limit ? Math.min(Number(limit), 200) : 100;
+  const take = all === 'true' ? undefined : (limit ? Math.min(Number(limit), 200) : 100);
 
   const tickets = await prisma.weighbridgeTicket.findMany({
     where,
@@ -103,6 +103,43 @@ export async function getTicketsHandler(req: Request, res: Response) {
   });
 
   res.json(tickets);
+}
+
+function normaliseMatchText(value: string): string {
+  return value.toUpperCase().replace(/&/g, 'AND').replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Resolve the physical Kata ticket for an ERP movement. Date + lorry are used
+ * in the database lookup; party is then compared after stripping punctuation
+ * and spacing so entries such as "ABC & Co." and "ABC AND CO" remain usable.
+ */
+export async function matchTicketHandler(req: Request, res: Response) {
+  const date = String(req.query.date ?? '').trim();
+  const vehicleNumber = normaliseMatchText(String(req.query.vehicleNumber ?? ''));
+  const partyName = normaliseMatchText(String(req.query.partyName ?? ''));
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !vehicleNumber || !partyName) {
+    throw new HttpError(400, 'Date, party name and vehicle number are required');
+  }
+
+  // ERP dates are India-local business dates even when the server runs in UTC.
+  const start = new Date(`${date}T00:00:00+05:30`);
+  const end = new Date(`${date}T23:59:59.999+05:30`);
+  const candidates = await prisma.weighbridgeTicket.findMany({
+    where: {
+      createdAt: { gte: start, lte: end },
+      status: { not: 'CANCELLED' },
+    },
+    orderBy: [{ updatedAt: 'desc' }, { ticketNo: 'desc' }],
+  });
+
+  const matched = candidates.find((ticket) =>
+    normaliseMatchText(ticket.vehicleNumber) === vehicleNumber
+    && normaliseMatchText(ticket.partyName ?? '') === partyName,
+  ) ?? null;
+
+  res.json(matched);
 }
 
 /**
@@ -414,6 +451,19 @@ export async function cancelTicketHandler(req: Request, res: Response) {
   });
 
   res.json(updated);
+}
+
+/** Permanently remove a register entry and its queued print jobs. */
+export async function deleteTicketHandler(req: Request, res: Response) {
+  const { id } = req.params;
+  const existing = await prisma.weighbridgeTicket.findUnique({ where: { id }, select: { id: true } });
+  if (!existing) throw new HttpError(404, 'Weighbridge ticket not found');
+
+  await prisma.$transaction([
+    prisma.printJob.deleteMany({ where: { ticketId: id } }),
+    prisma.weighbridgeTicket.delete({ where: { id } }),
+  ]);
+  res.status(204).send();
 }
 
 /**

@@ -41,6 +41,7 @@ import {
 } from '@/components/ExpandPanel';
 import { cn } from '@/lib/utils';
 import type { ExportColumn } from '@/lib/export';
+import { useWeighbridgeMatch } from '@/lib/useWeighbridgeMatch';
 
 type StockInRow = StockInType;
 type DocKind = 'invoice';
@@ -380,6 +381,19 @@ function StockInFormDialog({
   }
 
   const selectedPo = pendingPOs?.find((p) => p.id === poId);
+  const linkedPartyName = editing?.purchaseOrder?.party?.name ?? selectedPo?.party?.name ?? '';
+  const { data: linkedKataTicket, isFetching: isMatchingKata } = useWeighbridgeMatch({
+    date: editing ? undefined : arrivalDate,
+    partyName: editing ? undefined : linkedPartyName,
+    vehicleNumber: editing ? undefined : lorryNumber,
+  });
+
+  useEffect(() => {
+    if (!editing && linkedKataTicket?.firstWeightKg) {
+      setRvpFirstWeightKg(String(linkedKataTicket.firstWeightKg));
+    }
+  }, [editing, linkedKataTicket]);
+
   const priceType = editing?.purchaseOrder?.priceType ?? selectedPo?.priceType;
   const isBase = priceType === 'BASE';
 
@@ -533,6 +547,12 @@ function StockInFormDialog({
                   />
                 </div>
                 <Input id="rvpFirst" type="number" value={rvpFirstWeightKg} onChange={(e) => setRvpFirstWeightKg(e.target.value)} required />
+                {isMatchingKata && <p className="text-[11px] text-muted-foreground">Checking the ticket register…</p>}
+                {linkedKataTicket?.firstWeightKg && (
+                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    Auto-filled from Kata ticket #{linkedKataTicket.ticketNo}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="billing">Billing weight (kg)</Label>

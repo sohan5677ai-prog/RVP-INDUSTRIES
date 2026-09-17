@@ -3,11 +3,13 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import {
   getNextTicketNumberHandler,
   getTicketsHandler,
+  matchTicketHandler,
   getPendingSecondWeightHandler,
   createTicketHandler,
   completeSecondWeightHandler,
   updateTicketHandler,
   cancelTicketHandler,
+  deleteTicketHandler,
   streamCctvHandler,
   snapshotCctvHandler,
   broadcastCctvHandler,
@@ -47,6 +49,7 @@ router.post('/scale/broadcast', (req, res, next) => {
 router.get('/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets', asyncHandler(getTicketsHandler));
+router.get('/tickets/match', asyncHandler(matchTicketHandler));
 router.get('/pending', asyncHandler(getPendingSecondWeightHandler));
 router.get('/tickets/pending', asyncHandler(getPendingSecondWeightHandler));
 router.post('/tickets', asyncHandler(createTicketHandler));
@@ -54,6 +57,7 @@ router.patch('/tickets/:id', asyncHandler(updateTicketHandler));
 router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.patch('/tickets/:id/cancel', asyncHandler(cancelTicketHandler));
+router.delete('/tickets/:id', asyncHandler(deleteTicketHandler));
 
 // Print queue routes (for cabin print agent)
 router.post('/print-queue', asyncHandler(queuePrintJobHandler));

@@ -28,6 +28,7 @@ import {
   CloudOff,
   IndianRupee,
   Cable,
+  Trash2,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -60,6 +61,8 @@ import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
 import { calcKataFee, isVehicleExempt } from '@/lib/calc';
 import WeighbridgeSlipModal, { triggerDirectPrint } from '@/components/WeighbridgeSlipModal';
+import { ExportButtons } from '@/components/ExportButtons';
+import type { ExportColumn } from '@/lib/export';
 import './WeighbridgeScreen.css';
 
 const MATERIALS = [
@@ -117,6 +120,22 @@ type EditTicketDraft = {
   secondWeightKg: string;
   remarks: string;
 };
+
+const TICKET_EXPORT_COLUMNS: ExportColumn<WeighbridgeTicket>[] = [
+  { header: 'Ticket No', value: (t) => t.ticketNo, numFmt: '0', align: 'right' },
+  { header: 'Date', value: (t) => shortDate(t.createdAt) },
+  { header: 'Time', value: (t) => new Date(t.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) },
+  { header: 'Vehicle No', value: (t) => t.vehicleNumber },
+  { header: 'Party', value: (t) => t.partyName ?? '' },
+  { header: 'Material', value: (t) => t.material ?? '' },
+  { header: 'First Weight (kg)', value: (t) => t.firstWeightKg ?? '', excel: (t) => t.firstWeightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Second Weight (kg)', value: (t) => t.secondWeightKg ?? '', excel: (t) => t.secondWeightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Net Weight (kg)', value: (t) => t.netWeightKg ?? '', excel: (t) => t.netWeightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Charge', value: (t) => Number(t.amount || 0), numFmt: '#,##0.00', align: 'right' },
+  { header: 'Status', value: (t) => t.status },
+  { header: 'Operator', value: (t) => t.operatorName ?? '' },
+  { header: 'Remarks', value: (t) => t.remarks ?? '' },
+];
 
 export function getCameraSnapshotUrl(camNumber: 1 | 2, ts: number = Date.now()): string {
   // Always route through the cloud server so the Kata is accessible from anywhere
@@ -569,6 +588,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   // Search & Filter in History tab
   const [historySearch, setHistorySearch] = useState<string>('');
   const [editingTicket, setEditingTicket] = useState<EditTicketDraft | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WeighbridgeTicket | null>(null);
 
   // Clock
   const [clockString, setClockString] = useState<string>('');
@@ -1022,6 +1042,23 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api<void>(`/weighbridge/tickets/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      const ticketNo = deleteTarget?.ticketNo;
+      setDeleteTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
+      toast.success(ticketNo ? `Ticket #${ticketNo} deleted.` : 'Ticket deleted.');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const exportTickets = useCallback(() => api<WeighbridgeTicket[]>(
+    `/weighbridge/tickets?all=true${historySearch ? `&search=${encodeURIComponent(historySearch)}` : ''}`,
+  ), [historySearch]);
 
   const editPreview = useMemo(() => {
     if (!editingTicket) return { net: null as number | null, fee: 0 };
@@ -1959,6 +1996,15 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               </div>
 
               <div className="flex items-center gap-2">
+                <ExportButtons
+                  filename="weighbridge-ticket-register"
+                  title="Weighbridge Ticket Register"
+                  subtitle={historySearch ? `Search: ${historySearch}` : 'All tickets'}
+                  columns={TICKET_EXPORT_COLUMNS}
+                  rows={exportTickets}
+                  showPrint={false}
+                  size="sm"
+                />
                 <div className="relative w-64">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -2052,6 +2098,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                           className="h-7 px-2 text-xs gap-1" title="Edit saved ticket">
                           <Pencil className="h-3.5 w-3.5 text-amber-600" />
                           Edit
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(t)}
+                          className="h-7 px-2 text-xs gap-1 text-destructive hover:text-destructive" title="Delete ticket">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
                         </Button>
                         <Button
                           variant="ghost"
@@ -2176,6 +2227,27 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Kata ticket #{deleteTarget?.ticketNo}?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the ticket from the register. It will no longer be available for Stock In, Stock In Detail, or Dispatch auto-fill.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+            <div className="flex justify-between gap-3"><span className="text-muted-foreground">Vehicle</span><span className="font-mono font-semibold">{deleteTarget?.vehicleNumber}</span></div>
+            <div className="mt-1 flex justify-between gap-3"><span className="text-muted-foreground">Party</span><span className="text-right font-medium">{deleteTarget?.partyName || '-'}</span></div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending}>Cancel</Button>
+            <Button variant="destructive" onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} disabled={deleteMutation.isPending}>
+              <Trash2 className="h-4 w-4" /> {deleteMutation.isPending ? 'Deleting…' : 'Delete ticket'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

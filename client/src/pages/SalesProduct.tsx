@@ -43,6 +43,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { InvoiceDocument, InvoiceStyles, parseInvoiceLayout } from '@/components/InvoiceDocument';
 import { usePagedRows } from '@/lib/usePagedRows';
+import { useWeighbridgeMatch } from '@/lib/useWeighbridgeMatch';
 import ScaleCaptureButton from '@/components/ScaleCaptureButton';
 
 const GST_RATE = 0.05;
@@ -268,6 +269,18 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // Byproducts only: this lorry is being sold out of transferred stock rather
   // than straight off the factory. Pure reporting tag.
   const [fromTransfer, setFromTransfer] = useState(false);
+
+  const { data: linkedKataTicket, isFetching: isMatchingKata } = useWeighbridgeMatch({
+    date: dispatchOrder ? dispatchDate : undefined,
+    partyName: dispatchOrder?.buyer?.name,
+    vehicleNumber: dispatchOrder ? vehicleNumber : undefined,
+  });
+
+  useEffect(() => {
+    if (linkedKataTicket?.status === 'COMPLETED' && linkedKataTicket.netWeightKg) {
+      setDispatchTonnes(String(linkedKataTicket.netWeightKg / 1000));
+    }
+  }, [linkedKataTicket]);
 
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
@@ -1795,6 +1808,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                 />
               </div>
               <Input type="number" step="0.001" value={dispatchTonnes} onChange={(e) => setDispatchTonnes(e.target.value)} />
+              {isMatchingKata && <p className="text-[11px] text-muted-foreground">Checking the ticket register…</p>}
+              {linkedKataTicket?.status === 'COMPLETED' && linkedKataTicket.netWeightKg && (
+                <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                  Sale weight auto-filled from Kata ticket #{linkedKataTicket.ticketNo} ({linkedKataTicket.netWeightKg.toLocaleString('en-IN')} kg)
+                </p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 {isPappu
                   ? 'This actual weight bills the sale and depletes the black-seed pool.'

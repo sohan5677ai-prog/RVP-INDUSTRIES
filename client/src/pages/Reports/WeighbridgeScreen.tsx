@@ -2516,6 +2516,55 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         </DialogContent>
       </Dialog>
 
+      <Dialog open={paymentTarget !== null} onOpenChange={(open) => !open && setPaymentTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {Number(paymentTarget?.amount || 0) === 0
+                ? `Release Free Slip #${paymentTarget?.ticketNo}`
+                : `Verify Payment #${paymentTarget?.ticketNo}`}
+            </DialogTitle>
+            <DialogDescription>
+              Confirm weighment fee receipt and send the signed Kata slip to the driver via WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm">
+            <div className="flex justify-between rounded-lg border bg-muted/40 p-3">
+              <span className="text-muted-foreground">Vehicle</span>
+              <span className="font-mono font-bold">{paymentTarget?.vehicleNumber}</span>
+            </div>
+            <div className="flex justify-between rounded-lg border bg-muted/40 p-3">
+              <span className="text-muted-foreground">Kata Charge</span>
+              <span className="font-mono font-bold text-base text-primary">
+                ₹{Number(paymentTarget?.amount || 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+            {Number(paymentTarget?.amount || 0) > 0 && (
+              <div className="space-y-1.5">
+                <Label>Payment Mode / Reference</Label>
+                <Input
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                  placeholder="CASH / UPI / UTR"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setPaymentTarget(null)} disabled={paymentMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => paymentTarget && paymentMutation.mutate(paymentTarget)}
+              disabled={paymentMutation.isPending}
+            >
+              <Banknote className="h-4 w-4 mr-1" />
+              {paymentMutation.isPending ? 'Verifying…' : 'Confirm & Release'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Official Printable Weighbridge Slip Modal */}
       <WeighbridgeSlipModal
         ticket={slipModalTicket}

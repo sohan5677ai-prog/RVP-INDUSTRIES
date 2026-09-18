@@ -73,13 +73,13 @@ import './WeighbridgeScreen.css';
 const MATERIALS = [
   'PAPPU',
   'HUSK',
+  'TAMARIND',
   'TAMARIND SEED',
   'TAMARIND SHELL',
   'TAMARIND WASTE',
   'TPS (BROKENS)',
   'PRE CLEANER DUST',
   'NALLA POKKULU',
-  'BLACK SEED',
   'OTHER',
 ];
 
@@ -90,7 +90,8 @@ const STORAGE_LOCATIONS = [
 ];
 
 function transferDirectionForMaterial(material: string): 'STORAGE_TO_RVP' | 'RVP_TO_STORAGE' {
-  return material.trim().toUpperCase() === 'BLACK SEED' ? 'STORAGE_TO_RVP' : 'RVP_TO_STORAGE';
+  const m = material.trim().toUpperCase();
+  return m === 'TAMARIND SEED' || m === 'BLACK SEED' ? 'STORAGE_TO_RVP' : 'RVP_TO_STORAGE';
 }
 
 function ticketTransferRoute(ticket: WeighbridgeTicket): string {
@@ -1517,7 +1518,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       Internal Storage Transfer
                     </span>
                     <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
-                      Use for black seed coming to RVP or husk and tamarind by-products going to storage.
+                      Use for tamarind seed coming to RVP or husk and tamarind by-products going to storage.
                     </span>
                   </span>
                 </label>
@@ -1545,7 +1546,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       <ArrowRight className="h-3.5 w-3.5 text-amber-600" />
                       <span>{storageTransferDirection === 'STORAGE_TO_RVP' ? 'RVP' : storageLocation || 'Storage'}</span>
                       <Badge variant="outline" className="ml-auto border-amber-500/40 text-[9px] text-amber-700 dark:text-amber-300">
-                        {material === 'BLACK SEED' ? 'INWARD' : 'OUTWARD'}
+                        {storageTransferDirection === 'STORAGE_TO_RVP' ? 'INWARD' : 'OUTWARD'}
                       </Badge>
                     </div>
                   </div>

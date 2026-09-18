@@ -78,7 +78,7 @@ function resolveStorageTransfer(
   return {
     enabled: true,
     storageLocation,
-    transferDirection: material === 'BLACK SEED' ? 'STORAGE_TO_RVP' : 'RVP_TO_STORAGE',
+    transferDirection: (material === 'TAMARIND SEED' || material === 'BLACK SEED') ? 'STORAGE_TO_RVP' : 'RVP_TO_STORAGE',
   };
 }
 

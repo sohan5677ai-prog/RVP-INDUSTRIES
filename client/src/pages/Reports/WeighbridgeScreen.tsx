@@ -71,27 +71,29 @@ import type { ExportColumn } from '@/lib/export';
 import './WeighbridgeScreen.css';
 
 const MATERIALS = [
+  'TAMARIND SEED',
   'PAPPU',
   'HUSK',
-  'TAMARIND',
-  'TAMARIND SEED',
-  'TAMARIND SHELL',
-  'TAMARIND WASTE',
-  'TPS (BROKENS)',
+  'T SHELL',
+  'T WASTE',
   'PRE CLEANER DUST',
+  'TPS BROKENS',
   'NALLA POKKULU',
-  'OTHER',
+  'NALLA CHINTAPANDU',
+  'TAMARIND',
+  'OTHERS',
 ];
 
 const TRANSFER_MATERIALS = [
   'TAMARIND SEED',
   'HUSK',
-  'TAMARIND',
-  'TAMARIND SHELL',
-  'TAMARIND WASTE',
-  'TPS (BROKENS)',
+  'T SHELL',
+  'T WASTE',
   'PRE CLEANER DUST',
+  'TPS BROKENS',
   'NALLA POKKULU',
+  'NALLA CHINTAPANDU',
+  'TAMARIND',
 ];
 
 const STORAGE_LOCATIONS = [
@@ -546,7 +548,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [partyName, setPartyName] = useState<string>('');
   const [isStorageTransfer, setIsStorageTransfer] = useState<boolean>(false);
   const [storageLocation, setStorageLocation] = useState<string>('');
-  const [material, setMaterial] = useState<string>('PAPPU');
+  const [material, setMaterial] = useState<string>('TAMARIND SEED');
   const [loadType, setLoadType] = useState<'LOAD' | 'EMPTY'>('LOAD');
   const [billType, setBillType] = useState<'CASH' | 'CREDIT' | 'FREE'>('CASH');
   const [charges, setCharges] = useState<string>('0');
@@ -957,7 +959,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setPartyName(ticket.partyName || '');
     setIsStorageTransfer(Boolean(ticket.isStorageTransfer));
     setStorageLocation(ticket.storageLocation || '');
-    setMaterial(ticket.material || 'PAPPU');
+    setMaterial(ticket.material || 'TAMARIND SEED');
     setLoadType(ticket.loadType === 'LOAD' ? 'EMPTY' : 'LOAD');
     setFirstWeight(ticket.firstWeightKg);
     setBillType((ticket.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
@@ -1142,7 +1144,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       tripType: ticket.tripType || 'FIRST',
       partyName: ticket.partyName || '',
       partyMobile: ticket.partyMobile || '',
-      material: ticket.material || 'PAPPU',
+      material: ticket.material || 'TAMARIND SEED',
       loadType: ticket.loadType || 'LOAD',
       billType: ticket.billType || 'CASH',
       firstWeightKg: ticket.firstWeightKg != null ? String(ticket.firstWeightKg) : '',
@@ -2191,7 +2193,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       </TableCell>
                       <TableCell className="text-xs">
                         <Badge variant="outline" className="font-normal text-[10px]">
-                          {t.material || 'OTHER'}
+                          {t.material || 'OTHERS'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs">
@@ -2457,7 +2459,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     </TableCell>
                     <TableCell className="text-xs">
                       <Badge variant="outline" className="text-[10px] font-normal">
-                        {t.material || 'OTHER'}
+                        {t.material || 'OTHERS'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">

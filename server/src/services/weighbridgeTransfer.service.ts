@@ -16,10 +16,14 @@ type CompletedTransferTicket = {
 const BYPRODUCT_MATERIALS = new Set([
   'TAMARIND',
   'TAMARIND SHELL',
+  'T SHELL',
   'TAMARIND WASTE',
+  'T WASTE',
   'TPS (BROKENS)',
+  'TPS BROKENS',
   'PRE CLEANER DUST',
   'NALLA POKKULU',
+  'NALLA CHINTAPANDU',
 ]);
 
 /**

@@ -26,17 +26,6 @@ export const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Try again in a few minutes.' },
 });
 
-/**
- * Limiter for the AI chat endpoint, which fans out to a paid LLM on every call.
- * Keeps a stolen token or a runaway client from burning the API bill.
- */
-export const chatLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 20,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { error: 'Chat rate limit reached, please wait a moment.' },
-});
 
 /**
  * Limiter for the public (unauthenticated) WhatsApp webhook. Fast2SMS is the

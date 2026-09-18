@@ -65,7 +65,6 @@ import UserNoteReminders from '@/components/UserNoteReminders';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
-import JarvisOrb from '@/components/JarvisOrb';
 import { ReminderQueueProvider } from '@/components/ReminderQueue';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
@@ -466,7 +465,6 @@ export default function Layout() {
         </main>
       </div>
       <FloatingNotesWidget pageLabel={current?.label ?? 'Home'} />
-      <JarvisOrb />
       <CommandPalette />
       <ShortcutCheatSheetModal />
     </div>

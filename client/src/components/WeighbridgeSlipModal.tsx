@@ -332,7 +332,7 @@ export function triggerDirectPrint(
       iframe.style.left = '-9999px';
       iframe.style.top = '-9999px';
       iframe.style.width = '210mm';
-      iframe.style.height = '150mm';
+      iframe.style.height = '148mm';
       iframe.style.border = '0';
       document.body.appendChild(iframe);
 

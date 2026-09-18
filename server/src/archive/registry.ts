@@ -158,10 +158,12 @@ const TABLES: ArchiveModel[] = [
   { name: 'TransportConfirmation', delegate: 'transportConfirmation', cls: 'LOG', order: 370, dateField: 'createdAt' },
   { name: 'ConsolidatedEwb', delegate: 'consolidatedEwb', cls: 'LOG', order: 372, dateField: 'createdAt' },
   { name: 'WeighbridgeTicket', delegate: 'weighbridgeTicket', cls: 'LOG', order: 373, dateField: 'createdAt' },
-  { name: 'Gstr2bImport', delegate: 'gstr2bImport', cls: 'LOG', order: 374, dateField: 'uploadedAt' },
-  { name: 'DriverKataSubmission', delegate: 'driverKataSubmission', cls: 'LOG', order: 375, dateField: 'createdAt' },
-  { name: 'Gstr2bEntry', delegate: 'gstr2bEntry', cls: 'DERIVED', order: 376,
+  { name: 'InternalWeightRecord', delegate: 'internalWeightRecord', cls: 'LOG', order: 374, dateField: 'createdAt' },
+  { name: 'Gstr2bImport', delegate: 'gstr2bImport', cls: 'LOG', order: 375, dateField: 'uploadedAt' },
+  { name: 'DriverKataSubmission', delegate: 'driverKataSubmission', cls: 'LOG', order: 376, dateField: 'createdAt' },
+  { name: 'Gstr2bEntry', delegate: 'gstr2bEntry', cls: 'DERIVED', order: 377,
     scopeVia: (r) => ({ import: { uploadedAt: between(r) } }) },
+  { name: 'PrintJob', delegate: 'printJob', cls: 'LOG', order: 378, dateField: 'createdAt' },
   { name: 'WishBroadcast', delegate: 'wishBroadcast', cls: 'LOG', order: 380, dateField: 'createdAt' },
 ];
 

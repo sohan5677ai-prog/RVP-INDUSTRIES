@@ -830,10 +830,31 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
     excessOutKg = Math.min(data.excessOutKg, weightKg); // never more excess than the lorry weighs
   }
   let internalWeightKg: number | null = null;
+  let matchedInternalRecordId: string | null = null;
   if (order.product === 'PAPPU') {
     if (data.internalWeightKg) {
       internalWeightKg = data.internalWeightKg;
-    } else {
+    }
+    // Attempt to match an unused InternalWeightRecord recorded at the weighbridge (Kata)
+    if (data.vehicleNumber) {
+      const cleanVeh = data.vehicleNumber.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const unusedRecords = await prisma.internalWeightRecord.findMany({
+        where: { used: false },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
+      const matchedRecord = unusedRecords.find(
+        (r) => r.vehicleNumber.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanVeh,
+      );
+      if (matchedRecord) {
+        matchedInternalRecordId = matchedRecord.id;
+        if (!internalWeightKg) {
+          internalWeightKg = matchedRecord.weightKg;
+        }
+      }
+    }
+    // Fall back to tiered moisture calculation only if no internal weight was recorded or provided
+    if (!internalWeightKg) {
       if (weightKg >= 35000) internalWeightKg = weightKg - 250;
       else if (weightKg >= 30000) internalWeightKg = weightKg - 200;
       else if (weightKg >= 25000) internalWeightKg = weightKg - 150;
@@ -1051,6 +1072,17 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
       },
     });
 
+    if (matchedInternalRecordId) {
+      await tx.internalWeightRecord.update({
+        where: { id: matchedInternalRecordId },
+        data: {
+          used: true,
+          usedAt: new Date(),
+          saleDispatchId: created.id,
+        },
+      });
+    }
+
     return created;
   });
 
@@ -1128,7 +1160,17 @@ export async function undoSaleDispatch(req: Request, res: Response) {
     // 2. Delete the sale's ledger posting (journal lines cascade with the entry).
     await tx.journalEntry.deleteMany({ where: { reference: `SALE-${dispatch.id}` } });
 
-    // 3. Remove the dispatch itself.
+    // 3. Reset any linked InternalWeightRecord so it can be reused
+    await tx.internalWeightRecord.updateMany({
+      where: { saleDispatchId: dispatch.id },
+      data: {
+        used: false,
+        usedAt: null,
+        saleDispatchId: null,
+      },
+    });
+
+    // 4. Remove the dispatch itself.
     await tx.saleDispatch.delete({ where: { id: dispatch.id } });
 
     // 4. Recompute the order's status from whatever shipments remain, on the

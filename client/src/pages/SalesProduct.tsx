@@ -2,10 +2,10 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Clock } from 'lucide-react';
+import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Clock, Scale } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation } from '@/lib/types';
+import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation, InternalWeightRecord } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import {
   saleCloseToleranceKg,
@@ -282,6 +282,23 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     }
   }, [linkedKataTicket]);
 
+  const cleanVehicleNumber = vehicleNumber.trim();
+  const { data: matchedInternalRecord } = useQuery<InternalWeightRecord | null>({
+    queryKey: ['internal-weight-match', cleanVehicleNumber, dispatchOrder?.buyer?.name],
+    queryFn: () => api<InternalWeightRecord | null>(
+      `/weighbridge/internal-weight/match?vehicleNumber=${encodeURIComponent(cleanVehicleNumber)}`
+      + (dispatchOrder?.buyer?.name ? `&partyName=${encodeURIComponent(dispatchOrder.buyer.name)}` : ''),
+    ),
+    enabled: Boolean(isPappu && cleanVehicleNumber.length >= 4),
+    staleTime: 10_000,
+  });
+
+  useEffect(() => {
+    if (matchedInternalRecord?.weightKg) {
+      setInternalWeightTonnes((matchedInternalRecord.weightKg / 1000).toFixed(3));
+    }
+  }, [matchedInternalRecord]);
+
   const dispatchRemaining = dispatchOrder ? remainingKgOf(dispatchOrder) : 0;
   const dispatchTonnesNum = Number(dispatchTonnes) || 0;
   const dispatchOverflow = dispatchOrder ? Math.round(dispatchTonnesNum * 1000) > dispatchRemaining : false;
@@ -431,6 +448,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
       qc.invalidateQueries({ queryKey: ['pappu-margins'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['internal-weight-match'] });
+      qc.invalidateQueries({ queryKey: ['internal-weights'] });
       toast.success('Dispatched - raise the invoice when ready');
       setDispatchOrder(null);
     },
@@ -470,6 +489,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['black-seed-stock'] });
       qc.invalidateQueries({ queryKey: ['pappu-margins'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['internal-weight-match'] });
+      qc.invalidateQueries({ queryKey: ['internal-weights'] });
       toast.success('Dispatch undone - stock and ledger reversed');
       setUndoTarget(null);
     },
@@ -1842,14 +1863,24 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                       tonnesDecimals={3}
                       onCapture={(_val, formatted) => setInternalWeightTonnes(formatted)}
                     />
-                    {internalWeightDefaultTonnes > 0 && (
+                    {matchedInternalRecord?.weightKg ? (
                       <button
                         type="button"
-                        className="text-[11px] text-primary hover:underline"
-                        onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
+                        className="text-[11px] text-amber-600 dark:text-amber-400 font-medium hover:underline"
+                        onClick={() => setInternalWeightTonnes((matchedInternalRecord.weightKg / 1000).toFixed(3))}
                       >
-                        Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
+                        Kata recorded: {(matchedInternalRecord.weightKg / 1000).toFixed(3)} t
                       </button>
+                    ) : (
+                      internalWeightDefaultTonnes > 0 && (
+                        <button
+                          type="button"
+                          className="text-[11px] text-primary hover:underline"
+                          onClick={() => setInternalWeightTonnes(String(internalWeightDefaultTonnes))}
+                        >
+                          Auto-fill: {internalWeightDefaultTonnes.toFixed(3)} t
+                        </button>
+                      )
                     )}
                   </div>
                 </div>
@@ -1859,14 +1890,23 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   value={internalWeightTonnes}
                   onChange={(e) => setInternalWeightTonnes(e.target.value)}
                   placeholder={
-                    internalWeightDefaultTonnes > 0
-                      ? `Auto-calculated default: ${internalWeightDefaultTonnes.toFixed(3)} t`
-                      : 'e.g. 24.85'
+                    matchedInternalRecord?.weightKg
+                      ? `Kata recorded: ${(matchedInternalRecord.weightKg / 1000).toFixed(3)} t`
+                      : internalWeightDefaultTonnes > 0
+                        ? `Auto-calculated default: ${internalWeightDefaultTonnes.toFixed(3)} t`
+                        : 'e.g. 24.85'
                   }
                 />
-                <p className="text-[11px] text-muted-foreground">
-                  Internal weight before moisture gain. Leave blank to auto-calculate (tiered moisture scale). Never sent to parties or on invoices.
-                </p>
+                {matchedInternalRecord ? (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium">
+                    <Scale className="h-3 w-3" />
+                    Auto-filled from Kata recorded weight: {(matchedInternalRecord.weightKg / 1000).toFixed(3)} t ({matchedInternalRecord.vehicleNumber})
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Internal weight before moisture gain. Leave blank to auto-calculate (tiered moisture scale). Never sent to parties or on invoices.
+                  </p>
+                )}
               </div>
             )}
             {offerFromTransfer && (

@@ -180,6 +180,7 @@ model Party {
   setOffs             PartySetOff[]
   reminderSchedule    PartyReminderSchedule?
   addresses           PartyAddress[]
+  internalWeightRecords InternalWeightRecord[]
 
   @@index([type])
   @@index([name])
@@ -822,11 +823,12 @@ model SaleDispatch {
 
   createdAt DateTime @default(now())
 
-  receipts        Receipt[]
-  creditNotes     CreditNote[]
-  debitNotes      DebitNote[]
-  emailLogs       EmailLog[]
-  kataSubmissions DriverKataSubmission[]
+  receipts             Receipt[]
+  creditNotes          CreditNote[]
+  debitNotes           DebitNote[]
+  emailLogs            EmailLog[]
+  kataSubmissions      DriverKataSubmission[]
+  internalWeightRecord InternalWeightRecord?
 
   @@unique([invoiceFy, invoiceSeq, invoiceSeries])
   @@index([saleOrderId])
@@ -835,6 +837,28 @@ model SaleDispatch {
   @@index([vehicleNumber])
   @@index([invoiceNumber])
   @@index([transportId])
+}
+
+// Pre-dispatch original weight recorded at the weighbridge (Kata) for Pappu before moisture gain.
+// Matches against sale dispatch by vehicle number, and is marked as used once dispatched.
+model InternalWeightRecord {
+  id             String        @id @default(cuid())
+  vehicleNumber  String
+  partyName      String?
+  partyId        String?
+  party          Party?        @relation(fields: [partyId], references: [id])
+  weightKg       Int
+  material       String        @default("PAPPU")
+  weighedAt      DateTime      @default(now())
+  used           Boolean       @default(false)
+  usedAt         DateTime?
+  saleDispatchId String?       @unique
+  saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
+  createdAt      DateTime      @default(now())
+
+  @@index([vehicleNumber, used])
+  @@index([partyName, used])
+  @@index([createdAt])
 }
 
 model SaleAllocation {

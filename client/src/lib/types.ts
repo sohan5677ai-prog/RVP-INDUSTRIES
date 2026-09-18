@@ -1437,4 +1437,16 @@ export interface WeighbridgeTicket {
   updatedAt: string;
 }
 
-
+export interface InternalWeightRecord {
+  id: string;
+  vehicleNumber: string;
+  partyName?: string | null;
+  partyId?: string | null;
+  weightKg: number;
+  material: string;
+  weighedAt: string;
+  used: boolean;
+  usedAt?: string | null;
+  saleDispatchId?: string | null;
+  createdAt: string;
+}

@@ -21,6 +21,9 @@ import {
   getPrintAgentStatusHandler,
   remindSecondWeightHandler,
   verifyTicketPaymentHandler,
+  recordInternalWeightHandler,
+  matchInternalWeightHandler,
+  listInternalWeightsHandler,
 } from '../controllers/weighbridge.controller.js';
 
 const router = Router();
@@ -52,6 +55,9 @@ router.get('/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets/next-number', asyncHandler(getNextTicketNumberHandler));
 router.get('/tickets', asyncHandler(getTicketsHandler));
 router.get('/tickets/match', asyncHandler(matchTicketHandler));
+router.post('/internal-weight', asyncHandler(recordInternalWeightHandler));
+router.get('/internal-weight/match', asyncHandler(matchInternalWeightHandler));
+router.get('/internal-weights', asyncHandler(listInternalWeightsHandler));
 router.get('/pending', asyncHandler(getPendingSecondWeightHandler));
 router.get('/tickets/pending', asyncHandler(getPendingSecondWeightHandler));
 router.post('/tickets', asyncHandler(createTicketHandler));

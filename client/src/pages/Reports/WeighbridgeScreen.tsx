@@ -38,7 +38,7 @@ import {
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useScale } from '@/lib/scaleContext';
-import type { Party, CompanyProfile, WeighbridgeTicket } from '@/lib/types';
+import type { Party, CompanyProfile, WeighbridgeTicket, InternalWeightRecord } from '@/lib/types';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
 import { Button } from '@/components/ui/button';
@@ -1195,6 +1195,32 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
+  const recordInternalWeightMutation = useMutation({
+    mutationFn: async () => {
+      if (currentLiveWeight <= 0) {
+        throw new Error('Live weight must be greater than 0 kg');
+      }
+      if (!vehicleNumber.trim()) {
+        throw new Error('Vehicle number is required');
+      }
+      return api<InternalWeightRecord>('/weighbridge/internal-weight', {
+        method: 'POST',
+        body: JSON.stringify({
+          vehicleNumber: vehicleNumber.trim().toUpperCase(),
+          partyName: isStorageTransfer ? undefined : (partyName.trim() || undefined),
+          weightKg: currentLiveWeight,
+          material: material || 'PAPPU',
+        }),
+      });
+    },
+    onSuccess: (rec) => {
+      toast.success(`Internal / Original weight recorded: ${rec.weightKg.toLocaleString('en-IN')} kg for ${rec.vehicleNumber}. (No ticket or fee created)`);
+      queryClient.invalidateQueries({ queryKey: ['internal-weights'] });
+      queryClient.invalidateQueries({ queryKey: ['internal-weight-match'] });
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
   const exportTickets = useCallback(() => api<WeighbridgeTicket[]>(
     `/weighbridge/tickets?${historyQuery}`,
   ), [historyQuery]);
@@ -1732,15 +1758,29 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   )}
                 </div>
 
-                <Button
-                  type="button"
-                  onClick={() => saveMutation.mutate()}
-                  disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim() || (isStorageTransfer && !storageLocation)}
-                  className="h-11 px-6 font-bold gap-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-transform active:scale-98"
-                >
-                  <Printer className="h-4 w-4" />
-                  <span>Save Ticket & Print (F12)</span>
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => recordInternalWeightMutation.mutate()}
+                    disabled={recordInternalWeightMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim()}
+                    className="h-11 px-4 font-semibold gap-2 text-xs border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500 transition-colors"
+                    title="Record live weight against party & vehicle without generating a ticket, fee, or print slip"
+                  >
+                    <Scale className="h-4 w-4 text-amber-500" />
+                    <span>Record Original / Internal Weight</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={() => saveMutation.mutate()}
+                    disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim() || (isStorageTransfer && !storageLocation)}
+                    className="h-11 px-6 font-bold gap-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-transform active:scale-98"
+                  >
+                    <Printer className="h-4 w-4" />
+                    <span>Save Ticket & Print (F12)</span>
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

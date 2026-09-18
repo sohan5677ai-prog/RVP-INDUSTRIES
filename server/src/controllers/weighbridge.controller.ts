@@ -195,6 +195,100 @@ export async function matchTicketHandler(req: Request, res: Response) {
 }
 
 /**
+ * Record live weight as an internal/original weight (without ticket, fee, or printing).
+ * Used primarily for Pappu dispatches before moisture absorption.
+ */
+export async function recordInternalWeightHandler(req: Request, res: Response) {
+  const { vehicleNumber, partyName, weightKg, material } = req.body;
+
+  if (!vehicleNumber?.trim()) {
+    throw new HttpError(400, 'Vehicle number is required');
+  }
+  const weight = Number(weightKg);
+  if (!weight || weight <= 0) {
+    throw new HttpError(400, 'A valid weight greater than 0 kg is required');
+  }
+
+  const cleanVehNo = vehicleNumber.trim().toUpperCase();
+  const cleanParty = partyName?.trim() || null;
+
+  let partyId: string | null = null;
+  if (cleanParty) {
+    const party = await prisma.party.findFirst({
+      where: { name: { equals: cleanParty, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (party) partyId = party.id;
+  }
+
+  const record = await prisma.internalWeightRecord.create({
+    data: {
+      vehicleNumber: cleanVehNo,
+      partyName: cleanParty,
+      partyId,
+      weightKg: Math.round(weight),
+      material: material?.trim() || 'PAPPU',
+      weighedAt: new Date(),
+    },
+  });
+
+  res.status(201).json(record);
+}
+
+/**
+ * Match the latest unused internal weight record for a vehicle (and optional party).
+ */
+export async function matchInternalWeightHandler(req: Request, res: Response) {
+  const rawVehicle = String(req.query.vehicleNumber ?? '').trim();
+  const rawParty = String(req.query.partyName ?? '').trim();
+
+  if (!rawVehicle) {
+    throw new HttpError(400, 'Vehicle number is required');
+  }
+
+  const cleanVeh = normaliseMatchText(rawVehicle);
+  const cleanParty = rawParty ? normaliseMatchText(rawParty) : null;
+
+  const candidates = await prisma.internalWeightRecord.findMany({
+    where: { used: false },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+
+  // Match by vehicle number; if party name provided, prefer record matching both, else match vehicle
+  let matched = candidates.find((r) => {
+    const vMatch = normaliseMatchText(r.vehicleNumber) === cleanVeh;
+    if (!vMatch) return false;
+    if (cleanParty && r.partyName) {
+      return normaliseMatchText(r.partyName) === cleanParty;
+    }
+    return true;
+  });
+
+  if (!matched) {
+    matched = candidates.find((r) => normaliseMatchText(r.vehicleNumber) === cleanVeh);
+  }
+
+  res.json(matched ?? null);
+}
+
+/**
+ * List internal weight records with optional unused filter and limit.
+ */
+export async function listInternalWeightsHandler(req: Request, res: Response) {
+  const { unusedOnly, limit } = req.query;
+  const take = limit ? Math.min(Number(limit), 100) : 50;
+
+  const records = await prisma.internalWeightRecord.findMany({
+    where: unusedOnly === 'true' ? { used: false } : undefined,
+    orderBy: { createdAt: 'desc' },
+    take,
+  });
+
+  res.json(records);
+}
+
+/**
  * List pending trucks (completed first weight, awaiting second weight).
  */
 export async function getPendingSecondWeightHandler(_req: Request, res: Response) {

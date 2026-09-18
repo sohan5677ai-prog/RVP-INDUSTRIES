@@ -21,6 +21,7 @@ import {
   getPrintAgentStatusHandler,
   remindSecondWeightHandler,
   verifyTicketPaymentHandler,
+  sendTicketSlipWhatsappHandler,
   recordInternalWeightHandler,
   matchInternalWeightHandler,
   listInternalWeightsHandler,
@@ -66,6 +67,7 @@ router.post('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandl
 router.patch('/tickets/:id/second-weight', asyncHandler(completeSecondWeightHandler));
 router.post('/tickets/:id/remind-second-weight', asyncHandler(remindSecondWeightHandler));
 router.post('/tickets/:id/verify-payment', asyncHandler(verifyTicketPaymentHandler));
+router.post('/tickets/:id/send-whatsapp-slip', asyncHandler(sendTicketSlipWhatsappHandler));
 router.patch('/tickets/:id/cancel', asyncHandler(cancelTicketHandler));
 router.delete('/tickets/:id', asyncHandler(deleteTicketHandler));
 

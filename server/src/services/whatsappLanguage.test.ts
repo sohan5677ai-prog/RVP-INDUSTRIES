@@ -154,6 +154,30 @@ describe('approved language ids', () => {
     expect(resolvedLanguage('WISHES', 'TE')).toBe('EN');
   });
 
+  it('maps BUYER_KATA_ALERT_TEXT to approved message_id 31798', () => {
+    expect(templateId('BUYER_KATA_ALERT_TEXT', 'EN')).toBe('31798');
+  });
+
+  it('pins DRIVER_UNLOADED_KATA across all 5 languages (EN 33504, TE 33505, HI 33506, KN 33507, TA 33508)', () => {
+    expect(templateId('DRIVER_UNLOADED_KATA', 'EN')).toBe('33504');
+    expect(templateId('DRIVER_UNLOADED_KATA', 'TE')).toBe('33505');
+    expect(templateId('DRIVER_UNLOADED_KATA', 'HI')).toBe('33506');
+    expect(templateId('DRIVER_UNLOADED_KATA', 'KN')).toBe('33507');
+    expect(templateId('DRIVER_UNLOADED_KATA', 'TA')).toBe('33508');
+
+    expect(resolvedLanguage('DRIVER_UNLOADED_KATA', 'TE')).toBe('TE');
+    expect(resolvedLanguage('DRIVER_UNLOADED_KATA', 'HI')).toBe('HI');
+    expect(resolvedLanguage('DRIVER_UNLOADED_KATA', 'KN')).toBe('KN');
+    expect(resolvedLanguage('DRIVER_UNLOADED_KATA', 'TA')).toBe('TA');
+  });
+
+  it('pins DRIVER_SECOND_REMINDER to Telugu (TE 33509) and HAMALI_SECOND_REMINDER to Hindi (HI 33510)', () => {
+    expect(templateId('DRIVER_SECOND_REMINDER', 'TE')).toBe('33509');
+    expect(templateId('DRIVER_SECOND_REMINDER', 'EN')).toBe('33509'); // default fallback
+    expect(templateId('HAMALI_SECOND_REMINDER', 'HI')).toBe('33510');
+    expect(templateId('HAMALI_SECOND_REMINDER', 'EN')).toBe('33510'); // default fallback
+  });
+
   it('leaves a template with no translations falling back to English', () => {
     process.env.FAST2SMS_TMPL_RECEIPT_RECEIVED = '26130';
     expect(templateId('RECEIPT_RECEIVED', 'TA')).toBe('26130');

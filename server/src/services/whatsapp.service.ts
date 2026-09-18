@@ -99,7 +99,10 @@ export type WaTemplateKey =
   | 'BUYER_KATA_ALERT'
   | 'BUYER_KATA_ALERT_TEXT'
   | 'WEIGHBRIDGE_SECOND_REMINDER' // driver/hamali: role, vehicle, ticket, first weight/time
-  | 'WEIGHBRIDGE_PAID_SLIP'; // signed PDF: driver, ticket, vehicle, net weight, amount
+  | 'WEIGHBRIDGE_PAID_SLIP' // signed PDF: driver, ticket, vehicle, net weight, amount
+  | 'DRIVER_UNLOADED_KATA' // driver_unloaded_signed_kata (image header): driver, lorry, location, gross, tare, net, shortage
+  | 'DRIVER_SECOND_REMINDER' // 2nd_weight_remainder (Telugu): driver, lorry, location
+  | 'HAMALI_SECOND_REMINDER'; // hamali_remainder (Hindi): hamali incharge, lorry
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -152,6 +155,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // 1081272931051099). See docs/whatsapp-lorry-payment-template.md.
   LORRY_PAYMENT: '31369',
   LORRY_PAYMENT_TEXT: '31369',
+  // rvp_buyer_kata_alert_text (Utility template, 6 vars), approved on the shared KNM
+  // number (+917207146094). Fast2SMS message_id 31798 (Meta template ID 1510273787797520).
+  BUYER_KATA_ALERT_TEXT: '31798',
   //
   // rvp_party_ledger, approved on the shared KNM number. This id was only ever
   // set as the Render env var FAST2SMS_TMPL_PARTY_LEDGER (sync: false, no repo
@@ -163,6 +169,12 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // was baked in. Keep the Render var correct too - env still wins over this
   // default when both are set.
   PARTY_LEDGER: '28223',
+  // Delivery completed — signed kata slip (IMAGE header, 7 vars: driver, lorry, location, gross, tare, net, shortage)
+  DRIVER_UNLOADED_KATA: '33504',
+  // 2nd weight reminder to driver (Telugu template 2nd_weight_remainder, 3 vars: driver, lorry, location)
+  DRIVER_SECOND_REMINDER: '33509',
+  // 2nd weight reminder to hamali (Hindi template hamali_remainder, 2 vars: hamali in-charge, lorry)
+  HAMALI_SECOND_REMINDER: '33510',
 };
 
 /**
@@ -181,10 +193,12 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
 const LANGUAGE_TEMPLATE_IDS: Partial<Record<Exclude<WaLanguage, 'EN'>, Partial<Record<WaTemplateKey, string>>>> = {
   // po_* approved 2026-08-11; stockin_* approved 2026-08-12; private loan statements approved 2026-08-21;
   // lorry_* (EN 31369, TE 31377, HI 31378, TA 31379) created 2026-09-04 on +917207146094.
-  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595', PRIVATE_LOAN_STATEMENT: '28935', LORRY_PAYMENT: '31377', LORRY_PAYMENT_TEXT: '31377' },
-  TA: { PO_CREATED: '28598', STOCKIN_CONFIRMED: '28594', LORRY_PAYMENT: '31379', LORRY_PAYMENT_TEXT: '31379' },
-  KN: { PO_CREATED: '28597', STOCKIN_CONFIRMED: '28593' },
-  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592', PRIVATE_LOAN_STATEMENT: '28936', LORRY_PAYMENT: '31378', LORRY_PAYMENT_TEXT: '31378' },
+  // driver_unloaded_signed_kata_* (EN 33504, TE 33505, HI 33506, KN 33507, TA 33508);
+  // 2nd_weight_remainder (TE 33509); hamali_remainder (HI 33510) created 2026-09-18.
+  TE: { PO_CREATED: '28599', STOCKIN_CONFIRMED: '28595', PRIVATE_LOAN_STATEMENT: '28935', LORRY_PAYMENT: '31377', LORRY_PAYMENT_TEXT: '31377', DRIVER_UNLOADED_KATA: '33505', DRIVER_SECOND_REMINDER: '33509' },
+  TA: { PO_CREATED: '28598', STOCKIN_CONFIRMED: '28594', LORRY_PAYMENT: '31379', LORRY_PAYMENT_TEXT: '31379', DRIVER_UNLOADED_KATA: '33508' },
+  KN: { PO_CREATED: '28597', STOCKIN_CONFIRMED: '28593', DRIVER_UNLOADED_KATA: '33507' },
+  HI: { PO_CREATED: '28596', STOCKIN_CONFIRMED: '28592', PRIVATE_LOAN_STATEMENT: '28936', LORRY_PAYMENT: '31378', LORRY_PAYMENT_TEXT: '31378', DRIVER_UNLOADED_KATA: '33506', HAMALI_SECOND_REMINDER: '33510' },
 };
 
 /**
@@ -246,6 +260,10 @@ const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
   DISPATCH_DRIVER: 'driver_industries',
   WISHES: 'rvp_rema',
+  BUYER_KATA_ALERT_TEXT: 'rvp_buyer_kata_alert_text',
+  DRIVER_UNLOADED_KATA: 'driver_unloaded_signed_kata',
+  DRIVER_SECOND_REMINDER: '2nd_weight_remainder',
+  HAMALI_SECOND_REMINDER: 'hamali_remainder',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {
@@ -787,6 +805,46 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
   return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error ?? 'Send failed' };
 }
 
+export function sendDriverSecondWeightReminder(args: {
+  to: string;
+  driverName?: string | null;
+  vehicleNumber: string;
+  location?: string | null;
+  ticketId?: string;
+}) {
+  return sendWhatsAppTemplate({
+    templateKey: 'DRIVER_SECOND_REMINDER',
+    to: args.to,
+    language: 'TE',
+    variables: [
+      args.driverName?.trim() || 'డ్రైవర్ గారు',
+      args.vehicleNumber,
+      args.location?.trim() || 'RVP ప్లాంట్',
+    ],
+    relatedType: 'DRIVER_SECOND_REMINDER',
+    relatedId: args.ticketId,
+  });
+}
+
+export function sendHamaliSecondWeightReminder(args: {
+  to: string;
+  hamaliName?: string | null;
+  vehicleNumber: string;
+  ticketId?: string;
+}) {
+  return sendWhatsAppTemplate({
+    templateKey: 'HAMALI_SECOND_REMINDER',
+    to: args.to,
+    language: 'HI',
+    variables: [
+      args.hamaliName?.trim() || 'हमाली टीम',
+      args.vehicleNumber,
+    ],
+    relatedType: 'HAMALI_SECOND_REMINDER',
+    relatedId: args.ticketId,
+  });
+}
+
 export function sendWeighbridgeSecondWeightReminder(args: {
   to: string;
   recipientLabel: string;
@@ -795,16 +853,62 @@ export function sendWeighbridgeSecondWeightReminder(args: {
   vehicleNumber: string;
   firstWeightKg: number;
   firstWeighedAt: Date | null;
+  location?: string | null;
 }) {
-  const weighedAt = args.firstWeighedAt
-    ? args.firstWeighedAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })
-    : '-';
-  const fmtTicketNo = String(args.ticketNo).padStart(2, '0');
-  return sendWhatsAppTemplate({
-    templateKey: 'WEIGHBRIDGE_SECOND_REMINDER',
+  const isDriver = args.recipientLabel.toLowerCase().includes('driver');
+  if (isDriver) {
+    return sendDriverSecondWeightReminder({
+      to: args.to,
+      driverName: args.recipientLabel === 'Driver' ? 'డ్రైవర్ గారు' : args.recipientLabel,
+      vehicleNumber: args.vehicleNumber,
+      location: args.location || 'RVP ప్లాంట్',
+      ticketId: args.ticketId,
+    });
+  }
+
+  return sendHamaliSecondWeightReminder({
     to: args.to,
-    variables: [args.recipientLabel, args.vehicleNumber, fmtTicketNo, `${args.firstWeightKg.toLocaleString('en-IN')} kg at ${weighedAt}`],
-    relatedType: 'WEIGHBRIDGE_SECOND_REMINDER',
+    hamaliName: args.recipientLabel,
+    vehicleNumber: args.vehicleNumber,
+    ticketId: args.ticketId,
+  });
+}
+
+export function sendWeighbridgeDriverUnloadedSlip(args: {
+  to: string;
+  driverName?: string | null;
+  ticketId: string;
+  ticketNo: number;
+  vehicleNumber: string;
+  location?: string | null;
+  firstWeightKg?: number | null;
+  secondWeightKg?: number | null;
+  netWeightKg?: number | null;
+  imageUrl?: string | null;
+  language?: WaLanguage;
+}) {
+  const driverName = args.driverName?.trim() || 'Driver ji';
+  const gross = args.firstWeightKg != null ? `${args.firstWeightKg.toLocaleString('en-IN')} kg` : '-';
+  const tare = args.secondWeightKg != null ? `${args.secondWeightKg.toLocaleString('en-IN')} kg` : '-';
+  const net = args.netWeightKg != null ? `${args.netWeightKg.toLocaleString('en-IN')} kg` : '-';
+  const location = args.location?.trim() || 'RVP Plant, Tadipatri';
+  const lang = args.language || 'TE'; // Default to Telugu for local drivers
+
+  return sendWhatsAppTemplate({
+    templateKey: 'DRIVER_UNLOADED_KATA',
+    to: args.to,
+    language: lang,
+    mediaUrl: args.imageUrl || undefined,
+    variables: [
+      driverName,
+      args.vehicleNumber,
+      location,
+      gross,
+      tare,
+      net,
+      '0 kg (Nil)',
+    ],
+    relatedType: 'DRIVER_UNLOADED_KATA',
     relatedId: args.ticketId,
   });
 }
@@ -818,16 +922,38 @@ export function sendWeighbridgePaidSlip(args: {
   netWeightKg: number;
   amount: number;
   slipUrl: string;
+  firstWeightKg?: number | null;
+  secondWeightKg?: number | null;
+  location?: string | null;
+  imageUrl?: string | null;
+  language?: WaLanguage;
 }) {
   const fmtTicketNo = String(args.ticketNo).padStart(2, '0');
-  return sendWhatsAppTemplate({
-    templateKey: 'WEIGHBRIDGE_PAID_SLIP',
+  const photoUrl = args.imageUrl || args.slipUrl;
+  return sendWeighbridgeDriverUnloadedSlip({
     to: args.to,
-    variables: [args.driverName, fmtTicketNo, args.vehicleNumber, `${args.netWeightKg.toLocaleString('en-IN')} kg`, `Rs. ${args.amount.toLocaleString('en-IN')}`],
-    mediaUrl: args.slipUrl,
-    documentFilename: `Kata-Slip-${fmtTicketNo}-${args.vehicleNumber}.pdf`,
-    relatedType: 'WEIGHBRIDGE_PAID_SLIP',
-    relatedId: args.ticketId,
+    driverName: args.driverName,
+    ticketId: args.ticketId,
+    ticketNo: args.ticketNo,
+    vehicleNumber: args.vehicleNumber,
+    location: args.location || 'RVP Plant, Tadipatri',
+    firstWeightKg: args.firstWeightKg,
+    secondWeightKg: args.secondWeightKg,
+    netWeightKg: args.netWeightKg,
+    imageUrl: photoUrl,
+    language: args.language || 'TE',
+  }).then((res) => {
+    if (res.ok) return res;
+    // Fallback to previous WEIGHBRIDGE_PAID_SLIP if template not yet approved/configured
+    return sendWhatsAppTemplate({
+      templateKey: 'WEIGHBRIDGE_PAID_SLIP',
+      to: args.to,
+      variables: [args.driverName, fmtTicketNo, args.vehicleNumber, `${args.netWeightKg.toLocaleString('en-IN')} kg`, `Rs. ${args.amount.toLocaleString('en-IN')}`],
+      mediaUrl: args.slipUrl,
+      documentFilename: `Kata-Slip-${fmtTicketNo}-${args.vehicleNumber}.pdf`,
+      relatedType: 'WEIGHBRIDGE_PAID_SLIP',
+      relatedId: args.ticketId,
+    });
   });
 }
 
@@ -1864,6 +1990,9 @@ export const whatsappService = {
   notifyDriverKataConfirmed,
   notifyDriverKataRejected,
   notifyOwnersKataReceived,
+  sendDriverSecondWeightReminder,
+  sendHamaliSecondWeightReminder,
+  sendWeighbridgeDriverUnloadedSlip,
 };
 
 /**
@@ -2027,8 +2156,50 @@ export async function notifyDriverKataConfirmed(
   driverPhone: string,
   lorryNumber: string,
   buyerName: string,
-  shortageKg: number
+  shortageKg: number,
+  extra?: {
+    driverName?: string | null;
+    grossWeightKg?: number | null;
+    tareWeightKg?: number | null;
+    netWeightKg?: number | null;
+    imageUrl?: string | null;
+    language?: WaLanguage;
+  }
 ) {
+  const driverName = extra?.driverName?.trim() || 'Driver ji';
+  const shortage = shortageKg > 0 ? `${shortageKg.toLocaleString('en-IN')} kg` : 'Nil (0 kg)';
+  const gross = extra?.grossWeightKg != null ? `${extra.grossWeightKg.toLocaleString('en-IN')} kg` : '-';
+  const tare = extra?.tareWeightKg != null ? `${extra.tareWeightKg.toLocaleString('en-IN')} kg` : '-';
+  const net = extra?.netWeightKg != null ? `${extra.netWeightKg.toLocaleString('en-IN')} kg` : '-';
+  const lang = extra?.language || 'EN';
+
+  // 1. Send official approved WhatsApp template (driver_unloaded_signed_kata) with Kata slip pic attached
+  try {
+    const tResult = await sendWhatsAppTemplate({
+      templateKey: 'DRIVER_UNLOADED_KATA',
+      to: driverPhone,
+      language: lang,
+      mediaUrl: extra?.imageUrl || undefined,
+      variables: [
+        driverName,
+        lorryNumber,
+        buyerName,
+        gross,
+        tare,
+        net,
+        shortage,
+      ],
+      relatedType: 'DRIVER_UNLOADED_KATA',
+    });
+
+    if (tResult.ok) {
+      return tResult;
+    }
+  } catch (err) {
+    logger.warn('[whatsapp] DRIVER_UNLOADED_KATA template send threw, trying fallback:', err);
+  }
+
+  // 2. Fallback to freeform session text message if template was skipped or unconfigured
   const shortageText = shortageKg > 0 ? `Transit shortage: ${shortageKg} kg.` : 'No shortage recorded.';
   const text = `✅ *Delivery Confirmed!*\nLorry: *${lorryNumber}*\nBuyer: *${buyerName}*\n${shortageText}\nDelivery has been successfully recorded. Thank you for your service! 🚛\n\n— *RVP Industries*`;
   return sendSessionTextMessage({ to: driverPhone, text, relatedType: 'KATA_CONFIRMED' });
@@ -2063,8 +2234,14 @@ export async function notifyOwnersKataReceived(args: {
   }
 
   const hasImage = !!args.imageUrl;
-  const tmplKey = hasImage ? 'BUYER_KATA_ALERT' : 'BUYER_KATA_ALERT_TEXT';
-  const tid = templateId(tmplKey) || templateId('BUYER_KATA_ALERT');
+  // If BUYER_KATA_ALERT (image header) is configured, prefer it when there is an image.
+  // Otherwise fall back to BUYER_KATA_ALERT_TEXT (approved Fast2SMS message_id 31798).
+  const selectedKey: WaTemplateKey | null =
+    (hasImage && templateId('BUYER_KATA_ALERT'))
+      ? 'BUYER_KATA_ALERT'
+      : (templateId('BUYER_KATA_ALERT_TEXT')
+        ? 'BUYER_KATA_ALERT_TEXT'
+        : (templateId('BUYER_KATA_ALERT') ? 'BUYER_KATA_ALERT' : null));
 
   const weightClean = args.buyerKataKg ? `${args.buyerKataKg.toLocaleString('en-IN')} kg` : 'OCR pending';
   const shortageClean = args.shortageKg > 0
@@ -2073,11 +2250,7 @@ export async function notifyOwnersKataReceived(args: {
 
   // 1. If an approved template is configured on Fast2SMS, use it!
   // This bypasses Meta's 24-hour window restriction completely and sends 24/7 unconditionally.
-  if (tid) {
-    const selectedKey = (hasImage && templateId('BUYER_KATA_ALERT'))
-      ? 'BUYER_KATA_ALERT'
-      : (templateId('BUYER_KATA_ALERT_TEXT') ? 'BUYER_KATA_ALERT_TEXT' : 'BUYER_KATA_ALERT');
-
+  if (selectedKey) {
     return fanOutToAlertRecipients((to) =>
       sendWhatsAppTemplate({
         templateKey: selectedKey,
@@ -2090,7 +2263,9 @@ export async function notifyOwnersKataReceived(args: {
           weightClean,
           shortageClean,
         ],
-        mediaUrl: args.imageUrl ?? undefined,
+        // Header IMAGE is only supported for BUYER_KATA_ALERT.
+        // BUYER_KATA_ALERT_TEXT is headerless; passing mediaUrl causes Fast2SMS/Meta API to fail.
+        mediaUrl: selectedKey === 'BUYER_KATA_ALERT' ? (args.imageUrl ?? undefined) : undefined,
         relatedType: 'KATA_ALERT',
         relatedId: args.submissionId,
       })

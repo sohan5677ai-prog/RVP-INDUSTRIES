@@ -503,8 +503,13 @@ async function parseInboundIntoRegister(logRow: InboundLogRow) {
  */
 async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> {
   const from = logRow.from;
-  const text = (logRow.text || '').trim();
-  if (!from || !text) return false;
+  const rawText = (logRow.text || '').trim();
+  if (!from || !rawText) return false;
+
+  // Clean formatting: strip leading markdown symbols (*, _, ~, #), emojis, and "Reply:" prefix
+  let text = rawText.replace(/^[\s*#_~✅👍👉▶️-]+/, '').trim();
+  text = text.replace(/^(?:reply|re)\s*:\s*/i, '').trim();
+  text = text.replace(/^[\s*#_~✅👍👉▶️-]+/, '').trim();
 
   const senderDigits = from.replace(/\D/g, '').slice(-10);
   if (senderDigits.length < 10) return false;
@@ -742,7 +747,14 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
       const shortageKg = Math.max(0, dispatch.weightKg - finalWeightKg);
 
       if (driverPhone) {
-        notifyDriverKataConfirmed(driverPhone, lorryNo, buyerName, shortageKg).catch((err) => {
+        notifyDriverKataConfirmed(driverPhone, lorryNo, buyerName, shortageKg, {
+          driverName: dispatch.driverName,
+          grossWeightKg: dispatch.weightKg,
+          tareWeightKg: Math.max(0, dispatch.weightKg - finalWeightKg),
+          netWeightKg: finalWeightKg,
+          imageUrl: sub?.imageUrl || dispatch.buyerKataFileUrl,
+          language: (dispatch.saleOrder.buyer as any)?.waLanguage || 'EN',
+        }).catch((err) => {
           logger.error('[whatsapp] driver confirmation notify failed', err);
         });
       }
@@ -2510,7 +2522,14 @@ export async function approveDriverKataSubmission(req: Request, res: Response) {
   const lorry = sub.saleDispatch.vehicleNumber || 'your lorry';
   const buyer = sub.saleDispatch.saleOrder.buyer.name;
   const shortage = Math.max(0, sub.saleDispatch.weightKg - confirmedWeight);
-  notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage).catch((err) => {
+  notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage, {
+    driverName: sub.saleDispatch.driverName,
+    grossWeightKg: sub.saleDispatch.weightKg,
+    tareWeightKg: Math.max(0, sub.saleDispatch.weightKg - confirmedWeight),
+    netWeightKg: confirmedWeight,
+    imageUrl: sub.imageUrl,
+    language: (sub.saleDispatch.saleOrder.buyer as any)?.waLanguage || 'EN',
+  }).catch((err) => {
     logger.error('[whatsapp] driver confirmation notify failed', err);
   });
 

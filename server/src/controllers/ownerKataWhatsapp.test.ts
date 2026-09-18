@@ -134,7 +134,12 @@ describe('Owner WhatsApp Kata Approval Workflow', () => {
       '9876543210',
       'TN28BF7423',
       'Colourtex Industries',
-      150 // 25000 - 24850
+      150, // 25000 - 24850
+      expect.objectContaining({
+        imageUrl: 'https://example.com/slip.jpg',
+        grossWeightKg: 25000,
+        netWeightKg: 24850,
+      })
     );
 
     // Verify owner received confirmation reply
@@ -344,6 +349,59 @@ describe('Owner WhatsApp Kata Approval Workflow', () => {
           status: 'REJECTED',
           rejectionReason: 'unclear photo',
         }),
+      })
+    );
+  });
+
+  it('handles bolded "*APPROVE TN28BF7423*" and "Reply: APPROVE TN28BF7423"', async () => {
+    const mockSubmission = {
+      id: 'sub_fmt',
+      status: 'PENDING',
+      driverPhone: '9876543210',
+      ocrBuyerKataKg: 24850,
+      ocrLorryNumber: 'TN28BF7423',
+      imageUrl: 'https://example.com/slip.jpg',
+      saleDispatch: {
+        id: 'disp_fmt',
+        vehicleNumber: 'TN28BF7423',
+        weightKg: 25000,
+        driverPhone: '9876543210',
+        saleOrder: { buyer: { name: 'Colourtex Industries' } },
+      },
+    };
+
+    mockPrisma.driverKataSubmission.findMany.mockResolvedValue([mockSubmission]);
+    mockDelivery.confirmDelivery.mockResolvedValue({ id: 'disp_fmt', status: 'DELIVERED' });
+
+    // Test with WhatsApp bold asterisks: *APPROVE TN28BF7423*
+    await postWebhook({
+      webhook_type: 'incoming_message',
+      from: '919902953300',
+      text: '*APPROVE TN28BF7423*',
+    });
+
+    expect(mockDelivery.confirmDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatchId: 'disp_fmt',
+        buyerKataKg: 24850,
+      })
+    );
+
+    // Test with "Reply:\nAPPROVE TN28BF7423"
+    vi.clearAllMocks();
+    mockPrisma.driverKataSubmission.findMany.mockResolvedValue([mockSubmission]);
+    mockDelivery.confirmDelivery.mockResolvedValue({ id: 'disp_fmt', status: 'DELIVERED' });
+
+    await postWebhook({
+      webhook_type: 'incoming_message',
+      from: '919902953300',
+      text: 'Reply:\nAPPROVE TN28BF7423',
+    });
+
+    expect(mockDelivery.confirmDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatchId: 'disp_fmt',
+        buyerKataKg: 24850,
       })
     );
   });

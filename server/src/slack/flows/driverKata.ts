@@ -178,7 +178,14 @@ export function registerDriverKataFlow(app: App) {
       const lorry = sub.saleDispatch.vehicleNumber || 'your lorry';
       const buyer = sub.saleDispatch.saleOrder.buyer.name;
       const shortage = Math.max(0, sub.saleDispatch.weightKg - sub.ocrBuyerKataKg);
-      await notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage).catch((err) => {
+      await notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage, {
+        driverName: sub.saleDispatch.driverName,
+        grossWeightKg: sub.saleDispatch.weightKg,
+        tareWeightKg: Math.max(0, sub.saleDispatch.weightKg - (sub.ocrBuyerKataKg || 0)),
+        netWeightKg: sub.ocrBuyerKataKg,
+        imageUrl: sub.imageUrl,
+        language: (sub.saleDispatch.saleOrder.buyer as any)?.waLanguage || 'EN',
+      }).catch((err) => {
         logger.error('[whatsapp] driver confirmation notify failed', err);
       });
     } catch (err: any) {
@@ -306,7 +313,14 @@ export function registerDriverKataFlow(app: App) {
       const lorry = sub.saleDispatch.vehicleNumber || 'your lorry';
       const buyer = sub.saleDispatch.saleOrder.buyer.name;
       const shortage = Math.max(0, sub.saleDispatch.weightKg - weightKg);
-      await notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage).catch((err) => {
+      await notifyDriverKataConfirmed(sub.driverPhone, lorry, buyer, shortage, {
+        driverName: sub.saleDispatch.driverName,
+        grossWeightKg: sub.saleDispatch.weightKg,
+        tareWeightKg: Math.max(0, sub.saleDispatch.weightKg - weightKg),
+        netWeightKg: weightKg,
+        imageUrl: sub.imageUrl,
+        language: (sub.saleDispatch.saleOrder.buyer as any)?.waLanguage || 'EN',
+      }).catch((err) => {
         logger.error('[whatsapp] driver confirmation notify failed', err);
       });
     } catch (err: any) {

@@ -149,6 +149,13 @@ app.post("/api/weighbridge/scale/broadcast", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.broadcastScaleReadingHandler(req, res)).catch(next);
 });
 
+// Forward root /webhooks/* to apiRoutes so webhook callbacks (e.g. Fast2SMS / Meta / Resend)
+// succeed whether configured with or without the /api prefix.
+app.use('/webhooks', (req, res, next) => {
+  req.url = `/webhooks${req.url}`;
+  apiRoutes(req, res, next);
+});
+
 app.use("/api", apiLimiter, apiRoutes);
 
 // Error handler must be registered last.

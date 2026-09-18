@@ -1111,8 +1111,26 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const reminderMutation = useMutation({
     mutationFn: (ticket: WeighbridgeTicket) => api<{ sent: number; attempted: number }>(`/weighbridge/tickets/${ticket.id}/remind-second-weight`, { method: 'POST' }),
     onSuccess: (result) => {
-      toast.success(`Second-weight reminder sent to ${result.sent} of ${result.attempted} recipient(s).`);
+      toast.success(`2nd weight reminder sent to ${result.sent} recipient(s) (Telugu to Driver, Hindi to Hamali).`);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const sendSlipWhatsappMutation = useMutation({
+    mutationFn: (ticket: WeighbridgeTicket) =>
+      api<{ ok: boolean; whatsapp: { ok: boolean; skipped?: boolean; error?: string } }>(
+        `/weighbridge/tickets/${ticket.id}/send-whatsapp-slip`,
+        { method: 'POST' }
+      ),
+    onSuccess: ({ whatsapp }) => {
+      if (whatsapp.ok) {
+        toast.success('Signed Kata slip with photo sent to driver on WhatsApp!');
+      } else {
+        toast.warning(whatsapp.error || 'Could not send WhatsApp Kata slip.');
+      }
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
     },
@@ -2559,6 +2577,19 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                           <Printer className="h-3.5 w-3.5 text-primary" />
                           Slip
                         </Button>
+                        {t.status === 'COMPLETED' && t.partyMobile && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => sendSlipWhatsappMutation.mutate(t)}
+                            disabled={sendSlipWhatsappMutation.isPending}
+                            className="h-7 px-2 text-xs gap-1 text-emerald-700 hover:text-emerald-800 dark:text-emerald-400"
+                            title="Send signed Kata slip with photo to driver on WhatsApp"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            WhatsApp
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

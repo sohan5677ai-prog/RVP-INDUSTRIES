@@ -789,7 +789,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     retry: false,
   });
 
-  const recentlyPrintedIdsRef = useRef<Set<string>>(new Set());
+  const locallySavedTicketTimestamps = useRef<Map<string, number>>(new Map());
 
   // Cabin Browser Auto-Print Listener:
   // When running in Kata Cabin (/kata-cabin), automatically poll pending print jobs
@@ -815,12 +815,19 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           isPrinting = true;
           for (const job of pendingJobs) {
             if (job.ticket) {
-              const alreadyPrintedLocally = recentlyPrintedIdsRef.current.has(job.ticket.id);
-              if (!alreadyPrintedLocally) {
-                recentlyPrintedIdsRef.current.add(job.ticket.id);
-                toast.info(`🖨️ Cabin Printer: Auto-printing Ticket #${job.ticketNo}...`);
+              const savedLocallyAt = locallySavedTicketTimestamps.current.get(job.ticket.id);
+              // Only skip duplicate AUTO-prints if THIS cabin PC was the one that saved it within the last 15s
+              const isDuplicateAutoPrint =
+                job.requestedBy === 'AUTO' &&
+                Boolean(savedLocallyAt && Date.now() - savedLocallyAt < 15000);
+
+              if (!isDuplicateAutoPrint) {
+                toast.info(`🖨️ Cabin Printer: Printing Ticket #${job.ticketNo}...`);
                 await triggerDirectPrint(job.ticket);
+              } else {
+                console.log(`[Cabin] Skipped duplicate auto-print for Ticket #${job.ticketNo} (already printed on save)`);
               }
+
               // Mark completed in cloud queue
               await api(`/weighbridge/print-queue/${job.id}/complete`, {
                 method: 'PATCH',
@@ -1032,7 +1039,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
 
-      recentlyPrintedIdsRef.current.add(ticket.id);
+      locallySavedTicketTimestamps.current.set(ticket.id, Date.now());
 
       if (cabinMode) {
         // Dedicated Kata Cabin PC: trigger immediate direct print to the cabin printer!
@@ -2570,6 +2577,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         ticket={slipModalTicket}
         companyProfile={companyProfile}
         snapshots={activeSnapshots}
+        cabinMode={cabinMode}
         onClose={() => setSlipModalTicket(null)}
       />
 

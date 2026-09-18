@@ -37,6 +37,7 @@ interface WeighbridgeSlipModalProps {
   ticket: WeighbridgeTicket | null;
   companyProfile?: CompanyProfile | null;
   snapshots?: { cam1?: string; cam2?: string } | null;
+  cabinMode?: boolean;
   onClose: () => void;
 }
 
@@ -434,6 +435,7 @@ export default function WeighbridgeSlipModal({
   ticket,
   companyProfile: _companyProfile,
   snapshots,
+  cabinMode = false,
   onClose,
 }: WeighbridgeSlipModalProps) {
   const [calibration, setCalibration] = useState<PrinterCalibration>(() => {
@@ -450,6 +452,7 @@ export default function WeighbridgeSlipModal({
 
   const [showCalibrationBar, setShowCalibrationBar] = useState<boolean>(false);
   const [showScreenGuide, setShowScreenGuide] = useState<boolean>(true);
+  const [isSendingToCabin, setIsSendingToCabin] = useState<boolean>(false);
 
   // Camera images with automatic fallback to cloud/server relay
   const [cam1Url, setCam1Url] = useState<string | null>(null);
@@ -486,12 +489,8 @@ export default function WeighbridgeSlipModal({
     tareWeight = Math.min(firstWeight, secondWeight);
     netWeight = grossWeight - tareWeight;
   } else if (firstWeight != null) {
-    if (netWeight == null) {
-      netWeight = firstWeight;
-    }
-    if (ticket?.tripType === 'SINGLE') {
-      grossWeight = firstWeight;
-    } else if (ticket?.loadType === 'LOAD') {
+    if (netWeight == null) netWeight = firstWeight;
+    if (ticket?.tripType === 'SINGLE' || ticket?.loadType === 'LOAD') {
       grossWeight = firstWeight;
     } else {
       tareWeight = firstWeight;
@@ -529,6 +528,38 @@ export default function WeighbridgeSlipModal({
   const handlePrint = () => {
     if (!ticket) return;
     triggerDirectPrint(ticket, calibration, snapshots);
+  };
+
+  const handleSendToCabinPrinter = async () => {
+    if (!ticket || isSendingToCabin) return;
+    setIsSendingToCabin(true);
+    try {
+      toast.info(`🖨️ Sending Ticket #${ticket.ticketNo} to Cabin Printer...`, { duration: 3000 });
+
+      // If running on the Kata Cabin PC itself:
+      const isCabinTerminal = cabinMode || Boolean(localStorage.getItem('rvp_kata_cabin_installation_key'));
+      if (isCabinTerminal) {
+        await triggerDirectPrint(ticket, calibration, snapshots);
+        toast.success(`🖨️ Ticket #${ticket.ticketNo} printed directly on Cabin Printer!`);
+        return;
+      }
+
+      // If running on remote device (e.g. laptop beside Kata PC):
+      // Queue directly to cloud queue with explicit requestedBy so Cabin PC prints it immediately
+      await api('/weighbridge/print-queue', {
+        method: 'POST',
+        body: JSON.stringify({
+          ticketId: ticket.id,
+          ticketNo: ticket.ticketNo,
+          requestedBy: 'MANUAL_CABIN_BUTTON',
+        }),
+      });
+      toast.success(`🖨️ Ticket #${ticket.ticketNo} sent to Cabin Printer! Printing now...`);
+    } catch (err: any) {
+      toast.error(`Failed to send to Cabin Printer: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSendingToCabin(false);
+    }
   };
 
   // Keyboard shortcut listener for F12 or Ctrl+P while slip modal is active
@@ -624,11 +655,25 @@ export default function WeighbridgeSlipModal({
               Adjust (mm)
             </Button>
 
+            {/* Send to Cabin Printer Button */}
+            <Button
+              size="sm"
+              onClick={handleSendToCabinPrinter}
+              disabled={isSendingToCabin}
+              className="h-8 gap-1.5 font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs"
+              title="Print directly on the physical Canon printer in the Kata Cabin"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {isSendingToCabin ? 'Sending…' : 'Send to Cabin Printer'}
+            </Button>
+
             {/* Main Print Button */}
             <Button
               size="sm"
               onClick={handlePrint}
-              className="h-8 gap-1.5 font-semibold bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs"
+              variant="outline"
+              className="h-8 gap-1.5 font-semibold shadow-xs"
+              title="Print from this browser (F12)"
             >
               <Printer className="h-3.5 w-3.5" />
               Print Slip (F12)
@@ -1113,36 +1158,13 @@ export default function WeighbridgeSlipModal({
             <Button
               variant="outline"
               size="sm"
-              onClick={async () => {
-                if (!ticket) return;
-                try {
-                  toast.info(`🖨️ Sending Ticket #${ticket.ticketNo} to cabin printer...`, { duration: 3000 });
-                  // 1. If running on cabin terminal with local print agent, print silently with 0 latency
-                  const localRes = await triggerSilentLocalPrint(ticket, calibration, snapshots);
-                  if (localRes.success) {
-                    toast.success(`🖨️ Ticket #${ticket.ticketNo} printed automatically on Cabin Printer!`);
-                    return;
-                  }
-                  if (!localRes.unreachable && localRes.error) {
-                    toast.error(`Cabin printer error: ${localRes.error}`, { duration: 6000 });
-                    return;
-                  }
-
-                  // 2. Queue for remote cabin print agent via cloud queue
-                  await api('/weighbridge/print-queue', {
-                    method: 'POST',
-                    body: JSON.stringify({ ticketId: ticket.id, ticketNo: ticket.ticketNo }),
-                  });
-                  toast.success(`🖨️ Ticket #${ticket.ticketNo} queued in cabin print queue!`);
-                } catch (err: any) {
-                  toast.error(`Failed to queue print: ${err.message || 'Unknown error'}`);
-                }
-              }}
-              className="h-7 text-xs gap-1.5 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-              title="Print automatically on the cabin's physical printer (no preview dialog)"
+              onClick={handleSendToCabinPrinter}
+              disabled={isSendingToCabin}
+              className="h-7 text-xs gap-1.5 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 font-bold"
+              title="Print automatically on the cabin's physical Canon printer (no preview dialog)"
             >
               <Send className="h-3 w-3" />
-              Send to Cabin Printer
+              {isSendingToCabin ? 'Sending…' : 'Send to Cabin Printer'}
             </Button>
             <span className="text-[11px] font-mono">
               Paper: 21cm × 15cm (210×150mm)

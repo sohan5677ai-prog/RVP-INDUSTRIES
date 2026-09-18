@@ -825,7 +825,7 @@ export async function queuePrintJobHandler(req: Request, res: Response) {
   }
 
   const user = (req as any).user;
-  const requestedBy = user?.name || (isTrustedCameraBridge(req) ? 'CABIN_BRIDGE' : 'REMOTE');
+  const requestedBy = req.body.requestedBy || user?.name || (isTrustedCameraBridge(req) ? 'CABIN_BRIDGE' : 'REMOTE');
 
   const job = await prisma.printJob.create({
     data: {

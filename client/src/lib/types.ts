@@ -1430,6 +1430,9 @@ export interface WeighbridgeTicket {
   paymentReference: string | null;
   slipWhatsappSentAt: string | null;
   secondWeightReminderSentAt: string | null;
+  isStorageTransfer: boolean;
+  storageLocation: string | null;
+  transferDirection: 'STORAGE_TO_RVP' | 'RVP_TO_STORAGE' | string | null;
   createdAt: string;
   updatedAt: string;
 }

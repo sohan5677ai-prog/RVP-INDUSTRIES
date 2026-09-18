@@ -57,6 +57,31 @@ function readWeight(value: unknown, field: string): number | null {
   return Math.round(parsed);
 }
 
+const STORAGE_TRANSFER_LOCATIONS = new Set(['PGR COLD', 'Murugan', 'KNM Multi']);
+
+function resolveStorageTransfer(
+  rawEnabled: unknown,
+  rawLocation: unknown,
+  rawMaterial: unknown,
+): { enabled: boolean; storageLocation: string | null; transferDirection: string | null } {
+  const enabled = rawEnabled === true || String(rawEnabled).toLowerCase() === 'true';
+  if (!enabled) {
+    return { enabled: false, storageLocation: null, transferDirection: null };
+  }
+
+  const storageLocation = String(rawLocation ?? '').trim();
+  if (!STORAGE_TRANSFER_LOCATIONS.has(storageLocation)) {
+    throw new HttpError(400, 'Select a valid storage location for this internal transfer');
+  }
+
+  const material = String(rawMaterial ?? '').trim().toUpperCase();
+  return {
+    enabled: true,
+    storageLocation,
+    transferDirection: material === 'BLACK SEED' ? 'STORAGE_TO_RVP' : 'RVP_TO_STORAGE',
+  };
+}
+
 /**
  * Get next sequential weighbridge ticket number.
  */
@@ -184,6 +209,8 @@ export async function createTicketHandler(req: Request, res: Response) {
     remarks,
     snapCam1,
     snapCam2,
+    isStorageTransfer,
+    storageLocation,
   } = req.body;
 
   if (!vehicleNumber?.trim()) {
@@ -215,6 +242,13 @@ export async function createTicketHandler(req: Request, res: Response) {
       if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
       const finalBillType = String(billType || existingPending.billType || 'CASH').toUpperCase();
       const finalAmount = await calculateTicketFee(netWeight, cleanVehNo, finalBillType);
+      const transfer = resolveStorageTransfer(
+        Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
+          ? isStorageTransfer
+          : existingPending.isStorageTransfer,
+        storageLocation ?? existingPending.storageLocation,
+        material ?? existingPending.material,
+      );
 
       const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
         saveWeighbridgeSnapshot(existingPending.ticketNo, 1, snapCam1, true),
@@ -232,6 +266,12 @@ export async function createTicketHandler(req: Request, res: Response) {
           billType: finalBillType,
           amount: finalAmount,
           paymentStatus: paymentStatusFor(finalAmount, finalBillType),
+          isStorageTransfer: transfer.enabled,
+          storageLocation: transfer.storageLocation,
+          transferDirection: transfer.transferDirection,
+          partyName: transfer.enabled ? null : (partyName?.trim() || existingPending.partyName),
+          ...(partyMobile ? { partyMobile: partyMobile.trim() } : {}),
+          ...(material ? { material: material.trim() } : {}),
           ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
           ...(remarks ? { remarks: remarks.trim() } : {}),
           secondCam1PhotoUrl,
@@ -260,6 +300,7 @@ export async function createTicketHandler(req: Request, res: Response) {
 
   const user = (req as any).user;
   const operatorName = user?.name || (user?.scope === 'KATA_CABIN' ? 'Kata Cabin' : 'ADMIN');
+  const transfer = resolveStorageTransfer(isStorageTransfer, storageLocation, material);
 
   // Capture and persist CCTV snapshots taken during this kata weighment
   const [cam1PhotoUrl, cam2PhotoUrl] = await Promise.all([
@@ -273,13 +314,16 @@ export async function createTicketHandler(req: Request, res: Response) {
       vehicleNumber: cleanVehNo,
       vehicleType: String(vehicleType).toUpperCase(),
       tripType: String(tripType).toUpperCase(),
-      partyName: partyName?.trim() || null,
+      partyName: transfer.enabled ? null : (partyName?.trim() || null),
       partyMobile: partyMobile?.trim() || null,
       material: material?.trim() || null,
       loadType: String(loadType).toUpperCase(),
       billType: String(billType).toUpperCase(),
       amount: computedAmount,
       paymentStatus: status === 'COMPLETED' ? paymentStatusFor(computedAmount, String(billType)) : 'NOT_REQUIRED',
+      isStorageTransfer: transfer.enabled,
+      storageLocation: transfer.storageLocation,
+      transferDirection: transfer.transferDirection,
       firstWeightKg: firstWeight,
       secondWeightKg: secondWeight,
       netWeightKg: netWeight,
@@ -311,7 +355,7 @@ export async function createTicketHandler(req: Request, res: Response) {
  */
 export async function completeSecondWeightHandler(req: Request, res: Response) {
   const { id } = req.params;
-  const { secondWeightKg, secondWeight, partyName, partyMobile, material, loadType, billType, remarks, snapCam1, snapCam2 } = req.body;
+  const { secondWeightKg, secondWeight, partyName, partyMobile, material, loadType, billType, remarks, snapCam1, snapCam2, isStorageTransfer, storageLocation } = req.body;
   const weightVal = secondWeightKg ?? secondWeight ?? req.body.weight ?? req.body.liveWeight;
 
   if (weightVal == null || isNaN(Number(weightVal))) {
@@ -333,6 +377,13 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
   const finalBillType = String(billType || existing.billType || 'CASH').toUpperCase();
   const finalAmount = await calculateTicketFee(netWeight, existing.vehicleNumber, finalBillType);
+  const transfer = resolveStorageTransfer(
+    Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
+      ? isStorageTransfer
+      : existing.isStorageTransfer,
+    storageLocation ?? existing.storageLocation,
+    material ?? existing.material,
+  );
 
   // Capture snapshots for the second weighment
   const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
@@ -351,7 +402,12 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       billType: finalBillType,
       amount: finalAmount,
       paymentStatus: paymentStatusFor(finalAmount, finalBillType),
-      ...(partyName ? { partyName: String(partyName).trim() } : {}),
+      isStorageTransfer: transfer.enabled,
+      storageLocation: transfer.storageLocation,
+      transferDirection: transfer.transferDirection,
+      partyName: transfer.enabled
+        ? null
+        : (partyName ? String(partyName).trim() : existing.partyName),
       ...(partyMobile ? { partyMobile: String(partyMobile).trim() } : {}),
       ...(material ? { material: String(material).trim() } : {}),
       ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
@@ -397,6 +453,14 @@ export async function updateTicketHandler(req: Request, res: Response) {
   );
   const tripType = String(req.body.tripType ?? existing.tripType).toUpperCase();
   const billType = String(req.body.billType ?? existing.billType).toUpperCase();
+  const material = String(req.body.material ?? existing.material ?? '').trim();
+  const transfer = resolveStorageTransfer(
+    Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
+      ? req.body.isStorageTransfer
+      : existing.isStorageTransfer,
+    req.body.storageLocation ?? existing.storageLocation,
+    material,
+  );
 
   let netWeight: number | null = null;
   let status = existing.status;
@@ -421,11 +485,16 @@ export async function updateTicketHandler(req: Request, res: Response) {
       vehicleNumber,
       vehicleType: String(req.body.vehicleType ?? existing.vehicleType).toUpperCase(),
       tripType,
-      partyName: String(req.body.partyName ?? existing.partyName ?? '').trim() || null,
+      partyName: transfer.enabled
+        ? null
+        : (String(req.body.partyName ?? existing.partyName ?? '').trim() || null),
       partyMobile: String(req.body.partyMobile ?? existing.partyMobile ?? '').trim() || null,
-      material: String(req.body.material ?? existing.material ?? '').trim() || null,
+      material: material || null,
       loadType: String(req.body.loadType ?? existing.loadType).toUpperCase(),
       billType,
+      isStorageTransfer: transfer.enabled,
+      storageLocation: transfer.storageLocation,
+      transferDirection: transfer.transferDirection,
       firstWeightKg: firstWeight,
       secondWeightKg: secondWeight,
       netWeightKg: netWeight,

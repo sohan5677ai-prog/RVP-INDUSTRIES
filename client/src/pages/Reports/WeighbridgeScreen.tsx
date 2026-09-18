@@ -32,6 +32,8 @@ import {
   Banknote,
   MessageCircle,
   BadgeCheck,
+  Warehouse,
+  ArrowRight,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -81,6 +83,23 @@ const MATERIALS = [
   'OTHER',
 ];
 
+const STORAGE_LOCATIONS = [
+  { value: 'PGR COLD', label: 'PGR COLD (Rampalli)' },
+  { value: 'Murugan', label: 'Murugan' },
+  { value: 'KNM Multi', label: 'KNM Multi' },
+];
+
+function transferDirectionForMaterial(material: string): 'STORAGE_TO_RVP' | 'RVP_TO_STORAGE' {
+  return material.trim().toUpperCase() === 'BLACK SEED' ? 'STORAGE_TO_RVP' : 'RVP_TO_STORAGE';
+}
+
+function ticketTransferRoute(ticket: WeighbridgeTicket): string {
+  if (!ticket.isStorageTransfer || !ticket.storageLocation) return '';
+  return ticket.transferDirection === 'STORAGE_TO_RVP'
+    ? `${ticket.storageLocation} → RVP`
+    : `RVP → ${ticket.storageLocation}`;
+}
+
 const VEHICLE_TYPES = [
   { value: 'LORRY', label: 'Lorry / Truck (10-14 Wheeler)' },
   { value: 'TRAILER', label: 'Heavy Trailer (18-22 Wheeler)' },
@@ -129,7 +148,9 @@ const TICKET_EXPORT_COLUMNS: ExportColumn<WeighbridgeTicket>[] = [
   { header: 'Date', value: (t) => shortDate(t.createdAt) },
   { header: 'Time', value: (t) => new Date(t.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) },
   { header: 'Vehicle No', value: (t) => t.vehicleNumber },
-  { header: 'Party', value: (t) => t.partyName ?? '' },
+  { header: 'Party / Route', value: (t) => ticketTransferRoute(t) || t.partyName || '' },
+  { header: 'Movement', value: (t) => t.isStorageTransfer ? 'STORAGE TRANSFER' : 'PARTY WEIGHMENT' },
+  { header: 'Storage', value: (t) => t.storageLocation ?? '' },
   { header: 'Material', value: (t) => t.material ?? '' },
   { header: 'First Weight (kg)', value: (t) => t.firstWeightKg ?? '', excel: (t) => t.firstWeightKg, numFmt: '#,##0', align: 'right' },
   { header: 'Second Weight (kg)', value: (t) => t.secondWeightKg ?? '', excel: (t) => t.secondWeightKg, numFmt: '#,##0', align: 'right' },
@@ -511,6 +532,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [vehicleType, setVehicleType] = useState<string>('LORRY');
   const [tripType, setTripType] = useState<'FIRST' | 'SECOND' | 'SINGLE'>('FIRST');
   const [partyName, setPartyName] = useState<string>('');
+  const [isStorageTransfer, setIsStorageTransfer] = useState<boolean>(false);
+  const [storageLocation, setStorageLocation] = useState<string>('');
   const [material, setMaterial] = useState<string>('PAPPU');
   const [loadType, setLoadType] = useState<'LOAD' | 'EMPTY'>('LOAD');
   const [billType, setBillType] = useState<'CASH' | 'CREDIT' | 'FREE'>('CASH');
@@ -696,7 +719,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     return Array.from(latest.values()).map((ticket) => ({
       value: ticket.vehicleNumber.trim().toUpperCase(),
       label: ticket.vehicleNumber.trim().toUpperCase(),
-      hint: ticket.partyName || ticket.material || undefined,
+      hint: ticketTransferRoute(ticket) || ticket.partyName || ticket.material || undefined,
     }));
   }, [allTickets]);
 
@@ -718,6 +741,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     if (!previous) return;
     setVehicleType(previous.vehicleType || 'LORRY');
     setPartyName(previous.partyName || '');
+    setIsStorageTransfer(Boolean(previous.isStorageTransfer));
+    setStorageLocation(previous.storageLocation || '');
     setMaterial(previous.material || 'PAPPU');
     setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
     setDriverMobile(previous.partyMobile || '');
@@ -839,6 +864,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     return null;
   }, [tripType, firstWeight, currentLiveWeight]);
 
+  const storageTransferDirection = transferDirectionForMaterial(material);
+
   const calculatedKataFee = useMemo(() => {
     if (billType === 'FREE' || calculatedNetWeight == null || calculatedNetWeight <= 0) return 0;
     return calcKataFee(
@@ -871,6 +898,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setVehicleType('LORRY');
     setTripType('FIRST');
     setPartyName('');
+    setIsStorageTransfer(false);
+    setStorageLocation('');
     setMaterial('PAPPU');
     setLoadType('LOAD');
     setBillType('CASH');
@@ -890,6 +919,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setVehicleType(ticket.vehicleType || 'LORRY');
     setTripType('SECOND');
     setPartyName(ticket.partyName || '');
+    setIsStorageTransfer(Boolean(ticket.isStorageTransfer));
+    setStorageLocation(ticket.storageLocation || '');
     setMaterial(ticket.material || 'PAPPU');
     setLoadType(ticket.loadType === 'LOAD' ? 'EMPTY' : 'LOAD');
     setFirstWeight(ticket.firstWeightKg);
@@ -906,6 +937,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     mutationFn: async () => {
       if (!vehicleNumber.trim()) {
         throw new Error('Vehicle number is mandatory');
+      }
+      if (isStorageTransfer && !storageLocation) {
+        throw new Error('Select the storage location for this transfer');
       }
       if (currentLiveWeight <= 0) {
         throw new Error('Weight must be greater than 0 kg');
@@ -939,9 +973,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           body: JSON.stringify({
             secondWeightKg: currentLiveWeight,
             secondWeight: currentLiveWeight,
-            partyName: partyName.trim() || undefined,
+            partyName: isStorageTransfer ? undefined : (partyName.trim() || undefined),
             partyMobile: driverMobile.trim() || undefined,
             material: material || undefined,
+            isStorageTransfer,
+            storageLocation: isStorageTransfer ? storageLocation : undefined,
             billType,
             loadType,
             remarks: remarks.trim() || undefined,
@@ -964,8 +1000,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             vehicleNumber: vehicleNumber.trim().toUpperCase(),
             vehicleType,
             tripType,
-            partyName: partyName.trim(),
+            partyName: isStorageTransfer ? '' : partyName.trim(),
             material,
+            isStorageTransfer,
+            storageLocation: isStorageTransfer ? storageLocation : undefined,
             loadType,
             billType,
             firstWeightKg: tripType === 'SECOND' ? (firstWeight ?? currentLiveWeight) : currentLiveWeight,
@@ -996,14 +1034,18 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
       recentlyPrintedIdsRef.current.add(ticket.id);
 
-      // In cabin mode, trigger immediate print directly to the printer!
-      toast.info(`🖨️ Printing Ticket #${ticket.ticketNo}...`, { duration: 3500 });
-      triggerDirectPrint(ticket, undefined, snapshots).catch(() => {});
-
-      // Always open the slip modal preview so operator can inspect certificate & photos
-      setSlipModalTicket(ticket);
-      if (snapshots) {
-        setActiveSnapshots(snapshots);
+      if (cabinMode) {
+        // Dedicated Kata Cabin PC: trigger immediate direct print to the cabin printer!
+        toast.info(`🖨️ Printing Ticket #${ticket.ticketNo}...`, { duration: 3000 });
+        triggerDirectPrint(ticket, undefined, snapshots).catch(() => {});
+      } else {
+        // Non-cabin office/laptop PC: do NOT popup browser print dialog!
+        // The ticket is automatically queued in the cloud for the Kata Cabin Printer.
+        toast.success(`🖨️ Ticket #${ticket.ticketNo} queued for Kata Cabin Printer.`);
+        setSlipModalTicket(ticket);
+        if (snapshots) {
+          setActiveSnapshots(snapshots);
+        }
       }
 
       if (ticket.status === 'COMPLETED') {
@@ -1443,20 +1485,79 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   />
                 </div>
 
-                {/* Party Name (with autocomplete datalist) */}
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <User className="h-3.5 w-3.5 text-primary" />
-                      Customer / Party Name
+                {/* Internal transfer mode */}
+                <label className={cn(
+                  'sm:col-span-2 flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 transition-colors',
+                  isStorageTransfer
+                    ? 'border-amber-500/50 bg-amber-500/10'
+                    : 'border-border bg-muted/25 hover:bg-muted/45',
+                )}>
+                  <input
+                    type="checkbox"
+                    checked={isStorageTransfer}
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setIsStorageTransfer(checked);
+                      if (checked) setPartyName('');
+                      else setStorageLocation('');
+                    }}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600"
+                    aria-label="Internal storage transfer"
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-foreground">
+                      <Warehouse className="h-4 w-4 text-amber-600" />
+                      Internal Storage Transfer
                     </span>
-                    <span className="text-[10px] font-normal text-muted-foreground">Supplier or Buyer name</span>
-                  </Label>
-                  <Combobox options={partyOptions} value={partyName} onChange={selectParty}
-                    placeholder="Select customer or party" searchPlaceholder="Search or enter party name…"
-                    emptyText="No saved party found." allowCustomValue customValueLabel="Use party"
-                    ariaLabel="Customer or party name" className="bg-background uppercase" />
-                </div>
+                    <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                      Use for black seed coming to RVP or husk and tamarind by-products going to storage.
+                    </span>
+                  </span>
+                </label>
+
+                {isStorageTransfer ? (
+                  <div className="space-y-2 sm:col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Warehouse className="h-3.5 w-3.5 text-amber-600" />
+                        Storage Location *
+                      </span>
+                      <span className="text-[10px] font-normal text-amber-700 dark:text-amber-300">Party name not required</span>
+                    </Label>
+                    <Combobox
+                      options={STORAGE_LOCATIONS}
+                      value={storageLocation}
+                      onChange={setStorageLocation}
+                      placeholder="Select storage"
+                      searchPlaceholder="Search storage…"
+                      ariaLabel="Storage location"
+                      className="bg-background font-medium"
+                    />
+                    <div className="flex items-center gap-2 rounded-lg bg-background/80 px-3 py-2 text-xs font-semibold text-foreground ring-1 ring-border/60">
+                      <span>{storageTransferDirection === 'STORAGE_TO_RVP' ? storageLocation || 'Storage' : 'RVP'}</span>
+                      <ArrowRight className="h-3.5 w-3.5 text-amber-600" />
+                      <span>{storageTransferDirection === 'STORAGE_TO_RVP' ? 'RVP' : storageLocation || 'Storage'}</span>
+                      <Badge variant="outline" className="ml-auto border-amber-500/40 text-[9px] text-amber-700 dark:text-amber-300">
+                        {material === 'BLACK SEED' ? 'INWARD' : 'OUTWARD'}
+                      </Badge>
+                    </div>
+                  </div>
+                ) : (
+                  /* Party Name (with autocomplete) */
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <User className="h-3.5 w-3.5 text-primary" />
+                        Customer / Party Name
+                      </span>
+                      <span className="text-[10px] font-normal text-muted-foreground">Supplier or Buyer name</span>
+                    </Label>
+                    <Combobox options={partyOptions} value={partyName} onChange={selectParty}
+                      placeholder="Select customer or party" searchPlaceholder="Search or enter party name…"
+                      emptyText="No saved party found." allowCustomValue customValueLabel="Use party"
+                      ariaLabel="Customer or party name" className="bg-background uppercase" />
+                  </div>
+                )}
 
                 {/* Material Selection */}
                 <div className="space-y-1.5">
@@ -1582,7 +1683,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 <Button
                   type="button"
                   onClick={() => saveMutation.mutate()}
-                  disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim()}
+                  disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim() || (isStorageTransfer && !storageLocation)}
                   className="h-11 px-6 font-bold gap-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-transform active:scale-98"
                 >
                   <Printer className="h-4 w-4" />
@@ -2036,7 +2137,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         {t.vehicleNumber}
                       </TableCell>
                       <TableCell className="font-medium text-xs">
-                        {t.partyName || '-'}
+                        {ticketTransferRoute(t) || t.partyName || '-'}
                       </TableCell>
                       <TableCell className="text-xs">
                         <Badge variant="outline" className="font-normal text-[10px]">
@@ -2227,7 +2328,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       {t.vehicleNumber}
                     </TableCell>
                     <TableCell className="font-medium text-xs truncate max-w-[140px]">
-                      {t.partyName || '-'}
+                      {ticketTransferRoute(t) || t.partyName || '-'}
                     </TableCell>
                     <TableCell className="text-xs">
                       <Badge variant="outline" className="text-[10px] font-normal">
@@ -2404,7 +2505,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           </DialogHeader>
           <div className="rounded-lg border bg-muted/40 p-3 text-sm">
             <div className="flex justify-between gap-3"><span className="text-muted-foreground">Vehicle</span><span className="font-mono font-semibold">{deleteTarget?.vehicleNumber}</span></div>
-            <div className="mt-1 flex justify-between gap-3"><span className="text-muted-foreground">Party</span><span className="text-right font-medium">{deleteTarget?.partyName || '-'}</span></div>
+            <div className="mt-1 flex justify-between gap-3"><span className="text-muted-foreground">Party / Route</span><span className="text-right font-medium">{deleteTarget ? (ticketTransferRoute(deleteTarget) || deleteTarget.partyName || '-') : '-'}</span></div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending}>Cancel</Button>

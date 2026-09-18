@@ -92,6 +92,11 @@ export function renderTicketPrintHtml(
   };
 
   const formattedMaterial = ticket.material ? ticket.material.trim().toUpperCase() : '';
+  const formattedParty = ticket.isStorageTransfer && ticket.storageLocation
+    ? ticket.transferDirection === 'STORAGE_TO_RVP'
+      ? `${ticket.storageLocation} → RVP`
+      : `RVP → ${ticket.storageLocation}`
+    : ticket.partyName || '';
   const formattedCharges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
   const isStationeryMode = calibration.printMode === 'stationery';
 
@@ -107,7 +112,7 @@ export function renderTicketPrintHtml(
   <title>Weighment Slip #${ticket.ticketNo}</title>
   <style>
     @page {
-      size: A4 portrait;
+      size: 210mm 150mm;
       margin: 0mm;
     }
     * {
@@ -117,9 +122,9 @@ export function renderTicketPrintHtml(
     }
     html, body {
       width: 210mm;
-      height: 297mm;
+      height: 150mm;
       max-width: 210mm;
-      max-height: 297mm;
+      max-height: 150mm;
       margin: 0;
       padding: 0;
       overflow: hidden;
@@ -130,6 +135,9 @@ export function renderTicketPrintHtml(
       -webkit-font-smoothing: antialiased;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
+      page-break-after: avoid;
+      page-break-inside: avoid;
+      break-after: avoid;
     }
     .sheet {
       position: absolute;
@@ -281,7 +289,7 @@ export function renderTicketPrintHtml(
     </div>
 
     <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; font-weight: 800; padding: 0 2px;">
-      ${ticket.partyName || ''}
+      ${formattedParty}
     </div>
 
     <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 14px; font-weight: 800; padding: 0 2px;">
@@ -507,6 +515,11 @@ export default function WeighbridgeSlipModal({
   };
 
   const formattedMaterial = ticket?.material ? ticket.material.trim().toUpperCase() : '';
+  const formattedParty = ticket?.isStorageTransfer && ticket.storageLocation
+    ? ticket.transferDirection === 'STORAGE_TO_RVP'
+      ? `${ticket.storageLocation} → RVP`
+      : `RVP → ${ticket.storageLocation}`
+    : ticket?.partyName || '';
   const formattedCharges = `₹ ${Number(ticket?.amount || 0).toFixed(2)}`;
   const isStationeryMode = calibration.printMode === 'stationery';
 
@@ -1055,7 +1068,7 @@ export default function WeighbridgeSlipModal({
               {/* 10. Party Name */}
               <div className="absolute top-[128.5mm] left-[4mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-xs sm:text-sm text-black tracking-wide uppercase truncate" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
-                  {ticket.partyName || ''}
+                  {formattedParty}
                 </span>
               </div>
 
@@ -1138,5 +1151,4 @@ export default function WeighbridgeSlipModal({
     </Dialog>
   );
 }
-
 

@@ -5,6 +5,9 @@ type TicketLike = {
   ticketNo: number;
   vehicleNumber: string;
   partyName: string | null;
+  isStorageTransfer: boolean;
+  storageLocation: string | null;
+  transferDirection: string | null;
   material: string | null;
   loadType: string;
   firstWeightKg: number | null;
@@ -45,8 +48,13 @@ export function renderWeighbridgeSlipPdf(ticket: TicketLike, company: CompanyLik
     doc.font('Helvetica-Bold').fontSize(14).fillColor('#292524').text('WEIGHBRIDGE CERTIFICATE', left, 106, { width, align: 'center' });
     doc.font('Helvetica').fontSize(9).fillColor('#78716c').text(`Ticket #${ticket.ticketNo}  |  Final weighment: ${fmtDate(ticket.secondWeighedAt)}`, left, 127, { width, align: 'center' });
 
+    const partyOrRoute = ticket.isStorageTransfer && ticket.storageLocation
+      ? ticket.transferDirection === 'STORAGE_TO_RVP'
+        ? `${ticket.storageLocation} -> RVP`
+        : `RVP -> ${ticket.storageLocation}`
+      : ticket.partyName || '-';
     const rows: Array<[string, string, string, string]> = [
-      ['Vehicle Number', ticket.vehicleNumber, 'Party / Customer', ticket.partyName || '-'],
+      ['Vehicle Number', ticket.vehicleNumber, ticket.isStorageTransfer ? 'Internal Transfer' : 'Party / Customer', partyOrRoute],
       ['Material', ticket.material || '-', 'Load Condition', ticket.loadType],
       ['First Weight', fmtKg(ticket.firstWeightKg), 'First Weighed At', fmtDate(ticket.firstWeighedAt)],
       ['Second Weight', fmtKg(ticket.secondWeightKg), 'Second Weighed At', fmtDate(ticket.secondWeighedAt)],

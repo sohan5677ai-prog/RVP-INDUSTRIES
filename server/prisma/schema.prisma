@@ -2207,6 +2207,9 @@ model WeighbridgeTicket {
   paymentReference String?
   slipWhatsappSentAt DateTime?
   secondWeightReminderSentAt DateTime?
+  isStorageTransfer Boolean   @default(false)
+  storageLocation   String?
+  transferDirection String?   // STORAGE_TO_RVP | RVP_TO_STORAGE
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

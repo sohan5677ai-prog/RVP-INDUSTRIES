@@ -244,6 +244,11 @@ function generateSlipHtml(ticket) {
   };
 
   const material = ticket.material ? ticket.material.trim().toUpperCase() : '';
+  const partyOrRoute = ticket.isStorageTransfer && ticket.storageLocation
+    ? ticket.transferDirection === 'STORAGE_TO_RVP'
+      ? `${ticket.storageLocation} → RVP`
+      : `RVP → ${ticket.storageLocation}`
+    : ticket.partyName || '';
   const charges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
 
   // Resolve camera URLs to absolute cloud URLs
@@ -368,7 +373,7 @@ function generateSlipHtml(ticket) {
     <div class="val" style="top: 113.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 16px;">${secondWeight != null ? formatWeight(secondWeight) : ''}</div>
     <div class="val" style="top: 113.5mm; left: 157mm; width: 48mm; height: 7.5mm; font-size: 16px;">${netWeight != null ? formatWeight(netWeight) : ''}</div>
 
-    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">${ticket.partyName || ''}</div>
+    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">${partyOrRoute}</div>
     <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 14px; padding: 0 2px;">${material}</div>
     <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px;">${charges}</div>
   </div>

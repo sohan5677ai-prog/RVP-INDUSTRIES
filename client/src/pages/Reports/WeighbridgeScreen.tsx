@@ -83,6 +83,17 @@ const MATERIALS = [
   'OTHER',
 ];
 
+const TRANSFER_MATERIALS = [
+  'TAMARIND SEED',
+  'HUSK',
+  'TAMARIND',
+  'TAMARIND SHELL',
+  'TAMARIND WASTE',
+  'TPS (BROKENS)',
+  'PRE CLEANER DUST',
+  'NALLA POKKULU',
+];
+
 const STORAGE_LOCATIONS = [
   { value: 'PGR COLD', label: 'PGR COLD (Rampalli)' },
   { value: 'Murugan', label: 'Murugan' },
@@ -614,6 +625,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
   // Search & Filter in History tab
   const [historySearch, setHistorySearch] = useState<string>('');
+  const [historyMovement, setHistoryMovement] = useState<'ALL' | 'TRANSFER' | 'REGULAR'>('ALL');
+  const [historyMaterial, setHistoryMaterial] = useState<string>('ALL');
+  const [historyFromDate, setHistoryFromDate] = useState<string>('');
+  const [historyToDate, setHistoryToDate] = useState<string>('');
+  const [historySort, setHistorySort] = useState<'NEWEST' | 'OLDEST' | 'COMMODITY'>('NEWEST');
   const [editingTicket, setEditingTicket] = useState<EditTicketDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WeighbridgeTicket | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<WeighbridgeTicket | null>(null);
@@ -673,12 +689,24 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   });
 
   // Fetch all tickets for history
-  const { data: allTickets = [], refetch: refetchHistory } = useQuery<WeighbridgeTicket[]>({
-    queryKey: ['weighbridge-tickets', historySearch],
-    queryFn: () =>
-      api<WeighbridgeTicket[]>(
-        `/weighbridge/tickets?limit=100${historySearch ? `&search=${encodeURIComponent(historySearch)}` : ''}`
-      ),
+  const { data: allTickets = [] } = useQuery<WeighbridgeTicket[]>({
+    queryKey: ['weighbridge-tickets'],
+    queryFn: () => api<WeighbridgeTicket[]>('/weighbridge/tickets?limit=100'),
+  });
+
+  const historyQuery = useMemo(() => {
+    const params = new URLSearchParams({ all: 'true', sort: historySort });
+    if (historySearch.trim()) params.set('search', historySearch.trim());
+    if (historyMovement !== 'ALL') params.set('movement', historyMovement);
+    if (historyMaterial !== 'ALL') params.set('material', historyMaterial);
+    if (historyFromDate) params.set('fromDate', historyFromDate);
+    if (historyToDate) params.set('toDate', historyToDate);
+    return params.toString();
+  }, [historySearch, historyMovement, historyMaterial, historyFromDate, historyToDate, historySort]);
+
+  const { data: registerTickets = [], refetch: refetchHistory } = useQuery<WeighbridgeTicket[]>({
+    queryKey: ['weighbridge-ticket-register', historyQuery],
+    queryFn: () => api<WeighbridgeTicket[]>(`/weighbridge/tickets?${historyQuery}`),
   });
 
   // Resilient pending tickets list: combines direct pending query with
@@ -1038,7 +1066,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-print-agent-status'] });
+      if (ticket.isStorageTransfer && ticket.status === 'COMPLETED') {
+        ['stock-transfers', 'husk-transfers', 'shell-transfers', 'black-seed-stock', 'silos', 'profit-loss', 'dashboard'].forEach(
+          (key) => queryClient.invalidateQueries({ queryKey: [key] }),
+        );
+        toast.success(`Transfer posted automatically: ${ticketTransferRoute(ticket)} · ${(ticket.netWeightKg || 0).toLocaleString('en-IN')} kg`);
+      }
 
       locallySavedTicketTimestamps.current.set(ticket.id, Date.now());
 
@@ -1077,6 +1112,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       toast.success(`Second-weight reminder sent to ${result.sent} of ${result.attempted} recipient(s).`);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
@@ -1093,6 +1129,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       setPaymentTarget(null);
       setPaymentReference('CASH');
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
@@ -1136,6 +1173,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       setEditingTicket(null);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
       setSlipModalTicket((current) => current?.id === ticket.id ? ticket : current);
     },
     onError: (err) => toast.error(getErrorMessage(err)),
@@ -1148,6 +1186,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       toast.success(ticketNo ? `Ticket #${formatTicketNo(ticketNo)} deleted.` : 'Ticket deleted.');
     },
@@ -1155,8 +1194,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   });
 
   const exportTickets = useCallback(() => api<WeighbridgeTicket[]>(
-    `/weighbridge/tickets?all=true${historySearch ? `&search=${encodeURIComponent(historySearch)}` : ''}`,
-  ), [historySearch]);
+    `/weighbridge/tickets?${historyQuery}`,
+  ), [historyQuery]);
 
   const editPreview = useMemo(() => {
     if (!editingTicket) return { net: null as number | null, fee: 0 };
@@ -1506,7 +1545,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     onChange={(event) => {
                       const checked = event.target.checked;
                       setIsStorageTransfer(checked);
-                      if (checked) setPartyName('');
+                      if (checked) {
+                        setPartyName('');
+                        if (!TRANSFER_MATERIALS.includes(material)) setMaterial('TAMARIND SEED');
+                      }
                       else setStorageLocation('');
                     }}
                     className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600"
@@ -1573,7 +1615,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     <Package className="h-3.5 w-3.5 text-primary" />
                     Material / Commodity
                   </Label>
-                  <Combobox options={MATERIALS.map((m) => ({ value: m, label: m }))} value={material} onChange={setMaterial}
+                  <Combobox options={(isStorageTransfer ? TRANSFER_MATERIALS : MATERIALS).map((m) => ({ value: m, label: m }))} value={material} onChange={setMaterial}
                     placeholder="Select material" searchPlaceholder="Search material…" ariaLabel="Material" className="bg-background font-medium" />
                 </div>
 
@@ -2272,7 +2314,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 <ExportButtons
                   filename="weighbridge-ticket-register"
                   title="Weighbridge Ticket Register"
-                  subtitle={historySearch ? `Search: ${historySearch}` : 'All tickets'}
+                  subtitle={`${registerTickets.length} filtered ticket(s)`}
                   columns={TICKET_EXPORT_COLUMNS}
                   rows={exportTickets}
                   showPrint={false}
@@ -2298,6 +2340,69 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </Button>
               </div>
             </div>
+
+            <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 sm:grid-cols-2 lg:grid-cols-6">
+              <label className="space-y-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Ticket type
+                <select
+                  value={historyMovement}
+                  onChange={(e) => setHistoryMovement(e.target.value as typeof historyMovement)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs font-medium normal-case tracking-normal text-foreground"
+                >
+                  <option value="ALL">All tickets</option>
+                  <option value="TRANSFER">Transfers only</option>
+                  <option value="REGULAR">Regular weighments</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Commodity
+                <select
+                  value={historyMaterial}
+                  onChange={(e) => setHistoryMaterial(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs font-medium normal-case tracking-normal text-foreground"
+                >
+                  <option value="ALL">All commodities</option>
+                  {MATERIALS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                From date
+                <Input type="date" value={historyFromDate} onChange={(e) => setHistoryFromDate(e.target.value)} className="h-9 text-xs font-normal normal-case tracking-normal" />
+              </label>
+              <label className="space-y-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                To date
+                <Input type="date" value={historyToDate} onChange={(e) => setHistoryToDate(e.target.value)} className="h-9 text-xs font-normal normal-case tracking-normal" />
+              </label>
+              <label className="space-y-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Sort by
+                <select
+                  value={historySort}
+                  onChange={(e) => setHistorySort(e.target.value as typeof historySort)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs font-medium normal-case tracking-normal text-foreground"
+                >
+                  <option value="NEWEST">Newest first</option>
+                  <option value="OLDEST">Oldest first</option>
+                  <option value="COMMODITY">Commodity A–Z</option>
+                </select>
+              </label>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 w-full text-xs"
+                  onClick={() => {
+                    setHistoryMovement('ALL');
+                    setHistoryMaterial('ALL');
+                    setHistoryFromDate('');
+                    setHistoryToDate('');
+                    setHistorySort('NEWEST');
+                    setHistorySearch('');
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            </div>
           </CardHeader>
 
           <CardContent className="p-0">
@@ -2307,7 +2412,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <TableHead className="w-20">Ticket #</TableHead>
                   <TableHead>Date & Time</TableHead>
                   <TableHead>Vehicle No</TableHead>
-                  <TableHead>Customer</TableHead>
+                  <TableHead>Party / Route</TableHead>
                   <TableHead>Material</TableHead>
                   <TableHead className="text-right">1st (Kg)</TableHead>
                   <TableHead className="text-right">2nd (Kg)</TableHead>
@@ -2318,7 +2423,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {allTickets.map((t) => (
+                {registerTickets.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="h-28 text-center text-sm text-muted-foreground">
+                      No tickets match these filters.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {registerTickets.map((t) => (
                   <TableRow key={t.id} className="hover:bg-muted/30">
                     <TableCell className="font-mono font-bold text-primary">
                       #{formatTicketNo(t.ticketNo)}
@@ -2337,6 +2449,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     </TableCell>
                     <TableCell className="font-medium text-xs truncate max-w-[140px]">
                       {ticketTransferRoute(t) || t.partyName || '-'}
+                      {t.isStorageTransfer && (
+                        <Badge variant="outline" className="ml-2 border-amber-500/40 text-[9px] text-amber-700 dark:text-amber-300">
+                          TRANSFER
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs">
                       <Badge variant="outline" className="text-[10px] font-normal">

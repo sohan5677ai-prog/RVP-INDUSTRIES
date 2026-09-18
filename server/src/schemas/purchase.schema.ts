@@ -128,6 +128,8 @@ export const createStockTransferSchema = z.object({
 // Tamarind shell transfer (process → Rampalli). Hamali ₹333/t and ₹500 transport
 // are fixed server-side; weight + lorry + date come from the client.
 export const createShellTransferSchema = z.object({
+  toLocation: z.enum(['PGR COLD', 'Murugan', 'KNM Multi']).optional().default('PGR COLD'),
+  material: z.string().trim().min(1).optional().default('TAMARIND SHELL'),
   weightKg: z.coerce.number().int().positive(),
   lorryNumber: z.string().optional().nullable(),
   transferDate: z.coerce.date(),

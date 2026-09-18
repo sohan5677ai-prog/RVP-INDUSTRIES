@@ -157,8 +157,17 @@ export async function previewStockTransfer(req: Request, res: Response) {
  * value at the process silo. Company-vehicle exemption does not apply to transfers
  * (only to arrivals).
  */
-export async function createStockTransfer(req: Request, res: Response) {
-  const data = createStockTransferSchema.parse(req.body);
+type StockTransferInput = Parameters<typeof createStockTransferSchema.parse>[0];
+
+export async function recordStockTransfer(
+  input: StockTransferInput,
+  weighbridgeTicketId?: string,
+) {
+  const data = createStockTransferSchema.parse(input);
+  if (weighbridgeTicketId) {
+    const existing = await prisma.stockTransfer.findUnique({ where: { weighbridgeTicketId } });
+    if (existing) return existing;
+  }
 
   // The source location must actually hold enough physical seed to move.
   const purchases = await prisma.purchase.findMany({
@@ -242,6 +251,7 @@ export async function createStockTransfer(req: Request, res: Response) {
         seedCostMoved,
         movedValue,
         transferDate: data.transferDate,
+        weighbridgeTicketId: weighbridgeTicketId ?? null,
       },
     });
 
@@ -263,6 +273,11 @@ export async function createStockTransfer(req: Request, res: Response) {
   clearCache('pappu_order_margins');
   clearCache('unified_stock_engine');
 
+  return transfer;
+}
+
+export async function createStockTransfer(req: Request, res: Response) {
+  const transfer = await recordStockTransfer(req.body);
   res.status(201).json(transfer);
 }
 

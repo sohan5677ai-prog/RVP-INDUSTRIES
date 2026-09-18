@@ -12,14 +12,17 @@ export async function listHuskTransfers(_req: Request, res: Response) {
   res.json(transfers);
 }
 
-/**
- * Record a husk transfer from the factory to a storage location (PGR COLD /
- * Murugan / KNM Multi). Husk is not held as a valued silo - this is only a
- * physical-movement + cost record. The fixed hamali (₹333/t packing + loading +
- * unloading) and transport (₹500) are expensed (see LedgerService.postHuskTransfer).
- */
-export async function createHuskTransfer(req: Request, res: Response) {
-  const data = createHuskTransferSchema.parse(req.body);
+type HuskTransferInput = Parameters<typeof createHuskTransferSchema.parse>[0];
+
+export async function recordHuskTransfer(
+  input: HuskTransferInput,
+  weighbridgeTicketId?: string,
+) {
+  const data = createHuskTransferSchema.parse(input);
+  if (weighbridgeTicketId) {
+    const existing = await prisma.huskTransfer.findUnique({ where: { weighbridgeTicketId } });
+    if (existing) return existing;
+  }
 
   const { getHamaliRate } = await import('./settings.controller.js');
   const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(
@@ -28,7 +31,7 @@ export async function createHuskTransfer(req: Request, res: Response) {
     data.toLocation
   );
 
-  const transfer = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const created = await tx.huskTransfer.create({
       data: {
         toLocation: data.toLocation,
@@ -38,6 +41,7 @@ export async function createHuskTransfer(req: Request, res: Response) {
         transportCharge,
         totalCost,
         transferDate: data.transferDate,
+        weighbridgeTicketId: weighbridgeTicketId ?? null,
       },
     });
 
@@ -50,7 +54,16 @@ export async function createHuskTransfer(req: Request, res: Response) {
 
     return created;
   });
+}
 
+/**
+ * Record a husk transfer from the factory to a storage location (PGR COLD /
+ * Murugan / KNM Multi). Husk is not held as a valued silo - this is only a
+ * physical-movement + cost record. The fixed hamali (₹333/t packing + loading +
+ * unloading) and transport (₹500) are expensed (see LedgerService.postHuskTransfer).
+ */
+export async function createHuskTransfer(req: Request, res: Response) {
+  const transfer = await recordHuskTransfer(req.body);
   res.status(201).json(transfer);
 }
 

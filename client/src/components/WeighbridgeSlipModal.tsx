@@ -56,6 +56,14 @@ export function formatTicketNo(ticketNo: number | string | undefined | null): st
   return num < 10 ? `0${num}` : `${num}`;
 }
 
+export function getPartyTextStyle(text: string): { fontSize: string; lineHeight: string } {
+  const len = (text || '').trim().length;
+  if (len <= 16) return { fontSize: '13px', lineHeight: '1.15' };
+  if (len <= 24) return { fontSize: '11px', lineHeight: '1.12' };
+  if (len <= 34) return { fontSize: '10px', lineHeight: '1.10' };
+  return { fontSize: '8.5px', lineHeight: '1.08' };
+}
+
 export function renderTicketPrintHtml(
   ticket: WeighbridgeTicket,
   calibration: PrinterCalibration = { offsetXmm: 0, offsetYmm: 0, printMode: 'stationery' },
@@ -107,6 +115,9 @@ export function renderTicketPrintHtml(
     : ticket.partyName || '';
   const formattedCharges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
   const isStationeryMode = calibration.printMode === 'stationery';
+
+  const partyStyle = getPartyTextStyle(formattedParty);
+  const materialStyle = getPartyTextStyle(formattedMaterial);
 
   const rawCam1 = snapshots?.cam1 || ticket.cam1PhotoUrl || null;
   const rawCam2 = snapshots?.cam2 || ticket.cam2PhotoUrl || null;
@@ -178,15 +189,25 @@ export function renderTicketPrintHtml(
       display: flex;
       align-items: center;
       justify-content: center;
+      box-sizing: border-box;
+      padding: 0 1.5mm;
+      overflow: hidden;
+    }
+    .val-sans-inner {
+      width: 100%;
+      max-height: 100%;
       text-align: center;
       font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', Tahoma, sans-serif;
       font-weight: 800;
       color: #000000;
-      line-height: 1;
-      white-space: nowrap;
+      letter-spacing: 0.2px;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
       overflow: hidden;
       text-overflow: ellipsis;
-      letter-spacing: 0.2px;
     }
     .cam-box {
       position: absolute;
@@ -239,23 +260,23 @@ export function renderTicketPrintHtml(
         </div>
         <div style="position: absolute; top: 46.5mm; left: 2mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
         <div style="position: absolute; top: 46.5mm; left: 100.5mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
-        <div style="position: absolute; top: 97.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">VEHICLE NO.</div>
-        <div style="position: absolute; top: 97.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">1ST WEIGHT</div>
-        <div style="position: absolute; top: 97.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">2ND WEIGHT</div>
-        <div style="position: absolute; top: 97.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">NET WEIGHT</div>
-        <div style="position: absolute; top: 102mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 102mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 102mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 102mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 113.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">PARTY NAME</div>
-        <div style="position: absolute; top: 113.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">MATERIAL</div>
-        <div style="position: absolute; top: 113.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">CHARGES</div>
-        <div style="position: absolute; top: 113.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">SIGNATURE</div>
-        <div style="position: absolute; top: 118mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 118mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 118mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 118mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 130mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px; font-family: Arial, sans-serif;">
+        <div style="position: absolute; top: 107mm; left: 4mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">VEHICLE NO.</div>
+        <div style="position: absolute; top: 107mm; left: 55mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">1ST WEIGHT</div>
+        <div style="position: absolute; top: 107mm; left: 106mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">2ND WEIGHT</div>
+        <div style="position: absolute; top: 107mm; left: 157mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">NET WEIGHT</div>
+        <div style="position: absolute; top: 111.5mm; left: 4mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 111.5mm; left: 55mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 111.5mm; left: 106mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 111.5mm; left: 157mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 122mm; left: 4mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">PARTY NAME</div>
+        <div style="position: absolute; top: 122mm; left: 55mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">MATERIAL</div>
+        <div style="position: absolute; top: 122mm; left: 106mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">CHARGES</div>
+        <div style="position: absolute; top: 122mm; left: 157mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm; font-family: Arial, sans-serif;">SIGNATURE</div>
+        <div style="position: absolute; top: 126.5mm; left: 4mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 126.5mm; left: 55mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 126.5mm; left: 106mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 126.5mm; left: 157mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 137mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px; font-family: Arial, sans-serif;">
           <div><span style="background: #b91c1c; color: white; font-weight: 900; padding: 2px 6px; font-size: 10px;">100 TON</span> <span style="font-size: 7.5px; color: #3f3f46; font-weight: 700;">Weigh Bridge Manufactured by : Sri Modern Weigh System. Cell 98430 55760</span></div>
           <div style="font-weight: 900; color: #b91c1c; font-size: 10px;">THANK YOU! VISIT AGAIN!!</div>
         </div>
@@ -298,15 +319,19 @@ export function renderTicketPrintHtml(
       ${netWeight != null ? formatWeight(netWeight) : ''}
     </div>
 
-    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; font-weight: 800; padding: 0 2px;">
-      ${formattedParty}
+    <div class="val-sans" style="top: 128.2mm; left: 4mm; width: 48mm; height: 8.2mm;">
+      <div class="val-sans-inner" style="font-size: ${partyStyle.fontSize}; line-height: ${partyStyle.lineHeight};">
+        ${formattedParty}
+      </div>
     </div>
 
-    <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 14px; font-weight: 800; padding: 0 2px;">
-      ${formattedMaterial}
+    <div class="val-sans" style="top: 128.2mm; left: 55mm; width: 48mm; height: 8.2mm;">
+      <div class="val-sans-inner" style="font-size: ${materialStyle.fontSize}; line-height: ${materialStyle.lineHeight};">
+        ${formattedMaterial}
+      </div>
     </div>
 
-    <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px; font-weight: 800;">
+    <div class="val" style="top: 128.2mm; left: 106mm; width: 48mm; height: 8.2mm; font-size: 15px; font-weight: 800;">
       ${formattedCharges}
     </div>
   </div>
@@ -1123,21 +1148,35 @@ export default function WeighbridgeSlipModal({
                  ═════════════════════════════════════════════════════════════ */}
 
               {/* 10. Party Name */}
-              <div className="absolute top-[128.5mm] left-[4mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-sans font-black text-xs sm:text-sm text-black tracking-wide uppercase truncate" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
+              <div className="absolute top-[128.2mm] left-[4mm] w-[48mm] h-[8.2mm] flex items-center justify-center px-1 overflow-hidden">
+                <span
+                  className="font-sans font-black text-black tracking-wide text-center leading-tight line-clamp-2 break-words"
+                  style={{
+                    fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif",
+                    fontSize: formattedParty.length <= 16 ? '13px' : formattedParty.length <= 24 ? '11px' : formattedParty.length <= 34 ? '10px' : '8.5px',
+                    lineHeight: '1.12',
+                  }}
+                >
                   {formattedParty}
                 </span>
               </div>
 
               {/* 11. Material (e.g. 'SEED') */}
-              <div className="absolute top-[128.5mm] left-[55mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
-                <span className="font-sans font-black text-xs sm:text-sm text-black tracking-wider uppercase truncate" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
+              <div className="absolute top-[128.2mm] left-[55mm] w-[48mm] h-[8.2mm] flex items-center justify-center px-1 overflow-hidden">
+                <span
+                  className="font-sans font-black text-black tracking-wider text-center leading-tight line-clamp-2 break-words uppercase"
+                  style={{
+                    fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif",
+                    fontSize: formattedMaterial.length <= 16 ? '13px' : formattedMaterial.length <= 24 ? '11px' : formattedMaterial.length <= 34 ? '10px' : '8.5px',
+                    lineHeight: '1.12',
+                  }}
+                >
                   {formattedMaterial}
                 </span>
               </div>
 
               {/* 12. Charges (e.g. '₹ 1.00') */}
-              <div className="absolute top-[128.5mm] left-[106mm] w-[48mm] h-[7.5mm] flex items-center justify-center px-1">
+              <div className="absolute top-[128.2mm] left-[106mm] w-[48mm] h-[8.2mm] flex items-center justify-center px-1">
                 <span className="font-sans font-black text-sm sm:text-base text-black tracking-wide" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
                   {formattedCharges}
                 </span>

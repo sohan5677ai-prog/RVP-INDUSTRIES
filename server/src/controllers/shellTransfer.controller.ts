@@ -5,13 +5,56 @@ import { createShellTransferSchema } from '../schemas/purchase.schema.js';
 import { shellTransferCost } from '../lib/calc.js';
 import { LedgerService } from '../services/ledger.service.js';
 
-const SHELL_STORAGE = 'PGR COLD';
-
 export async function listShellTransfers(_req: Request, res: Response) {
   const transfers = await prisma.shellTransfer.findMany({
     orderBy: { transferDate: 'desc' },
   });
   res.json(transfers);
+}
+
+type ShellTransferInput = Parameters<typeof createShellTransferSchema.parse>[0];
+
+export async function recordShellTransfer(
+  input: ShellTransferInput,
+  weighbridgeTicketId?: string,
+) {
+  const data = createShellTransferSchema.parse(input);
+  if (weighbridgeTicketId) {
+    const existing = await prisma.shellTransfer.findUnique({ where: { weighbridgeTicketId } });
+    if (existing) return existing;
+  }
+
+  const { getHamaliRate } = await import('./settings.controller.js');
+  const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(
+    data.weightKg,
+    await getHamaliRate('SHELL_TRANSFER'),
+    data.toLocation
+  );
+
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.shellTransfer.create({
+      data: {
+        toLocation: data.toLocation,
+        material: data.material,
+        weightKg: data.weightKg,
+        lorryNumber: data.lorryNumber ?? null,
+        hamaliCharge,
+        transportCharge,
+        totalCost,
+        transferDate: data.transferDate,
+        weighbridgeTicketId: weighbridgeTicketId ?? null,
+      },
+    });
+
+    await LedgerService.postShellTransfer(tx, created.id, {
+      toLocation: data.toLocation,
+      weightKg: data.weightKg,
+      hamaliCharge,
+      transportCharge,
+    });
+
+    return created;
+  });
 }
 
 /**
@@ -22,38 +65,7 @@ export async function listShellTransfers(_req: Request, res: Response) {
  * shared 10% "Pre Cleaner Husk & Tamarind" pool, like Waste.
  */
 export async function createShellTransfer(req: Request, res: Response) {
-  const data = createShellTransferSchema.parse(req.body);
-
-  const { getHamaliRate } = await import('./settings.controller.js');
-  const { hamaliCharge, transportCharge, totalCost } = shellTransferCost(
-    data.weightKg,
-    await getHamaliRate('SHELL_TRANSFER'),
-    SHELL_STORAGE
-  );
-
-  const transfer = await prisma.$transaction(async (tx) => {
-    const created = await tx.shellTransfer.create({
-      data: {
-        toLocation: SHELL_STORAGE,
-        weightKg: data.weightKg,
-        lorryNumber: data.lorryNumber ?? null,
-        hamaliCharge,
-        transportCharge,
-        totalCost,
-        transferDate: data.transferDate,
-      },
-    });
-
-    await LedgerService.postShellTransfer(tx, created.id, {
-      toLocation: SHELL_STORAGE,
-      weightKg: data.weightKg,
-      hamaliCharge,
-      transportCharge,
-    });
-
-    return created;
-  });
-
+  const transfer = await recordShellTransfer(req.body);
   res.status(201).json(transfer);
 }
 

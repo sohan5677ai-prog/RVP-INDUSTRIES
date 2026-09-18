@@ -8,6 +8,7 @@ import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridg
 import { calcKataFee, findCompanyVehicle, isVehicleExempt } from '../lib/calc.js';
 import { renderWeighbridgeSlipPdf } from '../lib/weighbridgeSlipPdf.js';
 import { sendWeighbridgePaidSlip, sendWeighbridgeSecondWeightReminder } from '../services/whatsapp.service.js';
+import { recordAutomaticTransfer } from '../services/weighbridgeTransfer.service.js';
 
 function getExpectedBridgeKey(): string {
   if (process.env.CCTV_BRIDGE_KEY && process.env.CCTV_BRIDGE_KEY.length >= 24) {
@@ -102,12 +103,19 @@ export async function getNextTicketNumberHandler(_req: Request, res: Response) {
  * List weighbridge tickets with search & filters.
  */
 export async function getTicketsHandler(req: Request, res: Response) {
-  const { search, status, fromDate, toDate, limit, all } = req.query;
+  const { search, status, fromDate, toDate, material, movement, sort, limit, all } = req.query;
 
   const where: any = {};
 
   if (status && status !== 'ALL') {
     where.status = String(status);
+  }
+
+  if (movement === 'TRANSFER') where.isStorageTransfer = true;
+  if (movement === 'REGULAR') where.isStorageTransfer = false;
+
+  if (material && material !== 'ALL') {
+    where.material = { equals: String(material), mode: 'insensitive' };
   }
 
   if (search) {
@@ -123,13 +131,13 @@ export async function getTicketsHandler(req: Request, res: Response) {
   if (fromDate || toDate) {
     where.createdAt = {};
     if (fromDate) {
-      const from = new Date(String(fromDate));
-      from.setHours(0, 0, 0, 0);
+      const from = new Date(`${String(fromDate)}T00:00:00+05:30`);
+      if (Number.isNaN(from.getTime())) throw new HttpError(400, 'Invalid from date');
       where.createdAt.gte = from;
     }
     if (toDate) {
-      const to = new Date(String(toDate));
-      to.setHours(23, 59, 59, 999);
+      const to = new Date(`${String(toDate)}T23:59:59.999+05:30`);
+      if (Number.isNaN(to.getTime())) throw new HttpError(400, 'Invalid to date');
       where.createdAt.lte = to;
     }
   }
@@ -138,7 +146,11 @@ export async function getTicketsHandler(req: Request, res: Response) {
 
   const tickets = await prisma.weighbridgeTicket.findMany({
     where,
-    orderBy: { ticketNo: 'desc' },
+    orderBy: sort === 'OLDEST'
+      ? [{ createdAt: 'asc' }, { ticketNo: 'asc' }]
+      : sort === 'COMMODITY'
+        ? [{ material: 'asc' }, { createdAt: 'desc' }]
+        : [{ createdAt: 'desc' }, { ticketNo: 'desc' }],
     take,
   });
 
@@ -252,6 +264,16 @@ export async function createTicketHandler(req: Request, res: Response) {
         storageLocation ?? existingPending.storageLocation,
         material ?? existingPending.material,
       );
+      const secondWeighedAt = new Date();
+
+      await recordAutomaticTransfer({
+        ...existingPending,
+        material: material ? String(material).trim() : existingPending.material,
+        netWeightKg: netWeight,
+        isStorageTransfer: transfer.enabled,
+        storageLocation: transfer.storageLocation,
+        secondWeighedAt,
+      });
 
       const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
         saveWeighbridgeSnapshot(existingPending.ticketNo, 1, snapCam1, true),
@@ -262,7 +284,7 @@ export async function createTicketHandler(req: Request, res: Response) {
         where: { id: existingPending.id },
         data: {
           secondWeightKg: secondWeightNum,
-          secondWeighedAt: new Date(),
+          secondWeighedAt,
           netWeightKg: netWeight,
           status: 'COMPLETED',
           tripType: 'SECOND',
@@ -340,6 +362,10 @@ export async function createTicketHandler(req: Request, res: Response) {
     },
   });
 
+  if (ticket.secondWeightKg != null) {
+    await recordAutomaticTransfer(ticket);
+  }
+
   res.status(201).json(ticket);
 
   // Auto-queue print job for the cabin printer (fire-and-forget)
@@ -387,6 +413,16 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
     storageLocation ?? existing.storageLocation,
     material ?? existing.material,
   );
+  const secondWeighedAt = new Date();
+
+  await recordAutomaticTransfer({
+    ...existing,
+    material: material ? String(material).trim() : existing.material,
+    netWeightKg: netWeight,
+    isStorageTransfer: transfer.enabled,
+    storageLocation: transfer.storageLocation,
+    secondWeighedAt,
+  });
 
   // Capture snapshots for the second weighment
   const [secondCam1PhotoUrl, secondCam2PhotoUrl] = await Promise.all([
@@ -398,7 +434,7 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
     where: { id },
     data: {
       secondWeightKg: secondWeightNum,
-      secondWeighedAt: new Date(),
+      secondWeighedAt,
       netWeightKg: netWeight,
       status: 'COMPLETED',
       tripType: 'SECOND',
@@ -647,6 +683,15 @@ export async function deleteTicketHandler(req: Request, res: Response) {
   const { id } = req.params;
   const existing = await prisma.weighbridgeTicket.findUnique({ where: { id }, select: { id: true } });
   if (!existing) throw new HttpError(404, 'Weighbridge ticket not found');
+
+  const [stockTransfer, huskTransfer, byproductTransfer] = await Promise.all([
+    prisma.stockTransfer.findUnique({ where: { weighbridgeTicketId: id }, select: { id: true } }),
+    prisma.huskTransfer.findUnique({ where: { weighbridgeTicketId: id }, select: { id: true } }),
+    prisma.shellTransfer.findUnique({ where: { weighbridgeTicketId: id }, select: { id: true } }),
+  ]);
+  if (stockTransfer || huskTransfer || byproductTransfer) {
+    throw new HttpError(409, 'Reverse the linked automatic transfer before deleting this Kata ticket');
+  }
 
   await prisma.$transaction([
     prisma.printJob.deleteMany({ where: { ticketId: id } }),

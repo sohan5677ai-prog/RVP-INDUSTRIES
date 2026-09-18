@@ -216,6 +216,14 @@ async function httpRequest(method, urlStr, body = null, extraHeaders = {}) {
 // Slip HTML Generator (matches WeighbridgeSlipModal exactly)
 // ──────────────────────────────────────────────────────────────────────
 
+function getPartyTextStyle(text) {
+  const len = (text || '').trim().length;
+  if (len <= 16) return { fontSize: '13px', lineHeight: '1.15' };
+  if (len <= 24) return { fontSize: '11px', lineHeight: '1.12' };
+  if (len <= 34) return { fontSize: '10px', lineHeight: '1.10' };
+  return { fontSize: '8.5px', lineHeight: '1.08' };
+}
+
 function generateSlipHtml(ticket) {
   const firstWeight = ticket.firstWeightKg ?? null;
   const secondWeight = ticket.secondWeightKg ?? null;
@@ -250,6 +258,9 @@ function generateSlipHtml(ticket) {
       : `RVP → ${ticket.storageLocation}`
     : ticket.partyName || '';
   const charges = `₹ ${Number(ticket.amount || 0).toFixed(2)}`;
+
+  const partyStyle = getPartyTextStyle(partyOrRoute);
+  const materialStyle = getPartyTextStyle(material);
 
   // Resolve camera URLs to absolute cloud URLs
   const resolveCamUrl = (url, cam) => {
@@ -296,10 +307,29 @@ function generateSlipHtml(ticket) {
       color: #000000; line-height: 1; white-space: nowrap; letter-spacing: 0.3px;
     }
     .val-sans {
-      position: absolute; display: flex; align-items: center; justify-content: center;
-      text-align: center; font-family: Arial, sans-serif; font-weight: 800;
-      color: #000000; line-height: 1; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.2px;
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      padding: 0 1.5mm;
+      overflow: hidden;
+    }
+    .val-sans-inner {
+      width: 100%;
+      max-height: 100%;
+      text-align: center;
+      font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', Tahoma, sans-serif;
+      font-weight: 800;
+      color: #000000;
+      letter-spacing: 0.2px;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .cam-box {
       position: absolute; overflow: hidden; border-radius: 2px;
@@ -335,23 +365,23 @@ function generateSlipHtml(ticket) {
         </div>
         <div style="position: absolute; top: 46.5mm; left: 2mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
         <div style="position: absolute; top: 46.5mm; left: 100.5mm; width: 95mm; height: 49mm; border: 2px solid #ef4444; border-radius: 8px;"></div>
-        <div style="position: absolute; top: 97.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">VEHICLE NO.</div>
-        <div style="position: absolute; top: 97.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">1ST WEIGHT</div>
-        <div style="position: absolute; top: 97.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">2ND WEIGHT</div>
-        <div style="position: absolute; top: 97.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">NET WEIGHT</div>
-        <div style="position: absolute; top: 102mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 102mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 102mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 102mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 113.5mm; left: 2mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">PARTY NAME</div>
-        <div style="position: absolute; top: 113.5mm; left: 51mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">MATERIAL</div>
-        <div style="position: absolute; top: 113.5mm; left: 100mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">CHARGES</div>
-        <div style="position: absolute; top: 113.5mm; left: 149mm; width: 46.5mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">SIGNATURE</div>
-        <div style="position: absolute; top: 118mm; left: 2mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 118mm; left: 51mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 118mm; left: 100mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 118mm; left: 149mm; width: 46.5mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
-        <div style="position: absolute; top: 130mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px;">
+        <div style="position: absolute; top: 107mm; left: 4mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">VEHICLE NO.</div>
+        <div style="position: absolute; top: 107mm; left: 55mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">1ST WEIGHT</div>
+        <div style="position: absolute; top: 107mm; left: 106mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">2ND WEIGHT</div>
+        <div style="position: absolute; top: 107mm; left: 157mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">NET WEIGHT</div>
+        <div style="position: absolute; top: 111.5mm; left: 4mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 111.5mm; left: 55mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 111.5mm; left: 106mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 111.5mm; left: 157mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 122mm; left: 4mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">PARTY NAME</div>
+        <div style="position: absolute; top: 122mm; left: 55mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">MATERIAL</div>
+        <div style="position: absolute; top: 122mm; left: 106mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">CHARGES</div>
+        <div style="position: absolute; top: 122mm; left: 157mm; width: 48mm; height: 4.5mm; background: #dc2626; color: white; font-size: 8.5px; font-weight: bold; text-align: center; line-height: 4.5mm;">SIGNATURE</div>
+        <div style="position: absolute; top: 126.5mm; left: 4mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 126.5mm; left: 55mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 126.5mm; left: 106mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 126.5mm; left: 157mm; width: 48mm; height: 9.5mm; border: 1px solid #ef4444; border-radius: 0 0 6px 6px;"></div>
+        <div style="position: absolute; top: 137mm; left: 2mm; right: 2mm; display: flex; justify-content: space-between; font-size: 8.5px;">
           <div><span style="background: #b91c1c; color: white; font-weight: 900; padding: 2px 6px; font-size: 10px;">100 TON</span> <span style="font-size: 7.5px; color: #3f3f46; font-weight: 700;">Weigh Bridge Manufactured by : Sri Modern Weigh System. Cell 98430 55760</span></div>
           <div style="font-weight: 900; color: #b91c1c; font-size: 10px;">THANK YOU! VISIT AGAIN!!</div>
         </div>
@@ -375,9 +405,13 @@ function generateSlipHtml(ticket) {
     <div class="val" style="top: 113.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 16px;">${secondWeight != null ? formatWeight(secondWeight) : ''}</div>
     <div class="val" style="top: 113.5mm; left: 157mm; width: 48mm; height: 7.5mm; font-size: 16px;">${netWeight != null ? formatWeight(netWeight) : ''}</div>
 
-    <div class="val-sans" style="top: 128.5mm; left: 4mm; width: 48mm; height: 7.5mm; font-size: 13px; padding: 0 2px;">${partyOrRoute}</div>
-    <div class="val-sans" style="top: 128.5mm; left: 55mm; width: 48mm; height: 7.5mm; font-size: 14px; padding: 0 2px;">${material}</div>
-    <div class="val" style="top: 128.5mm; left: 106mm; width: 48mm; height: 7.5mm; font-size: 15px;">${charges}</div>
+    <div class="val-sans" style="top: 128.2mm; left: 4mm; width: 48mm; height: 8.2mm;">
+      <div class="val-sans-inner" style="font-size: ${partyStyle.fontSize}; line-height: ${partyStyle.lineHeight};">${partyOrRoute}</div>
+    </div>
+    <div class="val-sans" style="top: 128.2mm; left: 55mm; width: 48mm; height: 8.2mm;">
+      <div class="val-sans-inner" style="font-size: ${materialStyle.fontSize}; line-height: ${materialStyle.lineHeight};">${material}</div>
+    </div>
+    <div class="val" style="top: 128.2mm; left: 106mm; width: 48mm; height: 8.2mm; font-size: 15px;">${charges}</div>
   </div>
 </body>
 </html>`;

@@ -112,7 +112,7 @@ export function renderTicketPrintHtml(
   <title>Weighment Slip #${ticket.ticketNo}</title>
   <style>
     @page {
-      size: 210mm 150mm;
+      size: A4 portrait;
       margin: 0mm;
     }
     * {
@@ -122,12 +122,12 @@ export function renderTicketPrintHtml(
     }
     html, body {
       width: 210mm;
-      height: 150mm;
+      height: 148mm;
       max-width: 210mm;
-      max-height: 150mm;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
+      max-height: 148mm;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
       background: #ffffff;
       color: #000000;
       font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', Tahoma, sans-serif;
@@ -135,20 +135,22 @@ export function renderTicketPrintHtml(
       -webkit-font-smoothing: antialiased;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
-      page-break-after: avoid;
-      page-break-inside: avoid;
-      break-after: avoid;
+      page-break-after: avoid !important;
+      page-break-inside: avoid !important;
+      break-after: avoid !important;
     }
     .sheet {
       position: absolute;
       top: 0;
       left: 0;
       width: 210mm;
-      height: 150mm;
+      height: 148mm;
       max-width: 210mm;
-      max-height: 150mm;
+      max-height: 148mm;
       overflow: hidden;
       transform: translate(${calibration.offsetXmm}mm, ${calibration.offsetYmm}mm);
+      page-break-after: avoid !important;
+      break-after: avoid !important;
     }
     .val {
       position: absolute;
@@ -715,12 +717,15 @@ export default function WeighbridgeSlipModal({
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 210mm !important;
-                height: 297mm !important;
+                height: 148mm !important;
                 max-width: 210mm !important;
-                max-height: 297mm !important;
+                max-height: 148mm !important;
                 overflow: hidden !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
+                page-break-after: avoid !important;
+                page-break-inside: avoid !important;
+                break-after: avoid !important;
               }
               body > * {
                 visibility: hidden !important;

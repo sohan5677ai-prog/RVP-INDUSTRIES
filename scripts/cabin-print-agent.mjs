@@ -277,16 +277,18 @@ function generateSlipHtml(ticket) {
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 210mm; height: 297mm; max-width: 210mm; max-height: 297mm;
+      width: 210mm; height: 148mm; max-width: 210mm; max-height: 148mm;
       margin: 0; padding: 0; overflow: hidden;
       background: #ffffff; color: #000000;
       font-family: Arial, 'Helvetica Neue', Helvetica, 'Segoe UI', sans-serif;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
+      page-break-after: avoid; break-after: avoid;
     }
     .sheet {
       position: absolute; top: 0; left: 0;
-      width: 210mm; height: 150mm; max-width: 210mm; max-height: 150mm;
+      width: 210mm; height: 148mm; max-width: 210mm; max-height: 148mm;
       overflow: hidden;
+      page-break-after: avoid; break-after: avoid;
     }
     .val {
       position: absolute; display: flex; align-items: center; justify-content: center;
@@ -705,10 +707,9 @@ async function printSlipHtml(html, ticketNo) {
     // Wait a brief moment for images/fonts to render
     await new Promise(r => setTimeout(r, 1200));
     
-    // Render exact 210mm x 150mm PDF
+    // Render exact A4 portrait PDF (top 148mm contains slip content)
     const pdfBuffer = await page.pdf({
-      width: '210mm',
-      height: '150mm',
+      format: 'A4',
       printBackground: true,
       margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
     });

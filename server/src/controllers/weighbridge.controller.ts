@@ -26,7 +26,7 @@ export function isTrustedCameraBridge(req: Request): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const STARTING_TICKET_NUMBER = 2807;
+const STARTING_TICKET_NUMBER = 1;
 
 async function calculateTicketFee(
   netWeightKg: number | null,
@@ -92,7 +92,10 @@ export async function getNextTicketNumberHandler(_req: Request, res: Response) {
   });
 
   const nextNumber = latest ? latest.ticketNo + 1 : STARTING_TICKET_NUMBER;
-  res.json({ nextTicketNo: nextNumber });
+  res.json({
+    nextTicketNo: nextNumber,
+    formattedTicketNo: String(nextNumber).padStart(2, '0'),
+  });
 }
 
 /**
@@ -605,7 +608,7 @@ export async function downloadSignedWeighbridgeSlipHandler(req: Request, res: Re
   const company = await prisma.companyProfile.findFirst({ select: { name: true, address: true, gstin: true, contact: true } });
   const pdf = await renderWeighbridgeSlipPdf(ticket, company || { name: 'RVP INDUSTRIES', address: null, gstin: null, contact: null });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="Kata-Slip-${ticket.ticketNo}.pdf"`);
+  res.setHeader('Content-Disposition', `inline; filename="Kata-Slip-${String(ticket.ticketNo).padStart(2, '0')}.pdf"`);
   res.setHeader('Cache-Control', 'private, max-age=86400');
   res.send(pdf);
 }

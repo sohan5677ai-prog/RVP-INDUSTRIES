@@ -65,7 +65,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
 import { calcKataFee, isVehicleExempt } from '@/lib/calc';
-import WeighbridgeSlipModal, { triggerDirectPrint } from '@/components/WeighbridgeSlipModal';
+import WeighbridgeSlipModal, { triggerDirectPrint, formatTicketNo } from '@/components/WeighbridgeSlipModal';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import './WeighbridgeScreen.css';
@@ -144,7 +144,7 @@ type EditTicketDraft = {
 };
 
 const TICKET_EXPORT_COLUMNS: ExportColumn<WeighbridgeTicket>[] = [
-  { header: 'Ticket No', value: (t) => t.ticketNo, numFmt: '0', align: 'right' },
+  { header: 'Ticket No', value: (t) => formatTicketNo(t.ticketNo), numFmt: '@', align: 'right' },
   { header: 'Date', value: (t) => shortDate(t.createdAt) },
   { header: 'Time', value: (t) => new Date(t.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) },
   { header: 'Vehicle No', value: (t) => t.vehicleNumber },
@@ -656,7 +656,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     refetchInterval: 15000,
   });
 
-  const nextTicketNo = ticketNumData?.nextTicketNo ?? 2808;
+  const nextTicketNo = ticketNumData?.nextTicketNo ?? 1;
 
   // Fetch pending trucks (awaiting second weight)
   const { data: rawPendingTickets = [], refetch: refetchPending } = useQuery<WeighbridgeTicket[]>({
@@ -822,10 +822,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 Boolean(savedLocallyAt && Date.now() - savedLocallyAt < 15000);
 
               if (!isDuplicateAutoPrint) {
-                toast.info(`🖨️ Cabin Printer: Printing Ticket #${job.ticketNo}...`);
+                toast.info(`🖨️ Cabin Printer: Printing Ticket #${formatTicketNo(job.ticketNo)}...`);
                 await triggerDirectPrint(job.ticket);
               } else {
-                console.log(`[Cabin] Skipped duplicate auto-print for Ticket #${job.ticketNo} (already printed on save)`);
+                console.log(`[Cabin] Skipped duplicate auto-print for Ticket #${formatTicketNo(job.ticketNo)} (already printed on save)`);
               }
 
               // Mark completed in cloud queue
@@ -1033,7 +1033,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       }
     },
     onSuccess: ({ ticket, snapshots }) => {
-      toast.success(`Ticket #${ticket.ticketNo} saved successfully!`);
+      toast.success(`Ticket #${formatTicketNo(ticket.ticketNo)} saved successfully!`);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
@@ -1043,12 +1043,12 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
       if (cabinMode) {
         // Dedicated Kata Cabin PC: trigger immediate direct print to the cabin printer!
-        toast.info(`🖨️ Printing Ticket #${ticket.ticketNo}...`, { duration: 3000 });
+        toast.info(`🖨️ Printing Ticket #${formatTicketNo(ticket.ticketNo)}...`, { duration: 3000 });
         triggerDirectPrint(ticket, undefined, snapshots).catch(() => {});
       } else {
         // Non-cabin office/laptop PC: do NOT popup browser print dialog!
         // The ticket is automatically queued in the cloud for the Kata Cabin Printer.
-        toast.success(`🖨️ Ticket #${ticket.ticketNo} queued for Kata Cabin Printer.`);
+        toast.success(`🖨️ Ticket #${formatTicketNo(ticket.ticketNo)} queued for Kata Cabin Printer.`);
         setSlipModalTicket(ticket);
         if (snapshots) {
           setActiveSnapshots(snapshots);
@@ -1086,7 +1086,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       body: JSON.stringify({ amount: Number(ticket.amount || 0), reference: paymentReference.trim() || (Number(ticket.amount || 0) > 0 ? 'CASH' : 'FREE') }),
     }),
     onSuccess: ({ ticket, whatsapp }) => {
-      toast.success(Number(ticket.amount || 0) > 0 ? `Payment verified for Ticket #${ticket.ticketNo}.` : `Free KNM ticket #${ticket.ticketNo} released.`);
+      toast.success(Number(ticket.amount || 0) > 0 ? `Payment verified for Ticket #${formatTicketNo(ticket.ticketNo)}.` : `Free KNM ticket #${formatTicketNo(ticket.ticketNo)} released.`);
       if (whatsapp.ok) toast.success('Signed Kata slip sent to the driver on WhatsApp.');
       else toast.warning(whatsapp.error || 'Payment saved, but the WhatsApp slip could not be sent.');
       setPaymentTarget(null);
@@ -1131,7 +1131,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       }),
     }),
     onSuccess: (ticket) => {
-      toast.success(`Ticket #${ticket.ticketNo} updated. Net weight and fee recalculated.`);
+      toast.success(`Ticket #${formatTicketNo(ticket.ticketNo)} updated. Net weight and fee recalculated.`);
       setEditingTicket(null);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
@@ -1148,7 +1148,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
-      toast.success(ticketNo ? `Ticket #${ticketNo} deleted.` : 'Ticket deleted.');
+      toast.success(ticketNo ? `Ticket #${formatTicketNo(ticketNo)} deleted.` : 'Ticket deleted.');
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
@@ -1276,7 +1276,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         <section className="kata-operations-strip" aria-label="Live weighbridge status">
           <div className="kata-ops-brand">
             <span className="kata-eyebrow">Active weighment</span>
-            <strong>Ticket #{nextTicketNo}</strong>
+            <strong>Ticket #{formatTicketNo(nextTicketNo)}</strong>
           </div>
           <div className="kata-ops-cell">
             <Calendar className="h-4 w-4" />
@@ -1417,7 +1417,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-mono font-bold text-sm">
-                    #{nextTicketNo}
+                    #{formatTicketNo(nextTicketNo)}
                   </div>
                   <div>
                     <CardTitle className="text-base font-bold text-foreground">
@@ -1425,7 +1425,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     </CardTitle>
                     <CardDescription className="text-xs">
                       {pendingTicketId
-                        ? `Completing Second Weight for Ticket #${nextTicketNo}`
+                        ? `Completing Second Weight for Ticket #${formatTicketNo(nextTicketNo)}`
                         : 'Capture vehicle weight, customer, and cargo details'}
                     </CardDescription>
                   </div>
@@ -2132,7 +2132,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   {pendingTickets.map((t) => (
                     <TableRow key={t.id} className="hover:bg-muted/30">
                       <TableCell className="font-mono font-bold text-primary">
-                        #{t.ticketNo}
+                        #{formatTicketNo(t.ticketNo)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(t.createdAt).toLocaleTimeString('en-IN', {
@@ -2232,7 +2232,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     const free = Number(ticket.amount || 0) === 0;
                     const verified = Boolean(ticket.paidAt);
                     return <TableRow key={ticket.id}>
-                      <TableCell className="font-mono font-bold text-primary">#{ticket.ticketNo}</TableCell>
+                      <TableCell className="font-mono font-bold text-primary">#{formatTicketNo(ticket.ticketNo)}</TableCell>
                       <TableCell className="font-mono font-bold">{ticket.vehicleNumber}{free && <Badge variant="outline" className="ml-2 border-sky-500/30 text-sky-700">KNM / FREE</Badge>}</TableCell>
                       <TableCell className="font-mono text-xs">{ticket.partyMobile || <span className="text-rose-600">Missing</span>}</TableCell>
                       <TableCell className="text-right font-mono">{Number(ticket.netWeightKg || 0).toLocaleString('en-IN')} kg</TableCell>
@@ -2320,7 +2320,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 {allTickets.map((t) => (
                   <TableRow key={t.id} className="hover:bg-muted/30">
                     <TableCell className="font-mono font-bold text-primary">
-                      #{t.ticketNo}
+                      #{formatTicketNo(t.ticketNo)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {shortDate(t.createdAt)}{' '}
@@ -2505,7 +2505,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Kata ticket #{deleteTarget?.ticketNo}?</DialogTitle>
+            <DialogTitle>Delete Kata ticket #{formatTicketNo(deleteTarget?.ticketNo)}?</DialogTitle>
             <DialogDescription>
               This permanently removes the ticket from the register. It will no longer be available for Stock In, Stock In Detail, or Dispatch auto-fill.
             </DialogDescription>
@@ -2528,8 +2528,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           <DialogHeader>
             <DialogTitle>
               {Number(paymentTarget?.amount || 0) === 0
-                ? `Release Free Slip #${paymentTarget?.ticketNo}`
-                : `Verify Payment #${paymentTarget?.ticketNo}`}
+                ? `Release Free Slip #${formatTicketNo(paymentTarget?.ticketNo)}`
+                : `Verify Payment #${formatTicketNo(paymentTarget?.ticketNo)}`}
             </DialogTitle>
             <DialogDescription>
               Confirm weighment fee receipt and send the signed Kata slip to the driver via WhatsApp.

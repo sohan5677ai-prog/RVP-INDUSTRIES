@@ -49,6 +49,13 @@ export interface PrinterCalibration {
   printMode: 'stationery' | 'plain'; // 'stationery' = only 11 values/photos on pre-printed paper; 'plain' = full artwork
 }
 
+export function formatTicketNo(ticketNo: number | string | undefined | null): string {
+  if (ticketNo === undefined || ticketNo === null || ticketNo === '') return '01';
+  const num = Number(ticketNo);
+  if (isNaN(num)) return String(ticketNo);
+  return num < 10 ? `0${num}` : `${num}`;
+}
+
 export function renderTicketPrintHtml(
   ticket: WeighbridgeTicket,
   calibration: PrinterCalibration = { offsetXmm: 0, offsetYmm: 0, printMode: 'stationery' },
@@ -110,7 +117,7 @@ export function renderTicketPrintHtml(
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Weighment Slip #${ticket.ticketNo}</title>
+  <title>Weighment Slip #${formatTicketNo(ticket.ticketNo)}</title>
   <style>
     @page {
       size: A4 portrait;
@@ -256,7 +263,7 @@ export function renderTicketPrintHtml(
     ` : ''}
 
     <div class="val" style="top: 43.5mm; left: 23mm; width: 45mm; height: 8mm; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;">
-      ${ticket.ticketNo}
+      ${formatTicketNo(ticket.ticketNo)}
     </div>
 
     <div class="val" style="top: 43.5mm; left: 89mm; width: 44mm; height: 8mm; font-size: 14px; font-weight: 800;">
@@ -534,13 +541,13 @@ export default function WeighbridgeSlipModal({
     if (!ticket || isSendingToCabin) return;
     setIsSendingToCabin(true);
     try {
-      toast.info(`🖨️ Sending Ticket #${ticket.ticketNo} to Cabin Printer...`, { duration: 3000 });
+      toast.info(`🖨️ Sending Ticket #${formatTicketNo(ticket.ticketNo)} to Cabin Printer...`, { duration: 3000 });
 
       // If running on the Kata Cabin PC itself:
       const isCabinTerminal = cabinMode || Boolean(localStorage.getItem('rvp_kata_cabin_installation_key'));
       if (isCabinTerminal) {
         await triggerDirectPrint(ticket, calibration, snapshots);
-        toast.success(`🖨️ Ticket #${ticket.ticketNo} printed directly on Cabin Printer!`);
+        toast.success(`🖨️ Ticket #${formatTicketNo(ticket.ticketNo)} printed directly on Cabin Printer!`);
         return;
       }
 
@@ -554,7 +561,7 @@ export default function WeighbridgeSlipModal({
           requestedBy: 'MANUAL_CABIN_BUTTON',
         }),
       });
-      toast.success(`🖨️ Ticket #${ticket.ticketNo} sent to Cabin Printer! Printing now...`);
+      toast.success(`🖨️ Ticket #${formatTicketNo(ticket.ticketNo)} sent to Cabin Printer! Printing now...`);
     } catch (err: any) {
       toast.error(`Failed to send to Cabin Printer: ${err.message || 'Unknown error'}`);
     } finally {
@@ -585,11 +592,11 @@ export default function WeighbridgeSlipModal({
         <div className="p-4 border-b border-border bg-card/60 flex flex-wrap items-center justify-between gap-3 print:hidden">
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
-              #{ticket.ticketNo}
+              #{formatTicketNo(ticket.ticketNo)}
             </div>
             <div>
               <DialogTitle className="text-sm font-bold text-foreground">
-                Weighment Slip #{ticket.ticketNo} ({ticket.vehicleNumber})
+                Weighment Slip #{formatTicketNo(ticket.ticketNo)} ({ticket.vehicleNumber})
               </DialogTitle>
               <p className="text-[11px] text-muted-foreground">
                 Pre-Printed Slip Overlay (Only 11 Dynamic Values & 2 CCTV Snapshots Print)
@@ -998,10 +1005,10 @@ export default function WeighbridgeSlipModal({
                ═════════════════════════════════════════════════════════════════ */}
             <div className="absolute inset-0 pointer-events-none">
               
-              {/* 1. S. No. (e.g. '2807') */}
+              {/* 1. S. No. (e.g. '01') */}
               <div className="absolute top-[43.5mm] left-[23mm] w-[45mm] h-[8mm] flex items-center justify-center">
                 <span className="font-sans font-black text-base text-black tracking-wider" style={{ fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif" }}>
-                  {ticket.ticketNo}
+                  {formatTicketNo(ticket.ticketNo)}
                 </span>
               </div>
 

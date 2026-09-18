@@ -46,7 +46,7 @@ export function renderWeighbridgeSlipPdf(ticket: TicketLike, company: CompanyLik
     doc.font('Helvetica').fontSize(8).fillColor('#78716c').text([company.address, company.gstin ? `GSTIN: ${company.gstin}` : '', company.contact ? `Ph: ${company.contact}` : ''].filter(Boolean).join('  |  '), left, 68, { width, align: 'center' });
     doc.moveTo(left, 91).lineTo(left + width, 91).lineWidth(1.2).strokeColor('#b45309').stroke();
     doc.font('Helvetica-Bold').fontSize(14).fillColor('#292524').text('WEIGHBRIDGE CERTIFICATE', left, 106, { width, align: 'center' });
-    doc.font('Helvetica').fontSize(9).fillColor('#78716c').text(`Ticket #${ticket.ticketNo}  |  Final weighment: ${fmtDate(ticket.secondWeighedAt)}`, left, 127, { width, align: 'center' });
+    doc.font('Helvetica').fontSize(9).fillColor('#78716c').text(`Ticket #${String(ticket.ticketNo).padStart(2, '0')}  |  Final weighment: ${fmtDate(ticket.secondWeighedAt)}`, left, 127, { width, align: 'center' });
 
     const partyOrRoute = ticket.isStorageTransfer && ticket.storageLocation
       ? ticket.transferDirection === 'STORAGE_TO_RVP'

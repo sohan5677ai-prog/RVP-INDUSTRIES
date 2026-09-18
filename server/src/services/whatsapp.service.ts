@@ -799,10 +799,11 @@ export function sendWeighbridgeSecondWeightReminder(args: {
   const weighedAt = args.firstWeighedAt
     ? args.firstWeighedAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })
     : '-';
+  const fmtTicketNo = String(args.ticketNo).padStart(2, '0');
   return sendWhatsAppTemplate({
     templateKey: 'WEIGHBRIDGE_SECOND_REMINDER',
     to: args.to,
-    variables: [args.recipientLabel, args.vehicleNumber, args.ticketNo, `${args.firstWeightKg.toLocaleString('en-IN')} kg at ${weighedAt}`],
+    variables: [args.recipientLabel, args.vehicleNumber, fmtTicketNo, `${args.firstWeightKg.toLocaleString('en-IN')} kg at ${weighedAt}`],
     relatedType: 'WEIGHBRIDGE_SECOND_REMINDER',
     relatedId: args.ticketId,
   });
@@ -818,12 +819,13 @@ export function sendWeighbridgePaidSlip(args: {
   amount: number;
   slipUrl: string;
 }) {
+  const fmtTicketNo = String(args.ticketNo).padStart(2, '0');
   return sendWhatsAppTemplate({
     templateKey: 'WEIGHBRIDGE_PAID_SLIP',
     to: args.to,
-    variables: [args.driverName, args.ticketNo, args.vehicleNumber, `${args.netWeightKg.toLocaleString('en-IN')} kg`, `Rs. ${args.amount.toLocaleString('en-IN')}`],
+    variables: [args.driverName, fmtTicketNo, args.vehicleNumber, `${args.netWeightKg.toLocaleString('en-IN')} kg`, `Rs. ${args.amount.toLocaleString('en-IN')}`],
     mediaUrl: args.slipUrl,
-    documentFilename: `Kata-Slip-${args.ticketNo}-${args.vehicleNumber}.pdf`,
+    documentFilename: `Kata-Slip-${fmtTicketNo}-${args.vehicleNumber}.pdf`,
     relatedType: 'WEIGHBRIDGE_PAID_SLIP',
     relatedId: args.ticketId,
   });

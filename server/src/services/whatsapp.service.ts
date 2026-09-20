@@ -1,4 +1,5 @@
 import type { WaLanguage } from '@prisma/client';
+export type { WaLanguage };
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
@@ -102,7 +103,8 @@ export type WaTemplateKey =
   | 'WEIGHBRIDGE_PAID_SLIP' // signed PDF: driver, ticket, vehicle, net weight, amount
   | 'DRIVER_UNLOADED_KATA' // driver_unloaded_signed_kata (image header): driver, lorry, location, gross, tare, net, shortage
   | 'DRIVER_SECOND_REMINDER' // 2nd_weight_remainder (Telugu): driver, lorry, location
-  | 'HAMALI_SECOND_REMINDER'; // hamali_remainder (Hindi): hamali incharge, lorry
+  | 'HAMALI_SECOND_REMINDER' // hamali_remainder (Hindi): hamali incharge, lorry
+  | 'INBOUND_MESSAGE'; // inbound_whatsapp_message (Marketing, en, 3 vars: from, time, message)
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -176,6 +178,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DRIVER_SECOND_REMINDER: '33509',
   // 2nd weight reminder to hamali (Hindi template hamali_remainder, 2 vars: hamali in-charge, lorry)
   HAMALI_SECOND_REMINDER: '33510',
+  // Inbound message forward to internal team members (Marketing template inbound_whatsapp_message, 3 vars: from, time, message).
+  // Approved under name `inbound_whatsapp_message` on +917207146094 with Fast2SMS message_id 31637 (Meta template ID 1624358459270497).
+  INBOUND_MESSAGE: '31637',
 };
 
 /**
@@ -266,6 +271,7 @@ const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   DRIVER_UNLOADED_KATA: 'driver_unloaded_signed_kata',
   DRIVER_SECOND_REMINDER: '2nd_weight_remainder',
   HAMALI_SECOND_REMINDER: 'hamali_remainder',
+  INBOUND_MESSAGE: 'inbound_whatsapp_message',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {
@@ -312,6 +318,13 @@ function fmtDate(d: Date): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const { day, month, year } = istCalendar(d);
   return `${String(day).padStart(2, '0')}-${months[month - 1]}-${year}`;
+}
+
+/** dd-MMM-yyyy hh:mm AM/PM, e.g. "20-Sep-2026 02:15 PM" in IST. */
+export function fmtDateTime(d: Date): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const { day, month, year, hour, minute, ampm } = istParts(d);
+  return `${String(day).padStart(2, '0')}-${months[Number(month) - 1]}-${year} ${hour}:${minute} ${ampm}`;
 }
 
 /** Indian-grouped amount, e.g. 450000 → "4,50,000". */
@@ -915,6 +928,9 @@ export function sendWeighbridgeDriverUnloadedSlip(args: {
   });
 }
 
+export const DEFAULT_KATA_SLIP_IMAGE_URL =
+  'https://raw.githubusercontent.com/sohan5677ai-prog/RVP-INDUSTRIES/main/client/public/kata-ganesha.jpg';
+
 export function sendWeighbridgePaidSlip(args: {
   to: string;
   driverName: string;
@@ -931,7 +947,25 @@ export function sendWeighbridgePaidSlip(args: {
   language?: WaLanguage;
 }) {
   const fmtTicketNo = String(args.ticketNo).padStart(2, '0');
-  const photoUrl = args.imageUrl || args.slipUrl;
+  const lang = args.language || 'TE';
+
+  // Ensure image URL is an actual image URL (not a .pdf, which Meta rejects for IMAGE header)
+  let photoUrl: string | undefined = undefined;
+  if (args.imageUrl && typeof args.imageUrl === 'string' && !args.imageUrl.toLowerCase().endsWith('.pdf') && !args.imageUrl.includes('.pdf?')) {
+    if (args.imageUrl.startsWith('http://') || args.imageUrl.startsWith('https://')) {
+      photoUrl = args.imageUrl;
+    } else {
+      const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
+      const hostBase = apiBase.replace(/\/api\/?$/, '');
+      photoUrl = args.imageUrl.startsWith('/api/') ? `${hostBase}${args.imageUrl}` : `${apiBase}/${args.imageUrl.replace(/^\//, '')}`;
+    }
+  }
+
+  // Fallback to default Kata image if no camera snapshot exists so Meta IMAGE header is valid
+  if (!photoUrl) {
+    photoUrl = DEFAULT_KATA_SLIP_IMAGE_URL;
+  }
+
   return sendWeighbridgeDriverUnloadedSlip({
     to: args.to,
     driverName: args.driverName,
@@ -943,16 +977,18 @@ export function sendWeighbridgePaidSlip(args: {
     secondWeightKg: args.secondWeightKg,
     netWeightKg: args.netWeightKg,
     imageUrl: photoUrl,
-    language: args.language || 'TE',
-  }).then((res) => {
+    language: lang,
+  }).then(async (res) => {
     if (res.ok) return res;
-    // Fallback to previous WEIGHBRIDGE_PAID_SLIP if template not yet approved/configured
-    return sendWhatsAppTemplate({
-      templateKey: 'WEIGHBRIDGE_PAID_SLIP',
+
+    // Fallback: If template was not delivered or rejected by provider, send a session WhatsApp text with slip details
+    logger.warn(`[whatsapp] DRIVER_UNLOADED_KATA template send was not delivered for ticket #${args.ticketNo}, sending session text fallback`);
+    const feeText = args.amount > 0 ? `Kata Charge: ₹${args.amount.toLocaleString('en-IN')}` : 'Free / KNM Vehicle';
+    const text = `⚖️ *RVP Industries — Weighbridge Slip #${fmtTicketNo}*\nVehicle: *${args.vehicleNumber}*\nNet Weight: *${args.netWeightKg.toLocaleString('en-IN')} kg*\n${feeText}\nLocation: *${args.location || 'RVP Plant, Tadipatri'}*\n\n📄 Download Official Signed Kata Slip:\n${args.slipUrl}\n\n— *RVP Industries*`;
+    return sendSessionTextMessage({
       to: args.to,
-      variables: [args.driverName, fmtTicketNo, args.vehicleNumber, `${args.netWeightKg.toLocaleString('en-IN')} kg`, `Rs. ${args.amount.toLocaleString('en-IN')}`],
-      mediaUrl: args.slipUrl,
-      documentFilename: `Kata-Slip-${fmtTicketNo}-${args.vehicleNumber}.pdf`,
+      text,
+      imageUrl: photoUrl,
       relatedType: 'WEIGHBRIDGE_PAID_SLIP',
       relatedId: args.ticketId,
     });
@@ -1172,6 +1208,8 @@ type WaRecipient = {
 
 export const whatsappService = {
   send: sendWhatsAppTemplate,
+  notifyInboundMessageToMembers: (...args: Parameters<typeof notifyInboundMessageToMembers>) =>
+    notifyInboundMessageToMembers(...args),
 
   /**
    * PO created → party. One order may split into several per-lorry POs
@@ -2310,6 +2348,123 @@ export async function notifyOwnersKataReceived(args: {
   );
 
   return { ok: results.some((r) => r.ok) };
+}
+
+/**
+ * Identify who sent an inbound WhatsApp message by checking ERP records:
+ * 1. Party (phone or phone2)
+ * 2. Broker (phone)
+ * 3. Recent SaleDispatch or PurchaseOrder driver
+ * 4. Fallback to formatted Indian mobile number
+ */
+export async function identifyInboundSender(from: string | null | undefined): Promise<string> {
+  if (!from) return 'Unknown Sender';
+  const cleanPhone = from.replace(/\D/g, '').slice(-10);
+  if (cleanPhone.length < 10) return from.trim() || 'Unknown Sender';
+
+  try {
+    const party = await prisma.party.findFirst({
+      where: {
+        OR: [{ phone: { contains: cleanPhone } }, { phone2: { contains: cleanPhone } }],
+      },
+      select: { name: true, type: true },
+    });
+    if (party) {
+      return `${party.name} (${cleanPhone})`;
+    }
+
+    const broker = await prisma.broker.findFirst({
+      where: { phone: { contains: cleanPhone } },
+      select: { name: true },
+    });
+    if (broker) {
+      return `${broker.name} [Broker] (${cleanPhone})`;
+    }
+
+    const dispatch = await prisma.saleDispatch.findFirst({
+      where: { driverPhone: { contains: cleanPhone } },
+      select: { driverName: true, vehicleNumber: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (dispatch) {
+      const driverLabel = dispatch.driverName || dispatch.vehicleNumber || cleanPhone;
+      return `Driver ${driverLabel} (${cleanPhone})`;
+    }
+  } catch (err) {
+    logger.warn('[whatsapp] identifyInboundSender failed', err);
+  }
+
+  return from.startsWith('+') ? from : `+91 ${cleanPhone}`;
+}
+
+/**
+ * Forward an inbound WhatsApp message from a customer, party, or external contact
+ * to internal members (alert recipients and owners) using the approved template
+ * `inbound_whatsapp_message` (Fast2SMS message_id 31637).
+ */
+export async function notifyInboundMessageToMembers(args: {
+  from: string | null;
+  text: string | null;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  logId?: string;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const recipients = await resolveAlertRecipients();
+  if (recipients.length === 0) {
+    logger.warn('[whatsapp] no alert recipients configured to forward inbound message');
+    return { ok: false, skipped: true, error: 'No alert recipients configured' };
+  }
+
+  // 1. Identify the sender
+  const senderDisplay = await identifyInboundSender(args.from);
+
+  // 2. Format IST timestamp
+  const timeStr = fmtDateTime(new Date());
+
+  // 3. Format message content
+  let messageContent = (args.text || '').trim();
+  if (args.mediaUrl) {
+    const mediaLabel = args.mediaType?.includes('pdf') ? '[PDF Document]' : '[Photo/Media]';
+    messageContent = messageContent
+      ? `${messageContent} ${mediaLabel}`
+      : `${mediaLabel}: ${args.mediaUrl}`;
+  }
+  if (!messageContent) {
+    messageContent = '[Empty message]';
+  }
+  // Safe truncate to 900 chars to avoid exceeding WhatsApp template variable limits
+  if (messageContent.length > 900) {
+    messageContent = `${messageContent.slice(0, 897)}...`;
+  }
+
+  // 4. Exclude sender from recipients if there are multiple recipients
+  const senderDigits = (args.from || '').replace(/\D/g, '').slice(-10);
+  let targets = recipients;
+  if (recipients.length > 1 && senderDigits.length === 10) {
+    const filtered = recipients.filter((to) => to.replace(/\D/g, '').slice(-10) !== senderDigits);
+    if (filtered.length > 0) targets = filtered;
+  }
+
+  logger.info(`[whatsapp] forwarding inbound message from ${senderDisplay} to ${targets.length} internal member(s)...`);
+
+  const results = await Promise.all(
+    targets.map((to) =>
+      sendWhatsAppTemplate({
+        templateKey: 'INBOUND_MESSAGE',
+        to,
+        variables: [
+          senderDisplay.slice(0, 60), // {{1}} From
+          timeStr,                    // {{2}} Time
+          messageContent,             // {{3}} Message
+        ],
+        relatedType: 'INBOUND_FORWARD',
+        relatedId: args.logId,
+      })
+    )
+  );
+
+  const anyOk = results.some((r) => r.ok);
+  return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error ?? 'Forwarding failed' };
 }
 
 

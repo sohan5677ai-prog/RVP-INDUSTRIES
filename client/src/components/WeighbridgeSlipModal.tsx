@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Printer, Sliders, FileText, Layers, Eye, EyeOff, Video, Send } from 'lucide-react';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
@@ -39,6 +40,7 @@ interface WeighbridgeSlipModalProps {
   snapshots?: { cam1?: string; cam2?: string } | null;
   cabinMode?: boolean;
   onClose: () => void;
+  onSendWhatsapp?: (ticket: WeighbridgeTicket) => void;
 }
 
 const STORAGE_CALIBRATION_KEY = 'rvp_kata_printer_calibration_v4';
@@ -488,6 +490,7 @@ export default function WeighbridgeSlipModal({
   snapshots,
   cabinMode = false,
   onClose,
+  onSendWhatsapp,
 }: WeighbridgeSlipModalProps) {
   const [calibration, setCalibration] = useState<PrinterCalibration>(() => {
     try {
@@ -1230,6 +1233,23 @@ export default function WeighbridgeSlipModal({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Send WhatsApp Slip button */}
+            {ticket && onSendWhatsapp && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onClose();
+                  onSendWhatsapp(ticket);
+                }}
+                className="h-7 text-xs gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 font-bold"
+                title="Send signed Kata slip with photo to driver via WhatsApp"
+              >
+                <WhatsAppIcon className="h-3 w-3 text-emerald-600" />
+                <span>WhatsApp Slip</span>
+              </Button>
+            )}
+
             {/* Send to Cabin Printer button */}
             <Button
               variant="outline"

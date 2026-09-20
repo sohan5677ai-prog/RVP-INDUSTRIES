@@ -22,8 +22,13 @@ vi.mock('../lib/prisma.js', () => ({
       update: (...a: unknown[]) => update(...a),
     },
     transportConfirmation: { create: (...a: unknown[]) => tcCreate(...a) },
+    party: { findFirst: vi.fn().mockResolvedValue(null) },
+    broker: { findFirst: vi.fn().mockResolvedValue(null) },
+    saleDispatch: { findFirst: vi.fn().mockResolvedValue(null) },
+    companyProfile: { findUnique: vi.fn().mockResolvedValue({ alertRecipients: JSON.stringify([{ name: 'Owner', phone: '9902953300' }]) }) },
   },
 }));
+
 vi.mock('../lib/gemini.js', () => ({
   parseTransportConfirmationText: (...a: unknown[]) => parseTransport(...a),
 }));
@@ -222,4 +227,26 @@ describe('Fast2SMS webhook routing', () => {
     expect(res.statusCode).toBe(200);
     expect(tcCreate).toHaveBeenCalledOnce();
   });
+
+  it('forwards general inbound customer messages to internal team members', async () => {
+    parseTransport.mockResolvedValue({ isTransportConfirmation: false });
+    const res = await post({
+      webhook_type: 'incoming_message',
+      from: '919876543210',
+      body: 'Hello please share latest seed prices',
+      message_id: 'wamid.CUST1',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          direction: 'INBOUND',
+          phone: '919876543210',
+          body: 'Hello please share latest seed prices',
+        }),
+      })
+    );
+    expect(tcCreate).not.toHaveBeenCalled();
+  });
 });
+

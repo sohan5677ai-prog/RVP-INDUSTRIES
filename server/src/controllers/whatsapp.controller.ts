@@ -12,6 +12,7 @@ import {
   notifyDriverKataConfirmed,
   notifyDriverKataRejected,
   notifyOwnersKataReceived,
+  notifyInboundMessageToMembers,
   resolveAlertRecipients,
   sendSessionTextMessage,
 } from '../services/whatsapp.service.js';
@@ -462,19 +463,19 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
  * lorry number. Nothing existing is touched: a booking message is news about a
  * lorry that is yet to load, not a correction to a trip already made.
  */
-async function parseInboundIntoRegister(logRow: InboundLogRow) {
+async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean> {
   const { from, text } = logRow;
 
   // A transport confirmation is a long-ish text with digits (lorry no / phone).
-  if (!text || text.length < 25 || !/\d{4}/.test(text)) return;
+  if (!text || text.length < 25 || !/\d{4}/.test(text)) return false;
 
   // Never treat owner commands or delivery review replies as lorry transport bookings
-  if (/^(?:APPROVE|REJECT|DELIVER|CONFIRM|STATUS|CHECK|HELP|KATA)\b/i.test(text.trim())) return;
-  if (/\b(?:override\s*weight|confirm\s*delivery|kata\s*slip|kata\s*received)\b/i.test(text)) return;
+  if (/^(?:APPROVE|REJECT|DELIVER|CONFIRM|STATUS|CHECK|HELP|KATA)\b/i.test(text.trim())) return false;
+  if (/\b(?:override\s*weight|confirm\s*delivery|kata\s*slip|kata\s*received)\b/i.test(text)) return false;
 
   const parsed = await parseTransportConfirmationText(text);
-  if (!parsed?.isTransportConfirmation) return;
-  if (!parsed.lorryNumber && !parsed.driverPhone) return; // nothing actionable
+  if (!parsed?.isTransportConfirmation) return false;
+  if (!parsed.lorryNumber && !parsed.driverPhone) return false; // nothing actionable
 
   const booking = await prisma.transportConfirmation.create({
     data: {
@@ -494,6 +495,7 @@ async function parseInboundIntoRegister(logRow: InboundLogRow) {
     },
   });
   logger.info(`[whatsapp] lorry booking ${booking.id} (${booking.lorryNumber ?? 'no lorry no'}) filed from ${from} (log ${logRow.id})`);
+  return true;
 }
 
 /**
@@ -1191,7 +1193,17 @@ export async function handleWhatsAppWebhook(req: Request, res: Response) {
         if (!handled) {
           const kataHandled = await processDriverKataInbound(logRow);
           if (!kataHandled) {
-            await parseInboundIntoRegister(logRow);
+            const transportHandled = await parseInboundIntoRegister(logRow);
+            // If not a transport booking, this is a customer/party inbound message - forward to internal members
+            if (!transportHandled && logRow.from && (logRow.text || logRow.mediaUrl)) {
+              await notifyInboundMessageToMembers({
+                from: logRow.from,
+                text: logRow.text,
+                mediaUrl: logRow.mediaUrl,
+                mediaType: logRow.mediaType,
+                logId: logRow.id,
+              });
+            }
           }
         }
       } catch (err) {

@@ -280,4 +280,13 @@ describe('approved language ids', () => {
     delete process.env.FAST2SMS_TMPL_BUYER_KATA_ALERT;
     expect(templateId('BUYER_KATA_ALERT', 'EN')).toBe('31798');
   });
+
+  it('supports INBOUND_MESSAGE environment variable configuration and fallback', () => {
+    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('31637');
+    process.env.FAST2SMS_TMPL_INBOUND_MESSAGE = '99999';
+    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('99999');
+    delete process.env.FAST2SMS_TMPL_INBOUND_MESSAGE;
+    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('31637');
+  });
 });
+

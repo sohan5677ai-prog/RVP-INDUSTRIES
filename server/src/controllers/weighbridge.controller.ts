@@ -5,7 +5,7 @@ import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
-import { calcKataFee, findCompanyVehicle, isVehicleExempt } from '../lib/calc.js';
+import { calcKataFee, findCompanyVehicle, isVehicleExempt, clean10DigitPhone } from '../lib/calc.js';
 import { renderWeighbridgeSlipPdf } from '../lib/weighbridgeSlipPdf.js';
 import {
   sendWeighbridgePaidSlip,
@@ -13,6 +13,7 @@ import {
   sendDriverSecondWeightReminder,
   sendHamaliSecondWeightReminder,
   sendWeighbridgeDriverUnloadedSlip,
+  type WaLanguage,
 } from '../services/whatsapp.service.js';
 import { recordAutomaticTransfer } from '../services/weighbridgeTransfer.service.js';
 
@@ -798,6 +799,10 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
 
   const paidAt = new Date();
   const user = (req as any).user;
+
+  const rawMobile = req.body.driverMobile ?? req.body.partyMobile;
+  const cleanedMobile = rawMobile ? clean10DigitPhone(rawMobile) : '';
+
   let updated = await prisma.weighbridgeTicket.update({
     where: { id: ticket.id },
     data: {
@@ -806,35 +811,45 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
       paidAt,
       paymentVerifiedBy: user?.name || user?.email || 'Kata Operator',
       paymentReference: String(req.body.reference || (due > 0 ? 'CASH' : 'FREE')).trim().slice(0, 100),
+      ...(cleanedMobile ? { partyMobile: cleanedMobile } : {}),
     },
   });
 
-  let whatsapp: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, skipped: true, error: 'Driver mobile is missing' };
-  if (updated.partyMobile) {
-    const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
-    const driver = findCompanyVehicle(updated.vehicleNumber, company?.companyVehicles);
-    const token = slipToken(updated.id, paidAt);
-    const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
-    const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}`;
-    const photoUrl = updated.secondCam1PhotoUrl || updated.cam1PhotoUrl || url;
+  const shouldSendWhatsapp = req.body.sendWhatsapp !== false;
+  const chosenLang = ((req.body.language || 'TE') as string).toUpperCase() as WaLanguage;
 
-    whatsapp = await sendWeighbridgePaidSlip({
-      to: updated.partyMobile,
-      driverName: driver?.driverName || updated.partyName || 'Driver ji',
-      ticketId: updated.id,
-      ticketNo: updated.ticketNo,
-      vehicleNumber: updated.vehicleNumber,
-      netWeightKg: updated.netWeightKg || 0,
-      amount: received,
-      slipUrl: url,
-      firstWeightKg: updated.firstWeightKg,
-      secondWeightKg: updated.secondWeightKg,
-      location: updated.partyName || updated.storageLocation || 'RVP Plant, Tadipatri',
-      imageUrl: photoUrl,
-      language: 'TE',
-    });
-    if (whatsapp.ok) {
-      updated = await prisma.weighbridgeTicket.update({ where: { id: updated.id }, data: { slipWhatsappSentAt: new Date() } });
+  let whatsapp: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, skipped: true, error: 'WhatsApp delivery not requested' };
+
+  if (shouldSendWhatsapp) {
+    const targetMobile = updated.partyMobile || cleanedMobile;
+    if (!targetMobile) {
+      whatsapp = { ok: false, skipped: true, error: 'Driver mobile is missing' };
+    } else {
+      const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+      const driver = findCompanyVehicle(updated.vehicleNumber, company?.companyVehicles);
+      const token = slipToken(updated.id, paidAt);
+      const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
+      const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}`;
+      const photoUrl = updated.secondCam1PhotoUrl || updated.cam1PhotoUrl || undefined;
+
+      whatsapp = await sendWeighbridgePaidSlip({
+        to: targetMobile,
+        driverName: driver?.driverName || updated.partyName || 'Driver ji',
+        ticketId: updated.id,
+        ticketNo: updated.ticketNo,
+        vehicleNumber: updated.vehicleNumber,
+        netWeightKg: updated.netWeightKg || 0,
+        amount: received,
+        slipUrl: url,
+        firstWeightKg: updated.firstWeightKg,
+        secondWeightKg: updated.secondWeightKg,
+        location: updated.partyName || updated.storageLocation || 'RVP Plant, Tadipatri',
+        imageUrl: photoUrl,
+        language: chosenLang,
+      });
+      if (whatsapp.ok) {
+        updated = await prisma.weighbridgeTicket.update({ where: { id: updated.id }, data: { slipWhatsappSentAt: new Date() } });
+      }
     }
   }
   res.json({ ticket: updated, whatsapp });
@@ -845,17 +860,33 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
   const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
   if (!ticket) throw new HttpError(404, 'Weighbridge ticket not found');
   if (ticket.status !== 'COMPLETED') throw new HttpError(400, 'Complete the weighment before sending the Kata slip');
-  if (!ticket.partyMobile) throw new HttpError(400, 'Driver / party mobile number is missing on this ticket');
 
+  const rawMobile = req.body.driverMobile ?? req.body.partyMobile;
+  const cleanedMobile = rawMobile ? clean10DigitPhone(rawMobile) : '';
+  const targetMobile = cleanedMobile || ticket.partyMobile;
+
+  if (!targetMobile) {
+    throw new HttpError(400, 'Driver / party mobile number is missing on this ticket');
+  }
+
+  // If a new valid mobile was entered, persist it to the ticket
+  if (cleanedMobile && cleanedMobile !== ticket.partyMobile) {
+    await prisma.weighbridgeTicket.update({
+      where: { id: ticket.id },
+      data: { partyMobile: cleanedMobile },
+    });
+  }
+
+  const chosenLang = ((req.body.language || 'TE') as string).toUpperCase() as WaLanguage;
   const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
   const driver = findCompanyVehicle(ticket.vehicleNumber, company?.companyVehicles);
   const token = slipToken(ticket.id, ticket.paidAt || ticket.createdAt);
   const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
   const slipUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.pdf?token=${token}`;
-  const photoUrl = ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || slipUrl;
+  const photoUrl = ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || undefined;
 
   const whatsapp = await sendWeighbridgePaidSlip({
-    to: ticket.partyMobile,
+    to: targetMobile,
     driverName: driver?.driverName || ticket.partyName || 'Driver ji',
     ticketId: ticket.id,
     ticketNo: ticket.ticketNo,
@@ -867,7 +898,7 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
     secondWeightKg: ticket.secondWeightKg,
     location: ticket.partyName || ticket.storageLocation || 'RVP Plant, Tadipatri',
     imageUrl: photoUrl,
-    language: 'TE',
+    language: chosenLang,
   });
 
   if (whatsapp.ok) {

@@ -104,6 +104,7 @@ export type WaTemplateKey =
   | 'DRIVER_UNLOADED_KATA' // driver_unloaded_signed_kata (image header): driver, lorry, location, gross, tare, net, shortage
   | 'DRIVER_SECOND_REMINDER' // 2nd_weight_remainder (Telugu): driver, lorry, location
   | 'HAMALI_SECOND_REMINDER' // hamali_remainder (Hindi): hamali incharge, lorry
+  | 'INTERNAL_KATA_ALERT' // rvp_kata_alert (Utility, image header): vehicle, date, time, party, commodity, net weight
   | 'INBOUND_MESSAGE'; // inbound_whatsapp_message (Marketing, en, 3 vars: from, time, message)
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
@@ -181,6 +182,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // Inbound message forward to internal team members (Marketing template inbound_whatsapp_message, 3 vars: from, time, message).
   // Approved under name `inbound_whatsapp_message` on +917207146094 with Fast2SMS message_id 31637 (Meta template ID 1624358459270497).
   INBOUND_MESSAGE: '31637',
+  // Internal weighbridge Kata alert to internal members (Utility template rvp_kata_alert, IMAGE header, 6 vars: vehicle, date, time, party, commodity, net weight).
+  // Created on +917207146094 with Fast2SMS message_id 33711 (Meta template ID 1094782289801137).
+  INTERNAL_KATA_ALERT: '33711',
 };
 
 /**
@@ -272,6 +276,7 @@ const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   DRIVER_SECOND_REMINDER: '2nd_weight_remainder',
   HAMALI_SECOND_REMINDER: 'hamali_remainder',
   INBOUND_MESSAGE: 'inbound_whatsapp_message',
+  INTERNAL_KATA_ALERT: 'rvp_kata_alert',
 };
 
 function templateName(key: WaTemplateKey): string | undefined {
@@ -2033,6 +2038,7 @@ export const whatsappService = {
   sendDriverSecondWeightReminder,
   sendHamaliSecondWeightReminder,
   sendWeighbridgeDriverUnloadedSlip,
+  notifyInternalKataCompleted,
 };
 
 /**
@@ -2466,5 +2472,178 @@ export async function notifyInboundMessageToMembers(args: {
   const anyOk = results.some((r) => r.ok);
   return anyOk ? { ok: true } : { ok: false, error: results.find((r) => r.error)?.error ?? 'Forwarding failed' };
 }
+
+export interface InternalKataTicketPayload {
+  id: string;
+  ticketNo: number;
+  vehicleNumber: string;
+  partyName?: string | null;
+  material?: string | null;
+  firstWeightKg?: number | null;
+  secondWeightKg?: number | null;
+  netWeightKg?: number | null;
+  createdAt?: Date | string | null;
+  secondWeighedAt?: Date | string | null;
+  cam1PhotoUrl?: string | null;
+  cam2PhotoUrl?: string | null;
+  secondCam1PhotoUrl?: string | null;
+  secondCam2PhotoUrl?: string | null;
+  isStorageTransfer?: boolean | null;
+  storageLocation?: string | null;
+  transferDirection?: string | null;
+}
+
+/**
+ * Send weighbridge Kata completion alert to internal members (Settings -> WhatsApp Alert Recipients)
+ * using approved Fast2SMS Utility template `rvp_kata_alert` (Message ID 33711).
+ *
+ * Variables contract (6 vars):
+ *   {{1}} Vehicle No (e.g. TN28BF7423)
+ *   {{2}} Date (e.g. 20-09-2026)
+ *   {{3}} Time (e.g. 08:03 PM)
+ *   {{4}} Party / Route (e.g. SLV Enterprises or RVP → PGR COLD STORAGE)
+ *   {{5}} Commodity / Material (e.g. TAMARIND SEED)
+ *   {{6}} Net Weight (e.g. 20,560 Kg)
+ *
+ * Header: IMAGE (camera snapshot of truck on scale or Kata slip image).
+ * Sent only after 2nd weight (or on editing/updating a 2nd weight ticket).
+ */
+export async function notifyInternalKataCompleted(
+  ticket: InternalKataTicketPayload,
+  options?: { isUpdate?: boolean }
+): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  // Guard: Must only be sent after 2nd weight, never for 1st weight only
+  if (ticket.secondWeightKg == null && (ticket.netWeightKg == null || ticket.netWeightKg <= 0)) {
+    logger.info(`[whatsapp] Skipping internal Kata alert for ticket #${ticket.ticketNo}: 2nd weight not yet recorded`);
+    return { ok: false, skipped: true, error: 'Second weight not yet recorded' };
+  }
+
+  const recipients = await resolveAlertRecipients();
+  if (recipients.length === 0) {
+    logger.warn(`[whatsapp] No alert recipients configured for ticket #${ticket.ticketNo} Kata alert`);
+    return { ok: false, skipped: true, error: 'No alert recipients configured' };
+  }
+
+  // 1. Format date and time in IST (Asia/Kolkata)
+  const timestamp = ticket.secondWeighedAt || ticket.createdAt || new Date();
+  const dateObj = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+
+  const dateStr = dateObj.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).replace(/\//g, '-');
+
+  const timeStr = dateObj.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).toUpperCase();
+
+  // 2. Format party / route
+  let partyDisplay = ticket.partyName?.trim() || '';
+  if (ticket.isStorageTransfer && ticket.storageLocation) {
+    partyDisplay = ticket.transferDirection === 'STORAGE_TO_RVP'
+      ? `${ticket.storageLocation} → RVP`
+      : `RVP → ${ticket.storageLocation}`;
+  } else if (!partyDisplay) {
+    partyDisplay = 'Self / RVP Plant';
+  }
+  if (options?.isUpdate) {
+    partyDisplay = `${partyDisplay} (Updated)`;
+  }
+
+  // 3. Format vehicle, commodity, net weight
+  const vehicleNo = ticket.vehicleNumber.trim().toUpperCase();
+  const commodity = ticket.material?.trim() || 'OTHERS';
+  const netWeightNum = ticket.netWeightKg != null
+    ? ticket.netWeightKg
+    : (ticket.firstWeightKg != null && ticket.secondWeightKg != null
+        ? Math.abs(ticket.secondWeightKg - ticket.firstWeightKg)
+        : 0);
+  const netWeightStr = `${netWeightNum.toLocaleString('en-IN')} Kg`;
+
+  // 4. Resolve camera snapshot photo URL for IMAGE header
+  let photoUrl: string | undefined = undefined;
+  const rawPhoto = ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || ticket.secondCam2PhotoUrl || ticket.cam2PhotoUrl;
+  if (rawPhoto && typeof rawPhoto === 'string' && !rawPhoto.toLowerCase().endsWith('.pdf') && !rawPhoto.includes('.pdf?')) {
+    if (rawPhoto.startsWith('http://') || rawPhoto.startsWith('https://')) {
+      photoUrl = rawPhoto;
+    } else {
+      const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
+      const hostBase = apiBase.replace(/\/api\/?$/, '');
+      photoUrl = rawPhoto.startsWith('/api/') ? `${hostBase}${rawPhoto}` : `${apiBase}/${rawPhoto.replace(/^\//, '')}`;
+    }
+  }
+  if (!photoUrl) {
+    photoUrl = DEFAULT_KATA_SLIP_IMAGE_URL;
+  }
+
+  // 5. Send using the template rvp_kata_alert (Message ID 33711)
+  const templateResult = await fanOutToAlertRecipients((to) =>
+    sendWhatsAppTemplate({
+      templateKey: 'INTERNAL_KATA_ALERT',
+      to,
+      mediaUrl: photoUrl,
+      variables: [
+        vehicleNo,
+        dateStr,
+        timeStr,
+        partyDisplay,
+        commodity,
+        netWeightStr,
+      ],
+      relatedType: 'INTERNAL_KATA_ALERT',
+      relatedId: ticket.id,
+    })
+  );
+
+  // If template succeeded, update slip timestamp and return
+  if (templateResult.ok) {
+    await prisma.weighbridgeTicket.update({
+      where: { id: ticket.id },
+      data: { slipWhatsappSentAt: new Date() },
+    }).catch(() => {});
+    return templateResult;
+  }
+
+  // 6. Fallback: If template ID is not yet approved or returned error, send structured session text message
+  logger.info(`[whatsapp] Sending session message fallback for internal Kata alert ticket #${ticket.ticketNo}`);
+  const fallbackText =
+    `⚖️ *Weighbridge Kata Alert*${options?.isUpdate ? ' *(Updated)*' : ''}\n\n` +
+    `Vehicle No: *${vehicleNo}*\n` +
+    `Date: *${dateStr}*\n` +
+    `Time: *${timeStr}*\n` +
+    `Party: *${partyDisplay}*\n` +
+    `Commodity: *${commodity}*\n` +
+    `Net Weight: *${netWeightStr}*\n\n` +
+    `_Kata is done for the above_`;
+
+  const fallbackResults = await Promise.all(
+    recipients.map((phone) =>
+      sendSessionTextMessage({
+        to: phone,
+        text: fallbackText,
+        imageUrl: photoUrl,
+        relatedType: 'INTERNAL_KATA_ALERT',
+        relatedId: ticket.id,
+      })
+    )
+  );
+
+  const anyFallbackOk = fallbackResults.some((r) => r.ok);
+  if (anyFallbackOk) {
+    await prisma.weighbridgeTicket.update({
+      where: { id: ticket.id },
+      data: { slipWhatsappSentAt: new Date() },
+    }).catch(() => {});
+    return { ok: true };
+  }
+
+  return { ok: false, error: templateResult.error || 'Failed to send internal Kata alert' };
+}
+
 
 

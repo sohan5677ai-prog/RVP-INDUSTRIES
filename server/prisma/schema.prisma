@@ -2235,6 +2235,7 @@ model WeighbridgeTicket {
   paymentVerifiedBy          String?
   paymentReference           String?
   slipWhatsappSentAt         DateTime?
+  slipImageUrl               String?
   secondWeightReminderSentAt DateTime?
   isStorageTransfer          Boolean   @default(false)
   storageLocation            String?

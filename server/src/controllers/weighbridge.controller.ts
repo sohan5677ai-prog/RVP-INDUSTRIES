@@ -7,12 +7,15 @@ import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCc
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
 import { calcKataFee, findCompanyVehicle, isVehicleExempt, clean10DigitPhone } from '../lib/calc.js';
 import { renderWeighbridgeSlipPdf } from '../lib/weighbridgeSlipPdf.js';
+import { generateWeighbridgeSlipJpeg } from '../lib/weighbridgeSlipImage.js';
+import { uploadBufferToStorage } from '../lib/upload.js';
 import {
   sendWeighbridgePaidSlip,
   sendWeighbridgeSecondWeightReminder,
   sendDriverSecondWeightReminder,
   sendHamaliSecondWeightReminder,
   sendWeighbridgeDriverUnloadedSlip,
+  notifyInternalKataCompleted,
   type WaLanguage,
 } from '../services/whatsapp.service.js';
 import { recordAutomaticTransfer } from '../services/weighbridgeTransfer.service.js';
@@ -464,7 +467,11 @@ export async function createTicketHandler(req: Request, res: Response) {
           tripType: 'SECOND',
           billType: finalBillType,
           amount: finalAmount,
-          paymentStatus: paymentStatusFor(finalAmount, finalBillType),
+          paymentStatus: (isExempt || transfer.enabled) ? 'NOT_REQUIRED' : paymentStatusFor(finalAmount, finalBillType),
+          paidAt: (isExempt || transfer.enabled) ? (existingPending.paidAt ?? secondWeighedAt) : existingPending.paidAt,
+          paidAmount: (isExempt || transfer.enabled) ? 0 : existingPending.paidAmount,
+          paymentReference: isExempt ? 'KNM_EXEMPT' : transfer.enabled ? 'INTERNAL_TRANSFER' : existingPending.paymentReference,
+          paymentVerifiedBy: isExempt ? 'Auto-Exempt (KNM)' : transfer.enabled ? 'Auto-Exempt (Transfer)' : existingPending.paymentVerifiedBy,
           isStorageTransfer: transfer.enabled,
           storageLocation: transfer.storageLocation,
           transferDirection: transfer.transferDirection,
@@ -477,6 +484,9 @@ export async function createTicketHandler(req: Request, res: Response) {
           secondCam2PhotoUrl,
         },
       });
+      notifyInternalKataCompleted(updated).catch((err: any) =>
+        logger.warn('[weighbridge] Internal Kata WhatsApp alert failed:', err.message)
+      );
       return res.status(200).json(updated);
     }
   }
@@ -522,7 +532,21 @@ export async function createTicketHandler(req: Request, res: Response) {
       loadType: String(loadType).toUpperCase(),
       billType: effectiveBillType,
       amount: computedAmount,
-      paymentStatus: status === 'COMPLETED' ? paymentStatusFor(computedAmount, effectiveBillType) : 'NOT_REQUIRED',
+      paymentStatus: status === 'COMPLETED'
+        ? (isExempt || transfer.enabled) ? 'NOT_REQUIRED' : paymentStatusFor(computedAmount, effectiveBillType)
+        : 'NOT_REQUIRED',
+      paidAt: (status === 'COMPLETED' && (isExempt || transfer.enabled)) ? new Date() : null,
+      paidAmount: 0,
+      paymentReference: (status === 'COMPLETED' && isExempt)
+        ? 'KNM_EXEMPT'
+        : (status === 'COMPLETED' && transfer.enabled)
+          ? 'INTERNAL_TRANSFER'
+          : null,
+      paymentVerifiedBy: (status === 'COMPLETED' && isExempt)
+        ? 'Auto-Exempt (KNM)'
+        : (status === 'COMPLETED' && transfer.enabled)
+          ? 'Auto-Exempt (Transfer)'
+          : null,
       isStorageTransfer: transfer.enabled,
       storageLocation: transfer.storageLocation,
       transferDirection: transfer.transferDirection,
@@ -541,6 +565,9 @@ export async function createTicketHandler(req: Request, res: Response) {
 
   if (ticket.secondWeightKg != null) {
     await recordAutomaticTransfer(ticket);
+    notifyInternalKataCompleted(ticket).catch((err: any) =>
+      logger.warn('[weighbridge] Internal Kata WhatsApp alert failed:', err.message)
+    );
   }
 
   res.status(201).json(ticket);
@@ -619,7 +646,11 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       tripType: 'SECOND',
       billType: finalBillType,
       amount: finalAmount,
-      paymentStatus: paymentStatusFor(finalAmount, finalBillType),
+      paymentStatus: (isExempt || transfer.enabled) ? 'NOT_REQUIRED' : paymentStatusFor(finalAmount, finalBillType),
+      paidAt: (isExempt || transfer.enabled) ? (existing.paidAt ?? secondWeighedAt) : existing.paidAt,
+      paidAmount: (isExempt || transfer.enabled) ? 0 : existing.paidAmount,
+      paymentReference: isExempt ? 'KNM_EXEMPT' : transfer.enabled ? 'INTERNAL_TRANSFER' : existing.paymentReference,
+      paymentVerifiedBy: isExempt ? 'Auto-Exempt (KNM)' : transfer.enabled ? 'Auto-Exempt (Transfer)' : existing.paymentVerifiedBy,
       isStorageTransfer: transfer.enabled,
       storageLocation: transfer.storageLocation,
       transferDirection: transfer.transferDirection,
@@ -636,6 +667,11 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   });
 
   res.json(updated);
+
+  // Auto-send WhatsApp Kata alert to internal members (fire-and-forget)
+  notifyInternalKataCompleted(updated).catch((err: any) =>
+    logger.warn('[weighbridge] Internal Kata WhatsApp alert failed:', err.message)
+  );
 
   // Auto-queue print job for the completed ticket (fire-and-forget)
   prisma.printJob.create({
@@ -724,15 +760,40 @@ export async function updateTicketHandler(req: Request, res: Response) {
       amount,
       paymentStatus: status !== 'COMPLETED'
         ? 'NOT_REQUIRED'
-        : existing.paymentStatus === 'PAID' && amount > 0
-          ? 'PAID'
-          : paymentStatusFor(amount, effectiveBillType),
+        : (isExempt || transfer.enabled)
+          ? 'NOT_REQUIRED'
+          : existing.paymentStatus === 'PAID' && amount > 0
+            ? 'PAID'
+            : paymentStatusFor(amount, effectiveBillType),
+      paidAt: (status === 'COMPLETED' && (isExempt || transfer.enabled))
+        ? (existing.paidAt ?? new Date())
+        : existing.paidAt,
+      paidAmount: (status === 'COMPLETED' && (isExempt || transfer.enabled))
+        ? 0
+        : existing.paidAmount,
+      paymentReference: (status === 'COMPLETED' && isExempt)
+        ? 'KNM_EXEMPT'
+        : (status === 'COMPLETED' && transfer.enabled)
+          ? 'INTERNAL_TRANSFER'
+          : existing.paymentReference,
+      paymentVerifiedBy: (status === 'COMPLETED' && isExempt)
+        ? 'Auto-Exempt (KNM)'
+        : (status === 'COMPLETED' && transfer.enabled)
+          ? 'Auto-Exempt (Transfer)'
+          : existing.paymentVerifiedBy,
       status,
       firstWeighedAt: firstWeight != null ? (existing.firstWeighedAt ?? new Date()) : null,
       secondWeighedAt: secondWeight != null ? (existing.secondWeighedAt ?? new Date()) : null,
       remarks: String(req.body.remarks ?? existing.remarks ?? '').trim() || null,
     },
   });
+
+  if (updated.secondWeightKg != null) {
+    // Auto-send updated WhatsApp Kata alert to internal members (fire-and-forget)
+    notifyInternalKataCompleted(updated, { isUpdate: true }).catch((err: any) =>
+      logger.warn('[weighbridge] Internal Kata WhatsApp alert (edit) failed:', err.message)
+    );
+  }
 
   res.json(updated);
 }
@@ -803,6 +864,65 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
   const rawMobile = req.body.driverMobile ?? req.body.partyMobile;
   const cleanedMobile = rawMobile ? clean10DigitPhone(rawMobile) : '';
 
+  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+  const isKnm = isVehicleExempt(ticket.vehicleNumber, company?.companyVehicles) ||
+    /knm/i.test(ticket.vehicleNumber) ||
+    (ticket.partyName ? /knm/i.test(ticket.partyName) : false);
+
+  const isTransfer = Boolean(
+    ticket.isStorageTransfer ||
+    ticket.storageLocation ||
+    ticket.transferDirection ||
+    (ticket.partyName && (ticket.partyName.includes('→') || ticket.partyName.includes('->') || /cold|storage|godown/i.test(ticket.partyName)))
+  );
+
+  // 1. KNM Company Vehicles: Automatically marked as EXEMPT, NO WhatsApp message sent
+  if (isKnm) {
+    const updated = await prisma.weighbridgeTicket.update({
+      where: { id: ticket.id },
+      data: {
+        paymentStatus: 'NOT_REQUIRED',
+        paidAmount: 0,
+        paidAt,
+        paymentVerifiedBy: user?.name || user?.email || 'Kata Operator',
+        paymentReference: 'KNM_EXEMPT',
+        ...(cleanedMobile ? { partyMobile: cleanedMobile } : {}),
+      },
+    });
+    return res.json({
+      ticket: updated,
+      whatsapp: {
+        ok: false,
+        skipped: true,
+        error: 'KNM company vehicle automatically marked as exempt; no WhatsApp release message sent.',
+      },
+    });
+  }
+
+  // 2. Storage Transfers: Automatically marked as EXEMPT, NO WhatsApp message sent
+  if (isTransfer) {
+    const updated = await prisma.weighbridgeTicket.update({
+      where: { id: ticket.id },
+      data: {
+        paymentStatus: 'NOT_REQUIRED',
+        paidAmount: 0,
+        paidAt,
+        paymentVerifiedBy: user?.name || user?.email || 'Kata Operator',
+        paymentReference: 'INTERNAL_TRANSFER',
+        ...(cleanedMobile ? { partyMobile: cleanedMobile } : {}),
+      },
+    });
+    return res.json({
+      ticket: updated,
+      whatsapp: {
+        ok: false,
+        skipped: true,
+        error: 'Storage transfer is exempt; no WhatsApp release message sent.',
+      },
+    });
+  }
+
+  // 3. Inward Purchases from outside suppliers
   let updated = await prisma.weighbridgeTicket.update({
     where: { id: ticket.id },
     data: {
@@ -815,22 +935,50 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
     },
   });
 
-  const shouldSendWhatsapp = req.body.sendWhatsapp !== false;
+  // Ensure release slip is only for purchases / inward items (not outward sales)
+  let isBuyerParty = false;
+  if (ticket.partyName) {
+    const partyRow = await prisma.party.findFirst({ where: { name: ticket.partyName.trim() }, select: { type: true } });
+    if (partyRow?.type === 'BUYER') isBuyerParty = true;
+  }
+  const isPurchase = !isBuyerParty;
+
+  const shouldSendWhatsapp = req.body.sendWhatsapp !== false && isPurchase;
   const chosenLang = ((req.body.language || 'TE') as string).toUpperCase() as WaLanguage;
 
-  let whatsapp: { ok: boolean; skipped?: boolean; error?: string } = { ok: false, skipped: true, error: 'WhatsApp delivery not requested' };
+  let whatsapp: { ok: boolean; skipped?: boolean; error?: string } = {
+    ok: false,
+    skipped: true,
+    error: !isPurchase ? 'Release slip is only for inward purchases; no WhatsApp sent.' : 'WhatsApp delivery not requested',
+  };
 
   if (shouldSendWhatsapp) {
     const targetMobile = updated.partyMobile || cleanedMobile;
     if (!targetMobile) {
       whatsapp = { ok: false, skipped: true, error: 'Driver mobile is missing' };
     } else {
-      const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
       const driver = findCompanyVehicle(updated.vehicleNumber, company?.companyVehicles);
       const token = slipToken(updated.id, paidAt);
       const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
       const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}`;
-      const photoUrl = updated.secondCam1PhotoUrl || updated.cam1PhotoUrl || undefined;
+
+      // Upload client-rendered slip image if provided
+      let slipImageUrl = updated.slipImageUrl;
+      if (req.body.slipImage && typeof req.body.slipImage === 'string' && req.body.slipImage.startsWith('data:image/')) {
+        try {
+          const base64Data = req.body.slipImage.split(',')[1];
+          if (base64Data) {
+            const buf = Buffer.from(base64Data, 'base64');
+            slipImageUrl = await uploadBufferToStorage(buf, 'image/jpeg', '.jpg');
+            updated = await prisma.weighbridgeTicket.update({ where: { id: updated.id }, data: { slipImageUrl } });
+          }
+        } catch (err) {
+          logger.warn('[weighbridge] failed to upload client slipImage:', err);
+        }
+      }
+
+      // Official Stamped Kata Slip image URL (NEVER raw CCTV photo)
+      const photoUrl = slipImageUrl || `${apiBase}/weighbridge/tickets/${updated.id}/slip.jpg?token=${token}`;
 
       whatsapp = await sendWeighbridgePaidSlip({
         to: targetMobile,
@@ -861,6 +1009,34 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
   if (!ticket) throw new HttpError(404, 'Weighbridge ticket not found');
   if (ticket.status !== 'COMPLETED') throw new HttpError(400, 'Complete the weighment before sending the Kata slip');
 
+  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+  const isKnm = isVehicleExempt(ticket.vehicleNumber, company?.companyVehicles) ||
+    /knm/i.test(ticket.vehicleNumber) ||
+    (ticket.partyName ? /knm/i.test(ticket.partyName) : false);
+
+  const isTransfer = Boolean(
+    ticket.isStorageTransfer ||
+    ticket.storageLocation ||
+    ticket.transferDirection ||
+    (ticket.partyName && (ticket.partyName.includes('→') || ticket.partyName.includes('->') || /cold|storage|godown/i.test(ticket.partyName)))
+  );
+
+  if (isKnm) {
+    throw new HttpError(400, 'KNM company vehicles are exempt; WhatsApp slip is not sent for company vehicles');
+  }
+  if (isTransfer) {
+    throw new HttpError(400, 'Internal storage transfers are exempt; WhatsApp slip is only for inward purchases');
+  }
+
+  let isBuyerParty = false;
+  if (ticket.partyName) {
+    const partyRow = await prisma.party.findFirst({ where: { name: ticket.partyName.trim() }, select: { type: true } });
+    if (partyRow?.type === 'BUYER') isBuyerParty = true;
+  }
+  if (isBuyerParty) {
+    throw new HttpError(400, 'Release slip via WhatsApp is only for inward purchases (not outward sales)');
+  }
+
   const rawMobile = req.body.driverMobile ?? req.body.partyMobile;
   const cleanedMobile = rawMobile ? clean10DigitPhone(rawMobile) : '';
   const targetMobile = cleanedMobile || ticket.partyMobile;
@@ -877,13 +1053,29 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
     });
   }
 
+  // Upload client-rendered slip image if provided
+  let slipImageUrl = ticket.slipImageUrl;
+  if (req.body.slipImage && typeof req.body.slipImage === 'string' && req.body.slipImage.startsWith('data:image/')) {
+    try {
+      const base64Data = req.body.slipImage.split(',')[1];
+      if (base64Data) {
+        const buf = Buffer.from(base64Data, 'base64');
+        slipImageUrl = await uploadBufferToStorage(buf, 'image/jpeg', '.jpg');
+        await prisma.weighbridgeTicket.update({ where: { id: ticket.id }, data: { slipImageUrl } });
+      }
+    } catch (err) {
+      logger.warn('[weighbridge] failed to upload client slipImage:', err);
+    }
+  }
+
   const chosenLang = ((req.body.language || 'TE') as string).toUpperCase() as WaLanguage;
-  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
   const driver = findCompanyVehicle(ticket.vehicleNumber, company?.companyVehicles);
   const token = slipToken(ticket.id, ticket.paidAt || ticket.createdAt);
   const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
   const slipUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.pdf?token=${token}`;
-  const photoUrl = ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || undefined;
+  
+  // Official Stamped Kata Slip image URL (NEVER raw CCTV photo)
+  const photoUrl = slipImageUrl || `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}`;
 
   const whatsapp = await sendWeighbridgePaidSlip({
     to: targetMobile,
@@ -923,6 +1115,23 @@ export async function downloadSignedWeighbridgeSlipHandler(req: Request, res: Re
   res.setHeader('Content-Disposition', `inline; filename="Kata-Slip-${String(ticket.ticketNo).padStart(2, '0')}.pdf"`);
   res.setHeader('Cache-Control', 'private, max-age=86400');
   res.send(pdf);
+}
+
+/** Public, unguessable JPEG image URL of the signed Kata certificate for WhatsApp image header. */
+export async function downloadSignedWeighbridgeSlipImageHandler(req: Request, res: Response) {
+  const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
+  if (!ticket) throw new HttpError(404, 'Signed Kata slip not found');
+  const expected = slipToken(ticket.id, ticket.paidAt || ticket.createdAt);
+  const received = String(req.query.token || '');
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) throw new HttpError(403, 'Invalid slip link');
+
+  const jpegBuffer = await generateWeighbridgeSlipJpeg(ticket);
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Content-Disposition', `inline; filename="Kata-Slip-${String(ticket.ticketNo).padStart(2, '0')}.jpg"`);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.send(jpegBuffer);
 }
 
 /**

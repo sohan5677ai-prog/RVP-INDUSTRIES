@@ -35,6 +35,7 @@ const ENV_KEYS = [
   // Cleared so the "no id anywhere" case below reads the source, not a local .env.
   'FAST2SMS_TMPL_PAYMENT_SENT_TEXT',
   'FAST2SMS_TMPL_WISHES',
+  'FAST2SMS_TMPL_INTERNAL_KATA_ALERT',
 ];
 const saved: Record<string, string | undefined> = {};
 
@@ -287,6 +288,14 @@ describe('approved language ids', () => {
     expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('99999');
     delete process.env.FAST2SMS_TMPL_INBOUND_MESSAGE;
     expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('31637');
+  });
+
+  it('maps INTERNAL_KATA_ALERT to approved message_id 33711 and supports env override', () => {
+    expect(templateId('INTERNAL_KATA_ALERT', 'EN')).toBe('33711');
+    process.env.FAST2SMS_TMPL_INTERNAL_KATA_ALERT = '88888';
+    expect(templateId('INTERNAL_KATA_ALERT', 'EN')).toBe('88888');
+    delete process.env.FAST2SMS_TMPL_INTERNAL_KATA_ALERT;
+    expect(templateId('INTERNAL_KATA_ALERT', 'EN')).toBe('33711');
   });
 });
 

@@ -58,6 +58,7 @@ import {
   getPrintAgentStatusHandler,
   isTrustedCameraBridge,
   downloadSignedWeighbridgeSlipHandler,
+  downloadSignedWeighbridgeSlipImageHandler,
 } from '../controllers/weighbridge.controller.js';
 const router = Router();
 
@@ -79,6 +80,7 @@ router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
 router.post('/weighbridge/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/weighbridge/cctv/status', asyncHandler(getCctvStatusHandler));
 router.get('/weighbridge/tickets/:id/slip.pdf', asyncHandler(downloadSignedWeighbridgeSlipHandler));
+router.get('/weighbridge/tickets/:id/slip.jpg', asyncHandler(downloadSignedWeighbridgeSlipImageHandler));
 
 // Weighbridge Print Queue routes (authenticated via X-CCTV-Bridge-Key or Bearer JWT)
 const printQueueAuth = (req: any, res: any, next: any) => {

@@ -383,6 +383,13 @@ function generateSlipHtml(ticket) {
           <span style="font-size: 7.5px; font-weight: bold; text-transform: uppercase; line-height: 1; font-family: Arial, sans-serif; color: #000;">HRS</span>
           <span style="font-size: 5.5px; font-weight: bold; background: #18181b; color: #ffffff; padding: 0.5px 2px; border-radius: 1px; text-transform: uppercase; margin-top: 1px; font-family: Arial, sans-serif;">SERVICE</span>
         </div>
+
+        <!-- Top Right Blank Space: Official Inked RECEIVED Stamp (Consignment Received) -->
+        <div style="position: absolute; top: 18mm; right: 3.5mm; width: 44mm; height: 15mm; border: 2.5px solid #047857; outline: 1px solid #047857; outline-offset: -4px; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; transform: rotate(-3deg); background: rgba(240, 253, 244, 0.9); pointer-events: none; mix-blend-mode: multiply;">
+          <span style="font-family: Arial, sans-serif; font-size: 7.5px; font-weight: 900; color: #047857; letter-spacing: 0.8px; text-transform: uppercase; line-height: 1;">✔ CONSIGNMENT</span>
+          <span style="font-family: Arial, sans-serif; font-size: 11px; font-weight: 900; color: #047857; letter-spacing: 1.5px; text-transform: uppercase; line-height: 1.1; margin-top: 0.5px;">RECEIVED</span>
+          <span style="font-family: Arial, sans-serif; font-size: 6px; font-weight: 800; color: #065f46; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1;">RVP WEIGH BRIDGE</span>
+        </div>
         <div style="position: absolute; top: 36mm; left: 2mm; width: 64mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
           <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">S. No.</div>
         </div>

@@ -7,6 +7,8 @@ import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import { toJpeg } from 'html-to-image';
+import { isVehicleExempt } from '@/lib/calc';
 
 /**
  * Resolve a camera image URL to an absolute URL that works everywhere,
@@ -264,6 +266,13 @@ export function renderTicketPrintHtml(
           <span style="font-size: 7.5px; font-weight: bold; text-transform: uppercase; line-height: 1; font-family: Arial, sans-serif; color: #000;">HRS</span>
           <span style="font-size: 5.5px; font-weight: bold; background: #18181b; color: #ffffff; padding: 0.5px 2px; border-radius: 1px; text-transform: uppercase; margin-top: 1px; font-family: Arial, sans-serif;">SERVICE</span>
         </div>
+
+        <!-- Top Right Blank Space: Official Inked RECEIVED Stamp (Consignment Received) -->
+        <div style="position: absolute; top: 18mm; right: 3.5mm; width: 44mm; height: 15mm; border: 2.5px solid #047857; outline: 1px solid #047857; outline-offset: -4px; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; transform: rotate(-3deg); background: rgba(240, 253, 244, 0.9); pointer-events: none; mix-blend-mode: multiply;">
+          <span style="font-family: Arial, sans-serif; font-size: 7.5px; font-weight: 900; color: #047857; letter-spacing: 0.8px; text-transform: uppercase; line-height: 1;">✔ CONSIGNMENT</span>
+          <span style="font-family: Arial, sans-serif; font-size: 11px; font-weight: 900; color: #047857; letter-spacing: 1.5px; text-transform: uppercase; line-height: 1.1; margin-top: 0.5px;">RECEIVED</span>
+          <span style="font-family: Arial, sans-serif; font-size: 6px; font-weight: 800; color: #065f46; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1;">RVP WEIGH BRIDGE</span>
+        </div>
         <div style="position: absolute; top: 36mm; left: 2mm; width: 64mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
           <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b; font-family: Arial, sans-serif;">S. No.</div>
         </div>
@@ -484,6 +493,63 @@ export async function triggerSilentLocalPrint(
   }
 }
 
+/**
+ * Render and capture the complete official stamped Kata certificate as a high-res JPEG Data URL.
+ * Used for attaching the official signed slip to WhatsApp instead of the raw CCTV photo.
+ */
+export async function captureKataSlipImage(
+  ticket: WeighbridgeTicket,
+  snapshots?: { cam1?: string; cam2?: string } | null
+): Promise<string | null> {
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '-9999px';
+    iframe.style.width = '210mm';
+    iframe.style.height = '148mm';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      iframe.remove();
+      return null;
+    }
+
+    const html = renderTicketPrintHtml(ticket, { offsetXmm: 0, offsetYmm: 0, printMode: 'plain' }, snapshots);
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // Give iframe a moment for layout and images to resolve
+    await new Promise((r) => setTimeout(r, 200));
+
+    const sheet = doc.querySelector('.sheet') as HTMLElement;
+    if (!sheet) {
+      iframe.remove();
+      return null;
+    }
+
+    const dataUrl = await Promise.race([
+      toJpeg(sheet, {
+        quality: 0.92,
+        pixelRatio: 2,
+        skipFonts: true,
+        cacheBust: true,
+        backgroundColor: '#ffffff',
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+    ]);
+
+    iframe.remove();
+    return dataUrl;
+  } catch (err) {
+    console.warn('[weighbridge] captureKataSlipImage failed, will use server renderer:', err);
+    return null;
+  }
+}
+
 export default function WeighbridgeSlipModal({
   ticket,
   companyProfile: _companyProfile,
@@ -556,6 +622,19 @@ export default function WeighbridgeSlipModal({
   const month = String(ticketDateObj.getMonth() + 1).padStart(2, '0');
   const year = ticketDateObj.getFullYear();
   const formattedDate = `${day}-${month}-${year}`;
+
+  const isKnm = ticket
+    ? isVehicleExempt(ticket.vehicleNumber, _companyProfile?.companyVehicles) ||
+      /knm/i.test(ticket.vehicleNumber) ||
+      (ticket.partyName ? /knm/i.test(ticket.partyName) : false)
+    : false;
+
+  const isTransfer = Boolean(
+    ticket?.isStorageTransfer ||
+    ticket?.storageLocation ||
+    ticket?.transferDirection ||
+    (ticket?.partyName && (ticket.partyName.includes('→') || ticket.partyName.includes('->') || /cold|storage|godown/i.test(ticket.partyName)))
+  );
 
   const formattedTime = ticketDateObj.toLocaleTimeString('en-IN', {
     hour: '2-digit',
@@ -961,6 +1040,16 @@ export default function WeighbridgeSlipModal({
                   </div>
                 </div>
 
+                {/* Top Right Blank Space: Official Inked RECEIVED Stamp (Consignment Received) */}
+                <div
+                  className="absolute top-[21mm] right-[3.5mm] w-[44mm] h-[15mm] border-[2.5px] border-emerald-700 rounded-xs flex flex-col items-center justify-center -rotate-3 bg-emerald-50/90 pointer-events-none shadow-2xs"
+                  style={{ outline: '1px solid #047857', outlineOffset: '-4px' }}
+                >
+                  <span className="font-sans font-black text-[7.5px] text-emerald-700 tracking-wider uppercase leading-none">✔ CONSIGNMENT</span>
+                  <span className="font-sans font-black text-[11px] text-emerald-700 tracking-widest uppercase leading-tight mt-0.5">RECEIVED</span>
+                  <span className="font-sans font-extrabold text-[6px] text-emerald-800 tracking-wide uppercase leading-none">RVP WEIGH BRIDGE</span>
+                </div>
+
                 {/* S. No. Box Artwork Outline (Top: 43mm) */}
                 <div className="absolute top-[43mm] left-[2mm] w-[64mm] h-[8.5mm] border-2 border-amber-500 rounded-md flex items-center overflow-hidden bg-white">
                   <div className="bg-yellow-300 text-red-900 text-[10px] font-black px-2 h-full flex items-center justify-center uppercase border-r border-amber-400 shrink-0">
@@ -1233,8 +1322,8 @@ export default function WeighbridgeSlipModal({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Send WhatsApp Slip button */}
-            {ticket && onSendWhatsapp && (
+            {/* Send WhatsApp Slip button - only for inward purchases, not KNM or transfers */}
+            {ticket && onSendWhatsapp && !isKnm && !isTransfer && (
               <Button
                 variant="outline"
                 size="sm"

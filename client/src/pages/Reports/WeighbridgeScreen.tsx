@@ -67,7 +67,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
 import { calcKataFee, isVehicleExempt, findCompanyVehicle, clean10DigitPhone, normalizeLorryNumber, parseCompanyVehicles } from '@/lib/calc';
-import WeighbridgeSlipModal, { triggerDirectPrint, formatTicketNo } from '@/components/WeighbridgeSlipModal';
+import WeighbridgeSlipModal, { triggerDirectPrint, formatTicketNo, captureKataSlipImage } from '@/components/WeighbridgeSlipModal';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import './WeighbridgeScreen.css';
@@ -777,6 +777,31 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     return false;
   }, [companyProfile?.companyVehicles]);
 
+  const isTicketTransfer = useCallback((ticket: WeighbridgeTicket) => {
+    return Boolean(
+      ticket.isStorageTransfer ||
+      ticket.storageLocation ||
+      ticket.transferDirection ||
+      (ticket.partyName && (ticket.partyName.includes('→') || ticket.partyName.includes('->') || /cold|storage|godown/i.test(ticket.partyName)))
+    );
+  }, []);
+
+  const isTicketBuyerSale = useCallback((ticket: WeighbridgeTicket) => {
+    if (!ticket.partyName) return false;
+    const cleanName = ticket.partyName.trim().toLowerCase();
+    const party = parties.find(p => p.name.trim().toLowerCase() === cleanName);
+    return party?.type === 'BUYER';
+  }, [parties]);
+
+  const isEligibleForWhatsappSlip = useCallback((ticket: WeighbridgeTicket) => {
+    // Release slip is ONLY for inward purchases
+    // NOT for sales, NOT for transfers, and NOT for KNM company vehicles
+    if (isKnmVehicle(ticket.vehicleNumber, ticket.partyName)) return false;
+    if (isTicketTransfer(ticket)) return false;
+    if (isTicketBuyerSale(ticket)) return false;
+    return true;
+  }, [isKnmVehicle, isTicketTransfer, isTicketBuyerSale]);
+
   const vehicleOptions = useMemo(() => {
     const latest = new Map<string, { value: string; label: string; hint?: string }>();
 
@@ -1228,7 +1253,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       }
     },
     onSuccess: ({ ticket, snapshots }) => {
-      toast.success(`Ticket #${formatTicketNo(ticket.ticketNo)} saved successfully!`);
+      const saveMsg = ticket.secondWeightKg != null
+        ? `Ticket #${formatTicketNo(ticket.ticketNo)} saved & Kata sent to internal team on WhatsApp!`
+        : `Ticket #${formatTicketNo(ticket.ticketNo)} saved successfully!`;
+      toast.success(saveMsg);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
@@ -1287,6 +1315,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     (ticket: WeighbridgeTicket) => {
       const free = Number(ticket.amount || 0) === 0;
       const isExempt = isKnmVehicle(ticket.vehicleNumber, ticket.partyName);
+      const isTransfer = isTicketTransfer(ticket);
+      const isSale = isTicketBuyerSale(ticket);
+      const eligibleForWa = !isExempt && !isTransfer && !isSale;
+
       const companyDriver = findCompanyVehicle(ticket.vehicleNumber, companyProfile?.companyVehicles);
 
       let mobile = ticket.partyMobile ? clean10DigitPhone(ticket.partyMobile) : '';
@@ -1297,53 +1329,76 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       }
 
       setPaymentTarget(ticket);
-      setPaymentReference(free ? 'FREE' : 'CASH');
+      setPaymentReference(isExempt ? 'KNM_EXEMPT' : isTransfer ? 'INTERNAL_TRANSFER' : free ? 'FREE' : 'CASH');
       setPaymentDriverMobile(mobile);
       setPaymentLanguage(detectDriverLanguage(ticket.vehicleNumber));
-      setPaymentSendWhatsapp(true);
+      setPaymentSendWhatsapp(eligibleForWa);
     },
-    [isKnmVehicle, companyProfile?.companyVehicles],
+    [isKnmVehicle, isTicketTransfer, isTicketBuyerSale, companyProfile?.companyVehicles],
   );
 
   const handleOpenSendSlipModal = useCallback(
     (ticket: WeighbridgeTicket) => {
-      const isExempt = isKnmVehicle(ticket.vehicleNumber, ticket.partyName);
+      if (isKnmVehicle(ticket.vehicleNumber, ticket.partyName)) {
+        toast.info('KNM vehicles are exempt; WhatsApp release slips are not sent.');
+        return;
+      }
+      if (isTicketTransfer(ticket)) {
+        toast.info('Internal transfers are exempt; WhatsApp release slips are not sent.');
+        return;
+      }
+      if (isTicketBuyerSale(ticket)) {
+        toast.info('Driver release slips on WhatsApp are only sent for inward purchases.');
+        return;
+      }
+
       const companyDriver = findCompanyVehicle(ticket.vehicleNumber, companyProfile?.companyVehicles);
 
       let mobile = ticket.partyMobile ? clean10DigitPhone(ticket.partyMobile) : '';
       if (!mobile && companyDriver?.driverPhone) {
         mobile = clean10DigitPhone(companyDriver.driverPhone);
-      } else if (!mobile && isExempt) {
-        mobile = '9440416639';
       }
 
       setSendSlipTarget(ticket);
       setSendSlipMobile(mobile);
       setSendSlipLanguage(detectDriverLanguage(ticket.vehicleNumber));
     },
-    [isKnmVehicle, companyProfile?.companyVehicles],
+    [isKnmVehicle, isTicketTransfer, isTicketBuyerSale, companyProfile?.companyVehicles],
   );
 
   const sendSlipWhatsappMutation = useMutation({
-    mutationFn: (payload: { ticket: WeighbridgeTicket; driverMobile?: string; language?: WaLanguage }) =>
-      api<{ ok: boolean; whatsapp: { ok: boolean; skipped?: boolean; error?: string } }>(
+    mutationFn: async (payload: { ticket: WeighbridgeTicket; driverMobile?: string; language?: WaLanguage }) => {
+      let slipImage: string | null = null;
+      try {
+        const snap = {
+          cam1: payload.ticket.secondCam1PhotoUrl || payload.ticket.cam1PhotoUrl || activeSnapshots?.cam1,
+          cam2: payload.ticket.secondCam2PhotoUrl || payload.ticket.cam2PhotoUrl || activeSnapshots?.cam2,
+        };
+        slipImage = await captureKataSlipImage(payload.ticket, snap);
+      } catch (err) {
+        console.warn('[weighbridge] captureKataSlipImage failed in sendSlipWhatsappMutation:', err);
+      }
+
+      return api<{ ok: boolean; whatsapp: { ok: boolean; skipped?: boolean; error?: string } }>(
         `/weighbridge/tickets/${payload.ticket.id}/send-whatsapp-slip`,
         {
           method: 'POST',
           body: JSON.stringify({
             driverMobile: payload.driverMobile?.trim() || undefined,
             language: payload.language || 'TE',
+            slipImage: slipImage || undefined,
           }),
         },
-      ),
+      );
+    },
     onSuccess: ({ whatsapp }, variables) => {
       if (whatsapp.ok) {
         toast.success(
-          `Signed Kata slip sent to driver in ${WA_LANGUAGE_LABELS[variables.language || 'TE'] || variables.language} on WhatsApp!`,
+          `Official stamped Kata certificate sent to driver in ${WA_LANGUAGE_LABELS[variables.language || 'TE'] || variables.language} on WhatsApp!`,
         );
         setSendSlipTarget(null);
       } else {
-        toast.warning(whatsapp.error || 'Could not send WhatsApp Kata slip.');
+        toast.warning(whatsapp.error || 'Could not send WhatsApp Kata certificate.');
       }
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-ticket-register'] });
@@ -1352,15 +1407,28 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   });
 
   const paymentMutation = useMutation({
-    mutationFn: (payload: {
+    mutationFn: async (payload: {
       ticket: WeighbridgeTicket;
       amount: number;
       reference: string;
       driverMobile?: string;
       language?: WaLanguage;
       sendWhatsapp?: boolean;
-    }) =>
-      api<{ ticket: WeighbridgeTicket; whatsapp: { ok: boolean; skipped?: boolean; error?: string } }>(
+    }) => {
+      let slipImage: string | null = null;
+      if (payload.sendWhatsapp) {
+        try {
+          const snap = {
+            cam1: payload.ticket.secondCam1PhotoUrl || payload.ticket.cam1PhotoUrl || activeSnapshots?.cam1,
+            cam2: payload.ticket.secondCam2PhotoUrl || payload.ticket.cam2PhotoUrl || activeSnapshots?.cam2,
+          };
+          slipImage = await captureKataSlipImage(payload.ticket, snap);
+        } catch (err) {
+          console.warn('[weighbridge] captureKataSlipImage failed in paymentMutation:', err);
+        }
+      }
+
+      return api<{ ticket: WeighbridgeTicket; whatsapp: { ok: boolean; skipped?: boolean; error?: string } }>(
         `/weighbridge/tickets/${payload.ticket.id}/verify-payment`,
         {
           method: 'POST',
@@ -1370,18 +1438,20 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             driverMobile: payload.driverMobile?.trim() || undefined,
             language: payload.language || 'TE',
             sendWhatsapp: payload.sendWhatsapp !== false,
+            slipImage: slipImage || undefined,
           }),
         },
-      ),
+      );
+    },
     onSuccess: ({ ticket, whatsapp }, variables) => {
       toast.success(
         Number(ticket.amount || 0) > 0
           ? `Payment verified for Ticket #${formatTicketNo(ticket.ticketNo)}.`
-          : `Free KNM ticket #${formatTicketNo(ticket.ticketNo)} released.`,
+          : `Ticket #${formatTicketNo(ticket.ticketNo)} released.`,
       );
       if (whatsapp.ok) {
         toast.success(
-          `Signed Kata slip sent to driver on WhatsApp in ${WA_LANGUAGE_LABELS[variables.language || 'TE'] || variables.language}.`,
+          `Official stamped Kata certificate sent to driver on WhatsApp in ${WA_LANGUAGE_LABELS[variables.language || 'TE'] || variables.language}.`,
         );
       } else if (!whatsapp.skipped) {
         toast.warning(whatsapp.error || 'Payment saved, but the WhatsApp slip could not be sent.');
@@ -1430,7 +1500,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       }),
     }),
     onSuccess: (ticket) => {
-      toast.success(`Ticket #${formatTicketNo(ticket.ticketNo)} updated. Net weight and fee recalculated.`);
+      const msg = ticket.secondWeightKg != null
+        ? `Ticket #${formatTicketNo(ticket.ticketNo)} updated & Kata sent to internal team on WhatsApp.`
+        : `Ticket #${formatTicketNo(ticket.ticketNo)} updated. Net weight and fee recalculated.`;
+      toast.success(msg);
       setEditingTicket(null);
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
@@ -2576,73 +2649,138 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </TableRow></TableHeader>
                 <TableBody>
                   {completedTickets.map((ticket) => {
-                    const free = Number(ticket.amount || 0) === 0;
-                    const verified = Boolean(ticket.paidAt);
-                    return <TableRow key={ticket.id}>
-                      <TableCell className="font-mono font-bold text-primary">#{formatTicketNo(ticket.ticketNo)}</TableCell>
-                      <TableCell className="font-mono font-bold">{ticket.vehicleNumber}{free && <Badge variant="outline" className="ml-2 border-sky-500/30 text-sky-700">KNM / FREE</Badge>}</TableCell>
-                      <TableCell className="font-mono text-xs">{ticket.partyMobile || <span className="text-rose-600">Missing</span>}</TableCell>
-                      <TableCell className="text-right font-mono">{Number(ticket.netWeightKg || 0).toLocaleString('en-IN')} kg</TableCell>
-                      <TableCell className="text-right font-mono font-bold">₹{Number(ticket.amount || 0).toLocaleString('en-IN')}</TableCell>
-                      <TableCell>{verified ? <Badge className="bg-emerald-600"><BadgeCheck className="mr-1 h-3 w-3" />{free ? 'FREE VERIFIED' : 'PAID'}</Badge> : <Badge variant="secondary">{free ? 'NO PAYMENT' : ticket.billType === 'CREDIT' ? 'CREDIT' : 'PENDING'}</Badge>}</TableCell>
-                      <TableCell>
-                        {ticket.slipWhatsappSentAt ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                              <WhatsAppIcon className="h-3 w-3 text-emerald-600 shrink-0" />
-                              Sent {new Date(ticket.slipWhatsappSentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    const isExempt = isKnmVehicle(ticket.vehicleNumber, ticket.partyName);
+                    const isTransfer = isTicketTransfer(ticket);
+                    const isSale = isTicketBuyerSale(ticket);
+                    const isPurchase = !isExempt && !isTransfer && !isSale;
+                    const free = Number(ticket.amount || 0) === 0 || isExempt || isTransfer;
+                    const verified = Boolean(ticket.paidAt) || isExempt || isTransfer;
+
+                    return (
+                      <TableRow key={ticket.id}>
+                        <TableCell className="font-mono font-bold text-primary">#{formatTicketNo(ticket.ticketNo)}</TableCell>
+                        <TableCell className="font-mono font-bold">
+                          {ticket.vehicleNumber}
+                          {isExempt && <Badge variant="outline" className="ml-2 border-emerald-500/30 bg-emerald-50 text-emerald-700 font-semibold">KNM</Badge>}
+                          {isTransfer && <Badge variant="outline" className="ml-2 border-sky-500/30 bg-sky-50 text-sky-700 font-semibold">TRANSFER</Badge>}
+                          {isSale && <Badge variant="outline" className="ml-2 border-purple-500/30 bg-purple-50 text-purple-700 font-semibold">SALE</Badge>}
+                          {!isExempt && !isTransfer && !isSale && free && <Badge variant="outline" className="ml-2 border-sky-500/30 text-sky-700">FREE</Badge>}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{ticket.partyMobile || <span className="text-muted-foreground italic">None</span>}</TableCell>
+                        <TableCell className="text-right font-mono">{Number(ticket.netWeightKg || 0).toLocaleString('en-IN')} kg</TableCell>
+                        <TableCell className="text-right font-mono font-bold">
+                          {isExempt || isTransfer ? <span className="text-muted-foreground font-normal">₹0 (Exempt)</span> : `₹${Number(ticket.amount || 0).toLocaleString('en-IN')}`}
+                        </TableCell>
+                        <TableCell>
+                          {isExempt ? (
+                            <Badge className="bg-emerald-600/15 text-emerald-800 border-emerald-500/40 font-semibold">
+                              <BadgeCheck className="mr-1 h-3 w-3" />KNM EXEMPT
+                            </Badge>
+                          ) : isTransfer ? (
+                            <Badge className="bg-sky-600/15 text-sky-800 border-sky-500/40 font-semibold">
+                              <BadgeCheck className="mr-1 h-3 w-3" />TRANSFER EXEMPT
+                            </Badge>
+                          ) : verified ? (
+                            <Badge className="bg-emerald-600">
+                              <BadgeCheck className="mr-1 h-3 w-3" />{free ? 'FREE VERIFIED' : 'PAID'}
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">
+                              {ticket.billType === 'CREDIT' ? 'CREDIT' : 'PENDING'}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isExempt ? (
+                            <span className="text-xs text-muted-foreground italic flex items-center gap-1.5" title="KNM company vehicles are exempt from WhatsApp slips">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Exempted (KNM)
                             </span>
+                          ) : isTransfer ? (
+                            <span className="text-xs text-muted-foreground italic flex items-center gap-1.5" title="Storage transfers do not send driver release slips">
+                              <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                              Internal transfer
+                            </span>
+                          ) : isSale ? (
+                            <span className="text-xs text-muted-foreground italic flex items-center gap-1.5" title="Release slips are only for inward purchases">
+                              <span className="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                              Sale (Inward only)
+                            </span>
+                          ) : ticket.slipWhatsappSentAt ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                                <WhatsAppIcon className="h-3 w-3 text-emerald-600 shrink-0" />
+                                Sent {new Date(ticket.slipWhatsappSentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleOpenSendSlipModal(ticket)}
+                                className="h-6 w-6 p-0 text-muted-foreground hover:text-emerald-700"
+                                title="Resend WhatsApp slip to driver"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenSendSlipModal(ticket)}
-                              className="h-6 w-6 p-0 text-muted-foreground hover:text-emerald-700"
-                              title="Resend WhatsApp slip to driver"
+                              onClick={() => (verified ? handleOpenSendSlipModal(ticket) : handleOpenPaymentModal(ticket))}
+                              className="h-6 gap-1 px-1 text-xs text-amber-700 hover:text-emerald-700 hover:bg-emerald-500/10"
+                              title="Click to send signed Kata certificate via WhatsApp"
                             >
-                              <RotateCcw className="h-3 w-3" />
+                              <WhatsAppIcon className="h-3 w-3 text-amber-600 shrink-0" />
+                              Not sent
                             </Button>
-                          </div>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => (verified ? handleOpenSendSlipModal(ticket) : handleOpenPaymentModal(ticket))}
-                            className="h-6 gap-1 px-1 text-xs text-amber-700 hover:text-emerald-700 hover:bg-emerald-500/10"
-                            title="Click to send signed Kata slip via WhatsApp"
-                          >
-                            <WhatsAppIcon className="h-3 w-3 text-amber-600 shrink-0" />
-                            Not sent
-                          </Button>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {verified ? (
-                            <>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {isExempt || isTransfer ? (
                               <Button variant="ghost" size="sm" onClick={() => setSlipModalTicket(ticket)} className="h-8 gap-1 text-xs">
                                 <Printer className="h-3.5 w-3.5" />
                                 View slip
                               </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleOpenSendSlipModal(ticket)}
-                                className="h-8 gap-1 text-xs border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 font-medium"
-                                title="Send signed Kata slip with photo to driver on WhatsApp"
-                              >
-                                <WhatsAppIcon className="h-3.5 w-3.5 text-emerald-600" />
-                                {ticket.slipWhatsappSentAt ? 'Resend' : 'Send Slip'}
+                            ) : isSale ? (
+                              verified ? (
+                                <Button variant="ghost" size="sm" onClick={() => setSlipModalTicket(ticket)} className="h-8 gap-1 text-xs">
+                                  <Printer className="h-3.5 w-3.5" />
+                                  View slip
+                                </Button>
+                              ) : (
+                                <Button size="sm" onClick={() => handleOpenPaymentModal(ticket)} className="h-8 gap-1 text-xs">
+                                  <Banknote className="h-3.5 w-3.5" />
+                                  Pay ₹{Number(ticket.amount || 0).toLocaleString('en-IN')}
+                                </Button>
+                              )
+                            ) : verified ? (
+                              <>
+                                <Button variant="ghost" size="sm" onClick={() => setSlipModalTicket(ticket)} className="h-8 gap-1 text-xs">
+                                  <Printer className="h-3.5 w-3.5" />
+                                  View slip
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleOpenSendSlipModal(ticket)}
+                                  className="h-8 gap-1 text-xs border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 font-medium"
+                                  title="Send signed Kata certificate with photo to driver on WhatsApp"
+                                >
+                                  <WhatsAppIcon className="h-3.5 w-3.5 text-emerald-600" />
+                                  {ticket.slipWhatsappSentAt ? 'Resend' : 'Send Slip'}
+                                </Button>
+                              </>
+                            ) : (
+                              <Button size="sm" onClick={() => handleOpenPaymentModal(ticket)} className="h-8 gap-1 text-xs">
+                                <Banknote className="h-3.5 w-3.5" />
+                                {free ? 'Release Free Slip' : `Pay ₹${Number(ticket.amount || 0).toLocaleString('en-IN')}`}
                               </Button>
-                            </>
-                          ) : (
-                            <Button size="sm" onClick={() => handleOpenPaymentModal(ticket)} className="h-8 gap-1 text-xs">
-                              <Banknote className="h-3.5 w-3.5" />
-                              {free ? 'Release Free Slip' : `Pay ₹${Number(ticket.amount || 0).toLocaleString('en-IN')}`}
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>;
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
                   })}
                 </TableBody>
               </Table>
@@ -2874,18 +3012,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                           <Printer className="h-3.5 w-3.5 text-primary" />
                           Slip
                         </Button>
-                        {t.status === 'COMPLETED' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleOpenSendSlipModal(t)}
-                            className="h-7 px-2 text-xs gap-1 text-emerald-700 hover:text-emerald-800 dark:text-emerald-400"
-                            title="Send signed Kata slip with photo to driver on WhatsApp"
-                          >
-                            <WhatsAppIcon className="h-3.5 w-3.5" />
-                            WhatsApp
-                          </Button>
-                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -3037,138 +3163,217 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
       <Dialog open={paymentTarget !== null} onOpenChange={(open) => !open && setPaymentTarget(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {Number(paymentTarget?.amount || 0) === 0
-                ? `Release Free Slip #${formatTicketNo(paymentTarget?.ticketNo)}`
-                : `Verify Payment #${formatTicketNo(paymentTarget?.ticketNo)}`}
-            </DialogTitle>
-            <DialogDescription>
-              Confirm weighment fee receipt and send the signed Kata slip to the driver via WhatsApp.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2 text-sm">
-            <div className="flex justify-between rounded-lg border bg-muted/40 p-3">
-              <span className="text-muted-foreground">Vehicle</span>
-              <span className="font-mono font-bold">{paymentTarget?.vehicleNumber}</span>
-            </div>
-            <div className="flex justify-between rounded-lg border bg-muted/40 p-3">
-              <span className="text-muted-foreground">Kata Charge</span>
-              <span className="font-mono font-bold text-base text-primary">
-                ₹{Number(paymentTarget?.amount || 0).toLocaleString('en-IN')}
-              </span>
-            </div>
-            {Number(paymentTarget?.amount || 0) > 0 && (
-              <div className="space-y-1.5">
-                <Label>Payment Mode / Reference</Label>
-                <Input
-                  value={paymentReference}
-                  onChange={(e) => setPaymentReference(e.target.value)}
-                  placeholder="CASH / UPI / UTR"
-                />
-              </div>
-            )}
+          {(() => {
+            const isTargetExempt = paymentTarget ? isKnmVehicle(paymentTarget.vehicleNumber, paymentTarget.partyName) : false;
+            const isTargetTransfer = paymentTarget ? isTicketTransfer(paymentTarget) : false;
+            const isTargetSale = paymentTarget ? isTicketBuyerSale(paymentTarget) : false;
+            const isTargetPurchase = !isTargetExempt && !isTargetTransfer && !isTargetSale;
 
-            {/* Driver WhatsApp Mobile Number */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="flex items-center gap-1.5 text-xs font-semibold">
-                  <WhatsAppIcon className="h-3.5 w-3.5 text-emerald-600" />
-                  Driver WhatsApp Mobile
-                </Label>
-                {paymentDriverMobile && paymentDriverMobile.length === 10 ? (
-                  <span className="text-[11px] text-emerald-700 font-mono font-medium flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> Valid 10-digit
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-amber-600 font-medium">
-                    Required for WhatsApp delivery
-                  </span>
-                )}
-              </div>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-xs text-muted-foreground font-mono">+91</span>
-                <Input
-                  value={paymentDriverMobile}
-                  onChange={(e) => setPaymentDriverMobile(clean10DigitPhone(e.target.value))}
-                  placeholder="10-digit mobile number"
-                  maxLength={10}
-                  className="pl-11 font-mono text-sm font-semibold"
-                />
-              </div>
-            </div>
-
-            {/* Language Selection Option */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold">Driver WhatsApp Language</Label>
-                <span className="text-[11px] text-muted-foreground">
-                  Template ID: {paymentLanguage === 'TE' ? '33505' : paymentLanguage === 'TA' ? '33508' : paymentLanguage === 'KN' ? '33507' : paymentLanguage === 'HI' ? '33506' : '33504'}
-                </span>
-              </div>
-              <div className="grid grid-cols-5 gap-1.5">
-                {KATA_WHATSAPP_LANGUAGES.map((lang) => {
-                  const selected = paymentLanguage === lang.key;
-                  return (
-                    <button
-                      key={lang.key}
-                      type="button"
-                      onClick={() => setPaymentLanguage(lang.key)}
-                      className={cn(
-                        'flex flex-col items-center justify-center rounded-lg border p-1.5 transition-all text-center cursor-pointer',
-                        selected
-                          ? 'border-emerald-600 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 font-bold shadow-xs'
-                          : 'border-border/70 hover:border-border hover:bg-muted/50 text-muted-foreground'
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>
+                    {isTargetExempt
+                      ? `Release KNM Vehicle #${formatTicketNo(paymentTarget?.ticketNo)}`
+                      : isTargetTransfer
+                        ? `Release Internal Transfer #${formatTicketNo(paymentTarget?.ticketNo)}`
+                        : Number(paymentTarget?.amount || 0) === 0
+                          ? `Release Free Slip #${formatTicketNo(paymentTarget?.ticketNo)}`
+                          : `Verify Payment #${formatTicketNo(paymentTarget?.ticketNo)}`}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {isTargetExempt
+                      ? 'KNM company vehicles are automatically exempted from Kata fees and WhatsApp driver messages.'
+                      : isTargetTransfer
+                        ? 'Internal storage transfers are exempt from Kata fees and driver WhatsApp slips.'
+                        : isTargetSale
+                          ? 'Confirm payment for outward sale. Release slips on WhatsApp are reserved for inward purchases.'
+                          : 'Confirm weighment fee receipt and send the official stamped Kata certificate to the driver via WhatsApp.'}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 py-2 text-sm">
+                  <div className="flex justify-between rounded-lg border bg-muted/40 p-3">
+                    <span className="text-muted-foreground">Vehicle</span>
+                    <span className="font-mono font-bold flex items-center gap-1.5">
+                      {paymentTarget?.vehicleNumber}
+                      {isTargetExempt && <Badge variant="outline" className="border-emerald-500/30 bg-emerald-50 text-emerald-700 text-[10px]">KNM</Badge>}
+                      {isTargetTransfer && <Badge variant="outline" className="border-sky-500/30 bg-sky-50 text-sky-700 text-[10px]">TRANSFER</Badge>}
+                      {isTargetSale && <Badge variant="outline" className="border-purple-500/30 bg-purple-50 text-purple-700 text-[10px]">SALE</Badge>}
+                    </span>
+                  </div>
+                  <div className="flex justify-between rounded-lg border bg-muted/40 p-3">
+                    <span className="text-muted-foreground">Kata Charge</span>
+                    <span className="font-mono font-bold text-base text-primary">
+                      {isTargetExempt || isTargetTransfer ? (
+                        <span className="text-emerald-700">₹0 (Exempt)</span>
+                      ) : (
+                        `₹${Number(paymentTarget?.amount || 0).toLocaleString('en-IN')}`
                       )}
-                    >
-                      <span className="text-xs font-bold leading-tight">{lang.native}</span>
-                      <span className="text-[10px] opacity-75">{lang.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                    </span>
+                  </div>
 
-            {/* WhatsApp delivery toggle */}
-            <div className="flex items-center justify-between rounded-lg border bg-emerald-500/5 border-emerald-500/20 p-2.5">
-              <div className="flex items-center gap-2">
-                <WhatsAppIcon className="h-4 w-4 text-emerald-600 shrink-0" />
-                <div className="text-xs">
-                  <span className="font-semibold text-foreground">Send Signed Kata Slip via WhatsApp</span>
-                  <p className="text-[11px] text-muted-foreground">Includes CCTV photo &amp; certified weighment weights</p>
+                  {Number(paymentTarget?.amount || 0) > 0 && !isTargetExempt && !isTargetTransfer && (
+                    <div className="space-y-1.5">
+                      <Label>Payment Mode / Reference</Label>
+                      <Input
+                        value={paymentReference}
+                        onChange={(e) => setPaymentReference(e.target.value)}
+                        placeholder="CASH / UPI / UTR"
+                      />
+                    </div>
+                  )}
+
+                  {/* WhatsApp delivery or exemption notification */}
+                  {isTargetExempt ? (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-50/60 p-3 text-xs text-emerald-800 dark:text-emerald-300">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                        KNM Company Vehicle (Exempt)
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                        This is an official KNM company vehicle. Kata charge is ₹0 and no WhatsApp message is dispatched.
+                      </p>
+                    </div>
+                  ) : isTargetTransfer ? (
+                    <div className="rounded-lg border border-sky-500/30 bg-sky-50/60 p-3 text-xs text-sky-800 dark:text-sky-300">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <CheckCircle2 className="h-4 w-4 text-sky-600 shrink-0" />
+                        Internal Storage Transfer (Exempt)
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                        Internal warehouse movement. Kata charge is ₹0 and no WhatsApp message is dispatched.
+                      </p>
+                    </div>
+                  ) : isTargetSale ? (
+                    <div className="rounded-lg border border-purple-500/30 bg-purple-50/60 p-3 text-xs text-purple-800 dark:text-purple-300">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <CheckCircle2 className="h-4 w-4 text-purple-600 shrink-0" />
+                        Outward Sale Movement
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                        Driver release slips on WhatsApp are reserved only for inward purchases. No driver message will be sent.
+                      </p>
+                    </div>
+                  ) : (
+                    /* Inward Purchase: Official Stamped Kata Certificate via WhatsApp */
+                    <>
+                      {/* Driver WhatsApp Mobile Number */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="flex items-center gap-1.5 text-xs font-semibold">
+                            <WhatsAppIcon className="h-3.5 w-3.5 text-emerald-600" />
+                            Driver WhatsApp Mobile
+                          </Label>
+                          {paymentDriverMobile && paymentDriverMobile.length === 10 ? (
+                            <span className="text-[11px] text-emerald-700 font-mono font-medium flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3" /> Valid 10-digit
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-amber-600 font-medium">
+                              Required for WhatsApp delivery
+                            </span>
+                          )}
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2.5 text-xs text-muted-foreground font-mono">+91</span>
+                          <Input
+                            value={paymentDriverMobile}
+                            onChange={(e) => setPaymentDriverMobile(clean10DigitPhone(e.target.value))}
+                            placeholder="10-digit mobile number"
+                            maxLength={10}
+                            className="pl-11 font-mono text-sm font-semibold"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Language Selection Option */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-semibold">Driver WhatsApp Language</Label>
+                          <span className="text-[11px] text-muted-foreground">
+                            Template ID: {paymentLanguage === 'TE' ? '33505' : paymentLanguage === 'TA' ? '33508' : paymentLanguage === 'KN' ? '33507' : paymentLanguage === 'HI' ? '33506' : '33504'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {KATA_WHATSAPP_LANGUAGES.map((lang) => {
+                            const selected = paymentLanguage === lang.key;
+                            return (
+                              <button
+                                key={lang.key}
+                                type="button"
+                                onClick={() => setPaymentLanguage(lang.key)}
+                                className={cn(
+                                  'flex flex-col items-center justify-center rounded-lg border p-1.5 transition-all text-center cursor-pointer',
+                                  selected
+                                    ? 'border-emerald-600 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 font-bold shadow-xs'
+                                    : 'border-border/70 hover:border-border hover:bg-muted/50 text-muted-foreground'
+                                )}
+                              >
+                                <span className="text-xs font-bold leading-tight">{lang.native}</span>
+                                <span className="text-[10px] opacity-75">{lang.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* WhatsApp delivery toggle */}
+                      <div className="flex items-center justify-between rounded-lg border bg-emerald-500/5 border-emerald-500/20 p-2.5">
+                        <div className="flex items-center gap-2">
+                          <WhatsAppIcon className="h-4 w-4 text-emerald-600 shrink-0" />
+                          <div className="text-xs">
+                            <span className="font-semibold text-foreground">Send Stamped Kata Certificate via WhatsApp</span>
+                            <p className="text-[11px] text-muted-foreground">Attaches certified Kata slip image with top-right RECEIVED stamp</p>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={paymentSendWhatsapp}
+                          onChange={(e) => setPaymentSendWhatsapp(e.target.checked)}
+                          className="h-4 w-4 rounded accent-emerald-600 cursor-pointer"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={paymentSendWhatsapp}
-                onChange={(e) => setPaymentSendWhatsapp(e.target.checked)}
-                className="h-4 w-4 rounded accent-emerald-600 cursor-pointer"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setPaymentTarget(null)} disabled={paymentMutation.isPending}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() =>
-                paymentTarget &&
-                paymentMutation.mutate({
-                  ticket: paymentTarget,
-                  amount: Number(paymentTarget.amount || 0),
-                  reference: paymentReference.trim() || (Number(paymentTarget.amount || 0) > 0 ? 'CASH' : 'FREE'),
-                  driverMobile: paymentDriverMobile,
-                  language: paymentLanguage,
-                  sendWhatsapp: paymentSendWhatsapp,
-                })
-              }
-              disabled={paymentMutation.isPending}
-              className={paymentSendWhatsapp ? 'bg-emerald-700 hover:bg-emerald-800 text-white' : ''}
-            >
-              {paymentSendWhatsapp ? <WhatsAppIcon className="h-4 w-4 mr-1 text-white" /> : <Banknote className="h-4 w-4 mr-1" />}
-              {paymentMutation.isPending ? 'Verifying…' : 'Confirm & Release'}
-            </Button>
-          </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setPaymentTarget(null)} disabled={paymentMutation.isPending}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      paymentTarget &&
+                      paymentMutation.mutate({
+                        ticket: paymentTarget,
+                        amount: Number(paymentTarget.amount || 0),
+                        reference: isTargetExempt
+                          ? 'KNM_EXEMPT'
+                          : isTargetTransfer
+                            ? 'INTERNAL_TRANSFER'
+                            : paymentReference.trim() || (Number(paymentTarget.amount || 0) > 0 ? 'CASH' : 'FREE'),
+                        driverMobile: paymentDriverMobile,
+                        language: paymentLanguage,
+                        sendWhatsapp: isTargetPurchase && paymentSendWhatsapp,
+                      })
+                    }
+                    disabled={paymentMutation.isPending}
+                    className={isTargetPurchase && paymentSendWhatsapp ? 'bg-emerald-700 hover:bg-emerald-800 text-white' : ''}
+                  >
+                    {isTargetPurchase && paymentSendWhatsapp ? <WhatsAppIcon className="h-4 w-4 mr-1 text-white" /> : <Banknote className="h-4 w-4 mr-1" />}
+                    {paymentMutation.isPending
+                      ? 'Verifying…'
+                      : isTargetExempt
+                        ? 'Confirm Exemption'
+                        : isTargetTransfer
+                          ? 'Confirm Transfer'
+                          : isTargetPurchase && paymentSendWhatsapp
+                            ? 'Confirm & Send Slip'
+                            : 'Confirm & Release'}
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -3178,10 +3383,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
-              Send Signed Slip #{formatTicketNo(sendSlipTarget?.ticketNo)}
+              Send Stamped Kata Slip #{formatTicketNo(sendSlipTarget?.ticketNo)}
             </DialogTitle>
             <DialogDescription>
-              Deliver the official signed weighbridge certificate with CCTV snapshot to the driver via WhatsApp.
+              Deliver the official stamped weighbridge certificate with top-right RECEIVED stamp to the driver via WhatsApp.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">

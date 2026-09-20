@@ -1272,7 +1272,7 @@ export default function SaleDuesPage() {
                   }))}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Goods value of the party-kata shortage (auto-filled from delivery). 5% GST is added on top. Leave 0 if full amount received.
+                  Goods value of the party-kata shortage (auto-filled from delivery).{receiveDialog.inv.gstExempt ? '' : ' 5% GST is added on top.'} Leave 0 if full amount received.
                 </p>
               </div>
 

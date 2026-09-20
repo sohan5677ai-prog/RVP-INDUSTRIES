@@ -19,12 +19,13 @@ export function useWeighbridgeMatch({ date, partyName, vehicleNumber }: Weighbri
 
   return useQuery<WeighbridgeTicket | null>({
     queryKey: ['weighbridge-ticket-match', date, cleanParty, cleanVehicle],
-    queryFn: () => api<WeighbridgeTicket | null>(
-      `/weighbridge/tickets/match?date=${encodeURIComponent(date!)}`
-      + `&partyName=${encodeURIComponent(cleanParty)}`
-      + `&vehicleNumber=${encodeURIComponent(cleanVehicle)}`,
-    ),
-    enabled: Boolean(date && cleanParty && cleanVehicle.length >= 4),
+    queryFn: () => {
+      let url = `/weighbridge/tickets/match?vehicleNumber=${encodeURIComponent(cleanVehicle)}`;
+      if (date) url += `&date=${encodeURIComponent(date)}`;
+      if (cleanParty) url += `&partyName=${encodeURIComponent(cleanParty)}`;
+      return api<WeighbridgeTicket | null>(url);
+    },
+    enabled: Boolean(cleanVehicle.length >= 4),
     staleTime: 15_000,
     retry: false,
   });

@@ -552,8 +552,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const { data: productTax } = useQuery({
     queryKey: ['product-tax'],
     queryFn: () => api<ProductTaxInfo[]>('/settings/product-tax'),
-    enabled: invoicePreview,
   });
+
+  const getProductGstRate = (product: SaleProduct) => {
+    const row = productTax?.find((t) => t.product === product);
+    return row?.gstRate != null ? Number(row.gstRate) : 5;
+  };
 
   // ── Short close ────────────────────────────────────────────────────────────
   // How much of the booked tonnage this lorry would leave unshipped, and whether
@@ -1333,6 +1337,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
                       {rupees(o.ratePerKg)}
+                      {o.gstExempt && (
+                        <span className="block text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                          Exempt
+                        </span>
+                      )}
                       {margin && (
                         <span className={cn('block text-[10px] font-medium', margin.margin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
                           {margin.margin >= 0 ? '▲' : '▼'} {rupees(Math.abs(margin.marginPerKg))}/kg
@@ -2090,8 +2099,20 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
             </label>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
               <div className="flex justify-between"><span className="text-muted-foreground">Base ({invoiceDispatch ? toTonnes(invoiceDispatch.dispatch.weightKg).toFixed(2) : 0} t × {rupees(invoiceDispatch?.order.ratePerKg ?? 0)})</span><span className="font-medium">{rupees(invoiceBase)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">GST (5% IGST)</span><span className="font-medium">{rupees(invoiceGst)}</span></div>
-              <div className="flex justify-between border-t pt-1.5"><span className="font-semibold text-muted-foreground">Invoice value (incl. GST)</span><span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span></div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  {invoiceDispatch?.order.gstExempt ? 'GST (Exempt)' : `GST (${getProductGstRate(invoiceDispatch?.order.product ?? 'PAPPU')}% IGST)`}
+                </span>
+                <span className="font-medium">
+                  {invoiceDispatch?.order.gstExempt ? '₹0.00 (Exempt)' : rupees(invoiceGst)}
+                </span>
+              </div>
+              <div className="flex justify-between border-t pt-1.5">
+                <span className="font-semibold text-muted-foreground">
+                  {invoiceDispatch?.order.gstExempt ? 'Invoice value (Exempt)' : 'Invoice value (incl. GST)'}
+                </span>
+                <span className="font-bold text-emerald-600">{rupees(invoiceBase + invoiceGst)}</span>
+              </div>
             </div>
 
             {/* The E-Way Bill's approx distance is worked out for you - reused
@@ -2280,7 +2301,12 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Invoice Rate</Label>
-                <div className="text-sm font-medium">{deliverDispatch ? rupees(deliverDispatch.order.ratePerKg) : 0}/kg + 5% GST</div>
+                <div className="text-sm font-medium">
+                  {deliverDispatch ? rupees(deliverDispatch.order.ratePerKg) : 0}/kg
+                  {deliverDispatch && (deliverDispatch.order.gstExempt || Number(deliverDispatch.dispatch.gstAmount) === 0
+                    ? ' (GST Exempt)'
+                    : ` + ${getProductGstRate(deliverDispatch.order.product)}% GST`)}
+                </div>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -2769,7 +2795,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
                       <Input type="number" step="0.01" className="pl-7" value={payShortage} onChange={(e) => handlePayShortageChange(e.target.value)} placeholder="0" />
                     </div>
-                    <p className="text-[11px] text-muted-foreground">Goods value of the buyer's shortage/kata claim. 5% GST is added on top.</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {o.gstExempt
+                        ? "Goods value of the buyer's shortage/kata claim (GST exempt)."
+                        : "Goods value of the buyer's shortage/kata claim. 5% GST is added on top."}
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <label className="flex cursor-pointer items-center gap-2">
@@ -2785,7 +2815,11 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</div>
                       <Input type="number" step="0.01" className="pl-7" value={payTds} disabled={!payTdsEnabled} onChange={(e) => setPayTds(e.target.value)} placeholder="0" />
                     </div>
-                    <p className="text-[11px] text-muted-foreground">0.1% of sale value (excluding GST). Tick to auto-calculate.</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {o.gstExempt
+                        ? "0.1% of sale value. Tick to auto-calculate."
+                        : "0.1% of sale value (excluding GST). Tick to auto-calculate."}
+                    </p>
                   </div>
                 </div>
               </div>

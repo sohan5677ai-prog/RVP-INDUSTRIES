@@ -891,10 +891,10 @@ export default function ReceiptsPage() {
                     </div>
                     <p className="text-[10px] text-muted-foreground">
                       {invoiceLocked
-                        ? "Due is this invoice's balance before this receipt. Shortage is the goods value of the buyer's kata cut; 5% GST is added on top."
+                        ? "Due is this invoice's balance before this receipt. Shortage is the goods value of the buyer's kata cut (5% GST added if applicable)."
                         : editing
-                          ? "Tick the invoice this money covers - a correction rewrites one receipt, so it can sit on one bill. Shortage is the goods value of the buyer's kata cut (auto-filled from delivery); 5% GST is added on top."
-                          : "Tick every invoice this money covers. Shortage is the goods value of the buyer's kata cut (auto-filled from delivery); 5% GST is added on top. Money left unallocated credits the ledger but clears no bill, so the invoice would keep reading Unpaid on Sale Dues."}
+                          ? "Tick the invoice this money covers - a correction rewrites one receipt, so it can sit on one bill. Shortage is the goods value of the buyer's kata cut (auto-filled from delivery, 5% GST added if applicable)."
+                          : "Tick every invoice this money covers. Shortage is the goods value of the buyer's kata cut (auto-filled from delivery, 5% GST added if applicable). Money left unallocated credits the ledger but clears no bill, so the invoice would keep reading Unpaid on Sale Dues."}
                     </p>
                   </>
                 )}
@@ -913,9 +913,11 @@ export default function ReceiptsPage() {
                     <div className="flex justify-between text-amber-600 dark:text-amber-500">
                       <span>Shortage</span><span>{rupees(allocatedShortage)}</span>
                     </div>
-                    <div className="flex justify-between text-amber-600 dark:text-amber-500">
-                      <span>GST on shortage (5%)</span><span>{rupees(allocatedShortageGross - allocatedShortage)}</span>
-                    </div>
+                    {allocatedShortageGross - allocatedShortage > 0 && (
+                      <div className="flex justify-between text-amber-600 dark:text-amber-500">
+                        <span>GST on shortage (5%)</span><span>{rupees(allocatedShortageGross - allocatedShortage)}</span>
+                      </div>
+                    )}
                   </>
                 )}
                 {allocatedTds > 0 && (

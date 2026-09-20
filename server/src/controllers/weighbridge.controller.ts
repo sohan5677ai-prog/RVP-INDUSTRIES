@@ -168,36 +168,105 @@ function normaliseMatchText(value: string): string {
 }
 
 /**
- * Resolve the physical Kata ticket for an ERP movement. Date + lorry are used
- * in the database lookup; party is then compared after stripping punctuation
- * and spacing so entries such as "ABC & Co." and "ABC AND CO" remain usable.
+ * Resolve the physical Kata ticket for an ERP movement.
+ * Flexible lookup: matches vehicle number within an operational date window
+ * (around target date or recent days) and intelligently scores by party name,
+ * date proximity, and material to match the exact inward/outward movement.
  */
 export async function matchTicketHandler(req: Request, res: Response) {
   const date = String(req.query.date ?? '').trim();
-  const vehicleNumber = normaliseMatchText(String(req.query.vehicleNumber ?? ''));
+  const rawVehicle = String(req.query.vehicleNumber ?? '').trim();
+  const vehicleNumber = normaliseMatchText(rawVehicle);
   const partyName = normaliseMatchText(String(req.query.partyName ?? ''));
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !vehicleNumber || !partyName) {
-    throw new HttpError(400, 'Date, party name and vehicle number are required');
+  if (!vehicleNumber) {
+    throw new HttpError(400, 'Vehicle number is required');
   }
 
-  // ERP dates are India-local business dates even when the server runs in UTC.
-  const start = new Date(`${date}T00:00:00+05:30`);
-  const end = new Date(`${date}T23:59:59.999+05:30`);
+  // Calculate search window: if date provided, search ±4 days around target date
+  // to account for trucks weighed the previous evening, over weekends, or prior day.
+  let windowStart: Date;
+  let windowEnd: Date;
+  let targetDate: Date | null = null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    targetDate = new Date(`${date}T12:00:00+05:30`);
+    windowStart = new Date(targetDate.getTime() - 4 * 24 * 60 * 60 * 1000);
+    windowEnd = new Date(targetDate.getTime() + 2 * 24 * 60 * 60 * 1000);
+  } else {
+    // If no date provided, look back 14 days
+    windowStart = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    windowEnd = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000);
+  }
+
   const candidates = await prisma.weighbridgeTicket.findMany({
     where: {
-      createdAt: { gte: start, lte: end },
+      createdAt: { gte: windowStart, lte: windowEnd },
       status: { not: 'CANCELLED' },
     },
     orderBy: [{ updatedAt: 'desc' }, { ticketNo: 'desc' }],
+    take: 100,
   });
 
-  const matched = candidates.find((ticket) =>
-    normaliseMatchText(ticket.vehicleNumber) === vehicleNumber
-    && normaliseMatchText(ticket.partyName ?? '') === partyName,
-  ) ?? null;
+  const vehCandidates = candidates.filter(
+    (ticket) => normaliseMatchText(ticket.vehicleNumber) === vehicleNumber,
+  );
 
-  res.json(matched);
+  if (vehCandidates.length === 0) {
+    return res.json(null);
+  }
+
+  function scoreTicket(t: typeof vehCandidates[0]): number {
+    let score = 50; // base score for matching vehicle number
+
+    const tParty = normaliseMatchText(t.partyName ?? '');
+    if (partyName) {
+      if (tParty === partyName) {
+        score += 100; // exact party match
+      } else if (tParty && (tParty.includes(partyName) || partyName.includes(tParty))) {
+        score += 80; // partial party match (e.g. "Murugesh" vs "Murugesh Kurumbatti")
+      } else if (!tParty) {
+        score += 15; // ticket didn't specify party, acceptable fallback
+      } else {
+        score -= 40; // ticket belongs to another party
+      }
+    }
+
+    if (targetDate) {
+      const tTime = new Date(t.createdAt).getTime();
+      const daysDiff = Math.abs(tTime - targetDate.getTime()) / (24 * 60 * 60 * 1000);
+      if (daysDiff < 0.5) {
+        score += 50; // same day
+      } else {
+        score += Math.max(0, 35 - Math.round(daysDiff * 8));
+      }
+    }
+
+    // Material preference: raw tamarind materials get boost for inward spot buys
+    const mat = (t.material ?? '').toUpperCase();
+    if (mat.includes('SEED') || mat.includes('TAMARIND') || mat.includes('RAW') || mat.includes('CHINCH')) {
+      score += 20;
+    }
+
+    // Internal storage transfer tickets have lower priority for purchase matching
+    if (t.isStorageTransfer) {
+      score -= 30;
+    }
+
+    // Completed tickets preferred
+    if (t.status === 'COMPLETED') {
+      score += 10;
+    }
+
+    return score;
+  }
+
+  const scored = vehCandidates
+    .map((ticket) => ({ ticket, score: scoreTicket(ticket) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  res.json(scored[0]?.ticket ?? null);
 }
 
 /**

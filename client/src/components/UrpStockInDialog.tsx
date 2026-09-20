@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
@@ -14,6 +14,9 @@ import {
 import { Combobox } from '@/components/ui/combobox';
 import type { Party } from '@/lib/types';
 import { rupees } from '@/lib/format';
+import { useWeighbridgeMatch } from '@/lib/useWeighbridgeMatch';
+import ScaleCaptureButton from '@/components/ScaleCaptureButton';
+import { CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -64,6 +67,51 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
   });
 
   const suppliers = useMemo(() => parties?.filter((p) => p.type === 'SUPPLIER' || p.type === 'BOTH') ?? [], [parties]);
+
+  const selectedSupplier = suppliers.find((p) => p.id === partyId);
+  const { data: linkedKataTicket, isFetching: isMatchingKata } = useWeighbridgeMatch({
+    date: arrivalDate,
+    partyName: selectedSupplier?.name,
+    vehicleNumber: lorryNumber,
+  });
+
+  useEffect(() => {
+    if (!linkedKataTicket) return;
+
+    if (linkedKataTicket.firstWeightKg) {
+      setRvpFirstWeightKg(String(linkedKataTicket.firstWeightKg));
+    }
+    if (linkedKataTicket.secondWeightKg) {
+      setRvpSecondWeightKg(String(linkedKataTicket.secondWeightKg));
+    }
+    if (linkedKataTicket.netWeightKg) {
+      setRvpNetWeightKg(String(linkedKataTicket.netWeightKg));
+      setBillingWeightKg((prev) => (prev ? prev : String(linkedKataTicket.netWeightKg)));
+      setPartyKataKg((prev) => (prev ? prev : String(linkedKataTicket.netWeightKg)));
+    }
+
+    // Auto-select party if empty and ticket has party name matching one of our suppliers
+    if (!partyId && linkedKataTicket.partyName) {
+      const match = suppliers.find(
+        (s) => s.name.trim().toLowerCase() === linkedKataTicket.partyName?.trim().toLowerCase(),
+      );
+      if (match) {
+        setPartyId(match.id);
+      }
+    }
+  }, [linkedKataTicket]);
+
+  const applyKataWeights = () => {
+    if (!linkedKataTicket) return;
+    if (linkedKataTicket.firstWeightKg) setRvpFirstWeightKg(String(linkedKataTicket.firstWeightKg));
+    if (linkedKataTicket.secondWeightKg) setRvpSecondWeightKg(String(linkedKataTicket.secondWeightKg));
+    if (linkedKataTicket.netWeightKg) {
+      setRvpNetWeightKg(String(linkedKataTicket.netWeightKg));
+      setBillingWeightKg(String(linkedKataTicket.netWeightKg));
+      setPartyKataKg(String(linkedKataTicket.netWeightKg));
+    }
+    toast.success(`Applied weights from Kata ticket #${linkedKataTicket.ticketNo}`);
+  };
 
   const mutation = useMutation({
     // Route through the api() helper so the auth token is attached (the raw
@@ -204,6 +252,37 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
             </div>
           </div>
 
+          {isMatchingKata && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 px-3 py-2 rounded-md">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              <span>Checking Kata ticket register…</span>
+            </div>
+          )}
+
+          {linkedKataTicket && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                <div>
+                  <span className="font-semibold">Kata Ticket #{linkedKataTicket.ticketNo} auto-filled:</span>{' '}
+                  Gross: {linkedKataTicket.firstWeightKg?.toLocaleString('en-IN') ?? '-'} kg
+                  {linkedKataTicket.secondWeightKg ? ` | Tare: ${linkedKataTicket.secondWeightKg.toLocaleString('en-IN')} kg` : ''}
+                  {linkedKataTicket.netWeightKg ? ` | Net: ${linkedKataTicket.netWeightKg.toLocaleString('en-IN')} kg` : ''}
+                  {linkedKataTicket.partyName ? ` (${linkedKataTicket.partyName})` : ''}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-emerald-700 hover:text-emerald-900 hover:bg-emerald-500/20 px-2 flex-shrink-0"
+                onClick={applyKataWeights}
+              >
+                <RefreshCw className="h-3 w-3 mr-1" /> Re-apply
+              </Button>
+            </div>
+          )}
+
           <div className="flex items-center space-x-2 pt-2">
             <input
               type="checkbox"
@@ -221,8 +300,16 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="rvpNet">RVP Net Weight (Kg)</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="rvpNet">RVP Net Weight (Kg)</Label>
+                    <ScaleCaptureButton unit="kg" onCapture={(_val, formatted) => setRvpNetWeightKg(formatted)} />
+                  </div>
                   <Input id="rvpNet" type="number" value={rvpNetWeightKg} onChange={(e) => setRvpNetWeightKg(e.target.value)} required placeholder="e.g. 24500" />
+                  {linkedKataTicket?.netWeightKg && (
+                    <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                      Auto-filled from Kata ticket #{linkedKataTicket.ticketNo}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex items-center space-x-2">
@@ -241,12 +328,28 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
           ) : (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="rvpFirst">RVP First Weight (Gross Kg)</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="rvpFirst">RVP First Weight (Gross Kg)</Label>
+                  <ScaleCaptureButton unit="kg" onCapture={(_val, formatted) => setRvpFirstWeightKg(formatted)} />
+                </div>
                 <Input id="rvpFirst" type="number" value={rvpFirstWeightKg} onChange={(e) => setRvpFirstWeightKg(e.target.value)} required />
+                {linkedKataTicket?.firstWeightKg && (
+                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    Auto-filled from Kata ticket #{linkedKataTicket.ticketNo}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="rvpSecond">RVP Second Weight (Tare Kg)</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="rvpSecond">RVP Second Weight (Tare Kg)</Label>
+                  <ScaleCaptureButton unit="kg" onCapture={(_val, formatted) => setRvpSecondWeightKg(formatted)} />
+                </div>
                 <Input id="rvpSecond" type="number" value={rvpSecondWeightKg} onChange={(e) => setRvpSecondWeightKg(e.target.value)} placeholder="0 (Optional if direct unload)" />
+                {linkedKataTicket?.secondWeightKg && (
+                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    Auto-filled from Kata ticket #{linkedKataTicket.ticketNo}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -264,6 +367,11 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
               <div className="space-y-2">
                 <Label htmlFor="partyKata">Party Kata (Kg)</Label>
                 <Input id="partyKata" type="number" value={partyKataKg} onChange={(e) => setPartyKataKg(e.target.value)} required />
+                {linkedKataTicket?.netWeightKg && partyKataKg === String(linkedKataTicket.netWeightKg) && (
+                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    Auto-filled from Kata net weight ({linkedKataTicket.netWeightKg.toLocaleString('en-IN')} kg)
+                  </p>
+                )}
               </div>
             </div>
           )}

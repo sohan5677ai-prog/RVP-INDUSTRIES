@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SetOffsRegister } from '@/components/SetOffsRegister';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
@@ -511,28 +512,24 @@ export default function PaymentsPage() {
             {(type === 'SUPPLIER' || type === 'HAMALI') && (
               <div className="space-y-2">
                 <Label>{type === 'HAMALI' ? 'Hamali Team' : 'Supplier'}</Label>
-                <Select value={partyId} onValueChange={setPartyId}>
-                  <SelectTrigger><SelectValue placeholder={type === 'HAMALI' ? 'Select hamali team' : 'Select supplier'} /></SelectTrigger>
-                  <SelectContent>
-                    {(type === 'HAMALI' ? hamaliTeams : suppliers).map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={(type === 'HAMALI' ? hamaliTeams : suppliers).map(s => ({ value: s.id, label: s.name }))}
+                  value={partyId}
+                  onChange={setPartyId}
+                  placeholder={type === 'HAMALI' ? 'Search hamali team…' : 'Search supplier…'}
+                />
               </div>
             )}
 
             {type === 'BROKER' && (
               <div className="space-y-2">
                 <Label>Broker</Label>
-                <Select value={brokerId} onValueChange={setBrokerId}>
-                  <SelectTrigger><SelectValue placeholder="Select broker" /></SelectTrigger>
-                  <SelectContent>
-                    {brokers?.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={brokers?.map(b => ({ value: b.id, label: b.name })) ?? []}
+                  value={brokerId}
+                  onChange={setBrokerId}
+                  placeholder="Search broker…"
+                />
               </div>
             )}
 

@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 
 type NoteKind = 'CREDIT' | 'DEBIT';
 
@@ -582,14 +583,12 @@ export default function CreditDebitNotes() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Party</Label>
-              <Select value={partyId} onValueChange={(v) => { setPartyId(v); setSaleDispatchId(''); }}>
-                <SelectTrigger><SelectValue placeholder="Select party" /></SelectTrigger>
-                <SelectContent>
-                  {buyers.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={buyers.map(p => ({ value: p.id, label: p.name }))}
+                value={partyId}
+                onChange={(v) => { setPartyId(v); setSaleDispatchId(''); }}
+                placeholder="Search party…"
+              />
             </div>
 
             {dispatchOptions.length > 0 && (

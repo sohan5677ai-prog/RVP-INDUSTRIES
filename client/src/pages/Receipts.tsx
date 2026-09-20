@@ -25,6 +25,7 @@ import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 
 // Types you can record directly from this page. Gunny Bag Sales are entered on
 // the Gunny Bags page (which auto-posts a linked Receipt here), so it is
@@ -753,14 +754,13 @@ export default function ReceiptsPage() {
             {type === 'BUYER' && (
               <div className="space-y-2">
                 <Label>Buyer</Label>
-                <Select value={partyId} disabled={invoiceLocked} onValueChange={(v) => { setPartyId(v); setAllocs({}); setEnableTds(false); }}>
-                  <SelectTrigger><SelectValue placeholder="Select buyer" /></SelectTrigger>
-                  <SelectContent>
-                    {buyers.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={buyers.map(b => ({ value: b.id, label: b.name }))}
+                  value={partyId}
+                  disabled={invoiceLocked}
+                  onChange={(v) => { setPartyId(v); setAllocs({}); setEnableTds(false); }}
+                  placeholder="Search buyer…"
+                />
               </div>
             )}
 

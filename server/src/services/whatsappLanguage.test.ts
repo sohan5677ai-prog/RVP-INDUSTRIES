@@ -154,7 +154,8 @@ describe('approved language ids', () => {
     expect(resolvedLanguage('WISHES', 'TE')).toBe('EN');
   });
 
-  it('maps BUYER_KATA_ALERT_TEXT to approved message_id 31798', () => {
+  it('maps BUYER_KATA_ALERT and BUYER_KATA_ALERT_TEXT to approved message_id 31798', () => {
+    expect(templateId('BUYER_KATA_ALERT', 'EN')).toBe('31798');
     expect(templateId('BUYER_KATA_ALERT_TEXT', 'EN')).toBe('31798');
   });
 
@@ -270,5 +271,13 @@ describe('approved language ids', () => {
     expect(resolvedLanguage('LORRY_PAYMENT', 'TE')).toBe('TE');
     expect(resolvedLanguage('LORRY_PAYMENT', 'HI')).toBe('HI');
     expect(resolvedLanguage('LORRY_PAYMENT', 'KN')).toBe('EN');
+  });
+
+  it('supports BUYER_KATA_ALERT environment variable configuration and fallback', () => {
+    expect(templateId('BUYER_KATA_ALERT', 'EN')).toBe('31798');
+    process.env.FAST2SMS_TMPL_BUYER_KATA_ALERT = '99999';
+    expect(templateId('BUYER_KATA_ALERT', 'EN')).toBe('99999');
+    delete process.env.FAST2SMS_TMPL_BUYER_KATA_ALERT;
+    expect(templateId('BUYER_KATA_ALERT', 'EN')).toBe('31798');
   });
 });

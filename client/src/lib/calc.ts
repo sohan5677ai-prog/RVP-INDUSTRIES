@@ -182,6 +182,16 @@ export function normalizeLorryNumber(vehicleNumber: string | null | undefined): 
   return (vehicleNumber ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+/** Clean a phone number down to a 10-digit mobile number, stripping +91/country code if present. */
+export function clean10DigitPhone(phone: string | null | undefined): string {
+  if (!phone) return '';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return digits.slice(-10);
+  }
+  return digits;
+}
+
 /**
  * Look a lorry up in the directory to pre-fill its driver. Matching ignores
  * spaces and hyphens (the office types `AP 39 UX 9105` as often as not); this
@@ -199,7 +209,9 @@ export function findCompanyVehicle(
 
 /** Helper to check if a vehicle is in the exempt company vehicles list */
 export function isVehicleExempt(vehicleNumber: string | null | undefined, companyVehiclesList: string | null | undefined): boolean {
-  if (!vehicleNumber || !companyVehiclesList) return false;
+  if (!vehicleNumber) return false;
+  if (/knm/i.test(vehicleNumber)) return true;
+  if (!companyVehiclesList) return false;
   const target = normalizeLorryNumber(vehicleNumber);
   return parseCompanyVehicles(companyVehiclesList).some((vehicle) => normalizeLorryNumber(vehicle.number) === target);
 }

@@ -25,7 +25,7 @@ import {
 } from '../services/lorryConfirmation.service.js';
 import { JOB_RUNNERS, OWNER_DIGEST_JOBS, describeCron, buildCron, rescheduleOwnerJob, reschedulePartyDueTodayJob } from '../jobs/whatsappJobs.js';
 import { buildPartyStatementData } from './ledger.controller.js';
-import { findCompanyVehicle } from '../lib/calc.js';
+import { findCompanyVehicle, clean10DigitPhone } from '../lib/calc.js';
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderStatementPdf } from '../lib/statementPdf.js';
 import { renderBrokerLedgerPdf } from '../lib/brokerLedgerPdf.js';
@@ -1971,6 +1971,11 @@ export async function lookupLorryConfirmation(req: Request, res: Response) {
  * Lookup contact details (driver phone/name, transporter, owner) for a lorry.
  * Queries CompanyProfile.companyVehicles, recent SaleDispatches, and TransportConfirmations.
  */
+/**
+ * Lookup contact details (driver phone/name, transporter, owner) for a lorry.
+ * Queries CompanyProfile.companyVehicles (KNM drivers), TransportConfirmations (recent bookings),
+ * recent SaleDispatches, and past WeighbridgeTickets.
+ */
 export async function getLorryContactInfo(req: Request, res: Response) {
   const raw = typeof req.query.lorryNumber === 'string' ? req.query.lorryNumber : '';
   const normalized = normalizeLorryNumber(raw);
@@ -1994,46 +1999,77 @@ export async function getLorryContactInfo(req: Request, res: Response) {
     });
   }
 
-  // 1. Check company vehicle directory
+  // 1. Check company vehicle directory (KNM drivers)
   const cv = findCompanyVehicle(normalized, profile?.companyVehicles);
   if (cv) {
-    const knmPhone = '9440416639';
+    const driverPhone = cv.driverPhone ? clean10DigitPhone(cv.driverPhone) : '9440416639';
     return res.json({
       lorryNumber: cv.number || raw,
-      driverName: 'KNM Transport (Reddy)',
-      driverPhone: knmPhone,
+      driverName: cv.driverName || 'KNM Driver',
+      driverPhone,
       ownerPhone,
       transporterName: 'KNM Transport',
-      transporterPhone: knmPhone,
+      transporterPhone: '9440416639',
       isKnm: true,
+      billType: 'FREE',
       source: 'company_vehicle',
     });
   }
 
-  // 2. Check TransportConfirmations (recent bookings)
-  const confirmations = await prisma.transportConfirmation.findMany({
+  // 2. Check TransportConfirmations (recent bookings - WAITING / CONFIRMED first, then recent USED/DRAFT)
+  const waitingBooking = await prisma.transportConfirmation.findFirst({
     where: {
-      lorryNumber: { not: null },
+      lorryNumber: { equals: normalized, mode: 'insensitive' },
+      status: { in: ['WAITING', 'CONFIRMED'] },
+      OR: [{ driverPhone: { not: null } }, { driverName: { not: null } }],
     },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
+    orderBy: [{ messageDate: 'desc' }, { createdAt: 'desc' }],
   });
-  const matchedBooking = confirmations.find(
-    (b) => normalizeLorryNumber(b.lorryNumber) === normalized && (b.driverPhone || b.driverName)
-  );
-  if (matchedBooking) {
+
+  let matchedBooking = waitingBooking;
+  if (!matchedBooking) {
+    matchedBooking = await prisma.transportConfirmation.findFirst({
+      where: {
+        lorryNumber: { equals: normalized, mode: 'insensitive' },
+        OR: [{ driverPhone: { not: null } }, { driverName: { not: null } }],
+      },
+      orderBy: [{ messageDate: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+  // Loose match fallback across recent confirmations
+  if (!matchedBooking) {
+    const recentConfirmations = await prisma.transportConfirmation.findMany({
+      where: {
+        OR: [{ driverPhone: { not: null } }, { driverName: { not: null } }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    matchedBooking = recentConfirmations.find(
+      (b) => normalizeLorryNumber(b.lorryNumber) === normalized
+    ) ?? null;
+  }
+
+  if (matchedBooking && (matchedBooking.driverPhone || matchedBooking.driverName)) {
+    let suggestedMaterial: string | null = null;
+    const rawLower = (matchedBooking.rawText || '').toLowerCase();
+    if (rawLower.includes('husk')) suggestedMaterial = 'HUSK';
+    else if (rawLower.includes('pappu') || rawLower.includes('dhall') || rawLower.includes('dal')) suggestedMaterial = 'PAPPU';
+
     return res.json({
       lorryNumber: matchedBooking.lorryNumber || raw,
       driverName: matchedBooking.driverName || null,
-      driverPhone: matchedBooking.driverPhone ? normalizeWhatsAppNumber(matchedBooking.driverPhone) : null,
+      driverPhone: matchedBooking.driverPhone ? clean10DigitPhone(matchedBooking.driverPhone) : null,
       ownerPhone,
       transporterName: null,
-      transporterPhone: matchedBooking.fromPhone ? normalizeWhatsAppNumber(matchedBooking.fromPhone) : null,
+      transporterPhone: matchedBooking.fromPhone ? clean10DigitPhone(matchedBooking.fromPhone) : null,
+      material: suggestedMaterial,
+      bookingStatus: matchedBooking.status,
       source: 'transport_confirmation',
     });
   }
 
-  // 3. Check recent SaleDispatches
+  // 3. Check recent SaleDispatches (lorry has come before for dispatch)
   const dispatches = await prisma.saleDispatch.findMany({
     where: {
       vehicleNumber: { not: null },
@@ -2049,11 +2085,40 @@ export async function getLorryContactInfo(req: Request, res: Response) {
     return res.json({
       lorryNumber: matchedDispatch.vehicleNumber || raw,
       driverName: matchedDispatch.driverName || null,
-      driverPhone: matchedDispatch.driverPhone ? normalizeWhatsAppNumber(matchedDispatch.driverPhone) : null,
+      driverPhone: matchedDispatch.driverPhone ? clean10DigitPhone(matchedDispatch.driverPhone) : null,
       ownerPhone,
       transporterName: matchedDispatch.transport?.name || null,
-      transporterPhone: matchedDispatch.transport?.phone ? normalizeWhatsAppNumber(matchedDispatch.transport.phone) : null,
+      transporterPhone: matchedDispatch.transport?.phone ? clean10DigitPhone(matchedDispatch.transport.phone) : null,
       source: 'sale_dispatch',
+    });
+  }
+
+  // 4. Check past Weighbridge Tickets (lorry has come before for kata weighment)
+  const tickets = await prisma.weighbridgeTicket.findMany({
+    where: {
+      vehicleNumber: { not: '' },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+  const matchedTicket = tickets.find(
+    (t) => normalizeLorryNumber(t.vehicleNumber) === normalized && (t.partyMobile || t.partyName)
+  );
+  if (matchedTicket) {
+    return res.json({
+      lorryNumber: matchedTicket.vehicleNumber || raw,
+      driverName: null,
+      driverPhone: matchedTicket.partyMobile ? clean10DigitPhone(matchedTicket.partyMobile) : null,
+      partyName: matchedTicket.partyName || null,
+      vehicleType: matchedTicket.vehicleType || null,
+      material: matchedTicket.material || null,
+      isStorageTransfer: matchedTicket.isStorageTransfer,
+      storageLocation: matchedTicket.storageLocation || null,
+      billType: matchedTicket.billType || null,
+      ownerPhone,
+      transporterName: null,
+      transporterPhone: null,
+      source: 'weighbridge_ticket',
     });
   }
 

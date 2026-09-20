@@ -39,8 +39,10 @@ async function calculateTicketFee(
   netWeightKg: number | null,
   vehicleNumber: string,
   billType: string,
+  partyName?: string | null,
 ): Promise<number> {
   if (netWeightKg == null || netWeightKg <= 0 || billType.toUpperCase() === 'FREE') return 0;
+  if (/knm/i.test(vehicleNumber) || (partyName && /knm/i.test(partyName))) return 0;
   const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
   return calcKataFee(netWeightKg, isVehicleExempt(vehicleNumber, company?.companyVehicles));
 }
@@ -423,9 +425,6 @@ export async function createTicketHandler(req: Request, res: Response) {
       const secondWeightNum = Number(secondWeight ?? firstWeight ?? 0);
       const firstWeightExisting = existingPending.firstWeightKg ?? 0;
       const netWeight = Math.abs(secondWeightNum - firstWeightExisting);
-      if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
-      const finalBillType = String(billType || existingPending.billType || 'CASH').toUpperCase();
-      const finalAmount = await calculateTicketFee(netWeight, cleanVehNo, finalBillType);
       const transfer = resolveStorageTransfer(
         Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
           ? isStorageTransfer
@@ -433,6 +432,11 @@ export async function createTicketHandler(req: Request, res: Response) {
         storageLocation ?? existingPending.storageLocation,
         material ?? existingPending.material,
       );
+      const finalParty = transfer.enabled ? null : (partyName?.trim() || existingPending.partyName);
+      const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+      const isExempt = isVehicleExempt(cleanVehNo, company?.companyVehicles) || /knm/i.test(cleanVehNo) || (finalParty && /knm/i.test(finalParty));
+      const finalBillType = isExempt ? 'FREE' : String(billType || existingPending.billType || 'CASH').toUpperCase();
+      const finalAmount = await calculateTicketFee(netWeight, cleanVehNo, finalBillType, finalParty);
       const secondWeighedAt = new Date();
 
       await recordAutomaticTransfer({
@@ -488,8 +492,11 @@ export async function createTicketHandler(req: Request, res: Response) {
 
   const isPending = tripType === 'FIRST' && secondWeight == null;
   const status = isPending ? 'PENDING_SECOND' : 'COMPLETED';
+  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+  const isExempt = isVehicleExempt(cleanVehNo, company?.companyVehicles) || /knm/i.test(cleanVehNo) || (partyName && /knm/i.test(partyName));
+  const effectiveBillType = isExempt ? 'FREE' : String(billType).toUpperCase();
   const computedAmount = status === 'COMPLETED'
-    ? await calculateTicketFee(netWeight, cleanVehNo, String(billType))
+    ? await calculateTicketFee(netWeight, cleanVehNo, effectiveBillType, partyName)
     : 0;
 
   const user = (req as any).user;
@@ -512,9 +519,9 @@ export async function createTicketHandler(req: Request, res: Response) {
       partyMobile: partyMobile?.trim() || null,
       material: material?.trim() || null,
       loadType: String(loadType).toUpperCase(),
-      billType: String(billType).toUpperCase(),
+      billType: effectiveBillType,
       amount: computedAmount,
-      paymentStatus: status === 'COMPLETED' ? paymentStatusFor(computedAmount, String(billType)) : 'NOT_REQUIRED',
+      paymentStatus: status === 'COMPLETED' ? paymentStatusFor(computedAmount, effectiveBillType) : 'NOT_REQUIRED',
       isStorageTransfer: transfer.enabled,
       storageLocation: transfer.storageLocation,
       transferDirection: transfer.transferDirection,
@@ -572,9 +579,11 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   const secondWeightNum = Number(weightVal);
   const firstWeight = existing.firstWeightKg ?? 0;
   const netWeight = Math.abs(secondWeightNum - firstWeight);
-  if (netWeight <= 0) throw new HttpError(400, 'First and second weights must be different');
-  const finalBillType = String(billType || existing.billType || 'CASH').toUpperCase();
-  const finalAmount = await calculateTicketFee(netWeight, existing.vehicleNumber, finalBillType);
+  const finalParty = (partyName ? String(partyName).trim() : existing.partyName);
+  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+  const isExempt = isVehicleExempt(existing.vehicleNumber, company?.companyVehicles) || /knm/i.test(existing.vehicleNumber) || (finalParty && /knm/i.test(finalParty));
+  const finalBillType = isExempt ? 'FREE' : String(billType || existing.billType || 'CASH').toUpperCase();
+  const finalAmount = await calculateTicketFee(netWeight, existing.vehicleNumber, finalBillType, finalParty);
   const transfer = resolveStorageTransfer(
     Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
       ? isStorageTransfer
@@ -683,8 +692,15 @@ export async function updateTicketHandler(req: Request, res: Response) {
     status = 'PENDING_SECOND';
   }
 
+  const effectiveParty = transfer.enabled
+    ? null
+    : (String(req.body.partyName ?? existing.partyName ?? '').trim() || null);
+  const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
+  const isExempt = isVehicleExempt(vehicleNumber, company?.companyVehicles) || /knm/i.test(vehicleNumber) || (effectiveParty && /knm/i.test(effectiveParty));
+  const effectiveBillType = isExempt ? 'FREE' : billType;
+
   const amount = status === 'COMPLETED'
-    ? await calculateTicketFee(netWeight, vehicleNumber, billType)
+    ? await calculateTicketFee(netWeight, vehicleNumber, effectiveBillType, effectiveParty)
     : 0;
 
   const updated = await prisma.weighbridgeTicket.update({
@@ -693,13 +709,11 @@ export async function updateTicketHandler(req: Request, res: Response) {
       vehicleNumber,
       vehicleType: String(req.body.vehicleType ?? existing.vehicleType).toUpperCase(),
       tripType,
-      partyName: transfer.enabled
-        ? null
-        : (String(req.body.partyName ?? existing.partyName ?? '').trim() || null),
+      partyName: effectiveParty,
       partyMobile: String(req.body.partyMobile ?? existing.partyMobile ?? '').trim() || null,
       material: material || null,
       loadType: String(req.body.loadType ?? existing.loadType).toUpperCase(),
-      billType,
+      billType: effectiveBillType,
       isStorageTransfer: transfer.enabled,
       storageLocation: transfer.storageLocation,
       transferDirection: transfer.transferDirection,
@@ -711,7 +725,7 @@ export async function updateTicketHandler(req: Request, res: Response) {
         ? 'NOT_REQUIRED'
         : existing.paymentStatus === 'PAID' && amount > 0
           ? 'PAID'
-          : paymentStatusFor(amount, billType),
+          : paymentStatusFor(amount, effectiveBillType),
       status,
       firstWeighedAt: firstWeight != null ? (existing.firstWeighedAt ?? new Date()) : null,
       secondWeighedAt: secondWeight != null ? (existing.secondWeighedAt ?? new Date()) : null,

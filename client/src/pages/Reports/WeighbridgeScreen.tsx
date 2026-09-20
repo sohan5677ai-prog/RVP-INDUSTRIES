@@ -64,7 +64,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
-import { calcKataFee, isVehicleExempt } from '@/lib/calc';
+import { calcKataFee, isVehicleExempt, findCompanyVehicle, clean10DigitPhone, normalizeLorryNumber, parseCompanyVehicles } from '@/lib/calc';
 import WeighbridgeSlipModal, { triggerDirectPrint, formatTicketNo } from '@/components/WeighbridgeSlipModal';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
@@ -735,24 +735,51 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     queryFn: () => api<Party[]>('/parties'),
   });
 
-  // Fetch Company Profile for Print Header
+  // Fetch Company Profile for Print Header & Exemption
   const { data: companyProfile } = useQuery<CompanyProfile>({
-    queryKey: ['company-profile'],
-    queryFn: () => api<CompanyProfile>('/company-profile'),
+    queryKey: ['company'],
+    queryFn: () => api<CompanyProfile>('/settings/company'),
   });
 
+  const isKnmVehicle = useCallback((vehNo?: string | null, party?: string | null) => {
+    if (!vehNo && !party) return false;
+    const cleanVeh = (vehNo ?? '').trim().toUpperCase();
+    if (isVehicleExempt(cleanVeh, companyProfile?.companyVehicles)) return true;
+    if (cleanVeh && /knm/i.test(cleanVeh)) return true;
+    if (party && /knm/i.test(party)) return true;
+    return false;
+  }, [companyProfile?.companyVehicles]);
+
   const vehicleOptions = useMemo(() => {
-    const latest = new Map<string, WeighbridgeTicket>();
+    const latest = new Map<string, { value: string; label: string; hint?: string }>();
+
+    // 1. All company vehicles (KNM vehicles & drivers)
+    const companyList = parseCompanyVehicles(companyProfile?.companyVehicles);
+    for (const cv of companyList) {
+      const v = cv.number.trim().toUpperCase();
+      if (v) {
+        latest.set(v, {
+          value: v,
+          label: v,
+          hint: `KNM · ${cv.driverName || 'Driver'}${cv.driverPhone ? ` (${clean10DigitPhone(cv.driverPhone)})` : ''}`,
+        });
+      }
+    }
+
+    // 2. Recent tickets
     for (const ticket of allTickets) {
       const value = ticket.vehicleNumber.trim().toUpperCase();
-      if (value && !latest.has(value)) latest.set(value, ticket);
+      if (value && !latest.has(value)) {
+        latest.set(value, {
+          value,
+          label: value,
+          hint: ticketTransferRoute(ticket) || ticket.partyName || ticket.material || (ticket.partyMobile ? `Ph: ${ticket.partyMobile}` : undefined),
+        });
+      }
     }
-    return Array.from(latest.values()).map((ticket) => ({
-      value: ticket.vehicleNumber.trim().toUpperCase(),
-      label: ticket.vehicleNumber.trim().toUpperCase(),
-      hint: ticketTransferRoute(ticket) || ticket.partyName || ticket.material || undefined,
-    }));
-  }, [allTickets]);
+
+    return Array.from(latest.values());
+  }, [allTickets, companyProfile?.companyVehicles]);
 
   const partyOptions = useMemo(() => {
     const names = new Map<string, string>();
@@ -768,17 +795,117 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const selectVehicle = useCallback((value: string) => {
     const clean = value.toUpperCase();
     setVehicleNumber(clean);
+    const isExempt = isKnmVehicle(clean);
+    const companyDriver = findCompanyVehicle(clean, companyProfile?.companyVehicles);
     const previous = allTickets.find((ticket) => ticket.vehicleNumber.trim().toUpperCase() === clean);
-    if (!previous) return;
-    setVehicleType(previous.vehicleType || 'LORRY');
-    setPartyName(previous.partyName || '');
-    setIsStorageTransfer(Boolean(previous.isStorageTransfer));
-    setStorageLocation(previous.storageLocation || '');
-    setMaterial(previous.material || 'PAPPU');
-    setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
-    setDriverMobile(previous.partyMobile || '');
-    setRemarks(previous.remarks || '');
-  }, [allTickets]);
+
+    if (isExempt) {
+      setBillType('FREE');
+    } else if (previous?.billType) {
+      setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
+    }
+
+    if (companyDriver?.driverPhone) {
+      setDriverMobile(clean10DigitPhone(companyDriver.driverPhone));
+    } else if (isExempt) {
+      setDriverMobile('9440416639');
+    } else if (previous?.partyMobile) {
+      setDriverMobile(clean10DigitPhone(previous.partyMobile));
+    }
+
+    if (previous) {
+      setVehicleType(previous.vehicleType || 'LORRY');
+      setPartyName(previous.partyName || '');
+      setIsStorageTransfer(Boolean(previous.isStorageTransfer));
+      setStorageLocation(previous.storageLocation || '');
+      setMaterial(previous.material || 'PAPPU');
+      setRemarks(previous.remarks || '');
+    }
+
+    // Lookup contact info from server (Lorry Confirmations for Pappu/Husk, past dispatches, older tickets)
+    const key = normalizeLorryNumber(clean);
+    if (key.length >= 6) {
+      api<{
+        driverPhone?: string | null;
+        driverName?: string | null;
+        partyName?: string | null;
+        vehicleType?: string | null;
+        material?: string | null;
+        isKnm?: boolean;
+        source?: string | null;
+      }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(key)}`)
+        .then((info) => {
+          if (!info) return;
+          if (info.isKnm) setBillType('FREE');
+          if (info.driverPhone) {
+            setDriverMobile((cur) => cur.trim() || clean10DigitPhone(info.driverPhone));
+          }
+          if (info.partyName && !previous) {
+            setPartyName((cur) => cur.trim() || info.partyName!);
+          }
+          if (info.vehicleType && !previous) {
+            setVehicleType((cur) => cur || info.vehicleType!);
+          }
+          if (info.material && !previous) {
+            setMaterial((cur) => (cur === 'PAPPU' && info.material ? info.material : cur));
+          }
+          if (info.source === 'transport_confirmation') {
+            toast.info(`Autofilled from lorry confirmation: ${info.driverName ? info.driverName + ' · ' : ''}${info.driverPhone || ''}`);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [allTickets, isKnmVehicle, companyProfile?.companyVehicles]);
+
+  // Auto-fill driver phone, bill type, and details as vehicle number is typed or pasted
+  useEffect(() => {
+    const key = normalizeLorryNumber(vehicleNumber);
+    if (key.length < 6) return;
+
+    // 1. Instant check KNM company vehicle locally
+    const cv = findCompanyVehicle(vehicleNumber, companyProfile?.companyVehicles);
+    if (cv) {
+      setBillType('FREE');
+      const phone = cv.driverPhone ? clean10DigitPhone(cv.driverPhone) : '9440416639';
+      setDriverMobile((cur) => cur.trim() || phone);
+    }
+
+    // 2. Debounced server lookup across lorry confirmations, past dispatches, and past tickets
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api<{
+        driverPhone?: string | null;
+        driverName?: string | null;
+        partyName?: string | null;
+        vehicleType?: string | null;
+        material?: string | null;
+        isKnm?: boolean;
+        source?: string | null;
+      }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(key)}`)
+        .then((info) => {
+          if (cancelled || !info) return;
+          if (info.isKnm) setBillType('FREE');
+          if (info.driverPhone) {
+            setDriverMobile((cur) => cur.trim() || clean10DigitPhone(info.driverPhone));
+          }
+          if (info.partyName) {
+            setPartyName((cur) => cur.trim() || info.partyName!);
+          }
+          if (info.vehicleType) {
+            setVehicleType((cur) => cur || info.vehicleType!);
+          }
+          if (info.source === 'transport_confirmation') {
+            toast.info(`Autofilled from lorry confirmation: ${info.driverName ? info.driverName + ' · ' : ''}${info.driverPhone || ''}`);
+          }
+        })
+        .catch(() => {});
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [vehicleNumber, companyProfile?.companyVehicles]);
 
   const selectParty = useCallback((value: string) => {
     setPartyName(value);
@@ -904,13 +1031,23 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
   const storageTransferDirection = transferDirectionForMaterial(material);
 
+  const isCurrentVehicleExempt = useMemo(() => {
+    return isKnmVehicle(vehicleNumber, partyName);
+  }, [isKnmVehicle, vehicleNumber, partyName]);
+
+  useEffect(() => {
+    if (isCurrentVehicleExempt && billType !== 'FREE') {
+      setBillType('FREE');
+    }
+  }, [isCurrentVehicleExempt, billType]);
+
   const calculatedKataFee = useMemo(() => {
-    if (billType === 'FREE' || calculatedNetWeight == null || calculatedNetWeight <= 0) return 0;
+    if (billType === 'FREE' || isCurrentVehicleExempt || calculatedNetWeight == null || calculatedNetWeight <= 0) return 0;
     return calcKataFee(
       calculatedNetWeight,
-      isVehicleExempt(vehicleNumber, companyProfile?.companyVehicles),
+      isCurrentVehicleExempt,
     );
-  }, [billType, calculatedNetWeight, vehicleNumber, companyProfile?.companyVehicles]);
+  }, [billType, isCurrentVehicleExempt, calculatedNetWeight]);
 
   useEffect(() => {
     setCharges(String(calculatedKataFee));
@@ -1155,6 +1292,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   });
 
   const startEditingTicket = useCallback((ticket: WeighbridgeTicket) => {
+    const isExempt = isKnmVehicle(ticket.vehicleNumber, ticket.partyName);
     setEditingTicket({
       id: ticket.id,
       vehicleNumber: ticket.vehicleNumber,
@@ -1164,12 +1302,12 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       partyMobile: ticket.partyMobile || '',
       material: ticket.material || 'TAMARIND SEED',
       loadType: ticket.loadType || 'LOAD',
-      billType: ticket.billType || 'CASH',
+      billType: isExempt ? 'FREE' : (ticket.billType || 'CASH'),
       firstWeightKg: ticket.firstWeightKg != null ? String(ticket.firstWeightKg) : '',
       secondWeightKg: ticket.secondWeightKg != null ? String(ticket.secondWeightKg) : '',
       remarks: ticket.remarks || '',
     });
-  }, []);
+  }, [isKnmVehicle]);
 
   const editMutation = useMutation({
     mutationFn: async (draft: EditTicketDraft) => api<WeighbridgeTicket>(`/weighbridge/tickets/${draft.id}`, {
@@ -1244,17 +1382,18 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   ), [historyQuery]);
 
   const editPreview = useMemo(() => {
-    if (!editingTicket) return { net: null as number | null, fee: 0 };
+    if (!editingTicket) return { net: null as number | null, fee: 0, isExempt: false };
     const first = Number(editingTicket.firstWeightKg);
     const second = Number(editingTicket.secondWeightKg);
     let net: number | null = null;
     if (first > 0 && second > 0) net = Math.abs(first - second);
     else if (editingTicket.tripType === 'SINGLE' && first > 0) net = first;
-    const fee = net && editingTicket.billType !== 'FREE'
-      ? calcKataFee(net, isVehicleExempt(editingTicket.vehicleNumber, companyProfile?.companyVehicles))
+    const isExempt = isKnmVehicle(editingTicket.vehicleNumber, editingTicket.partyName);
+    const fee = (net && editingTicket.billType !== 'FREE' && !isExempt)
+      ? calcKataFee(net, isExempt)
       : 0;
-    return { net, fee };
-  }, [editingTicket, companyProfile?.companyVehicles]);
+    return { net, fee, isExempt };
+  }, [editingTicket, isKnmVehicle]);
 
   // Global Keyboard Shortcuts (F12 = Save, F4 = Pending, F8 = Override, Esc = Clear)
   useEffect(() => {
@@ -1738,14 +1877,16 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <span className="kata-eyebrow">Payment display</span>
                   <p>{calculatedNetWeight == null
                     ? 'Charge after second weight'
-                    : billType === 'FREE'
-                      ? 'Complimentary weighment'
-                      : billType === 'CREDIT'
-                        ? 'Post to customer credit'
-                        : 'Collect at counter'}</p>
+                    : isCurrentVehicleExempt
+                      ? 'KNM Company Vehicle (Exempt)'
+                      : billType === 'FREE'
+                        ? 'Complimentary weighment'
+                        : billType === 'CREDIT'
+                          ? 'Post to customer credit'
+                          : 'Collect at counter'}</p>
                 </div>
                 <div className="kata-payment-amount">
-                  <span>{billType}</span>
+                  <span>{isCurrentVehicleExempt ? 'EXEMPT' : billType}</span>
                   <strong>{calculatedNetWeight == null ? 'Pending' : `₹${Number(charges || 0).toLocaleString('en-IN')}`}</strong>
                 </div>
               </div>
@@ -2614,13 +2755,30 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 <div className="space-y-1.5">
                   <Label>Vehicle number</Label>
                   <Combobox options={vehicleOptions} value={editingTicket.vehicleNumber}
-                    onChange={(value) => setEditingTicket((d) => d ? { ...d, vehicleNumber: value.toUpperCase() } : d)}
+                    onChange={(value) => {
+                      const clean = value.toUpperCase();
+                      const isEx = isKnmVehicle(clean, editingTicket.partyName);
+                      const cv = findCompanyVehicle(clean, companyProfile?.companyVehicles);
+                      setEditingTicket((d) => d ? {
+                        ...d,
+                        vehicleNumber: clean,
+                        ...(isEx ? { billType: 'FREE' } : {}),
+                        ...(cv?.driverPhone && !d.partyMobile ? { partyMobile: cv.driverPhone } : {}),
+                      } : d);
+                    }}
                     searchPlaceholder="Search or enter vehicle…" allowCustomValue customValueLabel="Use vehicle" />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Party name</Label>
                   <Combobox options={partyOptions} value={editingTicket.partyName}
-                    onChange={(value) => setEditingTicket((d) => d ? { ...d, partyName: value } : d)}
+                    onChange={(value) => {
+                      const isEx = isKnmVehicle(editingTicket.vehicleNumber, value);
+                      setEditingTicket((d) => d ? {
+                        ...d,
+                        partyName: value,
+                        ...(isEx ? { billType: 'FREE' } : {}),
+                      } : d);
+                    }}
                     searchPlaceholder="Search or enter party…" allowCustomValue customValueLabel="Use party" />
                 </div>
                 <div className="space-y-1.5">
@@ -2677,7 +2835,15 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <p className="mt-1 font-mono text-xl font-black">{editPreview.net == null ? 'Pending' : `${editPreview.net.toLocaleString('en-IN')} kg`}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Collect at counter</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {editPreview.isExempt
+                      ? 'KNM Company Vehicle (Exempt)'
+                      : editingTicket.billType === 'FREE'
+                        ? 'Complimentary (No charge)'
+                        : editingTicket.billType === 'CREDIT'
+                          ? 'Customer credit'
+                          : 'Collect at counter'}
+                  </p>
                   <p className="mt-1 font-mono text-xl font-black text-primary">₹{editPreview.fee.toLocaleString('en-IN')}</p>
                 </div>
               </div>

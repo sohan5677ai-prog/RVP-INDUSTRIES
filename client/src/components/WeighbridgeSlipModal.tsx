@@ -243,11 +243,24 @@ export function renderTicketPrintHtml(
   <div class="sheet">
     ${!isStationeryMode ? `
       <div style="position: absolute; inset: 3mm; border: 2px solid #dc2626; border-radius: 8px; pointer-events: none;">
+        <!-- Top Left: Lord Ganesha in circular frame -->
+        <div style="position: absolute; top: 2.5mm; left: 3.5mm; width: 15.5mm; height: 15.5mm; border-radius: 50%; border: 2px solid #dc2626; box-shadow: 0 0 0 1.2px #eab308; overflow: hidden; background: #ffffff; display: flex; align-items: center; justify-content: center; padding: 0.5px;">
+          <img src="/kata-ganesha.jpg" alt="Lord Ganesha" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;" crossorigin="anonymous" />
+        </div>
+
+        <!-- Center: Header -->
         <div style="position: absolute; top: 2mm; left: 0; right: 0; text-align: center;">
           <h1 style="font-size: 23px; font-weight: 900; color: #b91c1c; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; text-transform: uppercase; letter-spacing: 0.5px;">RVP WEIGH BRIDGE</h1>
           <div style="display: inline-block; background: #facc15; font-size: 9px; font-weight: 900; padding: 1px 10px; border-radius: 10px; font-family: Arial, sans-serif;">GOVT APPROVED</div>
           <p style="font-size: 9.5px; font-weight: 700; color: #27272a; margin-top: 2px; font-family: Arial, sans-serif;">3/86, New By-Pass Road, Near Rajuluru, BG Palli, PUNGANUR - 517 247, Chittoor Dist., A.P.</p>
           <p style="font-size: 9.5px; font-weight: 800; color: #18181b; font-family: Arial, sans-serif;">Ph : 91215 53909, 94909 21002</p>
+        </div>
+
+        <!-- Top Right: 24 Hrs Service Badge -->
+        <div style="position: absolute; top: 2.5mm; right: 3.5mm; width: 14.5mm; height: 14.5mm; border-radius: 50%; border: 2px solid #18181b; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fafafa;">
+          <span style="font-size: 13px; font-weight: 900; line-height: 1; font-family: Arial, sans-serif; color: #000;">24</span>
+          <span style="font-size: 7.5px; font-weight: bold; text-transform: uppercase; line-height: 1; font-family: Arial, sans-serif; color: #000;">HRS</span>
+          <span style="font-size: 5.5px; font-weight: bold; background: #18181b; color: #ffffff; padding: 0.5px 2px; border-radius: 1px; text-transform: uppercase; margin-top: 1px; font-family: Arial, sans-serif;">SERVICE</span>
         </div>
         <div style="position: absolute; top: 36mm; left: 2mm; width: 64mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
           <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b; font-family: Arial, sans-serif;">S. No.</div>
@@ -333,6 +346,12 @@ export function renderTicketPrintHtml(
 
     <div class="val" style="top: 128.2mm; left: 106mm; width: 48mm; height: 8.2mm; font-size: 15px; font-weight: 800;">
       ${formattedCharges}
+    </div>
+
+    <!-- Official RVP Industries Stamp & Authorised Signatory in Signature Cell -->
+    <div style="position: absolute; top: 124.5mm; left: 157mm; width: 48mm; height: 12.5mm; display: flex; align-items: center; justify-content: center; overflow: visible; pointer-events: none;">
+      <img src="/company-stamp.png" alt="RVP Stamp" style="height: 13.5mm; max-width: 44mm; object-fit: contain; mix-blend-mode: multiply;" crossorigin="anonymous" />
+      <img src="/authorised-sign.png" alt="Authorised Sign" style="position: absolute; bottom: 0.5mm; height: 7.5mm; max-width: 32mm; object-fit: contain; mix-blend-mode: multiply;" crossorigin="anonymous" />
     </div>
   </div>
 </body>
@@ -904,14 +923,13 @@ export default function WeighbridgeSlipModal({
                 <div className="absolute top-[2mm] left-[2mm] right-[2mm] h-[33mm] flex items-center justify-between px-2">
                   {/* Ganesha Sacred Motif */}
                   <div className="w-16 h-16 shrink-0 flex items-center justify-center">
-                    <svg viewBox="0 0 100 100" className="w-14 h-14 text-red-600 fill-current">
-                      <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" strokeWidth="3" />
-                      <circle cx="50" cy="50" r="41" fill="none" stroke="#eab308" strokeWidth="1.5" />
-                      <path d="M50 20 C42 20 38 28 38 35 C38 45 44 48 44 58 C44 65 48 70 52 70 C56 70 58 65 58 60 C58 52 64 45 64 35 C64 28 58 20 50 20 Z" />
-                      <circle cx="43" cy="33" r="2.5" fill="#eab308" />
-                      <circle cx="57" cy="33" r="2.5" fill="#eab308" />
-                      <path d="M50 24 L50 34 M46 27 L54 27" stroke="#eab308" strokeWidth="1.5" />
-                    </svg>
+                    <div className="w-14 h-14 rounded-full border-2 border-red-600 ring-1 ring-amber-400 overflow-hidden bg-white shadow-xs flex items-center justify-center p-0.5">
+                      <img
+                        src="/kata-ganesha.jpg"
+                        alt="Lord Ganesha"
+                        className="w-full h-full object-contain rounded-full"
+                      />
+                    </div>
                   </div>
 
                   {/* Center Title & Government Approved */}
@@ -1182,7 +1200,19 @@ export default function WeighbridgeSlipModal({
                 </span>
               </div>
 
-              {/* Signature is purposefully left BLANK for manual pen signing */}
+              {/* 13. Signature with RVP INDUSTRIES STAMP */}
+              <div className="absolute top-[125mm] left-[157mm] w-[48mm] h-[12mm] flex items-center justify-center pointer-events-none overflow-visible">
+                <img
+                  src="/company-stamp.png"
+                  alt="RVP Industries Stamp"
+                  className="h-[13.5mm] max-w-[44mm] object-contain mix-blend-multiply opacity-95"
+                />
+                <img
+                  src="/authorised-sign.png"
+                  alt="Authorised Signatory"
+                  className="absolute h-[7.5mm] max-w-[32mm] object-contain mix-blend-multiply opacity-90 bottom-[0.5mm]"
+                />
+              </div>
 
             </div>
           </div>

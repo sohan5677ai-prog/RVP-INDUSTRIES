@@ -270,6 +270,22 @@ function generateSlipHtml(ticket) {
     return url;
   };
 
+  const getAssetUri = (filename, mime) => {
+    try {
+      const p = path.resolve(SCRIPT_DIR, '../client/public', filename);
+      if (fs.existsSync(p)) {
+        const b64 = fs.readFileSync(p).toString('base64');
+        return `data:${mime};base64,${b64}`;
+      }
+    } catch {}
+    const baseUrl = CONFIG.cloudApiUrl.replace(/\/api$/, '');
+    return `${baseUrl}/assets/${filename}`;
+  };
+
+  const ganeshaUrl = getAssetUri('kata-ganesha.jpg', 'image/jpeg');
+  const stampUrl = getAssetUri('company-stamp.png', 'image/png');
+  const signatureUrl = getAssetUri('authorised-sign.png', 'image/png');
+
   // Use second-weight photos if available (completed ticket), else first-weight photos
   const cam1Url = resolveCamUrl(ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl, 1);
   const cam2Url = resolveCamUrl(ticket.secondCam2PhotoUrl || ticket.cam2PhotoUrl, 2);
@@ -348,11 +364,24 @@ function generateSlipHtml(ticket) {
   <div class="sheet">
     ${!isStationery ? `
       <div style="position: absolute; inset: 3mm; border: 2px solid #dc2626; border-radius: 8px; pointer-events: none;">
+        <!-- Top Left: Lord Ganesha in circular frame -->
+        <div style="position: absolute; top: 2.5mm; left: 3.5mm; width: 15.5mm; height: 15.5mm; border-radius: 50%; border: 2px solid #dc2626; box-shadow: 0 0 0 1.2px #eab308; overflow: hidden; background: #ffffff; display: flex; align-items: center; justify-content: center; padding: 0.5px;">
+          <img src="${ganeshaUrl}" alt="Lord Ganesha" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;" />
+        </div>
+
+        <!-- Center: Header -->
         <div style="position: absolute; top: 2mm; left: 0; right: 0; text-align: center;">
           <h1 style="font-size: 23px; font-weight: 900; color: #b91c1c; font-family: Arial, sans-serif; text-transform: uppercase;">RVP WEIGH BRIDGE</h1>
           <div style="display: inline-block; background: #facc15; font-size: 9px; font-weight: 900; padding: 1px 10px; border-radius: 10px;">GOVT APPROVED</div>
           <p style="font-size: 9.5px; font-weight: 700; color: #27272a; margin-top: 2px;">3/86, New By-Pass Road, Near Rajuluru, BG Palli, PUNGANUR - 517 247, Chittoor Dist., A.P.</p>
           <p style="font-size: 9.5px; font-weight: 800; color: #18181b;">Ph : 91215 53909, 94909 21002</p>
+        </div>
+
+        <!-- Top Right: 24 Hrs Service Badge -->
+        <div style="position: absolute; top: 2.5mm; right: 3.5mm; width: 14.5mm; height: 14.5mm; border-radius: 50%; border: 2px solid #18181b; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fafafa;">
+          <span style="font-size: 13px; font-weight: 900; line-height: 1; font-family: Arial, sans-serif; color: #000;">24</span>
+          <span style="font-size: 7.5px; font-weight: bold; text-transform: uppercase; line-height: 1; font-family: Arial, sans-serif; color: #000;">HRS</span>
+          <span style="font-size: 5.5px; font-weight: bold; background: #18181b; color: #ffffff; padding: 0.5px 2px; border-radius: 1px; text-transform: uppercase; margin-top: 1px; font-family: Arial, sans-serif;">SERVICE</span>
         </div>
         <div style="position: absolute; top: 36mm; left: 2mm; width: 64mm; height: 8.5mm; border: 2px solid #f59e0b; border-radius: 6px; display: flex; align-items: center;">
           <div style="background: #fde047; color: #7f1d1d; font-size: 10px; font-weight: 900; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid #f59e0b;">S. No.</div>
@@ -412,6 +441,12 @@ function generateSlipHtml(ticket) {
       <div class="val-sans-inner" style="font-size: ${materialStyle.fontSize}; line-height: ${materialStyle.lineHeight};">${material}</div>
     </div>
     <div class="val" style="top: 128.2mm; left: 106mm; width: 48mm; height: 8.2mm; font-size: 15px;">${charges}</div>
+
+    <!-- Official RVP Industries Stamp & Authorised Signatory in Signature Cell -->
+    <div style="position: absolute; top: 124.5mm; left: 157mm; width: 48mm; height: 12.5mm; display: flex; align-items: center; justify-content: center; overflow: visible; pointer-events: none;">
+      <img src="${stampUrl}" alt="RVP Stamp" style="height: 13.5mm; max-width: 44mm; object-fit: contain; mix-blend-mode: multiply;" />
+      <img src="${signatureUrl}" alt="Authorised Sign" style="position: absolute; bottom: 0.5mm; height: 7.5mm; max-width: 32mm; object-fit: contain; mix-blend-mode: multiply;" />
+    </div>
   </div>
 </body>
 </html>`;

@@ -12,7 +12,7 @@ import {
   DEFAULT_SALE_CLOSE_TOLERANCE_PCT,
   DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
 } from '@/lib/calc';
-import { findCompanyVehicle } from '@/lib/calc';
+import { findCompanyVehicle, clean10DigitPhone } from '@/lib/calc';
 import { settledByDispatch, isDispatchPaid, saleDisplayStatus, dispatchShortage, SALE_STATUS_VARIANT, saleStatusLabel, type SaleDisplayStatus } from '@/lib/saleStatus';
 import { shortageGst, shortageWithGst, saleTds } from '@/lib/receiptCalc';
 import { invalidateReceiptQueries } from '@/lib/receiptCache';
@@ -365,9 +365,23 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         .then((booking) => {
           if (cancelled) return;
           setMatchedBooking(booking);
-          if (!booking) return;
-          if (booking.driverName) setDriverName((cur) => cur.trim() || booking.driverName!);
-          if (booking.driverPhone) setDriverPhone((cur) => cur.trim() || booking.driverPhone!);
+          if (booking) {
+            if (booking.driverName) setDriverName((cur) => cur.trim() || booking.driverName!);
+            if (booking.driverPhone) setDriverPhone((cur) => cur.trim() || clean10DigitPhone(booking.driverPhone));
+          } else {
+            // Fallback: If no active waiting confirmation, check past dispatches, tickets, or used bookings via contact-info
+            api<{
+              driverName?: string | null;
+              driverPhone?: string | null;
+              source?: string | null;
+            }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(key)}`)
+              .then((info) => {
+                if (cancelled || !info) return;
+                if (info.driverName) setDriverName((cur) => cur.trim() || info.driverName!);
+                if (info.driverPhone) setDriverPhone((cur) => cur.trim() || clean10DigitPhone(info.driverPhone));
+              })
+              .catch(() => {});
+          }
         })
         // A miss is normal and a failed lookup must never block a dispatch, so
         // there is nothing to report here - the fields simply stay as typed.
@@ -546,7 +560,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   useEffect(() => {
     if (!dispatchOrder || !matchedCompanyVehicle) return;
     if (matchedCompanyVehicle.driverName) setDriverName((cur) => cur.trim() || matchedCompanyVehicle.driverName);
-    if (matchedCompanyVehicle.driverPhone) setDriverPhone((cur) => cur.trim() || matchedCompanyVehicle.driverPhone);
+    const knmPhone = matchedCompanyVehicle.driverPhone ? clean10DigitPhone(matchedCompanyVehicle.driverPhone) : '9440416639';
+    setDriverPhone((cur) => cur.trim() || knmPhone);
   }, [matchedCompanyVehicle, dispatchOrder]);
 
   const { data: productTax } = useQuery({

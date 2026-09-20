@@ -1,4 +1,6 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import { subscriptionGate } from '../middleware/subscription.js';
@@ -64,6 +66,13 @@ router.use('/auth', authRoutes);
 // Public maintenance status endpoint for polling, unauthenticated screens & pre-login checks
 router.get('/system/maintenance/status', asyncHandler(getMaintenanceStatusHandler));
 
+// Static assets (logos, stamps, signatures)
+router.use('/assets', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets')));
+
 // Weighbridge CCTV direct streaming & snapshots for <img> tags
 router.get('/weighbridge/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
@@ -110,7 +119,7 @@ router.use(requireAuth);
 router.use((req, _res, next) => {
   if (req.user?.scope !== 'KATA_CABIN') return next();
   const isWeighbridge = req.path === '/weighbridge' || req.path.startsWith('/weighbridge/');
-  const isReadonlyCabinData = req.method === 'GET' && (req.path === '/parties' || req.path === '/company-profile');
+  const isReadonlyCabinData = req.method === 'GET' && (req.path === '/parties' || req.path === '/company-profile' || req.path === '/settings/company');
   if (!isWeighbridge && !isReadonlyCabinData) {
     return next(new HttpError(403, 'This device is limited to Kata Cabin operations'));
   }

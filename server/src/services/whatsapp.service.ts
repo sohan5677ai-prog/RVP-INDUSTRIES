@@ -155,8 +155,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // 1081272931051099). See docs/whatsapp-lorry-payment-template.md.
   LORRY_PAYMENT: '31369',
   LORRY_PAYMENT_TEXT: '31369',
-  // rvp_buyer_kata_alert_text (Utility template, 6 vars), approved on the shared KNM
+  // rvp_buyer_kata_alert (Utility template, 6 vars, image header), approved on the shared KNM
   // number (+917207146094). Fast2SMS message_id 31798 (Meta template ID 1510273787797520).
+  BUYER_KATA_ALERT: '31798',
   BUYER_KATA_ALERT_TEXT: '31798',
   //
   // rvp_party_ledger, approved on the shared KNM number. This id was only ever
@@ -260,6 +261,7 @@ const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
   DISPATCH_DRIVER: 'driver_industries',
   WISHES: 'rvp_rema',
+  BUYER_KATA_ALERT: 'rvp_buyer_kata_alert',
   BUYER_KATA_ALERT_TEXT: 'rvp_buyer_kata_alert_text',
   DRIVER_UNLOADED_KATA: 'driver_unloaded_signed_kata',
   DRIVER_SECOND_REMINDER: '2nd_weight_remainder',
@@ -2263,9 +2265,9 @@ export async function notifyOwnersKataReceived(args: {
           weightClean,
           shortageClean,
         ],
-        // Header IMAGE is only supported for BUYER_KATA_ALERT.
-        // BUYER_KATA_ALERT_TEXT is headerless; passing mediaUrl causes Fast2SMS/Meta API to fail.
-        mediaUrl: selectedKey === 'BUYER_KATA_ALERT' ? (args.imageUrl ?? undefined) : undefined,
+        // Header IMAGE is supported by template 31798 (BUYER_KATA_ALERT).
+        // Pass mediaUrl whenever an image URL is present so WhatsApp renders the slip photo preview.
+        mediaUrl: args.imageUrl ?? undefined,
         relatedType: 'KATA_ALERT',
         relatedId: args.submissionId,
       })

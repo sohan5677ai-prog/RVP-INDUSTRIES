@@ -25,6 +25,7 @@ router.put('/settings/freight-rates', canEditSettings, asyncHandler(upsertFreigh
 router.delete('/settings/freight-rates/:id', canEditSettings, asyncHandler(deleteFreightRate));
 
 router.get('/settings/company', asyncHandler(getCompanyProfile));
+router.get('/company-profile', asyncHandler(getCompanyProfile));
 router.put('/settings/company', canEditSettings, asyncHandler(updateCompanyProfile));
 router.put('/settings/invoice-layout', canEditSettings, asyncHandler(updateInvoiceLayout));
 

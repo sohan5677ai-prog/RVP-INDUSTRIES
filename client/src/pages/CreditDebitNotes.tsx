@@ -324,6 +324,14 @@ export default function CreditDebitNotes() {
       .flatMap((o) => (o.dispatches ?? []).filter((d) => d.invoiceNumber).map((d) => ({ id: d.id, label: `${d.invoiceNumber} · ${shortDate(d.dispatchDate)}` })));
   }, [partyId, saleOrders]);
 
+  useEffect(() => {
+    const q = Number(quantity);
+    const r = Number(rate);
+    if (q > 0 && r > 0) {
+      setTaxableValue(Math.round(q * r).toString());
+    }
+  }, [quantity, rate]);
+
   function resetForm() {
     setPartyId('');
     setSaleDispatchId('');

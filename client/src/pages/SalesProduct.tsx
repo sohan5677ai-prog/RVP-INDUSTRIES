@@ -48,6 +48,7 @@ import ScaleCaptureButton from '@/components/ScaleCaptureButton';
 
 const GST_RATE = 0.05;
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const BYPRODUCT_STORAGES = ['PGR COLD', 'Murugan', 'KNM Multi'] as const;
 
 /** Per-order pappu profit/loss, from the date-aware seed allocation (server). */
 interface PappuMargin {
@@ -269,6 +270,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // Byproducts only: this lorry is being sold out of transferred stock rather
   // than straight off the factory. Pure reporting tag.
   const [fromTransfer, setFromTransfer] = useState(false);
+  const [transferMode, setTransferMode] = useState<'ALL' | 'SPLIT'>('ALL');
+  const [transferTonnes, setTransferTonnes] = useState('');
+  const [transferLocation, setTransferLocation] = useState<string>('PGR COLD');
 
   const { data: linkedKataTicket, isFetching: isMatchingKata } = useWeighbridgeMatch({
     date: dispatchOrder ? dispatchDate : undefined,
@@ -340,7 +344,17 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     : 0;
   const needsExcessOut = dispatchShortfallKg > 0;
   const excessOutKg = Math.round((Number(excessOutTonnes) || 0) * 1000);
-  const dispatchBlocked = needsExcessOut && excessOutKg < dispatchShortfallKg;
+
+  const transferTonnesNum = Number(transferTonnes) || 0;
+  const isSplitTransfer = offerFromTransfer && fromTransfer && transferMode === 'SPLIT';
+  const invalidSplitTransfer =
+    isSplitTransfer &&
+    (transferTonnesNum <= 0 ||
+      (dispatchTonnesNum > 0 && transferTonnesNum >= dispatchTonnesNum));
+  const rvpMillTonnes = Math.max(0, dispatchTonnesNum - transferTonnesNum);
+
+  const dispatchBlocked =
+    (needsExcessOut && excessOutKg < dispatchShortfallKg) || invalidSplitTransfer;
 
   /**
    * Fill the driver in from the lorry's WhatsApp booking as the number is typed.
@@ -413,6 +427,9 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setExcessOutTonnes(''); // never sticky - each XS claim must be deliberate
     setFinalDispatch(false); // closing an order short must be deliberate too
     setFromTransfer(false); // never sticky - each dispatch must say so explicitly
+    setTransferMode('ALL');
+    setTransferTonnes('');
+    setTransferLocation('PGR COLD');
   }
 
   async function extractKata(file: File) {
@@ -454,7 +471,17 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       if (customRetention.trim() !== '') fd.append('customRetention', customRetention);
       if (excessOutKg > 0) fd.append('excessOutKg', String(excessOutKg));
       if (finalDispatch) fd.append('finalDispatch', 'true');
-      if (offerFromTransfer && fromTransfer) fd.append('fromTransfer', 'true');
+      if (offerFromTransfer && fromTransfer) {
+        fd.append('fromTransfer', 'true');
+        if (transferMode === 'SPLIT') {
+          const splitKg = Math.round((Number(transferTonnes) || 0) * 1000);
+          if (splitKg > 0) fd.append('transferWeightKg', String(splitKg));
+        } else {
+          const totalKg = Math.round((Number(dispatchTonnes) || 0) * 1000);
+          if (totalKg > 0) fd.append('transferWeightKg', String(totalKg));
+        }
+        if (transferLocation) fd.append('transferLocation', transferLocation);
+      }
       return api(`/sale-orders/${dispatchOrder!.id}/dispatch`, { method: 'POST', body: fd, multipart: true });
     },
     onSuccess: () => {
@@ -1445,9 +1472,22 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                                             </span>
                                             <Badge variant={statusVariant[d.status]}>{titleCase(d.status)}</Badge>
                                             {d.fromTransfer && (
-                                              <Badge variant="outline" title="Sold out of stock already moved to a storage location, rather than straight off the factory.">
-                                                From Transfer
-                                              </Badge>
+                                              d.transferWeightKg != null && d.transferWeightKg < d.weightKg ? (
+                                                <Badge
+                                                  variant="outline"
+                                                  className="border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-medium"
+                                                  title={`Mixed source: ${toTonnes(d.transferWeightKg).toFixed(2)} t from ${d.transferLocation || 'transfers'}, ${toTonnes(d.weightKg - d.transferWeightKg).toFixed(2)} t from RVP Mill.`}
+                                                >
+                                                  Transfer: {toTonnes(d.transferWeightKg).toFixed(2)} t{d.transferLocation ? ` (${d.transferLocation})` : ''} · RVP: {toTonnes(d.weightKg - d.transferWeightKg).toFixed(2)} t
+                                                </Badge>
+                                              ) : (
+                                                <Badge
+                                                  variant="outline"
+                                                  title={`Sold out of stock moved to ${d.transferLocation || 'a storage location'}, rather than straight off the factory.`}
+                                                >
+                                                  From Transfer{d.transferLocation ? ` (${d.transferLocation})` : ''}
+                                                </Badge>
+                                              )
                                             )}
                                             {(d.excessOutKg ?? 0) > 0 && (
                                               <Badge
@@ -1934,22 +1974,133 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               </div>
             )}
             {offerFromTransfer && (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 accent-primary"
-                  checked={fromTransfer}
-                  onChange={(e) => setFromTransfer(e.target.checked)}
-                />
-                <span className="space-y-1">
-                  <span className="block text-sm font-medium">Dispatch from Transfers</span>
-                  <span className="block text-[11px] text-muted-foreground">
-                    Tick this if this lorry is being sold out of stock already moved to a storage
-                    location, rather than straight off the factory. Tags the shipment only - it
-                    does not change billing or cost.
+              <div className="space-y-3 rounded-lg border bg-muted/30 p-3.5">
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-primary"
+                    checked={fromTransfer}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setFromTransfer(checked);
+                      if (!checked) {
+                        setTransferMode('ALL');
+                        setTransferTonnes('');
+                      }
+                    }}
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Dispatch from Transfers</span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      Tick this if this lorry is being sold out of stock moved to a storage location, rather than straight off the factory.
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+
+                {fromTransfer && (
+                  <div className="space-y-3 border-t pt-3 pl-6">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Storage Location</Label>
+                      <Select value={transferLocation} onValueChange={setTransferLocation}>
+                        <SelectTrigger className="h-8 text-xs bg-background">
+                          <SelectValue placeholder="Select storage location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BYPRODUCT_STORAGES.map((loc) => (
+                            <SelectItem key={loc} value={loc} className="text-xs">
+                              {loc}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Stock Source Breakdown</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex flex-col items-center justify-center rounded-md border p-2 text-xs transition-colors text-center",
+                            transferMode === 'ALL'
+                              ? "border-primary bg-primary/10 text-primary font-medium shadow-xs"
+                              : "border-input bg-background hover:bg-muted/50 text-muted-foreground"
+                          )}
+                          onClick={() => setTransferMode('ALL')}
+                        >
+                          <span className="font-semibold">Full Lorry ({dispatchTonnesNum > 0 ? `${dispatchTonnesNum.toFixed(2)} t` : '100%'})</span>
+                          <span className="text-[10px] opacity-75">All from {transferLocation}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex flex-col items-center justify-center rounded-md border p-2 text-xs transition-colors text-center",
+                            transferMode === 'SPLIT'
+                              ? "border-primary bg-primary/10 text-primary font-medium shadow-xs"
+                              : "border-input bg-background hover:bg-muted/50 text-muted-foreground"
+                          )}
+                          onClick={() => {
+                            setTransferMode('SPLIT');
+                            if (!transferTonnes && dispatchTonnesNum > 0) {
+                              setTransferTonnes((dispatchTonnesNum / 2).toFixed(2));
+                            }
+                          }}
+                        >
+                          <span className="font-semibold">Partial / Split</span>
+                          <span className="text-[10px] opacity-75">From {transferLocation} + RVP Mill</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {transferMode === 'SPLIT' && (
+                      <div className="space-y-2.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label className="text-xs font-medium whitespace-nowrap">From Transfers ({transferLocation}):</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              type="number"
+                              step="0.001"
+                              min="0.001"
+                              max={dispatchTonnesNum > 0 ? String(dispatchTonnesNum - 0.001) : undefined}
+                              className="h-8 w-24 text-right font-mono text-xs bg-background"
+                              placeholder="e.g. 10.00"
+                              value={transferTonnes}
+                              onChange={(e) => setTransferTonnes(e.target.value)}
+                            />
+                            <span className="text-xs text-muted-foreground font-medium">t</span>
+                          </div>
+                        </div>
+
+                        <div className="rounded border bg-background/90 p-2.5 space-y-1.5 text-[11px]">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">📦 From Transfers ({transferLocation}):</span>
+                            <span className="font-mono font-medium">{transferTonnesNum.toFixed(2)} t</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">🏭 From RVP Mill:</span>
+                            <span className="font-mono font-medium text-forest font-semibold">{rvpMillTonnes.toFixed(2)} t</span>
+                          </div>
+                          <div className="flex justify-between border-t pt-1.5 font-semibold">
+                            <span>🚚 Total Lorry (Billed to buyer):</span>
+                            <span className="font-mono">{dispatchTonnesNum.toFixed(2)} t</span>
+                          </div>
+                        </div>
+
+                        {transferTonnesNum <= 0 && (
+                          <p className="text-[11px] text-destructive font-medium">
+                            Enter the tonnage taken from {transferLocation}.
+                          </p>
+                        )}
+                        {dispatchTonnesNum > 0 && transferTonnesNum >= dispatchTonnesNum && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                            Transfer tonnage equals or exceeds total lorry weight. Switch to "Full Lorry" if everything is from storage.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
             {offerFinalDispatch && (
               <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border bg-muted/40 p-3">

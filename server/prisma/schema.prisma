@@ -766,7 +766,9 @@ model SaleDispatch {
   // StockTransfer/ShellTransfer/HuskTransfer) rather than straight off the
   // factory. Pure reporting tag - byproducts carry no valued inventory silo, so
   // it does not change COGS or any allocation.
-  fromTransfer Boolean @default(false)
+  fromTransfer     Boolean @default(false)
+  transferWeightKg Int?
+  transferLocation String?
 
   // Delivery matching (buyer's kata slip captured at delivery).
   receivedDate               DateTime?

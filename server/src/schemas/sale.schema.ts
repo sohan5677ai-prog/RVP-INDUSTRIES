@@ -78,6 +78,8 @@ export const dispatchSaleOrderSchema = z.object({
   // Byproducts only: this shipment is sold out of transferred stock rather than
   // straight off the factory. Pure tag, sent over multipart so "true" has to count.
   fromTransfer: z.preprocess((v) => v === true || v === 'true', z.boolean().optional().default(false)),
+  transferWeightKg: z.preprocess(emptyToUndefined, z.coerce.number().int().nonnegative().optional().nullable()),
+  transferLocation: z.preprocess(emptyToUndefined, z.string().trim().optional().nullable()),
 });
 
 export const listSaleOrdersSchema = z.object({

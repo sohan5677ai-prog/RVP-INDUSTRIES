@@ -1041,6 +1041,14 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         excessOutKg,
         excessOutNote: excessOutKg > 0 ? (data.excessOutNote ?? null) : null,
         fromTransfer: order.product !== 'PAPPU' && order.product !== 'TPS' ? data.fromTransfer : false,
+        transferWeightKg:
+          order.product !== 'PAPPU' && order.product !== 'TPS' && data.fromTransfer
+            ? Math.min(weightKg, data.transferWeightKg != null ? Number(data.transferWeightKg) : weightKg)
+            : null,
+        transferLocation:
+          order.product !== 'PAPPU' && order.product !== 'TPS' && data.fromTransfer
+            ? (data.transferLocation ?? null)
+            : null,
       },
     });
 

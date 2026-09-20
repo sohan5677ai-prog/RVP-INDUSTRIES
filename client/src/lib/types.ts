@@ -503,6 +503,8 @@ export interface SaleDispatch {
   // Byproducts only: this shipment sold out of transferred stock rather than
   // straight off the factory. Pure reporting tag, no cost effect.
   fromTransfer?: boolean;
+  transferWeightKg?: number | null;
+  transferLocation?: string | null;
   receivedDate?: string | null;
   deliveredDate?: string | null;
   buyerKataKg?: number | null;

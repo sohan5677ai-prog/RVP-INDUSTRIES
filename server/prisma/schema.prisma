@@ -332,6 +332,8 @@ model CreditNote {
   saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
   saleDispatchId String?
   reason         String
+  quantity       Decimal?      @db.Decimal(12, 2)
+  rate           Decimal?      @db.Decimal(12, 2)
   // GST-aware breakdown, since this adjusts an invoice already reported with GST.
   taxableValue   Decimal       @db.Decimal(14, 2)
   gstRate        Decimal       @db.Decimal(5, 2)
@@ -366,6 +368,8 @@ model DebitNote {
   saleDispatch   SaleDispatch? @relation(fields: [saleDispatchId], references: [id])
   saleDispatchId String?
   reason         String
+  quantity       Decimal?      @db.Decimal(12, 2)
+  rate           Decimal?      @db.Decimal(12, 2)
   taxableValue   Decimal       @db.Decimal(14, 2)
   gstRate        Decimal       @db.Decimal(5, 2)
   gstAmount      Decimal       @db.Decimal(14, 2)

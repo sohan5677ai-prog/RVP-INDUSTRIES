@@ -310,6 +310,8 @@ export default function CreditDebitNotes() {
   const [partyId, setPartyId] = useState('');
   const [saleDispatchId, setSaleDispatchId] = useState('');
   const [reason, setReason] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [rate, setRate] = useState('');
   const [taxableValue, setTaxableValue] = useState('');
   const [gstRate, setGstRate] = useState('5');
   const [noteDate, setNoteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -325,6 +327,8 @@ export default function CreditDebitNotes() {
     setPartyId('');
     setSaleDispatchId('');
     setReason('');
+    setQuantity('');
+    setRate('');
     setTaxableValue('');
     setGstRate('5');
     setNoteDate(new Date().toISOString().slice(0, 10));
@@ -339,6 +343,8 @@ export default function CreditDebitNotes() {
           saleDispatchId: saleDispatchId || undefined,
           noteDate,
           reason,
+          quantity: Number(quantity) || undefined,
+          rate: Number(rate) || undefined,
           taxableValue: Number(taxableValue) || 0,
           gstRate: Number(gstRate) || 0,
         },
@@ -614,6 +620,17 @@ export default function CreditDebitNotes() {
             <div className="space-y-2">
               <Label htmlFor="reason">Reason</Label>
               <Input id="reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Rate correction, quality shortfall" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="quantity">Quantity (optional)</Label>
+                <Input id="quantity" type="number" step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rate">Rate (optional)</Label>
+                <Input id="rate" type="number" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="e.g. 24.50" />
+              </div>
             </div>
 
             <div className="space-y-2">

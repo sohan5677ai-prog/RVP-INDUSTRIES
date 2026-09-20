@@ -103,6 +103,8 @@ export function createNote(kind: Kind) {
         partyId: data.partyId,
         saleDispatchId: data.saleDispatchId,
         reason: data.reason,
+        quantity: data.quantity,
+        rate: data.rate,
         taxableValue: data.taxableValue,
         gstRate: data.gstRate,
         gstAmount,
@@ -197,15 +199,17 @@ async function buildNotePdfData(kind: Kind, id: string) {
   const hsn = resolveProductHsn(row.party, tax, order?.gstExempt, '1207');
 
   // Quantity and Rate calculation
-  const ratePerKg = order?.ratePerKg != null && Number(order.ratePerKg) > 0 ? Number(order.ratePerKg) : null;
-  let quantityKg: number | null = null;
-  if (dispatch?.shortageKg && dispatch.shortageKg > 0) {
-    quantityKg = dispatch.shortageKg;
-  } else if (ratePerKg && ratePerKg > 0) {
-    const derived = Math.round(Number(row.taxableValue) / ratePerKg);
-    if (derived > 0) quantityKg = derived;
-  } else if (dispatch?.weightKg && Math.abs(dispatch.weightKg * (ratePerKg ?? 0) - Number(row.taxableValue)) < 2) {
-    quantityKg = dispatch.weightKg;
+  let ratePerKg = row.rate != null ? Number(row.rate) : (order?.ratePerKg != null && Number(order.ratePerKg) > 0 ? Number(order.ratePerKg) : null);
+  let quantityKg: number | null = row.quantity != null ? Number(row.quantity) : null;
+  if (quantityKg == null) {
+    if (dispatch?.shortageKg && dispatch.shortageKg > 0) {
+      quantityKg = dispatch.shortageKg;
+    } else if (ratePerKg && ratePerKg > 0) {
+      const derived = Math.round(Number(row.taxableValue) / ratePerKg);
+      if (derived > 0) quantityKg = derived;
+    } else if (dispatch?.weightKg && Math.abs(dispatch.weightKg * (ratePerKg ?? 0) - Number(row.taxableValue)) < 2) {
+      quantityKg = dispatch.weightKg;
+    }
   }
 
   // Original invoice details

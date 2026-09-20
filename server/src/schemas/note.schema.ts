@@ -5,6 +5,8 @@ export const createNoteSchema = z.object({
   saleDispatchId: z.string().optional(),
   noteDate: z.coerce.date().optional(),
   reason: z.string().min(1, 'Reason is required'),
+  quantity: z.coerce.number().optional(),
+  rate: z.coerce.number().optional(),
   taxableValue: z.coerce.number().positive('Taxable value must be positive'),
   gstRate: z.coerce.number().min(0).max(100),
 });

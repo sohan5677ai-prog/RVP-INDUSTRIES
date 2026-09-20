@@ -615,6 +615,8 @@ interface NoteBase {
   saleDispatchId?: string | null;
   saleDispatch?: SaleDispatch | null;
   reason: string;
+  quantity?: string | null;
+  rate?: string | null;
   taxableValue: string;
   gstRate: string;
   gstAmount: string;

@@ -12,6 +12,9 @@ import {
 import { getCompanyProfileRow } from './settings.controller.js';
 import { renderPurchaseStatementPdf, type PurchaseStatementData } from '../lib/purchaseStatementPdf.js';
 import { SUPPORTED_LANGUAGES, type StatementLanguage } from '../lib/i18n/purchaseStatement.js';
+import { findMatchingTicket } from './weighbridge.controller.js';
+import { generateWeighbridgeSlipJpeg, type SlipTicketData } from '../lib/weighbridgeSlipImage.js';
+import { logger } from '../lib/logger.js';
 
 const LANG_CODES = new Set(SUPPORTED_LANGUAGES.map((l) => l.code));
 
@@ -34,7 +37,14 @@ export async function buildPurchaseStatementData(
     where: { id: verificationId },
     include: {
       purchase: {
-        include: { stockIn: { include: { purchaseOrder: { include: { party: true } } } } },
+        include: {
+          stockIn: {
+            include: {
+              purchaseOrder: { include: { party: true } },
+              weighbridgeTicket: true,
+            },
+          },
+        },
       },
     },
   });
@@ -80,6 +90,65 @@ export async function buildPurchaseStatementData(
       )
     : [];
 
+  let ticket = (stockIn as any).weighbridgeTicket;
+  if (!ticket) {
+    ticket = await findMatchingTicket({
+      vehicleNumber: stockIn.lorryNumber,
+      date: purchase.purchaseDate ?? stockIn.arrivalDate,
+      partyName: party.name,
+    });
+    if (ticket && !stockIn.weighbridgeTicketId) {
+      await prisma.stockIn.update({
+        where: { id: stockIn.id },
+        data: { weighbridgeTicketId: ticket.id },
+      }).catch((err) => logger.warn('[statement] failed to link weighbridge ticket:', err));
+    }
+  }
+
+  let kataSlipImage: Buffer | null = null;
+  let kataTicketData: SlipTicketData | null = null;
+
+  if (ticket) {
+    const firstWeightKg = ticket.firstWeightKg ?? stockIn.rvpFirstWeightKg;
+    const secondWeightKg = ticket.secondWeightKg ?? (stockIn.rvpSecondWeightKg > 0 ? stockIn.rvpSecondWeightKg : null);
+    const netWeightKg =
+      ticket.netWeightKg ??
+      (firstWeightKg != null && secondWeightKg != null
+        ? Math.max(firstWeightKg, secondWeightKg) - Math.min(firstWeightKg, secondWeightKg)
+        : verification.rvpKataKg);
+
+    kataTicketData = {
+      ticketNo: ticket.ticketNo,
+      vehicleNumber: ticket.vehicleNumber || stockIn.lorryNumber,
+      partyName: ticket.partyName || party.name,
+      material: ticket.material || 'TAMARIND SEED (BLACK SEED)',
+      loadType: ticket.loadType || 'LOAD',
+      tripType: ticket.tripType || 'SECOND',
+      firstWeightKg,
+      secondWeightKg,
+      netWeightKg,
+      amount: ticket.amount,
+      paidAmount: ticket.paidAmount,
+      paidAt: ticket.paidAt || ticket.secondWeighedAt || verification.createdAt,
+      createdAt: ticket.createdAt || stockIn.arrivalDate,
+      secondWeighedAt: ticket.secondWeighedAt || verification.createdAt,
+      firstWeighedAt: ticket.firstWeighedAt || stockIn.arrivalDate,
+      isStorageTransfer: ticket.isStorageTransfer ?? false,
+      storageLocation: ticket.storageLocation,
+      transferDirection: ticket.transferDirection,
+      cam1PhotoUrl: ticket.cam1PhotoUrl,
+      cam2PhotoUrl: ticket.cam2PhotoUrl,
+      secondCam1PhotoUrl: ticket.secondCam1PhotoUrl,
+      secondCam2PhotoUrl: ticket.secondCam2PhotoUrl,
+    };
+
+    try {
+      kataSlipImage = await generateWeighbridgeSlipJpeg(kataTicketData);
+    } catch (err) {
+      logger.warn('[statement] failed to generate weighbridge slip image for statement:', err);
+    }
+  }
+
   return {
     company: {
       name: profile.name,
@@ -121,6 +190,8 @@ export async function buildPurchaseStatementData(
     selfVehicleKata: Number(verification.selfVehicleKata ?? 0),
     netPayable,
     lang,
+    kataSlipImage,
+    kataTicket: kataTicketData,
   };
 }
 

@@ -74,6 +74,10 @@ export interface PurchaseStatementData {
   netPayable: number;
   /** Language the party-facing text renders in - defaults to English. */
   lang?: StatementLanguage;
+  /** Official stamped Kata Certificate image (after 2nd weight) rendered on Page 2 */
+  kataSlipImage?: Buffer | null;
+  /** Stored weighbridge ticket data for reconciliation */
+  kataTicket?: any | null;
 }
 
 const PAGE = { margin: 36, width: 595.28, height: 841.89 };
@@ -555,6 +559,116 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       width: W * 0.4,
       align: 'right',
     });
+
+    // --- Page 2: Official Weighment Certificate (Kata Slip) -----------------
+    if (data.kataSlipImage) {
+      doc.addPage({ size: 'A4', margin: PAGE.margin });
+      let p2y = PAGE.margin;
+
+      // Header row
+      doc.font(F.display).fontSize(14).fillColor(INK).text('RVP WEIGH BRIDGE', LEFT, p2y, {
+        width: W * 0.5,
+        characterSpacing: 0.2,
+      });
+      doc.font(F.display).fontSize(10.5).fillColor('#b91c1c').text('OFFICIAL WEIGHMENT CERTIFICATE (KATA SLIP)', LEFT, p2y + 1, {
+        width: W,
+        align: 'right',
+        characterSpacing: 0.2,
+      });
+      p2y += 18;
+
+      doc.font(F.body).fontSize(7.5).fillColor(MUTED).text(
+        `Lorry Tare & Net Weighment Confirmation · Post 2nd Weight Completion · Lorry: ${data.lorryNumber}`,
+        LEFT,
+        p2y,
+        { width: W }
+      );
+      p2y += 12;
+
+      hline(p2y, RULE, 0.8);
+      p2y += 8;
+
+      // High-resolution Kata Slip Image
+      const slipW = W;
+      const slipH = (W * 740) / 1050; // Aspect ratio of generateWeighbridgeSlipJpeg (1050x740)
+      try {
+        doc.image(data.kataSlipImage, LEFT, p2y, { width: slipW, height: slipH });
+      } catch (err) {
+        logger.warn('[pdf] failed to embed kata slip image in statement pdf:', err);
+      }
+      p2y += slipH + 10;
+
+      // Reconciliation card below slip
+      const reconH = 88;
+      doc.roundedRect(LEFT, p2y, W, reconH, 4).fillAndStroke('#f8fafc', '#cbd5e1');
+
+      doc.font(F.bold).fontSize(8.5).fillColor(INK).text(
+        'KATA WEIGHT RECONCILIATION & PURCHASE STATEMENT CONNECTION',
+        LEFT + 10,
+        p2y + 8,
+        { width: W - 20, characterSpacing: 0.4 }
+      );
+      doc.lineWidth(0.5).strokeColor('#e2e8f0').moveTo(LEFT + 10, p2y + 21).lineTo(RIGHT - 10, p2y + 21).stroke();
+
+      const ticket = data.kataTicket;
+      const ticketNoStr = ticket?.ticketNo ? `#${String(ticket.ticketNo).padStart(2, '0')}` : '-';
+      const fWeight = ticket?.firstWeightKg ?? weights.rvpKataKg;
+      const sWeight = ticket?.secondWeightKg ?? (weights.billingKg > weights.rvpKataKg ? fWeight - weights.rvpKataKg : 0);
+      const nWeight = ticket?.netWeightKg ?? weights.rvpKataKg;
+
+      const reconCols: [string, string][] = [
+        ['Ticket Number', ticketNoStr],
+        ['1st Weight (Gross)', kg(fWeight)],
+        ['2nd Weight (Tare)', kg(sWeight)],
+        ['RVP Kata Net', kg(nWeight)],
+        ['Statement Weight', kg(weights.billingKg)],
+        ['Kata Difference', kg(weights.diffKg)],
+        ['Payable Weight', kg(weights.payableKg)],
+        ['Verification Status', weights.exempt ? 'Within Allowance' : 'Weight Cut Applied'],
+      ];
+
+      const colWidth = (W - 20) / 4;
+      reconCols.forEach(([label, value], idx) => {
+        const colIdx = idx % 4;
+        const rowIdx = Math.floor(idx / 4);
+        const cx = LEFT + 10 + colIdx * colWidth;
+        const cy = p2y + 26 + rowIdx * 27;
+
+        doc.font(F.body).fontSize(6.5).fillColor(MUTED).text(label.toUpperCase(), cx, cy, { width: colWidth - 4 });
+        doc.font(F.bold).fontSize(9).fillColor(label === 'RVP Kata Net' ? '#047857' : INK).text(value, cx, cy + 9, { width: colWidth - 4 });
+      });
+
+      p2y += reconH + 10;
+
+      // Page 2 Bottom Footer & Verified Seal
+      const p2FooterY = Math.max(p2y, BOTTOM - 75);
+      doc.lineWidth(0.6).strokeColor(HAIR).dash(2, { space: 2 }).moveTo(LEFT, p2FooterY).lineTo(RIGHT, p2FooterY).stroke();
+      doc.undash();
+
+      doc.font(F.body).fontSize(7).fillColor(MUTED).text(
+        `This electronic Kata certificate was automatically matched and attached to Purchase Statement Invoice #${data.invoiceNumber || data.lorryNumber}. ` +
+        `All weights captured live from RVP Weighbridge digital load-cell indicator.`,
+        LEFT,
+        p2FooterY + 6,
+        { width: W * 0.58 }
+      );
+
+      doc.font(F.semi).fontSize(8).fillColor(INK).text(t.forCompany(company.name), LEFT + W * 0.6, p2FooterY + 6, {
+        width: W * 0.4,
+        align: 'right',
+      });
+      drawSignatureMark(doc, {
+        x: LEFT + W * 0.6,
+        width: W * 0.4,
+        y: p2FooterY + 16,
+        signHeight: 38,
+        stampSize: 64,
+      });
+      doc.font(F.body).fontSize(7).fillColor(MUTED).text(t.authorisedSignatory, LEFT + W * 0.6, p2FooterY + 54, {
+        width: W * 0.4,
+        align: 'right',
+      });
+    }
 
     doc.end();
   });

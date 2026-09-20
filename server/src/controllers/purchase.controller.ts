@@ -6,10 +6,11 @@ import { createPurchaseSchema, updatePurchaseFreightCostsSchema } from '../schem
 import { calcHamali, calcKataFee, companyHamaliShare, purchaseGst } from '../lib/calc.js';
 import { InventoryService } from '../services/inventory.service.js';
 import { clearCache } from '../lib/cache.js';
+import { findMatchingTicket } from './weighbridge.controller.js';
 
 const purchaseInclude = {
   verification: true,
-  stockIn: { include: { purchaseOrder: { include: { party: true } } } },
+  stockIn: { include: { purchaseOrder: { include: { party: true } }, weighbridgeTicket: true } },
 } as const;
 
 // Trimmed projection for the Hamali Report, which only reads the party/lorry/
@@ -74,7 +75,7 @@ export async function createPurchase(req: Request, res: Response) {
 
   const stockIn = await prisma.stockIn.findUnique({
     where: { id: data.stockInId },
-    include: { purchase: true, purchaseOrder: true },
+    include: { purchase: true, purchaseOrder: { include: { party: true } } },
   });
   if (!stockIn) throw new HttpError(400, 'Stock-in not found');
   if (stockIn.purchase) throw new HttpError(409, 'Purchase already recorded for this stock-in');
@@ -105,13 +106,40 @@ export async function createPurchase(req: Request, res: Response) {
   // Shared-lorry tonnage the freight spreads over (BASE only), carried from the StockIn.
   const freightTonnageKg = stockIn.purchaseOrder.priceType === 'BASE' ? stockIn.freightTonnageKg : null;
 
+  let ticketIdToComplete = data.weighbridgeTicketId || stockIn.weighbridgeTicketId;
+  if (!ticketIdToComplete && data.rvpSecondWeightKg > 0) {
+    const matched = await findMatchingTicket({
+      vehicleNumber: stockIn.lorryNumber,
+      date: stockIn.arrivalDate,
+      partyName: stockIn.purchaseOrder?.party?.name,
+    });
+    if (matched) ticketIdToComplete = matched.id;
+  }
+
   const purchase = await prisma.$transaction(async (tx) => {
+    // If a Kata ticket is linked and pending second weight, complete it
+    if (ticketIdToComplete && data.rvpSecondWeightKg > 0) {
+      const ticket = await tx.weighbridgeTicket.findUnique({ where: { id: ticketIdToComplete } });
+      if (ticket && ticket.secondWeightKg == null) {
+        await tx.weighbridgeTicket.update({
+          where: { id: ticketIdToComplete },
+          data: {
+            secondWeightKg: data.rvpSecondWeightKg,
+            netWeightKg,
+            secondWeighedAt: new Date(),
+            status: 'COMPLETED',
+          },
+        });
+      }
+    }
+
     // 1. Update StockIn with rvpSecondWeightKg and rvpKataKg (direct-net keeps 0 tare)
     await tx.stockIn.update({
       where: { id: data.stockInId },
       data: {
         rvpSecondWeightKg: stockIn.directNet ? 0 : data.rvpSecondWeightKg,
         rvpKataKg: netWeightKg,
+        ...(ticketIdToComplete && !stockIn.weighbridgeTicketId ? { weighbridgeTicketId: ticketIdToComplete } : {}),
       },
     });
 

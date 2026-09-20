@@ -1,13 +1,14 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Printer, ArrowLeft, Download, Languages } from 'lucide-react';
+import { Printer, ArrowLeft, Download, Languages, Scale, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { api, apiBlob } from '@/lib/api';
-import type { Purchase, WeightVerification, StockIn, PurchaseOrder, Party } from '@/lib/types';
+import type { Purchase, WeightVerification, StockIn, PurchaseOrder, Party, CompanyProfile } from '@/lib/types';
 import { computeQualityAdjustments, type QualityAdjustmentMode, type QualityAdjustmentRow } from '@/lib/calc';
 import { Button } from '@/components/ui/button';
 import { shortDate } from '@/lib/format';
 import AuthorisedSignature from '@/components/AuthorisedSignature';
+import WeighbridgeSlipModal from '@/components/WeighbridgeSlipModal';
 import { SUPPORTED_LANGUAGES, TRANSLATIONS, type StatementLanguage } from '@/lib/i18n/purchaseStatement';
 
 type PurchaseDetails = Purchase & {
@@ -18,13 +19,6 @@ type PurchaseDetails = Purchase & {
     };
   };
 };
-
-interface CompanyProfile {
-  name: string;
-  address?: string | null;
-  gstin?: string | null;
-  contact?: string | null;
-}
 
 /** Free allowance on the kata difference - keep in step with EXEMPT_KG on the server. */
 const ALLOWANCE_KG = 80;
@@ -58,6 +52,7 @@ export default function PurchaseStatement() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const [downloading, setDownloading] = useState(false);
   const [lang, setLang] = useState<StatementLanguage>('en');
+  const [showKataSlip, setShowKataSlip] = useState(false);
 
   const t = TRANSLATIONS[lang];
 
@@ -111,6 +106,7 @@ export default function PurchaseStatement() {
   const party = stockIn.purchaseOrder.party;
   const hasGst = stockIn.purchaseOrder.hasGst ?? false;
   const price = Number(v.pricePerKg);
+  const kataTicket = stockIn.weighbridgeTicket;
 
   // --- Bill arithmetic (mirrors createVerification on the server) ------------
   const billedKg = Math.max(v.referenceKg, v.finalWeightKg);
@@ -263,6 +259,16 @@ export default function PurchaseStatement() {
         </div>
 
         <div className="flex items-center gap-2">
+          {kataTicket && (
+            <Button
+              variant="outline"
+              className="gap-1.5 border-emerald-600/30 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+              onClick={() => setShowKataSlip(true)}
+            >
+              <Scale className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              Kata Slip #{kataTicket.ticketNo}
+            </Button>
+          )}
           <Button
             variant="outline"
             className="gap-1.5"
@@ -386,6 +392,73 @@ export default function PurchaseStatement() {
           />
         </div>
       </div>
+
+      {/* Attached Kata slip preview card */}
+      {kataTicket && (
+        <div className="mt-6 rounded-xl border border-emerald-200 bg-gradient-to-b from-emerald-50/70 to-white p-5 shadow-sm dark:border-emerald-900/60 dark:from-emerald-950/20 dark:to-neutral-900 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-emerald-100 dark:border-emerald-900/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-xs">
+                <Scale className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                    Official Weighbridge Certificate Attached (#{kataTicket.ticketNo})
+                  </h3>
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                    Rendered on Page 2 of PDF
+                  </span>
+                </div>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                  Dual CCTV snapshots, gross/tare weighments, and RVP security seal are permanently bound to this purchase statement.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowKataSlip(true)}
+              className="gap-1.5 border-emerald-600/40 text-emerald-800 hover:bg-emerald-100/50 dark:border-emerald-700 dark:text-emerald-300 font-semibold"
+            >
+              <Eye className="h-4 w-4" /> Preview / Print Slip
+            </Button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+            <div className="rounded-md border border-neutral-200/80 bg-white/80 p-2.5 dark:border-neutral-800 dark:bg-neutral-900/50">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">Gross (1st Weight)</span>
+              <p className="mt-0.5 text-sm font-bold text-neutral-900 dark:text-neutral-100">{kg(kataTicket.firstWeightKg ?? 0)}</p>
+            </div>
+            <div className="rounded-md border border-neutral-200/80 bg-white/80 p-2.5 dark:border-neutral-800 dark:bg-neutral-900/50">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">Tare (2nd Weight)</span>
+              <p className="mt-0.5 text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                {kataTicket.secondWeightKg ? kg(kataTicket.secondWeightKg) : '—'}
+              </p>
+            </div>
+            <div className="rounded-md border border-neutral-200/80 bg-white/80 p-2.5 dark:border-neutral-800 dark:bg-neutral-900/50">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">Net Kata Weight</span>
+              <p className="mt-0.5 text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                {kataTicket.netWeightKg ? kg(kataTicket.netWeightKg) : '—'}
+              </p>
+            </div>
+            <div className="rounded-md border border-neutral-200/80 bg-white/80 p-2.5 dark:border-neutral-800 dark:bg-neutral-900/50">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">Vehicle / Lorry</span>
+              <p className="mt-0.5 text-sm font-bold font-mono text-neutral-900 dark:text-neutral-100">
+                {kataTicket.vehicleNumber || stockIn.lorryNumber || '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showKataSlip && kataTicket && (
+        <WeighbridgeSlipModal
+          ticket={kataTicket}
+          companyProfile={company}
+          onClose={() => setShowKataSlip(false)}
+        />
+      )}
 
 
       {/* Embedded CSS for Print Layout */}

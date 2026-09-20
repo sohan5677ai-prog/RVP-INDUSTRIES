@@ -10,6 +10,7 @@ import { computeFY, formatPoNumber, releasePoSerial, reservePoSerials } from '..
 import { whatsappService } from '../services/whatsapp.service.js';
 import { purchaseGst } from '../lib/calc.js';
 import { clearCache } from '../lib/cache.js';
+import { findMatchingTicket } from './weighbridge.controller.js';
 
 /**
  * True when `arrival` falls on a calendar day strictly before `poDate`. Both are
@@ -142,6 +143,7 @@ export async function listStockIns(_req: Request, res: Response) {
     include: {
       purchaseOrder: { include: { party: true } },
       purchase: { include: { verification: true } },
+      weighbridgeTicket: true,
     },
   });
   res.json(stockIns);
@@ -153,6 +155,7 @@ export async function getStockIn(req: Request, res: Response) {
     include: {
       purchaseOrder: { include: { party: true } },
       purchase: { include: { verification: true, processing: true } },
+      weighbridgeTicket: true,
     },
   });
   if (!stockIn) throw new HttpError(404, 'Stock-in not found');
@@ -216,6 +219,18 @@ export async function createStockIn(req: Request, res: Response) {
   // transaction open.
   const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : "";
 
+  let weighbridgeTicketId = data.weighbridgeTicketId;
+  if (!weighbridgeTicketId) {
+    const matched = await findMatchingTicket({
+      vehicleNumber: data.lorryNumber,
+      date: data.arrivalDate,
+      partyName: po.party?.name,
+    });
+    if (matched) {
+      weighbridgeTicketId = matched.id;
+    }
+  }
+
   const stockIn = await prisma.$transaction(async (tx) => {
     const created = await tx.stockIn.create({
       data: {
@@ -237,6 +252,7 @@ export async function createStockIn(req: Request, res: Response) {
         // Shared-lorry tonnage the freight is spread over (BASE only); null → single party.
         freightTonnageKg: po.priceType === 'BASE' ? (data.freightTonnageKg ?? null) : null,
         selfVehicle: data.selfVehicle,
+        weighbridgeTicketId: weighbridgeTicketId ?? null,
       },
     });
 
@@ -302,6 +318,19 @@ export async function createUrpStockIn(req: Request, res: Response) {
   // transaction open.
   const invoiceFileUrl = req.file ? await uploadFileToStorage(req.file) : "";
 
+  let weighbridgeTicketId = data.weighbridgeTicketId;
+  if (!weighbridgeTicketId) {
+    const party = await prisma.party.findUnique({ where: { id: data.partyId }, select: { name: true } });
+    const matched = await findMatchingTicket({
+      vehicleNumber: data.lorryNumber,
+      date: data.arrivalDate,
+      partyName: party?.name,
+    });
+    if (matched) {
+      weighbridgeTicketId = matched.id;
+    }
+  }
+
   const stockIn = await prisma.$transaction(async (tx) => {
     // 1. Create a 1-lorry PO behind the scenes. URP spot purchases share one
     // continuing "URP" series across all parties (URP/01/26-27, URP/02/26-27, ...).
@@ -357,6 +386,7 @@ export async function createUrpStockIn(req: Request, res: Response) {
         freightCharge,
         freightTonnageKg,
         selfVehicle: data.selfVehicle,
+        weighbridgeTicketId: weighbridgeTicketId ?? null,
       },
     });
 
@@ -388,7 +418,7 @@ export async function updateStockIn(req: Request, res: Response) {
   const data = createStockInSchema.parse(req.body);
   const stockIn = await prisma.stockIn.findUnique({
     where: { id: req.params.id },
-    include: { purchase: true, purchaseOrder: true },
+    include: { purchase: true, purchaseOrder: { include: { party: true } } },
   });
   if (!stockIn) throw new HttpError(404, 'Stock-in not found');
 
@@ -414,6 +444,18 @@ export async function updateStockIn(req: Request, res: Response) {
   const freightTonnageKg = stockIn.purchaseOrder.priceType === 'BASE'
     ? (data.freightTonnageKg ?? stockIn.freightTonnageKg ?? null)
     : null;
+
+  let weighbridgeTicketId = data.weighbridgeTicketId !== undefined ? data.weighbridgeTicketId : stockIn.weighbridgeTicketId;
+  if (!weighbridgeTicketId) {
+    const matched = await findMatchingTicket({
+      vehicleNumber: data.lorryNumber,
+      date: data.arrivalDate,
+      partyName: stockIn.purchaseOrder?.party?.name,
+    });
+    if (matched) {
+      weighbridgeTicketId = matched.id;
+    }
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     // If this stock-in was already purchased (and maybe verified), unwind that
@@ -442,6 +484,7 @@ export async function updateStockIn(req: Request, res: Response) {
         freightCharge,
         freightTonnageKg,
         selfVehicle: data.selfVehicle,
+        weighbridgeTicketId: weighbridgeTicketId ?? null,
       },
     });
 

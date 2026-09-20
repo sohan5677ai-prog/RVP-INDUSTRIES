@@ -78,3 +78,4 @@ server/email-previews/
 
 .vercel
 .env*
+logs/

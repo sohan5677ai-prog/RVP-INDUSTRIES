@@ -2,7 +2,7 @@ import React, { Fragment, useMemo, useRef, useState, useEffect, useCallback } fr
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X, Ban, Compass } from 'lucide-react';
+import { Plus, FileText, Pencil, Trash2, Sparkles, Loader2, UploadCloud, ChevronRight, Truck, PackageCheck, Clock, ClipboardPaste, X, Ban, Compass, Scale } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { usePasteImage, readImageFromClipboard } from '@/lib/usePasteImage';
 import type { PurchaseOrder, StockIn as StockInType } from '@/lib/types';
@@ -231,6 +231,7 @@ function StockInFormDialog({
   const [billingRatePerKg, setBillingRatePerKg] = useState('');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [extractingKind, setExtractingKind] = useState<DocKind | null>(null);
+  const [weighbridgeTicketId, setWeighbridgeTicketId] = useState<string | null>(null);
 
   const [sharedFreight, setSharedFreight] = useState(false);
   const [totalLorryFreight, setTotalLorryFreight] = useState('');
@@ -251,6 +252,7 @@ function StockInFormDialog({
         setSelfVehicle(editing.selfVehicle ?? false);
         setBilledAtDiffRate(Number(editing.billingRatePerKg ?? 0) > 0);
         setBillingRatePerKg(editing.billingRatePerKg ? String(editing.billingRatePerKg) : '');
+        setWeighbridgeTicketId(editing.weighbridgeTicketId ?? null);
         setInvoiceFile(null);
         setSharedFreight(false);
         setTotalLorryFreight('');
@@ -268,6 +270,7 @@ function StockInFormDialog({
         setSelfVehicle(false);
         setBilledAtDiffRate(false);
         setBillingRatePerKg('');
+        setWeighbridgeTicketId(null);
         setInvoiceFile(null);
         setSharedFreight(false);
         setTotalLorryFreight('');
@@ -389,10 +392,15 @@ function StockInFormDialog({
   });
 
   useEffect(() => {
-    if (!editing && linkedKataTicket?.firstWeightKg) {
-      setRvpFirstWeightKg(String(linkedKataTicket.firstWeightKg));
+    if (!editing && linkedKataTicket) {
+      if (linkedKataTicket.firstWeightKg) {
+        setRvpFirstWeightKg(String(linkedKataTicket.firstWeightKg));
+      }
+      setWeighbridgeTicketId(linkedKataTicket.id);
     }
   }, [editing, linkedKataTicket]);
+
+  const activeKataTicket = editing?.weighbridgeTicket ?? linkedKataTicket;
 
   const priceType = editing?.purchaseOrder?.priceType ?? selectedPo?.priceType;
   const isBase = priceType === 'BASE';
@@ -428,6 +436,9 @@ function StockInFormDialog({
       fd.append('selfVehicle', selfVehicle ? 'true' : 'false');
       // Blank clears it server-side (back to "billed at the PO price").
       fd.append('billingRatePerKg', billedAtDiffRate && billedRate > 0 ? String(billedRate) : '');
+      if (weighbridgeTicketId || linkedKataTicket?.id) {
+        fd.append('weighbridgeTicketId', weighbridgeTicketId || linkedKataTicket?.id || '');
+      }
       if (invoiceFile) fd.append('invoice', invoiceFile);
 
       const url = editing ? `/stock-in/${editing.id}` : '/stock-in';
@@ -559,6 +570,37 @@ function StockInFormDialog({
                 <Input id="billing" type="number" value={billingWeightKg} onChange={(e) => setBillingWeightKg(e.target.value)} required />
               </div>
             </div>
+
+            {activeKataTicket && (
+              <div className="rounded-lg border border-emerald-300/70 bg-emerald-50/60 p-3 dark:border-emerald-800/70 dark:bg-emerald-950/30 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-semibold text-emerald-800 dark:text-emerald-300">
+                    <Scale className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Connected Kata Weighbridge Slip #{activeKataTicket.ticketNo}</span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={
+                      activeKataTicket.status === 'COMPLETED'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300'
+                        : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300'
+                    }
+                  >
+                    {activeKataTicket.status === 'COMPLETED' ? '2nd Weight Done (Ready for Statement)' : '1st Weight Done (Pending Tare)'}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-muted-foreground pt-1.5 border-t border-emerald-200/60 dark:border-emerald-900/40">
+                  <div>Gross (1st): <span className="font-semibold text-foreground">{kg(activeKataTicket.firstWeightKg)}</span></div>
+                  <div>Tare (2nd): <span className="font-semibold text-foreground">{activeKataTicket.secondWeightKg ? kg(activeKataTicket.secondWeightKg) : 'Pending'}</span></div>
+                  <div>Net Kata: <span className="font-semibold text-foreground">{activeKataTicket.netWeightKg ? kg(activeKataTicket.netWeightKg) : '—'}</span></div>
+                </div>
+                <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80">
+                  {activeKataTicket.status === 'COMPLETED'
+                    ? 'Official stamped certificate with CCTV photos attached; will be rendered in the Purchase Statement PDF.'
+                    : '2nd weight will automatically update this slip when recorded via Kata Cabin or Purchases screen.'}
+                </p>
+              </div>
+            )}
 
             <label className="flex items-start gap-2.5 rounded-lg border bg-muted/30 px-4 py-3 cursor-pointer hover:border-primary/50 transition-colors">
               <input
@@ -736,6 +778,19 @@ const StockInGroupRow = React.memo(({
                         : <Badge variant="warning">Awaiting</Badge>}
                       <Badge variant="outline">{locationLabel(s.loadingLocation)}</Badge>
                       {s.selfVehicle && <Badge variant="soft">Self vehicle</Badge>}
+                      {s.weighbridgeTicket && (
+                        <Badge
+                          variant="outline"
+                          className={`font-mono text-[10px] gap-1 ${
+                            s.weighbridgeTicket.status === 'COMPLETED'
+                              ? 'border-emerald-500/50 text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40'
+                              : 'border-amber-500/50 text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-950/40'
+                          }`}
+                        >
+                          <Scale className="h-2.5 w-2.5" />
+                          Kata #{s.weighbridgeTicket.ticketNo}
+                        </Badge>
+                      )}
                       {s.ewbNumber && (
                         <Badge
                           variant={s.ewbStatus === 'CANCELLED' ? 'destructive' : 'default'}
@@ -749,6 +804,15 @@ const StockInGroupRow = React.memo(({
                       <span>{shortDate(s.arrivalDate)}</span><PanelDot />
                       <span className="tabular-nums">{s.purchaseOrder?.poNumber ?? '-'}</span><PanelDot />
                       <span>{s.lorryNumber || 'no lorry no'}</span>
+                      {s.weighbridgeTicket && (
+                        <>
+                          <PanelDot />
+                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
+                            Kata #{s.weighbridgeTicket.ticketNo}
+                            {s.weighbridgeTicket.secondWeightKg ? ` (${kg(s.weighbridgeTicket.firstWeightKg)} / ${kg(s.weighbridgeTicket.secondWeightKg)})` : ' (Pending 2nd Wt)'}
+                          </span>
+                        </>
+                      )}
                       {s.invoiceFileUrl && (
                         <>
                           <PanelDot />

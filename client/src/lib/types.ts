@@ -439,6 +439,8 @@ export interface StockIn {
   ewbVehicleType?: string | null;
   ewbTransDocNo?: string | null;
   ewbTransDocDate?: string | null;
+  weighbridgeTicketId?: string | null;
+  weighbridgeTicket?: WeighbridgeTicket | null;
   createdAt: string;
   purchase?: Purchase | null;
   purchaseOrder?: (PurchaseOrder & { party?: Party }) | null;

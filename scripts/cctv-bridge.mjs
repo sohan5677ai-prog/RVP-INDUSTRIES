@@ -77,7 +77,7 @@ function getDefaultBridgeKey() {
 
 const CONFIG = {
   cloudApiUrl: setting('CLOUD_API_URL', 'https://rvp-server.onrender.com/api').replace(/\/+$/, ''),
-  localPort: Number(setting('BRIDGE_LOCAL_PORT', 4000)),
+  localPort: Number(setting('BRIDGE_LOCAL_PORT', 4004)),
   // One fresh frame per second is enough for a remote operating console and
   // avoids piling up uploads while Render is waking or the internet is slow.
   cloudBroadcastIntervalMs: Number(setting('CCTV_CLOUD_FRAME_INTERVAL_MS', 1000)),

@@ -174,19 +174,25 @@ function normaliseMatchText(value: string): string {
 }
 
 /**
- * Resolve the physical Kata ticket for an ERP movement.
+ * Core business function to resolve the physical Kata ticket for an ERP movement.
  * Flexible lookup: matches vehicle number within an operational date window
  * (around target date or recent days) and intelligently scores by party name,
  * date proximity, and material to match the exact inward/outward movement.
  */
-export async function matchTicketHandler(req: Request, res: Response) {
-  const date = String(req.query.date ?? '').trim();
-  const rawVehicle = String(req.query.vehicleNumber ?? '').trim();
+export async function findMatchingTicket(params: {
+  vehicleNumber: string;
+  date?: Date | string | null;
+  partyName?: string | null;
+}): Promise<any | null> {
+  const rawVehicle = String(params.vehicleNumber ?? '').trim();
   const vehicleNumber = normaliseMatchText(rawVehicle);
-  const partyName = normaliseMatchText(String(req.query.partyName ?? ''));
+  const partyName = normaliseMatchText(String(params.partyName ?? ''));
+  const rawDate = params.date instanceof Date
+    ? params.date.toISOString().slice(0, 10)
+    : String(params.date ?? '').trim();
 
   if (!vehicleNumber) {
-    throw new HttpError(400, 'Vehicle number is required');
+    return null;
   }
 
   // Calculate search window: if date provided, search ±4 days around target date
@@ -195,8 +201,8 @@ export async function matchTicketHandler(req: Request, res: Response) {
   let windowEnd: Date;
   let targetDate: Date | null = null;
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    targetDate = new Date(`${date}T12:00:00+05:30`);
+  if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+    targetDate = new Date(`${rawDate.slice(0, 10)}T12:00:00+05:30`);
     windowStart = new Date(targetDate.getTime() - 4 * 24 * 60 * 60 * 1000);
     windowEnd = new Date(targetDate.getTime() + 2 * 24 * 60 * 60 * 1000);
   } else {
@@ -219,7 +225,7 @@ export async function matchTicketHandler(req: Request, res: Response) {
   );
 
   if (vehCandidates.length === 0) {
-    return res.json(null);
+    return null;
   }
 
   function scoreTicket(t: typeof vehCandidates[0]): number {
@@ -272,7 +278,18 @@ export async function matchTicketHandler(req: Request, res: Response) {
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  res.json(scored[0]?.ticket ?? null);
+  return scored[0]?.ticket ?? null;
+}
+
+export async function matchTicketHandler(req: Request, res: Response) {
+  const date = String(req.query.date ?? '').trim();
+  const rawVehicle = String(req.query.vehicleNumber ?? '').trim();
+  if (!rawVehicle) {
+    throw new HttpError(400, 'Vehicle number is required');
+  }
+  const partyName = String(req.query.partyName ?? '').trim();
+  const ticket = await findMatchingTicket({ vehicleNumber: rawVehicle, date, partyName });
+  res.json(ticket);
 }
 
 /**

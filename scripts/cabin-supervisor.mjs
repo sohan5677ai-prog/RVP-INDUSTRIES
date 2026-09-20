@@ -152,7 +152,7 @@ setInterval(() => {
   // Only check health after the process has had at least 10s to start up
   if (Date.now() - cctv.lastStarted < 10000) return;
 
-  const req = http.get('http://127.0.0.1:4000/api/weighbridge/cctv/status', { timeout: 5000 }, (res) => {
+  const req = http.get('http://127.0.0.1:4004/api/weighbridge/cctv/status', { timeout: 5000 }, (res) => {
     let data = '';
     res.on('data', (c) => { data += c; });
     res.on('end', () => {
@@ -168,7 +168,7 @@ setInterval(() => {
   req.on('error', (err) => {
     cctv.healthConsecutiveFailures += 1;
     if (cctv.healthConsecutiveFailures >= 3) {
-      log('warn', `CCTV Bridge unresponsive on http://127.0.0.1:4000 (${err.message}). Restarting...`);
+      log('warn', `CCTV Bridge unresponsive on http://127.0.0.1:4004 (${err.message}). Restarting...`);
       cctv.healthConsecutiveFailures = 0;
       startService('cctv');
     }

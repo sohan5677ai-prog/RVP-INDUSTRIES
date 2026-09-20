@@ -192,6 +192,9 @@ export function UrpStockInDialog({ open, onOpenChange }: Props) {
     fd.append('partyKataKg', effectivePartyKata);
     fd.append('loadingLocation', loadingLocation);
     fd.append('selfVehicle', selfVehicle ? 'true' : 'false');
+    if (linkedKataTicket?.id) {
+      fd.append('weighbridgeTicketId', linkedKataTicket.id);
+    }
     if (priceType === 'BASE') {
       fd.append('freightCharge', freight);
       // Shared lorry: spread the freight over the whole vehicle's tonnage. Left blank

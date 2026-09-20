@@ -1316,8 +1316,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       const free = Number(ticket.amount || 0) === 0;
       const isExempt = isKnmVehicle(ticket.vehicleNumber, ticket.partyName);
       const isTransfer = isTicketTransfer(ticket);
-      const isSale = isTicketBuyerSale(ticket);
-      const eligibleForWa = !isExempt && !isTransfer && !isSale;
+      const eligibleForWa = isEligibleForWhatsappSlip(ticket);
 
       const companyDriver = findCompanyVehicle(ticket.vehicleNumber, companyProfile?.companyVehicles);
 
@@ -2652,7 +2651,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     const isExempt = isKnmVehicle(ticket.vehicleNumber, ticket.partyName);
                     const isTransfer = isTicketTransfer(ticket);
                     const isSale = isTicketBuyerSale(ticket);
-                    const isPurchase = !isExempt && !isTransfer && !isSale;
                     const free = Number(ticket.amount || 0) === 0 || isExempt || isTransfer;
                     const verified = Boolean(ticket.paidAt) || isExempt || isTransfer;
 

@@ -57,6 +57,7 @@ export const createStockInSchema = z.object({
   // Party arrived in their own vehicle → the lorry's ₹80/t hamali share is
   // deducted from their payable at verification. Multipart sends "true"/"false".
   selfVehicle: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional().default(false),
+  weighbridgeTicketId: z.preprocess((val) => (val === null || val === undefined || val === '' ? undefined : String(val)), z.string().optional()),
 });
 
 export const createUrpStockInSchema = z.object({
@@ -92,6 +93,7 @@ export const createUrpStockInSchema = z.object({
   ),
   hasGst: z.preprocess((val) => val === 'true', z.boolean().optional().default(false)),
   selfVehicle: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional().default(false),
+  weighbridgeTicketId: z.preprocess((val) => (val === null || val === undefined || val === '' ? undefined : String(val)), z.string().optional()),
 });
 
 export const createPurchaseSchema = z.object({
@@ -108,6 +110,7 @@ export const createPurchaseSchema = z.object({
   // Optional: when omitted the DB default (now) applies on create and the existing
   // value is kept on update.
   purchaseDate: z.coerce.date().optional(),
+  weighbridgeTicketId: z.preprocess((val) => (val === null || val === undefined || val === '' ? undefined : String(val)), z.string().optional()),
   // Inward freight is now captured at Stock In (see createStockInSchema) and
   // sourced from the StockIn record at purchase time, not from this request.
 });

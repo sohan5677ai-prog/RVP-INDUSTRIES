@@ -483,6 +483,8 @@ model StockIn {
   ewbVehicleType    String?
   ewbTransDocNo     String?
   ewbTransDocDate   DateTime?
+  weighbridgeTicketId String?
+  weighbridgeTicket   WeighbridgeTicket? @relation(fields: [weighbridgeTicketId], references: [id])
   createdAt         DateTime      @default(now())
   purchase          Purchase?
 
@@ -490,6 +492,7 @@ model StockIn {
   @@index([arrivalDate])
   @@index([lorryNumber])
   @@index([invoiceNumber])
+  @@index([weighbridgeTicketId])
 }
 
 model Purchase {
@@ -2240,6 +2243,7 @@ model WeighbridgeTicket {
   isStorageTransfer          Boolean   @default(false)
   storageLocation            String?
   transferDirection          String? // STORAGE_TO_RVP | RVP_TO_STORAGE
+  stockIns                   StockIn[]
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt
 

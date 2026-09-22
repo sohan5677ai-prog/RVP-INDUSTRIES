@@ -2488,6 +2488,8 @@ export interface InternalKataTicketPayload {
   cam2PhotoUrl?: string | null;
   secondCam1PhotoUrl?: string | null;
   secondCam2PhotoUrl?: string | null;
+  slipImageUrl?: string | null;
+  paidAt?: Date | string | null;
   isStorageTransfer?: boolean | null;
   storageLocation?: string | null;
   transferDirection?: string | null;
@@ -2565,9 +2567,22 @@ export async function notifyInternalKataCompleted(
         : 0);
   const netWeightStr = `${netWeightNum.toLocaleString('en-IN')} Kg`;
 
-  // 4. Resolve camera snapshot photo URL for IMAGE header
+  // 4. Resolve kata slip URL (primary) or camera snapshot photo URL for IMAGE header
   let photoUrl: string | undefined = undefined;
-  const rawPhoto = ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || ticket.secondCam2PhotoUrl || ticket.cam2PhotoUrl;
+  
+  if (ticket.slipImageUrl && !ticket.slipImageUrl.toLowerCase().endsWith('.pdf') && !ticket.slipImageUrl.includes('.pdf?')) {
+    photoUrl = ticket.slipImageUrl;
+  } else {
+    // Generate dynamic slip.jpg url
+    const secret = process.env.JWT_SECRET || 'rvp-default-kata-secret-key-2026';
+    const crypto = await import('crypto');
+    const tokenTime = (ticket.paidAt ? new Date(ticket.paidAt) : dateObj).getTime();
+    const token = crypto.createHmac('sha256', secret).update(`weighbridge-slip:${ticket.id}:${tokenTime}`).digest('hex');
+    const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
+    photoUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}`;
+  }
+
+  const rawPhoto = photoUrl || ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || ticket.secondCam2PhotoUrl || ticket.cam2PhotoUrl;
   if (rawPhoto && typeof rawPhoto === 'string' && !rawPhoto.toLowerCase().endsWith('.pdf') && !rawPhoto.includes('.pdf?')) {
     if (rawPhoto.startsWith('http://') || rawPhoto.startsWith('https://')) {
       photoUrl = rawPhoto;

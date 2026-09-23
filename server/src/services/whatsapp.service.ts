@@ -105,7 +105,7 @@ export type WaTemplateKey =
   | 'DRIVER_SECOND_REMINDER' // 2nd_weight_remainder (Telugu): driver, lorry, location
   | 'HAMALI_SECOND_REMINDER' // hamali_remainder (Hindi): hamali incharge, lorry
   | 'INTERNAL_KATA_ALERT' // rvp_kata_alert (Utility, image header): vehicle, date, time, party, commodity, net weight
-  | 'INBOUND_MESSAGE'; // inbound_whatsapp_message (Marketing, en, 3 vars: from, time, message)
+  | 'INBOUND_MESSAGE'; // inbound_erp_alert (Utility, en, 3 vars: customer, time, query details)
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -179,9 +179,9 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DRIVER_SECOND_REMINDER: '33509',
   // 2nd weight reminder to hamali (Hindi template hamali_remainder, 2 vars: hamali in-charge, lorry)
   HAMALI_SECOND_REMINDER: '33510',
-  // Inbound message forward to internal team members (Marketing template inbound_whatsapp_message, 3 vars: from, time, message).
-  // Approved under name `inbound_whatsapp_message` on +917207146094 with Fast2SMS message_id 31637 (Meta template ID 1624358459270497).
-  INBOUND_MESSAGE: '31637',
+  // Inbound message forward to internal team members (Utility template inbound_erp_alert, 3 vars: customer, time, query details).
+  // Approved under name `inbound_erp_alert` on +917207146094 with Fast2SMS message_id 33710 (Meta template ID 1637095604616926).
+  INBOUND_MESSAGE: '33710',
   // Internal weighbridge Kata alert to internal members (Utility template rvp_kata_alert, IMAGE header, 6 vars: vehicle, date, time, party, commodity, net weight).
   // Created on +917207146094 with Fast2SMS message_id 33711 (Meta template ID 1094782289801137).
   INTERNAL_KATA_ALERT: '33711',
@@ -275,7 +275,7 @@ const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   DRIVER_UNLOADED_KATA: 'driver_unloaded_signed_kata',
   DRIVER_SECOND_REMINDER: '2nd_weight_remainder',
   HAMALI_SECOND_REMINDER: 'hamali_remainder',
-  INBOUND_MESSAGE: 'inbound_whatsapp_message',
+  INBOUND_MESSAGE: 'inbound_erp_alert',
   INTERNAL_KATA_ALERT: 'rvp_kata_alert',
 };
 
@@ -2406,7 +2406,7 @@ export async function identifyInboundSender(from: string | null | undefined): Pr
 /**
  * Forward an inbound WhatsApp message from a customer, party, or external contact
  * to internal members (alert recipients and owners) using the approved template
- * `inbound_whatsapp_message` (Fast2SMS message_id 31637).
+ * `inbound_erp_alert` (Fast2SMS message_id 33710).
  */
 export async function notifyInboundMessageToMembers(args: {
   from: string | null;

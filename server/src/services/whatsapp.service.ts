@@ -2579,7 +2579,7 @@ export async function notifyInternalKataCompleted(
     const tokenTime = (ticket.paidAt ? new Date(ticket.paidAt) : dateObj).getTime();
     const token = crypto.createHmac('sha256', secret).update(`weighbridge-slip:${ticket.id}:${tokenTime}`).digest('hex');
     const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
-    photoUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}`;
+    photoUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}&_t=${Date.now()}`;
   }
 
   const rawPhoto = photoUrl || ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || ticket.secondCam2PhotoUrl || ticket.cam2PhotoUrl;

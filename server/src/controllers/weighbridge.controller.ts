@@ -977,7 +977,7 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
       const driver = findCompanyVehicle(updated.vehicleNumber, company?.companyVehicles);
       const token = slipToken(updated.id, paidAt);
       const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
-      const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}`;
+      const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}&_t=${Date.now()}`;
 
       // Upload client-rendered slip image if provided
       let slipImageUrl = updated.slipImageUrl;
@@ -995,7 +995,7 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
       }
 
       // Official Stamped Kata Slip image URL (NEVER raw CCTV photo)
-      const photoUrl = slipImageUrl || `${apiBase}/weighbridge/tickets/${updated.id}/slip.jpg?token=${token}`;
+      const photoUrl = slipImageUrl || `${apiBase}/weighbridge/tickets/${updated.id}/slip.jpg?token=${token}&_t=${Date.now()}`;
 
       whatsapp = await sendWeighbridgePaidSlip({
         to: targetMobile,
@@ -1089,10 +1089,10 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
   const driver = findCompanyVehicle(ticket.vehicleNumber, company?.companyVehicles);
   const token = slipToken(ticket.id, ticket.paidAt || ticket.createdAt);
   const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
-  const slipUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.pdf?token=${token}`;
+  const slipUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.pdf?token=${token}&_t=${Date.now()}`;
   
   // Official Stamped Kata Slip image URL (NEVER raw CCTV photo)
-  const photoUrl = slipImageUrl || `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}`;
+  const photoUrl = slipImageUrl || `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}&_t=${Date.now()}`;
 
   const whatsapp = await sendWeighbridgePaidSlip({
     to: targetMobile,

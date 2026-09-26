@@ -12,6 +12,7 @@ import {
   deleteTicketHandler,
   streamCctvHandler,
   snapshotCctvHandler,
+  detectPlateCctvHandler,
   broadcastCctvHandler,
   getCctvStatusHandler,
   getStoredSnapshotHandler,
@@ -31,6 +32,7 @@ const router = Router();
 
 router.get('/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/cctv/snapshot', asyncHandler(snapshotCctvHandler));
+router.post('/cctv/detect-plate', asyncHandler(detectPlateCctvHandler));
 router.post('/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/cctv/status', asyncHandler(getCctvStatusHandler));
 router.get('/snapshots/:filename', asyncHandler(getStoredSnapshotHandler));

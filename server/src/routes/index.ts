@@ -50,6 +50,7 @@ import gstr2bRoutes from './gstr2b.routes.js';
 import {
   streamCctvHandler,
   snapshotCctvHandler,
+  detectPlateCctvHandler,
   broadcastCctvHandler,
   getCctvStatusHandler,
   queuePrintJobHandler,
@@ -77,6 +78,7 @@ router.use('/assets', (req, res, next) => {
 // Weighbridge CCTV direct streaming & snapshots for <img> tags
 router.get('/weighbridge/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
+router.post('/weighbridge/cctv/detect-plate', asyncHandler(detectPlateCctvHandler));
 router.post('/weighbridge/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/weighbridge/cctv/status', asyncHandler(getCctvStatusHandler));
 router.get('/weighbridge/tickets/:id/slip.pdf', asyncHandler(downloadSignedWeighbridgeSlipHandler));

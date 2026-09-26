@@ -128,6 +128,9 @@ app.post("/api/weighbridge/cctv/broadcast", (req, res, next) => {
 app.get("/api/weighbridge/cctv/status", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getCctvStatusHandler(req, res)).catch(next);
 });
+app.post("/api/weighbridge/cctv/detect-plate", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.detectPlateCctvHandler(req, res)).catch(next);
+});
 app.get("/api/weighbridge/snapshots/:filename", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getStoredSnapshotHandler(req, res)).catch(next);
 });

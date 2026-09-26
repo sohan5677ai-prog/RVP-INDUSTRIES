@@ -34,6 +34,8 @@ import {
   BadgeCheck,
   Warehouse,
   ArrowRight,
+  Camera,
+  Sparkles,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -230,6 +232,8 @@ interface CctvLiveBoxProps {
   onStatusChange?: (online: boolean, isLocal: boolean) => void;
   onExpand?: (camNumber: 1 | 2) => void;
   relayStatus?: CctvCameraStatus;
+  onDetectPlate?: (camNumber: 1 | 2) => void;
+  isDetectingPlate?: boolean;
 }
 
 interface CctvCameraStatus {
@@ -248,7 +252,7 @@ interface CctvStatusResponse {
   cam2: CctvCameraStatus;
 }
 
-function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus }: CctvLiveBoxProps) {
+function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus, onDetectPlate, isDetectingPlate }: CctvLiveBoxProps) {
   const [frameUrl, setFrameUrl] = useState<string>(() =>
     getCameraSnapshotUrl(camNumber, Date.now())
   );
@@ -319,13 +323,34 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
       )}
 
       {/* Elegant OSD Overlay */}
-      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
         <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-bold text-amber-400 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
           {label}
         </span>
-        <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-medium text-stone-200 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
-          {currentTime}
-        </span>
+        <div className="flex items-center gap-1.5 pointer-events-auto">
+          {onDetectPlate && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDetectPlate(camNumber);
+              }}
+              disabled={isDetectingPlate}
+              title={`Auto-detect vehicle number plate from ${label}`}
+              className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-stone-950 px-2 py-0.5 rounded-md border border-amber-500/50 text-[10px] font-mono font-bold transition-all shadow-xs cursor-pointer"
+            >
+              {isDetectingPlate ? (
+                <RefreshCw className="h-3 w-3 animate-spin text-amber-400" />
+              ) : (
+                <Camera className="h-3 w-3" />
+              )}
+              <span>ANPR</span>
+            </button>
+          )}
+          <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-medium text-stone-200 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
+            {currentTime}
+          </span>
+        </div>
       </div>
 
       {/* Hover to Expand indicator overlay */}
@@ -364,9 +389,11 @@ interface CctvFullViewDialogProps {
   onClose: () => void;
   onSelectCam: (camNumber: 1 | 2) => void;
   currentTime: string;
+  onDetectPlate?: (camNumber: 1 | 2) => void;
+  isDetectingPlate?: boolean;
 }
 
-function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: CctvFullViewDialogProps) {
+function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDetectPlate, isDetectingPlate }: CctvFullViewDialogProps) {
   const [frameUrl, setFrameUrl] = useState<string>('');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -536,6 +563,22 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime }: Cc
               <Download className="h-3.5 w-3.5 text-amber-400" />
               <span>Save HD Snapshot</span>
             </Button>
+            {onDetectPlate && camNumber && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onDetectPlate(camNumber)}
+                disabled={isDetectingPlate}
+                className="bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500 hover:text-stone-950 text-xs h-8 gap-1.5 font-bold transition-all"
+              >
+                {isDetectingPlate ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Camera className="h-3.5 w-3.5" />
+                )}
+                <span>Scan Plate (ANPR)</span>
+              </Button>
+            )}
           </div>
 
           <Button
@@ -1552,6 +1595,56 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
+  const lastAutoScannedPlateRef = useRef<number | null>(null);
+
+  // Automatic Number Plate Recognition (ANPR) via CCTV Camera & Gemini Vision
+  const detectPlateMutation = useMutation({
+    mutationFn: async (cam: 1 | 2 = 1) => {
+      return api<{
+        success: boolean;
+        vehicleNumber: string | null;
+        confidence?: string | null;
+        plateColor?: string | null;
+        vehicleType?: string | null;
+        rawText?: string | null;
+        cam?: number;
+        message?: string;
+      }>('/weighbridge/cctv/detect-plate', {
+        method: 'POST',
+        body: JSON.stringify({ cam }),
+      });
+    },
+    onSuccess: (data, variables) => {
+      if (data.success && data.vehicleNumber) {
+        selectVehicle(data.vehicleNumber);
+        toast.success(`📷 ANPR Plate Detected: ${data.vehicleNumber}`, {
+          description: `Auto-filled from Camera ${variables} (${data.confidence || 'HIGH'} confidence)`,
+        });
+      } else {
+        toast.warning(data.message || `No vehicle number plate was detected on Camera ${variables}.`);
+      }
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  // Scale auto-trigger: when vehicle rolls onto weighbridge scale and stabilizes (>1500 kg), auto-scan Cam 1
+  useEffect(() => {
+    if (
+      scale.isStable &&
+      scale.liveWeight > 1500 &&
+      !vehicleNumber.trim() &&
+      activeTab === 'entry' &&
+      !pendingTicketId &&
+      !detectPlateMutation.isPending
+    ) {
+      const now = Date.now();
+      if (!lastAutoScannedPlateRef.current || now - lastAutoScannedPlateRef.current > 25000) {
+        lastAutoScannedPlateRef.current = now;
+        detectPlateMutation.mutate(1);
+      }
+    }
+  }, [scale.isStable, scale.liveWeight, vehicleNumber, activeTab, pendingTicketId, detectPlateMutation]);
+
   const exportTickets = useCallback(() => api<WeighbridgeTicket[]>(
     `/weighbridge/tickets?${historyQuery}`,
   ), [historyQuery]);
@@ -1846,13 +1939,44 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Vehicle Number */}
                 <div className="space-y-1.5 sm:col-span-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                       <Truck className="h-3.5 w-3.5 text-primary" />
                       Vehicle Number *
-                    </span>
-                    <span className="text-[10px] font-normal text-muted-foreground">e.g. KA01AS1009 / AP39V1234</span>
-                  </Label>
+                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => detectPlateMutation.mutate(1)}
+                        disabled={detectPlateMutation.isPending}
+                        className="h-6 px-2 text-[11px] font-semibold gap-1 text-primary border-primary/30 bg-primary/5 hover:bg-primary/10 shadow-2xs cursor-pointer"
+                        title="Auto-scan number plate from Cam 1 (Entry / Front)"
+                      >
+                        {detectPlateMutation.isPending && detectPlateMutation.variables === 1 ? (
+                          <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                        ) : (
+                          <Camera className="h-3 w-3 text-primary" />
+                        )}
+                        <span>Scan Plate (Cam 1)</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => detectPlateMutation.mutate(2)}
+                        disabled={detectPlateMutation.isPending}
+                        className="h-6 px-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer"
+                        title="Scan number plate from Cam 2 (Exit / Rear)"
+                      >
+                        {detectPlateMutation.isPending && detectPlateMutation.variables === 2 ? (
+                          <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
+                        ) : null}
+                        <span>Cam 2</span>
+                      </Button>
+                    </div>
+                  </div>
                   <Combobox
                     options={vehicleOptions}
                     value={vehicleNumber}
@@ -2477,6 +2601,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     refreshTrigger={camRefreshTrigger}
                     onExpand={(cam) => setExpandedCam(cam)}
                     relayStatus={cctvStatus?.cam1}
+                    onDetectPlate={(cam) => detectPlateMutation.mutate(cam)}
+                    isDetectingPlate={detectPlateMutation.isPending && detectPlateMutation.variables === 1}
                   />
                   <CctvLiveBox
                     camNumber={2}
@@ -2486,6 +2612,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     refreshTrigger={camRefreshTrigger}
                     onExpand={(cam) => setExpandedCam(cam)}
                     relayStatus={cctvStatus?.cam2}
+                    onDetectPlate={(cam) => detectPlateMutation.mutate(cam)}
+                    isDetectingPlate={detectPlateMutation.isPending && detectPlateMutation.variables === 2}
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground text-center font-mono">
@@ -3496,6 +3624,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         onClose={() => setExpandedCam(null)}
         onSelectCam={(num) => setExpandedCam(num)}
         currentTime={clockString}
+        onDetectPlate={(num) => detectPlateMutation.mutate(num)}
+        isDetectingPlate={detectPlateMutation.isPending}
       />
 
       {/* CCTV & RTSP Network Status & Configuration Dialog */}

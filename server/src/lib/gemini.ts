@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { HttpError } from './httpError.js';
+import { logger } from './logger.js';
 
 /**
  * Fields that can come back from reading a stock-in document. Every field is
@@ -1152,3 +1153,85 @@ ${contextLine}
     mimeType: imagePart.inlineData.mimeType || 'image/png',
   };
 }
+
+export interface DetectedVehiclePlate {
+  isPlateDetected: boolean;
+  vehicleNumber?: string | null;
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW' | null;
+  rawText?: string | null;
+  plateColor?: string | null;
+  vehicleType?: string | null;
+  notes?: string | null;
+}
+
+const VEHICLE_PLATE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    isPlateDetected: { type: Type.BOOLEAN },
+    vehicleNumber: { type: Type.STRING },
+    confidence: { type: Type.STRING },
+    rawText: { type: Type.STRING },
+    plateColor: { type: Type.STRING },
+    vehicleType: { type: Type.STRING },
+    notes: { type: Type.STRING },
+  },
+  required: ['isPlateDetected'],
+};
+
+/**
+ * Detect Indian vehicle registration plate from CCTV camera snapshot using Gemini Vision.
+ */
+export async function detectVehiclePlateFromImage(
+  buffer: Buffer,
+  mimeType: string = 'image/jpeg'
+): Promise<DetectedVehiclePlate | null> {
+  if (!process.env.GEMINI_API_KEY) return null;
+  try {
+    const ai = getClient();
+    const prompt = `You are an expert Automatic Number Plate Recognition (ANPR / ALPR) AI system for an Indian industrial weighbridge.
+Analyze this CCTV snapshot of a vehicle (truck, lorry, tractor, tanker, or auto) entering or exiting the weighbridge.
+Your task is to detect and read the vehicle's registration number plate.
+
+Rules for Indian vehicle registration numbers:
+- Typically 9-10 alphanumeric characters: [2-letter State code like AP, TS, TN, KA, MH, DL, GJ, KL, RJ, OD, etc.] [1-2 digit RTO district code] [0-3 series letters] [4 digit number]. (e.g., AP02TE1234, TN28BF7423, KA01AB1009, TS16UB4567, AP39V1234, NL01N8899).
+- Clean and normalize vehicleNumber: convert to ALL UPPERCASE with NO spaces, dashes, or dots.
+- Look at both the front bumper / grill area and windshield sticker / tailgate / mudguard / body writing if visible.
+- If plate is yellow with black text, note plateColor as "YELLOW" (commercial). If white, "WHITE".
+- vehicleType: identify if it is "LORRY", "TRUCK", "TRACTOR", "AUTO", "CAR", or "OTHER".
+- If no number plate or registration text is visible, set isPlateDetected to false and vehicleNumber to null.
+
+Return JSON adhering to the provided schema.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType, data: buffer.toString('base64') } },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: VEHICLE_PLATE_SCHEMA,
+        temperature: 0.0,
+      },
+    });
+
+    const candidate = response.candidates?.[0];
+    const textPart = candidate?.content?.parts?.find((p: any) => p.text)?.text;
+    if (!textPart) return null;
+
+    const parsed: DetectedVehiclePlate = JSON.parse(textPart);
+    if (parsed.vehicleNumber) {
+      parsed.vehicleNumber = parsed.vehicleNumber.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    }
+    return parsed;
+  } catch (err) {
+    logger.warn('[gemini] detectVehiclePlateFromImage failed:', err);
+    return null;
+  }
+}
+

@@ -1231,6 +1231,65 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
 }
 
 /**
+ * Automatic Number Plate Recognition (ANPR / ALPR) using CCTV camera snapshot.
+ */
+export async function detectPlateCctvHandler(req: Request, res: Response) {
+  const camQuery = req.query.cam || req.body?.cam;
+  const camNum = camQuery === '2' || camQuery === 2 ? 2 : 1;
+
+  try {
+    let frameBuffer: Buffer;
+    let timestamp = Date.now();
+
+    if (req.body?.image && typeof req.body.image === 'string') {
+      const cleanBase64 = req.body.image.replace(/^data:image\/\w+;base64,/, '');
+      frameBuffer = Buffer.from(cleanBase64, 'base64');
+    } else {
+      const frame = await getCameraSnapshotWithMeta(camNum);
+      if (!frame || !frame.buffer || frame.buffer.length < 500) {
+        return res.status(502).json({
+          success: false,
+          vehicleNumber: null,
+          message: `Unable to capture a fresh snapshot from Camera ${camNum}. Check camera connection.`,
+        });
+      }
+      frameBuffer = frame.buffer;
+      timestamp = frame.timestamp;
+    }
+
+    const { detectVehiclePlateFromImage } = await import('../lib/gemini.js');
+    const result = await detectVehiclePlateFromImage(frameBuffer, 'image/jpeg');
+
+    if (!result || !result.isPlateDetected || !result.vehicleNumber) {
+      return res.json({
+        success: false,
+        vehicleNumber: null,
+        confidence: null,
+        cam: camNum,
+        timestamp,
+        message: result?.notes || 'No vehicle number plate was detected in the camera frame.',
+      });
+    }
+
+    res.json({
+      success: true,
+      vehicleNumber: result.vehicleNumber,
+      confidence: result.confidence || 'HIGH',
+      plateColor: result.plateColor || null,
+      vehicleType: result.vehicleType || null,
+      rawText: result.rawText || result.vehicleNumber,
+      cam: camNum,
+      timestamp,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Plate detection encountered an internal error',
+    });
+  }
+}
+
+/**
  * Ingest live CCTV camera frame broadcast from Kata Cabin bridge.
  */
 export async function broadcastCctvHandler(req: Request, res: Response) {

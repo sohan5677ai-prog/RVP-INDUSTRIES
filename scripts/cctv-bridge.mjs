@@ -100,7 +100,7 @@ const CONFIG = {
       user: setting('CCTV_CAM2_USER', 'admin'),
       pass: setting('CCTV_CAM2_PASS', 'admin@123'),
       channel: 1,
-      rtspUrl: setting('CCTV_CAM2_RTSP', 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=1'),
+      rtspUrl: setting('CCTV_CAM2_RTSP', 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0'),
       rtspHdUrl: setting('CCTV_CAM2_RTSP_HD', 'rtsp://admin:admin%40123@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0'),
     },
   },
@@ -630,4 +630,4 @@ if (CONFIG.bridgeKey.length < 24) {
 
 startLocalServer();
 startRtspWorker(1);
-startRtspWorker(2);
+startRtspWorker(2, true);

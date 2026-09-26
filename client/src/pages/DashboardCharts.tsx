@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import {
   LineChart as LineChartIcon, PieChart as PieChartIcon, TrendingUp,
   Layers, Scale, BarChart3, ShoppingCart, Wallet, Users,
@@ -10,7 +9,7 @@ import {
 import { kg, rupees } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { ChartCard } from '@/components/ChartCard';
-import type { ProfitLoss, Purchase, PurchaseOrder, SaleOrder, POStatus, SaleStatus } from '@/lib/types';
+import type { ProfitLoss, POStatus, SaleStatus } from '@/lib/types';
 
 // ── Shared types (also imported by Dashboard) ────────────────────────
 export interface Summary {
@@ -73,15 +72,14 @@ export interface HuskPnl {
   netRecovery: number;
 }
 
-export type PurchaseRow = Purchase & {
-  netWeightKg: number;
-  stockIn?: {
-    arrivalDate?: string;
-    billingWeightKg?: number;
-    partyKataKg?: number;
-    purchaseOrder?: { poNumber?: string; party?: { name: string } };
-  };
-};
+export interface DashboardMetrics {
+  trend: { key: string; label: string; spend: number; weight: number; trips: number }[];
+  poCounts: Record<string, number>;
+  saleCounts: Record<string, number>;
+  topSuppliers: { name: string; value: number }[];
+  topBuyersList: { name: string; count: number; ordered: number; dispatched: number; remaining: number; fulfilPct: number }[];
+  reconciliation: { billing: number; party: number; rvp: number };
+}
 
 // Display order + labels for the itemized husk-pool deductions.
 const HUSK_EXPENSE_ROWS: { key: keyof HuskExpenses; label: string }[] = [
@@ -167,55 +165,12 @@ const axisTick = { fill: C.axis, fontSize: 11 };
 interface Props {
   data: Summary;
   pnl?: ProfitLoss;
-  purchases?: PurchaseRow[];
-  poAll?: PurchaseOrder[];
-  saleAll?: SaleOrder[];
+  metrics: DashboardMetrics;
   huskPnl?: HuskPnl;
 }
 
-export default function DashboardCharts({ data, pnl, purchases, poAll, saleAll, huskPnl }: Props) {
-  // ── Monthly procurement spend + volume (from March) ────────────
-  const trend = useMemo(() => {
-    const now = new Date();
-    // Operations started March 2026 (31st March). Generate months starting from March 2026 up to current month.
-    const startYear = 2026;
-    const startMonth = 2; // March is month 2 (0-indexed)
-
-    const months: { key: string; label: string; spend: number; weight: number; trips: number }[] = [];
-    const curYear = now.getFullYear();
-    const curMonth = now.getMonth();
-
-    let y = startYear;
-    let m = startMonth;
-
-    while (y < curYear || (y === curYear && m <= curMonth)) {
-      const d = new Date(y, m, 1);
-      months.push({
-        key: `${y}-${m}`,
-        label: d.toLocaleString('en-IN', { month: 'short' }),
-        spend: 0,
-        weight: 0,
-        trips: 0,
-      });
-      m++;
-      if (m > 11) {
-        m = 0;
-        y++;
-      }
-    }
-
-    const idx = Object.fromEntries(months.map((m, i) => [m.key, i]));
-    for (const p of purchases ?? []) {
-      const d = new Date(p.stockIn?.arrivalDate || p.createdAt);
-      const i = idx[`${d.getFullYear()}-${d.getMonth()}`];
-      if (i != null) {
-        months[i].spend += Number(p.verification?.totalAmount || 0);
-        months[i].weight += Number(p.netWeightKg || 0);
-        months[i].trips += 1;
-      }
-    }
-    return months;
-  }, [purchases]);
+export default function DashboardCharts({ data, pnl, metrics, huskPnl }: Props) {
+  const { trend, topSuppliers, topBuyersList } = metrics;
 
   // ── Profitability (management P&L) ────────────────────────────────
   // Same model as the Profit & Loss A/c page: pappu margin ± the husk pool.
@@ -235,13 +190,13 @@ export default function DashboardCharts({ data, pnl, purchases, poAll, saleAll, 
   // ── PO pipeline by status ─────────────────────────────────────────
   const poStatusColor: Record<POStatus, string> = { PENDING: C.gold, ARRIVED: C.amber, COMPLETED: C.forest, CANCELLED: C.brick };
   const poPipeline = (['PENDING', 'ARRIVED', 'COMPLETED', 'CANCELLED'] as POStatus[])
-    .map((s) => ({ status: s[0] + s.slice(1).toLowerCase(), key: s, count: poAll?.filter((p) => p.status === s).length ?? 0 }));
+    .map((s) => ({ status: s[0] + s.slice(1).toLowerCase(), key: s, count: metrics.poCounts[s] ?? 0 }));
 
   // ── Sales fulfilment by status ────────────────────────────────────
   const salePipeline = (['PENDING', 'DISPATCHED', 'DELIVERED'] as SaleStatus[])
     .map((s) => ({
       name: s[0] + s.slice(1).toLowerCase(),
-      value: saleAll?.filter((o) => s === 'PENDING' ? (o.status === 'PENDING' || o.status === 'PARTIAL') : o.status === s).length ?? 0,
+      value: (metrics.saleCounts[s] ?? 0) + (s === 'PENDING' ? metrics.saleCounts.PARTIAL ?? 0 : 0),
     }))
     .filter((d) => d.value > 0);
 
@@ -252,56 +207,11 @@ export default function DashboardCharts({ data, pnl, purchases, poAll, saleAll, 
     { name: 'Pappu dispatched', value: Math.round(data.pappuDispatchedKg) },
   ].filter((d) => d.value > 0) : [];
 
-  // ── Supplier stats: volume + shortage / trust ─────────────────────
-  const supplierStats = useMemo(() => {
-    const map: Record<string, { name: string; count: number; billing: number; rvp: number; shortage: number }> = {};
-    for (const p of purchases ?? []) {
-      const name = p.stockIn?.purchaseOrder?.party?.name;
-      if (!name) continue;
-      map[name] ??= { name, count: 0, billing: 0, rvp: 0, shortage: 0 };
-      const billing = p.stockIn?.billingWeightKg ?? 0;
-      const rvp = p.netWeightKg ?? 0;
-      map[name].count += 1;
-      map[name].billing += billing;
-      map[name].rvp += rvp;
-      map[name].shortage += Math.max(0, billing - rvp);
-    }
-    return Object.values(map);
-  }, [purchases]);
-
-  const topSuppliers = [...supplierStats].sort((a, b) => b.rvp - a.rvp).slice(0, 6)
-    .map((s) => ({ name: s.name.length > 16 ? s.name.slice(0, 15) + '…' : s.name, value: Math.round(s.rvp) }));
-
-  const topBuyersList = useMemo(() => {
-    const map: Record<string, { name: string; count: number; ordered: number; dispatched: number }> = {};
-    for (const o of saleAll ?? []) {
-      const name = o.buyer?.name;
-      if (!name) continue;
-      map[name] ??= { name, count: 0, ordered: 0, dispatched: 0 };
-      map[name].count += 1;
-      map[name].ordered += o.tonnageKg;
-      map[name].dispatched += o.dispatchedKg ?? 0;
-    }
-    return Object.values(map)
-      .map(b => ({ ...b, remaining: Math.max(0, b.ordered - b.dispatched), fulfilPct: b.ordered > 0 ? (b.dispatched / b.ordered) * 100 : 0 }))
-      .sort((a, b) => b.dispatched - a.dispatched)
-      .slice(0, 10);
-  }, [saleAll]);
-
-  // ── Weight reconciliation totals ──────────────────────────────────
-  const recon = useMemo(() => {
-    let billing = 0, party = 0, rvp = 0;
-    for (const p of purchases ?? []) {
-      billing += p.stockIn?.billingWeightKg ?? 0;
-      party += p.stockIn?.partyKataKg ?? 0;
-      rvp += p.netWeightKg ?? 0;
-    }
-    return [
-      { name: 'Invoice billing', value: Math.round(billing), fill: C.gold },
-      { name: 'Party kata', value: Math.round(party), fill: C.amber },
-      { name: 'RVP kata', value: Math.round(rvp), fill: C.forest },
-    ];
-  }, [purchases]);
+  const recon = [
+    { name: 'Invoice billing', value: metrics.reconciliation.billing, fill: C.gold },
+    { name: 'Party kata', value: metrics.reconciliation.party, fill: C.amber },
+    { name: 'RVP kata', value: metrics.reconciliation.rvp, fill: C.forest },
+  ];
 
   return (
     <div className="space-y-7">

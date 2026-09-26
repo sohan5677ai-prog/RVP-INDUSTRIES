@@ -1,3 +1,4 @@
+import { withRequestDeadline } from './requestDeadline';
 export const API_BASE = (
   import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== '/api'
     ? import.meta.env.VITE_API_URL
@@ -51,6 +52,9 @@ interface ApiOptions {
   body?: unknown;
   /** Set true for multipart/form-data (body must be a FormData). */
   multipart?: boolean;
+  signal?: AbortSignal;
+  /** Override for long-running operations; zero disables the deadline. */
+  timeoutMs?: number;
 }
 
 export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -66,10 +70,12 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     body = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
   }
 
-  const res = await fetch(`${BASE}${path}`, {
-    method: opts.method ?? 'GET',
-    headers,
-    body,
+  return withRequestDeadline(opts.signal, opts.timeoutMs ?? 60_000, async (signal) => {
+    const res = await fetch(`${BASE}${path}`, {
+      signal,
+      method: opts.method ?? 'GET',
+      headers,
+      body,
   });
 
   // A 401 on an authenticated call means the session is gone (revoked from
@@ -115,21 +121,27 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
 
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+  }, !['GET', 'HEAD'].includes((opts.method ?? 'GET').toUpperCase()));
 }
 
 /**
  * Fetch a binary endpoint (PDF/image) with the auth header attached and hand
  * back a Blob. Plain <a href> links can't carry the bearer token.
  */
-export async function apiBlob(path: string): Promise<Blob> {
+export async function apiBlob(path: string, opts: Pick<ApiOptions, 'signal' | 'timeoutMs'> = {}): Promise<Blob> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { headers });
-  if (res.status === 401) clearToken();
-  if (!res.ok) throw new ApiError(res.status, res.statusText);
-  return res.blob();
+  return withRequestDeadline(opts.signal, opts.timeoutMs ?? 120_000, async (signal) => {
+    const res = await fetch(`${BASE}${path}`, { headers, signal });
+    if (res.status === 401) {
+      clearToken();
+      if (token) window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+    if (!res.ok) throw new ApiError(res.status, res.statusText);
+    return res.blob();
+  });
 }
 
 export function getErrorMessage(err: unknown): string {

@@ -519,24 +519,28 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
   /**
    * Background Network Stream: Automatically receive live scale weight from server broadcast.
-   * Dual-Sync Architecture:
-   * 1. Continuous 600ms polling guarantees reliable updates across all devices, mobile phones, and proxies.
-   * 2. SSE provides instantaneous sub-50ms push updates where supported.
+   * Prefer SSE; poll only when the stream has stopped delivering updates.
    */
   useEffect(() => {
     let es: EventSource | null = null;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let isCancelled = false;
+    let lastStreamMessage = 0;
+    let pollController: AbortController | null = null;
 
     const streamUrl = getScaleApiUrl('/weighbridge/scale/stream');
     const liveUrl = getScaleApiUrl('/weighbridge/scale/live');
 
     const fetchLiveScale = async () => {
-      if (portRef.current || isCancelled) return;
+      if (portRef.current || isCancelled || pollController || Date.now() - lastStreamMessage < 3000) return;
+      const controller = new AbortController();
+      pollController = controller;
+      const timeout = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch(liveUrl, { cache: 'no-store' });
+        const res = await fetch(liveUrl, { cache: 'no-store', signal: controller.signal });
         if (res.ok) {
           const data = await res.json();
+          if (isCancelled || portRef.current || Date.now() - lastStreamMessage < 3000) return;
           setIsServerStreaming(true);
           if (data.port) setServerPort(data.port);
           if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
@@ -579,23 +583,28 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
             }
           }
         }
-      } catch {}
+      } catch {} finally {
+        clearTimeout(timeout);
+        if (pollController === controller) pollController = null;
+      }
     };
 
     // Immediate initial sync
     fetchLiveScale();
 
-    // Fast polling every 600ms to guarantee network updates across all client machines
+    // Keep the fallback responsive, without concurrent polls or duplicate SSE traffic.
     pollInterval = setInterval(fetchLiveScale, 600);
 
     // Parallel Server-Sent Events (SSE) for low latency
     try {
       es = new EventSource(streamUrl);
+      es.addEventListener('heartbeat', () => { lastStreamMessage = Date.now(); });
 
       es.onmessage = (event) => {
         if (isCancelled || portRef.current) return;
         try {
           const data = JSON.parse(event.data);
+          lastStreamMessage = Date.now();
           setIsServerStreaming(true);
           if (data.port) setServerPort(data.port);
           if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
@@ -641,12 +650,14 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       };
 
       es.onerror = () => {
-        // SSE error (e.g. proxy timeout) - fast polling interval handles updates seamlessly!
+        lastStreamMessage = 0;
+        void fetchLiveScale();
       };
     } catch {}
 
     return () => {
       isCancelled = true;
+      pollController?.abort();
       if (es) es.close();
       if (pollInterval) clearInterval(pollInterval);
     };

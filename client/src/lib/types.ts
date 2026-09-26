@@ -393,6 +393,8 @@ export interface HuskTransfer {
   totalCost: string;
   transferDate: string;
   createdAt: string;
+  soldKg?: number;
+  remainingKg?: number;
 }
 
 export interface DustPurchase {

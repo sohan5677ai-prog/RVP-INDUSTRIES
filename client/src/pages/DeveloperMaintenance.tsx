@@ -228,6 +228,12 @@ export default function DeveloperMaintenance() {
     });
   };
 
+  const resetMutation = useMutation({
+    mutationFn: () => api<{ message: string }>('/system/clear-transactions', { method: 'POST' }),
+    onSuccess: (res) => { qc.invalidateQueries(); toast.success(res.message || 'ERP transactional data reset successfully!'); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="space-y-6 max-w-5xl">
       {/* ── Active Status Banner ── */}
@@ -617,6 +623,36 @@ export default function DeveloperMaintenance() {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Danger zone */}
+      <div className="pt-2">
+        <Card className="border-destructive/30 bg-destructive/[0.02]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold text-destructive uppercase tracking-wider flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5" /> Danger zone
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold">Reset ERP transactional data</p>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl">
+                Permanently clears all purchase orders, arrivals, weight verifications, ledger statements, and processing batches. Master data (Parties, Brokers, Users) is preserved.
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={resetMutation.isPending}
+              onClick={() => {
+                if (confirm('CRITICAL WARNING: This will permanently delete all transaction records and restart your ledgers from zero. Are you sure you want to proceed?')) {
+                  resetMutation.mutate();
+                }
+              }}
+            >
+              {resetMutation.isPending ? 'Resetting…' : 'Reset ERP data'}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

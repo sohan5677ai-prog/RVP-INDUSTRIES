@@ -491,6 +491,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['internal-weight-match'] });
       qc.invalidateQueries({ queryKey: ['internal-weights'] });
+      qc.invalidateQueries({ queryKey: ['husk-transfers'] });
+      qc.invalidateQueries({ queryKey: ['shell-transfers'] });
       toast.success('Dispatched - raise the invoice when ready');
       setDispatchOrder(null);
     },
@@ -532,6 +534,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['internal-weight-match'] });
       qc.invalidateQueries({ queryKey: ['internal-weights'] });
+      qc.invalidateQueries({ queryKey: ['husk-transfers'] });
+      qc.invalidateQueries({ queryKey: ['shell-transfers'] });
       toast.success('Dispatch undone - stock and ledger reversed');
       setUndoTarget(null);
     },

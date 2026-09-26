@@ -1296,7 +1296,14 @@ export async function streamLiveScaleHandler(req: Request, res: Response) {
     res.write(`data: ${JSON.stringify(reading)}\n\n`);
   });
 
+  // Keep transport liveness separate from sensor freshness. An idle scale
+  // should not cause every connected browser to fall back to HTTP polling.
+  const heartbeat = setInterval(() => {
+    res.write('event: heartbeat\ndata: {}\n\n');
+  }, 2000);
+
   req.on('close', () => {
+    clearInterval(heartbeat);
     unsubscribe();
   });
 }

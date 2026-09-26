@@ -1,3 +1,4 @@
+import { invalidatePayments } from '@/lib/invalidatePayments';
 import { useState, useMemo, useCallback, memo, useEffect, Fragment, lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -1869,7 +1870,7 @@ export default function FreightDuesPage() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['payments'] });
+      void invalidatePayments(qc);
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
       toast.success('Freight payment recorded');

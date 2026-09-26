@@ -1,3 +1,4 @@
+import { invalidatePayments } from '@/lib/invalidatePayments';
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -127,12 +128,12 @@ export default function PaymentsPage() {
 
   const { data: pageData, isLoading } = useQuery({
     queryKey: ['payments', { page, pageSize, search: debouncedSearch }],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       pageSize === Infinity
         // Register view: set-off legs are excluded server-side (no cash moved),
         // so the "All" page and the export below match the paged view.
-        ? api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`).then((rows) => ({ rows, total: rows.length }))
-        : api<{ rows: Payment[]; total: number }>(`/payments?skip=${(page - 1) * pageSize}&take=${pageSize}${searchParam}`),
+        ? api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`, { signal }).then((rows) => ({ rows, total: rows.length }))
+        : api<{ rows: Payment[]; total: number }>(`/payments?skip=${(page - 1) * pageSize}&take=${pageSize}${searchParam}`, { signal }),
     // Keep the previous page on screen while the next loads, so paging doesn't flash.
     placeholderData: keepPreviousData,
   });
@@ -266,10 +267,7 @@ export default function PaymentsPage() {
       return api<Payment>('/payments', { method: 'POST', body: fields });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['payments'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['journal-entries'] });
-      qc.invalidateQueries({ queryKey: ['party-ledger'] });
+      void invalidatePayments(qc);
       toast.success(editing ? 'Payment updated' : 'Payment recorded successfully');
       setOpen(false);
       setEditing(null);
@@ -281,9 +279,7 @@ export default function PaymentsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api(`/payments/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['payments'] });
-      qc.invalidateQueries({ queryKey: ['accounts'] });
-      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      void invalidatePayments(qc);
       toast.success('Payment reversed');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -327,7 +323,7 @@ export default function PaymentsPage() {
                 title="Payments Register"
                 subtitle={`${total} payment(s)`}
                 columns={PAYMENT_EXPORT_COLUMNS}
-                rows={() => api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`)}
+                rows={() => api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`, { signal })}
               />
               <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
                 <Plus className="h-4 w-4" /> Record Payment

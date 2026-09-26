@@ -1,3 +1,4 @@
+import { invalidatePayments } from '@/lib/invalidatePayments';
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -149,7 +150,7 @@ export default function PurchaseDuesPage() {
     },
     onSuccess: () => {
       toast.success('Payment recorded');
-      qc.invalidateQueries({ queryKey: ['payments'] });
+      void invalidatePayments(qc);
       setPayProof(null);
       setPayDialog(null);
     },
@@ -164,7 +165,7 @@ export default function PurchaseDuesPage() {
     },
     onSuccess: () => {
       toast.success('Payment removed');
-      qc.invalidateQueries({ queryKey: ['payments'] });
+      void invalidatePayments(qc);
     },
     onError: () => toast.error('Failed to remove payment'),
   });

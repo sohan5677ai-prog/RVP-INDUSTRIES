@@ -5,6 +5,29 @@ import { getHamaliRateFull, getCustomHamaliRates } from './settings.controller.j
 import { customLoadingHamali, pappuLoadingHamali, calcKataFee, isVehicleExempt, hamaliSplit } from '../lib/calc.js';
 
 import { computeUnifiedStockEngine } from '../services/stockEngine.js';
+import { buildDashboardMetrics } from '../lib/dashboardMetrics.js';
+import { withCache } from '../lib/cache.js';
+
+export async function dashboardCharts(_req: Request, res: Response) {
+  const metrics = await withCache('dashboard_charts', 60, async () => {
+    const [purchases, sales, counts] = await Promise.all([
+      prisma.purchase.findMany({
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true, netWeightKg: true, verification: { select: { totalAmount: true } },
+          stockIn: { select: { arrivalDate: true, billingWeightKg: true, partyKataKg: true,
+            purchaseOrder: { select: { party: { select: { name: true } } } } } } },
+      }),
+      prisma.saleOrder.findMany({
+        orderBy: { saleDate: 'desc' },
+        select: { status: true, closedAt: true, tonnageKg: true, buyer: { select: { name: true } },
+          dispatches: { select: { weightKg: true, status: true } } },
+      }),
+      prisma.purchaseOrder.groupBy({ by: ['status'], _count: { _all: true } }),
+    ]);
+    return buildDashboardMetrics(purchases, sales, counts);
+  });
+  res.json(metrics);
+}
 
 export async function dashboardSummary(_req: Request, res: Response) {
   const PAPPU_OUTTURN = 0.6;
@@ -173,7 +196,7 @@ export const HUSK_INCOME_META: { key: keyof HuskIncome; label: string }[] = [
 // dispatched tonnage; the four standalone reports (gunny/electricity/maintenance/
 // drawings) are read from their own tables. Used by the dashboard recovery card
 // and by the P&L page's husk pool.
-export async function computeHuskPool(): Promise<{ revenue: number; expenses: HuskExpenses; income: HuskIncome }> {
+async function computeHuskPoolUncached(): Promise<{ revenue: number; expenses: HuskExpenses; income: HuskIncome }> {
   const [
     byproductDispatches,
     freightOutwardAccount,
@@ -575,6 +598,11 @@ export async function computeHuskPool(): Promise<{ revenue: number; expenses: Hu
     };
 
   return { revenue, expenses, income };
+}
+
+// Successful API writes invalidate this shared result through routes/index.ts.
+export function computeHuskPool() {
+  return withCache('husk_pool', 60, computeHuskPoolUncached);
 }
 
 // Dashboard husk-recovery card: full itemized pool (includes pappu-flagged costs).

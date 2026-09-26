@@ -1,19 +1,17 @@
 import { lazy, Suspense } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   ClipboardList, Truck, Boxes, Wheat, Wallet, ShoppingCart,
   Gauge, AlertTriangle,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { kg, rupees } from '@/lib/format';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
 import FestivalCalendarWidget from '@/components/FestivalCalendarWidget';
-import type { ProfitLoss, PurchaseOrder, SaleOrder } from '@/lib/types';
-import type { Summary, HuskPnl, PurchaseRow } from './DashboardCharts';
+import type { ProfitLoss } from '@/lib/types';
+import type { Summary, HuskPnl, DashboardMetrics } from './DashboardCharts';
 
 // Charts pull in recharts (~300 kB). Splitting them into a lazy chunk lets the
 // page shell + KPI cards paint immediately on navigation; the charts stream in
@@ -37,56 +35,38 @@ function ChartsSkeleton() {
 }
 
 export default function Dashboard() {
-  const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['dashboard'],
-    queryFn: () => api<Summary>('/dashboard/summary'),
+    queryFn: ({ signal }) => api<Summary>('/dashboard/summary', { signal }),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
   // Management P&L - the Profitability card mirrors the Profit & Loss A/c page
   // so the dashboard and the report never quote two different net profits.
   // Key matches ProfitLoss.tsx so both share one cached fetch.
-  const { data: pnl } = useQuery({
+  const profitQuery = useQuery({
     queryKey: ['profit-loss'],
-    queryFn: () => api<ProfitLoss>('/reports/profit-loss'),
+    queryFn: ({ signal }) => api<ProfitLoss>('/reports/profit-loss', { signal }),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
-  const { data: purchases } = useQuery({
-    queryKey: ['purchases'],
-    queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
+  const charts = useQuery({
+    queryKey: ['dashboard', 'charts'],
+    queryFn: ({ signal }) => api<DashboardMetrics>('/dashboard/charts', { signal }),
   });
-  const { data: poAll } = useQuery({
-    queryKey: ['purchase-orders', 'ALL'],
-    queryFn: () => api<PurchaseOrder[]>('/purchase-orders?all=true'),
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
-  // Full history - the charts count every order by status, so the default
-  // latest-100 cap would silently under-report. Key matches the report pages
-  // so they all share one cached fetch.
-  const { data: saleAll } = useQuery({
-    queryKey: ['sale-orders', { all: true }],
-    queryFn: () => api<SaleOrder[]>('/sale-orders?all=true'),
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
-  const { data: huskPnl } = useQuery({
+  const huskQuery = useQuery({
     queryKey: ['husk-pnl'],
-    queryFn: () => api<HuskPnl>('/reports/husk-pnl'),
+    queryFn: ({ signal }) => api<HuskPnl>('/reports/husk-pnl', { signal }),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
 
-  const resetMutation = useMutation({
-    mutationFn: () => api<{ message: string }>('/system/clear-transactions', { method: 'POST' }),
-    onSuccess: (res) => { qc.invalidateQueries(); toast.success(res.message || 'ERP transactional data reset successfully!'); },
-    onError: (e: Error) => toast.error(e.message),
-  });
+
+
+  const refresh = () => Promise.all([refetch(), charts.refetch(), profitQuery.refetch(), huskQuery.refetch()]);
+  const refreshing = isFetching || charts.isFetching || profitQuery.isFetching || huskQuery.isFetching;
+  const chartError = charts.error || profitQuery.error || huskQuery.error;
 
   return (
     <div className="space-y-7">
@@ -96,13 +76,22 @@ export default function Dashboard() {
         description="Live view of procurement, stock, sales pipeline and profitability."
       />
 
-      {isLoading || !data ? (
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{dataUpdatedAt ? `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}` : 'Loading dashboard'}</span>
+        <Button variant="outline" size="sm" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button>
+      </div>
+      {error && <div role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">
+        <AlertTriangle className="mr-2 inline h-4 w-4" />{error.message}
+        {data && <span> Showing the last available figures.</span>}
+        <Button variant="outline" size="sm" className="ml-3" disabled={refreshing} onClick={() => void refresh()}>Retry</Button>
+      </div>}
+      {isLoading ? (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-28 rounded-2xl border border-border shimmer" />
           ))}
         </div>
-      ) : (
+      ) : data ? (
         <div className="space-y-7">
           {/* KPI row */}
           <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 stagger">
@@ -117,42 +106,19 @@ export default function Dashboard() {
           {/* Festival & Holiday Reminder Calendar */}
           <FestivalCalendarWidget />
 
-          <Suspense fallback={<ChartsSkeleton />}>
-            <DashboardCharts data={data} pnl={pnl} purchases={purchases} poAll={poAll} saleAll={saleAll} huskPnl={huskPnl} />
-          </Suspense>
+          {chartError && <div role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">
+            Some dashboard reports could not be refreshed. {chartError.message}
+            <Button variant="outline" size="sm" className="ml-3" disabled={refreshing} onClick={() => void refresh()}>Retry</Button>
+          </div>}
+          {charts.data && profitQuery.data && huskQuery.data ? (
+            <Suspense fallback={<ChartsSkeleton />}>
+              <DashboardCharts data={data} pnl={profitQuery.data} metrics={charts.data} huskPnl={huskQuery.data} />
+            </Suspense>
+          ) : !chartError ? <ChartsSkeleton /> : null}
         </div>
-      )}
+      ) : null}
 
-      {/* Danger zone */}
-      <div className="pt-2">
-        <Card className="border-destructive/30 bg-destructive/[0.02]">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold text-destructive uppercase tracking-wider flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" /> Danger zone
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold">Reset ERP transactional data</p>
-              <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl">
-                Permanently clears all purchase orders, arrivals, weight verifications, ledger statements, and processing batches. Master data (Parties, Brokers, Users) is preserved.
-              </p>
-            </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={resetMutation.isPending}
-              onClick={() => {
-                if (confirm('CRITICAL WARNING: This will permanently delete all transaction records and restart your ledgers from zero. Are you sure you want to proceed?')) {
-                  resetMutation.mutate();
-                }
-              }}
-            >
-              {resetMutation.isPending ? 'Resetting…' : 'Reset ERP data'}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+
     </div>
   );
 }

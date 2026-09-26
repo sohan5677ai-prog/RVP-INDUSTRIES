@@ -35,7 +35,6 @@ import {
   Warehouse,
   ArrowRight,
   Camera,
-  Sparkles,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -1631,7 +1630,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   useEffect(() => {
     if (
       scale.isStable &&
-      scale.liveWeight > 1500 &&
+      (scale.liveWeight ?? 0) > 1500 &&
       !vehicleNumber.trim() &&
       activeTab === 'entry' &&
       !pendingTicketId &&

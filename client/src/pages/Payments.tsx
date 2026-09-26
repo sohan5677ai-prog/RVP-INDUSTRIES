@@ -126,7 +126,7 @@ export default function PaymentsPage() {
 
   const searchParam = debouncedSearch.trim() ? `&search=${encodeURIComponent(debouncedSearch.trim())}` : '';
 
-  const { data: pageData, isLoading } = useQuery({
+  const { data: pageData, isLoading } = useQuery<{ rows: Payment[]; total: number }>({
     queryKey: ['payments', { page, pageSize, search: debouncedSearch }],
     queryFn: ({ signal }) =>
       pageSize === Infinity
@@ -137,7 +137,7 @@ export default function PaymentsPage() {
     // Keep the previous page on screen while the next loads, so paging doesn't flash.
     placeholderData: keepPreviousData,
   });
-  const visiblePayments = pageData?.rows ?? [];
+  const visiblePayments: Payment[] = pageData?.rows ?? [];
   const total = pageData?.total ?? 0;
   const totalPages = pageSize === Infinity ? 1 : Math.max(1, Math.ceil(total / pageSize));
 
@@ -323,7 +323,7 @@ export default function PaymentsPage() {
                 title="Payments Register"
                 subtitle={`${total} payment(s)`}
                 columns={PAYMENT_EXPORT_COLUMNS}
-                rows={() => api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`, { signal })}
+                rows={() => api<Payment[]>(`/payments?all=true&excludeSetOffs=true${searchParam}`)}
               />
               <Button onClick={() => { setEditing(null); resetForm(); setOpen(true); }}>
                 <Plus className="h-4 w-4" /> Record Payment

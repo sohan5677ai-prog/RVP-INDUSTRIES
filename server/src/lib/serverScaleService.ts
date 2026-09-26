@@ -26,6 +26,8 @@ type ScaleListener = (reading: ScaleReading) => void;
 const DLC_COOLDOWN_MS = 30_000;
 
 class ServerScaleService {
+  private localEnabled = process.env.SCALE_LOCAL_ENABLED?.toLowerCase() !== 'false';
+  private connectionFailureReported = false;
   private portName: string = process.env.SCALE_COM_PORT || 'COM4';
   private baudRate: number = Number(process.env.SCALE_BAUD_RATE || 2400);
   private serialPort: SerialPort | null = null;
@@ -54,6 +56,9 @@ class ServerScaleService {
   private lastFaultLabel: string = '';
 
   constructor() {
+    if (!this.localEnabled) {
+      logger.info('[scale] Local serial access disabled; waiting for terminal readings.');
+    }
     this.start();
   }
 
@@ -77,6 +82,7 @@ class ServerScaleService {
   }
 
   public async setConfig(port: string, baudRate?: number): Promise<boolean> {
+    this.connectionFailureReported = false;
     logger.info(`[scale] Switching config to port=${port}, baud=${baudRate || this.baudRate}`);
     this.portName = port;
     if (baudRate) this.baudRate = baudRate;
@@ -179,6 +185,7 @@ class ServerScaleService {
   }
 
   public start() {
+    if (!this.localEnabled) return;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -192,7 +199,7 @@ class ServerScaleService {
         this.serialPort.close();
       }
 
-      logger.info(`[scale] Attempting connection to ${this.portName} at ${this.baudRate} 8N1...`);
+      logger.debug(`[scale] Attempting connection to ${this.portName} at ${this.baudRate} 8N1...`);
       const port = new SerialPort({
         path: this.portName,
         baudRate: this.baudRate,
@@ -205,6 +212,7 @@ class ServerScaleService {
       port.open(async (err) => {
         this.isConnecting = false;
         if (err) {
+          this.reportConnectionFailure(err.message);
           if (!this.isRemoteActive) {
             this.currentReading.isConnected = false;
             this.currentReading.error = `Could not open ${this.portName}: ${err.message}`;
@@ -227,6 +235,7 @@ class ServerScaleService {
         }
 
         logger.info(`[scale] Successfully opened ${this.portName}! Streaming live weight in background.`);
+        this.connectionFailureReported = false;
         this.serialPort = port;
         this.currentReading.isConnected = true;
         this.currentReading.error = null;
@@ -257,6 +266,7 @@ class ServerScaleService {
       });
     } catch (e: any) {
       this.isConnecting = false;
+      this.reportConnectionFailure(e.message);
       if (!this.isRemoteActive) {
         this.currentReading.isConnected = false;
         this.currentReading.error = e.message;
@@ -264,6 +274,12 @@ class ServerScaleService {
       }
       this.scheduleReconnect(5000);
     }
+  }
+
+  private reportConnectionFailure(message: string) {
+    if (this.connectionFailureReported || this.isRemoteActive) return;
+    this.connectionFailureReported = true;
+    logger.warn(`[scale] Could not connect to ${this.portName}: ${message}. Retrying every 5 seconds; repeated attempts are logged at debug level. For terminal-only/cloud servers, set SCALE_LOCAL_ENABLED=false.`);
   }
 
   private scheduleReconnect(delayMs: number = 3000) {

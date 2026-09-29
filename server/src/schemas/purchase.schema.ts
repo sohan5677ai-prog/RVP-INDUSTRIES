@@ -204,3 +204,12 @@ export type CreateShellTransferInput = z.infer<typeof createShellTransferSchema>
 export type CreateHuskTransferInput = z.infer<typeof createHuskTransferSchema>;
 export type CreateDustPurchaseInput = z.infer<typeof createDustPurchaseSchema>;
 export type UpdatePurchaseFreightCostsInput = z.infer<typeof updatePurchaseFreightCostsSchema>;
+
+// Register-only parameters; report endpoints retain their full-history response.
+export const purchaseRegisterSchema = z.object({
+  skip: z.coerce.number().int().min(0).max(10_000_000).default(0),
+  take: z.coerce.number().int().min(1).max(200).default(50),
+  all: z.enum(['true', 'false']).optional(),
+  priceType: z.enum(['ALL', 'BASE', 'DELIVERY']).default('ALL'),
+  party: z.string().max(300).default('ALL'),
+});

@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -7,7 +8,6 @@ import type { Purchase, StockIn } from '@/lib/types';
 import { calcHamali, calcKataFee, DEFAULT_HAMALI_RATE, isVehicleExempt } from '@/lib/calc';
 import { kg, rupees, shortDate, toTonnes } from '@/lib/format';
 import { PaginationBar } from '@/components/ui/pagination-bar';
-import { usePagedRows } from '@/lib/usePagedRows';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -246,13 +246,40 @@ export default function Purchases() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseRow | null>(null);
-  const [priceFilter, setPriceFilter] = useState<'ALL' | 'BASE' | 'DELIVERY'>('ALL');
-  const [partyFilter, setPartyFilter] = useState('ALL');
-
-  const { data: items, isLoading } = useQuery({
-    queryKey: ['purchases'],
-    queryFn: () => api<PurchaseRow[]>('/purchases?all=true'),
+  const [params, setParams] = useSearchParams();
+  const priceFilter = ['BASE', 'DELIVERY'].includes(params.get('priceType') ?? '') ? params.get('priceType')! : 'ALL';
+  const partyFilter = params.get('party') || 'ALL';
+  const rawPage = Number(params.get('page') || 1);
+  const page = Number.isSafeInteger(rawPage) && rawPage > 0 && rawPage <= 50_001 ? rawPage : 1;
+  const rawSize = params.get('size');
+  const pageSize = rawSize === 'all' ? Infinity : [25, 50, 100, 200].includes(Number(rawSize)) ? Number(rawSize) : 50;
+  const updateParam = (key: string, value: string, resetPage = true) => setParams(previous => {
+    const next = new URLSearchParams(previous);
+    next.set(key, value);
+    if (resetPage) next.set('page', '1');
+    return next;
+  }, { replace: true });
+  const setPriceFilter = (value: string) => updateParam('priceType', value);
+  const setPartyFilter = (value: string) => updateParam('party', value);
+  const setPage = (value: number) => updateParam('page', String(value), false);
+  const setPageSize = (value: number) => updateParam('size', value === Infinity ? 'all' : String(value));
+  const filters = new URLSearchParams({ view: 'register', priceType: priceFilter, party: partyFilter }).toString();
+  const paging = pageSize === Infinity ? 'all=true' : `skip=${(page - 1) * pageSize}&take=${pageSize}`;
+  type RegisterPage = { rows: PurchaseRow[]; total: number; summary: {
+    count: number; totalNet: number; totalHamali: number; totalKata: number; parties: string[];
+  } };
+  const { data: register, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['purchases', 'register', { page, pageSize, priceFilter, partyFilter }],
+    queryFn: ({ signal }) => api<RegisterPage>(`/purchases?${filters}&${paging}`, { signal }),
   });
+  const total = register?.total ?? 0;
+  const totalPages = pageSize === Infinity ? 1 : Math.max(1, Math.ceil(total / pageSize));
+  const pageRows = register?.rows ?? [];
+  useEffect(() => {
+    if (register && page > totalPages) {
+      setParams(previous => { const next = new URLSearchParams(previous); next.set('page', String(totalPages)); return next; }, { replace: true });
+    }
+  }, [register, page, totalPages, setParams]);
 
   const { data: stockIns } = useQuery({
     queryKey: ['stock-in'],
@@ -286,29 +313,10 @@ export default function Purchases() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  const { totalNet, totalHamali, totalKata } = useMemo(() => ({
-    totalNet: items?.reduce((s, p) => s + Number(p.netWeightKg || 0), 0) ?? 0,
-    totalHamali: items?.reduce((s, p) => s + Number(p.hamaliCharge || 0), 0) ?? 0,
-    totalKata: items?.reduce((s, p) => s + Number(p.kataFee || 0), 0) ?? 0,
-  }), [items]);
-
-  // Party options for the filter combo, derived from the purchase records.
-  const partyOptions = useMemo(() => {
-    const names = [...new Set((items ?? [])
-      .map((p) => p.stockIn?.purchaseOrder?.party?.name)
-      .filter((n): n is string => !!n))].sort();
-    return [{ value: 'ALL', label: 'All parties' }, ...names.map((n) => ({ value: n, label: n }))];
-  }, [items]);
-
-  // Rows shown after the price-type tabs and party combo. Stat cards use the full set.
-  const filtered = useMemo(() => (items ?? []).filter((p) => {
-    if (partyFilter !== 'ALL' && (p.stockIn?.purchaseOrder?.party?.name ?? '') !== partyFilter) return false;
-    if (priceFilter !== 'ALL' && (p.stockIn?.purchaseOrder?.priceType ?? '') !== priceFilter) return false;
-    return true;
-  }), [items, partyFilter, priceFilter]);
+  const { totalNet = 0, totalHamali = 0, totalKata = 0 } = register?.summary ?? {};
+  const partyOptions = [{ value: 'ALL', label: 'All parties' },
+    ...(register?.summary.parties ?? []).map(name => ({ value: name, label: name }))];
   const filtersActive = priceFilter !== 'ALL' || partyFilter !== 'ALL';
-
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows } = usePagedRows(filtered, 50);
 
   return (
     <div className="space-y-8">
@@ -321,9 +329,9 @@ export default function Purchases() {
             <ExportButtons
               filename="Purchases"
               title="Purchase Records"
-              subtitle={`${filtered.length} record(s)`}
+              subtitle={`${total} record(s)`}
               columns={PURCHASE_EXPORT_COLUMNS}
-              rows={filtered}
+              rows={() => api<RegisterPage>(`/purchases?${filters}&all=true`).then(result => result.rows)}
             />
             <Button onClick={() => { resetForm(); setOpen(true); }} disabled={!available.length}>
               <Plus className="h-4 w-4" /> Record Purchase
@@ -333,14 +341,18 @@ export default function Purchases() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 stagger">
-        <StatCard label="Unloaded" value={items?.length ?? 0} icon={PackageCheck} tone="taupe" hint="purchase records" />
+        <StatCard label="Unloaded" value={register?.summary.count ?? 0} icon={PackageCheck} tone="taupe" hint="purchase records" />
         <StatCard label="Waiting" value={available.length} icon={Scale} tone="amber" hint="stock-ins to record" />
         <StatCard label="Net weight" value={`${toTonnes(totalNet).toFixed(2)} MT`} icon={Weight} tone="forest" hint="across purchases" />
         <StatCard label="Hamali" value={rupees(totalHamali)} icon={Coins} tone="clay" hint="total hamali" />
         <StatCard label="Kata" value={rupees(totalKata)} icon={Coins} tone="clay" hint="total kata fee" />
       </div>
 
-      {useMemo(() => (
+      {error && <div role="alert" className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">
+        {getErrorMessage(error)}
+        <Button variant="outline" size="sm" className="ml-3" disabled={isFetching} onClick={() => void refetch()}>Retry</Button>
+      </div>}
+      {(
       <div className="glass rounded-2xl overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border/70">
           <div className="flex items-center gap-2">
@@ -389,7 +401,7 @@ export default function Purchases() {
               {isLoading && (
                 <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
               )}
-              {!isLoading && filtered.length === 0 && (
+              {!isLoading && !error && pageRows.length === 0 && (
                 <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">{filtersActive ? 'No purchases match the filters.' : 'No purchases yet.'}</TableCell></TableRow>
               )}
               {(pageRows ?? []).map((p) => (
@@ -437,7 +449,7 @@ export default function Purchases() {
         </div>
         <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
       </div>
-      ), [pageRows, isLoading, filtersActive, deleteMutation.mutate, openEdit, partyOptions, priceFilter, partyFilter, available.length, page, setPage, pageSize, setPageSize, totalPages, total])}
+      )}
 
       {open && <PurchaseFormDialog 
         open={open} 

@@ -76,51 +76,51 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
       method: opts.method ?? 'GET',
       headers,
       body,
-  });
+    });
 
-  // A 401 on an authenticated call means the session is gone (revoked from
-  // another device, or timed out). Broadcast it so AuthProvider drops the user
-  // and the app falls back to the login screen without a manual refresh.
-  if (res.status === 401) {
-    clearToken();
-    if (token && path !== '/auth/login') {
-      window.dispatchEvent(new Event('auth:unauthorized'));
-    }
-  }
-
-  // 402 = the licensing gate rejected the call (subscription expired / stopped).
-  // Broadcast it so SubscriptionBoundary can flip to the paywall without a
-  // manual refresh, even if this particular call's error is swallowed.
-  if (res.status === 402) {
-    window.dispatchEvent(new Event('subscription:locked'));
-  }
-
-  // 503 = Maintenance mode active (or server temporarily unavailable).
-  // If flagged as maintenance, broadcast immediately so MaintenanceBoundary triggers.
-  if (res.status === 503 && res.headers.get('X-Maintenance-Mode') === '1') {
-    window.dispatchEvent(new Event('maintenance:active'));
-  }
-
-  if (!res.ok) {
-    let message = res.statusText;
-    let details: unknown;
-    try {
-      const data = await res.json();
-      message = data.error ?? message;
-      details = data.details ?? data.maintenance;
-      if (data.code === 'MAINTENANCE_MODE' || data.maintenance) {
-        window.dispatchEvent(
-          new CustomEvent('maintenance:active', { detail: data.maintenance })
-        );
+    // A 401 on an authenticated call means the session is gone (revoked from
+    // another device, or timed out). Broadcast it so AuthProvider drops the user
+    // and the app falls back to the login screen without a manual refresh.
+    if (res.status === 401) {
+      clearToken();
+      if (token && path !== '/auth/login') {
+        window.dispatchEvent(new Event('auth:unauthorized'));
       }
-    } catch {
-      /* non-JSON error body */
     }
-    throw new ApiError(res.status, message, details);
-  }
 
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+    // 402 = the licensing gate rejected the call (subscription expired / stopped).
+    // Broadcast it so SubscriptionBoundary can flip to the paywall without a
+    // manual refresh, even if this particular call's error is swallowed.
+    if (res.status === 402) {
+      window.dispatchEvent(new Event('subscription:locked'));
+    }
+
+    // 503 = Maintenance mode active (or server temporarily unavailable).
+    // If flagged as maintenance, broadcast immediately so MaintenanceBoundary triggers.
+    if (res.status === 503 && res.headers.get('X-Maintenance-Mode') === '1') {
+      window.dispatchEvent(new Event('maintenance:active'));
+    }
+
+    if (!res.ok) {
+      let message = res.statusText;
+      let details: unknown;
+      try {
+        const data = await res.json();
+        message = data.error ?? message;
+        details = data.details ?? data.maintenance;
+        if (data.code === 'MAINTENANCE_MODE' || data.maintenance) {
+          window.dispatchEvent(
+            new CustomEvent('maintenance:active', { detail: data.maintenance })
+          );
+        }
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(res.status, message, details);
+    }
+
+    if (res.status === 204) return undefined as T;
+    return res.json() as Promise<T>;
   }, !['GET', 'HEAD'].includes((opts.method ?? 'GET').toUpperCase()));
 }
 

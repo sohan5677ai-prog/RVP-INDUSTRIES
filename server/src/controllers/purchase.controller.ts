@@ -1,3 +1,4 @@
+import { getPurchaseRegister } from '../services/purchaseRegister.service.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
@@ -34,6 +35,10 @@ const hamaliSelect = {
 } as const;
 
 export async function listPurchases(req: Request, res: Response) {
+  if (req.query.view === 'register') {
+    res.json(await getPurchaseRegister(req.query));
+    return;
+  }
   if (req.query.view === 'hamali') {
     const purchases = await prisma.purchase.findMany({
       orderBy: { createdAt: 'desc' },

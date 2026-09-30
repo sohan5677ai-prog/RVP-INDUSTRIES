@@ -67,7 +67,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { shortDate } from '@/lib/format';
-import { calcKataFee, isVehicleExempt, findCompanyVehicle, clean10DigitPhone, normalizeLorryNumber, parseCompanyVehicles } from '@/lib/calc';
+import { calcKataFee, isVehicleExempt, findCompanyVehicle, clean10DigitPhone, parseCompanyVehicles } from '@/lib/calc';
 import WeighbridgeSlipModal, { triggerDirectPrint, formatTicketNo, captureKataSlipImage } from '@/components/WeighbridgeSlipModal';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
@@ -886,133 +886,25 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       .map((name) => ({ value: name, label: name }));
   }, [parties, allTickets]);
 
+  // Vehicle and party suggestions select only that field. A new carta must not
+  // inherit transaction details or internal-transfer mode from an older ticket.
   const selectVehicle = useCallback((value: string) => {
-    const clean = value.toUpperCase();
-    setVehicleNumber(clean);
-    const isExempt = isKnmVehicle(clean);
-    const companyDriver = findCompanyVehicle(clean, companyProfile?.companyVehicles);
-    const previous = allTickets.find((ticket) => ticket.vehicleNumber.trim().toUpperCase() === clean);
+    setVehicleNumber(value.toUpperCase());
+  }, []);
 
-    if (isExempt) {
-      setBillType('FREE');
-    } else if (previous?.billType) {
-      setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
-    }
-
-    if (companyDriver?.driverPhone) {
-      setDriverMobile(clean10DigitPhone(companyDriver.driverPhone));
-    } else if (isExempt) {
-      setDriverMobile('9440416639');
-    } else if (previous?.partyMobile) {
-      setDriverMobile(clean10DigitPhone(previous.partyMobile));
-    }
-
-    if (previous) {
-      setVehicleType(previous.vehicleType || 'LORRY');
-      setPartyName(previous.partyName || '');
-      setIsStorageTransfer(Boolean(previous.isStorageTransfer));
-      setStorageLocation(previous.storageLocation || '');
-      setMaterial(previous.material || 'PAPPU');
-      setRemarks(previous.remarks || '');
-    }
-
-    // Lookup contact info from server (Lorry Confirmations for Pappu/Husk, past dispatches, older tickets)
-    const key = normalizeLorryNumber(clean);
-    if (key.length >= 6) {
-      api<{
-        driverPhone?: string | null;
-        driverName?: string | null;
-        partyName?: string | null;
-        vehicleType?: string | null;
-        material?: string | null;
-        isKnm?: boolean;
-        source?: string | null;
-      }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(key)}`)
-        .then((info) => {
-          if (!info) return;
-          if (info.isKnm) setBillType('FREE');
-          if (info.driverPhone) {
-            setDriverMobile((cur) => cur.trim() || clean10DigitPhone(info.driverPhone));
-          }
-          if (info.partyName && !previous) {
-            setPartyName((cur) => cur.trim() || info.partyName!);
-          }
-          if (info.vehicleType && !previous) {
-            setVehicleType((cur) => cur || info.vehicleType!);
-          }
-          if (info.material && !previous) {
-            setMaterial((cur) => (cur === 'PAPPU' && info.material ? info.material : cur));
-          }
-          if (info.source === 'transport_confirmation') {
-            toast.info(`Autofilled from lorry confirmation: ${info.driverName ? info.driverName + ' · ' : ''}${info.driverPhone || ''}`);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [allTickets, isKnmVehicle, companyProfile?.companyVehicles]);
-
-  // Auto-fill driver phone, bill type, and details as vehicle number is typed or pasted
+  // Company driver details come from the vehicle master, not past cartas.
   useEffect(() => {
-    const key = normalizeLorryNumber(vehicleNumber);
-    if (key.length < 6) return;
-
-    // 1. Instant check KNM company vehicle locally
     const cv = findCompanyVehicle(vehicleNumber, companyProfile?.companyVehicles);
     if (cv) {
       setBillType('FREE');
       const phone = cv.driverPhone ? clean10DigitPhone(cv.driverPhone) : '9440416639';
       setDriverMobile((cur) => cur.trim() || phone);
     }
-
-    // 2. Debounced server lookup across lorry confirmations, past dispatches, and past tickets
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      api<{
-        driverPhone?: string | null;
-        driverName?: string | null;
-        partyName?: string | null;
-        vehicleType?: string | null;
-        material?: string | null;
-        isKnm?: boolean;
-        source?: string | null;
-      }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(key)}`)
-        .then((info) => {
-          if (cancelled || !info) return;
-          if (info.isKnm) setBillType('FREE');
-          if (info.driverPhone) {
-            setDriverMobile((cur) => cur.trim() || clean10DigitPhone(info.driverPhone));
-          }
-          if (info.partyName) {
-            setPartyName((cur) => cur.trim() || info.partyName!);
-          }
-          if (info.vehicleType) {
-            setVehicleType((cur) => cur || info.vehicleType!);
-          }
-          if (info.source === 'transport_confirmation') {
-            toast.info(`Autofilled from lorry confirmation: ${info.driverName ? info.driverName + ' · ' : ''}${info.driverPhone || ''}`);
-          }
-        })
-        .catch(() => {});
-    }, 400);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
   }, [vehicleNumber, companyProfile?.companyVehicles]);
 
   const selectParty = useCallback((value: string) => {
     setPartyName(value);
-    const previous = allTickets.find(
-      (ticket) => ticket.partyName?.trim().toUpperCase() === value.trim().toUpperCase(),
-    );
-    if (!previous) return;
-    setVehicleNumber(previous.vehicleNumber || '');
-    setVehicleType(previous.vehicleType || 'LORRY');
-    setMaterial(previous.material || 'PAPPU');
-    setBillType((previous.billType as 'CASH' | 'CREDIT' | 'FREE') || 'CASH');
-    setDriverMobile(previous.partyMobile || '');
-  }, [allTickets]);
+  }, []);
 
   const { data: cctvStatus, refetch: refetchCctvStatus } = useQuery<CctvStatusResponse>({
     queryKey: ['weighbridge-cctv-status'],

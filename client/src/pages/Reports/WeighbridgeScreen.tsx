@@ -37,6 +37,7 @@ import {
   Camera,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
+import { useCameraPreview } from '@/lib/useCameraPreview';
 import { useAuth } from '@/lib/auth';
 import { useScale } from '@/lib/scaleContext';
 import type { Party, CompanyProfile, WeighbridgeTicket, InternalWeightRecord, WaLanguage } from '@/lib/types';
@@ -223,6 +224,7 @@ export async function captureCamSnapshotBase64(camNumber: 1 | 2): Promise<string
 }
 
 interface CctvLiveBoxProps {
+  paused?: boolean;
   camNumber: 1 | 2;
   cameraIp: string;
   label: string;
@@ -251,38 +253,10 @@ interface CctvStatusResponse {
   cam2: CctvCameraStatus;
 }
 
-function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus, onDetectPlate, isDetectingPlate }: CctvLiveBoxProps) {
-  const [frameUrl, setFrameUrl] = useState<string>(() =>
-    getCameraSnapshotUrl(camNumber, Date.now())
-  );
+function CctvLiveBox({ paused = false, camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus, onDetectPlate, isDetectingPlate }: CctvLiveBoxProps) {
+  const { frameUrl, onFrameSettled } = useCameraPreview(camNumber, !paused, refreshTrigger);
   const [isOnline, setIsOnline] = useState<boolean>(true);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef<boolean>(true);
   const errCountRef = useRef<number>(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  const triggerNextFrame = useCallback((delayMs: number) => {
-    if (!mountedRef.current) return;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (mountedRef.current) {
-        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
-      }
-    }, delayMs);
-  }, [camNumber]);
-
-  useEffect(() => {
-    if (refreshTrigger) {
-      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
-    }
-  }, [refreshTrigger, camNumber]);
 
   return (
     <div 
@@ -297,7 +271,7 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
           errCountRef.current = 0;
           setIsOnline(true);
           onStatusChange?.(true, false);
-          triggerNextFrame(850);
+          onFrameSettled();
         }}
         onError={() => {
           errCountRef.current += 1;
@@ -305,7 +279,7 @@ function CctvLiveBox({ camNumber, cameraIp, label, currentTime, refreshTrigger, 
             setIsOnline(false);
             onStatusChange?.(false, false);
           }
-          triggerNextFrame(1200);
+          onFrameSettled();
         }}
         className={cn('w-full h-full object-cover transition-opacity duration-300', !isOnline && 'opacity-40')}
       />
@@ -393,37 +367,12 @@ interface CctvFullViewDialogProps {
 }
 
 function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDetectPlate, isDetectingPlate }: CctvFullViewDialogProps) {
-  const [frameUrl, setFrameUrl] = useState<string>('');
+  const { frameUrl, onFrameSettled } = useCameraPreview(camNumber);
   const [isOnline, setIsOnline] = useState<boolean>(true);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef<boolean>(true);
   const errCountRef = useRef<number>(0);
-
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  const triggerNextFrame = useCallback((delayMs: number) => {
-    if (!mountedRef.current || !camNumber) return;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (mountedRef.current && camNumber) {
-        setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
-      }
-    }, delayMs);
-  }, [camNumber]);
-
-  // Whenever camNumber changes, load frame immediately
-  useEffect(() => {
-    if (camNumber) {
-      errCountRef.current = 0;
-      setIsOnline(true);
-      setFrameUrl(getCameraSnapshotUrl(camNumber, Date.now()));
-    }
+    errCountRef.current = 0;
+    setIsOnline(true);
   }, [camNumber]);
 
   if (!camNumber) return null;
@@ -432,7 +381,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
   const label = camNumber === 1 ? 'CAM 1: ENTRY' : 'CAM 2: EXIT';
   const handleDownloadSnapshot = () => {
     const a = document.createElement('a');
-    a.href = frameUrl || getCameraSnapshotUrl(camNumber, Date.now());
+    a.href = getCameraSnapshotUrl(camNumber, Date.now());
     a.download = `WEIGHBRIDGE_${label.replace(/[^A-Za-z0-9]/g, '_')}_${Date.now()}.jpg`;
     document.body.appendChild(a);
     a.click();
@@ -455,7 +404,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
                   <span className="text-xs font-normal font-mono text-stone-400">({cameraIp})</span>
                 </DialogTitle>
                 <DialogDescription className="text-xs text-stone-400">
-                  Real-time cloud-relayed CCTV camera feed
+                  Camera preview · refreshes every 5 seconds
                 </DialogDescription>
               </div>
             </div>
@@ -500,14 +449,14 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
               onLoad={() => {
                 errCountRef.current = 0;
                 setIsOnline(true);
-                triggerNextFrame(850);
+                onFrameSettled();
               }}
               onError={() => {
                 errCountRef.current += 1;
                 if (errCountRef.current >= 8) {
                   setIsOnline(false);
                 }
-                triggerNextFrame(1200);
+                onFrameSettled();
               }}
               className={cn("w-full h-full object-contain transition-opacity duration-200", !isOnline && "opacity-40")}
             />
@@ -2485,6 +2434,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <CctvLiveBox
+                    paused={expandedCam !== null}
                     camNumber={1}
                     cameraIp="192.168.1.101"
                     label="CAM 1: ENTRY"
@@ -2496,6 +2446,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     isDetectingPlate={detectPlateMutation.isPending && detectPlateMutation.variables === 1}
                   />
                   <CctvLiveBox
+                    paused={expandedCam !== null}
                     camNumber={2}
                     cameraIp="192.168.1.102"
                     label="CAM 2: EXIT"

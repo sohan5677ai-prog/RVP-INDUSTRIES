@@ -1,4 +1,5 @@
 import { withRequestDeadline } from './requestDeadline';
+import { getLocalBridgeOrigin } from './localBridge';
 export const API_BASE = (
   import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== '/api'
     ? import.meta.env.VITE_API_URL
@@ -9,8 +10,30 @@ export const API_BASE = (
     : '/api'
 ).replace(/\/+$/, '');
 
+/**
+ * Paths `cctv-bridge.mjs` serves itself on the cabin LAN.
+ *
+ * Camera frames are the whole of our Render bandwidth bill - they are JPEGs,
+ * so nothing compresses them - and the bridge has the exact same bytes sitting
+ * in RAM on the same machine. Everything else (the scale endpoints, and the
+ * tiny 10-second `/cctv/status` poll whose cloud payload carries relay
+ * diagnostics the bridge does not report) stays on Render.
+ */
+const LOCAL_BRIDGE_PATHS = [
+  '/weighbridge/cctv/snapshot',
+  '/weighbridge/cctv/stream',
+];
+
 export function getScaleApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
+
+  // Serve camera frames off the LAN when the bridge is running on this PC.
+  // Costs no Render egress at all, and arrives in under a millisecond.
+  const localOrigin = getLocalBridgeOrigin();
+  if (localOrigin && LOCAL_BRIDGE_PATHS.some((p) => cleanPath.startsWith(p))) {
+    return `${localOrigin}/api${cleanPath}`;
+  }
+
   if (
     typeof window !== 'undefined' &&
     window.location.hostname !== 'localhost' &&

@@ -254,7 +254,7 @@ interface CctvStatusResponse {
 }
 
 function CctvLiveBox({ paused = false, camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus, onDetectPlate, isDetectingPlate }: CctvLiveBoxProps) {
-  const { frameUrl, onFrameSettled } = useCameraPreview(camNumber, !paused, refreshTrigger);
+  const { frameUrl, onFrameSettled, onFrameError, usingLocalBridge } = useCameraPreview(camNumber, !paused, refreshTrigger);
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const errCountRef = useRef<number>(0);
 
@@ -275,6 +275,9 @@ function CctvLiveBox({ paused = false, camNumber, cameraIp, label, currentTime, 
         }}
         onError={() => {
           errCountRef.current += 1;
+          // Hand the local bridge back to the cloud before counting this as a
+          // camera fault - a stopped bridge must not look like a dead camera.
+          onFrameError();
           if (errCountRef.current >= 8) {
             setIsOnline(false);
             onStatusChange?.(false, false);
@@ -297,9 +300,28 @@ function CctvLiveBox({ paused = false, camNumber, cameraIp, label, currentTime, 
 
       {/* Elegant OSD Overlay */}
       <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
-        <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-bold text-amber-400 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
-          {label}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-bold text-amber-400 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
+            {label}
+          </span>
+          {/* Where this frame came from. LAN means the cabin bridge served it
+              and it cost no Render bandwidth; CLOUD means it was relayed. */}
+          <span
+            title={
+              usingLocalBridge
+                ? 'Frames are coming from the cabin bridge on this PC - no cloud bandwidth used'
+                : 'Frames are being pulled from the Render cloud relay - this uses billed bandwidth'
+            }
+            className={cn(
+              'backdrop-blur-xs text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md border shadow-xs',
+              usingLocalBridge
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                : 'bg-stone-900/80 text-stone-400 border-stone-700/60'
+            )}
+          >
+            {usingLocalBridge ? 'LAN' : 'CLOUD'}
+          </span>
+        </div>
         <div className="flex items-center gap-1.5 pointer-events-auto">
           {onDetectPlate && (
             <button
@@ -367,7 +389,8 @@ interface CctvFullViewDialogProps {
 }
 
 function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDetectPlate, isDetectingPlate }: CctvFullViewDialogProps) {
-  const { frameUrl, onFrameSettled } = useCameraPreview(camNumber);
+  // 'lg': the expanded view is a big box, so it gets the higher-quality encode.
+  const { frameUrl, onFrameSettled, onFrameError } = useCameraPreview(camNumber, true, 0, 'lg');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const errCountRef = useRef<number>(0);
   useEffect(() => {
@@ -453,6 +476,8 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
               }}
               onError={() => {
                 errCountRef.current += 1;
+                // Drop back to the cloud relay if the LAN bridge stopped.
+                onFrameError();
                 if (errCountRef.current >= 8) {
                   setIsOnline(false);
                 }

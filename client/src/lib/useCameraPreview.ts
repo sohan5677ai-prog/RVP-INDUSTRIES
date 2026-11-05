@@ -1,10 +1,46 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { getScaleApiUrl } from './api';
+import {
+  getLocalBridgeOrigin,
+  probeLocalBridge,
+  reportLocalBridgeFailure,
+  subscribeLocalBridge,
+} from './localBridge';
+
+/**
+ * Size of the frame we ask the server for.
+ *
+ * `sm` is the live grid thumbnail, `lg` the expanded full-view dialog. Only
+ * matters on the cloud path - the local bridge serves whatever the camera gave
+ * it, and costs nothing either way. Ticket capture and ANPR keep using the
+ * untouched full-resolution snapshot endpoint.
+ */
+export type CameraPreviewVariant = 'sm' | 'lg';
 
 /** Preview only: ticket capture continues to use the original snapshot endpoint. */
-export function useCameraPreview(cam: 1 | 2 | null, enabled = true, refreshTrigger = 0) {
+export function useCameraPreview(
+  cam: 1 | 2 | null,
+  enabled = true,
+  refreshTrigger = 0,
+  variant: CameraPreviewVariant = 'sm'
+) {
   const [frameUrl, setFrameUrl] = useState<string>();
   const scheduleRef = useRef<(() => void) | null>(null);
+
+  // Re-render when the bridge appears or disappears so `getScaleApiUrl` starts
+  // (or stops) handing back LAN URLs for the very next frame.
+  const bridgeOrigin = useSyncExternalStore(
+    subscribeLocalBridge,
+    getLocalBridgeOrigin,
+    () => null
+  );
+
+  // Look for a bridge on this machine as soon as a camera is on screen. Cheap,
+  // cached, and at most one probe in flight however many camera boxes mount.
+  useEffect(() => {
+    if (cam === null || !enabled) return;
+    void probeLocalBridge();
+  }, [cam, enabled]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -12,7 +48,11 @@ export function useCameraPreview(cam: 1 | 2 | null, enabled = true, refreshTrigg
     const active = () => !disposed && enabled && cam !== null && document.visibilityState === 'visible';
     const refresh = () => {
       if (active()) {
-        setFrameUrl(getScaleApiUrl(`/weighbridge/cctv/snapshot?cam=${cam}&preview=1&t=${Date.now()}`));
+        setFrameUrl(
+          getScaleApiUrl(
+            `/weighbridge/cctv/snapshot?cam=${cam}&preview=${variant}&t=${Date.now()}`
+          )
+        );
       }
     };
     const schedule = () => {
@@ -32,8 +72,23 @@ export function useCameraPreview(cam: 1 | 2 | null, enabled = true, refreshTrigg
       scheduleRef.current = null;
       document.removeEventListener('visibilitychange', visibilityChanged);
     };
-  }, [cam, enabled, refreshTrigger]);
+    // `bridgeOrigin` is a dependency so switching between LAN and cloud takes
+    // effect immediately rather than at the next five-second tick.
+  }, [cam, enabled, refreshTrigger, variant, bridgeOrigin]);
 
   const onFrameSettled = useCallback(() => scheduleRef.current?.(), []);
-  return { frameUrl, onFrameSettled };
+
+  /**
+   * Call from the <img> error handler. If the frame came off the local bridge,
+   * stop trusting it and fall back to the cloud so the operator is never left
+   * looking at a dead camera box - the next probe will pick the bridge back up.
+   */
+  const onFrameError = useCallback(() => {
+    if (getLocalBridgeOrigin()) {
+      reportLocalBridgeFailure();
+      void probeLocalBridge(true);
+    }
+  }, []);
+
+  return { frameUrl, onFrameSettled, onFrameError, usingLocalBridge: bridgeOrigin !== null };
 }

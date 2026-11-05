@@ -1218,8 +1218,14 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
   const camNum = req.query.cam === '2' ? 2 : 1;
   try {
     const frame = await getCameraSnapshotWithMeta(camNum);
-    const image = req.query.preview === '1'
-      ? await getCameraPreview(camNum, frame.buffer)
+    // `preview=lg` for the expanded dialog, `preview=sm` (or the older
+    // `preview=1`) for the grid thumbnails. Anything else - ticket capture,
+    // ANPR, the slip modal - gets the untouched full-resolution frame.
+    const previewParam = String(req.query.preview ?? '');
+    const previewVariant =
+      previewParam === 'lg' ? 'lg' : previewParam === 'sm' || previewParam === '1' ? 'sm' : null;
+    const image = previewVariant
+      ? await getCameraPreview(camNum, frame.buffer, previewVariant)
       : frame.buffer;
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

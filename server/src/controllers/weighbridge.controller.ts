@@ -4,6 +4,11 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { getCameraPreview } from '../lib/cctvPreview.js';
+import {
+  markViewerInterest,
+  markAllViewerInterest,
+  getRelayDirective,
+} from '../lib/cctvRelayDemand.js';
 import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
 import { calcKataFee, findCompanyVehicle, isVehicleExempt, clean10DigitPhone } from '../lib/calc.js';
@@ -1208,6 +1213,7 @@ export async function deleteTicketHandler(req: Request, res: Response) {
  */
 export async function streamCctvHandler(req: Request, res: Response) {
   const camNum = req.query.cam === '2' ? 2 : 1;
+  markViewerInterest(camNum);
   await streamCameraMjpeg(camNum, res);
 }
 
@@ -1216,6 +1222,7 @@ export async function streamCctvHandler(req: Request, res: Response) {
  */
 export async function snapshotCctvHandler(req: Request, res: Response) {
   const camNum = req.query.cam === '2' ? 2 : 1;
+  markViewerInterest(camNum);
   try {
     const frame = await getCameraSnapshotWithMeta(camNum);
     // `preview=lg` for the expanded dialog, `preview=sm` (or the older
@@ -1246,6 +1253,9 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
 export async function detectPlateCctvHandler(req: Request, res: Response) {
   const camQuery = req.query.cam || req.body?.cam;
   const camNum = camQuery === '2' || camQuery === 2 ? 2 : 1;
+  // Keep the relay at full rate around a capture, so a follow-up scan of the
+  // same lorry reads a current frame rather than the tail of an idle trickle.
+  markViewerInterest(camNum);
 
   try {
     let frameBuffer: Buffer;
@@ -1320,17 +1330,34 @@ export async function broadcastCctvHandler(req: Request, res: Response) {
 
   setCameraBroadcast(camNum, buf);
 
+  // Tell the bridge how fast to keep sending. This response is the only channel
+  // we have back to it, so the directive rides along with every upload. It is
+  // advisory: a bridge that ignores it just keeps its configured interval.
+  const directive = getRelayDirective(camNum);
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.json({ success: true, cam: camNum, size: buf.length, timestamp: Date.now() });
+  res.json({
+    success: true,
+    cam: camNum,
+    size: buf.length,
+    timestamp: Date.now(),
+    relay: directive,
+  });
 }
 
 /**
  * Diagnostic status endpoint for cameras & bridge health.
  */
 export async function getCctvStatusHandler(_req: Request, res: Response) {
+  // The Weighbridge screen polls this every 5s and - unlike the frames - it
+  // still comes to the cloud even when the cabin PC is pulling pictures off
+  // its local bridge. So it is our one dependable signal that a Kata screen is
+  // open somewhere, and it is what keeps the relay warm for the auto-ANPR that
+  // fires when a lorry settles on the scale.
+  markAllViewerInterest();
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json(getCctvStatus());

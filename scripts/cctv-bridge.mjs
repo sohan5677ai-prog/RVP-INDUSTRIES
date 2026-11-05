@@ -135,9 +135,16 @@ const streamSubscribers = {
   2: new Set(),
 };
 
+/**
+ * `nextUploadAt` / `relayWanted` / `relayIntervalMs` carry the server's
+ * viewer-demand directive. The server answers every broadcast with how fast it
+ * wants the next one: full rate while a Kata screen is open, a slow trickle
+ * when nobody is watching. Until the first reply we use the configured
+ * interval, so a server that does not send a directive changes nothing.
+ */
 const cloudUpload = {
-  1: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0 },
-  2: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0 },
+  1: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0, nextUploadAt: 0, relayWanted: true, relayIntervalMs: null },
+  2: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0, nextUploadAt: 0, relayWanted: true, relayIntervalMs: null },
 };
 
 function md5(str) {
@@ -438,12 +445,28 @@ async function broadcastToCloud(camNum, buffer) {
         res.on('error', (err) => {
           reject(err);
         });
-        res.resume();
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(true);
-        } else {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
           reject(new Error(`Broadcast HTTP ${res.statusCode}`));
+          return;
         }
+        // Read the body rather than discarding it: it carries the server's
+        // relay directive. It is a couple of hundred bytes.
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          // Never let a misbehaving response grow unbounded in cabin memory.
+          if (body.length < 4096) body += chunk;
+        });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body)?.relay ?? null);
+          } catch {
+            // An older server, or a proxy error page. The upload still
+            // succeeded; we simply have no directive to act on.
+            resolve(null);
+          }
+        });
       }
     );
 
@@ -467,18 +490,45 @@ setInterval(() => {
   for (const num of [1, 2]) {
     const frame = latestFrames[num];
     const upload = cloudUpload[num];
+    // Hold off until the server's requested interval has elapsed. While nobody
+    // has the Kata screen open this throttles us from a frame a second to a
+    // slow trickle - the trickle is what lets the server tell us to speed up
+    // again, so we never stop entirely.
+    if (Date.now() < upload.nextUploadAt) continue;
     if (frame && frame.buffer && Date.now() - frame.timestamp < 3000 && !upload.inFlight) {
       upload.inFlight = true;
       upload.lastAttemptAt = Date.now();
       broadcastToCloud(num, frame.buffer)
-        .then(() => {
+        .then((relay) => {
           upload.lastSuccessAt = Date.now();
           upload.lastError = null;
           upload.consecutiveErrors = 0;
+          if (relay && Number.isFinite(relay.intervalMs) && relay.intervalMs > 0) {
+            const wasWanted = upload.relayWanted;
+            upload.relayWanted = relay.wanted !== false;
+            upload.relayIntervalMs = relay.intervalMs;
+            // Measure the gap from when this upload STARTED, not from when the
+            // reply came back. Adding the round trip on top would push each
+            // send a few hundred ms later than the tick that should carry it,
+            // and the live view would quietly drop to half the intended rate.
+            upload.nextUploadAt = upload.lastAttemptAt + relay.intervalMs;
+            if (wasWanted !== upload.relayWanted) {
+              console.log(
+                `[CCTV-BRIDGE] Cam ${num} cloud relay ${upload.relayWanted ? 'resumed - a viewer is watching' : 'idling - nobody is watching'} (every ${relay.intervalMs}ms)`
+              );
+            }
+          } else {
+            upload.relayIntervalMs = null;
+            upload.nextUploadAt = 0;
+          }
         })
         .catch((err) => {
           upload.lastError = err.message;
           upload.consecutiveErrors += 1;
+          // Ease off a server that is down or restarting rather than retrying
+          // every tick, capped so we recover promptly once it is back.
+          upload.nextUploadAt =
+            Date.now() + Math.min(30_000, CONFIG.cloudBroadcastIntervalMs * upload.consecutiveErrors);
           // Log at most once every 30s: a temporary network outage must not
           // fill the terminal's log or hide the useful RTSP diagnostics.
           if (Date.now() - upload.lastErrorAt > 30000) {
@@ -578,6 +628,8 @@ function startLocalServer() {
             cloudRelayLastAttempt: cloudUpload[1].lastAttemptAt || null,
             cloudRelayLastSuccess: cloudUpload[1].lastSuccessAt || null,
             cloudRelayError: cloudUpload[1].lastError,
+            cloudRelayMode: cloudUpload[1].relayWanted ? 'ACTIVE' : 'IDLE',
+            cloudRelayIntervalMs: cloudUpload[1].relayIntervalMs ?? CONFIG.cloudBroadcastIntervalMs,
           },
           cam2: {
             online: Date.now() - latestFrames[2].timestamp < 8000,
@@ -590,6 +642,8 @@ function startLocalServer() {
             cloudRelayLastAttempt: cloudUpload[2].lastAttemptAt || null,
             cloudRelayLastSuccess: cloudUpload[2].lastSuccessAt || null,
             cloudRelayError: cloudUpload[2].lastError,
+            cloudRelayMode: cloudUpload[2].relayWanted ? 'ACTIVE' : 'IDLE',
+            cloudRelayIntervalMs: cloudUpload[2].relayIntervalMs ?? CONFIG.cloudBroadcastIntervalMs,
           },
         })
       );

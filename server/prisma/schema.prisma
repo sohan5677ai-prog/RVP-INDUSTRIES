@@ -106,7 +106,144 @@ model User {
   slackUserId String?  @unique
   createdAt   DateTime @default(now())
 
-  sessions UserSession[]
+  /// Where password resets and new-device alerts go. Optional because existing
+  /// accounts predate it: a user without one cannot self-serve a reset and
+  /// needs an admin to set their password instead.
+  email       String?  @unique
+
+  /// Which algorithm `password` is hashed with. Informational only: the
+  /// verifier sniffs the hash prefix instead, so a stale value here cannot
+  /// lock anyone out. Defaults to BCRYPT because every row that existed when
+  /// this column was added holds a bcryptjs hash - defaulting to ARGON2ID
+  /// would have labelled all of them wrongly.
+  passwordAlgo      PasswordAlgo @default(BCRYPT)
+  /// Set on every password change. Any access token issued before this instant
+  /// is refused, which is how a password change signs out every other device.
+  passwordChangedAt DateTime     @default(now())
+  /// Forces a password change before anything else can be done - used when an
+  /// admin sets a password on someone's behalf.
+  mustChangePassword Boolean     @default(false)
+
+  /// Base32 TOTP secret. Null until enrolled; never leaves the server after
+  /// enrolment except as the initial QR code.
+  mfaSecret     String?
+  /// Null until the first code is verified, so a half-finished enrolment does
+  /// not lock anyone out.
+  mfaEnabledAt  DateTime?
+
+  /// Consecutive failed attempts; reset on success.
+  failedLoginCount Int       @default(0)
+  /// Set when failedLoginCount crosses the threshold. Login is refused until it
+  /// passes, whether or not the password is right.
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  /// Soft disable for offboarding: refuses login and kills live sessions,
+  /// without deleting the history the account is attached to.
+  disabledAt       DateTime?
+
+  sessions      UserSession[]
+  passwordHistory PasswordHistory[]
+  recoveryCodes MfaRecoveryCode[]
+  resetTokens   PasswordResetToken[]
+}
+
+enum PasswordAlgo {
+  /// Legacy bcryptjs hash, upgraded on next successful login.
+  BCRYPT
+  ARGON2ID
+}
+
+/// Previous password hashes, so a password cannot be cycled back to. Only the
+/// most recent PASSWORD_HISTORY_DEPTH rows per user are kept; older ones are
+/// pruned on each change.
+model PasswordHistory {
+  id        String       @id @default(cuid())
+  userId    String
+  hash      String
+  algo      PasswordAlgo
+  createdAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// Single-use MFA recovery codes. Stored hashed: a readable list in the
+/// database would be a second password for every account that has one.
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Password reset tokens, stored hashed and single-use. The plaintext exists
+/// only in the email that carries it.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  requestIp String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+/// Every login attempt, successful or not.
+///
+/// Drives per-username lockout and per-username rate limiting, which per-IP
+/// limiting alone cannot do - credential stuffing spreads one username across
+/// many addresses. Deliberately keyed on the typed username rather than a
+/// userId, so attempts against accounts that do not exist are recorded too.
+///
+/// This is also the first row of the audit trail Phase 4 builds out.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  username  String
+  ip        String?
+  userAgent String?
+  outcome   LoginOutcome
+  createdAt DateTime @default(now())
+
+  @@index([username, createdAt])
+  @@index([ip, createdAt])
+  @@index([createdAt])
+}
+
+enum LoginOutcome {
+  SUCCESS
+  BAD_PASSWORD
+  NO_SUCH_USER
+  LOCKED_OUT
+  MFA_REQUIRED
+  MFA_FAILED
+  DISABLED
+  IP_NOT_ALLOWED
+  DEVICE_LIMIT
+}
+
+/// Optional per-role IP allow-list. With no rows for a role, that role is
+/// unrestricted - so this feature is inert until someone adds a rule, and
+/// cannot accidentally lock everyone out by being deployed.
+model IpAllowRule {
+  id        String   @id @default(cuid())
+  role      Role
+  /// IPv4/IPv6 address or CIDR block, e.g. "203.0.113.4" or "203.0.113.0/24".
+  cidr      String
+  label     String?
+  createdAt DateTime @default(now())
+
+  @@unique([role, cidr])
+  @@index([role])
 }
 
 /// One row per device a user is signed in on. The login flow caps a normal
@@ -122,6 +259,17 @@ model UserSession {
   ip         String?
   createdAt  DateTime @default(now())
   lastSeenAt DateTime @default(now())
+
+  /// Hash of the current refresh token. Rotated on every refresh, so a stolen
+  /// refresh token is good for one use at most - and when an already-rotated
+  /// one is presented, that is evidence of theft and the session is killed.
+  refreshTokenHash String?
+  /// Hard stop regardless of activity (plan item 1.5). A session cannot be
+  /// refreshed past this, so an attacker who keeps one warm still loses it.
+  absoluteExpiresAt DateTime?
+  /// Set when the user ticks "remember this device", which suppresses the
+  /// new-device alert on later sign-ins from it.
+  trustedAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

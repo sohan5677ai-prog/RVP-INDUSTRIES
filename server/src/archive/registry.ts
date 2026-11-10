@@ -62,8 +62,8 @@ const between = (range: { from: Date; to: Date }) => ({ gte: range.from, lt: ran
 // accounts stay continuous. Ordered so self-referential and cross-master FKs
 // resolve on insert (AccountGroup's tree before Account; Party before the map).
 const MASTERS: ArchiveModel[] = [
-  { name: 'User', delegate: 'user', cls: 'MASTER', order: 10, omit: ['password'],
-    note: 'Password hashes never leave the building; mount re-links users by username.' },
+  { name: 'User', delegate: 'user', cls: 'MASTER', order: 10, omit: ['password', 'mfaSecret'],
+    note: 'Password hashes and TOTP secrets never leave the building; mount re-links users by username. mfaSecret is omitted for the same reason as password - exporting it would hand over a working second factor for every enrolled account.' },
   { name: 'Party', delegate: 'party', cls: 'MASTER', order: 20 },
   { name: 'PartyAddress', delegate: 'partyAddress', cls: 'MASTER', order: 22 },
   { name: 'Transport', delegate: 'transport', cls: 'MASTER', order: 25 },
@@ -202,6 +202,19 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Floating workspace sticky notes.' },
   { name: 'MaintenanceConfig', delegate: 'maintenanceConfig', cls: 'EXCLUDED', order: 0,
     note: 'Developer maintenance mode flag and countdown config.' },
+  // Phase 1 identity tables. All of them are credentials or security telemetry
+  // rather than the client's books, and every one carries something that must
+  // not travel in a file handed to a CA.
+  { name: 'PasswordHistory', delegate: 'passwordHistory', cls: 'EXCLUDED', order: 0,
+    note: 'Previous password hashes, kept only to stop a password being cycled back to. Exporting them would put a stack of crackable hashes per user into a file that leaves the building.' },
+  { name: 'MfaRecoveryCode', delegate: 'mfaRecoveryCode', cls: 'EXCLUDED', order: 0,
+    note: 'Hashed single-use MFA recovery codes. A working second factor, so it never leaves the building - same reasoning as User.mfaSecret.' },
+  { name: 'PasswordResetToken', delegate: 'passwordResetToken', cls: 'EXCLUDED', order: 0,
+    note: 'Short-lived reset tokens. Worthless once expired and dangerous while live.' },
+  { name: 'LoginAttempt', delegate: 'loginAttempt', cls: 'EXCLUDED', order: 0,
+    note: 'Sign-in telemetry carrying IP and user-agent per attempt. Security audit data with its own retention, deliberately NOT tied to a financial year - archiving a year must not take the login history with it.' },
+  { name: 'IpAllowRule', delegate: 'ipAllowRule', cls: 'EXCLUDED', order: 0,
+    note: 'Per-role IP allow-list. Deployment configuration, and a map of the office network.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

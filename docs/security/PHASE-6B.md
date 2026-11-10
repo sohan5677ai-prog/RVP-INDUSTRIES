@@ -260,3 +260,19 @@ actually be checked: the header should appear on a response from `www.rvpindustr
 
 **Lesson, worth carrying into Phase 2:** before changing deployment config, confirm which file
 the platform actually reads. `ls` at the root is not that confirmation.
+
+---
+
+## CSP enforcing
+
+The console check came back clean, so `Content-Security-Policy-Report-Only` in
+`client/vercel.json` was renamed to `Content-Security-Policy`. The policy itself is unchanged
+from the one that ran in report-only mode, so nothing new is being asserted - only enforced.
+
+If something does break, it will almost certainly be `script-src 'self'`, and the two candidates
+are the client-side file exports (`jspdf`, `exceljs`) if either needs `eval` or WebAssembly at
+runtime. Normal browsing would not have exercised those. The symptom is a console error naming
+`script-src` at the moment an export is generated, and the fix is to add `'wasm-unsafe-eval'`
+(preferred, narrower) or `'unsafe-eval'` to that directive.
+
+To revert to report-only, rename the key back - one line in `client/vercel.json`.

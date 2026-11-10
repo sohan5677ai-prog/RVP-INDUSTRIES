@@ -283,11 +283,14 @@ describe('approved language ids', () => {
   });
 
   it('supports INBOUND_MESSAGE environment variable configuration and fallback', () => {
-    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('31637');
+    // 33710 = `inbound_erp_alert`, the id approved on +917207146094. The
+    // expectation here still read 31637 after the template was re-approved
+    // under a new id, which left this test failing on main.
+    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('33710');
     process.env.FAST2SMS_TMPL_INBOUND_MESSAGE = '99999';
     expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('99999');
     delete process.env.FAST2SMS_TMPL_INBOUND_MESSAGE;
-    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('31637');
+    expect(templateId('INBOUND_MESSAGE', 'EN')).toBe('33710');
   });
 
   it('maps INTERNAL_KATA_ALERT to approved message_id 33711 and supports env override', () => {

@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import { requireAuthOrCameraBridge } from '../middleware/cameraAuth.js';
+import { isOriginAllowed, originPolicyFromEnv } from '../lib/corsOrigin.js';
 import { subscriptionGate } from '../middleware/subscription.js';
 import { maintenanceGate } from '../middleware/maintenance.js';
 import { webhookLimiter, bulkImportLimiter } from '../middleware/rateLimit.js';
@@ -68,9 +70,17 @@ router.use('/auth', authRoutes);
 // Public maintenance status endpoint for polling, unauthenticated screens & pre-login checks
 router.get('/system/maintenance/status', asyncHandler(getMaintenanceStatusHandler));
 
-// Static assets (logos, stamps, signatures)
+// Static assets (logos, stamps, signatures). Company branding rather than
+// business data, so the files stay public - but the wildcard ACAO is narrowed
+// to the configured client origins, so only our own pages can read them
+// cross-origin.
+const assetOriginPolicy = originPolicyFromEnv();
 router.use('/assets', (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin, assetOriginPolicy)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 }, express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets')));
@@ -78,7 +88,7 @@ router.use('/assets', (req, res, next) => {
 // Weighbridge CCTV direct streaming & snapshots for <img> tags
 router.get('/weighbridge/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
-router.post('/weighbridge/cctv/detect-plate', asyncHandler(detectPlateCctvHandler));
+router.post('/weighbridge/cctv/detect-plate', requireAuthOrCameraBridge, asyncHandler(detectPlateCctvHandler));
 router.post('/weighbridge/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/weighbridge/cctv/status', asyncHandler(getCctvStatusHandler));
 router.get('/weighbridge/tickets/:id/slip.pdf', asyncHandler(downloadSignedWeighbridgeSlipHandler));
@@ -94,7 +104,9 @@ const printQueueAuth = (req: any, res: any, next: any) => {
 router.post('/weighbridge/print-queue', printQueueAuth, asyncHandler(queuePrintJobHandler));
 router.get('/weighbridge/print-queue/pending', printQueueAuth, asyncHandler(getPendingPrintJobsHandler));
 router.patch('/weighbridge/print-queue/:id/complete', printQueueAuth, asyncHandler(completePrintJobHandler));
-router.get('/weighbridge/print-queue/status', asyncHandler(getPrintAgentStatusHandler));
+// The cabin print agent polls /pending and /complete, never /status - the only
+// caller is the client's own screen, which sends a Bearer token.
+router.get('/weighbridge/print-queue/status', printQueueAuth, asyncHandler(getPrintAgentStatusHandler));
 
 // Resend email delivery/tracking webhook (public - Resend calls this, Svix signed)
 router.post('/webhooks/resend', webhookLimiter, asyncHandler(handleResendWebhook));

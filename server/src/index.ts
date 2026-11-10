@@ -7,6 +7,8 @@ import apiRoutes from "./routes/index.js";
 import { errorHandler } from "./middleware/error.js";
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { assertJwtSecret } from "./lib/jwt.js";
+import { isOriginAllowed, originPolicyFromEnv } from "./lib/corsOrigin.js";
+import { requireAuthOrCameraBridge } from "./middleware/cameraAuth.js";
 import { prisma } from "./lib/prisma.js";
 
 // Fail fast if the JWT secret isn't configured, rather than booting an insecure
@@ -19,27 +21,30 @@ const app = express();
 // which the rate limiter keys on).
 app.set("trust proxy", 1);
 
-// Comma-separated list so the deployed client (a Vercel domain, plus any
-// custom domain later) can be added without a code change.
-const allowedOrigins = (process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
-  .split(",")
-  .map((o) => o.trim())
-  .filter(Boolean);
+// Whole-origin allow-list. CLIENT_ORIGIN (comma-separated) adds custom domains
+// and preview deployments on top of the built-in production origin; localhost
+// is accepted only outside production. See lib/corsOrigin.ts for why.
+const originPolicy = originPolicyFromEnv();
+logger.info(
+  `CORS allow-list: ${originPolicy.allowed.join(", ")}${
+    originPolicy.allowLocalhost ? " (+ localhost, non-production)" : ""
+  }`
+);
 
 app.use(helmet());
 app.use(cors({
   origin: (origin, cb) => {
     // No Origin header (server-to-server calls, health checks, curl) - allow.
+    // The Tally agent, the CCTV bridge and the Fast2SMS webhooks all arrive
+    // this way, and CORS is a browser mechanism: it is not what authenticates
+    // them (they carry their own shared secrets).
     if (!origin) return cb(null, true);
-    if (
-      allowedOrigins.includes(origin) ||
-      origin.endsWith('.vercel.app') ||
-      origin.includes('localhost') ||
-      origin.includes('127.0.0.1')
-    ) {
-      return cb(null, true);
-    }
-    cb(new Error(`Origin ${origin} not allowed by CORS`));
+    if (isOriginAllowed(origin, originPolicy)) return cb(null, true);
+    // Answer without the CORS headers rather than throwing: the browser blocks
+    // the read either way, and an Error here would surface as a 500 in the logs
+    // for what is really a routine rejection.
+    logger.warn(`CORS: rejected origin ${origin}`);
+    cb(null, false);
   },
 }));
 app.use(
@@ -128,7 +133,10 @@ app.post("/api/weighbridge/cctv/broadcast", (req, res, next) => {
 app.get("/api/weighbridge/cctv/status", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getCctvStatusHandler(req, res)).catch(next);
 });
-app.post("/api/weighbridge/cctv/detect-plate", (req, res, next) => {
+// Number-plate recognition runs a billed Gemini call, so it is never anonymous.
+// The client reaches it through api() with a Bearer token and the cabin bridge
+// has its own key, so requiring one of the two changes nothing for either.
+app.post("/api/weighbridge/cctv/detect-plate", requireAuthOrCameraBridge, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.detectPlateCctvHandler(req, res)).catch(next);
 });
 app.get("/api/weighbridge/snapshots/:filename", (req, res, next) => {

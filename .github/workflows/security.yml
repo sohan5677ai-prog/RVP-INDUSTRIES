@@ -1,0 +1,61 @@
+name: security
+
+# Dependency audit and secret scan. Phase 6a of SECURITY_PLAN.md (item 6.9).
+# This is the repository's first CI workflow, so it is deliberately narrow:
+# it does not build or deploy anything, it only reports.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [server, client]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+
+      # Reports without failing the build, for now. At the time this job was
+      # added the repository had 17 high/critical findings in server/ and 8 in
+      # client/, almost all transitive and several dev-only, so a blocking job
+      # would have been red on every PR from day one - the fastest way to teach
+      # everyone to ignore it.
+      #
+      # TODO (Phase 6b): triage and upgrade, then delete continue-on-error so a
+      # NEW high/critical finding actually blocks. Start with proxy-addr
+      # (critical, IP spoofing): this server sets `trust proxy` and the login
+      # rate limiter keys on the client IP.
+      #
+      # No `npm ci` and no build: the audit reads the lockfile, so installing
+      # is unnecessary and would make this job minutes slower.
+      - name: npm audit (high and critical)
+        continue-on-error: true
+        working-directory: ${{ matrix.workspace }}
+        run: npm audit --audit-level=high
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan commits, not just the worktree.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

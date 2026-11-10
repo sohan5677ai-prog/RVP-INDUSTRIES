@@ -1,0 +1,84 @@
+#!/bin/sh
+#
+# Local secret scan. Enable once per clone:
+#
+#   git config core.hooksPath .githooks
+#
+# Catches the obvious mistakes before they reach the remote. CI runs gitleaks on
+# the full history as the real backstop; this is the fast, local first pass.
+#
+# It only looks at STAGED changes, and only at added lines.
+
+set -e
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+
+# 1. Environment files must never be committed (.env.example excepted).
+for f in $staged; do
+  case "$f" in
+    *.env|*.env.*|.env|.env.*)
+      case "$f" in
+        *.env.example) ;;
+        *)
+          echo "pre-commit: refusing to commit an environment file: $f" >&2
+          fail=1
+          ;;
+      esac
+      ;;
+  esac
+done
+
+# 2. Credential-shaped strings in added lines.
+#
+# Each pattern matches a real credential format rather than a keyword, so
+# ordinary code and comments mentioning "secret" do not trip it.
+patterns='
+-----BEGIN [A-Z ]*PRIVATE KEY-----
+xox[baprs]-[A-Za-z0-9-]{10,}
+xapp-[0-9]-[A-Za-z0-9-]{10,}
+AKIA[0-9A-Z]{16}
+AIza[0-9A-Za-z_-]{35}
+rzp_live_[0-9A-Za-z]{10,}
+sk_live_[0-9A-Za-z]{10,}
+re_[0-9A-Za-z]{20,}
+eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}
+postgres(ql)?://[^:]+:[^@[:space:]]+@
+'
+
+added=$(git diff --cached --diff-filter=ACM -U0 | grep '^+' | grep -v '^+++' || true)
+
+if [ -n "$added" ]; then
+  echo "$patterns" | while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    hits=$(printf '%s\n' "$added" | grep -nEi -- "$pattern" || true)
+    if [ -n "$hits" ]; then
+      echo "pre-commit: possible secret matching /$pattern/:" >&2
+      printf '%s\n' "$hits" | head -5 >&2
+      echo "$pattern" >> "${TMPDIR:-/tmp}/rvp-precommit-hits.$$"
+    fi
+  done
+fi
+
+if [ -f "${TMPDIR:-/tmp}/rvp-precommit-hits.$$" ]; then
+  rm -f "${TMPDIR:-/tmp}/rvp-precommit-hits.$$"
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+pre-commit: commit blocked.
+
+If this is a real credential: remove it, put it in an environment variable, and
+rotate it if it has ever been pushed.
+
+If it is a false positive (a test fixture or an example value), re-run with:
+  git commit --no-verify
+MSG
+  exit 1
+fi
+
+exit 0

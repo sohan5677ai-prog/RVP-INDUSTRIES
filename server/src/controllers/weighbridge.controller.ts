@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
 import { getCameraPreview } from '../lib/cctvPreview.js';
+import { isTrustedCameraBridge } from '../lib/cameraBridgeKey.js';
 import {
   markViewerInterest,
   markAllViewerInterest,
@@ -26,22 +27,10 @@ import {
 } from '../services/whatsapp.service.js';
 import { recordAutomaticTransfer } from '../services/weighbridgeTransfer.service.js';
 
-function getExpectedBridgeKey(): string {
-  if (process.env.CCTV_BRIDGE_KEY && process.env.CCTV_BRIDGE_KEY.length >= 24) {
-    return process.env.CCTV_BRIDGE_KEY;
-  }
-  const secret = process.env.JWT_SECRET || 'rvp-default-kata-secret-key-2026';
-  return createHmac('sha256', secret).update('rvp-cctv-bridge-v1').digest('hex');
-}
-
-export function isTrustedCameraBridge(req: Request): boolean {
-  const expected = getExpectedBridgeKey();
-  const received = req.header('x-cctv-bridge-key');
-  if (!received || received.length < 24) return false;
-  const a = Buffer.from(received);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
+// Moved to lib/cameraBridgeKey.ts so route middleware can check the bridge key
+// without importing this controller. Re-exported here because several call
+// sites already import it from this module, and used below in this file.
+export { isTrustedCameraBridge };
 
 const STARTING_TICKET_NUMBER = 1;
 

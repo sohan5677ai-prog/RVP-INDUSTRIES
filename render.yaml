@@ -16,6 +16,13 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.11.0
+      # Set explicitly rather than relying on Render's default, because this is
+      # a security control and not only a logging switch: when it is anything
+      # other than "production" the API returns error messages and stack traces
+      # in 500 responses and accepts localhost browser origins.
+      # See server/src/middleware/error.ts and server/src/lib/corsOrigin.ts.
+      - key: NODE_ENV
+        value: production
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

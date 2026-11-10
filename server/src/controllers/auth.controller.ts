@@ -599,7 +599,17 @@ export async function beginMfaEnrolment(req: Request, res: Response) {
   const secret = generateMfaSecret();
   await prisma.user.update({ where: { id: user.id }, data: { mfaSecret: secret } });
 
-  res.json({ secret, otpauthUri: mfaEnrolmentUri(secret, user.username) });
+  const otpauthUri = mfaEnrolmentUri(secret, user.username);
+
+  // Rendered here rather than in the browser: the server already has the
+  // qrcode package, and a data URL needs no extra client dependency and no
+  // change to the CSP, which already allows `img-src data:`.
+  const { toDataURL } = await import('qrcode');
+  const qrDataUrl = await toDataURL(otpauthUri, { margin: 1, width: 240 });
+
+  // The secret is returned alongside the QR so it can be typed in by hand when
+  // a camera will not cooperate - it is the same secret either way.
+  res.json({ secret, otpauthUri, qrDataUrl });
 }
 
 export async function confirmMfaEnrolment(req: Request, res: Response) {

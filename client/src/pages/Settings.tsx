@@ -18,6 +18,7 @@ import { useAuth } from '@/lib/auth';
 const Subscription = lazy(() => import('@/pages/Subscription'));
 const ArchiveManager = lazy(() => import('@/pages/ArchiveManager'));
 const Wishes = lazy(() => import('@/pages/Wishes'));
+const SecuritySettings = lazy(() => import('@/components/settings/SecuritySettings'));
 const DeveloperMaintenance = lazy(() => import('@/pages/DeveloperMaintenance'));
 const KeyboardShortcutsSection = lazy(() => import('@/pages/Settings/KeyboardShortcutsSection'));
 
@@ -67,6 +68,7 @@ export default function Settings() {
       <Tabs value={activeTab} onValueChange={(val) => setSearchParams({ tab: val })} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="company">Company</TabsTrigger>
+          <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="invoice">Invoice Setup</TabsTrigger>
           <TabsTrigger value="freight">Freight Rates</TabsTrigger>
           <TabsTrigger value="hamali">Hamali Rates</TabsTrigger>
@@ -81,6 +83,12 @@ export default function Settings() {
 
         <TabsContent value="company" className="focus-visible:outline-none focus-visible:ring-0">
           <CompanySection qc={qc} />
+        </TabsContent>
+
+        <TabsContent value="security" className="focus-visible:outline-none focus-visible:ring-0">
+          <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
+            <SecuritySettings />
+          </Suspense>
         </TabsContent>
 
         <TabsContent value="invoice" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">

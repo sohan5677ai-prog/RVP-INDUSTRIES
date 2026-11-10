@@ -175,6 +175,12 @@ factor for every enrolled account.
   independently and is the only thing that decides.
 - Admin user management gains email, a disable toggle, and MFA/lock/last-login columns — the
   makings of the quarterly access review in Phase 9.
+- **Settings → Security** carries MFA enrolment, password change and sign-out-everywhere. The QR
+  is rendered server-side as a data URL by the `qrcode` package already on the server: no new
+  client dependency, and no CSP change, since `img-src data:` is already allowed. Enrolment is
+  three steps — scan, verify, save recovery codes — because the account is not protected until a
+  code has verified. Turning MFA off asks for the password *and* a code, and is refused outright
+  for a role that requires it.
 
 ## Tests
 
@@ -221,7 +227,7 @@ This phase cannot be deployed piecemeal.
 
 | Item | Where |
 |---|---|
-| MFA enrolment UI (the endpoints exist; the Settings screen does not) | finish before `MFA_ENFORCE=true` |
+| ~~MFA enrolment UI~~ | **done** — Settings → Security (`a5b48d3`) |
 | Password expiry (plan 1.2, "optional expiry setting") | not built; the column to drive it (`passwordChangedAt`) exists |
 | IP allow-list admin UI — rules must be inserted by hand today | Phase 2, alongside permissions |
 | `zod` 3 → 4, `xlsx` replacement | carried from Phase 6b |

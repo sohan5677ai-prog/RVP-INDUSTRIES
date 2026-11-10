@@ -2,24 +2,5 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://rvp-server.onrender.com/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Content-Security-Policy-Report-Only",
-          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https: http://127.0.0.1:4004 http://localhost:4004; connect-src 'self' https://rvp-server.onrender.com https://*.supabase.co http://127.0.0.1:4004 http://localhost:4004; frame-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'"
-        },
-        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        {
-          "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(self)"
-        },
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" }
-      ]
-    }
   ]
 }

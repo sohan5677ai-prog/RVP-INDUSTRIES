@@ -220,3 +220,43 @@ Phase 0 findings. The audit enumerated the CCTV routes in `index.ts` and stopped
 than reading every app-level registration ahead of `requireAuth`. The lesson for Phase 2, which
 has to get authorization right across ~393 routes: enumerate the route table mechanically, not by
 reading the file and trusting that the interesting parts stand out.
+
+---
+
+## Correction after live verification
+
+The deployed API was probed once Render finished building. Every gate holds:
+
+| Check | Result |
+|---|---|
+| `GET /cctv/snapshot`, `/cctv/stream`, `/cctv/status`, anonymous | 401 (each returned data before) |
+| `GET /scale/live`, `/scale/stream`, anonymous | 401 |
+| `GET /weighbridge/snapshots/:filename`, anonymous | 401 |
+| `GET /cctv/snapshot?k=junk` | 401 — an invalid token is no better than none |
+| `GET /weighbridge/media-token`, anonymous | 401 — the only way to get a token needs a session |
+| `POST /scale/config`, anonymous, empty body | 401. Probed with an empty body on purpose: had the gate failed, the handler would have answered 400 "Port name is required" without changing anything |
+| `POST /scale/broadcast?k=junk` | 403 `A media access token cannot authorise this request; sign in instead` — the read/write split is live, and the handler never runs |
+| `GET /scale/ports`, anonymous | 401 |
+| Phase 6a: CORS for `www.rvpindustries.co.in` / a look-alike | ACAO echoed / absent — no regression |
+
+**The mistake: the CSP went into the wrong file.** `vercel.json` at the repository root is **not**
+the effective Vercel config — the project's root directory is `client/`, and `client/vercel.json`
+exists with its own copy of the rewrites. The headers were added to the root file, so they were
+inert: the deployed site returned none of them, only Vercel's own HSTS.
+
+How it was caught, and how it was confirmed rather than guessed: the deployed `index.html`
+referenced `assets/index-B3c3R7QW.js`, the exact hash the local build produced, so the client had
+genuinely redeployed and a missing header could not be blamed on a build still running. The
+rewrites were working at the same time (`/api/health` and a deep link both 200), which could only
+come from `client/vercel.json`.
+
+Fixed by moving the header block to `client/vercel.json` and restoring the root file to
+rewrites-only. The headers are deliberately **not** duplicated across both files: two divergent
+copies of the same config is what caused this, and the root file appears to be dead weight — if
+anything, it should be deleted once someone confirms nothing else reads it.
+
+The CSP is still Report-Only, so the flip to enforcing remains outstanding, and now it can
+actually be checked: the header should appear on a response from `www.rvpindustries.co.in`.
+
+**Lesson, worth carrying into Phase 2:** before changing deployment config, confirm which file
+the platform actually reads. `ls` at the root is not that confirmation.

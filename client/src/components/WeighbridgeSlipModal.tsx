@@ -6,6 +6,8 @@ import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { withMediaToken } from '@/lib/mediaToken';
+import { useMediaToken } from '@/lib/useMediaToken';
 import { toast } from 'sonner';
 import { toJpeg } from 'html-to-image';
 import { isVehicleExempt } from '@/lib/calc';
@@ -18,7 +20,9 @@ import { isVehicleExempt } from '@/lib/calc';
 function resolveAbsoluteCamUrl(url: string | null | undefined, camNum: 1 | 2): string {
   if (!url) {
     // No URL at all — use the cloud server snapshot endpoint
-    return `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=${camNum}&t=${Date.now()}`;
+    return withMediaToken(
+      `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=${camNum}&t=${Date.now()}`
+    );
   }
   // Base64 data URIs work directly in any context
   if (url.startsWith('data:')) {
@@ -26,14 +30,16 @@ function resolveAbsoluteCamUrl(url: string | null | undefined, camNum: 1 | 2): s
   }
   // Already a full absolute URL (Supabase public URL or cloud URL)
   if (url.startsWith('http://') || url.startsWith('https://')) {
-    return url;
+    // A camera/snapshot URL on our own API now needs the capability token;
+    // a Supabase storage URL carries its own and must be left alone.
+    return url.includes('/api/weighbridge/') ? withMediaToken(url) : url;
   }
   // Relative /api/ path — prefix with cloud server origin so it works in print iframes
   if (url.startsWith('/api/')) {
-    return `https://rvp-server.onrender.com${url}`;
+    return withMediaToken(`https://rvp-server.onrender.com${url}`);
   }
   // Any other relative path
-  return `https://rvp-server.onrender.com/api/weighbridge/snapshots/${url}`;
+  return withMediaToken(`https://rvp-server.onrender.com/api/weighbridge/snapshots/${url}`);
 }
 
 interface WeighbridgeSlipModalProps {
@@ -558,6 +564,10 @@ export default function WeighbridgeSlipModal({
   onClose,
   onSendWhatsapp,
 }: WeighbridgeSlipModalProps) {
+  // Makes sure a media capability token exists and re-renders once it lands,
+  // so the camera <img> URLs built below carry it.
+  useMediaToken();
+
   const [calibration, setCalibration] = useState<PrinterCalibration>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_CALIBRATION_KEY);

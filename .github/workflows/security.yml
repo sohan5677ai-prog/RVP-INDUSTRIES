@@ -1,8 +1,8 @@
 name: security
 
-# Dependency audit and secret scan. Phase 6a of SECURITY_PLAN.md (item 6.9).
-# This is the repository's first CI workflow, so it is deliberately narrow:
-# it does not build or deploy anything, it only reports.
+# Dependency audit and secret scan. Added in Phase 6a of SECURITY_PLAN.md
+# (item 6.9), tightened in Phase 6b. This workflow only reports and gates; it
+# does not build or deploy.
 
 on:
   push:
@@ -15,12 +15,23 @@ permissions:
 
 jobs:
   audit:
-    name: dependency audit
+    name: dependency audit (${{ matrix.workspace }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        workspace: [server, client]
+        include:
+          # Production dependencies are clean here, so a new high/critical
+          # finding fails the build.
+          - workspace: client
+            gate_production: true
+          # Still carries zod, qs, uuid and xlsx findings in production deps.
+          # zod needs a 3 -> 4 major (the client is already on 4); xlsx has no
+          # fixed version on npm at all, since SheetJS publishes elsewhere now.
+          # Until those two are dealt with this can only report.
+          # TODO: flip gate_production to true once zod and xlsx are resolved.
+          - workspace: server
+            gate_production: false
     steps:
       - uses: actions/checkout@v4
 
@@ -28,20 +39,18 @@ jobs:
         with:
           node-version: '22.11.0'
 
-      # Reports without failing the build, for now. At the time this job was
-      # added the repository had 17 high/critical findings in server/ and 8 in
-      # client/, almost all transitive and several dev-only, so a blocking job
-      # would have been red on every PR from day one - the fastest way to teach
-      # everyone to ignore it.
-      #
-      # TODO (Phase 6b): triage and upgrade, then delete continue-on-error so a
-      # NEW high/critical finding actually blocks. Start with proxy-addr
-      # (critical, IP spoofing): this server sets `trust proxy` and the login
-      # rate limiter keys on the client IP.
-      #
       # No `npm ci` and no build: the audit reads the lockfile, so installing
       # is unnecessary and would make this job minutes slower.
-      - name: npm audit (high and critical)
+
+      # What actually ships. This is the one that gates.
+      - name: npm audit - production dependencies
+        continue-on-error: ${{ matrix.gate_production != true }}
+        working-directory: ${{ matrix.workspace }}
+        run: npm audit --omit=dev --audit-level=high
+
+      # Includes the toolchain (vitest, vite, prisma CLI). Advisory: a dev-only
+      # finding is not a reason to block a deploy, but it should be visible.
+      - name: npm audit - all dependencies (advisory)
         continue-on-error: true
         working-directory: ${{ matrix.workspace }}
         run: npm audit --audit-level=high

@@ -2,6 +2,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import multer from 'multer';
 import { getSupabase, storageBucket } from './supabase.js';
+import { HttpError } from './httpError.js';
+import { SNIFFED_TYPE_META, sniffFileType } from './fileSignature.js';
 
 // Only allow a small set of document/image extensions we actually accept, so a
 // user can't upload an .html/.svg that would be served inline, or an executable.
@@ -40,18 +42,31 @@ export const memoryUpload = multer({
  * Uploads a parsed multer file to Supabase Storage and returns its public URL.
  * Invoice files hold customer PII and are served as capability URLs, so the
  * object name must be unguessable - a 16-byte random token, not a timestamp.
+ *
+ * The extension allow-list in fileFilter only sees the filename, which the
+ * client chooses, so the bytes are checked here before anything is stored: the
+ * bucket is public, and a stored .html or .svg would execute as a page on that
+ * origin. The extension and Content-Type written to storage come from the
+ * sniffed type, never from what was uploaded.
  */
 export async function uploadFileToStorage(file: Express.Multer.File): Promise<string> {
-  const ext = path.extname(file.originalname).toLowerCase();
+  const sniffed = sniffFileType(file.buffer);
+  if (!sniffed) {
+    throw new HttpError(
+      400,
+      'That file is not a PDF or an image. Only PDF, JPEG, PNG, WebP and GIF files can be uploaded.'
+    );
+  }
+  const { ext, mime } = SNIFFED_TYPE_META[sniffed];
   const token = crypto.randomBytes(16).toString('hex');
-  const objectName = `${token}${ALLOWED_EXT.has(ext) ? ext : ''}`;
+  const objectName = `${token}${ext}`;
 
   const supabase = getSupabase();
   const bucket = storageBucket();
   const { error } = await supabase.storage
     .from(bucket)
     .upload(objectName, file.buffer, {
-      contentType: file.mimetype,
+      contentType: mime,
       upsert: false,
     });
   if (error) throw new Error(`Supabase upload failed: ${error.message}`);

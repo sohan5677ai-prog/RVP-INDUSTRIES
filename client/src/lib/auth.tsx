@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api, setToken, clearToken, getToken } from './api';
+import { clearMediaToken } from './mediaToken';
 import { getDeviceId } from './device';
 import { startIdleWatch, markActivity } from './idle';
 import type { User } from './types';
@@ -27,7 +28,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     api<{ user: User }>('/auth/me')
       .then((res) => setUser(res.user))
-      .catch(() => clearToken())
+      .catch(() => {
+        clearToken();
+        clearMediaToken();
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -48,6 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       api('/auth/logout', { method: 'POST' }).catch(() => {});
     }
     clearToken();
+    // The media capability token is only re-mintable while signed in, and it
+    // must not outlive the session in localStorage.
+    clearMediaToken();
     setUser(null);
   }, []);
 

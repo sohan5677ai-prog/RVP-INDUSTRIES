@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { getScaleApiUrl } from './api';
+import { useMediaToken } from './useMediaToken';
 import {
   getLocalBridgeOrigin,
   probeLocalBridge,
@@ -26,6 +27,11 @@ export function useCameraPreview(
 ) {
   const [frameUrl, setFrameUrl] = useState<string>();
   const scheduleRef = useRef<(() => void) | null>(null);
+
+  // The cloud snapshot endpoint needs a capability token in the URL, because an
+  // <img> cannot send a header. Holding it here re-renders the hook once it
+  // arrives, so the next frame URL carries it.
+  const mediaToken = useMediaToken();
 
   // Re-render when the bridge appears or disappears so `getScaleApiUrl` starts
   // (or stops) handing back LAN URLs for the very next frame.
@@ -73,8 +79,10 @@ export function useCameraPreview(
       document.removeEventListener('visibilitychange', visibilityChanged);
     };
     // `bridgeOrigin` is a dependency so switching between LAN and cloud takes
-    // effect immediately rather than at the next five-second tick.
-  }, [cam, enabled, refreshTrigger, variant, bridgeOrigin]);
+    // effect immediately rather than at the next five-second tick, and
+    // `mediaToken` so the first frame after sign-in carries the token instead
+    // of waiting five seconds to be retried.
+  }, [cam, enabled, refreshTrigger, variant, bridgeOrigin, mediaToken]);
 
   const onFrameSettled = useCallback(() => scheduleRef.current?.(), []);
 

@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { getScaleApiUrl } from '@/lib/api';
+import { authHeaders } from '@/lib/apiBase';
+import { useMediaToken } from '@/lib/useMediaToken';
 
 interface SerialPortInfo {
   usbVendorId?: number;
@@ -63,6 +65,10 @@ const STORAGE_BAUD_RATE = 'rvp_scale_baud_rate';
 const DEFAULT_BAUD_RATE = 2400;
 
 export function ScaleProvider({ children }: { children: ReactNode }) {
+  // The scale SSE stream and live-reading poll are no longer anonymous; this
+  // mints the capability token they carry and re-renders when it arrives.
+  const mediaToken = useMediaToken();
+
   const [isSupported, setIsSupported] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isLocalConnected, setIsLocalConnected] = useState<boolean>(false);
@@ -135,7 +141,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         const url = getScaleApiUrl('/weighbridge/scale/broadcast');
         await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          // /scale/broadcast and /scale/config are writes: the server refuses a
+        // query capability token for these, so the Bearer header is required.
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({
             liveWeight: weight,
             isStable: stable,
@@ -173,7 +181,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       const url = getScaleApiUrl('/weighbridge/scale/broadcast');
       await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // /scale/broadcast and /scale/config are writes: the server refuses a
+        // query capability token for these, so the Bearer header is required.
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           isConnected: false,
           error: 'USB scale disconnected from Kata Cabin terminal',
@@ -528,6 +538,12 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     let lastStreamMessage = 0;
     let pollController: AbortController | null = null;
 
+    // /scale/stream is an EventSource, which cannot send an Authorization
+    // header, so it carries the capability token in the query string instead.
+    // Until that token exists there is nothing to connect with, and re-running
+    // on it means the stream reconnects by itself once it lands.
+    if (!mediaToken) return;
+
     const streamUrl = getScaleApiUrl('/weighbridge/scale/stream');
     const liveUrl = getScaleApiUrl('/weighbridge/scale/live');
 
@@ -661,14 +677,16 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       if (es) es.close();
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, []);
+  }, [mediaToken]);
 
   const switchServerPort = useCallback(async (port: string, rate?: number): Promise<boolean> => {
     try {
       const url = getScaleApiUrl('/weighbridge/scale/config');
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // /scale/broadcast and /scale/config are writes: the server refuses a
+        // query capability token for these, so the Bearer header is required.
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ port, baudRate: rate || baudRate }),
       });
       if (res.ok) {

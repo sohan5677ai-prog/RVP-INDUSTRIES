@@ -37,6 +37,7 @@ import {
   Camera,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
+import { withMediaToken } from '@/lib/mediaToken';
 import { useCameraPreview } from '@/lib/useCameraPreview';
 import { useAuth } from '@/lib/auth';
 import { useScale } from '@/lib/scaleContext';
@@ -1088,8 +1089,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       if (!snap1Base64 || !snap2Base64) {
         toast.warning('One or more browser snapshots were unavailable. The server will use the freshest cabin relay frame.');
       }
-      const localSnap1 = snap1Base64 || `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=1&t=${Date.now()}`;
-      const localSnap2 = snap2Base64 || `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=2&t=${Date.now()}`;
+      const localSnap1 = snap1Base64 || withMediaToken(`https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=1&t=${Date.now()}`);
+      const localSnap2 = snap2Base64 || withMediaToken(`https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=2&t=${Date.now()}`);
       const snapObj = { cam1: localSnap1, cam2: localSnap2 };
       setActiveSnapshots(snapObj);
 

@@ -1,14 +1,11 @@
 import { withRequestDeadline } from './requestDeadline';
 import { getLocalBridgeOrigin } from './localBridge';
-export const API_BASE = (
-  import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== '/api'
-    ? import.meta.env.VITE_API_URL
-    : typeof window !== 'undefined' &&
-      window.location.hostname !== 'localhost' &&
-      window.location.hostname !== '127.0.0.1'
-    ? 'https://rvp-server.onrender.com/api'
-    : '/api'
-).replace(/\/+$/, '');
+import { API_BASE, getToken, setToken, clearToken } from './apiBase';
+import { withMediaToken } from './mediaToken';
+
+// Re-exported so existing imports from './api' keep working; the definitions
+// live in apiBase.ts so mediaToken.ts can use them without an import cycle.
+export { API_BASE, getToken, setToken, clearToken };
 
 /**
  * Paths `cctv-bridge.mjs` serves itself on the cabin LAN.
@@ -24,41 +21,49 @@ const LOCAL_BRIDGE_PATHS = [
   '/weighbridge/cctv/stream',
 ];
 
+/**
+ * Media paths the server will only serve to a credentialed caller. They are
+ * loaded by `<img src>` and `EventSource`, which cannot send an Authorization
+ * header, so the capability token goes in the query string instead. See
+ * server/src/middleware/mediaAuth.ts.
+ *
+ * Only reads appear here. /scale/broadcast and /scale/config are writes and
+ * are refused with a query token by design, so they must keep using fetch with
+ * the Bearer header.
+ */
+const MEDIA_TOKEN_PATHS = [
+  '/weighbridge/cctv/snapshot',
+  '/weighbridge/cctv/stream',
+  '/weighbridge/cctv/status',
+  '/weighbridge/snapshots/',
+  '/weighbridge/scale/live',
+  '/weighbridge/scale/stream',
+];
+
 export function getScaleApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const needsToken = MEDIA_TOKEN_PATHS.some((p) => cleanPath.startsWith(p));
 
   // Serve camera frames off the LAN when the bridge is running on this PC.
   // Costs no Render egress at all, and arrives in under a millisecond.
+  // The bridge matches on pathname and reads only `cam`, so the extra token
+  // parameter is ignored there - harmless, and it keeps one code path.
   const localOrigin = getLocalBridgeOrigin();
   if (localOrigin && LOCAL_BRIDGE_PATHS.some((p) => cleanPath.startsWith(p))) {
     return `${localOrigin}/api${cleanPath}`;
   }
 
-  if (
+  const url =
     typeof window !== 'undefined' &&
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1'
-  ) {
-    return `https://rvp-server.onrender.com/api${cleanPath}`;
-  }
-  return `${API_BASE}${cleanPath}`;
+      ? `https://rvp-server.onrender.com/api${cleanPath}`
+      : `${API_BASE}${cleanPath}`;
+
+  return needsToken ? withMediaToken(url) : url;
 }
 
 const BASE = API_BASE;
-
-const TOKEN_KEY = 'rvp_token';
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
-}
 
 export class ApiError extends Error {
   status: number;

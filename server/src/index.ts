@@ -9,6 +9,8 @@ import { apiLimiter } from "./middleware/rateLimit.js";
 import { assertJwtSecret } from "./lib/jwt.js";
 import { isOriginAllowed, originPolicyFromEnv } from "./lib/corsOrigin.js";
 import { requireAuthOrCameraBridge } from "./middleware/cameraAuth.js";
+import { requireMediaRead, requireMediaWrite } from "./middleware/mediaAuth.js";
+import { requireAuth } from "./middleware/auth.js";
 import { prisma } from "./lib/prisma.js";
 
 // Fail fast if the JWT secret isn't configured, rather than booting an insecure
@@ -120,17 +122,26 @@ app.get("/api/health/db", async (_req, res) => {
   }
 });
 
-// CCTV live snapshot & stream endpoints bypass general API rate limiter
-app.get("/api/weighbridge/cctv/snapshot", (req, res, next) => {
+// The weighbridge media surface. These sit here, ahead of the /api router, so
+// that a long-lived MJPEG or SSE connection does not consume the general rate
+// limiter's budget - which also put them ahead of requireAuth, leaving every
+// one of them open to the internet until Phase 6b.
+//
+// requireMediaRead accepts a `?k=` capability token as well as a header,
+// because <img src> and EventSource cannot send one. requireMediaWrite does
+// not: a token that travels in a URL must never be able to change the weight
+// the operator sees. See middleware/mediaAuth.ts.
+app.get("/api/weighbridge/cctv/snapshot", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.snapshotCctvHandler(req, res)).catch(next);
 });
-app.get("/api/weighbridge/cctv/stream", (req, res, next) => {
+app.get("/api/weighbridge/cctv/stream", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.streamCctvHandler(req, res)).catch(next);
 });
+// Verifies the bridge key itself, inside the handler.
 app.post("/api/weighbridge/cctv/broadcast", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.broadcastCctvHandler(req, res)).catch(next);
 });
-app.get("/api/weighbridge/cctv/status", (req, res, next) => {
+app.get("/api/weighbridge/cctv/status", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getCctvStatusHandler(req, res)).catch(next);
 });
 // Number-plate recognition runs a billed Gemini call, so it is never anonymous.
@@ -139,25 +150,34 @@ app.get("/api/weighbridge/cctv/status", (req, res, next) => {
 app.post("/api/weighbridge/cctv/detect-plate", requireAuthOrCameraBridge, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.detectPlateCctvHandler(req, res)).catch(next);
 });
-app.get("/api/weighbridge/snapshots/:filename", (req, res, next) => {
+app.get("/api/weighbridge/snapshots/:filename", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getStoredSnapshotHandler(req, res)).catch(next);
 });
 
-// Scale serial live streaming endpoints bypass general API rate limiter
-app.get("/api/weighbridge/scale/live", (req, res, next) => {
+// Scale serial live streaming endpoints bypass general API rate limiter.
+// /live and /stream are read by the cabin screen (fetch and EventSource);
+// /config and /broadcast change what every operator sees, so they are writes.
+app.get("/api/weighbridge/scale/live", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getLiveScaleHandler(req, res)).catch(next);
 });
-app.get("/api/weighbridge/scale/stream", (req, res, next) => {
+app.get("/api/weighbridge/scale/stream", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.streamLiveScaleHandler(req, res)).catch(next);
 });
-app.get("/api/weighbridge/scale/ports", (req, res, next) => {
+app.get("/api/weighbridge/scale/ports", requireMediaWrite, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.listScalePortsHandler(req, res)).catch(next);
 });
-app.post("/api/weighbridge/scale/config", (req, res, next) => {
+app.post("/api/weighbridge/scale/config", requireMediaWrite, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.configScalePortHandler(req, res)).catch(next);
 });
-app.post("/api/weighbridge/scale/broadcast", (req, res, next) => {
+app.post("/api/weighbridge/scale/broadcast", requireMediaWrite, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.broadcastScaleReadingHandler(req, res)).catch(next);
+});
+
+// Mint a media capability token. Authenticated, and the only way to get one.
+app.get("/api/weighbridge/media-token", requireAuth, (req, res, next) => {
+  import("./lib/mediaAccessToken.js")
+    .then(({ mintMediaAccessToken }) => res.json(mintMediaAccessToken()))
+    .catch(next);
 });
 
 // Forward root /webhooks/* to apiRoutes so webhook callbacks (e.g. Fast2SMS / Meta / Resend)

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAuthOrCameraBridge } from '../middleware/cameraAuth.js';
+import { requireMediaRead } from '../middleware/mediaAuth.js';
 import { isOriginAllowed, originPolicyFromEnv } from '../lib/corsOrigin.js';
 import { subscriptionGate } from '../middleware/subscription.js';
 import { maintenanceGate } from '../middleware/maintenance.js';
@@ -85,12 +86,15 @@ router.use('/assets', (req, res, next) => {
   next();
 }, express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets')));
 
-// Weighbridge CCTV direct streaming & snapshots for <img> tags
-router.get('/weighbridge/cctv/stream', asyncHandler(streamCctvHandler));
-router.get('/weighbridge/cctv/snapshot', asyncHandler(snapshotCctvHandler));
+// Weighbridge CCTV direct streaming & snapshots for <img> tags.
+// index.ts registers these same paths at app level (ahead of the rate limiter)
+// and so wins, but they are gated identically here: a future change that drops
+// the app-level copies must not silently reopen them to the internet.
+router.get('/weighbridge/cctv/stream', requireMediaRead, asyncHandler(streamCctvHandler));
+router.get('/weighbridge/cctv/snapshot', requireMediaRead, asyncHandler(snapshotCctvHandler));
 router.post('/weighbridge/cctv/detect-plate', requireAuthOrCameraBridge, asyncHandler(detectPlateCctvHandler));
 router.post('/weighbridge/cctv/broadcast', asyncHandler(broadcastCctvHandler));
-router.get('/weighbridge/cctv/status', asyncHandler(getCctvStatusHandler));
+router.get('/weighbridge/cctv/status', requireMediaRead, asyncHandler(getCctvStatusHandler));
 router.get('/weighbridge/tickets/:id/slip.pdf', asyncHandler(downloadSignedWeighbridgeSlipHandler));
 router.get('/weighbridge/tickets/:id/slip.jpg', asyncHandler(downloadSignedWeighbridgeSlipImageHandler));
 

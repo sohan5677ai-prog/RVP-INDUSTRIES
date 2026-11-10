@@ -28,6 +28,17 @@ export function istParts(date: Date) {
   };
 }
 
+/**
+ * Human-readable IST timestamp for a message to a person, e.g.
+ * `10-11-2026 01:45 PM`. Used in the security emails, where getting the time
+ * zone wrong would have someone chasing a sign-in that never happened at the
+ * hour stated.
+ */
+export function formatIstDateTime(date: Date): string {
+  const p = istParts(date);
+  return `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute} ${p.ampm}`;
+}
+
 /** Numeric IST calendar fields. `month` is 1-based, so April is 4. */
 export function istCalendar(date: Date): { year: number; month: number; day: number } {
   const p = istParts(date);

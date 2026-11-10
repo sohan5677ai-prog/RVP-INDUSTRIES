@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
 import { api, ApiError } from '@/lib/api';
 import type { MaintenanceStatus } from '@/lib/types';
@@ -9,13 +9,19 @@ import { Label } from '@/components/ui/label';
 import { Lock, Mail, Loader2, ArrowRight, Eye, EyeOff, Wrench, Clock, ShieldAlert } from 'lucide-react';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, completeMfa } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Second-factor step. `challenge` is the server's short-lived note that the
+  // password was already proven; it is not a session and cannot be used as one.
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   // Maintenance mode detection on login page
   const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
@@ -58,13 +64,49 @@ export default function Login() {
     setSubmitting(true);
     try {
       localStorage.removeItem('rvp_kata_cabin_installation_key');
-      await login(username, password);
+      const result = await login(username, password, remember);
+      if (result.mfaRequired) {
+        // Password accepted, but the account has two-factor on. Hold the
+        // challenge and ask for a code; no session exists yet.
+        setChallenge(result.challenge);
+        return;
+      }
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Invalid credentials. Please try again.');
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onSubmitCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!challenge) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await completeMfa(
+        challenge,
+        useRecoveryCode ? { recoveryCode: code } : { code },
+        remember
+      );
+      navigate('/', { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'That code was not correct.');
+      // A spent or mistyped code leaves the challenge usable for another go,
+      // but an expired one does not - the message says which.
+      setCode('');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function abandonMfa() {
+    setChallenge(null);
+    setCode('');
+    setUseRecoveryCode(false);
+    setError(null);
+    setPassword('');
   }
 
   const mins = Math.floor(secondsLeft / 60);
@@ -128,6 +170,72 @@ export default function Login() {
 
         {/* Glass Card */}
         <div className="backdrop-blur-xl bg-zinc-900/50 border border-white/10 rounded-3xl p-8 shadow-2xl">
+          {challenge ? (
+            <form onSubmit={onSubmitCode} className="space-y-6">
+              <div className="space-y-2 text-center">
+                <h2 className="text-lg font-semibold text-white">Two-factor authentication</h2>
+                <p className="text-sm text-zinc-400">
+                  {useRecoveryCode
+                    ? 'Enter one of the recovery codes you saved when you set this up.'
+                    : 'Enter the 6-digit code from your authenticator app.'}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mfa-code" className="text-zinc-300 ml-1">
+                  {useRecoveryCode ? 'Recovery code' : 'Authentication code'}
+                </Label>
+                <Input
+                  id="mfa-code"
+                  // Numeric keypad for the 6-digit case, plain text for a
+                  // recovery code, which contains letters.
+                  inputMode={useRecoveryCode ? 'text' : 'numeric'}
+                  autoComplete={useRecoveryCode ? 'off' : 'one-time-code'}
+                  autoFocus
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                  placeholder={useRecoveryCode ? 'ABCDE-FGHJK' : '123456'}
+                  className="login-field h-12 !bg-zinc-950/70 border-white/10 !text-white placeholder:text-zinc-500 focus-visible:ring-amber-500/50 rounded-xl text-center tracking-[0.3em] text-lg"
+                />
+              </div>
+
+              {error && (
+                <div className="p-3 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg text-center animate-in fade-in slide-in-from-top-1">
+                  {error}
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full h-12 bg-white text-zinc-950 hover:bg-zinc-200 rounded-xl font-semibold tracking-wide flex items-center justify-center gap-2 transition-all hover:gap-3"
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <><Loader2 className="h-5 w-5 animate-spin" /> Verifying</>
+                ) : (
+                  <>Verify <ArrowRight className="h-4 w-4" /></>
+                )}
+              </Button>
+
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => { setUseRecoveryCode(!useRecoveryCode); setCode(''); setError(null); }}
+                  className="text-zinc-400 hover:text-zinc-200 underline underline-offset-4"
+                >
+                  {useRecoveryCode ? 'Use my authenticator app' : 'Use a recovery code'}
+                </button>
+                <button
+                  type="button"
+                  onClick={abandonMfa}
+                  className="text-zinc-500 hover:text-zinc-300"
+                >
+                  Start again
+                </button>
+              </div>
+            </form>
+          ) : (
           <form onSubmit={onSubmit} className="space-y-6">
             <div className="space-y-4">
               <div className="space-y-2">
@@ -193,7 +301,26 @@ export default function Login() {
                 <>Sign In <ArrowRight className="h-4 w-4" /></>
               )}
             </Button>
+
+            <div className="flex items-center justify-between text-xs">
+              <label className="flex items-center gap-2 text-zinc-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-white/20 bg-zinc-950/70 accent-amber-500"
+                />
+                Remember this device
+              </label>
+              <Link
+                to="/forgot-password"
+                className="text-zinc-400 hover:text-zinc-200 underline underline-offset-4"
+              >
+                Forgot password?
+              </Link>
+            </div>
           </form>
+          )}
         </div>
 
         {/* Footer */}

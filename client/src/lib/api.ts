@@ -1,11 +1,20 @@
 import { withRequestDeadline } from './requestDeadline';
 import { getLocalBridgeOrigin } from './localBridge';
-import { API_BASE, getToken, setToken, clearToken } from './apiBase';
+import {
+  API_BASE,
+  getToken,
+  setToken,
+  clearToken,
+  clearSession,
+  getRefreshToken,
+  refreshAccessToken,
+  setSession,
+} from './apiBase';
 import { withMediaToken } from './mediaToken';
 
 // Re-exported so existing imports from './api' keep working; the definitions
 // live in apiBase.ts so mediaToken.ts can use them without an import cycle.
-export { API_BASE, getToken, setToken, clearToken };
+export { API_BASE, getToken, setToken, clearToken, clearSession, setSession, getRefreshToken };
 
 /**
  * Paths `cctv-bridge.mjs` serves itself on the cabin LAN.
@@ -85,7 +94,25 @@ interface ApiOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Endpoints that must never trigger a refresh-and-retry: the refresh itself,
+ * and the unauthenticated credential endpoints. A 401 from any of these is a
+ * real answer, not an expired access token.
+ */
+const NO_REFRESH_PATHS = [
+  '/auth/refresh',
+  '/auth/login',
+  '/auth/mfa/verify',
+  '/auth/kiosk',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
+
 export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
+  return apiOnce<T>(path, opts, true);
+}
+
+async function apiOnce<T>(path: string, opts: ApiOptions, mayRetry: boolean): Promise<T> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -106,11 +133,18 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
       body,
     });
 
-    // A 401 on an authenticated call means the session is gone (revoked from
-    // another device, or timed out). Broadcast it so AuthProvider drops the user
-    // and the app falls back to the login screen without a manual refresh.
+    // A 401 now usually means nothing worse than a fifteen-minute access token
+    // having expired, so try the refresh token once before giving up. Only if
+    // that fails is the session genuinely gone (revoked elsewhere, idle window
+    // lapsed, password changed, account disabled), and only then do we sign
+    // out - broadcasting it so AuthProvider drops the user without a reload.
     if (res.status === 401) {
-      clearToken();
+      const refreshable =
+        mayRetry && !!token && !!getRefreshToken() && !NO_REFRESH_PATHS.includes(path);
+      if (refreshable && (await refreshAccessToken())) {
+        return apiOnce<T>(path, opts, false);
+      }
+      clearSession();
       if (token && path !== '/auth/login') {
         window.dispatchEvent(new Event('auth:unauthorized'));
       }

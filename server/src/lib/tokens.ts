@@ -67,6 +67,29 @@ export function signAccessToken(payload: AccessTokenPayload): string {
   return jwt.sign(payload, getSecret(), { expiresIn: ACCESS_TOKEN_TTL_MS / 1000 });
 }
 
+/**
+ * Long-lived token for a non-browser principal: the Slack bot and the kata
+ * cabin screen.
+ *
+ * These carry `sid: 'service'` and no UserSession row, so they are exempt from
+ * the idle timeout, the device cap and the refresh cycle - a kiosk bolted to a
+ * wall cannot be asked to re-authenticate every fifteen minutes, and the Slack
+ * bot has no one to prompt. `pwdAt: 0` makes the password-change check a no-op
+ * for them, which is correct: they are not authenticated by a password, so a
+ * password change has no bearing on them.
+ *
+ * The tradeoff is deliberate and worth stating plainly: these tokens cannot be
+ * revoked except by rotating JWT_SECRET. The cabin's is constrained to the
+ * weighbridge routes by the KATA_CABIN scope check, which is what makes that
+ * acceptable.
+ */
+export function signServiceToken(
+  payload: Omit<AccessTokenPayload, 'pwdAt'>,
+  expiresIn: jwt.SignOptions['expiresIn'] = '30d'
+): string {
+  return jwt.sign({ ...payload, pwdAt: 0 }, getSecret(), { expiresIn });
+}
+
 export function verifyAccessToken(token: string): AccessTokenPayload {
   return jwt.verify(token, getSecret()) as AccessTokenPayload;
 }

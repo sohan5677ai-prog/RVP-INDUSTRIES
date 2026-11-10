@@ -1,24 +1,12 @@
-import jwt from 'jsonwebtoken';
 import { createHmac } from 'crypto';
-import type { Role } from '@prisma/client';
-
-export interface JwtPayload {
-  userId: string;
-  role: Role;
-  /** UserSession row this token belongs to — one per signed-in device. */
-  sid: string;
-  /** A deliberately narrow token issued to the permanently installed cabin screen. */
-  scope?: 'KATA_CABIN';
-  /** Kept in the signed token so kata tickets retain the dedicated operator name. */
-  name?: string;
-}
 
 let cachedSecret: string | undefined;
 
 /**
- * Resolve the signing secret, refusing a missing or trivially short one. Called
- * lazily (on first sign/verify) rather than at import so tools/tests that merely
- * import this module don't crash; call assertJwtSecret() at boot to fail fast.
+ * Resolve the signing secret, refusing a missing or trivially short one.
+ *
+ * Token signing and verification moved to lib/tokens.ts in Phase 1; what is
+ * left here is the secret itself and the cabin activation key derived from it.
  */
 function getSecret(): string {
   if (cachedSecret) return cachedSecret;
@@ -35,14 +23,6 @@ function getSecret(): string {
 /** Fail-fast check to run once at server startup. */
 export function assertJwtSecret(): void {
   getSecret();
-}
-
-export function signToken(payload: JwtPayload): string {
-  return jwt.sign(payload, getSecret(), { expiresIn: '7d' });
-}
-
-export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, getSecret()) as JwtPayload;
 }
 
 /**

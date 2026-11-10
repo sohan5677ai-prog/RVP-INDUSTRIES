@@ -1,6 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { Role } from '@prisma/client';
-import { verifyToken, type JwtPayload } from '../lib/jwt.js';
+import {
+  verifyAccessToken,
+  tokenPredatesPasswordChange,
+  type AccessTokenPayload,
+} from '../lib/tokens.js';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import {
@@ -15,7 +19,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      user?: JwtPayload;
+      user?: AccessTokenPayload;
     }
   }
 }
@@ -25,6 +29,11 @@ declare global {
  * round-trip on back-to-back requests; a session revoked elsewhere is noticed
  * within LAST_SEEN_WRITE_INTERVAL_MS (immediately if it was this process that
  * revoked it, via forgetSession).
+ *
+ * Note what this cache does and does not cover. The 15-minute access token is
+ * what bounds the damage of a revoked credential: the checks below run at most
+ * every 30 seconds, but a revoked session cannot be refreshed at all, so it
+ * dies within one token lifetime regardless.
  */
 const lastSeenCache = new Map<string, number>();
 
@@ -47,10 +56,12 @@ async function authenticate(req: Request): Promise<void> {
   }
   const token = header.slice('Bearer '.length);
 
-  let payload: JwtPayload;
+  let payload: AccessTokenPayload;
   try {
-    payload = verifyToken(token);
+    payload = verifyAccessToken(token);
   } catch {
+    // Covers both a forged token and an expired one. The client tells them
+    // apart by trying /auth/refresh: if that works the token was merely old.
     throw new HttpError(401, 'Invalid or expired token');
   }
   req.user = payload;
@@ -58,32 +69,73 @@ async function authenticate(req: Request): Promise<void> {
   // Tokens minted before device sessions existed carry no sid; make the holder
   // sign in again so they get a real session row.
   if (!payload.sid) throw new HttpError(401, 'Session ended. Please sign in again.');
+  // The Slack bot and the kata cabin screen. No session row, no idle timeout,
+  // and no password to have changed - see signServiceToken.
   if (payload.sid === SERVICE_SESSION_ID) return;
 
   const now = Date.now();
   const wroteAt = lastSeenCache.get(payload.sid);
   if (wroteAt !== undefined && now - wroteAt < LAST_SEEN_WRITE_INTERVAL_MS) return;
 
+  // One query for the session and the user state it depends on, rather than
+  // two round-trips per request.
   const session = await prisma.userSession.findUnique({
     where: { id: payload.sid },
-    select: { id: true, lastSeenAt: true },
+    select: {
+      id: true,
+      lastSeenAt: true,
+      absoluteExpiresAt: true,
+      user: {
+        select: { passwordChangedAt: true, disabledAt: true, role: true, mustChangePassword: true },
+      },
+    },
   });
   if (!session) {
     forgetSession(payload.sid);
     throw new HttpError(401, 'Session ended. Please sign in again.');
   }
 
+  const nowDate = new Date(now);
+
+  // Offboarding is immediate: a disabled account's live sessions stop working
+  // on their next request, without waiting for them to go idle.
+  if (session.user.disabledAt) {
+    await dropSession(session.id);
+    throw new HttpError(401, 'This account has been disabled.');
+  }
+
+  // A password change signs out every other device. This is the check that
+  // makes that true - without it, tokens issued before the change would keep
+  // working until they expired.
+  if (tokenPredatesPasswordChange(payload, session.user.passwordChangedAt)) {
+    await dropSession(session.id);
+    throw new HttpError(401, 'Your password was changed. Please sign in again.');
+  }
+
+  // Hard stop on session age regardless of activity (plan item 1.5).
+  if (session.absoluteExpiresAt && session.absoluteExpiresAt <= nowDate) {
+    await dropSession(session.id);
+    throw new HttpError(401, 'Session expired. Please sign in again.');
+  }
+
   // Belt-and-braces for the browser's own idle timer: a tab that sat quiet past
   // the idle window doesn't get to pick up where it left off.
-  if (session.lastSeenAt < liveSessionCutoff(new Date(now))) {
-    await prisma.userSession.deleteMany({ where: { id: session.id } });
-    forgetSession(payload.sid);
+  if (session.lastSeenAt < liveSessionCutoff(nowDate)) {
+    await dropSession(session.id);
     throw new HttpError(401, 'Signed out after a period of inactivity. Please sign in again.');
   }
 
-  const seenAt = new Date(now);
-  await prisma.userSession.update({ where: { id: session.id }, data: { lastSeenAt: seenAt } });
-  touchSession(session.id, seenAt);
+  // A role changed under a live token: trust the database, not the token. The
+  // token is reissued with the new role on the next refresh.
+  req.user = { ...payload, role: session.user.role };
+
+  await prisma.userSession.update({ where: { id: session.id }, data: { lastSeenAt: nowDate } });
+  touchSession(session.id, nowDate);
+}
+
+async function dropSession(sid: string): Promise<void> {
+  await prisma.userSession.deleteMany({ where: { id: sid } });
+  forgetSession(sid);
 }
 
 /** Reject unless a valid Bearer token with a live device session is present. */

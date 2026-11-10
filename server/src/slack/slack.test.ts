@@ -12,7 +12,7 @@ vi.mock('@google/genai', () => ({
 
 import { apiGet, apiPost, apiPostMultipart, ErpApiError, type ErpUser } from './erpClient';
 import { tonnesToKg, kgToTonnes } from './parse';
-import { verifyToken } from '../lib/jwt';
+import { verifyAccessToken } from '../lib/tokens';
 import { extractPurchaseOrderText, extractSaleOrderText } from '../lib/gemini';
 
 const USER: ErpUser = { userId: 'user_123', role: 'ADMIN' };
@@ -49,7 +49,7 @@ describe('erpClient', () => {
     expect(opts.method).toBe('POST');
     const auth = opts.headers.Authorization as string;
     expect(auth.startsWith('Bearer ')).toBe(true);
-    const decoded = verifyToken(auth.slice('Bearer '.length));
+    const decoded = verifyAccessToken(auth.slice('Bearer '.length));
     expect(decoded.userId).toBe(USER.userId);
     expect(decoded.role).toBe(USER.role);
     expect(JSON.parse(opts.body)).toEqual({ partyId: 'p1' });

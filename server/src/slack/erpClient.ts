@@ -1,4 +1,4 @@
-import { signToken, type JwtPayload } from '../lib/jwt.js';
+import { signServiceToken, type AccessTokenPayload } from '../lib/tokens.js';
 import { SERVICE_SESSION_ID } from '../lib/sessionPolicy.js';
 
 /**
@@ -14,7 +14,7 @@ const API_BASE = `http://localhost:${process.env.PORT ?? 4000}/api`;
 /** The minimal ERP user identity the bot acts on behalf of. */
 export interface ErpUser {
   userId: string;
-  role: JwtPayload['role'];
+  role: AccessTokenPayload['role'];
 }
 
 /** A file to forward in a multipart request (e.g. the stock-in invoice). */
@@ -33,9 +33,21 @@ export class ErpApiError extends Error {
   }
 }
 
-/** Mint a short-lived JWT so the request is attributed to this ERP user. */
+/**
+ * Mint a service token so the request is attributed to this ERP user.
+ *
+ * A service token rather than a user access token: the bot has no browser
+ * session to refresh every fifteen minutes, and no password of its own, so the
+ * password-change and idle checks do not apply to it. The tradeoff is that it
+ * cannot be revoked without rotating JWT_SECRET - acceptable because it never
+ * leaves this process, which issues it per request over localhost.
+ */
 function mintToken(user: ErpUser): string {
-  return signToken({ userId: user.userId, role: user.role, sid: SERVICE_SESSION_ID });
+  return signServiceToken(
+    { userId: user.userId, role: user.role, sid: SERVICE_SESSION_ID },
+    // Minutes, not days: it is used immediately by the very next fetch.
+    '5m'
+  );
 }
 
 async function parseOrThrow(res: globalThis.Response): Promise<any> {

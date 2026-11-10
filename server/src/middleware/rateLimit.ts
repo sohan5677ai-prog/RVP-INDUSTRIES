@@ -28,6 +28,23 @@ export const loginLimiter = rateLimit({
 
 
 /**
+ * Limiter for the password-reset endpoints.
+ *
+ * Tighter than the login limiter and counting *successes* too, because a
+ * successful request here is exactly what an abuser wants: /forgot-password
+ * sends an email, so an open endpoint is both an account-existence probe and a
+ * way to use the ERP as a mail relay against one address. Five in fifteen
+ * minutes is far above a real person forgetting their password twice.
+ */
+export const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many password reset requests. Try again in a few minutes.' },
+});
+
+/**
  * Limiter for the public (unauthenticated) WhatsApp webhook. Fast2SMS is the
  * only expected caller, but the URL has no secret in it - each POST also
  * triggers a DB write and, for text-shaped payloads, a Gemini call, so an

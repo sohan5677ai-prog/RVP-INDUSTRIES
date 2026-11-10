@@ -9,6 +9,13 @@ export interface User {
   username: string;
   role: Role;
   createdAt?: string;
+  /** Where password resets and new-device alerts go. Null on older accounts. */
+  email?: string | null;
+  /** Set when an admin set the password; the app forces a change before use. */
+  mustChangePassword?: boolean;
+  mfaEnrolled?: boolean;
+  /** True for a privileged role that has not set up two-factor yet. */
+  mfaEnrolmentRequired?: boolean;
 }
 
 export interface PartyAddress {

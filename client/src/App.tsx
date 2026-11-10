@@ -4,6 +4,7 @@ import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SubscriptionBoundary from '@/components/SubscriptionBoundary';
 import MaintenanceBoundary from '@/components/MaintenanceBoundary';
+import PasswordChangeBoundary from '@/components/PasswordChangeBoundary';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { registerPreload } from '@/lib/preload';
 import { ShortcutProvider } from '@/lib/shortcuts/ShortcutContext';
@@ -46,6 +47,8 @@ function lazyWithPreload(paths: string | string[], importFn: () => Promise<any>)
 
 const Login = lazyWithPreload('/login', () => import('@/pages/Login'));
 const KataCabin = lazyWithPreload('/kata-cabin', () => import('@/pages/KataCabin'));
+const ForgotPassword = lazyWithPreload('/forgot-password', () => import('@/pages/ForgotPassword'));
+const ResetPassword = lazyWithPreload('/reset-password', () => import('@/pages/ResetPassword'));
 const Home = lazyWithPreload('/', () => import('@/pages/Home'));
 const Dashboard = lazyWithPreload('/dashboard', () => import('@/pages/Dashboard'));
 const Parties = lazyWithPreload('/parties', () => import('@/pages/Parties'));
@@ -149,8 +152,11 @@ export default function App() {
             <Suspense fallback={<Fallback />}>
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/kata-cabin" element={<KataCabin />} />
                 <Route element={<ProtectedRoute />}>
+                  <Route element={<PasswordChangeBoundary />}>
                   <Route element={<MaintenanceBoundary />}>
                     <Route element={<SubscriptionBoundary />}>
                       <Route path="/sale-dispatches/:id/invoice" element={<InvoiceView />} />
@@ -238,6 +244,7 @@ export default function App() {
                         <Route path="/maintenance" element={<Navigate to="/settings?tab=maintenance" replace />} />
                       </Route>
                     </Route>
+                  </Route>
                   </Route>
                 </Route>
               </Routes>

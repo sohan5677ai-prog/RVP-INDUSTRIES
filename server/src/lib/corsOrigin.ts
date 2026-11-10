@@ -19,9 +19,20 @@
 
 /**
  * Origins that are always allowed, regardless of configuration — the deployed
- * client. Add a custom domain here or, better, to CLIENT_ORIGIN.
+ * client. Add a further custom domain here or, better, to CLIENT_ORIGIN.
+ *
+ * Both forms are listed because the apex 308-redirects to www, so either can
+ * end up as the page's origin depending on how it was opened.
+ *
+ * Deliberately NOT listed: rvp-industries.vercel.app. That is the Vercel
+ * project name, but no deployment is served there (it answers
+ * DEPLOYMENT_NOT_FOUND), so allowing it would buy nothing — and an unclaimed
+ * *.vercel.app subdomain is registrable by a stranger.
  */
-export const PRODUCTION_ORIGINS = ['https://rvp-industries.vercel.app'];
+export const PRODUCTION_ORIGINS = [
+  'https://rvpindustries.co.in',
+  'https://www.rvpindustries.co.in',
+];
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 

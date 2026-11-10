@@ -32,14 +32,14 @@ describe('parseAllowedOrigins', () => {
   });
 
   it('does not duplicate the production origin when it is also configured', () => {
-    const list = parseAllowedOrigins('https://rvp-industries.vercel.app');
-    expect(list.filter((o) => o === 'https://rvp-industries.vercel.app')).toHaveLength(1);
+    const list = parseAllowedOrigins('https://www.rvpindustries.co.in');
+    expect(list.filter((o) => o === 'https://www.rvpindustries.co.in')).toHaveLength(1);
   });
 });
 
 describe('isOriginAllowed', () => {
   it('accepts the deployed client', () => {
-    expect(isOriginAllowed('https://rvp-industries.vercel.app', prod)).toBe(true);
+    expect(isOriginAllowed('https://www.rvpindustries.co.in', prod)).toBe(true);
   });
 
   it('accepts a configured custom domain, with or without a trailing slash', () => {
@@ -107,6 +107,6 @@ describe('originPolicyFromEnv', () => {
       CLIENT_ORIGIN: 'https://erp.rvpindustries.com',
     } as NodeJS.ProcessEnv);
     expect(policy.allowed).toContain('https://erp.rvpindustries.com');
-    expect(policy.allowed).toContain('https://rvp-industries.vercel.app');
+    expect(policy.allowed).toContain('https://www.rvpindustries.co.in');
   });
 });

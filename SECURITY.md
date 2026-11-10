@@ -14,7 +14,7 @@ Slack channel or WhatsApp group.
 
 - Include: what you found, the steps to reproduce it, the affected URL or file, and what an
   attacker could do with it. A screenshot or a short request/response capture helps.
-- Please do not test against production (`rvp-industries.vercel.app` /
+- Please do not test against production (`rvpindustries.co.in` /
   `rvp-server.onrender.com`) beyond what is needed to demonstrate the issue, and never with
   another user's account. No load testing, no data deletion, no changes to live records.
 

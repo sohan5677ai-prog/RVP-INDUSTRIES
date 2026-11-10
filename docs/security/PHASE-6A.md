@@ -40,7 +40,7 @@ every Vercel deployment on the internet. The new module matches whole origins:
 
 | Origin | Before | After |
 |---|---|---|
-| `https://rvp-industries.vercel.app` | allow | allow |
+| `https://www.rvpindustries.co.in` | allow | allow |
 | a domain in `CLIENT_ORIGIN` | allow | allow |
 | `http://localhost:5173` | allow | allow outside production, **blocked** in production |
 | `https://rvp-localhost.attacker.com` | **allow** | blocked |
@@ -50,11 +50,18 @@ every Vercel deployment on the internet. The new module matches whole origins:
 
 Two things to know about the shape of this:
 
-- **The production origin is baked in** (`PRODUCTION_ORIGINS` in `corsOrigin.ts`), so an unset or
-  wrong `CLIENT_ORIGIN` on Render cannot take the app down. `CLIENT_ORIGIN` adds to that list, it
-  does not replace it. This matters because in production the client calls
+- **The production origins are baked in** (`PRODUCTION_ORIGINS` in `corsOrigin.ts`), so an unset
+  or wrong `CLIENT_ORIGIN` on Render cannot take the app down. `CLIENT_ORIGIN` adds to that list,
+  it does not replace it. This matters because in production the client calls
   `https://rvp-server.onrender.com/api` on its absolute URL rather than through the Vercel
   rewrite, so CORS is load-bearing rather than cosmetic.
+
+  The list is `rvpindustries.co.in` and `www.rvpindustries.co.in` — both, because the apex
+  308-redirects to www, so either can be the page's origin depending on how it was opened.
+  It deliberately does **not** include `rvp-industries.vercel.app`: that is the Vercel *project*
+  name, but no deployment is served there (it answers `DEPLOYMENT_NOT_FOUND`), so allowing it
+  would buy nothing, and an unclaimed `*.vercel.app` subdomain is registrable by a stranger.
+  See "Correction after live verification" at the end of this document.
 - **A rejected origin gets a normal response without the CORS headers**, instead of the old
   `cb(new Error(...))`. The browser blocks the read either way, and the old form surfaced a
   routine rejection as a 500 in the logs. The allow-list is logged once at boot and each
@@ -173,8 +180,8 @@ curl -sD - -o /dev/null https://rvp-server.onrender.com/api/health \
 
 # 2. The real client still does
 curl -sD - -o /dev/null https://rvp-server.onrender.com/api/health \
-  -H 'Origin: https://rvp-industries.vercel.app' | grep -i access-control
-# expect: access-control-allow-origin: https://rvp-industries.vercel.app
+  -H 'Origin: https://www.rvpindustries.co.in' | grep -i access-control
+# expect: access-control-allow-origin: https://www.rvpindustries.co.in
 
 # 3. Plate detection is no longer anonymous
 curl -s -X POST https://rvp-server.onrender.com/api/weighbridge/cctv/detect-plate
@@ -231,3 +238,44 @@ require a green suite at the end of each phase, and the suite could not go green
 
 The `npm audit` job may fail on its first run — it has never been run against this repository.
 Triage those findings as the first task of Phase 6b rather than inside this hotfix.
+
+---
+
+## Correction after live verification
+
+Phase 6a shipped to `main` and auto-deployed, and the deployed API was then probed to confirm the
+changes took effect. Everything verified, and one mistake in this phase's own work surfaced.
+
+Verified against `https://rvp-server.onrender.com`:
+
+| Check | Result |
+|---|---|
+| `GET /api/health` | 200 `OK`; `/api/health/db` reported `{"db":"ok","ms":7}` |
+| `Origin: https://www.rvpindustries.co.in` | ACAO echoed — the real client still works |
+| `Origin: https://rvp-localhost.attacker.com` | no ACAO (was allowed before) |
+| `Origin: https://someone-elses-app.vercel.app` | no ACAO (was allowed before) |
+| `Origin: http://localhost:5173` | no ACAO — which also **proves `NODE_ENV=production` is set on the service**, since localhost is accepted only when it is not. The same flag gates the stack-trace fix, so H1 is live too. |
+| `POST /cctv/detect-plate` with no credentials | 401 (was anonymous, and ran a billed Gemini call) |
+| `GET /print-queue/status` with no credentials | 401 |
+| `/api/assets/*` | ACAO echoed for the real client, absent for a stranger (was `*`) |
+| `GET /cctv/status`, `GET /cctv/snapshot` | still 200, so the cabin path is not broken |
+
+**The mistake.** `PRODUCTION_ORIGINS` was initially set to `https://rvp-industries.vercel.app`,
+taken from the Vercel project name in `.vercel/project.json`. That host serves nothing — it
+answers `X-Vercel-Error: DEPLOYMENT_NOT_FOUND`. The production client is actually the custom
+domain `https://rvpindustries.co.in`, which 308-redirects to `www.`.
+
+Two consequences, one harmless and one not:
+
+- The claimed safety net — "an unset `CLIENT_ORIGIN` cannot take the app down" — did not exist.
+  Production kept working only because `CLIENT_ORIGIN` on Render is correctly configured with the
+  real domain (confirmed: the live API echoes ACAO for both `rvpindustries.co.in` and
+  `www.rvpindustries.co.in`). Had it been unset, removing the old `*.vercel.app` wildcard would
+  have broken the client the moment this deployed.
+- Allow-listing an unclaimed `*.vercel.app` subdomain is a small latent hazard in its own right,
+  since anyone can register that project name on Vercel later and would then hold an allowed
+  origin.
+
+`PRODUCTION_ORIGINS` is now the two real domains, and the tests, `SECURITY.md` and the table above
+were repointed with it. The lesson for later phases: confirm a production hostname by asking it
+for a response, not by reading a project name out of a config file.

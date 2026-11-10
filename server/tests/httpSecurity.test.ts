@@ -104,9 +104,9 @@ describe('CORS', () => {
   it('allows the deployed client to read responses', async () => {
     const res = await request(buildApp())
       .get('/ok')
-      .set('Origin', 'https://rvp-industries.vercel.app');
+      .set('Origin', 'https://www.rvpindustries.co.in');
     expect(res.status).toBe(200);
-    expect(res.headers['access-control-allow-origin']).toBe('https://rvp-industries.vercel.app');
+    expect(res.headers['access-control-allow-origin']).toBe('https://www.rvpindustries.co.in');
   });
 
   it('allows a configured custom domain', async () => {

@@ -220,6 +220,10 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // makerChecker.service.ts against the permission each request recorded, plus
   // the rule that you cannot approve your own.
   { methods: 'ALL', path: '/pending-changes*', permission: 'approval.view' },
+  // Field-level history for a master record. Behind audit.view rather than the
+  // record's own view permission, because the history shows previous bank
+  // account numbers - more than someone merely reading the party needs.
+  { methods: READ, path: '/master-history/*', permission: 'audit.view' },
   { methods: READ, path: '/system*', permission: 'system.view' },
   { methods: 'ALL', path: '/system*', permission: 'system.manage' },
   { methods: READ, path: '/archive*', permission: 'archive.view' },

@@ -231,6 +231,57 @@ enum LoginOutcome {
   DEVICE_LIMIT
 }
 
+/// Field-level history for the master records (plan item 3.5).
+///
+/// One row per field that actually changed, with the before and after. Not a
+/// snapshot of the whole record: "what changed and who changed it" is the
+/// question being asked, and a diff of two JSON blobs is a worse answer than
+/// a list of fields.
+///
+/// Separate from the Phase 4 audit log on purpose, and earlier than it: the
+/// masters are where the fraud this phase guards against happens, so they get
+/// history now rather than waiting. Phase 4 generalises the same shape to
+/// everything else.
+model MasterChangeLog {
+  id         String       @id @default(cuid())
+  entity     MasterEntity
+  entityId   String
+  /// Captured at the time, so the history still reads sensibly after a rename
+  /// or a deletion.
+  entityName String?
+  field      String
+  /// Stored as text whatever the column's type - this is a record for a human
+  /// to read, not something to compute with. Null means the field was empty.
+  oldValue   String?
+  newValue   String?
+  /// True when the field is one that needed approval, so the sensitive
+  /// changes can be listed without knowing the field list by heart.
+  protected  Boolean      @default(false)
+
+  changedById   String?
+  changedByName String?
+  /// Who approved it, when it went through maker-checker.
+  approvedById   String?
+  approvedByName String?
+  /// The request this came from, if it was approved rather than applied directly.
+  pendingChangeId String?
+
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([createdAt])
+  @@index([protected, createdAt])
+}
+
+enum MasterEntity {
+  PARTY
+  BROKER
+  TRANSPORT
+  COMPANY
+}
+
 /// A change waiting for a second person to release it (plan item 2.6).
 ///
 /// Generic on purpose: the framework lands in Phase 2 with nothing routed
@@ -1381,6 +1432,14 @@ model CompanyProfile {
   contact                        String?
   // Company email address BCC'd on all outbound document emails (invoices, EWBs, credit notes)
   companyBccEmail                String?
+  /// Comma-separated addresses that get security alerts: a bank account,
+  /// GSTIN or email change requested or approved on a party (plan item 3.2).
+  ///
+  /// Deliberately NOT companyBccEmail. That mailbox receives a copy of every
+  /// invoice and e-way bill, so an alert about a vendor's account number
+  /// changing would arrive in a stream of ordinary paperwork - which is where
+  /// it would be missed. This should be the people who would actually act.
+  securityAlertEmails            String?
   // Bank details printed in the invoice footer.
   bankAccountName                String?
   bankName                       String?

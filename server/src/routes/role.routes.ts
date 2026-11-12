@@ -8,6 +8,7 @@ import {
   listPendingChanges,
   approvePendingChange,
   rejectPendingChange,
+  getMasterHistory,
 } from '../controllers/role.controller.js';
 
 const router = Router();
@@ -26,5 +27,7 @@ router.get('/permission-denials', asyncHandler(getPermissionDenials));
 router.get('/pending-changes', asyncHandler(listPendingChanges));
 router.post('/pending-changes/:id/approve', asyncHandler(approvePendingChange));
 router.post('/pending-changes/:id/reject', asyncHandler(rejectPendingChange));
+
+router.get('/master-history/:entity/:id', asyncHandler(getMasterHistory));
 
 export default router;

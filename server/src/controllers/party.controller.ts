@@ -2,6 +2,11 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createPartySchema, updatePartySchema } from '../schemas/party.schema.js';
+import {
+  prepareMasterUpdate,
+  recordChanges,
+} from '../services/masterChange.service.js';
+import { diffFields } from '../lib/masterFields.js';
 
 export async function listParties(_req: Request, res: Response) {
   const parties = await prisma.party.findMany({
@@ -114,6 +119,38 @@ export async function updateParty(req: Request, res: Response) {
     if (defaultAddr.locationLink) rest.locationLink = defaultAddr.locationLink;
   }
 
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  // The access token carries a name only for the cabin kiosk, so look it up:
+  // a change history that cannot say who made the change is not a history.
+  const actorUser = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { name: true },
+  });
+  const actor = {
+    userId: req.user.userId,
+    name: actorUser?.name ?? req.user.name ?? null,
+    ip: req.ip ?? null,
+    userAgent: req.headers['user-agent'] ?? null,
+  };
+
+  // Bank account, IFSC, GSTIN and email cannot be changed in one step: they
+  // are held as a request for someone else to approve, and the values already
+  // on file stay in force until then. `split.immediate` is what is safe to
+  // write - anything protected has been stripped out of it, so even a caller
+  // that ignored the rest of this result could not write a bank account.
+  const split = await prepareMasterUpdate({
+    entity: 'PARTY',
+    entityId: existing.id,
+    entityName: existing.name,
+    existing: existing as unknown as Record<string, unknown>,
+    incoming: rest as Record<string, unknown>,
+    actor,
+  });
+
+  for (const field of Object.keys(rest)) {
+    if (!(field in split.immediate)) delete (rest as Record<string, unknown>)[field];
+  }
+
   const party = await prisma.$transaction(async (tx) => {
     if (addressList !== undefined) {
       const incomingIds = addressList.map((a) => a.id).filter(Boolean) as string[];
@@ -174,7 +211,27 @@ export async function updateParty(req: Request, res: Response) {
     });
   });
 
-  res.json(party);
+  // History for the fields that went straight through (plan item 3.5).
+  await recordChanges({
+    entity: 'PARTY',
+    entityId: existing.id,
+    entityName: party.name,
+    changes: split.immediateChanges,
+    actor,
+  });
+
+  // Tell the caller plainly that part of their edit is waiting, rather than
+  // letting the screen show the old value back and look like a failed save.
+  res.json({
+    ...party,
+    pendingApproval: split.pending
+      ? {
+          id: split.pending.id,
+          summary: split.pending.summary,
+          fields: split.pendingChanges.map((c) => c.label),
+        }
+      : null,
+  });
 }
 
 export async function deleteParty(req: Request, res: Response) {

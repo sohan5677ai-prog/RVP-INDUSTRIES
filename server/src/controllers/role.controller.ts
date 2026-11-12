@@ -20,6 +20,8 @@ import {
   rejectChange,
 } from '../services/makerChecker.service.js';
 import { rbacEnforced } from '../middleware/permission.js';
+import { historyFor } from '../services/masterChange.service.js';
+import type { MasterEntity } from '@prisma/client';
 
 const ROLES: Role[] = ['ADMIN', 'USER', 'OWNER', 'DEVELOPER'];
 
@@ -164,4 +166,22 @@ export async function rejectPendingChange(req: Request, res: Response) {
     role: req.user.role,
   }, reason);
   res.json(updated);
+}
+
+/* ------------------------------------------------- master change history - */
+
+const MASTER_ENTITIES: MasterEntity[] = ['PARTY', 'BROKER', 'TRANSPORT', 'COMPANY'];
+
+/**
+ * Field-level history for one master record (plan item 3.5).
+ *
+ * Account numbers are returned in full here, unlike in the alert emails: this
+ * is behind the record's own view permission and is the screen someone uses to
+ * check exactly what an account was changed from. Masking it would make the
+ * history useless for the one job it has.
+ */
+export async function getMasterHistory(req: Request, res: Response) {
+  const entity = String(req.params.entity ?? '').toUpperCase() as MasterEntity;
+  if (!MASTER_ENTITIES.includes(entity)) throw new HttpError(404, 'No such record type');
+  res.json(await historyFor(entity, req.params.id));
 }

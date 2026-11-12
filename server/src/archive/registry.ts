@@ -225,6 +225,8 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Changes awaiting a second approver. Workflow state rather than the books, and the proposed values can include a vendor bank account that was never adopted - which has no business travelling in a file handed to a CA.' },
   { name: 'ApprovalLimit', delegate: 'approvalLimit', cls: 'EXCLUDED', order: 0,
     note: 'How much each role may approve. Deployment configuration, and a map of exactly where the signing authority stops.' },
+  { name: 'MasterChangeLog', delegate: 'masterChangeLog', cls: 'EXCLUDED', order: 0,
+    note: 'Field-level history of the masters: who changed a bank account or GSTIN, from what, when and from which IP. Security evidence with its own retention, and it spans years - a party’s history is not bounded by a financial year, so archiving one must not carry it away. It also holds every previous bank account number, which has no place in a file handed to a CA.' },
   { name: 'VehiclePing', delegate: 'vehiclePing', cls: 'EXCLUDED', order: 0,
     note: 'GPS positions pushed by the tracking provider. Operational telemetry, not the books: thousands of rows per lorry-trip, and the dispatch document that matters (SaleDispatch, its kata and its invoice) is archived without them. Has its own pruning retention.' },
 ];

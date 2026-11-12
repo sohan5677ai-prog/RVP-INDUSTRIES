@@ -265,6 +265,13 @@ app.listen(port, "0.0.0.0", () => {
       .catch((err) => logger.error("[slack] failed to start:", err));
   }
 
+  // Wire up how an approved master change is actually carried out. Without
+  // this, a bank-detail change could be requested and approved but would fail
+  // loudly at the point of being applied.
+  import("./services/masterChange.service.js")
+    .then(({ registerMasterAppliers }) => registerMasterAppliers())
+    .catch((err) => logger.error("[maker-checker] failed to register appliers:", err));
+
   // Register in-process WhatsApp cron jobs (daily dues/dispatch, weekly summary).
   // No-op unless WHATSAPP_CRON_ENABLED=true; isolated so it can never crash boot.
   import("./jobs/whatsappJobs.js")

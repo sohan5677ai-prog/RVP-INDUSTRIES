@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
+import { assertOwned } from '../lib/ownership.js';
 import { createUserNoteSchema, updateUserNoteSchema } from '../schemas/userNote.schema.js';
 
 /**
@@ -95,10 +96,13 @@ export async function getDueUserReminders(_req: Request, res: Response) {
  * Get a single note by ID.
  */
 export async function getUserNote(req: Request, res: Response) {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
   const row = await prisma.userNote.findUnique({
     where: { id: req.params.id },
   });
-  if (!row) throw new HttpError(404, 'Note not found');
+  // A note belongs to one person. Reading someone else's by guessing its id
+  // answers the same as a note that does not exist - see lib/ownership.ts.
+  assertOwned(row, req.user.userId, 'Note');
   res.json(row);
 }
 
@@ -146,10 +150,11 @@ export async function updateUserNote(req: Request, res: Response) {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
   const input = updateUserNoteSchema.parse(req.body);
 
-  const existing = await prisma.userNote.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!existing) throw new HttpError(404, 'Note not found');
+  const existing = assertOwned(
+    await prisma.userNote.findUnique({ where: { id: req.params.id } }),
+    req.user.userId,
+    'Note'
+  );
 
   const data: any = {};
   if (input.title !== undefined) data.title = input.title;
@@ -196,10 +201,11 @@ export async function updateUserNote(req: Request, res: Response) {
 export async function toggleUserNoteStatus(req: Request, res: Response) {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
 
-  const existing = await prisma.userNote.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!existing) throw new HttpError(404, 'Note not found');
+  const existing = assertOwned(
+    await prisma.userNote.findUnique({ where: { id: req.params.id } }),
+    req.user.userId,
+    'Note'
+  );
 
   const user = await prisma.user.findUnique({
     where: { id: req.user.userId },
@@ -228,10 +234,11 @@ export async function toggleUserNoteStatus(req: Request, res: Response) {
 export async function deleteUserNote(req: Request, res: Response) {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
 
-  const existing = await prisma.userNote.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!existing) throw new HttpError(404, 'Note not found');
+  const existing = assertOwned(
+    await prisma.userNote.findUnique({ where: { id: req.params.id } }),
+    req.user.userId,
+    'Note'
+  );
 
   await prisma.userNote.delete({
     where: { id: req.params.id },

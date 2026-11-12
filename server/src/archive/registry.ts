@@ -221,6 +221,12 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Which permissions each role holds. Deployment configuration, and a description of exactly where the access-control boundaries are - no place in a file handed to a CA.' },
   { name: 'PermissionDenial', delegate: 'permissionDenial', cls: 'EXCLUDED', order: 0,
     note: 'Failed and would-have-failed permission checks, per user. Security telemetry with its own retention, deliberately NOT tied to a financial year.' },
+  { name: 'PendingChange', delegate: 'pendingChange', cls: 'EXCLUDED', order: 0,
+    note: 'Changes awaiting a second approver. Workflow state rather than the books, and the proposed values can include a vendor bank account that was never adopted - which has no business travelling in a file handed to a CA.' },
+  { name: 'ApprovalLimit', delegate: 'approvalLimit', cls: 'EXCLUDED', order: 0,
+    note: 'How much each role may approve. Deployment configuration, and a map of exactly where the signing authority stops.' },
+  { name: 'VehiclePing', delegate: 'vehiclePing', cls: 'EXCLUDED', order: 0,
+    note: 'GPS positions pushed by the tracking provider. Operational telemetry, not the books: thousands of rows per lorry-trip, and the dispatch document that matters (SaleDispatch, its kata and its invoice) is archived without them. Has its own pruning retention.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

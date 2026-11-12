@@ -113,6 +113,13 @@ export const PERMISSIONS = [
   'pii.view',
   /** See who did what. Phase 4 builds the log this reads. */
   'audit.view',
+  /**
+   * Take part in approvals at all. Whether you may approve a *particular*
+   * request is decided by the permission that request recorded, plus the rule
+   * that you cannot approve your own - both enforced in the maker-checker
+   * service. This is the outer gate, not the decision.
+   */
+  'approval.view',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

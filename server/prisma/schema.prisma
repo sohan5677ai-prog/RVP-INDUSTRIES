@@ -231,6 +231,94 @@ enum LoginOutcome {
   DEVICE_LIMIT
 }
 
+/// A change waiting for a second person to release it (plan item 2.6).
+///
+/// Generic on purpose: the framework lands in Phase 2 with nothing routed
+/// through it, and Phase 3 attaches vendor bank details - the field where the
+/// fraud actually happens. Keeping the shape subject-agnostic means adding a
+/// workflow later is registering an applier, not another table.
+///
+/// The proposed values live here as JSON rather than in the target row, so the
+/// current details stay in force until approval. That is the point of
+/// maker-checker for a bank account: the old account keeps being paid until
+/// someone else agrees to the new one.
+model PendingChange {
+  id        String        @id @default(cuid())
+  /// What is changing, e.g. "party.bank". Matches a registered applier.
+  subject   String
+  /// Row being changed; null for a create.
+  subjectId String?
+  action    PendingAction
+  /// The values being proposed.
+  proposed  Json
+  /// What they would replace, captured when the request was made, so the
+  /// approver sees the before and after rather than just the after.
+  previous  Json?
+  /// One line for the approval screen.
+  summary   String
+  /// Permission required to decide this. Stored rather than derived so a
+  /// later change to the permission map cannot silently lower the bar for
+  /// requests already in flight.
+  approvePermission String
+  /// Amount this change concerns, where it has one. Drives ApprovalLimit.
+  amount    Decimal?      @db.Decimal(14, 2)
+
+  status    PendingStatus @default(PENDING)
+
+  requestedById String
+  requestedByName String?
+  requestedAt   DateTime  @default(now())
+
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  /// Required when rejecting: a refusal without a reason is not a decision.
+  decisionReason String?
+
+  appliedAt DateTime?
+  /// Why applying failed, if it did. An approved change that could not be
+  /// applied must not look like one that was.
+  error     String?
+
+  @@index([status, requestedAt])
+  @@index([subject, subjectId])
+  @@index([requestedById])
+}
+
+enum PendingAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum PendingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  /// Approved and successfully carried out.
+  APPLIED
+  /// Approved, but applying it failed. Needs a human.
+  FAILED
+}
+
+/// How much a role may approve without someone more senior (plan item 2.5).
+///
+/// No rows means no limit, so this is inert until configured - the same
+/// property as IpAllowRule, and for the same reason: a control that locks
+/// everyone out on the day it ships gets switched off wholesale.
+model ApprovalLimit {
+  id        String   @id @default(cuid())
+  role      Role
+  /// Matches PendingChange.subject, e.g. "payment".
+  subject   String
+  /// Maximum amount this role may approve. Null means unlimited.
+  maxAmount Decimal? @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+
+  @@unique([role, subject])
+  @@index([subject])
+}
+
 /// Which permissions a role holds, when the defaults in lib/permissions.ts are
 /// not what is wanted.
 ///
@@ -2618,4 +2706,44 @@ model Gstr2bEntry {
   @@index([supplierGstin])
   @@index([invoiceNumber])
   @@index([supplierGstin, invoiceNumber])
+}
+
+// ---------------------------------------------------------------- GPS tracking
+
+// One position reading for a lorry, as pushed to us by a GPS provider
+// (Locanix today; the `provider` column keeps the table usable for a second
+// vendor without a migration).
+//
+// Push, not pull: the provider POSTs to /api/webhooks/gps as the device
+// reports, so the ERP holds no polling job and needs no credentials of theirs.
+// That makes retries the normal case, so (provider, vehicleNumber, recordedAt)
+// is unique and ingestion is idempotent - re-sending the same batch after a
+// timeout stores nothing twice.
+//
+// `vehicleNumber` is the normalised plate (upper case, separators stripped:
+// "KA36 B 1234" -> "KA36B1234") because that is the only form that reliably
+// joins to SaleDispatch.vehicleNumber, which is typed by hand. The string as
+// the provider sent it is kept in `vehicleLabel` so a mismatch is debuggable.
+model VehiclePing {
+  id            String   @id @default(cuid())
+  vehicleNumber String
+  vehicleLabel  String?
+  latitude      Float
+  longitude     Float
+  speedKmph     Float?
+  address       String?
+  ignition      Boolean?
+  // When the device recorded the fix. Falls back to arrival time when the
+  // provider sends no timestamp, so the column is never null and the trail
+  // can always be ordered.
+  recordedAt    DateTime
+  receivedAt    DateTime @default(now())
+  provider      String   @default("LOCANIX")
+  // The untouched payload for this reading. Kept because the first weeks of a
+  // GPS integration are spent arguing about which field meant what.
+  raw           Json?
+
+  @@unique([provider, vehicleNumber, recordedAt])
+  @@index([vehicleNumber, recordedAt])
+  @@index([recordedAt])
 }

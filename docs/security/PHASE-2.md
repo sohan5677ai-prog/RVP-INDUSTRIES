@@ -163,15 +163,69 @@ Additive only: `RolePermission` and `PermissionDenial`. SQL at
 
 Rolling back is one environment variable, not a deploy.
 
+## Object-level ownership (2.3) — and a real IDOR
+
+The plan frames 2.3 as cross-company IDOR. This is single-company, so there is no tenant boundary
+to cross; what genuinely is per-user is small and specific. Looking there found a live bug:
+
+**All four per-id user-note handlers checked only that the note existed, never that it belonged to
+the caller.** `GET /user-notes/:id` did not even check `req.user`. Any signed-in account could
+read, edit, complete or delete another person's notes by knowing an id.
+
+Fixed with `lib/ownership.ts`, which answers **404, not 403**: telling someone "that exists but is
+not yours" confirms the id is real, which is information they should not have about another
+person's note.
+
+`SupportTicket` was already scoped correctly, including its deliberate privileged-sees-everything
+path for developers reading tickets they did not raise.
+
+## Maker-checker (2.4, 2.5, 2.6)
+
+The framework, with nothing routed through it — Phase 3 attaches vendor bank details, which is
+where the fraud this exists to stop actually happens. Shipping the machinery first means that
+phase registers an applier rather than inventing a workflow under time pressure.
+
+`PendingChange` holds the proposed values as JSON rather than writing them to the target row, so
+the current details stay in force until approval. That is the entire point for a bank account: the
+old account keeps being paid until someone else agrees to the new one.
+
+Two rules live in the service rather than in each caller, because a rule every caller must
+remember is one some caller will forget:
+
+1. **The requester cannot decide** — not with the permission, not as DEVELOPER. A segregation rule
+   the most privileged account can step around protects nothing, since that is the account an
+   attacker wants anyway.
+2. **The approver needs the permission the request recorded**, not today's — so changing the route
+   map later cannot lower the bar for requests already in flight.
+
+Approval limits (2.5) are inert until configured, like the IP allow-list. But where the permission
+lookup falls back to the code defaults on a database error, the limit lookup falls back to
+**zero**: returning "no limit" there would let an unreachable database quietly raise someone's
+ceiling.
+
+Approval and application are separate states. If applying throws, the row lands in `FAILED` with
+the error rather than staying `PENDING` (inviting a second approval of something half-done) or
+showing `APPLIED` (which would be a lie). The claim is a conditional `updateMany`, so two approvers
+clicking at once cannot both apply it.
+
+## Admin UI
+
+**Settings → Roles & Access**, for ADMIN and DEVELOPER — not OWNER, matching who holds
+`role.manage`. The permission matrix and the denial log sit on one screen deliberately: the log
+says what a role is missing and the matrix is where you grant it, and splitting them would mean
+reading one tab and acting in another from memory. The banner states plainly whether enforcement
+is on, because editing grants in audit mode otherwise implies a protection that is not yet there.
+
+Two guards on the editing itself: the DEVELOPER role cannot be edited from inside the app, and
+ADMIN cannot drop `role.manage` — either would leave no way back.
+
+There is no pending-changes screen yet. With no workflow routed through the framework it would
+always be empty; it arrives in Phase 3 with the first one.
+
 ## Left open in this phase
 
 | Item | Where |
 |---|---|
-| 2.3 object-level ownership (`UserNote`, `SupportTicket`) | next, in this phase |
-| 2.4 segregation of duties — creator cannot approve | next, in this phase |
-| 2.5 approval limits per role | next, in this phase |
-| 2.6 maker-checker framework | next, in this phase |
-| Admin UI for editing role permissions | next, in this phase |
 | `master.party.bank.edit` enforced on the field, not just the route | Phase 3, where bank changes get maker-checker |
 | `report.export` and `pii.view` actually gating exports and masked fields | Phase 5 |
 | `audit.view` has nothing to read yet | Phase 4 builds the log |

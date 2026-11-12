@@ -105,6 +105,13 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   { methods: READ, path: '/delivery-challans*', permission: 'sale.view' },
   { methods: 'ALL', path: '/delivery-challans*', permission: 'sale.dispatch.manage' },
 
+  // Live lorry positions pushed by the GPS provider. Read-only, and gated on
+  // sale.view because the only reason to look is "where is this dispatch" -
+  // the people who read the dispatch board are the people who need it. The
+  // provider's own push endpoint is public and sits outside this model; it
+  // authenticates with GPS_PUSH_TOKEN instead.
+  { methods: READ, path: '/gps/*', permission: 'sale.view' },
+
   // --------------------------------------------------------------- money --
   { methods: READ, path: '/payments*', permission: 'payment.view' },
   { methods: REMOVE, path: '/payments/*', permission: 'payment.delete' },
@@ -208,6 +215,11 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   { methods: READ, path: '/users*', permission: 'user.view' },
   { methods: 'ALL', path: '/users*', permission: 'user.manage' },
   { methods: 'ALL', path: '/roles*', permission: 'role.manage' },
+  { methods: 'ALL', path: '/permission-denials*', permission: 'role.manage', note: 'shows who attempted what' },
+  // The outer gate only. Which requests you may actually decide is settled in
+  // makerChecker.service.ts against the permission each request recorded, plus
+  // the rule that you cannot approve your own.
+  { methods: 'ALL', path: '/pending-changes*', permission: 'approval.view' },
   { methods: READ, path: '/system*', permission: 'system.view' },
   { methods: 'ALL', path: '/system*', permission: 'system.manage' },
   { methods: READ, path: '/archive*', permission: 'archive.view' },

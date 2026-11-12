@@ -215,6 +215,12 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Sign-in telemetry carrying IP and user-agent per attempt. Security audit data with its own retention, deliberately NOT tied to a financial year - archiving a year must not take the login history with it.' },
   { name: 'IpAllowRule', delegate: 'ipAllowRule', cls: 'EXCLUDED', order: 0,
     note: 'Per-role IP allow-list. Deployment configuration, and a map of the office network.' },
+  // Phase 2 authorization tables. Configuration and security telemetry, not
+  // the client's books.
+  { name: 'RolePermission', delegate: 'rolePermission', cls: 'EXCLUDED', order: 0,
+    note: 'Which permissions each role holds. Deployment configuration, and a description of exactly where the access-control boundaries are - no place in a file handed to a CA.' },
+  { name: 'PermissionDenial', delegate: 'permissionDenial', cls: 'EXCLUDED', order: 0,
+    note: 'Failed and would-have-failed permission checks, per user. Security telemetry with its own retention, deliberately NOT tied to a financial year.' },
 ];
 
 export const ARCHIVE_MASTERS = MASTERS;

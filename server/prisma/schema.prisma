@@ -231,6 +231,54 @@ enum LoginOutcome {
   DEVICE_LIMIT
 }
 
+/// Which permissions a role holds, when the defaults in lib/permissions.ts are
+/// not what is wanted.
+///
+/// Resolution is deliberately all-or-nothing per role: if ANY rows exist for a
+/// role they are the complete, authoritative set, and if none exist the code
+/// defaults apply. The alternative - an allow/deny overlay on top of the
+/// defaults - reads simply until a default changes in a release and silently
+/// shifts what a customised role can do.
+model RolePermission {
+  id         String   @id @default(cuid())
+  role       Role
+  /// A value from PERMISSIONS in lib/permissions.ts. Unknown strings are
+  /// ignored at resolution time rather than trusted.
+  permission String
+  createdAt  DateTime @default(now())
+  createdBy  String?
+
+  @@unique([role, permission])
+  @@index([role])
+}
+
+/// Every permission check that failed, or would have failed.
+///
+/// `enforced = false` is audit mode: the request was allowed through and the
+/// denial recorded instead. That is how this phase ships - with 201 write
+/// endpoints previously needing nothing but a session, switching to
+/// deny-by-default blind would have stopped someone mid-shift. Run normally,
+/// read what would have broken, fix the mapping, then enforce.
+///
+/// Only denials are recorded. Logging allows as well would write a row per
+/// request across 415 routes and bury the signal.
+model PermissionDenial {
+  id         String   @id @default(cuid())
+  userId     String?
+  username   String?
+  role       Role
+  permission String
+  method     String
+  path       String
+  /// False while in audit mode, true once the check actually blocked.
+  enforced   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([permission, createdAt])
+  @@index([userId, createdAt])
+}
+
 /// Optional per-role IP allow-list. With no rows for a role, that role is
 /// unrestricted - so this feature is inert until someone adds a rule, and
 /// cannot accidentally lock everyone out by being deployed.

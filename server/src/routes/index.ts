@@ -5,6 +5,7 @@ import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAuthOrCameraBridge } from '../middleware/cameraAuth.js';
 import { requireMediaRead } from '../middleware/mediaAuth.js';
+import { enforceRoutePermissions } from '../middleware/routePermission.js';
 import { isOriginAllowed, originPolicyFromEnv } from '../lib/corsOrigin.js';
 import { subscriptionGate } from '../middleware/subscription.js';
 import { maintenanceGate } from '../middleware/maintenance.js';
@@ -145,6 +146,16 @@ router.use((req, _res, next) => {
   }
   next();
 });
+
+// Authorization. One table (lib/routePermissions.ts) applied to every route,
+// rather than a guard bolted onto each of 415 of them - so the whole model is
+// readable in one place and this phase needed no edit to any route file.
+//
+// Ships in audit mode: unless RBAC_ENFORCE=true, a failing check is recorded
+// and the request proceeds. 201 write endpoints previously needed nothing but
+// a session, so switching to deny-by-default blind would have stopped someone
+// mid-shift.
+router.use(enforceRoutePermissions);
 
 // Developer Maintenance Gate: when maintenance mode is active, non-developers
 // receive HTTP 503 with the live countdown and developer message. The DEVELOPER role bypasses.

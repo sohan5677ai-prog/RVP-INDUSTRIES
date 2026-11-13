@@ -1465,3 +1465,66 @@ export interface InternalWeightRecord {
   saleDispatchId?: string | null;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------- loading calendar --
+
+export type DispatchSlotStatus = 'PLANNED' | 'REQUESTED' | 'CONFIRMED' | 'LOADED' | 'CANCELLED';
+
+/** One planned lorry on the loading calendar (one slot = one lorry = one order). */
+export interface DispatchSlot {
+  id: string;
+  code: string;
+  date: string;
+  dateKey: string;
+  seq: number;
+  vehicleClassKg: number;
+  plannedKg: number;
+  loadingPoint: string;
+  saleOrderId: string;
+  transportId: string | null;
+  transport: { id: string; name: string; phone: string | null; phone2: string | null } | null;
+  status: DispatchSlotStatus;
+  lorryNumber: string | null;
+  driverName: string | null;
+  driverPhone: string | null;
+  notes: string | null;
+  requestedAt: string | null;
+  confirmedAt: string | null;
+  saleDispatchId: string | null;
+  saleOrder: {
+    id: string;
+    product: string;
+    buyerId: string;
+    buyerName: string;
+    destination: string | null;
+    tonnageKg: number;
+    dispatchedKg: number;
+    remainingKg: number;
+    reminderDate: string | null;
+  };
+}
+
+/** An order with tonnage still to ship, split shipped / planned / unplanned. */
+export interface DispatchBacklogOrder {
+  id: string;
+  saleDate: string;
+  product: string;
+  buyerId: string;
+  buyerName: string;
+  destination: string | null;
+  reminderDate: string | null;
+  tonnageKg: number;
+  dispatchedKg: number;
+  remainingKg: number;
+  plannedKg: number;
+  unplannedKg: number;
+}
+
+export interface DispatchIndentPreview {
+  transport: { id: string; name: string; phone: string | null; phone2: string | null };
+  date: string;
+  revision: boolean;
+  slotCount: number;
+  totalKg: number;
+  message: string;
+}

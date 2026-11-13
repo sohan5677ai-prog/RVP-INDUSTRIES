@@ -153,6 +153,10 @@ const TABLES: ArchiveModel[] = [
   // FyClosingStock in Phase 3.
   { name: 'SiloInventory', delegate: 'siloInventory', cls: 'SPANNING', order: 340 },
 
+  // The loading calendar's planned lorries. A TXN: the slot owns its own
+  // business date (the day it loads), which is what decides its financial year.
+  { name: 'DispatchSlot', delegate: 'dispatchSlot', cls: 'TXN', order: 348, dateField: 'date' },
+
   { name: 'EmailLog', delegate: 'emailLog', cls: 'LOG', order: 350, dateField: 'sentAt' },
   { name: 'WhatsAppLog', delegate: 'whatsAppLog', cls: 'LOG', order: 360, dateField: 'createdAt' },
   { name: 'TransportConfirmation', delegate: 'transportConfirmation', cls: 'LOG', order: 370, dateField: 'createdAt' },

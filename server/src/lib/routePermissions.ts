@@ -92,6 +92,12 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   { methods: WRITE, path: '/sale-orders*', permission: 'sale.manage' },
   { methods: WRITE, path: '/sale-dues*', permission: 'sale.manage' },
 
+  // Loading calendar. Planning which lorry goes out on which day is dispatch
+  // work, not order-taking, so it rides on the dispatch permission rather than
+  // needing a role rebuild - anyone who may dispatch may plan and un-plan.
+  { methods: READ, path: '/dispatch-slots*', permission: 'sale.view' },
+  { methods: 'ALL', path: '/dispatch-slots*', permission: 'sale.dispatch.manage' },
+
   { methods: 'ALL', path: '/credit-notes/:id/einvoice*', permission: 'sale.invoice.issue' },
   { methods: 'ALL', path: '/debit-notes/:id/einvoice*', permission: 'sale.invoice.issue' },
   { methods: READ, path: '/credit-notes*', permission: 'sale.view' },

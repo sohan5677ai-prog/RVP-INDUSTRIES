@@ -109,27 +109,27 @@ model User {
   /// Where password resets and new-device alerts go. Optional because existing
   /// accounts predate it: a user without one cannot self-serve a reset and
   /// needs an admin to set their password instead.
-  email       String?  @unique
+  email String? @unique
 
   /// Which algorithm `password` is hashed with. Informational only: the
   /// verifier sniffs the hash prefix instead, so a stale value here cannot
   /// lock anyone out. Defaults to BCRYPT because every row that existed when
   /// this column was added holds a bcryptjs hash - defaulting to ARGON2ID
   /// would have labelled all of them wrongly.
-  passwordAlgo      PasswordAlgo @default(BCRYPT)
+  passwordAlgo       PasswordAlgo @default(BCRYPT)
   /// Set on every password change. Any access token issued before this instant
   /// is refused, which is how a password change signs out every other device.
-  passwordChangedAt DateTime     @default(now())
+  passwordChangedAt  DateTime     @default(now())
   /// Forces a password change before anything else can be done - used when an
   /// admin sets a password on someone's behalf.
-  mustChangePassword Boolean     @default(false)
+  mustChangePassword Boolean      @default(false)
 
   /// Base32 TOTP secret. Null until enrolled; never leaves the server after
   /// enrolment except as the initial QR code.
-  mfaSecret     String?
+  mfaSecret    String?
   /// Null until the first code is verified, so a half-finished enrolment does
   /// not lock anyone out.
-  mfaEnabledAt  DateTime?
+  mfaEnabledAt DateTime?
 
   /// Consecutive failed attempts; reset on success.
   failedLoginCount Int       @default(0)
@@ -141,10 +141,10 @@ model User {
   /// without deleting the history the account is attached to.
   disabledAt       DateTime?
 
-  sessions      UserSession[]
+  sessions        UserSession[]
   passwordHistory PasswordHistory[]
-  recoveryCodes MfaRecoveryCode[]
-  resetTokens   PasswordResetToken[]
+  recoveryCodes   MfaRecoveryCode[]
+  resetTokens     PasswordResetToken[]
 }
 
 enum PasswordAlgo {
@@ -207,12 +207,12 @@ model PasswordResetToken {
 ///
 /// This is also the first row of the audit trail Phase 4 builds out.
 model LoginAttempt {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   username  String
   ip        String?
   userAgent String?
   outcome   LoginOutcome
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
 
   @@index([username, createdAt])
   @@index([ip, createdAt])
@@ -258,11 +258,11 @@ model MasterChangeLog {
   /// changes can be listed without knowing the field list by heart.
   protected  Boolean      @default(false)
 
-  changedById   String?
-  changedByName String?
+  changedById     String?
+  changedByName   String?
   /// Who approved it, when it went through maker-checker.
-  approvedById   String?
-  approvedByName String?
+  approvedById    String?
+  approvedByName  String?
   /// The request this came from, if it was approved rather than applied directly.
   pendingChangeId String?
 
@@ -294,35 +294,35 @@ enum MasterEntity {
 /// maker-checker for a bank account: the old account keeps being paid until
 /// someone else agrees to the new one.
 model PendingChange {
-  id        String        @id @default(cuid())
+  id                String        @id @default(cuid())
   /// What is changing, e.g. "party.bank". Matches a registered applier.
-  subject   String
+  subject           String
   /// Row being changed; null for a create.
-  subjectId String?
-  action    PendingAction
+  subjectId         String?
+  action            PendingAction
   /// The values being proposed.
-  proposed  Json
+  proposed          Json
   /// What they would replace, captured when the request was made, so the
   /// approver sees the before and after rather than just the after.
-  previous  Json?
+  previous          Json?
   /// One line for the approval screen.
-  summary   String
+  summary           String
   /// Permission required to decide this. Stored rather than derived so a
   /// later change to the permission map cannot silently lower the bar for
   /// requests already in flight.
   approvePermission String
   /// Amount this change concerns, where it has one. Drives ApprovalLimit.
-  amount    Decimal?      @db.Decimal(14, 2)
+  amount            Decimal?      @db.Decimal(14, 2)
 
-  status    PendingStatus @default(PENDING)
+  status PendingStatus @default(PENDING)
 
-  requestedById String
+  requestedById   String
   requestedByName String?
-  requestedAt   DateTime  @default(now())
+  requestedAt     DateTime @default(now())
 
-  decidedById   String?
-  decidedByName String?
-  decidedAt     DateTime?
+  decidedById    String?
+  decidedByName  String?
+  decidedAt      DateTime?
   /// Required when rejecting: a refusal without a reason is not a decision.
   decisionReason String?
 
@@ -450,13 +450,13 @@ model UserSession {
   /// Hash of the current refresh token. Rotated on every refresh, so a stolen
   /// refresh token is good for one use at most - and when an already-rotated
   /// one is presented, that is evidence of theft and the session is killed.
-  refreshTokenHash String?
+  refreshTokenHash  String?
   /// Hard stop regardless of activity (plan item 1.5). A session cannot be
   /// refreshed past this, so an attacker who keeps one warm still loses it.
   absoluteExpiresAt DateTime?
   /// Set when the user ticks "remember this device", which suppresses the
   /// new-device alert on later sign-ins from it.
-  trustedAt  DateTime?
+  trustedAt         DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -465,56 +465,56 @@ model UserSession {
 }
 
 model Party {
-  id                  String                 @id @default(cuid())
-  name                String
+  id                    String                 @id @default(cuid())
+  name                  String
   // Short handle used as the PO-number series key, e.g. "DCS" -> DCS/01/26-27.
-  nickname            String?
-  type                PartyType              @default(SUPPLIER)
-  phone               String?
-  phone2              String?
-  email               String?
-  address             String?
+  nickname              String?
+  type                  PartyType              @default(SUPPLIER)
+  phone                 String?
+  phone2                String?
+  email                 String?
+  address               String?
   // Town/city of the party's premises. The e-invoice (`Loc`) and the E-Way Bill
   // ("Ship To" place) want the CITY, not the state - "Surat", not "Gujarat".
-  city                String?
-  state               String?
-  pincode             String?
-  gstin               String?
+  city                  String?
+  state                 String?
+  pincode               String?
+  gstin                 String?
   // Default delivery destination for this buyer (maps to a freight rate).
-  destination         String?
+  destination           String?
   // Google Maps link to the party's delivery point - sent to the lorry driver
   // on dispatch via WhatsApp.
-  locationLink        String?
+  locationLink          String?
   // Whether this buyer's shipments travel on a Surya Road Lines lorry receipt
   // (GC note). Most do not, so the receipt is offered on a dispatch only when
   // this is switched on for the buyer. Off for everyone until set.
-  lorryReceiptEnabled Boolean                @default(false)
+  lorryReceiptEnabled   Boolean                @default(false)
   // Language this party's WhatsApp messages go out in. EN until someone sets it
   // on the party form; an unapproved language falls back to the English copy at
   // send time, so switching this can never stop a message going out.
-  waLanguage          WaLanguage             @default(EN)
+  waLanguage            WaLanguage             @default(EN)
   // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
-  religion            WishCategory?
+  religion              WishCategory?
   // Opening balance brought forward (unpaid legacy balance).
-  openingBalance      Decimal                @default(0) @db.Decimal(14, 2)
-  openingBalanceType  BalanceType            @default(CR)
-  bankAccountNumber   String?
-  bankIfsc            String?
-  bankName            String?
-  commodities         Commodity[]
-  createdAt           DateTime               @default(now())
-  purchaseOrders      PurchaseOrder[]
-  saleOrders          SaleOrder[]
-  payments            Payment[]
-  receipts            Receipt[]
-  dustPurchases       DustPurchase[]
-  tallyLedgerMaps     TallyLedgerMap[]
-  creditNotes         CreditNote[]
-  debitNotes          DebitNote[]
-  emailLogs           EmailLog[]
-  setOffs             PartySetOff[]
-  reminderSchedule    PartyReminderSchedule?
-  addresses           PartyAddress[]
+  openingBalance        Decimal                @default(0) @db.Decimal(14, 2)
+  openingBalanceType    BalanceType            @default(CR)
+  bankAccountNumber     String?
+  bankIfsc              String?
+  bankName              String?
+  commodities           Commodity[]
+  createdAt             DateTime               @default(now())
+  purchaseOrders        PurchaseOrder[]
+  saleOrders            SaleOrder[]
+  payments              Payment[]
+  receipts              Receipt[]
+  dustPurchases         DustPurchase[]
+  tallyLedgerMaps       TallyLedgerMap[]
+  creditNotes           CreditNote[]
+  debitNotes            DebitNote[]
+  emailLogs             EmailLog[]
+  setOffs               PartySetOff[]
+  reminderSchedule      PartyReminderSchedule?
+  addresses             PartyAddress[]
   internalWeightRecords InternalWeightRecord[]
 
   @@index([type])
@@ -580,6 +580,7 @@ model Transport {
   updatedAt        DateTime      @updatedAt
 
   saleDispatches SaleDispatch[]
+  dispatchSlots  DispatchSlot[]
 }
 
 model PurchaseOrder {
@@ -775,57 +776,57 @@ model EmailLog {
 }
 
 model StockIn {
-  id                String        @id @default(cuid())
-  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  purchaseOrderId   String
-  arrivalDate       DateTime
-  lorryNumber       String
-  invoiceNumber     String // invoice number (e.g. "69")
-  rvpFirstWeightKg  Int           @default(0) // RVP weighbridge: loaded/gross weight
-  rvpSecondWeightKg Int           @default(0) // RVP weighbridge: empty/tare weight
-  rvpKataKg         Int // Net weight from our weighbridge (RVP Kata) = first - second
+  id                  String             @id @default(cuid())
+  purchaseOrder       PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId     String
+  arrivalDate         DateTime
+  lorryNumber         String
+  invoiceNumber       String // invoice number (e.g. "69")
+  rvpFirstWeightKg    Int                @default(0) // RVP weighbridge: loaded/gross weight
+  rvpSecondWeightKg   Int                @default(0) // RVP weighbridge: empty/tare weight
+  rvpKataKg           Int // Net weight from our weighbridge (RVP Kata) = first - second
   // Direct net entry (spot/URP): the operator typed the RVP net straight in with no
   // separate tare weighment, so rvpFirstWeightKg holds the net and rvpKataKg = it.
   // Persisted so edits keep the net as-is instead of recomputing first − second (→ 0).
-  directNet         Boolean       @default(false)
-  billingWeightKg   Int // invoice tonnage
+  directNet           Boolean            @default(false)
+  billingWeightKg     Int // invoice tonnage
   // Rate (Rs/kg) the party actually printed on their GST invoice, when it differs
   // from the PO price. Some suppliers quote us a DELIVERY (landed) price but bill
   // at their BASE price, so the taxable value - and therefore the input GST we can
   // claim - is lower than billingWeightKg x PO price. Null = billed at the PO price.
   // It moves the TAX BASE ONLY: the payable and the seed's landed cost stay on the
   // PO price, because we still pay the party the full delivery rate.
-  billingRatePerKg  Decimal?      @db.Decimal(12, 2)
-  partyKataKg       Int // party weighbridge
-  invoiceFileUrl    String // uploaded invoice
-  loadingLocation   String        @default("RVP")
+  billingRatePerKg    Decimal?           @db.Decimal(12, 2)
+  partyKataKg         Int // party weighbridge
+  invoiceFileUrl      String // uploaded invoice
+  loadingLocation     String             @default("RVP")
   // Inward freight (₹) captured at arrival, only for BASE-priced POs (DELIVERY
   // already includes it). Carried into Purchase.freightCharge and capitalised.
-  freightCharge     Decimal       @default(0) @db.Decimal(12, 2)
+  freightCharge       Decimal            @default(0) @db.Decimal(12, 2)
   // Whole-vehicle tonnage (kg) the inward freight is spread over. Set when the lorry
   // is SHARED between parties: freight/kg = freightCharge / freightTonnageKg, and this
   // party's landed price = base + that rate. Null → single-party lorry, so the basis
   // falls back to this arrival's net weight (freight/kg = freightCharge / netWeightKg).
-  freightTonnageKg  Int?
+  freightTonnageKg    Int?
   // Ticked when the party arrived in their OWN vehicle (no third-party lorry).
   // At verification the lorry's ₹80/t hamali share - normally recovered from the
   // transporter - is instead deducted from the party's net payable.
-  selfVehicle       Boolean       @default(false)
+  selfVehicle         Boolean            @default(false)
   // Inward E-Way Bill details (for URP / unregistered supplier inward supplies)
-  ewbNumber         String?
-  ewbDate           DateTime?
-  ewbValidUpto      DateTime?
-  ewbStatus         String? // 'GENERATED', 'CANCELLED'
-  ewbCancelledDate  DateTime?
-  ewbDistance       Int?
-  ewbTransMode      String?
-  ewbVehicleType    String?
-  ewbTransDocNo     String?
-  ewbTransDocDate   DateTime?
+  ewbNumber           String?
+  ewbDate             DateTime?
+  ewbValidUpto        DateTime?
+  ewbStatus           String? // 'GENERATED', 'CANCELLED'
+  ewbCancelledDate    DateTime?
+  ewbDistance         Int?
+  ewbTransMode        String?
+  ewbVehicleType      String?
+  ewbTransDocNo       String?
+  ewbTransDocDate     DateTime?
   weighbridgeTicketId String?
   weighbridgeTicket   WeighbridgeTicket? @relation(fields: [weighbridgeTicketId], references: [id])
-  createdAt         DateTime      @default(now())
-  purchase          Purchase?
+  createdAt           DateTime           @default(now())
+  purchase            Purchase?
 
   @@index([purchaseOrderId])
   @@index([arrivalDate])
@@ -1023,8 +1024,10 @@ model SaleOrder {
   closeReason String?
 
   // Each physical dispatch (lorry) is a SaleDispatch billed against this order.
-  dispatches  SaleDispatch[]
-  allocations SaleAllocation[]
+  dispatches    SaleDispatch[]
+  allocations   SaleAllocation[]
+  // Planned lorries on the loading calendar (one slot = one lorry, one order).
+  dispatchSlots DispatchSlot[]
 
   // --- Legacy columns (pre multi-dispatch). No longer written; kept so the
   // backfill migration can copy them into the first SaleDispatch row. ---
@@ -2805,4 +2808,79 @@ model VehiclePing {
   @@unique([provider, vehicleNumber, recordedAt])
   @@index([vehicleNumber, recordedAt])
   @@index([recordedAt])
+}
+
+// A slot's life: planned on the calendar, asked of the transporter, confirmed
+// with a lorry number, then loaded (it became a SaleDispatch). CANCELLED is
+// kept rather than deleted so the day's code sequence never reuses a number
+// the transporter has already seen on WhatsApp.
+enum DispatchSlotStatus {
+  PLANNED
+  REQUESTED
+  CONFIRMED
+  LOADED
+  CANCELLED
+}
+
+/// One planned lorry on the loading calendar.
+///
+/// The unit of dispatch planning is a *lorry on a day*, not an order: a 100 t
+/// order shipped on the 16th, 18th and 20th is three slots, and the order's
+/// unplanned balance is what the calendar is for. The reverse never happens -
+/// one lorry carries one buyer's goods only - so a slot points at exactly one
+/// SaleOrder and carries its own plannedKg. That is why there is no allocation
+/// table here: destination, buyer, product and rate all derive from the order.
+///
+/// `code` (e.g. `16NOV-03`) is the slot's name on WhatsApp. The transporter
+/// replies against it, which is what makes a reply match a slot exactly instead
+/// of being guessed from route + date + tonnage.
+model DispatchSlot {
+  id   String   @id @default(cuid())
+  /// Human code shown to the transporter: DDMON-NN, sequence per date.
+  code String   @unique
+  /// Planned loading date, stored at IST midnight (date-only in meaning).
+  date DateTime
+  /// Sequence within `date`. Never reused - a cancelled slot keeps its number.
+  seq  Int
+
+  /// Lorry size asked for: 25000 / 30000 / 35000 / 40000, or a custom figure.
+  vehicleClassKg Int
+  /// Tonnage this lorry is planned to carry. Never more than vehicleClassKg.
+  plannedKg      Int
+  /// Where it loads - RVP or KNM, same vocabulary as stock locations.
+  loadingPoint   String @default("RVP")
+
+  saleOrder   SaleOrder @relation(fields: [saleOrderId], references: [id])
+  saleOrderId String
+
+  /// The transporter asked to supply the lorry. Null until one is chosen -
+  /// freight is already agreed with them, so there is nothing to tender out.
+  transport   Transport? @relation(fields: [transportId], references: [id])
+  transportId String?
+
+  status DispatchSlotStatus @default(PLANNED)
+
+  /// Filled when the transporter confirms, by hand here or from his reply.
+  lorryNumber String?
+  driverName  String?
+  driverPhone String?
+  notes       String?
+
+  requestedAt DateTime?
+  confirmedAt DateTime?
+
+  /// Set when the slot is actually loaded. No FK, matching the convention
+  /// TransportConfirmation already uses for the same pointer.
+  saleDispatchId          String? @unique
+  /// The WhatsApp booking this slot was confirmed from, when it came that way.
+  transportConfirmationId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, seq])
+  @@index([date])
+  @@index([saleOrderId])
+  @@index([status])
+  @@index([transportId])
 }

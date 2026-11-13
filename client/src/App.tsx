@@ -70,6 +70,7 @@ const BankLoans = lazyWithPreload('/loans', () => import('@/pages/BankLoans'));
 const PrivateLoans = lazyWithPreload('/private-loans', () => import('@/pages/PrivateLoans'));
 const StockByState = lazyWithPreload('/stock/state', () => import('@/pages/StockByState'));
 const SaleOrders = lazyWithPreload('/sale-orders', () => import('@/pages/SaleOrders'));
+const LoadingCalendar = lazyWithPreload('/sales/loading-calendar', () => import('@/pages/LoadingCalendar'));
 const InvoiceView = lazyWithPreload('/sale-dispatches/:id/invoice', () => import('@/pages/InvoiceView'));
 const EWayBillView = lazyWithPreload('/sale-dispatches/:id/ewaybill', () => import('@/pages/EWayBillView'));
 const EInvoiceView = lazyWithPreload('/sale-dispatches/:id/einvoice-print', () => import('@/pages/EInvoiceView'));
@@ -187,6 +188,7 @@ export default function App() {
                         <Route path="/loans" element={<BankLoans />} />
                         <Route path="/private-loans" element={<PrivateLoans />} />
                         <Route path="/sale-orders" element={<SaleOrders />} />
+                        <Route path="/sales/loading-calendar" element={<LoadingCalendar />} />
                         <Route path="/sales/pappu" element={<SalesProduct product="PAPPU" />} />
                         <Route path="/sales/husk" element={<Husk />} />
                         <Route path="/sales/notes" element={<CreditDebitNotes />} />

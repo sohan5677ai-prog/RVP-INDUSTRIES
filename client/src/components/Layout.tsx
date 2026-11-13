@@ -122,6 +122,7 @@ const sections: NavSection[] = [
     heading: 'Sales',
     items: [
       { to: '/sale-orders', label: 'Sale Orders', icon: ClipboardList },
+      { to: '/sales/loading-calendar', label: 'Loading Calendar', icon: CalendarDays },
       { to: '/sales/pappu', label: 'Pappu', icon: ShoppingCart },
       { to: '/sales/profit-loss', label: 'Pappu Profit & Loss', icon: TrendingUp },
       { to: '/sales/husk', label: 'Husk', icon: Layers },

@@ -225,8 +225,7 @@ async function indentContext(date: string, transportId: string) {
     orderBy: { seq: 'asc' },
     include: SLOT_INCLUDE,
   });
-  const company = await prisma.companyProfile.findUnique({ where: { id: 'default' }, select: { name: true } });
-  return { day, transport, slots, companyName: company?.name ?? 'RVP INDUSTRIES' };
+  return { day, transport, slots };
 }
 
 /**
@@ -235,7 +234,7 @@ async function indentContext(date: string, transportId: string) {
  */
 export async function previewDispatchIndent(req: Request, res: Response) {
   const { date, transportId } = indentSchema.parse(req.query);
-  const { day, transport, slots, companyName } = await indentContext(date, transportId);
+  const { day, transport, slots } = await indentContext(date, transportId);
   if (slots.length === 0) throw new HttpError(400, `No lorries planned for ${transport.name} on that date`);
 
   const revision = slots.some((s) => s.requestedAt != null);
@@ -245,7 +244,7 @@ export async function previewDispatchIndent(req: Request, res: Response) {
     revision,
     slotCount: slots.length,
     totalKg: slots.reduce((s, x) => s + x.plannedKg, 0),
-    message: buildIndentMessage({ companyName, transportName: transport.name, date: day, slots, revision }),
+    message: buildIndentMessage({ transportName: transport.name, date: day, slots, revision }),
   });
 }
 
@@ -260,11 +259,11 @@ export async function previewDispatchIndent(req: Request, res: Response) {
  */
 export async function sendDispatchIndent(req: Request, res: Response) {
   const { date, transportId } = indentSchema.parse(req.body);
-  const { day, transport, slots, companyName } = await indentContext(date, transportId);
+  const { day, transport, slots } = await indentContext(date, transportId);
   if (slots.length === 0) throw new HttpError(400, `No lorries planned for ${transport.name} on that date`);
 
   const revision = slots.some((s) => s.requestedAt != null);
-  const message = buildIndentMessage({ companyName, transportName: transport.name, date: day, slots, revision });
+  const message = buildIndentMessage({ transportName: transport.name, date: day, slots, revision });
 
   // Only the ones not yet asked for move to REQUESTED; a slot already
   // confirmed with a lorry number stays confirmed even though it appears in a

@@ -26,6 +26,7 @@ vi.mock('../lib/prisma.js', () => ({
 
 const {
   slotCode,
+  buildIndentVariables,
   nextSeqForDate,
   parseSlotDate,
   slotDateKey,
@@ -149,54 +150,84 @@ describe('planning arithmetic', () => {
 });
 
 describe('the day indent', () => {
-  const slot = (code: string, classKg: number, dest: string, lorry?: string) =>
+  const slot = (
+    code: string,
+    classKg: number,
+    dest: string,
+    over: { product?: string; loadingPoint?: string; lorry?: string } = {}
+  ) =>
     ({
       code,
       vehicleClassKg: classKg,
       plannedKg: classKg,
-      loadingPoint: 'RVP',
-      lorryNumber: lorry ?? null,
-      saleOrder: { destination: dest, buyer: { city: null } },
+      loadingPoint: over.loadingPoint ?? 'RVP',
+      lorryNumber: over.lorry ?? null,
+      saleOrder: { destination: dest, product: over.product ?? 'PAPPU', buyer: { city: null } },
     }) as never;
 
-  it('lists a day\'s lorries by code, with the total', () => {
-    const msg = buildIndentMessage({
-      companyName: 'RVP INDUSTRIES',
-      transportName: 'Surya Road Lines',
-      date: NOV16,
-      slots: [slot('16NOV-01', 30_000, 'Surat'), slot('16NOV-02', 25_000, 'Barshi')],
-      revision: false,
-    });
-    expect(msg).toContain('16-NOV (Mon)');
-    expect(msg).toContain('16NOV-01 - 30 t to Surat');
-    expect(msg).toContain('16NOV-02 - 25 t to Barshi');
-    expect(msg).toContain('Total: 2 lorries · 55 t');
-    expect(msg).not.toContain('REVISED');
+  const vars = (slots: never[], revision = false) =>
+    buildIndentVariables({ transportName: 'Surya Road Lines', date: NOV16, slots, revision });
+
+  it('puts the whole fleet on ONE line - Meta drops a variable with a newline in it', () => {
+    const v = vars([slot('16NOV-01', 30_000, 'Surat'), slot('16NOV-02', 25_000, 'Barshi')]);
+    expect(v.vehiclesLine).not.toContain('\n');
+    expect(v.vehiclesLine).toBe(
+      '16NOV-01 30t Pappu RVP to Surat | 16NOV-02 25t Pappu RVP to Barshi'
+    );
   });
 
-  it('marks a re-send as revised and shows what is already confirmed', () => {
-    const msg = buildIndentMessage({
-      companyName: 'RVP INDUSTRIES',
-      transportName: 'Surya Road Lines',
-      date: NOV16,
-      slots: [slot('16NOV-01', 30_000, 'Surat', 'AP39T8217')],
-      revision: true,
-    });
-    expect(msg).toContain('(REVISED)');
-    expect(msg).toContain('[AP39T8217]');
-    expect(msg).toContain('Total: 1 lorry · 30 t');
+  it('carries the loading point per lorry, so a mixed day cannot send one to the wrong gate', () => {
+    const v = vars([
+      slot('16NOV-01', 30_000, 'Surat'),
+      slot('16NOV-02', 25_000, 'Barshi', { loadingPoint: 'KNM', product: 'HUSK' }),
+    ]);
+    expect(v.vehiclesLine).toBe(
+      '16NOV-01 30t Pappu RVP to Surat | 16NOV-02 25t Husk KNM to Barshi'
+    );
   });
 
-  it('splits the list by loading point when a day loads at both', () => {
-    const knm = { ...(slot('16NOV-02', 25_000, 'Barshi') as object), loadingPoint: 'KNM' } as never;
+  it('never names the buyer', () => {
+    // The one rule that is not cosmetic: the number this goes out on is shared,
+    // and who bought the goods is no part of arranging a lorry.
+    const v = vars([slot('16NOV-01', 30_000, 'Surat')]);
     const msg = buildIndentMessage({
-      companyName: 'RVP INDUSTRIES',
       transportName: 'Surya Road Lines',
       date: NOV16,
-      slots: [slot('16NOV-01', 30_000, 'Surat'), knm],
+      slots: [slot('16NOV-01', 30_000, 'Surat')],
       revision: false,
     });
-    expect(msg).toContain('Loading at RVP:');
-    expect(msg).toContain('Loading at KNM:');
+    expect(v.vehiclesLine).not.toMatch(/Vinod|Traders|buyer/i);
+    expect(msg).not.toMatch(/Vinod|Traders|buyer/i);
+  });
+
+  it('dates the day the way the template sample does, and flags a re-send', () => {
+    expect(vars([slot('16NOV-01', 30_000, 'Surat')]).dateLabel).toBe('16-Nov-2026 (Mon)');
+    expect(vars([slot('16NOV-01', 30_000, 'Surat')], true).dateLabel).toBe('16-Nov-2026 (Mon) (REVISED)');
+  });
+
+  it('shows a lorry already confirmed, so a revision reads as a change not a repeat', () => {
+    const v = vars([slot('16NOV-01', 30_000, 'Surat', { lorry: 'AP39T8217' })], true);
+    expect(v.vehiclesLine).toBe('16NOV-01 30t Pappu RVP to Surat [AP39T8217]');
+  });
+
+  it('renders the same three variables as the approved template body', () => {
+    const msg = buildIndentMessage({
+      transportName: 'Surya Road Lines',
+      date: NOV16,
+      slots: [slot('16NOV-01', 30_000, 'Surat'), slot('16NOV-02', 32_500, 'Barshi')],
+      revision: false,
+    });
+    expect(msg).toBe(
+      [
+        'Dear Surya Road Lines,',
+        'Please arrange the following vehicles.',
+        '',
+        'Loading date: *16-Nov-2026 (Mon)*',
+        '',
+        'Vehicles: 16NOV-01 30t Pappu RVP to Surat | 16NOV-02 32.5t Pappu RVP to Barshi',
+        '',
+        'Kindly reply with the lorry number, driver name and driver mobile against each code.',
+      ].join('\n')
+    );
   });
 });

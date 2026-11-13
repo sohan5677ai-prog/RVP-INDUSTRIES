@@ -282,6 +282,46 @@ export async function buildBacklog() {
 }
 
 /**
+ * Short commodity names for the one-line vehicle list. The long forms in
+ * `lorryReceiptPdf.PRODUCT_DESCRIPTION` are what a transporter's book expects
+ * on a consignment note; repeated six times inside one WhatsApp line they are
+ * just noise, and the transporter only needs enough to pick the right body.
+ */
+const PRODUCT_SHORT: Record<string, string> = {
+  PAPPU: 'Pappu',
+  HUSK: 'Husk',
+  WASTE: 'Waste',
+  TPS: 'Brokens',
+  SHELL: 'Shell',
+  PRECLEANER_DUST: 'Dust',
+  NALLA_POKKULU: 'Nalla Pokkulu',
+  NALLA_CHINTAPANDU: 'Nalla Chintapandu',
+};
+
+/** `25t`, `32.5t` - compact because several of these share one line. */
+const compactTonnes = (kg: number) => {
+  const t = kg / 1000;
+  return `${Number.isInteger(t) ? t : Number(t.toFixed(2))}t`;
+};
+
+/**
+ * The three values the approved WhatsApp template takes.
+ *
+ * Built as variables rather than as prose because Meta's template is exactly
+ * this: a greeting round `{{1}}`, a date in `{{2}}`, and the whole fleet in
+ * `{{3}}`. Keeping them separate means the day we have an approved message id
+ * the send is `variables: [transportName, dateLabel, vehiclesLine]` with no
+ * re-derivation, and until then `buildIndentMessage` composes the same three
+ * into the text that goes out over wa.me - so what the transporter reads today
+ * is character-for-character what the template will send later.
+ */
+export interface IndentVariables {
+  transportName: string;
+  dateLabel: string;
+  vehiclesLine: string;
+}
+
+/**
  * The day-indent: one message per transporter per date, listing his slots by
  * code.
  *
@@ -290,47 +330,65 @@ export async function buildBacklog() {
  * spread over three dates therefore appears in three different messages, each
  * alongside whatever else loads that day, which is exactly what he needs in
  * order to send the right lorries.
+ *
+ * The buyer is deliberately absent. A transporter needs the day, the size, the
+ * commodity and the two places; who bought the goods is ours, not his - and on
+ * a shared WhatsApp number it would be a leak, not a courtesy.
+ *
+ * Loading point and commodity ride *inside* each vehicle entry rather than as
+ * variables of their own, because both vary per lorry: one day can load at RVP
+ * and KNM, carrying pappu to one buyer and husk to another. Hoisting either to
+ * a message-level line would be wrong the first time a day mixed them, and
+ * would quietly send a lorry to the wrong gate.
+ */
+export function buildIndentVariables(args: {
+  transportName: string;
+  date: Date;
+  slots: SlotWithOrder[];
+  revision: boolean;
+}): IndentVariables {
+  const { year, month, day } = istCalendar(args.date);
+  const weekday = args.date.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' });
+  const monthLabel = MONTHS[month - 1][0] + MONTHS[month - 1].slice(1).toLowerCase();
+  const dateLabel =
+    `${String(day).padStart(2, '0')}-${monthLabel}-${year} (${weekday})` + (args.revision ? ' (REVISED)' : '');
+
+  // One line, pipe-separated. Meta drops any template variable containing a
+  // newline (see salesDues.service.dueTodayListText), so the fleet cannot be a
+  // block however much easier that would be to read.
+  const vehiclesLine = args.slots
+    .map((slot) => {
+      const dest = slot.saleOrder.destination || slot.saleOrder.buyer.city || '-';
+      const product = PRODUCT_SHORT[slot.saleOrder.product] ?? slot.saleOrder.product;
+      const confirmed = slot.lorryNumber ? ` [${slot.lorryNumber}]` : '';
+      return `${slot.code} ${compactTonnes(slot.vehicleClassKg)} ${product} ${slot.loadingPoint} to ${dest}${confirmed}`;
+    })
+    .join(' | ');
+
+  return { transportName: args.transportName, dateLabel, vehiclesLine };
+}
+
+/**
+ * The same three variables rendered as the message the user sends over wa.me
+ * while the Fast2SMS template awaits approval. The copy is kept identical to
+ * the submitted template body (docs/whatsapp-vehicle-indent-template.md) so
+ * switching to a real template send changes the channel, not the wording.
  */
 export function buildIndentMessage(args: {
-  companyName: string;
   transportName: string;
   date: Date;
   slots: SlotWithOrder[];
   revision: boolean;
 }): string {
-  const { month, day } = istCalendar(args.date);
-  const weekday = args.date.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' });
-  const dateLabel = `${String(day).padStart(2, '0')}-${MONTHS[month - 1]} (${weekday})`;
-
-  const byPoint = new Map<string, SlotWithOrder[]>();
-  for (const slot of args.slots) {
-    const list = byPoint.get(slot.loadingPoint) ?? [];
-    list.push(slot);
-    byPoint.set(slot.loadingPoint, list);
-  }
-
-  const lines: string[] = [];
-  lines.push(`*${args.companyName} - Vehicle Requirement*`);
-  lines.push(args.revision ? `${dateLabel} (REVISED)` : dateLabel);
-  lines.push('');
-
-  for (const [point, slots] of byPoint) {
-    if (byPoint.size > 1) lines.push(`Loading at ${point}:`);
-    for (const slot of slots) {
-      const dest = slot.saleOrder.destination || slot.saleOrder.buyer.city || '-';
-      const confirmed = slot.lorryNumber ? `  [${slot.lorryNumber}]` : '';
-      lines.push(
-        `${slot.code} - ${fmtTonnes(slot.vehicleClassKg)} to ${dest}${confirmed}`
-      );
-    }
-    if (byPoint.size > 1) lines.push('');
-  }
-
-  const totalKg = args.slots.reduce((s, x) => s + x.plannedKg, 0);
-  if (lines[lines.length - 1] !== '') lines.push('');
-  lines.push(`Total: ${args.slots.length} ${args.slots.length === 1 ? 'lorry' : 'lorries'} · ${fmtTonnes(totalKg)}`);
-  lines.push('');
-  lines.push('Please reply with the lorry number and driver details against each code.');
-
-  return lines.join('\n');
+  const v = buildIndentVariables(args);
+  return [
+    `Dear ${v.transportName},`,
+    'Please arrange the following vehicles.',
+    '',
+    `Loading date: *${v.dateLabel}*`,
+    '',
+    `Vehicles: ${v.vehiclesLine}`,
+    '',
+    'Kindly reply with the lorry number, driver name and driver mobile against each code.',
+  ].join('\n');
 }

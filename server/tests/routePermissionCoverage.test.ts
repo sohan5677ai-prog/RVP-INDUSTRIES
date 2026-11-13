@@ -51,6 +51,11 @@ const KNOWN_PUBLIC = new Set([
   'GET /api/webhooks/whatsapp',
   'POST /api/webhooks/whatsapp',
   'POST /api/webhooks/whatsapp/jobs/:job',
+  // A tracking provider's server posts positions here; it holds GPS_PUSH_TOKEN,
+  // not a session. The GET answers their URL-validation probe and says nothing
+  // about the ERP. Unset token = 503, so public never means unauthenticated.
+  'GET /api/webhooks/gps',
+  'POST /api/webhooks/gps',
   'POST /api/weighbridge/cctv/broadcast',
   'GET /api/weighbridge/tickets/:id/slip.pdf',
   'GET /api/weighbridge/tickets/:id/slip.jpg',

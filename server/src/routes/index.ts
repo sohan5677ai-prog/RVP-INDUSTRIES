@@ -47,12 +47,14 @@ import userNoteRoutes from './userNote.routes.js';
 import roleRoutes from './role.routes.js';
 import { verifyWhatsAppWebhook, handleWhatsAppWebhook, runWhatsAppJob } from '../controllers/whatsapp.controller.js';
 import { handleResendWebhook } from '../controllers/resendWebhook.controller.js';
+import { verifyGpsWebhook, handleGpsPush } from '../controllers/gps.controller.js';
 import { globalSearch } from '../controllers/search.controller.js';
 import subscriptionRoutes from './subscription.routes.js';
 import archiveRoutes from './archive.routes.js';
 import weighbridgeRoutes from './weighbridge.routes.js';
 import deliveryChallanRoutes from './deliveryChallan.routes.js';
 import gstr2bRoutes from './gstr2b.routes.js';
+import gpsRoutes from './gps.routes.js';
 import {
   streamCctvHandler,
   snapshotCctvHandler,
@@ -114,6 +116,13 @@ router.patch('/weighbridge/print-queue/:id/complete', printQueueAuth, asyncHandl
 // The cabin print agent polls /pending and /complete, never /status - the only
 // caller is the client's own screen, which sends a Bearer token.
 router.get('/weighbridge/print-queue/status', printQueueAuth, asyncHandler(getPrintAgentStatusHandler));
+
+// GPS positions pushed by a tracking provider (public - their server calls
+// this, authenticated by GPS_PUSH_TOKEN inside the handler). Locanix is polled
+// rather than pushing (services/locanix.service.ts), but the endpoint stays
+// mounted: a second vendor is then a token, not a deployment.
+router.get('/webhooks/gps', webhookLimiter, asyncHandler(verifyGpsWebhook));
+router.post('/webhooks/gps', webhookLimiter, asyncHandler(handleGpsPush));
 
 // Resend email delivery/tracking webhook (public - Resend calls this, Svix signed)
 router.post('/webhooks/resend', webhookLimiter, asyncHandler(handleResendWebhook));
@@ -222,6 +231,7 @@ router.use('/', archiveRoutes);
 router.use('/weighbridge', weighbridgeRoutes);
 router.use('/delivery-challans', deliveryChallanRoutes);
 router.use('/gstr2b', gstr2bRoutes);
+router.use('/', gpsRoutes);
 
 router.get('/search', asyncHandler(globalSearch));
 

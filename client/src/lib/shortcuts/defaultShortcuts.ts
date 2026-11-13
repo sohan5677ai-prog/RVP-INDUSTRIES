@@ -475,6 +475,19 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     isEnabled: true,
   },
   {
+    id: 'nav:vehicle-tracking',
+    label: 'Go to Vehicle Tracking',
+    // No default key: the palette and the sidebar reach it, and the free
+    // Alt-number slots are worth keeping for the pages used every hour.
+    description: 'Live lorry positions, trails, and delivery ETAs from GPS',
+    category: 'reports',
+    keys: [],
+    defaultKeys: [],
+    targetUrl: '/reports/vehicle-tracking',
+    actionType: 'navigate',
+    isEnabled: true,
+  },
+  {
     id: 'nav:taxes',
     label: 'Go to Taxes / GST',
     description: 'GST summaries, GSTR-1, GSTR-3B matching, and TDS reports',

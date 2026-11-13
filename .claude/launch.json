@@ -4,7 +4,10 @@
     {
       "name": "rvp-client",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:client"],
+      "runtimeArgs": [
+        "run",
+        "dev:client"
+      ],
       "port": 5173,
       "autoPort": true
     },
@@ -21,6 +24,35 @@
         "5175"
       ],
       "port": 5175
+    },
+    {
+      "name": "rvp-server-4100",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "C:/Users/SOHAN/Desktop/RVP-ERP/server"
+      ],
+      "port": 4100,
+      "env": {
+        "PORT": "4100"
+      }
+    },
+    {
+      "name": "rvp-client-4100",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "C:/Users/SOHAN/Desktop/RVP-ERP/client"
+      ],
+      "port": 5174,
+      "env": {
+        "PORT": "5174",
+        "API_PROXY": "http://localhost:4100"
+      }
     }
   ]
 }

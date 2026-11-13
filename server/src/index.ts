@@ -282,6 +282,11 @@ app.listen(port, "0.0.0.0", () => {
   import("./jobs/subscriptionExpenseJobs.js")
     .then(({ registerSubscriptionCron }) => registerSubscriptionCron())
     .catch((err) => logger.error("[subscription-cron] failed to register:", err));
+
+  // Poll the GPS provider for lorry positions. No-op without LOCANIX_API_KEY.
+  import("./jobs/gpsPollJob.js")
+    .then(({ registerGpsPollCron }) => registerGpsPollCron())
+    .catch((err) => logger.error("[locanix] failed to register poll:", err));
 });
 
 

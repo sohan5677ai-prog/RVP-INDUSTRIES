@@ -117,6 +117,9 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // provider's own push endpoint is public and sits outside this model; it
   // authenticates with GPS_PUSH_TOKEN instead.
   { methods: READ, path: '/gps/*', permission: 'sale.view' },
+  // Pulling from the provider stores telemetry and changes no ERP data, so it
+  // is gated like the reads it refreshes rather than as a sales write.
+  { methods: ['POST'], path: '/gps/poll', permission: 'sale.view' },
 
   // --------------------------------------------------------------- money --
   { methods: READ, path: '/payments*', permission: 'payment.view' },

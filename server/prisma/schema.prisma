@@ -2795,6 +2795,19 @@ model VehiclePing {
   speedKmph     Float?
   address       String?
   ignition      Boolean?
+  // Course over ground in degrees (0 = north). The provider sends it on every
+  // fix and it is what lets the board draw a lorry pointing the way it is
+  // actually going instead of a dot.
+  headingDeg    Float?
+  // The provider's own word for the vehicle's state - "Moving", "Idling",
+  // "Parked", "Offline". Kept verbatim rather than re-derived from speed,
+  // because their device knows things we do not (ignition history, how long
+  // since the last report) and support conversations quote this value.
+  providerStatus String?
+  // Device odometer as reported. Units are NOT reliable across devices on the
+  // same feed - some report metres - so this is displayed as a raw reading and
+  // never used to compute a distance. Trip distance comes from the trail.
+  odometerRaw   Float?
   // When the device recorded the fix. Falls back to arrival time when the
   // provider sends no timestamp, so the column is never null and the trail
   // can always be ordered.

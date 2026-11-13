@@ -92,11 +92,25 @@ describe('journey arithmetic', () => {
     expect(resolvePlace('somewhere nobody has heard of')).toBeNull();
   });
 
-  it('measures Raichur to Surat at roughly its real straight-line distance', () => {
+  it('puts the factory at the mill in Punganur, not at a town centre', () => {
+    // The origin of every distance on the board. It is pinned here because it
+    // once sat 500 km away on a wrong assumption, and nothing on screen said so.
+    expect(FACTORY.latitude).toBeCloseTo(13.3659, 3);
+    expect(FACTORY.longitude).toBeCloseTo(78.5882, 3);
+    expect(resolvePlace('Punganur')).toBe(FACTORY);
+  });
+
+  it('measures Punganur to Surat at roughly its real straight-line distance', () => {
     const surat = resolvePlace('Surat')!;
     const km = kmBetween(FACTORY.latitude, FACTORY.longitude, surat.latitude, surat.longitude);
-    expect(km).toBeGreaterThan(700);
-    expect(km).toBeLessThan(820);
+    expect(km).toBeGreaterThan(1000);
+    expect(km).toBeLessThan(1120);
+  });
+
+  it('keeps Raichur as an ordinary destination, not as the factory', () => {
+    const raichur = resolvePlace('Raichur')!;
+    expect(raichur).not.toBe(FACTORY);
+    expect(raichur.name).toBe('Raichur');
   });
 
   it('measures short hops in metres for the thinning rule', () => {

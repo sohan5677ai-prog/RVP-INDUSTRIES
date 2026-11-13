@@ -18,12 +18,26 @@ export interface Place {
   longitude: number;
 }
 
-/** Our own gate. Everything outbound starts here. */
-export const FACTORY: Place = { name: 'RVP Industries, Raichur', latitude: 16.2076, longitude: 77.3463 };
+/**
+ * Our own gate. Everything outbound starts here, and it is the origin for
+ * every "km from the factory" and the start of every consignment's progress
+ * bar - so it is the mill itself (New Bypass Road, Kummaranatham Village,
+ * Punganur, Chittoor), not the town centre, and it matches the address on
+ * CompanyProfile.
+ */
+export const FACTORY: Place = { name: 'RVP Industries, Punganur', latitude: 13.3658707, longitude: 78.5882473 };
 
 const PLACES: Record<string, Place> = {
-  raichur: FACTORY,
+  punganur: FACTORY,
+  kummaranatham: FACTORY,
   rvp: FACTORY,
+  chittoor: { name: 'Chittoor', latitude: 13.2172, longitude: 79.1003 },
+  raichur: { name: 'Raichur', latitude: 16.2120, longitude: 77.3439 },
+  madanapalle: { name: 'Madanapalle', latitude: 13.5503, longitude: 78.5029 },
+  tirupati: { name: 'Tirupati', latitude: 13.6288, longitude: 79.4192 },
+  chikkaballapur: { name: 'Chikkaballapur', latitude: 13.4355, longitude: 77.7315 },
+  hosur: { name: 'Hosur', latitude: 12.7409, longitude: 77.8253 },
+  vellore: { name: 'Vellore', latitude: 12.9165, longitude: 79.1325 },
   surat: { name: 'Surat', latitude: 21.1702, longitude: 72.8311 },
   sachin: { name: 'Sachin, Surat', latitude: 21.0833, longitude: 72.8833 },
   barshi: { name: 'Barshi', latitude: 18.2333, longitude: 75.6833 },

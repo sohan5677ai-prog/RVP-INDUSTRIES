@@ -310,6 +310,11 @@ function VehicleDetailDialog({
   const d = data?.dispatch ?? null;
   const j = data?.journey ?? null;
 
+  // "RVP Industries, Punganur" -> "Punganur": the progress bar has room for a
+  // place, not for the company name we already know we are looking at. Taken
+  // from the server's own factory record so the two can never disagree.
+  const factoryName = factory?.name.split(',').pop()?.trim() ?? 'Factory';
+
   const mapVehicles = useMemo(() => {
     if (!latest || !data) return [];
     return [{
@@ -504,7 +509,7 @@ function VehicleDetailDialog({
                   {j?.progressPct != null && (
                     <div className="mt-3">
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>Raichur</span>
+                        <span>{factoryName}</span>
                         <span>{j.destination}</span>
                       </div>
                       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">

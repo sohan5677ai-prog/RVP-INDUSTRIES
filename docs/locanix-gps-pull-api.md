@@ -103,6 +103,12 @@ So the page is ready before the data is. Two things make it pay:
 1. **Get the lorries we actually use onto a tracked device** — either this vendor for the regular transporters, or a second provider pushed to `/api/webhooks/gps`. The `provider` column and the alias-tolerant parser mean a second vendor is configuration, not code.
 2. **Fill in `destination` on sale orders.** None of the 13 open dispatches has one, and without it there is no ETA and no "km to go" — only a position.
 
+### The factory point
+
+`FACTORY` in [gpsPlaces.ts](../server/src/lib/gpsPlaces.ts) is **13.3658707, 78.5882473** — the mill on New Bypass Road, Kummaranatham Village, Punganur, Chittoor, matching the address on `CompanyProfile` (GSTIN state code 37, Andhra Pradesh).
+
+It was first written as Raichur, Karnataka, on a wrong assumption carried over from an earlier draft of the request mail. That put the origin of every distance about 500 km from the real gate, and nothing on screen contradicted it. A test now pins the coordinates so the same slip cannot be made twice.
+
 Still open with Suresh: whether a history endpoint exists, whether more vehicles can be added to this key, what the odometer units are per device, and the commercials and validity of the token.
 
 ### Worth building next, once positions are flowing

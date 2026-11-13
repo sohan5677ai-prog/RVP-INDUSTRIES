@@ -13,15 +13,15 @@ CC: the transporter (vehicle owner) — their consent is what unlocks the data.
 
 > Dear Locanix Team,
 >
-> We are **RVP Industries** (Raichur, Karnataka), a de-oiled cake / cotton seed processing unit. We operate an in-house logistics and dispatch management software — **"RVP Industries ERP"** — which we use to plan, dispatch and track every inbound and outbound lorry.
+> We are **RVP Industries** (Punganur, Chittoor district, Andhra Pradesh), a de-oiled cake / cotton seed processing unit. We operate an in-house logistics and dispatch management software — **"RVP Industries ERP"** — which we use to plan, dispatch and track every inbound and outbound lorry.
 >
 > We would like to integrate the GPS of the below vehicle with our RVP Industries ERP platform via a **pull-based API**.
 >
 > **Vehicle No.:** [GJ18BV6551]
 > **Transporter:** [Shree Madhupuri Transport]
 > **Device/IMEI (if known):** [____]
-> **Consignor:** RVP Industries, Raichur
-> **Route:** [Raichur → Surat]
+> **Consignor:** RVP Industries, Punganur
+> **Route:** [Punganur → Surat]
 >
 > The transporter (vehicle owner) is copied on this mail and consents to the location data of this vehicle being shared with RVP Industries for the duration of our consignments.
 >
@@ -91,5 +91,5 @@ Proposed build (roughly a day's work once credentials arrive):
 ## 4. Worth knowing before you commit
 
 - **This is a per-device integration, not fleet-wide tracking.** One mail per GPS vendor per owner. If your lorries come from 10 different transporters with 5 different GPS vendors, you will be chasing 5 integrations.
-- **A vendor-neutral alternative exists:** FASTag/toll-read based tracking (via the e-way bill / NETC data that aggregators like Intugine, Fleetx, LocoNav or FreightTiger resell) works on **any** vehicle number with no device and no vendor consent. It is coarser — you get a position only when the lorry crosses a toll plaza, roughly every 50–150 km — but for a Raichur → Surat run that is 6–10 reliable fixes, which is usually enough to answer "where is it and will it reach tomorrow".
+- **A vendor-neutral alternative exists:** FASTag/toll-read based tracking (via the e-way bill / NETC data that aggregators like Intugine, Fleetx, LocoNav or FreightTiger resell) works on **any** vehicle number with no device and no vendor consent. It is coarser — you get a position only when the lorry crosses a toll plaza, roughly every 50–150 km — but for a Punganur → Surat run that is 6–10 reliable fixes, which is usually enough to answer "where is it and will it reach tomorrow".
 - Best setup is both: **Locanix (or whichever vendor) for the regular lorries, FASTag-based for the rest.** Build the ERP side (`VehiclePing` + the map panel) provider-agnostic so a second provider is just another service file.

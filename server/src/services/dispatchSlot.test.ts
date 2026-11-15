@@ -219,10 +219,11 @@ describe('the day indent', () => {
     });
     expect(msg).toBe(
       [
+        '*Vehicle Requirement*',
         'Dear Surya Road Lines,',
         'Please arrange the following vehicles.',
         '',
-        'Loading date: *16-Nov-2026 (Mon)*',
+        'Loading date: 16-Nov-2026 (Mon)',
         '',
         'Vehicles: 16NOV-01 30t Pappu RVP to Surat | 16NOV-02 32.5t Pappu RVP to Barshi',
         '',

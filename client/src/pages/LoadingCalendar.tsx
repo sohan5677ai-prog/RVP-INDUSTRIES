@@ -760,10 +760,11 @@ function ConfirmDialog(props: {
  * The day's requirement for one transporter: the message, and the two ways to
  * put it in front of him.
  *
- * Opening WhatsApp with the text pre-filled rather than sending it from the
- * server is deliberate for now - the approved template for a vehicle
- * requirement is not live yet, and this way the message goes out of the same
- * thread the transporter already replies in.
+ * Pressing send fires the approved `transport_sent` template from the server,
+ * straight to the transporter's number. Only where that could not happen - no
+ * number on file for him, or Fast2SMS refused it - does this fall back to
+ * opening wa.me with the same text pre-filled, so the requirement still reaches
+ * him out of the user's own WhatsApp.
  */
 function IndentDialog(props: { date: string; transportId: string; onClose: () => void; onSent: () => void }) {
   const preview = useQuery({
@@ -774,23 +775,36 @@ function IndentDialog(props: { date: string; transportId: string; onClose: () =>
 
   const send = useMutation({
     mutationFn: () =>
-      api<{ requestedCount: number; message: string; transport: DispatchIndentPreview['transport'] }>(
+      api<{
+        requestedCount: number;
+        message: string;
+        sent?: boolean;
+        sendError?: string | null;
+        transport: DispatchIndentPreview['transport'];
+      }>(
         '/dispatch-slots/indent',
         { method: 'POST', body: JSON.stringify({ date: props.date, transportId: props.transportId }) }
       ),
     onSuccess: (r) => {
-      const phone = (r.transport.phone || r.transport.phone2 || '').replace(/\D/g, '');
-      const target = phone.length === 10 ? `91${phone}` : phone;
-      window.open(
-        target ? `https://wa.me/${target}?text=${encodeURIComponent(r.message)}`
-               : `https://wa.me/?text=${encodeURIComponent(r.message)}`,
-        '_blank'
-      );
-      toast.success(
+      const count =
         r.requestedCount > 0
           ? `${r.requestedCount} ${r.requestedCount === 1 ? 'lorry' : 'lorries'} marked as asked for`
-          : 'Requirement re-sent'
-      );
+          : 'Requirement re-sent';
+
+      if (r.sent) {
+        toast.success(`Sent to ${r.transport.name} on WhatsApp · ${count}`);
+      } else {
+        // The ERP could not send it (no number on file, or Fast2SMS refused it).
+        // Open WhatsApp with the same text so the requirement still goes out.
+        const phone = (r.transport.phone || r.transport.phone2 || '').replace(/[^0-9]/g, '');
+        const target = phone.length === 10 ? `91${phone}` : phone;
+        window.open(
+          target ? `https://wa.me/${target}?text=${encodeURIComponent(r.message)}`
+                 : `https://wa.me/?text=${encodeURIComponent(r.message)}`,
+          '_blank'
+        );
+        toast.warning(`${r.sendError || 'Could not send from the ERP'} · sending from your own WhatsApp · ${count}`);
+      }
       props.onSent();
       props.onClose();
     },

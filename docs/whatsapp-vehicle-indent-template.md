@@ -6,30 +6,34 @@ order — a transport office plans by tomorrow's fleet, so an order shipping on
 the 16th, 18th and 20th appears in three different day messages, each
 alongside whatever else loads that day.
 
-## Status: submitted, awaiting approval
+## Status: approved and live
 
-Drafted and submitted to Fast2SMS as `rvp_vehicle_requirement` (body below);
-**no approved message id yet**, so the ERP does not send it through
-`whatsappService`. Until it has one, `POST /api/dispatch-slots/indent` returns
-the rendered text and the Loading Calendar opens `wa.me` with it pre-filled,
-out of the user's own WhatsApp. Two things make that an acceptable Phase 1
-rather than a stopgap:
+Approved on the shared KNM number (+917207146094) under the name
+`transport_sent` — Fast2SMS **message_id 43900** (Meta template ID
+2042323199808316), wired as the `VEHICLE_INDENT` key in
+`whatsapp.service.ts` and overridable with `FAST2SMS_TMPL_VEHICLE_INDENT`.
 
-- it lands in the same thread the transporter already replies into, which is
-  where his lorry numbers come back from;
-- the slots are still marked `REQUESTED` server-side when the user presses
-  send, so "asked for but not yet confirmed" stays a state the calendar can
-  show and chase regardless of the delivery channel.
+`POST /api/dispatch-slots/indent` now sends it to the transporter itself and
+returns `sent: true`. The send is **awaited**, not fire-and-forget: the slots
+move to `REQUESTED` either way, so the office must be told when the message
+behind that state never left.
 
-### Wiring it once approved
+### The wa.me path is still there
 
-Add `VEHICLE_INDENT` to `WaTemplateKey`, its message id to
-`DEFAULT_TEMPLATE_IDS` (overridable with `FAST2SMS_TMPL_VEHICLE_INDENT`), and a
-`sendVehicleIndent` that passes
-`variables: [transportName, dateLabel, vehiclesLine]` - the three values
-`buildIndentVariables` already returns, so nothing needs re-deriving. Keep the
-`wa.me` path as the fallback for an unset or rejected id, the way
-`PAYMENT_SENT` falls back to `PAYMENT_SENT_TEXT`.
+Where the ERP cannot send — no number on file for the transporter, or
+Fast2SMS refuses the send — the response carries `sent: false` plus the
+reason, and the Loading Calendar opens `wa.me` with the same text pre-filled,
+exactly as it did before approval. Two reasons to keep it rather than show an
+error: it lands in the same thread his lorry numbers come back from, and a
+requirement that does not reach the transporter costs a day of loading.
+
+`buildIndentMessage` is therefore kept character-for-character identical to
+the approved body (the title line included, and no asterisks around the date —
+the template carries no formatting of its own there). A transporter must not
+be able to tell the two channels apart.
+
+The approved copy also carries a bold **Vehicle Requirement** title line above
+the greeting, which the submitted draft below listed as optional.
 
 ## Template as submitted to Fast2SMS
 

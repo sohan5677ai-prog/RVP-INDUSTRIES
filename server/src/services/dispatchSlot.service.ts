@@ -369,10 +369,13 @@ export function buildIndentVariables(args: {
 }
 
 /**
- * The same three variables rendered as the message the user sends over wa.me
- * while the Fast2SMS template awaits approval. The copy is kept identical to
- * the submitted template body (docs/whatsapp-vehicle-indent-template.md) so
- * switching to a real template send changes the channel, not the wording.
+ * The same three variables rendered as plain text.
+ *
+ * The indent now goes out on the approved `transport_sent` template, so this
+ * is what the office previews before pressing send, and what gets pre-filled
+ * into wa.me on the fallback path (no phone on file, or the template send
+ * failed). The copy is character-for-character the approved body - a
+ * transporter must not be able to tell the two channels apart.
  */
 export function buildIndentMessage(args: {
   transportName: string;
@@ -382,10 +385,11 @@ export function buildIndentMessage(args: {
 }): string {
   const v = buildIndentVariables(args);
   return [
+    '*Vehicle Requirement*',
     `Dear ${v.transportName},`,
     'Please arrange the following vehicles.',
     '',
-    `Loading date: *${v.dateLabel}*`,
+    `Loading date: ${v.dateLabel}`,
     '',
     `Vehicles: ${v.vehiclesLine}`,
     '',

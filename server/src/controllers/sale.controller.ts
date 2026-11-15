@@ -560,6 +560,20 @@ export async function createSaleOrder(req: Request, res: Response) {
     include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true },
   });
 
+  // Order confirmation → buyer, fire-and-forget (never blocks the booking).
+  // Phones come from the address snapshotted onto the order where the buyer has
+  // several delivery sites, falling back to the party's own numbers.
+  void whatsappService.notifySaleOrderConfirmed(
+    order,
+    {
+      name: order.buyer.name,
+      phone: order.buyerPhone || order.buyer.phone,
+      phone2: order.buyerPhone2 || order.buyer.phone2,
+      waLanguage: order.buyer.waLanguage,
+    },
+    order.broker
+  );
+
   res.status(201).json(order);
 }
 

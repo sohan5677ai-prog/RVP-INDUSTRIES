@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Table2, ClipboardList } from 'lucide-react';
+import { Plus, Pencil, Trash2, Table2, ClipboardList, MessageCircle } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
 import { PageHeader } from '@/components/PageHeader';
@@ -296,6 +296,14 @@ export default function SaleOrders() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  // Order confirmation re-send. The same WhatsApp template fires automatically
+  // when the order is booked; this covers an order edited afterwards.
+  const confirmMutation = useMutation({
+    mutationFn: (id: string) => api<{ message: string }>(`/whatsapp/sale-orders/${id}/confirmation`, { method: 'POST' }),
+    onSuccess: (r) => toast.success(r?.message ?? 'Order confirmation sent'),
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   // --- Reach/Match Delivery dialog ---
   // (Moved to Pappu Sales page)
 
@@ -468,6 +476,15 @@ export default function SaleOrders() {
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(o)} title="Edit Order">
                       <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { if (confirm(`Send the order confirmation to ${o.buyer?.name ?? 'the buyer'} on WhatsApp?`)) confirmMutation.mutate(o.id); }}
+                      title="Send order confirmation on WhatsApp"
+                      disabled={confirmMutation.isPending}
+                    >
+                      <MessageCircle className="h-4 w-4 text-emerald-600" />
                     </Button>
                     <Button 
                       variant="ghost" 

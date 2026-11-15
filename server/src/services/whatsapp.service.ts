@@ -105,7 +105,19 @@ export type WaTemplateKey =
   | 'DRIVER_SECOND_REMINDER' // 2nd_weight_remainder (Telugu): driver, lorry, location
   | 'HAMALI_SECOND_REMINDER' // hamali_remainder (Hindi): hamali incharge, lorry
   | 'INTERNAL_KATA_ALERT' // rvp_kata_alert (Utility, image header): vehicle, date, time, party, commodity, net weight
-  | 'INBOUND_MESSAGE'; // inbound_erp_alert (Utility, en, 3 vars: customer, time, query details)
+  | 'INBOUND_MESSAGE' // inbound_erp_alert (Utility, en, 3 vars: customer, time, query details)
+  // saleorder_directmsg (Utility, en, no header, 7 vars: buyer, order date, order
+  // no, quantity MT, rate /KG, dispatch date, reference). The buyer's copy of a
+  // sale order the moment it is booked. Note the template's STATIC labels - the
+  // body already reads "Quantity: {{4}} MT" and "Rate: {{5}} /KG", so those two
+  // slots carry the bare number: putting "25.00 MT" in {{4}} would print
+  // "25.00 MT MT".
+  | 'SALE_ORDER_CONFIRMED'
+  // transport_sent (Utility, en, no header, 3 vars: transporter, loading date,
+  // vehicles line). The day's vehicle requirement from the Loading Calendar.
+  // The third slot carries the WHOLE fleet on one line - Meta drops a variable
+  // containing a newline - so it is pipe-separated, not a block.
+  | 'VEHICLE_INDENT';
 
 const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   DISPATCH_PARTY: '26405',
@@ -185,6 +197,17 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // Internal weighbridge Kata alert to internal members (Utility template rvp_kata_alert, IMAGE header, 6 vars: vehicle, date, time, party, commodity, net weight).
   // Created on +917207146094 with Fast2SMS message_id 33711 (Meta template ID 1094782289801137).
   INTERNAL_KATA_ALERT: '33711',
+  // Sale order confirmation to the buyer (Utility template saleorder_directmsg,
+  // no header, 7 vars). Approved on the shared KNM number (+917207146094) with
+  // Fast2SMS message_id 41342 (Meta template ID 967869945935351). As with
+  // PARTY_LEDGER above: 41342 is the Message ID the send API wants - never put
+  // the 15-digit Meta "Template ID" here or every send 400s.
+  SALE_ORDER_CONFIRMED: '41342',
+  // Vehicle requirement -> transporter (Utility template transport_sent, no
+  // header, 3 vars). Approved on the shared KNM number (+917207146094) with
+  // Fast2SMS message_id 43900 (Meta template ID 2042323199808316). 43900 is the
+  // Message ID the send API wants - never the 15-digit Meta "Template ID".
+  VEHICLE_INDENT: '43900',
 };
 
 /**
@@ -1248,6 +1271,92 @@ export const whatsappService = {
         relatedId: pos[0].id,
       },
       [party.phone, party.phone2]
+    );
+  },
+
+  /**
+   * Sale order booked → buyer gets the order confirmation (saleorder_directmsg).
+   *
+   * Slot notes, because three of the seven are not columns on SaleOrder:
+   *  - Order No: a SaleOrder has no number of its own (unlike a PurchaseOrder),
+   *    so the buyer's OWN po number is quoted when they gave one - that is the
+   *    reference they will quote back - and only otherwise do we fall back to a
+   *    short, stable handle derived from the row id.
+   *  - Dispatch Date: reminderDate is the date the goods are due out. Advance
+   *    orders often have none, so say "To be advised" rather than send a dash
+   *    against a date label.
+   *  - Reference: the broker who brought the order, or "Direct" for our own.
+   *    Per the house rule, a broker literally named "RVP" IS our own order.
+   *
+   * Quantity and Rate carry bare numbers - see the template-key comment.
+   */
+  async notifySaleOrderConfirmed(
+    order: {
+      id: string;
+      saleDate: Date;
+      tonnageKg: number;
+      ratePerKg: number | string | { toString(): string };
+      poNumber?: string | null;
+      reminderDate?: Date | null;
+    },
+    buyer: WaRecipient,
+    broker?: { name: string | null } | null
+  ) {
+    const orderNo = order.poNumber?.trim() || `SO-${order.id.slice(-6).toUpperCase()}`;
+    const qtyMt = (order.tonnageKg / 1000).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const rate = Number(order.ratePerKg).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const dispatchDate = order.reminderDate ? fmtDate(order.reminderDate) : 'To be advised';
+    const brokerName = broker?.name?.trim();
+    const reference = brokerName && brokerName.toUpperCase() !== 'RVP' ? brokerName : 'Direct';
+    return sendToPartyAndInternal(
+      {
+        templateKey: 'SALE_ORDER_CONFIRMED',
+        language: buyer.waLanguage,
+        variables: [
+          buyer.name,
+          fmtDate(order.saleDate),
+          orderNo,
+          qtyMt,
+          rate,
+          dispatchDate,
+          reference,
+        ],
+        relatedType: 'SALE_ORDER',
+        relatedId: order.id,
+      },
+      [buyer.phone, buyer.phone2]
+    );
+  },
+
+  /**
+   * The loading calendar's day indent -> transporter (transport_sent).
+   *
+   * The three variables are built in dispatchSlot.service.buildIndentVariables
+   * and passed straight through, so what leaves the server is what the office
+   * previewed. A failure here is not fatal: the Loading Calendar falls back to
+   * opening wa.me with the same message pre-filled, which is how this went out
+   * before the template was approved.
+   */
+  async notifyVehicleIndent(
+    transport: WaRecipient,
+    variables: { transportName: string; dateLabel: string; vehiclesLine: string },
+    relatedId?: string
+  ) {
+    return sendToPartyAndInternal(
+      {
+        templateKey: 'VEHICLE_INDENT',
+        language: transport.waLanguage,
+        variables: [variables.transportName, variables.dateLabel, variables.vehiclesLine],
+        relatedType: 'DISPATCH_INDENT',
+        relatedId,
+      },
+      [transport.phone, transport.phone2]
     );
   },
 

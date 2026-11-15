@@ -27,6 +27,7 @@ import {
   sendDuesOnDateBulk,
   updatePartyDueTodaySchedule,
   sendLorryPaymentWhatsApp,
+  sendSaleOrderConfirmation,
   listDriverKataSubmissions,
   approveDriverKataSubmission,
   rejectDriverKataSubmission,
@@ -82,6 +83,10 @@ router.post('/whatsapp/transport-confirmations/:id/restore', asyncHandler(restor
 router.post('/whatsapp/dispatches/:id/send', asyncHandler(sendDispatchWhatsApp));
 // Re-send just the driver's message (normally fires once, at dispatch creation).
 router.post('/whatsapp/dispatches/:id/resend-driver', asyncHandler(resendDriverWhatsApp));
+// Sale order confirmation → buyer. Fires automatically on booking; this route
+// is the manual re-send from the Sale Orders list.
+router.post('/whatsapp/sale-orders/:id/confirmation', asyncHandler(sendSaleOrderConfirmation));
+
 // Lorry Payment summary → driver / transporter on WhatsApp.
 router.post('/whatsapp/lorry-payment/send-summary', asyncHandler(sendLorryPaymentWhatsApp));
 

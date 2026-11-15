@@ -2539,6 +2539,33 @@ export async function sendLorryPaymentWhatsApp(req: Request, res: Response) {
 }
 
 /**
+ * Re-send a sale order's confirmation to the buyer (Sale Orders → row action).
+ * The same message fires automatically when the order is booked; this is for
+ * the order that was edited afterwards, or whose buyer says nothing arrived.
+ */
+export async function sendSaleOrderConfirmation(req: Request, res: Response) {
+  const order = await prisma.saleOrder.findUnique({
+    where: { id: req.params.id },
+    include: { buyer: true, broker: true },
+  });
+  if (!order) throw new HttpError(404, 'Sale order not found');
+
+  const phone = order.buyerPhone || order.buyer.phone;
+  const phone2 = order.buyerPhone2 || order.buyer.phone2;
+  if (!phone && !phone2) throw new HttpError(400, `No WhatsApp number on file for ${order.buyer.name}`);
+
+  const result = await whatsappService.notifySaleOrderConfirmed(
+    order,
+    { name: order.buyer.name, phone, phone2, waLanguage: order.buyer.waLanguage },
+    order.broker
+  );
+  if (!result.ok) {
+    return res.status(400).json({ ok: false, message: result.error || 'Failed to send order confirmation' });
+  }
+  return res.json({ ok: true, message: `Order confirmation sent to ${order.buyer.name}` });
+}
+
+/**
  * List pending and historical driver kata submissions.
  */
 export async function listDriverKataSubmissions(req: Request, res: Response) {

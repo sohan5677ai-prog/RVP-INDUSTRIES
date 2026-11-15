@@ -2,12 +2,14 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 import {
   ACTIVE_SLOT_STATUSES,
   LOADING_POINTS,
   SLOT_INCLUDE,
   buildBacklog,
   buildIndentMessage,
+  buildIndentVariables,
   createSlot,
   nextSeqForDate,
   parseSlotDate,
@@ -249,13 +251,19 @@ export async function previewDispatchIndent(req: Request, res: Response) {
 }
 
 /**
- * Mark the day's slots as asked for.
+ * Send the day's requirement to the transporter and mark its slots as asked for.
  *
- * The message itself goes out of the user's own WhatsApp (a `wa.me` link the
- * client opens with this text pre-filled), because the approved template for a
- * vehicle requirement is not live yet - see docs/whatsapp-vehicle-indent-template.md.
- * Recording the request here regardless is what makes "asked but not yet
- * confirmed" a state the calendar can show and chase.
+ * The message goes out on the approved `transport_sent` template (three
+ * variables: transporter, loading date, the fleet on one line - see
+ * docs/whatsapp-vehicle-indent-template.md). Where that cannot happen - no
+ * number on file for the transporter, or Fast2SMS refuses the send - the
+ * response comes back with `sent: false` and the Loading Calendar opens wa.me
+ * with the same text pre-filled, which is how this went out before the template
+ * was approved.
+ *
+ * The slots move to REQUESTED either way: "asked for but not yet confirmed" is
+ * a state the calendar has to be able to show and chase whichever channel
+ * carried the message.
  */
 export async function sendDispatchIndent(req: Request, res: Response) {
   const { date, transportId } = indentSchema.parse(req.body);
@@ -274,10 +282,22 @@ export async function sendDispatchIndent(req: Request, res: Response) {
     data: { status: 'REQUESTED', requestedAt: now },
   });
 
+  // Awaited, not fire-and-forget: the client needs to know whether to fall back
+  // to wa.me, and a silent failure here would leave the transporter with no
+  // message at all against slots the calendar now shows as asked for.
+  const variables = buildIndentVariables({ transportName: transport.name, date: day, slots, revision });
+  const sendResult = await whatsappService.notifyVehicleIndent(
+    { name: transport.name, phone: transport.phone, phone2: transport.phone2 },
+    variables,
+    `${date}:${transport.id}`
+  );
+
   res.json({
     ok: true,
     requestedCount: slots.filter((s) => s.status === 'PLANNED').length,
     message,
+    sent: sendResult.ok,
+    sendError: sendResult.ok ? undefined : sendResult.error ?? null,
     transport: { id: transport.id, name: transport.name, phone: transport.phone, phone2: transport.phone2 },
   });
 }

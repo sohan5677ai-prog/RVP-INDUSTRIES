@@ -565,6 +565,9 @@ export interface SaleDispatch {
 
 export interface SaleOrder {
   id: string;
+  // Our own order number, RVP-<NICK>/<NN>/<FY> (e.g. RVP-SOH/05/2627), allocated
+  // at booking. Null on orders booked before the scheme existed.
+  orderNumber?: string | null;
   saleDate: string;
   product: SaleProduct;
   buyerId: string;

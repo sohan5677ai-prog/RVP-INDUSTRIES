@@ -440,6 +440,9 @@ export default function SaleOrders() {
                 <TableCell><Badge variant="outline" className="font-medium">{PRODUCTS.find((p) => p.value === o.product)?.label ?? o.product}</Badge></TableCell>
                 <TableCell className="font-medium">
                   <div>{o.buyer?.name ?? '-'}</div>
+                  {o.orderNumber && (
+                    <div className="text-xs text-muted-foreground font-mono mt-0.5">{o.orderNumber}</div>
+                  )}
                   {o.poNumber && (
                     <div className="text-xs text-muted-foreground font-sans mt-0.5">
                       PO: <span className="font-semibold text-foreground">{o.poNumber}</span>

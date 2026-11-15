@@ -1278,10 +1278,11 @@ export const whatsappService = {
    * Sale order booked → buyer gets the order confirmation (saleorder_directmsg).
    *
    * Slot notes, because three of the seven are not columns on SaleOrder:
-   *  - Order No: a SaleOrder has no number of its own (unlike a PurchaseOrder),
-   *    so the buyer's OWN po number is quoted when they gave one - that is the
-   *    reference they will quote back - and only otherwise do we fall back to a
-   *    short, stable handle derived from the row id.
+   *  - Order No: our own order number, RVP-<NICK>/<NN>/<FY> (e.g. RVP-SOH/05/2627),
+   *    allocated when the order is booked - see lib/saleOrderNumber.ts. Orders
+   *    booked before that existed have none, and fall back to the buyer's own po
+   *    number, then to a dash. Never synthesise one from the row id: a number
+   *    the buyer quotes back has to be findable in the ERP.
    *  - Dispatch Date: reminderDate is the date the goods are due out. Advance
    *    orders often have none, so say "To be advised" rather than send a dash
    *    against a date label.
@@ -1296,13 +1297,14 @@ export const whatsappService = {
       saleDate: Date;
       tonnageKg: number;
       ratePerKg: number | string | { toString(): string };
+      orderNumber?: string | null;
       poNumber?: string | null;
       reminderDate?: Date | null;
     },
     buyer: WaRecipient,
     broker?: { name: string | null } | null
   ) {
-    const orderNo = order.poNumber?.trim() || `SO-${order.id.slice(-6).toUpperCase()}`;
+    const orderNo = order.orderNumber?.trim() || order.poNumber?.trim() || '-';
     const qtyMt = (order.tonnageKg / 1000).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,

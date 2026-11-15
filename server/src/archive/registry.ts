@@ -45,7 +45,7 @@ export interface ArchiveModel {
    */
   scopeVia?: (range: { from: Date; to: Date }) => Record<string, unknown>;
   /** COUNTER models: the FY label column and which label format it stores. */
-  counter?: { field: string; format: 'short' | 'long' };
+  counter?: { field: string; format: 'short' | 'long' | 'compact' };
   /**
    * Columns stripped on export. Secrets and credentials that must never leave
    * the building in a file (see spec §2.6).
@@ -173,8 +173,9 @@ const TABLES: ArchiveModel[] = [
 
 // ── Class C: FY-keyed counters ──────────────────────────────────────────────
 // Carried so a re-mounted year can still reprint documents with correct numbers.
-// NB the two counters store DIFFERENT label formats - poNumber.computeFY yields
-// "25-26" while invoice.indianFinancialYear yields "2025-26".
+// NB these counters store THREE different label formats - poNumber.computeFY
+// yields "25-26", invoice.indianFinancialYear yields "2025-26", and the sale
+// order series (saleOrderNumber.computeSaleFy) yields the compact "2526".
 const COUNTERS: ArchiveModel[] = [
   { name: 'PoSerialCounter', delegate: 'poSerialCounter', cls: 'COUNTER', order: 10,
     counter: { field: 'fy', format: 'short' } },
@@ -182,6 +183,8 @@ const COUNTERS: ArchiveModel[] = [
     counter: { field: 'fy', format: 'long' } },
   { name: 'ChallanSerialCounter', delegate: 'challanSerialCounter', cls: 'COUNTER', order: 30,
     counter: { field: 'fy', format: 'long' } },
+  { name: 'SaleSerialCounter', delegate: 'saleSerialCounter', cls: 'COUNTER', order: 40,
+    counter: { field: 'fy', format: 'compact' } },
 ];
 
 // ── Class X: never archived ─────────────────────────────────────────────────
@@ -276,7 +279,10 @@ export function whereForFy(
       return m.scopeVia(range);
     case 'COUNTER': {
       if (!m.counter) throw new Error(`${m.name}: COUNTER model needs a counter spec`);
-      const label = m.counter.format === 'short' ? fyLabelShort(fyStart) : fyLabelLong(fyStart);
+      const label =
+        m.counter.format === 'short' ? fyLabelShort(fyStart)
+        : m.counter.format === 'compact' ? fyLabelShort(fyStart).replace('-', '')
+        : fyLabelLong(fyStart);
       return { [m.counter.field]: label };
     }
     case 'EXCLUDED':

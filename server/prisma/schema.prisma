@@ -640,6 +640,18 @@ model PoSerialCounter {
   @@unique([seriesKey, fy])
 }
 
+/// Per-buyer, per-FY sequential counter behind SaleOrder.orderNumber. Same
+/// atomic-increment shape as PoSerialCounter, kept as its own table so a sale
+/// and a purchase to the same party never share a sequence.
+model SaleSerialCounter {
+  id         String @id @default(cuid())
+  seriesKey  String
+  fy         String
+  lastSerial Int    @default(0)
+
+  @@unique([seriesKey, fy])
+}
+
 // Per-FY sequential counter for credit/debit note numbering, keyed by note
 // type ('CN' | 'DN'). Mirrors PoSerialCounter's atomic-increment shape.
 model NoteSerialCounter {
@@ -938,6 +950,20 @@ model Processing {
 
 model SaleOrder {
   id                 String      @id @default(cuid())
+  // Human-readable order number: "RVP-<NICK>/<NN>/<FY>", e.g. RVP-SOH/05/2627.
+  // NICK is the BUYER's Party.nickname (the same handle the PO series uses),
+  // NN that buyer's own sequence within the financial year, and FY the compact
+  // "2627". Deliberately NOT the PO scheme's "26-27": a number read out over the
+  // phone should say at once whether it is a purchase or a sale.
+  //
+  // Null on every order booked before this existed and on bulk-imported history
+  // - the confirmation message falls back accordingly rather than inventing one.
+  orderNumber        String?     @unique
+  // Components of orderNumber, kept apart so the counter can be rebuilt and the
+  // series re-sorted without parsing the string. Mirrors poSeriesKey/poSerial/poFy.
+  orderSeriesKey     String?
+  orderSerial        Int?
+  orderFy            String?
   saleDate           DateTime
   product            SaleProduct @default(PAPPU)
   buyer              Party       @relation(fields: [buyerId], references: [id])

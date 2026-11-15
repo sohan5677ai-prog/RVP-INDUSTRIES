@@ -44,6 +44,7 @@ import {
 import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
+import { allocateSaleOrderNumber, releaseSaleSerial } from '../lib/saleOrderNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.service.js';
 import { logger } from '../lib/logger.js';
@@ -527,8 +528,13 @@ export async function createSaleOrder(req: Request, res: Response) {
   const buyerPhone2 = selectedAddr?.phone2 || data.buyerPhone2 || buyer.phone2 || null;
   const buyerLocationLink = selectedAddr?.locationLink || data.buyerLocationLink || buyer.locationLink || null;
 
-  const order = await prisma.saleOrder.create({
+  // Counter and row in ONE transaction: a reserved serial that then fails to
+  // write would burn a number out of the buyer's sequence for good.
+  const order = await prisma.$transaction(async (tx) => {
+    const numbering = await allocateSaleOrderNumber(tx, buyer, data.saleDate);
+    return tx.saleOrder.create({
     data: {
+      ...numbering,
       saleDate: data.saleDate,
       product: data.product,
       buyerId: data.buyerId,
@@ -558,6 +564,7 @@ export async function createSaleOrder(req: Request, res: Response) {
       ...stamps,
     },
     include: { buyer: { include: { addresses: { orderBy: { createdAt: 'asc' } } } }, broker: true },
+    });
   });
 
   // Order confirmation → buyer, fire-and-forget (never blocks the booking).
@@ -631,8 +638,11 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
       const gstFraction = await gstFractionForProduct(data.product);
       const stamps = await currentCostStamps(destination ?? effectiveDestination, priceType);
 
-      const order = await prisma.saleOrder.create({
+      const order = await prisma.$transaction(async (tx) => {
+        const numbering = await allocateSaleOrderNumber(tx, buyer, data.saleDate);
+        return tx.saleOrder.create({
         data: {
+          ...numbering,
           saleDate: data.saleDate,
           product: data.product,
           buyerId: data.buyerId,
@@ -656,6 +666,7 @@ export async function bulkCreateSaleOrders(req: Request, res: Response) {
           marginOverride: data.marginOverride || false,
           ...stamps,
         },
+        });
       });
 
       results.push({ index: i, success: true, id: order.id });
@@ -762,7 +773,14 @@ export async function deleteSaleOrder(req: Request, res: Response) {
   if (order.status !== 'PENDING') {
     throw new HttpError(400, 'Cannot delete a sale order that has dispatches. Please undo all dispatches first.');
   }
-  await prisma.saleOrder.delete({ where: { id: req.params.id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.saleOrder.delete({ where: { id: req.params.id } });
+    // Give the number back if this order held the tail of its series, so the
+    // buyer's sequence stays gapless from the top.
+    if (order.orderSeriesKey && order.orderFy) {
+      await releaseSaleSerial(tx, order.orderSeriesKey, order.orderFy);
+    }
+  });
   res.json({ message: 'Sale order deleted' });
 }
 

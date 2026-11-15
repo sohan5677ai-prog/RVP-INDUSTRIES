@@ -172,18 +172,21 @@ describe('the day indent', () => {
     const v = vars([slot('16NOV-01', 30_000, 'Surat'), slot('16NOV-02', 25_000, 'Barshi')]);
     expect(v.vehiclesLine).not.toContain('\n');
     expect(v.vehiclesLine).toBe(
-      '16NOV-01 30t Pappu RVP to Surat | 16NOV-02 25t Pappu RVP to Barshi'
+      '16NOV-01 30 Tons to Surat | 16NOV-02 25 Tons to Barshi'
     );
   });
 
-  it('carries the loading point per lorry, so a mixed day cannot send one to the wrong gate', () => {
+  it('says the size and the destination only - no commodity, no loading point', () => {
+    // Both used to be in here. A mixed day must now read the same as any other:
+    // the transporter is being asked for a lorry, not for a loading plan.
     const v = vars([
       slot('16NOV-01', 30_000, 'Surat'),
       slot('16NOV-02', 25_000, 'Barshi', { loadingPoint: 'KNM', product: 'HUSK' }),
     ]);
     expect(v.vehiclesLine).toBe(
-      '16NOV-01 30t Pappu RVP to Surat | 16NOV-02 25t Husk KNM to Barshi'
+      '16NOV-01 30 Tons to Surat | 16NOV-02 25 Tons to Barshi'
     );
+    expect(v.vehiclesLine).not.toMatch(/Pappu|Husk|RVP|KNM/);
   });
 
   it('never names the buyer', () => {
@@ -207,7 +210,7 @@ describe('the day indent', () => {
 
   it('shows a lorry already confirmed, so a revision reads as a change not a repeat', () => {
     const v = vars([slot('16NOV-01', 30_000, 'Surat', { lorry: 'AP39T8217' })], true);
-    expect(v.vehiclesLine).toBe('16NOV-01 30t Pappu RVP to Surat [AP39T8217]');
+    expect(v.vehiclesLine).toBe('16NOV-01 30 Tons to Surat [AP39T8217]');
   });
 
   it('renders the same three variables as the approved template body', () => {
@@ -225,7 +228,7 @@ describe('the day indent', () => {
         '',
         'Loading date: 16-Nov-2026 (Mon)',
         '',
-        'Vehicles: 16NOV-01 30t Pappu RVP to Surat | 16NOV-02 32.5t Pappu RVP to Barshi',
+        'Vehicles: 16NOV-01 30 Tons to Surat | 16NOV-02 32.5 Tons to Barshi',
         '',
         'Kindly reply with the lorry number, driver name and driver mobile against each code.',
       ].join('\n')

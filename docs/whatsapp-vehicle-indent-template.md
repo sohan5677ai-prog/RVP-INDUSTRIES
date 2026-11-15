@@ -59,7 +59,7 @@ Kindly reply with the lorry number, driver name and driver mobile against each c
 |------|---------|---------|
 | `{{1}}` | Transporter name | `Surya Road Lines` |
 | `{{2}}` | Loading date, with ` (REVISED)` appended on a re-send | `16-Nov-2026 (Mon)` |
-| `{{3}}` | The whole fleet, pipe-separated on ONE line | `16NOV-01 30t Pappu RVP to Surat \| 16NOV-02 25t Husk KNM to Barshi` |
+| `{{3}}` | The whole fleet, pipe-separated on ONE line | `16NOV-01 30 Tons to Surat \| 16NOV-02 25 Tons to Barshi` |
 
 `(REVISED)` goes inside `{{2}}` rather than into a second template - a re-send
 is the same message about the same day, and submitting `rvp_vehicle_requirement_revised`
@@ -77,22 +77,24 @@ Six lorries come to roughly 300 characters, against a 1024 limit with the body
 at ~180 - so unlike the dues digest there is no need to cap the list or append
 "+N more".
 
-### Why loading point and commodity sit inside each entry
+### An entry is the code, the size and the destination
 
-Both vary per lorry. One day can load at RVP and at KNM, carrying pappu for one
-buyer and husk for another. Hoisting either to a message-level line
-(`Loading point: RVP`) would be wrong the first time a day mixed them, and the
-failure is expensive - a lorry sent to the wrong gate. Inside the entry they
-cost no extra variable.
+`16NOV-01 30 Tons to Surat`. Nothing else.
 
-The commodity earns its place because 25 t of husk needs far more body volume
-than 25 t of pappu: a transporter who is not told the commodity can send a
-lorry that physically will not take the load.
+The commodity and the loading point used to ride inside each entry - the
+argument being that both vary per lorry, and that 25 t of husk needs more body
+volume than 25 t of pappu. The office took them out: the transporter is being
+asked for a lorry, not handed a loading plan, and both are told to the driver
+when he reports. The shorter the line, the more of the fleet he reads on a
+phone without scrolling.
+
+The size is spelt `30 Tons` rather than the old compact `30t`. It is the one
+value in the message he acts on, and it is read off a phone.
 
 ### What is deliberately absent
 
-**The buyer.** A transporter needs the day, the size, the commodity and the two
-places. Who bought the goods is ours, and the ERP sends this from a WhatsApp
+**The buyer.** A transporter needs the day, the size and where it goes. Who
+bought the goods is ours, and the ERP sends this from a WhatsApp
 number shared with KNM, so naming the buyer would be a leak rather than a
 courtesy. Rate, invoice value, broker and order reference are out for the same
 reason - none of them helps him send a lorry.
@@ -106,16 +108,17 @@ field is worth keeping clean.
 
 `buildIndentVariables` in `server/src/services/dispatchSlot.service.ts` builds
 the three values; `buildIndentMessage` composes them into exactly the body
-above for the wa.me send, so what the transporter reads today is
-character-for-character what the template will send once approved.
+above, so the manual channel reads character-for-character the same as the
+template.
 
 ```
+*Vehicle Requirement*
 Dear Surya Road Lines,
 Please arrange the following vehicles.
 
-Loading date: *16-Nov-2026 (Mon)*
+Loading date: 16-Nov-2026 (Mon)
 
-Vehicles: 16NOV-01 30t Pappu RVP to Surat | 16NOV-02 25t Husk KNM to Barshi
+Vehicles: 16NOV-01 30 Tons to Surat | 16NOV-02 25 Tons to Barshi
 
 Kindly reply with the lorry number, driver name and driver mobile against each code.
 ```

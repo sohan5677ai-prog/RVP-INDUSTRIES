@@ -287,21 +287,15 @@ export async function buildBacklog() {
  * on a consignment note; repeated six times inside one WhatsApp line they are
  * just noise, and the transporter only needs enough to pick the right body.
  */
-const PRODUCT_SHORT: Record<string, string> = {
-  PAPPU: 'Pappu',
-  HUSK: 'Husk',
-  WASTE: 'Waste',
-  TPS: 'Brokens',
-  SHELL: 'Shell',
-  PRECLEANER_DUST: 'Dust',
-  NALLA_POKKULU: 'Nalla Pokkulu',
-  NALLA_CHINTAPANDU: 'Nalla Chintapandu',
-};
-
-/** `25t`, `32.5t` - compact because several of these share one line. */
-const compactTonnes = (kg: number) => {
+/**
+ * `35 Tons`, `32.5 Tons` - the size as the transport office says it out loud.
+ *
+ * Spelt out rather than the compact `35t` this used to carry: a lorry size is
+ * the one thing in the message he acts on, and it is read off a phone.
+ */
+const tonnesLabel = (kg: number) => {
   const t = kg / 1000;
-  return `${Number.isInteger(t) ? t : Number(t.toFixed(2))}t`;
+  return `${Number.isInteger(t) ? t : Number(t.toFixed(2))} Tons`;
 };
 
 /**
@@ -335,11 +329,11 @@ export interface IndentVariables {
  * commodity and the two places; who bought the goods is ours, not his - and on
  * a shared WhatsApp number it would be a leak, not a courtesy.
  *
- * Loading point and commodity ride *inside* each vehicle entry rather than as
- * variables of their own, because both vary per lorry: one day can load at RVP
- * and KNM, carrying pappu to one buyer and husk to another. Hoisting either to
- * a message-level line would be wrong the first time a day mixed them, and
- * would quietly send a lorry to the wrong gate.
+ * An entry is the code, the size and where it goes - nothing else. The
+ * commodity and the loading point were both in here and have been taken out at
+ * the office's request: they are told to the driver when he reports, and the
+ * transporter is being asked for a lorry, not for a loading plan. The shorter
+ * the line, the more of the fleet fits on a phone screen without scrolling.
  */
 export function buildIndentVariables(args: {
   transportName: string;
@@ -359,9 +353,8 @@ export function buildIndentVariables(args: {
   const vehiclesLine = args.slots
     .map((slot) => {
       const dest = slot.saleOrder.destination || slot.saleOrder.buyer.city || '-';
-      const product = PRODUCT_SHORT[slot.saleOrder.product] ?? slot.saleOrder.product;
       const confirmed = slot.lorryNumber ? ` [${slot.lorryNumber}]` : '';
-      return `${slot.code} ${compactTonnes(slot.vehicleClassKg)} ${product} ${slot.loadingPoint} to ${dest}${confirmed}`;
+      return `${slot.code} ${tonnesLabel(slot.vehicleClassKg)} to ${dest}${confirmed}`;
     })
     .join(' | ');
 

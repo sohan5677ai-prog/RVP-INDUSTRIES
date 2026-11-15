@@ -284,8 +284,13 @@ app.listen(port, "0.0.0.0", () => {
     .catch((err) => logger.error("[subscription-cron] failed to register:", err));
 
   // Poll the GPS provider for lorry positions. No-op without LOCANIX_API_KEY.
+  // The retention sweep registers either way - pings already written still
+  // have to age out, or the trail fills the database on its own.
   import("./jobs/gpsPollJob.js")
-    .then(({ registerGpsPollCron }) => registerGpsPollCron())
+    .then(({ registerGpsPollCron, registerGpsRetentionCron }) => {
+      registerGpsPollCron();
+      registerGpsRetentionCron();
+    })
     .catch((err) => logger.error("[locanix] failed to register poll:", err));
 });
 

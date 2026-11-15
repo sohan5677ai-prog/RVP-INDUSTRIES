@@ -303,7 +303,7 @@ function VehicleDetailDialog({
     queryKey: ['gps-detail', vehicleNumber, hours],
     queryFn: () => api(`/gps/vehicles/${encodeURIComponent(vehicleNumber ?? '')}/detail?hours=${hours}`),
     enabled: open && Boolean(vehicleNumber),
-    refetchInterval: open ? 60_000 : false,
+    refetchInterval: open ? 120_000 : false,
   });
 
   const latest = data?.latest ?? null;
@@ -589,15 +589,17 @@ export default function VehicleTracking() {
   const fleet = useQuery<FleetResponse>({
     queryKey: ['gps-fleet'],
     queryFn: () => api('/gps/fleet'),
-    // The server polls the provider every 60s, so asking more often than that
-    // just re-reads the same row.
-    refetchInterval: 60_000,
+    // Match the server's poll interval: asking more often than the provider is
+    // pulled just re-reads the same row, and this response is the whole feed -
+    // every refetch is ~70 KB out of Render and 145 rows out of Supabase, for
+    // as long as anyone leaves the page open.
+    refetchInterval: 120_000,
   });
 
   const status = useQuery<GpsStatus>({
     queryKey: ['gps-status'],
     queryFn: () => api('/gps/status'),
-    refetchInterval: 60_000,
+    refetchInterval: 120_000,
   });
 
   const refresh = useMutation({

@@ -1,5 +1,7 @@
+import cron from 'node-cron';
 import { logger } from '../lib/logger.js';
 import { locanixConfig, pollLocanix } from '../services/locanix.service.js';
+import { pruneVehiclePings } from '../services/gpsRetention.service.js';
 
 /**
  * The GPS poll loop.
@@ -41,4 +43,28 @@ export function registerGpsPollCron(): void {
 export function stopGpsPollCron(): void {
   if (timer) clearInterval(timer);
   timer = null;
+}
+
+/**
+ * The retention sweep.
+ *
+ * Registered whether or not polling is on: rows already written still have to
+ * age out if the key is later removed, and a table nobody is adding to is
+ * exactly the one it is safe to prune.
+ *
+ * Nightly at 02:40 IST, plus a pass on boot. The boot pass is not belt and
+ * braces here but the primary path - a free Render instance spins down when
+ * idle, so a 02:40 timer is as likely as not to be asleep when it fires, while
+ * a restart happens most days. `pruneVehiclePings` never throws and is
+ * idempotent, so running it twice in a day costs one indexed count query.
+ */
+export function registerGpsRetentionCron(): void {
+  cron.schedule(
+    '40 2 * * *',
+    () => void pruneVehiclePings(),
+    { timezone: 'Asia/Kolkata' },
+  );
+
+  // Delayed so the prune is not competing with boot and the first poll.
+  setTimeout(() => void pruneVehiclePings(), 30_000).unref?.();
 }

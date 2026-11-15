@@ -34,9 +34,19 @@ import {
 
 const DEFAULT_BASE_URL = 'https://compass.apps2.uctechlabs.com/api/standard-api';
 
-/** Their documented floor is 30s; 60s leaves room for a retry inside a tick. */
+/** Their documented floor is 30s; 35s leaves room for a retry inside a tick. */
 const MIN_POLL_SECONDS = 35;
-const DEFAULT_POLL_SECONDS = 60;
+/**
+ * Two minutes, not one.
+ *
+ * Every tick that finds a new device timestamp on one of our lorries writes a
+ * row, so the interval is the row-growth dial for the whole table: at 60s a
+ * single lorry on dispatch is 1,440 rows a day, at 120s it is 720. A lorry
+ * board does not need better than a two-minute fix, and the free Supabase
+ * database is 500 MB shared with the rest of the ERP. Override with
+ * LOCANIX_POLL_SECONDS where a particular trip needs finer resolution.
+ */
+const DEFAULT_POLL_SECONDS = 120;
 
 /** How long a cached list of active-dispatch plates stays good. */
 const ACTIVE_PLATES_TTL_MS = 60_000;
@@ -265,7 +275,7 @@ export async function pollLocanix(opts: { force?: boolean } = {}): Promise<Locan
     const now = new Date();
 
     const rejected: { vehicle: string; reason: string }[] = [];
-    const toStore: { ping: ParsedPing; row: LocanixVehicle }[] = [];
+    const toStore: { ping: ParsedPing; row: LocanixVehicle; isOurs: boolean }[] = [];
     let parsed = 0;
     let onDispatch = 0;
 
@@ -280,13 +290,13 @@ export async function pollLocanix(opts: { force?: boolean } = {}): Promise<Locan
       const isOurs = ours.has(ping.vehicleNumber);
       if (isOurs) onDispatch += 1;
       const status = typeof row.status === 'string' ? row.status : undefined;
-      if (shouldStore(ping, status, isOurs)) toStore.push({ ping, row });
+      if (shouldStore(ping, status, isOurs)) toStore.push({ ping, row, isOurs });
     }
 
     let stored = 0;
     if (toStore.length > 0) {
       const result = await prisma.vehiclePing.createMany({
-        data: toStore.map(({ ping, row }) => ({
+        data: toStore.map(({ ping, row, isOurs }) => ({
           provider: 'LOCANIX',
           vehicleNumber: ping.vehicleNumber,
           vehicleLabel: ping.vehicleLabel,
@@ -299,7 +309,15 @@ export async function pollLocanix(opts: { force?: boolean } = {}): Promise<Locan
           providerStatus: typeof row.status === 'string' ? row.status.slice(0, 32) : null,
           odometerRaw: typeof row.odometer === 'number' ? row.odometer : null,
           recordedAt: ping.recordedAt,
-          raw: row as object,
+          // The untouched payload, but only for lorries carrying one of our
+          // consignments. It is the widest column on the table and most of the
+          // feed is someone else's vehicle: keeping it for all 145 is most of
+          // the table's size for rows nobody will ever open. The parsed
+          // columns above are kept either way, so a thinned row is still a
+          // position on a map - what is lost is only the field-by-field
+          // argument with the provider, which is a conversation we only ever
+          // have about our own trips.
+          raw: isOurs ? (row as object) : undefined,
         })),
         skipDuplicates: true,
       });

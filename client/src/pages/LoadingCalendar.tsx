@@ -756,15 +756,29 @@ function ConfirmDialog(props: {
   );
 }
 
+/** What `POST /dispatch-slots/indent` answers with, on either channel. */
+interface IndentSendResult {
+  ok: boolean;
+  sent: boolean;
+  requestedCount: number;
+  message: string;
+  sendError?: string | null;
+  transport: DispatchIndentPreview['transport'];
+}
+
 /**
  * The day's requirement for one transporter: the message, and the two ways to
  * put it in front of him.
  *
  * Pressing send fires the approved `transport_sent` template from the server,
- * straight to the transporter's number. Only where that could not happen - no
- * number on file for him, or Fast2SMS refused it - does this fall back to
- * opening wa.me with the same text pre-filled, so the requirement still reaches
- * him out of the user's own WhatsApp.
+ * straight to the transporter's number. Nothing opens, nothing is handed to
+ * the user's own WhatsApp - the message simply goes.
+ *
+ * Where the ERP cannot send it - no number on file for him, or Fast2SMS
+ * refusing - the failure is SHOWN, with its reason, and no slot is marked as
+ * asked for. Only a second, deliberate press takes the same text out of the
+ * user's own WhatsApp instead. A silent reroute would leave the office
+ * believing the ERP had sent something it never did.
  */
 function IndentDialog(props: { date: string; transportId: string; onClose: () => void; onSent: () => void }) {
   const preview = useQuery({
@@ -773,38 +787,49 @@ function IndentDialog(props: { date: string; transportId: string; onClose: () =>
       api<DispatchIndentPreview>(`/dispatch-slots/indent?date=${props.date}&transportId=${props.transportId}`),
   });
 
-  const send = useMutation({
-    mutationFn: () =>
-      api<{
-        requestedCount: number;
-        message: string;
-        sent?: boolean;
-        sendError?: string | null;
-        transport: DispatchIndentPreview['transport'];
-      }>(
-        '/dispatch-slots/indent',
-        { method: 'POST', body: JSON.stringify({ date: props.date, transportId: props.transportId }) }
-      ),
-    onSuccess: (r) => {
-      const count =
-        r.requestedCount > 0
-          ? `${r.requestedCount} ${r.requestedCount === 1 ? 'lorry' : 'lorries'} marked as asked for`
-          : 'Requirement re-sent';
+  // A failed template send is shown, not silently rerouted: the office has to
+  // know the transporter is holding nothing, and the manual escape hatch below
+  // is a deliberate second press rather than something that happens behind it.
+  const [sendError, setSendError] = useState<string | null>(null);
 
-      if (r.sent) {
-        toast.success(`Sent to ${r.transport.name} on WhatsApp · ${count}`);
-      } else {
-        // The ERP could not send it (no number on file, or Fast2SMS refused it).
-        // Open WhatsApp with the same text so the requirement still goes out.
-        const phone = (r.transport.phone || r.transport.phone2 || '').replace(/[^0-9]/g, '');
-        const target = phone.length === 10 ? `91${phone}` : phone;
-        window.open(
-          target ? `https://wa.me/${target}?text=${encodeURIComponent(r.message)}`
-                 : `https://wa.me/?text=${encodeURIComponent(r.message)}`,
-          '_blank'
-        );
-        toast.warning(`${r.sendError || 'Could not send from the ERP'} · sending from your own WhatsApp · ${count}`);
+  const post = (channel: 'TEMPLATE' | 'MANUAL') =>
+    api<IndentSendResult>('/dispatch-slots/indent', {
+      method: 'POST',
+      body: JSON.stringify({ date: props.date, transportId: props.transportId, channel }),
+    });
+
+  const askedFor = (r: IndentSendResult) =>
+    r.requestedCount > 0
+      ? `${r.requestedCount} ${r.requestedCount === 1 ? 'lorry' : 'lorries'} marked as asked for`
+      : 'Requirement re-sent';
+
+  const send = useMutation({
+    mutationFn: () => post('TEMPLATE'),
+    onSuccess: (r) => {
+      if (!r.sent) {
+        // Nothing left, nothing was marked - the dialog stays open on the reason.
+        setSendError(r.sendError || 'WhatsApp refused the send');
+        return;
       }
+      toast.success(`Sent to ${r.transport.name} on WhatsApp · ${askedFor(r)}`);
+      props.onSent();
+      props.onClose();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  /** The escape hatch: the same text, out of the user's own WhatsApp. */
+  const sendManually = useMutation({
+    mutationFn: () => post('MANUAL'),
+    onSuccess: (r) => {
+      const phone = (r.transport.phone || r.transport.phone2 || '').replace(/[^0-9]/g, '');
+      const target = phone.length === 10 ? `91${phone}` : phone;
+      window.open(
+        target ? `https://wa.me/${target}?text=${encodeURIComponent(r.message)}`
+               : `https://wa.me/?text=${encodeURIComponent(r.message)}`,
+        '_blank'
+      );
+      toast.success(askedFor(r));
       props.onSent();
       props.onClose();
     },
@@ -829,7 +854,13 @@ function IndentDialog(props: { date: string; transportId: string; onClose: () =>
 
         {data && (
           <>
-            {data.revision && (
+            {sendError && (
+          <div className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <p className="font-medium">Not sent - nothing has been marked as asked for.</p>
+            <p className="mt-0.5">{sendError}</p>
+          </div>
+        )}
+        {data.revision && (
               <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                 This day has already been sent. The message goes out marked REVISED.
               </p>
@@ -855,9 +886,19 @@ function IndentDialog(props: { date: string; transportId: string; onClose: () =>
           >
             <Copy className="mr-2 h-4 w-4" /> Copy
           </Button>
+          {sendError && (
+            <Button
+              variant="outline"
+              disabled={!data || sendManually.isPending}
+              onClick={() => sendManually.mutate()}
+            >
+              {sendManually.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Send from my WhatsApp
+            </Button>
+          )}
           <Button disabled={!data || send.isPending} onClick={() => send.mutate()}>
             {send.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <WhatsAppIcon className="mr-2 h-4 w-4" />}
-            Send on WhatsApp
+            {sendError ? 'Try again' : 'Send on WhatsApp'}
           </Button>
         </DialogFooter>
       </DialogContent>

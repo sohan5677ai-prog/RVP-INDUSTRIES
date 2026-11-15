@@ -18,17 +18,21 @@ returns `sent: true`. The send is **awaited**, not fire-and-forget: the slots
 move to `REQUESTED` either way, so the office must be told when the message
 behind that state never left.
 
-### The wa.me path is still there
+### The wa.me path is now an escape hatch, not a fallback
 
-Where the ERP cannot send — no number on file for the transporter, or
-Fast2SMS refuses the send — the response carries `sent: false` plus the
-reason, and the Loading Calendar opens `wa.me` with the same text pre-filled,
-exactly as it did before approval. Two reasons to keep it rather than show an
-error: it lands in the same thread his lorry numbers come back from, and a
-requirement that does not reach the transporter costs a day of loading.
+It no longer happens on its own. A `TEMPLATE` send that fails returns
+`ok: false` with the reason, **and marks nothing** - the dialog stays open on
+the failure, because `REQUESTED` means the transporter has the requirement on
+his phone, and writing that against a send which never left would make the
+calendar lie about the one thing it exists to chase.
+
+Only a second, deliberate press ("Send from my WhatsApp") posts
+`channel: "MANUAL"`, which marks the slots asked-for and hands the same text
+to wa.me. Worth keeping, for the day Fast2SMS is down and a lorry still has to
+be arranged - but the office presses it knowing the ERP did not send.
 
 `buildIndentMessage` is therefore kept character-for-character identical to
-the approved body (the title line included, and no asterisks around the date —
+the approved body (the title line included, and no asterisks around the date -
 the template carries no formatting of its own there). A transporter must not
 be able to tell the two channels apart.
 

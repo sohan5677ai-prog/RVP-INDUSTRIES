@@ -51,6 +51,16 @@ const confirmSchema = z.object({
 
 const indentSchema = z.object({ date: dayString, transportId: z.string().min(1) });
 
+/**
+ * Sending adds a channel. TEMPLATE is the Indent button: the ERP sends it on
+ * the approved template. MANUAL is the escape hatch the calendar only offers
+ * after a TEMPLATE send has failed - the user takes the same text out of their
+ * own WhatsApp, and says so, which is what lets the slots be marked asked-for.
+ */
+const indentSendSchema = indentSchema.extend({
+  channel: z.enum(['TEMPLATE', 'MANUAL']).default('TEMPLATE'),
+});
+
 export async function listDispatchSlots(req: Request, res: Response) {
   const { from, to } = listSchema.parse(req.query);
   const fromDate = parseSlotDate(from);
@@ -266,12 +276,40 @@ export async function previewDispatchIndent(req: Request, res: Response) {
  * carried the message.
  */
 export async function sendDispatchIndent(req: Request, res: Response) {
-  const { date, transportId } = indentSchema.parse(req.body);
+  const { date, transportId, channel } = indentSendSchema.parse(req.body);
   const { day, transport, slots } = await indentContext(date, transportId);
   if (slots.length === 0) throw new HttpError(400, `No lorries planned for ${transport.name} on that date`);
 
   const revision = slots.some((s) => s.requestedAt != null);
   const message = buildIndentMessage({ transportName: transport.name, date: day, slots, revision });
+  const transportDto = { id: transport.id, name: transport.name, phone: transport.phone, phone2: transport.phone2 };
+
+  // The send happens BEFORE anything is marked asked-for, and is awaited.
+  // `REQUESTED` means the transporter has the requirement on his phone; writing
+  // it against a send that never left would make the calendar lie about the one
+  // thing it exists to chase, and the lorry would be found missing on the
+  // loading day rather than now.
+  if (channel === 'TEMPLATE') {
+    const variables = buildIndentVariables({ transportName: transport.name, date: day, slots, revision });
+    const sendResult = await whatsappService.notifyVehicleIndent(
+      { name: transport.name, phone: transport.phone, phone2: transport.phone2 },
+      variables,
+      `${date}:${transport.id}`
+    );
+    if (!sendResult.ok) {
+      // 200, not an error status: the calendar needs the rendered message back
+      // so the user can still take it out of their own WhatsApp, and nothing
+      // has been changed that a retry would have to undo.
+      return res.json({
+        ok: false,
+        sent: false,
+        requestedCount: 0,
+        message,
+        sendError: sendResult.error ?? 'WhatsApp refused the send',
+        transport: transportDto,
+      });
+    }
+  }
 
   // Only the ones not yet asked for move to REQUESTED; a slot already
   // confirmed with a lorry number stays confirmed even though it appears in a
@@ -282,22 +320,11 @@ export async function sendDispatchIndent(req: Request, res: Response) {
     data: { status: 'REQUESTED', requestedAt: now },
   });
 
-  // Awaited, not fire-and-forget: the client needs to know whether to fall back
-  // to wa.me, and a silent failure here would leave the transporter with no
-  // message at all against slots the calendar now shows as asked for.
-  const variables = buildIndentVariables({ transportName: transport.name, date: day, slots, revision });
-  const sendResult = await whatsappService.notifyVehicleIndent(
-    { name: transport.name, phone: transport.phone, phone2: transport.phone2 },
-    variables,
-    `${date}:${transport.id}`
-  );
-
   res.json({
     ok: true,
+    sent: channel === 'TEMPLATE',
     requestedCount: slots.filter((s) => s.status === 'PLANNED').length,
     message,
-    sent: sendResult.ok,
-    sendError: sendResult.ok ? undefined : sendResult.error ?? null,
-    transport: { id: transport.id, name: transport.name, phone: transport.phone, phone2: transport.phone2 },
+    transport: transportDto,
   });
 }

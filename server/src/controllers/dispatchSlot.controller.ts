@@ -10,7 +10,7 @@ import {
   buildBacklog,
   buildIndentMessage,
   buildIndentVariables,
-  createSlot,
+  createSlots,
   nextSeqForDate,
   parseSlotDate,
   slotCode,
@@ -39,9 +39,15 @@ const slotBodySchema = z.object({
   loadingPoint: z.enum(LOADING_POINTS as [string, ...string[]]).default('RVP'),
   transportId: z.string().min(1).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
+  // "35 t x 2" - identical lorries, planned in one go. Capped because this is
+  // a day's fleet for one order, not a yard.
+  count: z.coerce.number().int().min(1).max(25).default(1),
 });
 
-const updateSchema = slotBodySchema.partial().extend({ saleOrderId: z.string().min(1).optional() });
+const updateSchema = slotBodySchema
+  .omit({ count: true })
+  .partial()
+  .extend({ saleOrderId: z.string().min(1).optional() });
 
 const confirmSchema = z.object({
   lorryNumber: z.string().trim().min(4).max(20),
@@ -82,6 +88,13 @@ export async function listDispatchBacklog(_req: Request, res: Response) {
   res.json(await buildBacklog());
 }
 
+/**
+ * Plan one lorry, or several identical ones - the body carries a `count`.
+ *
+ * The whole batch is validated before any of it is written, so a request for
+ * more tonnage than the order has left is refused as a request rather than
+ * half-granted. The response is always an array, one entry per lorry.
+ */
 export async function createDispatchSlot(req: Request, res: Response) {
   const body = slotBodySchema.parse(req.body);
   const input = {
@@ -93,9 +106,9 @@ export async function createDispatchSlot(req: Request, res: Response) {
     transportId: body.transportId ?? null,
     notes: body.notes ?? null,
   };
-  await validateSlot(input);
-  const slot = await createSlot(input);
-  res.status(201).json(serializeSlot(slot));
+  await validateSlot(input, undefined, body.count);
+  const slots = await createSlots(input, body.count);
+  res.status(201).json(slots.map(serializeSlot));
 }
 
 export async function updateDispatchSlot(req: Request, res: Response) {

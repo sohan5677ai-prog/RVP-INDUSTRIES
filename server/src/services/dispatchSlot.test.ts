@@ -32,6 +32,7 @@ const {
   slotDateKey,
   validateSlot,
   createSlot,
+  createSlots,
   buildIndentMessage,
 } = await import('./dispatchSlot.service.js');
 
@@ -146,6 +147,45 @@ describe('planning arithmetic', () => {
   it('refuses an unknown loading point', async () => {
     orderWith();
     await expect(validateSlot(input({ loadingPoint: 'SURAT' }))).rejects.toThrow(/Unknown loading point/);
+  });
+});
+
+describe('planning several lorries at once', () => {
+  it('numbers a batch one after another', async () => {
+    // Each lorry is a slot of its own: the transporter confirms them
+    // separately, so they cannot share 16NOV-01 between them.
+    const created: { seq: number }[] = [];
+    slotFindFirst.mockImplementation(() =>
+      Promise.resolve(created.length ? { seq: created[created.length - 1].seq } : null)
+    );
+    slotCreate.mockImplementation((args: { data: { seq: number } }) => {
+      created.push(args.data);
+      return Promise.resolve(args.data);
+    });
+    orderWith();
+
+    const slots = (await createSlots(input(), 3)) as { code: string }[];
+    expect(slots.map((s) => s.code)).toEqual(['16NOV-01', '16NOV-02', '16NOV-03']);
+  });
+
+  it('checks the batch as a whole, not one lorry at a time', async () => {
+    // 100 t sold, 70 t already planned: 30 t left. One 30 t lorry fits; two
+    // do not, and must be refused before either is written rather than after
+    // the first has landed.
+    orderWith();
+    slotAggregate.mockResolvedValue({ _sum: { plannedKg: 70_000 } });
+
+    await expect(validateSlot(input(), undefined, 1)).resolves.toBeUndefined();
+    await expect(validateSlot(input(), undefined, 2)).rejects.toThrow(
+      /2 lorries of 30 t need 60 t, but only 30 t of the order for Vinod Traders is still unplanned/
+    );
+  });
+
+  it('still sizes each lorry on its own load, not the batch total', async () => {
+    // 3 x 30 t is 90 t of order, but each lorry carries 30 t - the vehicle
+    // check must not see 90 t and refuse a 30 t lorry.
+    orderWith();
+    await expect(validateSlot(input(), undefined, 3)).resolves.toBeUndefined();
   });
 });
 

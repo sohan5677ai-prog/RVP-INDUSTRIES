@@ -97,7 +97,7 @@ export interface SlotInput {
  * that actually protects you - it is what stops the same 100 t being promised
  * on the 16th and again on the 18th.
  */
-export async function validateSlot(input: SlotInput, excludeSlotId?: string) {
+export async function validateSlot(input: SlotInput, excludeSlotId?: string, count = 1) {
   if (input.plannedKg <= 0) throw new HttpError(400, 'Planned weight must be greater than zero');
   if (input.vehicleClassKg <= 0) throw new HttpError(400, 'Vehicle size must be greater than zero');
   if (input.plannedKg > input.vehicleClassKg) {
@@ -128,12 +128,17 @@ export async function validateSlot(input: SlotInput, excludeSlotId?: string) {
   const alreadyPlanned = await plannedKgForOrder(order.id, excludeSlotId);
   const unplannedKg = remainingKg - alreadyPlanned;
 
-  if (input.plannedKg > unplannedKg) {
+  // A batch is checked as a whole: three lorries that together overrun the
+  // order are refused outright, rather than two landing and the third failing.
+  const needKg = input.plannedKg * count;
+  if (needKg > unplannedKg) {
     throw new HttpError(
       400,
       unplannedKg <= 0
         ? `The order for ${order.buyer.name} is already fully planned`
-        : `Only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
+        : count > 1
+          ? `${count} lorries of ${fmtTonnes(input.plannedKg)} need ${fmtTonnes(needKg)}, but only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
+          : `Only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
     );
   }
 
@@ -185,6 +190,24 @@ export async function createSlot(input: SlotInput) {
     }
   }
   throw new HttpError(409, 'Could not allocate a slot number for that date - please try again');
+}
+
+/**
+ * Plan several identical lorries in one go - the "35 t x 2" case.
+ *
+ * They are created as separate slots, numbered one after another, because to
+ * the transporter each is a lorry of its own: he confirms them one at a time,
+ * and one of them can later move to another day without disturbing the rest.
+ * Creation is sequential rather than parallel - each slot's number comes from
+ * the highest already on that date, so the previous insert has to have landed
+ * before the next number is taken.
+ */
+export async function createSlots(input: SlotInput, count: number) {
+  const slots: Awaited<ReturnType<typeof createSlot>>[] = [];
+  for (let i = 0; i < count; i += 1) {
+    slots.push(await createSlot(input));
+  }
+  return slots;
 }
 
 function isUniqueViolation(err: unknown): boolean {

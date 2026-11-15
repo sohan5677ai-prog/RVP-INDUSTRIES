@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus, Truck, Check, X, Pencil,
+  CalendarDays, ChevronLeft, ChevronRight, Plus, Minus, Truck, Check, X, Pencil,
   Trash2, Copy, Send, AlertTriangle, PackageOpen, Loader2,
 } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
@@ -30,6 +30,8 @@ import { cn } from '@/lib/utils';
  */
 
 const VEHICLE_CLASSES = [25_000, 30_000, 35_000, 40_000];
+/** Matches the server's cap on one "plan several lorries" request. */
+const MAX_LORRIES = 25;
 const LOADING_POINTS = ['RVP', 'KNM'];
 
 const t = (kgValue: number) => {
@@ -75,6 +77,8 @@ type SlotDraft = {
   loadingPoint: string;
   transportId: string;
   notes: string;
+  /** How many identical lorries to plan. Always 1 when editing one. */
+  count: number;
 };
 
 export default function LoadingCalendarPage() {
@@ -128,7 +132,10 @@ export default function LoadingCalendarPage() {
   }, [slots]);
 
   const saveSlot = useMutation({
-    mutationFn: (d: SlotDraft) => {
+    // Creating answers with an array - one entry per lorry, since the dialog
+    // can ask for several identical ones. An edit is always a single slot,
+    // wrapped so both branches hand `onSuccess` the same shape.
+    mutationFn: async (d: SlotDraft): Promise<DispatchSlot[]> => {
       const body = {
         saleOrderId: d.saleOrderId,
         date: d.date,
@@ -138,12 +145,29 @@ export default function LoadingCalendarPage() {
         transportId: d.transportId || null,
         notes: d.notes.trim() || null,
       };
-      return d.id
-        ? api<DispatchSlot>(`/dispatch-slots/${d.id}`, { method: 'PUT', body: JSON.stringify(body) })
-        : api<DispatchSlot>('/dispatch-slots', { method: 'POST', body: JSON.stringify(body) });
+      if (d.id) {
+        const slot = await api<DispatchSlot>(`/dispatch-slots/${d.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        });
+        return [slot];
+      }
+      return api<DispatchSlot[]>('/dispatch-slots', {
+        method: 'POST',
+        body: JSON.stringify({ ...body, count: d.count }),
+      });
     },
-    onSuccess: (slot, vars) => {
-      toast.success(vars.id ? `${slot.code} updated` : `${slot.code} planned`);
+    onSuccess: (planned, vars) => {
+      const codes = planned.map((s) => s.code);
+      toast.success(
+        vars.id
+          ? `${codes[0]} updated`
+          : codes.length === 1
+            ? `${codes[0]} planned`
+            : codes.length <= 3
+              ? `${codes.length} lorries planned · ${codes.join(', ')}`
+              : `${codes.length} lorries planned · ${codes[0]} to ${codes[codes.length - 1]}`
+      );
       setDraft(null);
       refresh();
     },
@@ -217,6 +241,7 @@ export default function LoadingCalendarPage() {
         loadingPoint: slot.loadingPoint,
         transportId: slot.transportId ?? '',
         notes: slot.notes ?? '',
+        count: 1,
       });
       return;
     }
@@ -236,6 +261,7 @@ export default function LoadingCalendarPage() {
       loadingPoint: 'RVP',
       transportId: transports[0]?.id ?? '',
       notes: '',
+      count: 1,
     });
   };
 
@@ -551,7 +577,18 @@ function SlotDialog(props: {
   // An edit re-plans tonnage the slot itself already holds, so the rail's
   // unplanned figure understates what is available by exactly this slot.
   const roomKg = order ? order.unplannedKg + (draft.id ? draft.plannedKg : 0) : Infinity;
-  const overOrder = Number.isFinite(roomKg) && draft.plannedKg > roomKg;
+
+  // Editing touches one lorry; only a new plan can be "35 t x 2".
+  const count = draft.id ? 1 : Math.max(1, draft.count);
+  const totalKg = draft.plannedKg * count;
+  const overOrder = Number.isFinite(roomKg) && totalKg > roomKg;
+  // How many of this size the order could still take - what `+` stops at, so
+  // the usual way to reach the limit is a disabled button rather than an error.
+  const maxCount =
+    Number.isFinite(roomKg) && draft.plannedKg > 0
+      ? Math.max(1, Math.min(MAX_LORRIES, Math.floor(roomKg / draft.plannedKg)))
+      : MAX_LORRIES;
+  const setCount = (n: number) => onChange({ ...draft, count: Math.max(1, Math.min(MAX_LORRIES, n)) });
 
   return (
     <Dialog open onOpenChange={(o) => !o && props.onClose()}>
@@ -639,13 +676,44 @@ function SlotDialog(props: {
               />
             </div>
             <div>
-              <Label htmlFor="slot-kg">Load (kg)</Label>
+              <Label htmlFor="slot-kg">{draft.id ? 'Load (kg)' : 'Load per lorry (kg)'}</Label>
               <Input
                 id="slot-kg" type="number" value={draft.plannedKg}
                 onChange={(e) => onChange({ ...draft, plannedKg: Number(e.target.value) })}
               />
             </div>
           </div>
+
+          {!draft.id && (
+            <div>
+              <Label htmlFor="slot-count">How many lorries</Label>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button" variant="outline" size="icon" className="h-9 w-9"
+                  disabled={count <= 1} onClick={() => setCount(count - 1)}
+                  aria-label="One lorry fewer"
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <Input
+                  id="slot-count" type="number" min={1} max={MAX_LORRIES}
+                  className="h-9 w-16 text-center" value={draft.count}
+                  onChange={(e) => setCount(Number(e.target.value) || 1)}
+                />
+                <Button
+                  type="button" variant="outline" size="icon" className="h-9 w-9"
+                  disabled={count >= maxCount} onClick={() => setCount(count + 1)}
+                  aria-label="One lorry more"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {count} × {t(draft.vehicleClassKg)} ={' '}
+                  <span className="font-semibold text-foreground">{t(totalKg)}</span>
+                </span>
+              </div>
+            </div>
+          )}
 
           <div>
             <Label>Transporter</Label>
@@ -681,7 +749,9 @@ function SlotDialog(props: {
           )}
           {overOrder && !overClass && (
             <p className="text-xs font-medium text-destructive">
-              Only {t(roomKg)} of this order is still unplanned.
+              {count > 1
+                ? `${count} × ${t(draft.plannedKg)} needs ${t(totalKg)}, and only ${t(roomKg)} of this order is still unplanned.`
+                : `Only ${t(roomKg)} of this order is still unplanned.`}
             </p>
           )}
         </div>
@@ -693,7 +763,7 @@ function SlotDialog(props: {
             disabled={saving || !draft.saleOrderId || draft.plannedKg <= 0 || overClass || overOrder}
           >
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {draft.id ? 'Save' : 'Add lorry'}
+            {draft.id ? 'Save' : count === 1 ? 'Add lorry' : `Add ${count} lorries`}
           </Button>
         </DialogFooter>
       </DialogContent>

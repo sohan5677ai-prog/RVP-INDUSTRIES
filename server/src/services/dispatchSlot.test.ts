@@ -31,6 +31,7 @@ const {
   parseSlotDate,
   slotDateKey,
   validateSlot,
+  validateSlots,
   createSlot,
   createSlots,
   buildIndentMessage,
@@ -150,8 +151,8 @@ describe('planning arithmetic', () => {
   });
 });
 
-describe('planning several lorries at once', () => {
-  it('numbers a batch one after another', async () => {
+describe('planning a whole fleet at once', () => {
+  it('numbers the fleet one lorry after another', async () => {
     // Each lorry is a slot of its own: the transporter confirms them
     // separately, so they cannot share 16NOV-01 between them.
     const created: { seq: number }[] = [];
@@ -164,28 +165,44 @@ describe('planning several lorries at once', () => {
     });
     orderWith();
 
-    const slots = (await createSlots(input(), 3)) as { code: string }[];
+    const slots = (await createSlots([input(), input(), input()])) as { code: string }[];
     expect(slots.map((s) => s.code)).toEqual(['16NOV-01', '16NOV-02', '16NOV-03']);
   });
 
-  it('checks the batch as a whole, not one lorry at a time', async () => {
+  it('weighs the fleet as a whole, not one lorry at a time', async () => {
     // 100 t sold, 70 t already planned: 30 t left. One 30 t lorry fits; two
     // do not, and must be refused before either is written rather than after
     // the first has landed.
     orderWith();
     slotAggregate.mockResolvedValue({ _sum: { plannedKg: 70_000 } });
 
-    await expect(validateSlot(input(), undefined, 1)).resolves.toBeUndefined();
-    await expect(validateSlot(input(), undefined, 2)).rejects.toThrow(
-      /2 lorries of 30 t need 60 t, but only 30 t of the order for Vinod Traders is still unplanned/
+    await expect(validateSlots([input()])).resolves.toBeUndefined();
+    await expect(validateSlots([input(), input()])).rejects.toThrow(
+      /2 lorries need 60 t, but only 30 t of the order for Vinod Traders is still unplanned/
     );
   });
 
-  it('still sizes each lorry on its own load, not the batch total', async () => {
-    // 3 x 30 t is 90 t of order, but each lorry carries 30 t - the vehicle
-    // check must not see 90 t and refuse a 30 t lorry.
+  it('takes a mixed fleet, each lorry sized on its own load', async () => {
+    // 25 t + 40 t is 65 t of the order, but neither lorry is overloaded - the
+    // vehicle check must not see the batch total and refuse a 25 t lorry.
     orderWith();
-    await expect(validateSlot(input(), undefined, 3)).resolves.toBeUndefined();
+    await expect(
+      validateSlots([
+        input({ vehicleClassKg: 25_000, plannedKg: 25_000 }),
+        input({ vehicleClassKg: 40_000, plannedKg: 40_000 }),
+      ])
+    ).resolves.toBeUndefined();
+  });
+
+  it('still refuses a lorry loaded past its own size', async () => {
+    orderWith();
+    await expect(
+      validateSlots([input(), input({ vehicleClassKg: 25_000, plannedKg: 30_000 })])
+    ).rejects.toThrow(/30 t will not fit a 25 t lorry/);
+  });
+
+  it('refuses an empty fleet', async () => {
+    await expect(validateSlots([])).rejects.toThrow(/at least one lorry/);
   });
 });
 

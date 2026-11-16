@@ -87,17 +87,8 @@ export interface SlotInput {
   notes: string | null;
 }
 
-/**
- * Everything that must hold before a slot is written, checked in one place so
- * create and edit cannot drift apart.
- *
- * Two rules, both cheap and both worth enforcing in the database rather than
- * the UI: a lorry cannot be loaded past its own size, and an order cannot have
- * more tonnage planned than it still has left to ship. The second is the one
- * that actually protects you - it is what stops the same 100 t being promised
- * on the 16th and again on the 18th.
- */
-export async function validateSlot(input: SlotInput, excludeSlotId?: string, count = 1) {
+/** The rules that hold for one lorry on its own, whatever else is planned. */
+function validateLorry(input: SlotInput) {
   if (input.plannedKg <= 0) throw new HttpError(400, 'Planned weight must be greater than zero');
   if (input.vehicleClassKg <= 0) throw new HttpError(400, 'Vehicle size must be greater than zero');
   if (input.plannedKg > input.vehicleClassKg) {
@@ -109,9 +100,12 @@ export async function validateSlot(input: SlotInput, excludeSlotId?: string, cou
   if (!LOADING_POINTS.includes(input.loadingPoint)) {
     throw new HttpError(400, `Unknown loading point "${input.loadingPoint}"`);
   }
+}
 
+/** The order a plan draws on, with the tonnage nobody has promised yet. */
+async function orderRoom(saleOrderId: string, excludeSlotId?: string) {
   const order = await prisma.saleOrder.findUnique({
-    where: { id: input.saleOrderId },
+    where: { id: saleOrderId },
     select: {
       id: true,
       tonnageKg: true,
@@ -126,26 +120,62 @@ export async function validateSlot(input: SlotInput, excludeSlotId?: string, cou
   const dispatchedKg = order.dispatches.reduce((s, d) => s + d.weightKg, 0);
   const remainingKg = Math.max(0, order.tonnageKg - dispatchedKg);
   const alreadyPlanned = await plannedKgForOrder(order.id, excludeSlotId);
-  const unplannedKg = remainingKg - alreadyPlanned;
+  return { order, unplannedKg: remainingKg - alreadyPlanned };
+}
 
-  // A batch is checked as a whole: three lorries that together overrun the
-  // order are refused outright, rather than two landing and the third failing.
-  const needKg = input.plannedKg * count;
-  if (needKg > unplannedKg) {
+async function assertTransportExists(transportId: string | null) {
+  if (!transportId) return;
+  const transport = await prisma.transport.findUnique({ where: { id: transportId }, select: { id: true } });
+  if (!transport) throw new HttpError(404, 'Transporter not found');
+}
+
+/**
+ * Everything that must hold before one slot is written - the edit path, and
+ * the shared half of the create path.
+ *
+ * Two rules, both cheap and both worth enforcing in the database rather than
+ * the UI: a lorry cannot be loaded past its own size, and an order cannot have
+ * more tonnage planned than it still has left to ship. The second is the one
+ * that actually protects you - it is what stops the same 100 t being promised
+ * on the 16th and again on the 18th.
+ */
+export async function validateSlot(input: SlotInput, excludeSlotId?: string) {
+  validateLorry(input);
+  const { order, unplannedKg } = await orderRoom(input.saleOrderId, excludeSlotId);
+  if (input.plannedKg > unplannedKg) {
     throw new HttpError(
       400,
       unplannedKg <= 0
         ? `The order for ${order.buyer.name} is already fully planned`
-        : count > 1
-          ? `${count} lorries of ${fmtTonnes(input.plannedKg)} need ${fmtTonnes(needKg)}, but only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
-          : `Only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
+        : `Only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
     );
   }
+  await assertTransportExists(input.transportId);
+}
 
-  if (input.transportId) {
-    const transport = await prisma.transport.findUnique({ where: { id: input.transportId }, select: { id: true } });
-    if (!transport) throw new HttpError(404, 'Transporter not found');
+/**
+ * The same checks for a whole day's fleet - "two 25 t and a 40 t for the 16th".
+ *
+ * The batch is weighed as a batch: lorries that together overrun the order are
+ * refused outright, rather than the first two landing and the third failing
+ * with half a plan already written. Every lorry in one request shares an
+ * order, a date and a transporter, so the order is read once.
+ */
+export async function validateSlots(inputs: SlotInput[]) {
+  if (inputs.length === 0) throw new HttpError(400, 'Plan at least one lorry');
+  inputs.forEach(validateLorry);
+
+  const totalKg = inputs.reduce((sum, x) => sum + x.plannedKg, 0);
+  const { order, unplannedKg } = await orderRoom(inputs[0].saleOrderId);
+  if (totalKg > unplannedKg) {
+    throw new HttpError(
+      400,
+      unplannedKg <= 0
+        ? `The order for ${order.buyer.name} is already fully planned`
+        : `${inputs.length} ${inputs.length === 1 ? 'lorry needs' : 'lorries need'} ${fmtTonnes(totalKg)}, but only ${fmtTonnes(unplannedKg)} of the order for ${order.buyer.name} is still unplanned`
+    );
   }
+  await assertTransportExists(inputs[0].transportId);
 }
 
 /**
@@ -193,18 +223,18 @@ export async function createSlot(input: SlotInput) {
 }
 
 /**
- * Plan several identical lorries in one go - the "35 t x 2" case.
+ * Write a day's fleet, one slot per lorry.
  *
- * They are created as separate slots, numbered one after another, because to
- * the transporter each is a lorry of its own: he confirms them one at a time,
- * and one of them can later move to another day without disturbing the rest.
- * Creation is sequential rather than parallel - each slot's number comes from
- * the highest already on that date, so the previous insert has to have landed
- * before the next number is taken.
+ * Separate slots rather than one big one, because that is what they are to the
+ * transporter: he gives a lorry number against each code, and one of them can
+ * later move to another day without disturbing the rest. Creation is
+ * sequential rather than parallel - each slot's number comes from the highest
+ * already on that date, so the previous insert has to have landed before the
+ * next number is taken.
  */
-export async function createSlots(input: SlotInput, count: number) {
+export async function createSlots(inputs: SlotInput[]) {
   const slots: Awaited<ReturnType<typeof createSlot>>[] = [];
-  for (let i = 0; i < count; i += 1) {
+  for (const input of inputs) {
     slots.push(await createSlot(input));
   }
   return slots;

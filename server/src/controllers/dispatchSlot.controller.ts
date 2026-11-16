@@ -11,6 +11,7 @@ import {
   buildIndentMessage,
   buildIndentVariables,
   createSlots,
+  validateSlots,
   nextSeqForDate,
   parseSlotDate,
   slotCode,
@@ -31,23 +32,37 @@ const dayString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
 
 const listSchema = z.object({ from: dayString, to: dayString });
 
-const slotBodySchema = z.object({
-  saleOrderId: z.string().min(1),
-  date: dayString,
+/** One lorry inside a create request. */
+const lorrySchema = z.object({
   vehicleClassKg: z.coerce.number().int().positive().max(100_000),
   plannedKg: z.coerce.number().int().positive().max(100_000),
+});
+
+/**
+ * Creating plans a day's fleet for one order: "two 25 t and a 40 t on the
+ * 16th". Everything but the lorries themselves is shared by the whole batch,
+ * which is also what the transporter's message is - one order, one day, one
+ * transporter. Capped because this is a day's fleet, not a yard.
+ */
+const createSchema = z.object({
+  saleOrderId: z.string().min(1),
+  date: dayString,
   loadingPoint: z.enum(LOADING_POINTS as [string, ...string[]]).default('RVP'),
   transportId: z.string().min(1).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
-  // "35 t x 2" - identical lorries, planned in one go. Capped because this is
-  // a day's fleet for one order, not a yard.
-  count: z.coerce.number().int().min(1).max(25).default(1),
+  lorries: z.array(lorrySchema).min(1).max(25),
 });
 
-const updateSchema = slotBodySchema
-  .omit({ count: true })
-  .partial()
-  .extend({ saleOrderId: z.string().min(1).optional() });
+/** Editing touches one lorry, so the per-lorry fields come back here. */
+const updateSchema = z.object({
+  saleOrderId: z.string().min(1).optional(),
+  date: dayString.optional(),
+  vehicleClassKg: z.coerce.number().int().positive().max(100_000).optional(),
+  plannedKg: z.coerce.number().int().positive().max(100_000).optional(),
+  loadingPoint: z.enum(LOADING_POINTS as [string, ...string[]]).optional(),
+  transportId: z.string().min(1).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
 
 const confirmSchema = z.object({
   lorryNumber: z.string().trim().min(4).max(20),
@@ -89,25 +104,27 @@ export async function listDispatchBacklog(_req: Request, res: Response) {
 }
 
 /**
- * Plan one lorry, or several identical ones - the body carries a `count`.
+ * Plan a day's fleet for one order.
  *
  * The whole batch is validated before any of it is written, so a request for
  * more tonnage than the order has left is refused as a request rather than
  * half-granted. The response is always an array, one entry per lorry.
  */
 export async function createDispatchSlot(req: Request, res: Response) {
-  const body = slotBodySchema.parse(req.body);
-  const input = {
+  const body = createSchema.parse(req.body);
+  const date = parseSlotDate(body.date);
+  const inputs = body.lorries.map((lorry) => ({
     saleOrderId: body.saleOrderId,
-    date: parseSlotDate(body.date),
-    vehicleClassKg: body.vehicleClassKg,
-    plannedKg: body.plannedKg,
+    date,
+    vehicleClassKg: lorry.vehicleClassKg,
+    plannedKg: lorry.plannedKg,
     loadingPoint: body.loadingPoint,
     transportId: body.transportId ?? null,
     notes: body.notes ?? null,
-  };
-  await validateSlot(input, undefined, body.count);
-  const slots = await createSlots(input, body.count);
+  }));
+
+  await validateSlots(inputs);
+  const slots = await createSlots(inputs);
   res.status(201).json(slots.map(serializeSlot));
 }
 

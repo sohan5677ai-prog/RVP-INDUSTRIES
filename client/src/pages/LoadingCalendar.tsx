@@ -68,8 +68,23 @@ const STATUS_STYLE: Record<DispatchSlotStatus, { label: string; chip: string; do
   CANCELLED: { label: 'Cancelled', chip: 'bg-rose-600/15 text-rose-700 dark:text-rose-400', dot: 'bg-rose-500' },
 };
 
-type SlotDraft = {
-  id?: string;
+/**
+ * What the plan dialog collects: a day's fleet for one order, as a count
+ * against each lorry size. "Two 25 t and a 40 t on the 16th" is one draft.
+ */
+type PlanDraft = {
+  saleOrderId: string;
+  date: string;
+  loadingPoint: string;
+  transportId: string;
+  notes: string;
+  /** vehicleClassKg -> how many of that size. */
+  counts: Record<number, number>;
+};
+
+/** Editing works on one lorry, so the per-lorry figures come back here. */
+type EditDraft = {
+  id: string;
   saleOrderId: string;
   date: string;
   vehicleClassKg: number;
@@ -77,14 +92,36 @@ type SlotDraft = {
   loadingPoint: string;
   transportId: string;
   notes: string;
-  /** How many identical lorries to plan. Always 1 when editing one. */
-  count: number;
 };
+
+/**
+ * Turn "two 25 t and a 40 t" into the lorries the API is handed.
+ *
+ * The fleet is laid out largest first, and the last lorry takes whatever is
+ * left of the order rather than its full size: an order with 29.99 t to go
+ * gets a 30 t lorry carrying 29.99 t, which is what actually leaves the gate.
+ * That is why the dialog needs no kg boxes - the only load worth typing by
+ * hand is a correction, and corrections are made on the card.
+ */
+function lorriesFor(counts: Record<number, number>, roomKg: number) {
+  const out: { vehicleClassKg: number; plannedKg: number }[] = [];
+  let left = roomKg;
+  for (const cls of [...VEHICLE_CLASSES].sort((a, b) => b - a)) {
+    for (let i = 0; i < (counts[cls] ?? 0); i += 1) {
+      const plannedKg = Math.min(cls, left);
+      if (plannedKg <= 0) return out;
+      out.push({ vehicleClassKg: cls, plannedKg });
+      left -= plannedKg;
+    }
+  }
+  return out;
+}
 
 export default function LoadingCalendarPage() {
   const qc = useQueryClient();
   const [anchor, setAnchor] = useState(() => weekStart(new Date()));
-  const [draft, setDraft] = useState<SlotDraft | null>(null);
+  const [plan, setPlan] = useState<PlanDraft | null>(null);
+  const [editing, setEditing] = useState<EditDraft | null>(null);
   const [confirming, setConfirming] = useState<DispatchSlot | null>(null);
   const [indent, setIndent] = useState<{ date: string; transportId: string } | null>(null);
   const [dragOrderId, setDragOrderId] = useState<string | null>(null);
@@ -131,44 +168,51 @@ export default function LoadingCalendarPage() {
     return map;
   }, [slots]);
 
-  const saveSlot = useMutation({
-    // Creating answers with an array - one entry per lorry, since the dialog
-    // can ask for several identical ones. An edit is always a single slot,
-    // wrapped so both branches hand `onSuccess` the same shape.
-    mutationFn: async (d: SlotDraft): Promise<DispatchSlot[]> => {
-      const body = {
-        saleOrderId: d.saleOrderId,
-        date: d.date,
-        vehicleClassKg: d.vehicleClassKg,
-        plannedKg: d.plannedKg,
-        loadingPoint: d.loadingPoint,
-        transportId: d.transportId || null,
-        notes: d.notes.trim() || null,
-      };
-      if (d.id) {
-        const slot = await api<DispatchSlot>(`/dispatch-slots/${d.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(body),
-        });
-        return [slot];
-      }
-      return api<DispatchSlot[]>('/dispatch-slots', {
+  const planLorries = useMutation({
+    mutationFn: (d: PlanDraft & { lorries: { vehicleClassKg: number; plannedKg: number }[] }) =>
+      api<DispatchSlot[]>('/dispatch-slots', {
         method: 'POST',
-        body: JSON.stringify({ ...body, count: d.count }),
-      });
-    },
-    onSuccess: (planned, vars) => {
+        body: JSON.stringify({
+          saleOrderId: d.saleOrderId,
+          date: d.date,
+          loadingPoint: d.loadingPoint,
+          transportId: d.transportId || null,
+          notes: d.notes.trim() || null,
+          lorries: d.lorries,
+        }),
+      }),
+    onSuccess: (planned) => {
       const codes = planned.map((s) => s.code);
       toast.success(
-        vars.id
-          ? `${codes[0]} updated`
-          : codes.length === 1
-            ? `${codes[0]} planned`
-            : codes.length <= 3
-              ? `${codes.length} lorries planned · ${codes.join(', ')}`
-              : `${codes.length} lorries planned · ${codes[0]} to ${codes[codes.length - 1]}`
+        codes.length === 1
+          ? `${codes[0]} planned`
+          : codes.length <= 3
+            ? `${codes.length} lorries planned · ${codes.join(', ')}`
+            : `${codes.length} lorries planned · ${codes[0]} to ${codes[codes.length - 1]}`
       );
-      setDraft(null);
+      setPlan(null);
+      refresh();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const saveSlot = useMutation({
+    mutationFn: (d: EditDraft) =>
+      api<DispatchSlot>(`/dispatch-slots/${d.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          saleOrderId: d.saleOrderId,
+          date: d.date,
+          vehicleClassKg: d.vehicleClassKg,
+          plannedKg: d.plannedKg,
+          loadingPoint: d.loadingPoint,
+          transportId: d.transportId || null,
+          notes: d.notes.trim() || null,
+        }),
+      }),
+    onSuccess: (slot) => {
+      toast.success(`${slot.code} updated`);
+      setEditing(null);
       refresh();
     },
     onError: (e) => toast.error(getErrorMessage(e)),
@@ -230,38 +274,34 @@ export default function LoadingCalendarPage() {
     };
   }, [slots, backlog]);
 
-  const openDraft = (date: string, order?: DispatchBacklogOrder, slot?: DispatchSlot) => {
-    if (slot) {
-      setDraft({
-        id: slot.id,
-        saleOrderId: slot.saleOrderId,
-        date: slot.dateKey,
-        vehicleClassKg: slot.vehicleClassKg,
-        plannedKg: slot.plannedKg,
-        loadingPoint: slot.loadingPoint,
-        transportId: slot.transportId ?? '',
-        notes: slot.notes ?? '',
-        count: 1,
-      });
-      return;
-    }
+  const openEdit = (slot: DispatchSlot) =>
+    setEditing({
+      id: slot.id,
+      saleOrderId: slot.saleOrderId,
+      date: slot.dateKey,
+      vehicleClassKg: slot.vehicleClassKg,
+      plannedKg: slot.plannedKg,
+      loadingPoint: slot.loadingPoint,
+      transportId: slot.transportId ?? '',
+      notes: slot.notes ?? '',
+    });
+
+  const openPlan = (date: string, order?: DispatchBacklogOrder) => {
     const chosen = order ?? backlog[0];
     if (!chosen) {
       toast.error('No orders are waiting for a lorry');
       return;
     }
-    // Default to the biggest standard lorry the balance still justifies, and
-    // fill it - the common case is a full load, and trimming is one edit.
+    // Open with one lorry already on the sheet - the biggest standard size the
+    // balance still justifies, since the common case is a full load.
     const cls = VEHICLE_CLASSES.filter((c) => c <= chosen.unplannedKg).pop() ?? VEHICLE_CLASSES[0];
-    setDraft({
+    setPlan({
       saleOrderId: chosen.id,
       date,
-      vehicleClassKg: cls,
-      plannedKg: Math.min(cls, chosen.unplannedKg),
       loadingPoint: 'RVP',
       transportId: transports[0]?.id ?? '',
       notes: '',
-      count: 1,
+      counts: { [cls]: 1 },
     });
   };
 
@@ -343,7 +383,7 @@ export default function LoadingCalendarPage() {
                         size="icon"
                         className="h-7 w-7 shrink-0"
                         title="Plan a lorry"
-                        onClick={() => openDraft(todayKey, o)}
+                        onClick={() => openPlan(todayKey, o)}
                       >
                         <Plus className="h-4 w-4" />
                       </Button>
@@ -399,7 +439,7 @@ export default function LoadingCalendarPage() {
                   if (dragOrderId) {
                     const order = backlog.find((o) => o.id === dragOrderId);
                     setDragOrderId(null);
-                    if (order) openDraft(key, order);
+                    if (order) openPlan(key, order);
                   }
                 }}
                 className={cn(
@@ -425,7 +465,7 @@ export default function LoadingCalendarPage() {
                     size="icon"
                     className="h-7 w-7"
                     title="Plan a lorry on this day"
-                    onClick={() => openDraft(key)}
+                    onClick={() => openPlan(key)}
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -482,7 +522,7 @@ export default function LoadingCalendarPage() {
                           )}
                           <Button
                             variant="ghost" size="icon" className="h-6 w-6"
-                            title="Edit" onClick={() => openDraft(slot.dateKey, undefined, slot)}
+                            title="Edit" onClick={() => openEdit(slot)}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
@@ -527,15 +567,27 @@ export default function LoadingCalendarPage() {
         </div>
       </div>
 
-      {draft && (
-        <SlotDialog
-          draft={draft}
+      {plan && (
+        <PlanDialog
+          draft={plan}
+          backlog={backlog}
+          transports={transports}
+          saving={planLorries.isPending}
+          onChange={setPlan}
+          onClose={() => setPlan(null)}
+          onSave={(lorries) => planLorries.mutate({ ...plan, lorries })}
+        />
+      )}
+
+      {editing && (
+        <EditSlotDialog
+          draft={editing}
           backlog={backlog}
           transports={transports}
           saving={saveSlot.isPending}
-          onChange={setDraft}
-          onClose={() => setDraft(null)}
-          onSave={() => saveSlot.mutate(draft)}
+          onChange={setEditing}
+          onClose={() => setEditing(null)}
+          onSave={() => saveSlot.mutate(editing)}
         />
       )}
 
@@ -561,12 +613,196 @@ export default function LoadingCalendarPage() {
 }
 
 /** Create or edit one lorry. */
-function SlotDialog(props: {
-  draft: SlotDraft;
+/**
+ * Plan a day's fleet.
+ *
+ * The dialog asks the two things that actually vary - which sizes, and how
+ * many of each - and works the rest out. There is no loading-point select, no
+ * lorry-size box and no load box, because for a fleet all three are either the
+ * same for every lorry or follow from the size: a 40 t lorry carries 40 t
+ * unless it is the one finishing the order, and then it carries what is left.
+ * The odd lorry that needs a figure of its own is corrected on its card.
+ */
+function PlanDialog(props: {
+  draft: PlanDraft;
   backlog: DispatchBacklogOrder[];
   transports: Transport[];
   saving: boolean;
-  onChange: (d: SlotDraft) => void;
+  onChange: (d: PlanDraft) => void;
+  onClose: () => void;
+  onSave: (lorries: { vehicleClassKg: number; plannedKg: number }[]) => void;
+}) {
+  const { draft, backlog, transports, saving, onChange } = props;
+  const order = backlog.find((o) => o.id === draft.saleOrderId);
+  const roomKg = order?.unplannedKg ?? 0;
+
+  const lorries = lorriesFor(draft.counts, roomKg);
+  const totalKg = lorries.reduce((sum, l) => sum + l.plannedKg, 0);
+  // The lorry finishing the order, when it is not a full load.
+  const partLoad = lorries.find((l) => l.plannedKg < l.vehicleClassKg);
+  const full = totalKg >= roomKg || lorries.length >= MAX_LORRIES;
+
+  const setCount = (cls: number, n: number) =>
+    onChange({
+      ...draft,
+      counts: { ...draft.counts, [cls]: Math.max(0, Math.min(MAX_LORRIES, n)) },
+    });
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && props.onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Plan lorries</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <Label>Order</Label>
+            <Select
+              value={draft.saleOrderId}
+              onValueChange={(v) => onChange({ ...draft, saleOrderId: v })}
+            >
+              <SelectTrigger><SelectValue placeholder="Choose the order" /></SelectTrigger>
+              <SelectContent>
+                {backlog.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.buyerName} · {o.destination || '-'} · {t(o.unplannedKg)} left
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="plan-date">Loading date</Label>
+              <Input
+                id="plan-date" type="date" value={draft.date}
+                onChange={(e) => onChange({ ...draft, date: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>Transporter</Label>
+              <Select
+                value={draft.transportId || 'none'}
+                onValueChange={(v) => onChange({ ...draft, transportId: v === 'none' ? '' : v })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not decided yet</SelectItem>
+                  {transports.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div>
+            <Label>How many of each</Label>
+            <div className="mt-1 divide-y rounded-md border">
+              {VEHICLE_CLASSES.map((cls) => {
+                const n = draft.counts[cls] ?? 0;
+                return (
+                  <div key={cls} className="flex items-center gap-3 px-3 py-2">
+                    <span className={cn('w-12 text-sm', n > 0 ? 'font-semibold' : 'text-muted-foreground')}>
+                      {t(cls)}
+                    </span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <Button
+                        type="button" variant="outline" size="icon" className="h-8 w-8"
+                        disabled={n === 0} onClick={() => setCount(cls, n - 1)}
+                        aria-label={'One ' + t(cls) + ' lorry fewer'}
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
+                      <Input
+                        type="number" min={0} max={MAX_LORRIES}
+                        className="h-8 w-14 text-center" value={n}
+                        aria-label={'How many ' + t(cls) + ' lorries'}
+                        onChange={(e) => setCount(cls, Number(e.target.value) || 0)}
+                      />
+                      <Button
+                        type="button" variant="outline" size="icon" className="h-8 w-8"
+                        disabled={full} onClick={() => setCount(cls, n + 1)}
+                        aria-label={'One ' + t(cls) + ' lorry more'}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="plan-notes">Note for the transporter (optional)</Label>
+            <Input
+              id="plan-notes" value={draft.notes} maxLength={500}
+              onChange={(e) => onChange({ ...draft, notes: e.target.value })}
+            />
+          </div>
+
+          <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2">
+            <p className="text-sm">
+              {lorries.length === 0 ? (
+                <span className="text-muted-foreground">No lorries yet</span>
+              ) : (
+                <>
+                  <span className="font-semibold">
+                    {lorries.length} {lorries.length === 1 ? 'lorry' : 'lorries'} · {t(totalKg)}
+                  </span>
+                  {order && <span className="text-muted-foreground"> of {t(roomKg)} free to plan</span>}
+                </>
+              )}
+            </p>
+            {partLoad && (
+              <p className="text-xs text-muted-foreground">
+                The last lorry takes {t(partLoad.plannedKg)} - what is left of the order.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Loading at <span className="font-medium text-foreground">{draft.loadingPoint}</span>
+              {LOADING_POINTS.filter((pt) => pt !== draft.loadingPoint).map((pt) => (
+                <button
+                  key={pt} type="button"
+                  className="ml-2 underline underline-offset-2 hover:text-foreground"
+                  onClick={() => onChange({ ...draft, loadingPoint: pt })}
+                >
+                  load at {pt} instead
+                </button>
+              ))}
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={props.onClose}>Cancel</Button>
+          <Button
+            onClick={() => props.onSave(lorries)}
+            disabled={saving || !draft.saleOrderId || lorries.length === 0}
+          >
+            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {lorries.length <= 1 ? 'Add lorry' : 'Add ' + lorries.length + ' lorries'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Correct one lorry.
+ *
+ * This is where the figures the plan dialog works out by itself can be
+ * overruled - a part load, an odd vehicle size, a lorry loading at the other
+ * point - so it keeps every field.
+ */
+function EditSlotDialog(props: {
+  draft: EditDraft;
+  backlog: DispatchBacklogOrder[];
+  transports: Transport[];
+  saving: boolean;
+  onChange: (d: EditDraft) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -576,38 +812,20 @@ function SlotDialog(props: {
   const overClass = draft.plannedKg > draft.vehicleClassKg;
   // An edit re-plans tonnage the slot itself already holds, so the rail's
   // unplanned figure understates what is available by exactly this slot.
-  const roomKg = order ? order.unplannedKg + (draft.id ? draft.plannedKg : 0) : Infinity;
-
-  // Editing touches one lorry; only a new plan can be "35 t x 2".
-  const count = draft.id ? 1 : Math.max(1, draft.count);
-  const totalKg = draft.plannedKg * count;
-  const overOrder = Number.isFinite(roomKg) && totalKg > roomKg;
-  // How many of this size the order could still take - what `+` stops at, so
-  // the usual way to reach the limit is a disabled button rather than an error.
-  const maxCount =
-    Number.isFinite(roomKg) && draft.plannedKg > 0
-      ? Math.max(1, Math.min(MAX_LORRIES, Math.floor(roomKg / draft.plannedKg)))
-      : MAX_LORRIES;
-  const setCount = (n: number) => onChange({ ...draft, count: Math.max(1, Math.min(MAX_LORRIES, n)) });
+  const roomKg = order ? order.unplannedKg + draft.plannedKg : Infinity;
+  const overOrder = Number.isFinite(roomKg) && draft.plannedKg > roomKg;
 
   return (
     <Dialog open onOpenChange={(o) => !o && props.onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{draft.id ? 'Edit lorry' : 'Plan a lorry'}</DialogTitle>
+          <DialogTitle>Edit lorry</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
             <Label>Order</Label>
-            <Select value={draft.saleOrderId} onValueChange={(v) => {
-              const o = backlog.find((x) => x.id === v);
-              onChange({
-                ...draft,
-                saleOrderId: v,
-                plannedKg: o ? Math.min(draft.vehicleClassKg, o.unplannedKg) : draft.plannedKg,
-              });
-            }}>
+            <Select value={draft.saleOrderId} onValueChange={(v) => onChange({ ...draft, saleOrderId: v })}>
               <SelectTrigger><SelectValue placeholder="Choose the order" /></SelectTrigger>
               <SelectContent>
                 {backlog.map((o) => (
@@ -632,7 +850,7 @@ function SlotDialog(props: {
               <Select value={draft.loadingPoint} onValueChange={(v) => onChange({ ...draft, loadingPoint: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {LOADING_POINTS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  {LOADING_POINTS.map((pt) => <SelectItem key={pt} value={pt}>{pt}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -650,7 +868,7 @@ function SlotDialog(props: {
                   onClick={() => onChange({
                     ...draft,
                     vehicleClassKg: c,
-                    plannedKg: Math.min(c, order ? order.unplannedKg + (draft.id ? draft.plannedKg : 0) : c),
+                    plannedKg: Math.min(c, order ? order.unplannedKg + draft.plannedKg : c),
                   })}
                 >
                   {t(c)}
@@ -676,44 +894,13 @@ function SlotDialog(props: {
               />
             </div>
             <div>
-              <Label htmlFor="slot-kg">{draft.id ? 'Load (kg)' : 'Load per lorry (kg)'}</Label>
+              <Label htmlFor="slot-kg">Load (kg)</Label>
               <Input
                 id="slot-kg" type="number" value={draft.plannedKg}
                 onChange={(e) => onChange({ ...draft, plannedKg: Number(e.target.value) })}
               />
             </div>
           </div>
-
-          {!draft.id && (
-            <div>
-              <Label htmlFor="slot-count">How many lorries</Label>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button" variant="outline" size="icon" className="h-9 w-9"
-                  disabled={count <= 1} onClick={() => setCount(count - 1)}
-                  aria-label="One lorry fewer"
-                >
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <Input
-                  id="slot-count" type="number" min={1} max={MAX_LORRIES}
-                  className="h-9 w-16 text-center" value={draft.count}
-                  onChange={(e) => setCount(Number(e.target.value) || 1)}
-                />
-                <Button
-                  type="button" variant="outline" size="icon" className="h-9 w-9"
-                  disabled={count >= maxCount} onClick={() => setCount(count + 1)}
-                  aria-label="One lorry more"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-                <span className="text-sm text-muted-foreground">
-                  {count} × {t(draft.vehicleClassKg)} ={' '}
-                  <span className="font-semibold text-foreground">{t(totalKg)}</span>
-                </span>
-              </div>
-            </div>
-          )}
 
           <div>
             <Label>Transporter</Label>
@@ -749,9 +936,7 @@ function SlotDialog(props: {
           )}
           {overOrder && !overClass && (
             <p className="text-xs font-medium text-destructive">
-              {count > 1
-                ? `${count} × ${t(draft.plannedKg)} needs ${t(totalKg)}, and only ${t(roomKg)} of this order is still unplanned.`
-                : `Only ${t(roomKg)} of this order is still unplanned.`}
+              Only {t(roomKg)} of this order is still unplanned.
             </p>
           )}
         </div>
@@ -763,7 +948,7 @@ function SlotDialog(props: {
             disabled={saving || !draft.saleOrderId || draft.plannedKg <= 0 || overClass || overOrder}
           >
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {draft.id ? 'Save' : count === 1 ? 'Add lorry' : `Add ${count} lorries`}
+            Save
           </Button>
         </DialogFooter>
       </DialogContent>

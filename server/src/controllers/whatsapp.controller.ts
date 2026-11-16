@@ -469,6 +469,16 @@ async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean>
   // A transport confirmation is a long-ish text with digits (lorry no / phone).
   if (!text || text.length < 25 || !/\d{4}/.test(text)) return false;
 
+  // A photo, voice note or PDF is not a booking message. When one arrives,
+  // extractInbound leaves the media's own URL in `text` - and that URL's digits
+  // ("…/1674492334027097.jpg") read enough like a lorry number and a date that
+  // Gemini will happily return the example from its own prompt. Every such
+  // message used to file a phantom booking, which is where the register's
+  // repeated "18 Jul 2026 / AP39T8217 / Moula" rows came from. There is nothing
+  // to read in a bare link, so stop before the model is asked.
+  if (logRow.mediaUrl || logRow.mediaId) return false;
+  if (/^https?:\/\/\S*$/i.test(text.trim())) return false;
+
   // Never treat owner commands or delivery review replies as lorry transport bookings
   if (/^(?:APPROVE|REJECT|DELIVER|CONFIRM|STATUS|CHECK|HELP|KATA)\b/i.test(text.trim())) return false;
   if (/\b(?:override\s*weight|confirm\s*delivery|kata\s*slip|kata\s*received)\b/i.test(text)) return false;

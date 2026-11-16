@@ -40,6 +40,12 @@ vi.mock('../services/dispatchWhatsapp.service.js', () => ({
   resendDispatchDriverWhatsApp: vi.fn(),
 }));
 vi.mock('../jobs/whatsappJobs.js', () => ({ JOB_RUNNERS: {} }));
+vi.mock('../services/whatsapp.service.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  // The photo tests below must not reach out to files.fast2sms.com.
+  downloadWhatsAppMedia: vi.fn().mockResolvedValue(null),
+  notifyInboundMessageToMembers: vi.fn(),
+}));
 
 const { handleWhatsAppWebhook } = await import('./whatsapp.controller.js');
 
@@ -209,6 +215,35 @@ describe('Fast2SMS webhook routing', () => {
     expect(findFirst.mock.calls[0][0].where).toMatchObject({ providerId: 'reused-id', body: TRANSPORT_TEXT });
     expect(create).toHaveBeenCalledOnce();
     expect(tcCreate).toHaveBeenCalledOnce();
+  });
+
+  it('does not read a booking out of a photo message', async () => {
+    // What this guards: a photo arrives with the media's own URL sitting in the
+    // message body. Its digits read enough like a date and a lorry number that
+    // Gemini answered with the worked example from its own prompt, and every
+    // picture anyone sent the shared number filed another phantom booking -
+    // the register's repeated "18 Jul 2026 / AP39T8217 / Moula / Rs 80,000"
+    // rows. A link carries nothing to read, so the model is never asked.
+    await post({
+      webhook_type: 'incoming_message',
+      from: '919444666577',
+      message_type: 'image',
+      body: 'https://files.fast2sms.com/chat_uploads/2012326/1674492334027097.jpg',
+      message_id: 'wamid.IMG1',
+    });
+    expect(parseTransport).not.toHaveBeenCalled();
+    expect(tcCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not read a booking out of a voice note or PDF', async () => {
+    for (const [i, url] of [
+      'https://files.fast2sms.com/chat_uploads/2012326/4675979809313355.ogg',
+      'https://files.fast2sms.com/chat_uploads/2012326/1125466717117686.pdf',
+    ].entries()) {
+      await post({ webhook_type: 'incoming_message', from: '919254890004', body: url, message_id: `wamid.M${i}` });
+    }
+    expect(parseTransport).not.toHaveBeenCalled();
+    expect(tcCreate).not.toHaveBeenCalled();
   });
 
   it('rejects a call with the wrong secret when one is configured', async () => {

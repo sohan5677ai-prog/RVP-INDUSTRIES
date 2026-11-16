@@ -849,6 +849,10 @@ Decide whether THIS message is such a lorry-booking confirmation and return JSON
   the whole load. A realistic per-tonne rate on these routes is roughly 1,000-3,000, so a
   five-figure number like 80000 is a TOTAL. Default to "TOTAL" when unsure.
 Only include fields you can read with reasonable confidence. Do not guess.
+Every value you return must be COPIED FROM THE MESSAGE BELOW. The example above is
+only an illustration of the wording - never return any part of it. If the message is
+a bare link, a file name, a notification or anything else with no lorry booking
+written out in it, return isTransportConfirmation: false and no other fields.
 
 Message:
 ${text}`;
@@ -864,14 +868,46 @@ ${text}`;
     if (typeof parsed?.isTransportConfirmation !== 'boolean') return null;
 
     const clean: ParsedTransportConfirmation = { isTransportConfirmation: parsed.isTransportConfirmation };
+
+    // Everything below is checked back against the message itself. A model given
+    // a message it cannot read - a bare media link, a stray notification - tends
+    // to answer with the worked example from this very prompt rather than admit
+    // there is nothing there, and a lorry number that was never written is worse
+    // than no booking at all: it files a trip that does not exist and hands its
+    // driver to the next dispatch on that number.
+    const textAlnum = text.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const textDigits = text.replace(/\D/g, '');
+
     if (parsed.messageDate?.toString().trim()) clean.messageDate = parsed.messageDate.toString().trim();
     if (parsed.fromPlace?.toString().trim()) clean.fromPlace = parsed.fromPlace.toString().trim();
     if (parsed.toPlace?.toString().trim()) clean.toPlace = parsed.toPlace.toString().trim();
     if (typeof parsed.tonnageKg === 'number' && parsed.tonnageKg > 0) clean.tonnageKg = Math.round(parsed.tonnageKg);
-    if (parsed.lorryNumber?.toString().trim()) clean.lorryNumber = parsed.lorryNumber.toString().replace(/\s+/g, '').toUpperCase();
-    if (parsed.driverName?.toString().trim()) clean.driverName = parsed.driverName.toString().trim();
+    if (parsed.lorryNumber?.toString().trim()) {
+      const lorry = parsed.lorryNumber.toString().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      // The message spells it "AP 39 T 8217", we spell it "AP39T8217" - compare
+      // both with the punctuation taken out. A number that is nowhere in the
+      // text was invented, and that is enough to throw the whole read away.
+      if (lorry && !textAlnum.includes(lorry)) return null;
+      clean.lorryNumber = lorry;
+    }
+    if (parsed.driverName?.toString().trim()) {
+      const name = parsed.driverName.toString().trim();
+      if (new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text)) clean.driverName = name;
+    }
     const phone = parsed.driverPhone?.toString().replace(/\D/g, '') ?? '';
-    if (phone.length >= 10) clean.driverPhone = phone.slice(-10);
+    if (phone.length >= 10 && textDigits.includes(phone.slice(-10))) clean.driverPhone = phone.slice(-10);
+
+    // Nothing of the lorry survived the check above - there is no booking here.
+    if (!clean.lorryNumber && !clean.driverPhone) return { isTransportConfirmation: false };
+
+    // A booking is news about a lorry loading now. A date a season away came out
+    // of some other number in the message (a phone, an amount, a file name), so
+    // file the row dateless rather than at a year that never happened.
+    if (clean.messageDate) {
+      const d = new Date(`${clean.messageDate}T00:00:00`);
+      const days = (d.getTime() - Date.now()) / 86_400_000;
+      if (Number.isNaN(d.getTime()) || days < -45 || days > 120) delete clean.messageDate;
+    }
 
     // Normalise freight to a WHOLE-LORRY total. Gemini's own basis call is only a
     // starting point - the magnitude check below is what actually decides, so a

@@ -145,8 +145,23 @@ const partySchema = z.object({
   bankIfsc: z.string().optional(),
   bankName: z.string().optional(),
   commodities: z.array(z.string()),
+}).superRefine((v, ctx) => {
+  // A party is only useful downstream once it carries a phone (WhatsApp), a
+  // community (Wishes) and - for trading parties - the commodities it deals in.
+  // The Hamali crew is a labour counterparty: it has no commodities of its own.
+  if (!v.phone?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'Phone Number 1 is required' });
+  }
+  if (!v.religion || v.religion === 'NONE') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['religion'], message: 'Pick a community' });
+  }
+  if (v.type !== 'HAMALI_TEAM' && !(v.commodities?.length)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['commodities'], message: 'Pick at least one commodity' });
+  }
 });
 type PartyForm = z.infer<typeof partySchema>;
+
+const RequiredMark = () => <span className="text-destructive"> *</span>;
 
 const emptyParty: PartyForm = {
   name: '', nickname: '', type: 'SUPPLIER', phone: '', phone2: '', email: '', address: '', city: '', state: '', pincode: '', gstin: '', destination: '',
@@ -543,6 +558,23 @@ export default function Parties() {
   });
 
   function handleSave(values: PartyForm) {
+    // State decides GST treatment, so a trading party cannot be saved without
+    // one. In multi-address mode it comes off the default address row, which
+    // the form schema can't see - hence the check here.
+    if (values.type !== 'HAMALI_TEAM') {
+      const effectiveState = hasMultipleAddresses
+        ? ((addresses.find((a) => a.isDefault) || addresses[0])?.state ?? '').trim()
+        : (values.state ?? '').trim();
+      if (!effectiveState) {
+        if (hasMultipleAddresses) {
+          toast.error('Set a State on the default address');
+        } else {
+          form.setError('state', { type: 'manual', message: 'State is required' });
+        }
+        return;
+      }
+    }
+
     const enteredName = normalizeName(values.name);
     const others = (parties ?? []).filter((p) => p.id !== editing?.id);
 
@@ -793,7 +825,7 @@ export default function Parties() {
                   name="name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Name</FormLabel>
+                      <FormLabel>Name<RequiredMark /></FormLabel>
                       <FormControl>
                         <Input {...field} />
                       </FormControl>
@@ -823,7 +855,7 @@ export default function Parties() {
                 name="type"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Type</FormLabel>
+                    <FormLabel>Type<RequiredMark /></FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -847,7 +879,7 @@ export default function Parties() {
                 name="commodities"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Commodities</FormLabel>
+                    <FormLabel>Commodities<RequiredMark /></FormLabel>
                     <div className="flex flex-wrap gap-2">
                       {COMMODITIES.map((c) => {
                         const groupValues: string[] = c.value === 'TAMARIND_BYPRODUCTS'
@@ -886,7 +918,7 @@ export default function Parties() {
                   name="phone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone Number 1</FormLabel>
+                      <FormLabel>Phone Number 1<RequiredMark /></FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. 9876543210" {...field} />
                       </FormControl>
@@ -961,7 +993,7 @@ export default function Parties() {
                   name="religion"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Community (for Wishes)</FormLabel>
+                      <FormLabel>Community (for Wishes)<RequiredMark /></FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -1088,7 +1120,7 @@ export default function Parties() {
                       name="state"
                       render={({ field }) => (
                         <FormItem className="flex flex-col justify-end">
-                          <FormLabel className="mb-1">State</FormLabel>
+                          <FormLabel className="mb-1">State<RequiredMark /></FormLabel>
                           <Combobox
                             options={INDIAN_STATES}
                             value={field.value ?? ''}

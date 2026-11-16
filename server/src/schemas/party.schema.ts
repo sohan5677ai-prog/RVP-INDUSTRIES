@@ -24,7 +24,7 @@ export const partyAddressSchema = z.object({
   isDefault: z.boolean().optional().default(false),
 });
 
-export const createPartySchema = z.object({
+const partyBaseSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   nickname: z.string().optional().nullable(),
   type: partyTypeEnum.default('SUPPLIER'),
@@ -57,7 +57,31 @@ export const createPartySchema = z.object({
   addresses: z.array(partyAddressSchema).optional().default([]),
 });
 
-export const updatePartySchema = createPartySchema.partial();
+/**
+ * A new party must carry enough to be usable downstream: a phone for WhatsApp,
+ * a community for Wishes and - unless it is the Hamali labour crew - the
+ * commodities it trades and the state that decides its GST treatment. The state
+ * may sit on the default address row instead of the top-level field.
+ */
+export const createPartySchema = partyBaseSchema.superRefine((v, ctx) => {
+  if (!v.phone?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'Phone Number 1 is required' });
+  }
+  if (!v.religion) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['religion'], message: 'Community is required' });
+  }
+  if (v.type !== 'HAMALI_TEAM') {
+    if (!v.commodities?.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['commodities'], message: 'Pick at least one commodity' });
+    }
+    const defaultAddr = (v.addresses ?? []).find((a) => a.isDefault) ?? (v.addresses ?? [])[0];
+    if (!(v.state?.trim() || defaultAddr?.state?.trim())) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['state'], message: 'State is required' });
+    }
+  }
+});
+
+export const updatePartySchema = partyBaseSchema.partial();
 
 export type CreatePartyInput = z.infer<typeof createPartySchema>;
 export type UpdatePartyInput = z.infer<typeof updatePartySchema>;

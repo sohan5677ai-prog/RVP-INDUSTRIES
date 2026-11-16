@@ -7,10 +7,11 @@ import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { SearchInput } from '@/components/ui/search-input';
 import { ExportButtons } from '@/components/ExportButtons';
+import { TransportLedger, type TransportLedgerTrip } from '@/components/TransportLedger';
 import type { ExportColumn } from '@/lib/export';
-import type { SaleOrder, SaleProduct, CompanyProfile, Transport } from '@/lib/types';
+import type { SaleOrder, SaleProduct, CompanyProfile, Transport, Payment } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { companyVehicleNumbers } from '@/lib/calc';
+import { calcHamali, calcKataFee, companyVehicleNumbers, pappuLoadingHamali } from '@/lib/calc';
 import { productDescription } from '@/lib/productNames';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +22,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2, Truck, Wallet, Hourglass, FileText, Trash2 } from 'lucide-react';
+import { Loader2, Truck, Wallet, Hourglass, FileText, Trash2, BookOpen } from 'lucide-react';
 
 interface RetentionRow {
   id: string;
@@ -45,6 +46,13 @@ interface RetentionRow {
   kgPerBag: number | null;
   /** Whether the buyer's party record has lorry receipts switched on. */
   gcEnabled: boolean;
+  /** The lorry's share of the loading hamali, deducted off this trip's freight. */
+  hamali: number;
+  /** Weighbridge (kata) fee deducted off this trip's freight. */
+  kata: number;
+  /** Any other per-trip deductions and extra costs recorded against the trip. */
+  otherDeductions: { label: string; amount: number }[];
+  extraCosts: { label: string; amount: number }[];
 }
 
 export default function SuryaRoadTransport({ embedded = false }: { embedded?: boolean } = {}) {
@@ -67,6 +75,12 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
   const { data: transportsList, isLoading: loadingTransports } = useQuery({
     queryKey: ['transports'],
     queryFn: () => api<Transport[]>('/transports'),
+  });
+
+  // Freight payments, for the per-agency running ledger below.
+  const { data: payments } = useQuery({
+    queryKey: ['payments', { all: true }],
+    queryFn: () => api<Payment[]>('/payments?all=true'),
   });
 
   const retention = Number(company?.freightRetentionPerTrip ?? 3000);
@@ -159,6 +173,23 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         const transportKey = resolveTripTransportKey(d);
         const transportObj = (transportsList ?? []).find((t) => t.id === transportKey);
         const transportName = transportObj ? transportObj.name : 'Others';
+        // Same deductions the Freight Dues page nets off this trip's freight -
+        // the ledger has to agree with what the owner is actually paid.
+        const isKnmTrip = !!transportObj && (transportObj.code === 'KNM' || transportObj.name.toLowerCase().includes('knm'));
+        const customHamali = (d as any).customHamali != null ? Number((d as any).customHamali) : null;
+        const hamali = customHamali != null
+          ? customHamali
+          : isKnmTrip
+          ? 0
+          : o.product === 'PAPPU'
+          ? pappuLoadingHamali(d.weightKg).lorry
+          : calcHamali(d.weightKg);
+        const customKata = (d as any).customKata != null ? Number((d as any).customKata) : null;
+        const kata = customKata != null ? customKata : isKnmTrip ? 0 : calcKataFee(d.weightKg);
+        const toCostItems = (raw: any): { label: string; amount: number }[] =>
+          (Array.isArray(raw) ? raw : [])
+            .map((x: any) => ({ label: String(x?.label ?? 'Other'), amount: Number(x?.amount) || 0 }))
+            .filter((x) => x.amount !== 0);
         return {
           id: d.id,
           date: d.dispatchDate,
@@ -179,6 +210,10 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           bags: d.lrBags ?? null,
           kgPerBag: d.lrKgPerBag ?? null,
           gcEnabled: o.buyer?.lorryReceiptEnabled ?? false,
+          hamali,
+          kata,
+          otherDeductions: toCostItems((d as any).freightDeductions),
+          extraCosts: toCostItems((d as any).freightAdditions),
         };
       })
       .filter((r) => {
@@ -215,6 +250,25 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
       return matchBuyer || matchLorry || matchInvoice || matchDest || matchDriver || matchGc || matchStatus;
     });
   }, [allRows, activeTabInfo.key, search]);
+
+  // The same trips the tab is showing, shaped for the running ledger.
+  const ledgerTrips: TransportLedgerTrip[] = useMemo(
+    () =>
+      rows.map((r) => ({
+        id: r.id,
+        date: r.date,
+        lorryNumber: r.lorryNumber,
+        invoice: r.invoice,
+        destination: r.destination,
+        freight: r.freight,
+        hamali: r.hamali,
+        kata: r.kata,
+        retention: r.amount,
+        otherDeductions: r.otherDeductions,
+        extraCosts: r.extraCosts,
+      })),
+    [rows]
+  );
 
   const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(rows, 50);
 
@@ -311,6 +365,9 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
             </TabsTrigger>
             <TabsTrigger value="gc-notes" className="gap-2 text-sm font-semibold">
               <FileText className="h-4 w-4" /> G.C. Notes
+            </TabsTrigger>
+            <TabsTrigger value="ledger" className="gap-2 text-sm font-semibold">
+              <BookOpen className="h-4 w-4" /> Ledger
             </TabsTrigger>
           </TabsList>
 
@@ -418,6 +475,17 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
 
           <TabsContent value="gc-notes">
             <LorryReceiptRegister rows={rows} transportName={activeTabInfo.name} />
+          </TabsContent>
+
+          <TabsContent value="ledger">
+            <TransportLedger
+              trips={ledgerTrips}
+              payments={payments ?? []}
+              transport={(transportsList ?? []).find((t) => t.id === activeTabInfo.key) ?? null}
+              transportName={activeTabInfo.name}
+              startDate={startDate}
+              endDate={endDate}
+            />
           </TabsContent>
         </Tabs>
       )}

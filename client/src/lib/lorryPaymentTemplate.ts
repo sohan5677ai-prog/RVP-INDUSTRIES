@@ -17,6 +17,8 @@ export interface LorryPaymentData {
   deductions?: { label: string; amount: number }[];
   additions?: { label: string; amount: number }[];
   isKnm?: boolean;
+  /** Trip ran under a single-owner fleet: the recipient is the owner, not the driver. */
+  isOwnerPayee?: boolean;
 }
 
 export const LORRY_PAYMENT_LANGUAGES: { key: 'EN' | 'TE' | 'HI' | 'TA'; label: string; native: string }[] = [

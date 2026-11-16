@@ -7,6 +7,7 @@ import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer, LorryConfirmation } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { calcHamali, calcKataFee, companyVehicleNumbers, findCompanyVehicle, normalizeLorryNumber, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
+import { ownerPayeeOf } from '@/lib/transportPayee';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -112,6 +113,12 @@ interface FreightRow {
   party: string | null;
   driverPhone?: string | null;
   driverName?: string | null;
+  /**
+   * Set when the trip's transport agency is a single-owner fleet (Transport
+   * .payToOwner): the money and the freight receipt go to this one person, so
+   * the driver's number is never the recipient however it was captured.
+   */
+  ownerPayee?: { name: string; phone: string } | null;
   kind?: 'Husk' | 'Seed' | 'Dust';
   weightKg?: number;
   rawDispatchId?: string;
@@ -205,6 +212,7 @@ function combineSharedLorryRows(rows: FreightRow[]): FreightRow[] {
       party: parties || null,
       driverPhone: list.find((x) => x.driverPhone)?.driverPhone ?? null,
       driverName: list.find((x) => x.driverName)?.driverName ?? null,
+      ownerPayee: list.find((x) => x.ownerPayee)?.ownerPayee ?? null,
       kind: kind || undefined,
       weightKg: totalWeight || undefined,
       rawItems,
@@ -1565,6 +1573,7 @@ export default function FreightDuesPage() {
         party: o.buyer?.name ?? null,
         driverPhone: d.driverPhone || (d.transport?.phone ?? null),
         driverName: d.driverName || (d.transport?.contactPerson ?? null),
+        ownerPayee: ownerPayeeOf(d.transport),
         weightKg: d.weightKg,
         rawDispatchId: d.id,
       };
@@ -1791,9 +1800,13 @@ export default function FreightDuesPage() {
                   row.party === 'KNM Transport' ||
                   row.sourced === 'Transfer';
 
-    let driverPhone = isKnm ? '9440416639' : (row.driverPhone || null);
-    let driverName = isKnm ? 'KNM Transport (Reddy)' : (row.driverName || null);
-    if (!isKnm && !driverPhone && row.lorry) {
+    // A single-owner fleet is paid as one person: the owner is the payee and
+    // the receipt's recipient, so neither the driver captured at dispatch nor a
+    // number scraped off a lorry booking may stand in for him.
+    const ownerPayee = !isKnm ? (row.ownerPayee ?? null) : null;
+    let driverPhone = isKnm ? '9440416639' : (ownerPayee ? (ownerPayee.phone || null) : (row.driverPhone || null));
+    let driverName = isKnm ? 'KNM Transport (Reddy)' : (ownerPayee ? ownerPayee.name : (row.driverName || null));
+    if (!isKnm && !ownerPayee && !driverPhone && row.lorry) {
       const cv = findCompanyVehicle(row.lorry, company?.companyVehicles);
       if (cv?.driverPhone) {
         driverPhone = cv.driverPhone;
@@ -1827,6 +1840,7 @@ export default function FreightDuesPage() {
       deductions: row.deductions,
       additions: row.additions,
       isKnm,
+      isOwnerPayee: !!ownerPayee,
     };
   }, [paymentsByLorry, dueFor, company?.companyVehicles, company?.ownerWhatsappNumber, waitingBookings]);
 

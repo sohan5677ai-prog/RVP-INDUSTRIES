@@ -175,6 +175,12 @@ export interface Transport {
   gstin?: string | null;
   contactPerson?: string | null;
   defaultRetention: string | number;
+  /**
+   * Single-owner fleet: every lorry under this agency belongs to one person who
+   * is paid directly, so freight receipts are addressed to `phone` (the owner)
+   * rather than the driver, and the agency keeps its own running ledger.
+   */
+  payToOwner?: boolean;
   notes?: string | null;
   /** Settings -> Wishes targeting only. Null/undefined = not tagged. */
   religion?: WishCategory | null;

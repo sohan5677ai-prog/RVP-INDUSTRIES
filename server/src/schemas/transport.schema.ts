@@ -31,6 +31,8 @@ export const createTransportSchema = z.object({
   gstin: optionalText,
   contactPerson: optionalText,
   defaultRetention: z.union([z.number(), z.string()]).transform((v) => Number(v) || 0).default(0),
+  /** Single-owner fleet - freight receipts go to the owner's phone, not the driver's. */
+  payToOwner: z.boolean().default(false),
   notes: optionalText,
   religion: wishCategoryEnum.optional().nullable(),
   active: z.boolean().default(true),

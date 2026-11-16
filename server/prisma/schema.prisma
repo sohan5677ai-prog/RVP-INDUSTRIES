@@ -572,6 +572,11 @@ model Transport {
   contactPerson    String?
   // Default retention per trip (e.g. ₹3,000 for Surya Road Lines, ₹0 for KNM)
   defaultRetention Decimal       @default(0) @db.Decimal(12, 2)
+  // Single-owner fleet: every lorry running under this agency belongs to one
+  // person, who is paid directly and who gets the freight receipt. When set,
+  // freight payment receipts go to `phone` (the owner) instead of the driver,
+  // and the agency gets its own running ledger in the Transport Report.
+  payToOwner       Boolean       @default(false)
   notes            String?
   // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
   religion         WishCategory?

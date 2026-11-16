@@ -2038,6 +2038,36 @@ export async function getLorryContactInfo(req: Request, res: Response) {
     });
   }
 
+  // 1b. Single-owner fleets (Transport.payToOwner). Every lorry running under
+  // such an agency belongs to one owner who is paid directly, so he - not the
+  // driver at the wheel - is the contact for freight money and its receipt.
+  // This sits ahead of the driver lookups on purpose: a driver number captured
+  // at dispatch or off a WhatsApp booking must never win over the owner.
+  const ownerFleetDispatches = await prisma.saleDispatch.findMany({
+    where: { vehicleNumber: { not: null }, transport: { is: { payToOwner: true } } },
+    orderBy: { dispatchDate: 'desc' },
+    include: { transport: true },
+    take: 300,
+  });
+  const ownerFleetTrip = (ownerFleetDispatches ?? []).find(
+    (d) => normalizeLorryNumber(d.vehicleNumber) === normalized && d.transport?.payToOwner
+  );
+  if (ownerFleetTrip?.transport) {
+    const agency = ownerFleetTrip.transport;
+    const person = (agency.contactPerson || '').trim();
+    const agencyPhone = clean10DigitPhone(agency.phone || agency.phone2 || '');
+    return res.json({
+      lorryNumber: ownerFleetTrip.vehicleNumber || raw,
+      driverName: person ? `${person} (${agency.name})` : `${agency.name} (Owner)`,
+      driverPhone: agencyPhone || null,
+      ownerPhone,
+      transporterName: agency.name,
+      transporterPhone: agencyPhone || null,
+      isOwnerPayee: true,
+      source: 'transport_owner',
+    });
+  }
+
   // 2. Check TransportConfirmations (recent bookings - WAITING / CONFIRMED first, then recent USED/DRAFT)
   const waitingBooking = await prisma.transportConfirmation.findFirst({
     where: {

@@ -88,6 +88,7 @@ const transportSchema = z.object({
   pincode: z.string().trim().optional(),
   gstin: z.string().trim().optional(),
   defaultRetention: z.string().min(0).default('0'),
+  payToOwner: z.boolean().default(false),
   notes: z.string().trim().optional(),
   religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']).default('NONE'),
   active: z.boolean().default(true),
@@ -123,6 +124,7 @@ export default function Transports() {
       pincode: '',
       gstin: '',
       defaultRetention: '0',
+      payToOwner: false,
       notes: '',
       religion: 'NONE',
       active: true,
@@ -144,6 +146,7 @@ export default function Transports() {
       pincode: '',
       gstin: '',
       defaultRetention: '0',
+      payToOwner: false,
       notes: '',
       religion: 'NONE',
       active: true,
@@ -166,6 +169,7 @@ export default function Transports() {
       pincode: t.pincode ?? '',
       gstin: t.gstin ?? '',
       defaultRetention: String(Number(t.defaultRetention || 0)),
+      payToOwner: t.payToOwner ?? false,
       notes: t.notes ?? '',
       religion: t.religion ?? 'NONE',
       active: t.active,
@@ -624,6 +628,23 @@ export default function Transports() {
                   </FormItem>
                 )}
               />
+
+              <div className="flex items-start gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="pay-owner-toggle"
+                  checked={form.watch('payToOwner')}
+                  onChange={(e) => form.setValue('payToOwner', e.target.checked)}
+                  className="rounded border-border text-primary focus:ring-primary h-4 w-4 mt-0.5"
+                />
+                <Label htmlFor="pay-owner-toggle" className="text-sm font-medium cursor-pointer leading-snug">
+                  Single owner - pay &amp; message the owner
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    Every lorry belongs to one owner: freight receipts go to the phone above instead of the
+                    driver, and the agency gets its own ledger in the Transport Report.
+                  </span>
+                </Label>
+              </div>
 
               <div className="flex items-center gap-2 pt-2">
                 <input

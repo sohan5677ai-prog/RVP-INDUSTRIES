@@ -79,6 +79,8 @@ describe('getLorryContactInfo', () => {
       ownerWhatsappNumber: '9902953300',
     });
 
+    // The single-owner-fleet lookup runs ahead of the booking match.
+    prismaMock.saleDispatch.findMany.mockResolvedValue([]);
     prismaMock.transportConfirmation.findFirst.mockResolvedValue({
       id: 'conf-1',
       lorryNumber: 'TN34AB0330',
@@ -99,6 +101,39 @@ describe('getLorryContactInfo', () => {
         driverPhone: '6354886051',
         material: 'HUSK',
         source: 'transport_confirmation',
+      })
+    );
+  });
+
+  it('answers with the fleet owner, not the driver, for a single-owner transport', async () => {
+    prismaMock.companyProfile.findUnique.mockResolvedValue({
+      companyVehicles: '',
+      ownerWhatsappNumber: '9902953300',
+    });
+    prismaMock.saleDispatch.findMany.mockResolvedValue([
+      {
+        vehicleNumber: 'GJ18BV3060',
+        driverName: 'Chaman',
+        driverPhone: '9050306685',
+        transport: {
+          name: 'Madhupuri Transport',
+          contactPerson: 'Madhu',
+          phone: '9876543210',
+          payToOwner: true,
+        },
+      },
+    ]);
+
+    req.query.lorryNumber = 'GJ 18 BV 3060';
+    await getLorryContactInfo(req, res);
+
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driverName: 'Madhu (Madhupuri Transport)',
+        driverPhone: '9876543210',
+        transporterName: 'Madhupuri Transport',
+        isOwnerPayee: true,
+        source: 'transport_owner',
       })
     );
   });

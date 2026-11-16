@@ -4,9 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Table2, ClipboardList, MessageCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Table2, ClipboardList } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
+import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { PageHeader } from '@/components/PageHeader';
 import type { Party, Broker, SaleOrder, SaleStatus, SaleProduct, Commodity, Receipt } from '@/lib/types';
 import { SALE_STATUS_VARIANT, saleDisplayStatus, saleStatusLabel, settledByDispatch } from '@/lib/saleStatus';
@@ -487,7 +488,7 @@ export default function SaleOrders() {
                       title="Send order confirmation on WhatsApp"
                       disabled={confirmMutation.isPending}
                     >
-                      <MessageCircle className="h-4 w-4 text-emerald-600" />
+                      <WhatsAppIcon className="h-4 w-4 fill-emerald-600" />
                     </Button>
                     <Button 
                       variant="ghost" 

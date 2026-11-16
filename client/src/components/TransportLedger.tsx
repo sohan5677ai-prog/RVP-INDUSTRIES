@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
-import { SearchInput } from '@/components/ui/search-input';
 import { ExportButtons } from '@/components/ExportButtons';
 import type { ExportColumn } from '@/lib/export';
 import type { Payment, Transport } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { normalizeLorryNumber } from '@/lib/calc';
+import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  Search, Truck, Phone, MapPin, Hash, UserRound, ReceiptText,
+  Scale, Wallet, TrendingDown, TrendingUp, Copy, Check,
+} from 'lucide-react';
 
 /**
  * One trip as the ledger needs it: what the agency earned on it and everything
@@ -22,6 +26,8 @@ export interface TransportLedgerTrip {
   lorryNumber: string | null;
   invoice: string | null;
   destination: string | null;
+  buyer: string | null;
+  weightKg: number;
   freight: number;
   hamali: number;
   kata: number;
@@ -32,7 +38,7 @@ export interface TransportLedgerTrip {
 }
 
 /**
- * Running account for one transport agency.
+ * Running account for one transport agency, in the party ledger's shape.
  *
  * Single-owner fleets (Transport.payToOwner) are settled as one account: every
  * lorry belongs to the same person and the money goes to his one bank account,
@@ -42,40 +48,52 @@ export interface TransportLedgerTrip {
  * payments made against his lorries debit the rest. The closing balance is what
  * is still owed to him (CR) - or, when overpaid, what he owes back (DR).
  */
-type LedgerKind = 'Freight' | 'Hamali' | 'Kata' | 'Retention' | 'Deduction' | 'Extra Cost' | 'Payment';
+type LedgerKind = 'FREIGHT' | 'HAMALI' | 'KATA' | 'RETENTION' | 'DEDUCTION' | 'EXTRA' | 'PAYMENT';
+
+const KIND_META: Record<LedgerKind, { label: string; cls: string }> = {
+  FREIGHT: { label: 'Freight', cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
+  HAMALI: { label: 'Hamali', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
+  KATA: { label: 'Kata', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
+  RETENTION: { label: 'Retention', cls: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20' },
+  DEDUCTION: { label: 'Deduction', cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' },
+  EXTRA: { label: 'Extra Cost', cls: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' },
+  PAYMENT: { label: 'Payment', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' },
+};
+
+const KIND_ORDER: Record<LedgerKind, number> = {
+  FREIGHT: 0, HAMALI: 1, KATA: 2, RETENTION: 3, DEDUCTION: 4, EXTRA: 5, PAYMENT: 6,
+};
+
+const KIND_FILTERS: { label: string; value: 'ALL' | LedgerKind }[] = [
+  { label: 'All', value: 'ALL' },
+  { label: 'Freight', value: 'FREIGHT' },
+  { label: 'Hamali', value: 'HAMALI' },
+  { label: 'Kata', value: 'KATA' },
+  { label: 'Deductions', value: 'DEDUCTION' },
+  { label: 'Payments', value: 'PAYMENT' },
+];
 
 interface LedgerEntry {
   id: string;
   date: string;
-  particulars: string;
-  reference: string | null;
   kind: LedgerKind;
+  /** Main line, e.g. "Freight - Pappu to Coimbatore". */
+  particulars: string;
+  /** Grey detail under it, e.g. "24,290 kg · AB Traders". */
+  detail: string | null;
+  lorryNumber: string | null;
+  invoiceNumber: string | null;
+  utr: string | null;
   debit: number;
   credit: number;
   runningBalance: number;
 }
 
-const KIND_TONE: Record<LedgerKind, string> = {
-  Freight: 'bg-primary/10 text-primary border-primary/20',
-  Hamali: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-  Kata: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-  Retention: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20',
-  Deduction: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-  'Extra Cost': 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
-  Payment: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-};
-
-const KIND_ORDER: Record<LedgerKind, number> = {
-  Freight: 0,
-  Hamali: 1,
-  Kata: 2,
-  Retention: 3,
-  Deduction: 4,
-  'Extra Cost': 5,
-  Payment: 6,
-};
-
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function balanceColor(dr: boolean) {
+  return dr ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
+}
 
 export function TransportLedger({
   trips,
@@ -92,7 +110,8 @@ export function TransportLedger({
   startDate: string;
   endDate: string;
 }) {
-  const [search, setSearch] = useState('');
+  const [kind, setKind] = useState<'ALL' | LedgerKind>('ALL');
+  const [q, setQ] = useState('');
 
   const entries: LedgerEntry[] = useMemo(() => {
     // A freight payment is tagged with a lorry number, never with the agency,
@@ -104,68 +123,77 @@ export function TransportLedger({
     const raw: Omit<LedgerEntry, 'runningBalance'>[] = [];
 
     for (const t of trips) {
-      const lorry = t.lorryNumber ?? '-';
-      const tail = `${t.invoice ? ` · ${t.invoice}` : ''}${t.destination ? ` → ${t.destination}` : ''}`;
-      raw.push({
-        id: `${t.id}-freight`,
+      const base = {
         date: t.date,
-        particulars: `Freight · Lorry ${lorry}${tail}`,
-        reference: t.invoice,
-        kind: 'Freight',
+        lorryNumber: t.lorryNumber,
+        invoiceNumber: t.invoice,
+        utr: null as string | null,
+      };
+      const tripDetail = [
+        t.weightKg ? `${t.weightKg.toLocaleString('en-IN')} kg` : null,
+        t.buyer,
+      ].filter(Boolean).join(' · ') || null;
+
+      raw.push({
+        ...base,
+        id: `${t.id}-freight`,
+        kind: 'FREIGHT',
+        particulars: t.destination ? `Freight - ${t.destination}` : 'Freight',
+        detail: tripDetail,
         debit: 0,
         credit: round2(t.freight),
       });
       if (t.hamali > 0) {
         raw.push({
+          ...base,
           id: `${t.id}-hamali`,
-          date: t.date,
-          particulars: `Hamali (loading) · Lorry ${lorry}`,
-          reference: t.invoice,
-          kind: 'Hamali',
+          kind: 'HAMALI',
+          particulars: 'Hamali (loading) deducted',
+          detail: "Lorry's share of the loading hamali",
           debit: round2(t.hamali),
           credit: 0,
         });
       }
       if (t.kata > 0) {
         raw.push({
+          ...base,
           id: `${t.id}-kata`,
-          date: t.date,
-          particulars: `Kata fee · Lorry ${lorry}`,
-          reference: t.invoice,
-          kind: 'Kata',
+          kind: 'KATA',
+          particulars: 'Kata fee deducted',
+          detail: 'Weighbridge charge',
           debit: round2(t.kata),
           credit: 0,
         });
       }
       if (t.retention > 0) {
         raw.push({
+          ...base,
           id: `${t.id}-retention`,
-          date: t.date,
-          particulars: `Freight retention held · Lorry ${lorry}`,
-          reference: t.invoice,
-          kind: 'Retention',
+          kind: 'RETENTION',
+          particulars: 'Freight retention held',
+          detail: 'Released on delivery',
           debit: round2(t.retention),
           credit: 0,
         });
       }
       t.otherDeductions.forEach((d, i) => {
         raw.push({
+          ...base,
           id: `${t.id}-ded-${i}`,
-          date: t.date,
-          particulars: `${d.label} · Lorry ${lorry}`,
-          reference: t.invoice,
-          kind: 'Deduction',
+          kind: 'DEDUCTION',
+          particulars: d.label,
+          detail: 'Deducted off this trip',
           debit: round2(d.amount),
           credit: 0,
         });
       });
       t.extraCosts.forEach((a, i) => {
         raw.push({
+          ...base,
           id: `${t.id}-add-${i}`,
-          date: t.date,
-          particulars: `${a.label} (extra cost) · Lorry ${lorry}`,
-          reference: t.invoice,
-          kind: 'Extra Cost',
+          kind: 'EXTRA',
+          particulars: a.label,
+          detail: 'Extra cost allowed on this trip',
           debit: 0,
           credit: round2(a.amount),
         });
@@ -182,9 +210,12 @@ export function TransportLedger({
       raw.push({
         id: `pay-${p.id}`,
         date: p.date,
-        particulars: `Payment · Lorry ${p.lorryNumber}${p.reference ? ` · ${p.reference}` : ''}`,
-        reference: p.reference ?? null,
-        kind: 'Payment',
+        kind: 'PAYMENT',
+        particulars: 'Payment made',
+        detail: p.payee || p.description || null,
+        lorryNumber: p.lorryNumber ?? null,
+        invoiceNumber: null,
+        utr: p.reference ?? null,
         debit: round2(Number(p.amount) || 0),
         credit: 0,
       });
@@ -205,152 +236,379 @@ export function TransportLedger({
   }, [trips, payments, startDate, endDate]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter(
-      (e) =>
-        e.particulars.toLowerCase().includes(q) ||
-        e.kind.toLowerCase().includes(q) ||
-        (e.reference ?? '').toLowerCase().includes(q)
-    );
-  }, [entries, search]);
+    const needle = q.trim().toLowerCase();
+    return entries.filter((e) => {
+      if (kind !== 'ALL' && e.kind !== kind) return false;
+      if (!needle) return true;
+      return (
+        e.particulars.toLowerCase().includes(needle) ||
+        (e.detail ?? '').toLowerCase().includes(needle) ||
+        (e.lorryNumber ?? '').toLowerCase().includes(needle) ||
+        (e.invoiceNumber ?? '').toLowerCase().includes(needle) ||
+        (e.utr ?? '').toLowerCase().includes(needle)
+      );
+    });
+  }, [entries, kind, q]);
 
-  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: visible = [] } = usePagedRows(filtered, 50);
+  const { page, setPage, pageSize, setPageSize, totalPages, total, pageRows: paged = [] } = usePagedRows(filtered, 50);
 
-  const totalEarned = round2(entries.filter((e) => e.credit > 0).reduce((s, e) => s + e.credit, 0));
-  const totalDeducted = round2(entries.filter((e) => e.kind !== 'Payment').reduce((s, e) => s + e.debit, 0));
-  const totalPaid = round2(entries.filter((e) => e.kind === 'Payment').reduce((s, e) => s + e.debit, 0));
+  // The account's own position is read off every entry, not off the filtered
+  // view - a ledger filtered to "Payments" still owes what it owes.
   const closing = entries.length ? entries[entries.length - 1].runningBalance : 0;
-  const balanceLabel = `${rupees(Math.abs(closing))} ${closing > 0 ? 'DR' : 'CR'}`;
+  const totalFreight = round2(entries.filter((e) => e.kind === 'FREIGHT').reduce((s, e) => s + e.credit, 0));
+  const totalDeducted = round2(entries.filter((e) => e.kind !== 'PAYMENT').reduce((s, e) => s + e.debit, 0));
+  const totalPaid = round2(entries.filter((e) => e.kind === 'PAYMENT').reduce((s, e) => s + e.debit, 0));
+  const lifetime = round2(entries.reduce((s, e) => s + e.credit, 0));
+
+  const viewDebit = round2(filtered.reduce((s, e) => s + e.debit, 0));
+  const viewCredit = round2(filtered.reduce((s, e) => s + e.credit, 0));
+
+  const periodText = entries.length
+    ? `${shortDate(entries[0].date)} – ${shortDate(entries[entries.length - 1].date)}`
+    : '';
+
+  const ownerName = transport?.contactPerson?.trim() || '';
+  const phones = [transport?.phone, transport?.phone2].map((p) => (p || '').trim()).filter(Boolean);
+  const address = [transport?.address, transport?.city, transport?.state].map((p) => (p || '').trim()).filter(Boolean).join(', ');
 
   const exportColumns: ExportColumn<LedgerEntry>[] = [
     { header: 'Date', value: (e) => shortDate(e.date) },
+    { header: 'Type', value: (e) => KIND_META[e.kind].label },
     { header: 'Particulars', value: (e) => e.particulars },
-    { header: 'Type', value: (e) => e.kind },
+    { header: 'Lorry No', value: (e) => e.lorryNumber ?? '' },
+    { header: 'Invoice No', value: (e) => e.invoiceNumber ?? '' },
+    { header: 'UTR / Ref', value: (e) => e.utr ?? '' },
     { header: 'Debit', value: (e) => (e.debit ? rupees(e.debit) : ''), excel: (e) => e.debit || null, numFmt: '#,##0.00', align: 'right' },
     { header: 'Credit', value: (e) => (e.credit ? rupees(e.credit) : ''), excel: (e) => e.credit || null, numFmt: '#,##0.00', align: 'right' },
     {
       header: 'Balance',
-      value: (e) => `${rupees(Math.abs(e.runningBalance))} ${e.runningBalance > 0 ? 'DR' : 'CR'}`,
+      value: (e) => (e.runningBalance === 0 ? '0.00' : `${rupees(Math.abs(e.runningBalance))} ${e.runningBalance > 0 ? 'DR' : 'CR'}`),
       align: 'right',
     },
   ];
 
-  const subtitle = transport?.payToOwner
-    ? `Single owner · paid to ${transport.contactPerson?.trim() || transport.name}${transport.phone ? ` (${transport.phone})` : ''}`
-    : 'Trips, deductions and freight payments for this agency';
-
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-card border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Freight Earned</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">{rupees(totalEarned)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Gross freight &amp; extra costs credited</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-card border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Deductions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold text-amber-600 dark:text-amber-400">{rupees(totalDeducted)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Hamali, kata, retention &amp; other</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-card border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Paid</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{rupees(totalPaid)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Freight payments against these lorries</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-card border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Closing Balance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-xl font-bold ${closing > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-              {balanceLabel}
+      {/* profile header */}
+      <div className="rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card overflow-hidden">
+        <div className="p-6 flex flex-col lg:flex-row lg:items-start gap-6">
+          <div className="flex items-start gap-4 flex-1">
+            <div className="h-14 w-14 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <Truck className="h-7 w-7" />
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              {closing > 0 ? 'Overpaid · recoverable' : 'Payable to the transport'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="rounded-lg border bg-card">
-        <div className="px-5 py-4 border-b flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="font-semibold text-sm">{transportName} Ledger</div>
-            <p className="text-xs text-muted-foreground">{subtitle}</p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-2xl font-bold tracking-tight">{transportName}</h2>
+                <Badge variant="outline" className="font-medium">
+                  {transport?.payToOwner ? 'Single Owner' : 'Transport'}
+                </Badge>
+                {transport?.code && <Badge variant="outline" className="font-mono text-[10px]">{transport.code}</Badge>}
+              </div>
+              <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-muted-foreground">
+                {phones.length > 0 && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5" /> {phones.join(' / ')}
+                  </span>
+                )}
+                {ownerName && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <UserRound className="h-3.5 w-3.5" /> {ownerName}
+                  </span>
+                )}
+                {address && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5" /> {address}
+                  </span>
+                )}
+                {transport?.gstin && (
+                  <span className="inline-flex items-center gap-1.5 group font-medium tracking-wide">
+                    <Hash className="h-3.5 w-3.5" /> {transport.gstin} <CopyBtn value={transport.gstin} />
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <SearchInput
-              value={search}
-              onValueChange={setSearch}
-              placeholder="Search lorry, invoice, entry…"
-              className="h-9 w-56 bg-card"
-            />
-            <ExportButtons
-              filename={`Ledger_${transportName.replace(/\s+/g, '_')}`}
-              title={`${transportName} - Transport Ledger`}
-              subtitle={`${entries.length} entries · closing ${balanceLabel}`}
-              columns={exportColumns}
-              rows={filtered}
-            />
+
+          {/* who the money goes to */}
+          <div className="lg:w-80 shrink-0 rounded-lg border bg-background/60 p-4 space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Wallet className="h-3.5 w-3.5" /> Payee
+            </div>
+            {transport?.payToOwner ? (
+              <div className="space-y-1.5 text-sm">
+                <Info label="Owner" value={ownerName || `${transportName} (Owner)`} />
+                {phones[0] ? <Info label="WhatsApp" value={phones[0]} mono copy /> : (
+                  <p className="text-xs text-muted-foreground italic">No owner number on file yet.</p>
+                )}
+                <p className="text-[11px] text-muted-foreground leading-snug pt-1 border-t">
+                  Every lorry is settled on this one account - freight receipts go to the owner, never the driver.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                Paid per lorry. Switch on "Single owner" in Master Data to settle this agency on one account.
+              </p>
+            )}
           </div>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-28">Date</TableHead>
-              <TableHead className="min-w-[260px]">Particulars</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="text-right border-l border-border/60 bg-secondary">Debit</TableHead>
-              <TableHead className="text-right bg-secondary">Credit</TableHead>
-              <TableHead className="text-right border-l border-border/60 bg-secondary">Balance</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                  No ledger entries for {transportName} in the selected period.
-                </TableCell>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard
+          icon={closing > 0 ? TrendingUp : TrendingDown}
+          label={closing > 0 ? 'Recoverable (overpaid)' : 'Payable (we owe)'}
+          value={closing === 0 ? 'Settled' : rupees(Math.abs(closing))}
+          sub={closing === 0 ? undefined : closing > 0 ? 'DR' : 'CR'}
+          tone={closing === 0 ? 'neutral' : closing > 0 ? 'emerald' : 'rose'}
+        />
+        <KpiCard icon={Scale} label="Lifetime Freight" value={rupees(lifetime)} hint={`${entries.length} entries · ${trips.length} trips`} />
+        <KpiCard icon={ReceiptText} label="Gross Freight" value={rupees(totalFreight)} tone="blue" hint={`${rupees(totalDeducted)} deducted`} />
+        <KpiCard icon={Wallet} label="Total Paid" value={rupees(totalPaid)} hint="Freight payments on these lorries" />
+      </div>
+
+      {/* filters */}
+      <div className="flex flex-col lg:flex-row gap-3 print:hidden">
+        <div className="inline-flex rounded-lg border bg-card p-1 self-start">
+          {KIND_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => { setKind(f.value); setPage(1); }}
+              className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
+                kind === f.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+            placeholder="Search lorry, invoice, UTR…"
+            className="pl-9"
+          />
+        </div>
+        <ExportButtons
+          filename={`Ledger_${transportName.replace(/\s+/g, '_')}`}
+          title={`${transportName} - Transport Ledger`}
+          subtitle={periodText ? `${periodText} · ${filtered.length} entries` : `${filtered.length} entries`}
+          columns={exportColumns}
+          rows={filtered}
+        />
+      </div>
+
+      {/* statement */}
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b bg-gradient-to-r from-primary/[0.07] via-card to-card flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <ReceiptText className="h-4 w-4 text-primary" />
+              <span className="font-semibold tracking-tight">Account Statement</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {periodText ? `${transportName} · ${periodText}` : transportName}
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Closing Balance</div>
+            <div className={`text-lg font-bold tabular-nums ${closing === 0 ? '' : balanceColor(closing > 0)}`}>
+              {closing === 0 ? 'Settled' : <>{rupees(Math.abs(closing))} <span className="text-xs font-semibold">{closing > 0 ? 'DR' : 'CR'}</span></>}
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-28">Date</TableHead>
+                <TableHead className="min-w-[260px]">Particulars</TableHead>
+                <TableHead>Reference</TableHead>
+                <TableHead className="text-right border-l border-border/60 bg-secondary">Debit</TableHead>
+                <TableHead className="text-right bg-secondary">Credit</TableHead>
+                <TableHead className="text-right border-l border-border/60 bg-secondary">Balance</TableHead>
               </TableRow>
-            ) : (
-              visible.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{shortDate(e.date)}</TableCell>
-                  <TableCell className="text-sm">{e.particulars}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={`text-[10px] ${KIND_TONE[e.kind]}`}>
-                      {e.kind}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right text-sm border-l border-border/60">{e.debit ? rupees(e.debit) : '-'}</TableCell>
-                  <TableCell className="text-right text-sm">{e.credit ? rupees(e.credit) : '-'}</TableCell>
-                  <TableCell
-                    className={`text-right text-sm font-semibold border-l border-border/60 ${
-                      e.runningBalance > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                    }`}
-                  >
-                    {rupees(Math.abs(e.runningBalance))} {e.runningBalance > 0 ? 'DR' : 'CR'}
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
+                    No entries for {transportName} with the selected filters.
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-        <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
+              ) : (
+                <>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{shortDate(filtered[0].date)}</TableCell>
+                    <TableCell className="text-xs font-medium text-muted-foreground italic" colSpan={2}>Opening Balance</TableCell>
+                    <TableCell className="text-right border-l border-border/60 bg-muted/20" />
+                    <TableCell className="text-right bg-muted/20" />
+                    <TableCell className="text-right border-l border-border/60 bg-muted/20">
+                      <BalanceCell value={0} muted />
+                    </TableCell>
+                  </TableRow>
+
+                  {paged.map((e, i) => <EntryRow key={e.id} e={e} zebra={i % 2 === 1} />)}
+
+                  <TableRow className="bg-primary/[0.06] hover:bg-primary/[0.06] border-t-2 border-border">
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-medium">
+                      {shortDate(filtered[filtered.length - 1].date)}
+                    </TableCell>
+                    <TableCell className="text-sm font-semibold" colSpan={2}>Closing Balance</TableCell>
+                    <TableCell className="text-right border-l border-border/60 font-semibold tabular-nums">{viewDebit > 0 ? rupees(viewDebit) : ''}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{viewCredit > 0 ? rupees(viewCredit) : ''}</TableCell>
+                    <TableCell className="text-right border-l border-border/60"><BalanceCell value={closing} /></TableCell>
+                  </TableRow>
+                </>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {filtered.length > 0 && (
+          <div className="grid grid-cols-3 divide-x divide-border border-t bg-muted/20">
+            <SummaryStat label="Total Debit" value={rupees(viewDebit)} />
+            <SummaryStat label="Total Credit" value={rupees(viewCredit)} />
+            <SummaryStat
+              label="Net Balance"
+              value={closing === 0 ? 'Settled' : `${rupees(Math.abs(closing))} ${closing > 0 ? 'DR' : 'CR'}`}
+              tone={closing === 0 ? undefined : closing > 0 ? 'emerald' : 'rose'}
+            />
+          </div>
+        )}
       </div>
+
+      <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
     </div>
+  );
+}
+
+/* --------------------------------------------------------------- one row */
+
+function EntryRow({ e, zebra }: { e: LedgerEntry; zebra?: boolean }) {
+  const meta = KIND_META[e.kind];
+  const refs = [
+    e.invoiceNumber && { label: 'Inv', value: e.invoiceNumber },
+    e.lorryNumber && { label: 'Veh', value: e.lorryNumber },
+    e.utr && { label: 'UTR', value: e.utr },
+  ].filter(Boolean) as { label: string; value: string }[];
+
+  return (
+    <TableRow className={zebra ? 'bg-muted/[0.18]' : undefined}>
+      <TableCell className="align-top text-sm whitespace-nowrap text-muted-foreground">{shortDate(e.date)}</TableCell>
+      <TableCell className="align-top">
+        <Badge variant="outline" className={`text-[10px] font-semibold ${meta.cls}`}>{meta.label}</Badge>
+        <div className="text-[13px] text-foreground/90 mt-1.5 leading-snug whitespace-normal">{e.particulars}</div>
+        {e.detail && <div className="text-[11px] text-muted-foreground mt-0.5">{e.detail}</div>}
+      </TableCell>
+      <TableCell className="align-top">
+        {refs.length ? (
+          <div className="space-y-0.5">
+            {refs.map((r) => (
+              <div key={r.label} className="flex items-baseline gap-1.5 text-[11px]">
+                <span className="text-muted-foreground w-7 shrink-0">{r.label}</span>
+                <span className="font-mono text-foreground/80 break-all">{r.value}</span>
+              </div>
+            ))}
+            <div className="flex items-baseline gap-1.5 text-[11px]">
+              <span className="text-muted-foreground w-7 shrink-0">Dt</span>
+              <span className="text-muted-foreground">{shortDate(e.date)}</span>
+            </div>
+          </div>
+        ) : (
+          <span className="text-muted-foreground text-xs">-</span>
+        )}
+      </TableCell>
+      <TableCell className="align-top text-right tabular-nums border-l border-border/60">
+        {e.debit > 0 ? <span className="font-semibold text-foreground">{rupees(e.debit)}</span> : <span className="text-muted-foreground/50">-</span>}
+      </TableCell>
+      <TableCell className="align-top text-right tabular-nums">
+        {e.credit > 0 ? <span className="font-semibold text-foreground">{rupees(e.credit)}</span> : <span className="text-muted-foreground/50">-</span>}
+      </TableCell>
+      <TableCell className="align-top text-right border-l border-border/60">
+        <BalanceCell value={e.runningBalance} />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/* ------------------------------------------------------------ small bits */
+
+function BalanceCell({ value, muted }: { value: number; muted?: boolean }) {
+  if (value === 0) return <span className="text-muted-foreground tabular-nums">0.00</span>;
+  const dr = value > 0;
+  return (
+    <span className={`inline-flex items-baseline gap-1.5 tabular-nums ${muted ? 'text-muted-foreground' : `font-semibold ${balanceColor(dr)}`}`}>
+      {rupees(Math.abs(value))}
+      <span className={`text-[9px] font-bold px-1 py-0.5 rounded leading-none ${dr ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+        {dr ? 'DR' : 'CR'}
+      </span>
+    </span>
+  );
+}
+
+function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: 'emerald' | 'rose' }) {
+  return (
+    <div className="px-5 py-3.5 text-center">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`text-base font-bold tabular-nums mt-0.5 ${tone ? TONE_RING[tone] : ''}`}>{value}</div>
+    </div>
+  );
+}
+
+function Info({ label, value, mono, copy }: { label: string; value: string; mono?: boolean; copy?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2 group">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className={`flex items-center gap-1.5 ${mono ? 'font-mono' : ''}`}>
+        {value}
+        {copy && <CopyBtn value={value} />}
+      </span>
+    </div>
+  );
+}
+
+function CopyBtn({ value }: { value: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => { navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1200); }}
+      className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+      title="Copy"
+    >
+      {done ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+type Tone = 'neutral' | 'emerald' | 'rose' | 'blue';
+const TONE_RING: Record<Tone, string> = {
+  neutral: 'text-muted-foreground',
+  emerald: 'text-emerald-600 dark:text-emerald-400',
+  rose: 'text-rose-600 dark:text-rose-400',
+  blue: 'text-blue-600 dark:text-blue-400',
+};
+
+function KpiCard({ icon: Icon, label, value, hint, sub, tone = 'neutral' }: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string; value: string; hint?: string; sub?: string; tone?: Tone;
+}) {
+  return (
+    <Card className="border shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+          <Icon className={`h-4 w-4 ${TONE_RING[tone]}`} />
+        </div>
+        <div className={`text-xl font-bold ${tone === 'neutral' ? '' : TONE_RING[tone]}`}>
+          {value}{sub && <span className="text-xs font-semibold ml-1">{sub}</span>}
+        </div>
+        {hint && <p className="text-[10px] text-muted-foreground mt-1">{hint}</p>}
+      </CardContent>
+    </Card>
   );
 }

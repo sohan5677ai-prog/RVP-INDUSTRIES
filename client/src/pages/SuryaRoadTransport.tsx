@@ -260,6 +260,8 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         lorryNumber: r.lorryNumber,
         invoice: r.invoice,
         destination: r.destination,
+        buyer: r.buyer,
+        weightKg: r.weightKg,
         freight: r.freight,
         hamali: r.hamali,
         kata: r.kata,

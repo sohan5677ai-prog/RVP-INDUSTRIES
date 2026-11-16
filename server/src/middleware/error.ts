@@ -42,6 +42,24 @@ export function errorHandler(
   if (err instanceof SyntaxError && 'status' in err && (err as any).status === 400) {
     return res.status(400).json({ error: 'Malformed JSON payload in request body' });
   }
+  // A unique-constraint clash is the caller's doing (a name or code already in
+  // use), not a server fault. Returning it as a 500 "Internal server error"
+  // left the user with nothing to act on, so name the field instead.
+  if (err && typeof err === 'object' && (err as any).code === 'P2002') {
+    const target = (err as any).meta?.target;
+    const fields: string[] = Array.isArray(target)
+      ? target
+      : typeof target === 'string'
+        ? [target]
+        : [];
+    // Prisma reports the index name on some providers (e.g. "Transport_code_key").
+    const names = fields.map((f) => f.replace(/_key$/, '').split('_').pop() ?? f).filter(Boolean);
+    return res.status(409).json({
+      error: names.length
+        ? `That ${names.join(' + ')} is already in use. Enter a different one.`
+        : 'That value is already in use. Enter a different one.',
+    });
+  }
 
   logger.error(err);
   if (isProduction()) {

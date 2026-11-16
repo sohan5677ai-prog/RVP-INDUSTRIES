@@ -19,6 +19,33 @@ const ORDER: ReminderSlotId[] = ['support-reply', 'festivals', 'user-notes', 'sa
 
 const HANDOVER_MS = 320;
 
+// The whole run-through is a once-a-day nudge, not a once-a-page one: a plain
+// browser refresh used to replay every popup, because the queue's "done" list
+// lives in React state only. We stamp the day the first popup actually opens
+// and Layout refuses to mount the queue again until the date changes.
+const SHOWN_KEY = 'reminders:lastShownDate';
+
+/** Local calendar day - toISOString() would roll the gate over at 5:30am IST. */
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** True once today's run-through has been seen on this browser, for this user. */
+export function remindersShownToday(userKey: string) {
+  try {
+    return localStorage.getItem(`${SHOWN_KEY}:${userKey}`) === todayKey();
+  } catch {
+    return false; // private mode / storage blocked - show them rather than hide them
+  }
+}
+
+function markRemindersShown(userKey: string) {
+  try {
+    localStorage.setItem(`${SHOWN_KEY}:${userKey}`, todayKey());
+  } catch { /* nothing to do; the popups simply come back next refresh */ }
+}
+
 interface ReminderQueueValue {
   setReady: (id: ReminderSlotId, ready: boolean) => void;
   finish: (id: ReminderSlotId) => void;
@@ -29,7 +56,9 @@ interface ReminderQueueValue {
 
 const Ctx = createContext<ReminderQueueValue | null>(null);
 
-export function ReminderQueueProvider({ children }: { children: React.ReactNode }) {
+export function ReminderQueueProvider(
+  { children, userKey = 'anon' }: { children: React.ReactNode; userKey?: string },
+) {
   const [ready, setReadyMap] = useState<Partial<Record<ReminderSlotId, boolean>>>({});
   const [done, setDone] = useState<ReminderSlotId[]>([]);
   // Blocks the next popup for one beat while the previous one animates out.
@@ -65,6 +94,12 @@ export function ReminderQueueProvider({ children }: { children: React.ReactNode 
     if (current && pending.includes(current)) return;
     setCurrent(pending[0] ?? null);
   }, [pending, handingOver, current]);
+
+  // Stamp the day only when something is genuinely on screen, so a quiet morning
+  // does not spend the day's allowance before any reminder has anything to say.
+  useEffect(() => {
+    if (current) markRemindersShown(userKey);
+  }, [current, userKey]);
 
   const value = useMemo<ReminderQueueValue>(() => ({
     setReady,

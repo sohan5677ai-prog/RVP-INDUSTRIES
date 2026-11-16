@@ -66,7 +66,7 @@ import UserNoteReminders from '@/components/UserNoteReminders';
 import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
-import { ReminderQueueProvider } from '@/components/ReminderQueue';
+import { ReminderQueueProvider, remindersShownToday } from '@/components/ReminderQueue';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
 type NavSection = { heading?: string; items: NavItem[] };
@@ -215,20 +215,25 @@ function PageLoader() {
   );
 }
 
-function DeferredReminders() {
+function DeferredReminders({ userKey }: { userKey: string }) {
   const [ready, setReady] = useState(false);
+  // Decided once, on mount: today's run-through has already been seen on this
+  // browser, so a refresh (or hopping between pages) must not replay it. Held in
+  // state so the stamp written while the queue is open cannot unmount it midway.
+  const [seenToday] = useState(() => remindersShownToday(userKey));
 
   useEffect(() => {
+    if (seenToday) return;
     // Delay reminder evaluation so the active page's primary data queries
     // have uncontended HTTP/1.1 socket bandwidth and finish loading first.
     const timer = setTimeout(() => setReady(true), 1500);
     return () => clearTimeout(timer);
-  }, []);
+  }, [seenToday]);
 
-  if (!ready) return null;
+  if (seenToday || !ready) return null;
 
   return (
-    <ReminderQueueProvider>
+    <ReminderQueueProvider userKey={userKey}>
       <SupportAnnouncements />
       <FestivalReminders />
       <UserNoteReminders />
@@ -279,7 +284,7 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden">
       {/* One queue, one popup on screen at a time - mounted after initial route load */}
-      <DeferredReminders />
+      <DeferredReminders key={user?.id ?? 'anon'} userKey={user?.id ?? 'anon'} />
       <aside className={cn('w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border relative', sidebarOpen ? 'flex' : 'hidden')}>
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(125%_40%_at_0%_0%,rgba(232,169,63,0.11),transparent_62%)]" />
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.025] via-transparent to-black/25" />

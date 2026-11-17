@@ -103,6 +103,20 @@ type EditDraft = {
  * That is why the dialog needs no kg boxes - the only load worth typing by
  * hand is a correction, and corrections are made on the card.
  */
+/**
+ * The transporter the dialog opens on.
+ *
+ * Nearly every lorry goes to Srinimadupuri Transport, so that is the one the
+ * planner should find already chosen; anything else is a deliberate switch.
+ */
+const HOUSE_TRANSPORT = 'srinimadupuri';
+
+function defaultTransportId(transports: Transport[]) {
+  const key = (name: string) => name.toLowerCase().replace(/[^a-z]/g, '');
+  const house = transports.find((x) => key(x.name).includes(HOUSE_TRANSPORT));
+  return house?.id ?? transports[0]?.id ?? '';
+}
+
 function lorriesFor(counts: Record<number, number>, roomKg: number) {
   const out: { vehicleClassKg: number; plannedKg: number }[] = [];
   let left = roomKg;
@@ -292,16 +306,16 @@ export default function LoadingCalendarPage() {
       toast.error('No orders are waiting for a lorry');
       return;
     }
-    // Open with one lorry already on the sheet - the biggest standard size the
-    // balance still justifies, since the common case is a full load.
-    const cls = VEHICLE_CLASSES.filter((c) => c <= chosen.unplannedKg).pop() ?? VEHICLE_CLASSES[0];
+    // Open with nothing counted. The sizes are the planner's call, and a size
+    // put there for him is one he has to notice and undo before he can count
+    // his own.
     setPlan({
       saleOrderId: chosen.id,
       date,
       loadingPoint: 'RVP',
-      transportId: transports[0]?.id ?? '',
+      transportId: defaultTransportId(transports),
       notes: '',
-      counts: { [cls]: 1 },
+      counts: {},
     });
   };
 

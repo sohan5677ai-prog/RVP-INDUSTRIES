@@ -30,6 +30,47 @@ import { Segmented } from '@/components/ui/segmented';
  * between RVP and KNM is otherwise a phone call per lorry.
  */
 
+/**
+ * The sheet's own palette.
+ *
+ * Fixed light colours, never the app's theme tokens: this is a picture that
+ * leaves the building, and a planner working in dark mode must not send a
+ * black card with grey text that a lorry driver cannot read in daylight. The
+ * navy and the clay accent are the ERP's own, so a sheet on WhatsApp is
+ * recognisably the same company as the screen it came from.
+ */
+const SHEET_W = 760;
+const NAVY = '#0F2742';
+const NAVY_LABEL = '#8CA6C4';
+const NAVY_SOFT_TEXT = '#B6C7DA';
+const ACCENT = '#C2410C';
+const PAPER = '#FFFFFF';
+const ZEBRA = '#FCFCFD';
+const TINT = '#F7F8FA';
+const BAND = '#EEF2F7';
+const LINE = '#E4E7EC';
+const LINE_STRONG = '#CDD3DB';
+const HAIRLINE = '#F1F2F5';
+const INK = '#111827';
+const INK_SOFT = '#374151';
+const MUTED = '#6B7280';
+const MUTED_SOFT = '#9CA3AF';
+const GREEN = '#15803D';
+const MONO = "'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace";
+
+/**
+ * The letterhead mark. A short first word is the house name itself ("RVP
+ * Industries" is RVP, and that is what the transport office calls us);
+ * anything longer falls back to initials.
+ */
+function monogram(companyName: string): string {
+  const words = companyName.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'RVP';
+  if (words[0].length <= 4) return words[0].toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
 /** Already gone, or never going. Neither belongs on a sheet of future work. */
 const LIVE = new Set(['PLANNED', 'REQUESTED', 'CONFIRMED']);
 
@@ -192,6 +233,7 @@ export function LorryCodeSheet(props: { transports: Transport[]; weekFrom: strin
             slots={g.slots}
             companyName={companyQ.data?.tradeName || companyQ.data?.name || 'RVP Industries'}
             companyPlace={companyQ.data?.dispatchFromPlace || companyQ.data?.stateName || null}
+            companyContact={companyQ.data?.contact || null}
             rangeLabel={rangeLabel}
             assigned={Boolean(g.id)}
           />
@@ -204,20 +246,19 @@ export function LorryCodeSheet(props: { transports: Transport[]; weekFrom: strin
 /**
  * One transporter's card, and the three ways it leaves the browser.
  *
- * The sheet is styled in fixed light colours rather than the app's tokens: it
- * is a picture that leaves the building, and a planner working in dark mode
- * must not send a black card with grey text that a phone cannot read in
- * daylight.
+ * The sheet itself is drawn in the fixed palette above, never the app's theme
+ * tokens - see the note there.
  */
 function TransporterSheet(props: {
   name: string;
   slots: DispatchSlot[];
   companyName: string;
   companyPlace: string | null;
+  companyContact: string | null;
   rangeLabel: string;
   assigned: boolean;
 }) {
-  const { name, slots, companyName, companyPlace, rangeLabel, assigned } = props;
+  const { name, slots, companyName, companyPlace, companyContact, rangeLabel, assigned } = props;
   const sheetRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<null | 'download' | 'copy' | 'share'>(null);
 
@@ -338,109 +379,201 @@ function TransporterSheet(props: {
         <div
           ref={sheetRef}
           style={{
-            width: 720,
-            background: '#ffffff',
-            color: '#1c1917',
+            width: SHEET_W,
+            background: PAPER,
+            color: INK,
             fontFamily: "'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif",
-            border: '1px solid #e7e5e4',
-            borderRadius: 14,
+            border: `1px solid ${LINE}`,
+            borderRadius: 16,
             overflow: 'hidden',
           }}
         >
-          <div style={{ padding: '18px 22px', background: '#1e293b', color: '#ffffff' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{companyName}</div>
-                {companyPlace && <div style={{ fontSize: 11, color: '#cbd5e1', marginTop: 2 }}>{companyPlace}</div>}
+          {/* Letterhead. The mill's name carries the sheet, so it is read
+              first; the monogram gives the picture a mark the transport office
+              can pick out of a crowded WhatsApp group. */}
+          <div style={{ padding: '22px 26px 20px', background: NAVY, color: '#ffffff' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 11,
+                    background: 'rgba(255,255,255,0.10)',
+                    border: '1px solid rgba(255,255,255,0.20)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  {monogram(companyName)}
+                </div>
+                <div>
+                  <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.01em' }}>{companyName}</div>
+                  <div style={{ fontSize: 11.5, color: NAVY_SOFT_TEXT, marginTop: 3 }}>
+                    {[companyPlace, companyContact].filter(Boolean).join('  ·  ') || 'Loading codes'}
+                  </div>
+                </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 10, letterSpacing: '0.14em', color: '#94a3b8', fontWeight: 700 }}>
-                  LOADING CODES
+                <div style={{ fontSize: 9.5, letterSpacing: '0.18em', color: NAVY_LABEL, fontWeight: 700 }}>
+                  LOADING CODE SHEET
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, marginTop: 3 }}>{rangeLabel}</div>
+                <div
+                  style={{
+                    display: 'inline-block',
+                    marginTop: 7,
+                    padding: '4px 11px',
+                    borderRadius: 999,
+                    background: 'rgba(255,255,255,0.12)',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                  }}
+                >
+                  {rangeLabel}
+                </div>
               </div>
             </div>
           </div>
+          <div style={{ height: 3, background: ACCENT }} />
 
+          {/* Who it is for, and the three figures he checks before reading a
+              single row: how many lorries, how much tonnage, how many still
+              owe us a number. */}
           <div
             style={{
-              padding: '12px 22px',
-              background: '#f8fafc',
-              borderBottom: '1px solid #e7e5e4',
+              padding: '16px 26px',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              gap: 16,
+              gap: 20,
+              borderBottom: `1px solid ${LINE}`,
             }}
           >
-            <div>
-              <div style={{ fontSize: 10, letterSpacing: '0.12em', color: '#78716c', fontWeight: 700 }}>
-                TRANSPORTER
-              </div>
-              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>{name}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 9.5, letterSpacing: '0.16em', color: MUTED, fontWeight: 700 }}>PREPARED FOR</div>
+              <div style={{ fontSize: 17, fontWeight: 700, marginTop: 4, letterSpacing: '-0.01em' }}>{name}</div>
             </div>
-            <div style={{ textAlign: 'right', fontSize: 12, color: '#57534e' }}>
-              <div style={{ fontWeight: 700, color: '#1c1917' }}>
-                {slots.length} {slots.length === 1 ? 'lorry' : 'lorries'}
-              </div>
-              <div>{tonnage(totalKg)} in all</div>
+            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <Stat label="Lorries" value={String(slots.length)} />
+              <Stat label="Tonnage" value={tonnage(totalKg)} divider />
+              <Stat label="Awaiting no." value={String(pending)} divider tone={pending > 0 ? ACCENT : GREEN} />
             </div>
           </div>
 
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ color: '#78716c' }}>
-                <Th style={{ width: 120, paddingLeft: 22 }}>Code</Th>
-                <Th style={{ width: 96 }}>Size</Th>
+              <tr style={{ background: TINT, color: MUTED }}>
+                <Th style={{ width: 128, paddingLeft: 26 }}>Code</Th>
+                <Th style={{ width: 92 }}>Size</Th>
                 <Th>Delivery to</Th>
-                <Th style={{ width: 74 }}>Load at</Th>
-                <Th style={{ width: 130, paddingRight: 22 }}>Lorry no.</Th>
+                <Th style={{ width: 84 }}>Load at</Th>
+                <Th style={{ width: 138, paddingRight: 26 }}>Lorry no.</Th>
               </tr>
             </thead>
             <tbody>
               {byDay.map(([key, daySlots]) => (
                 <Fragment key={key}>
                   <tr>
-                    <td
-                      colSpan={5}
-                      style={{
-                        background: '#f1f5f9',
-                        padding: '6px 22px',
-                        fontSize: 10.5,
-                        fontWeight: 700,
-                        letterSpacing: '0.1em',
-                        textTransform: 'uppercase',
-                        color: '#334155',
-                        borderTop: '1px solid #e2e8f0',
-                        borderBottom: '1px solid #e2e8f0',
-                      }}
-                    >
-                      {dayLabel(key)} · {daySlots.length} {daySlots.length === 1 ? 'lorry' : 'lorries'}
+                    <td colSpan={5} style={{ padding: 0, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}` }}>
+                      {/* The day band is the sheet's spine: a transport office
+                          reads it as "what am I sending on Thursday", so the
+                          date is given room and the day's own load sits against
+                          it. */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          padding: '8px 26px',
+                          background: BAND,
+                          borderLeft: `3px solid ${NAVY}`,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            color: NAVY,
+                          }}
+                        >
+                          {dayLabel(key)}
+                        </span>
+                        <span style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
+                          {daySlots.length} {daySlots.length === 1 ? 'lorry' : 'lorries'} ·{' '}
+                          {tonnage(daySlots.reduce((sum, x) => sum + x.vehicleClassKg, 0))}
+                        </span>
+                      </div>
                     </td>
                   </tr>
-                  {daySlots.map((s) => (
-                    <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <Td
-                        style={{
-                          paddingLeft: 22,
-                          fontWeight: 700,
-                          fontFamily: "'Consolas', 'Menlo', monospace",
-                        }}
-                      >
-                        {s.code}
+                  {daySlots.map((s, i) => (
+                    <tr
+                      key={s.id}
+                      style={{ background: i % 2 === 1 ? ZEBRA : PAPER, borderBottom: `1px solid ${HAIRLINE}` }}
+                    >
+                      <Td style={{ paddingLeft: 26 }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '4px 9px',
+                            borderRadius: 7,
+                            background: NAVY,
+                            color: '#ffffff',
+                            fontFamily: MONO,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            letterSpacing: '0.04em',
+                          }}
+                        >
+                          {s.code}
+                        </span>
                       </Td>
-                      <Td style={{ fontWeight: 600 }}>{tonsLabel(s.vehicleClassKg)}</Td>
-                      <Td>{s.saleOrder.destination || '-'}</Td>
-                      <Td style={{ color: '#57534e' }}>{s.loadingPoint}</Td>
-                      <Td
-                        style={{
-                          paddingRight: 22,
-                          fontFamily: "'Consolas', 'Menlo', monospace",
-                          fontWeight: s.lorryNumber ? 700 : 400,
-                          color: s.lorryNumber ? '#15803d' : '#a8a29e',
-                        }}
-                      >
-                        {s.lorryNumber ?? 'awaiting'}
+                      <Td style={{ fontWeight: 700 }}>{tonsLabel(s.vehicleClassKg)}</Td>
+                      <Td style={{ fontWeight: 600 }}>{s.saleOrder.destination || '-'}</Td>
+                      <Td>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            border: `1px solid ${LINE}`,
+                            background: TINT,
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            letterSpacing: '0.04em',
+                            color: INK_SOFT,
+                          }}
+                        >
+                          {s.loadingPoint}
+                        </span>
+                      </Td>
+                      <Td style={{ paddingRight: 26 }}>
+                        {s.lorryNumber ? (
+                          <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 700, color: GREEN }}>
+                            {s.lorryNumber}
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 9px',
+                              borderRadius: 999,
+                              border: `1px dashed ${LINE_STRONG}`,
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                              color: MUTED,
+                            }}
+                          >
+                            awaiting
+                          </span>
+                        )}
                       </Td>
                     </tr>
                   ))}
@@ -449,24 +582,52 @@ function TransporterSheet(props: {
             </tbody>
           </table>
 
-          <div
-            style={{
-              padding: '12px 22px 16px',
-              background: '#f8fafc',
-              borderTop: '1px solid #e7e5e4',
-              fontSize: 11.5,
-              color: '#57534e',
-              lineHeight: 1.5,
-            }}
-          >
-            Kindly reply with the lorry number, driver name and driver mobile against each code.
-            <div style={{ marginTop: 4, color: '#a8a29e' }}>
-              Sent{' '}
-              {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} · A code
-              never changes - always quote the code, not the date.
+          {/* The one thing he is being asked to do, said once and plainly. */}
+          <div style={{ padding: '16px 26px 18px', background: TINT, borderTop: `1px solid ${LINE}` }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+              <div style={{ width: 3, borderRadius: 2, background: ACCENT, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: INK, lineHeight: 1.45 }}>
+                  Kindly reply with the lorry number, driver name and driver mobile against each code.
+                </div>
+                <div style={{ fontSize: 11, color: MUTED, marginTop: 4, lineHeight: 1.5 }}>
+                  A code never changes - always quote the code, not the date.
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 10,
+                borderTop: `1px solid ${LINE}`,
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 10,
+                color: MUTED_SOFT,
+                letterSpacing: '0.04em',
+              }}
+            >
+              <span>{companyName.toUpperCase()}</span>
+              <span>
+                Issued {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </span>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** One figure in the sheet's summary strip. */
+function Stat(props: { label: string; value: string; divider?: boolean; tone?: string }) {
+  return (
+    <div style={{ padding: '0 16px', textAlign: 'right', borderLeft: props.divider ? `1px solid ${LINE}` : undefined }}>
+      <div style={{ fontSize: 17, fontWeight: 700, color: props.tone ?? INK, letterSpacing: '-0.01em' }}>
+        {props.value}
+      </div>
+      <div style={{ fontSize: 9.5, letterSpacing: '0.12em', color: MUTED, fontWeight: 700, marginTop: 3 }}>
+        {props.label.toUpperCase()}
       </div>
     </div>
   );
@@ -477,12 +638,12 @@ function Th(props: { children: ReactNode; style?: CSSProperties }) {
     <th
       style={{
         textAlign: 'left',
-        padding: '9px 10px',
-        fontSize: 10,
-        letterSpacing: '0.1em',
+        padding: '10px 10px',
+        fontSize: 9.5,
+        letterSpacing: '0.14em',
         textTransform: 'uppercase',
         fontWeight: 700,
-        borderBottom: '1px solid #e7e5e4',
+        borderBottom: `1px solid ${LINE}`,
         ...props.style,
       }}
     >
@@ -492,5 +653,5 @@ function Th(props: { children: ReactNode; style?: CSSProperties }) {
 }
 
 function Td(props: { children: ReactNode; style?: CSSProperties }) {
-  return <td style={{ padding: '8px 10px', verticalAlign: 'middle', ...props.style }}>{props.children}</td>;
+  return <td style={{ padding: '10px 10px', verticalAlign: 'middle', ...props.style }}>{props.children}</td>;
 }

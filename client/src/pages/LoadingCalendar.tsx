@@ -50,14 +50,12 @@ function ymd(d: Date): string {
  * The day a backlog order's lorry should be planned for.
  *
  * The order's due date, because that is the day the buyer is waiting on and
- * the day the planner would have typed anyway. An order already past due has
- * no such day left, so it opens on today instead - a slot cannot be loaded
- * backwards.
+ * the day the planner would have typed anyway. An overdue order keeps its own
+ * date too: the lorry it is waiting for belongs against the day it was
+ * promised, not against today. Only an order with no due date opens on today.
  */
 function dueDateKey(order: { reminderDate: string | null }, todayKey: string): string {
-  if (!order.reminderDate) return todayKey;
-  const due = ymd(new Date(order.reminderDate));
-  return due < todayKey ? todayKey : due;
+  return order.reminderDate ? ymd(new Date(order.reminderDate)) : todayKey;
 }
 
 /** Monday of the week containing `d`. */

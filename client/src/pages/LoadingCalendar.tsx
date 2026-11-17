@@ -11,6 +11,8 @@ import type {
   DispatchSlot, DispatchBacklogOrder, DispatchIndentPreview, DispatchSlotStatus, Transport,
 } from '@/lib/types';
 import { PageHeader } from '@/components/PageHeader';
+import { LorryCodeSheet } from '@/components/LorryCodeSheet';
+import { Segmented } from '@/components/ui/segmented';
 import { StatCard } from '@/components/StatCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,6 +44,20 @@ const t = (kgValue: number) => {
 /** `YYYY-MM-DD` for a Date, read in local time (the browser sits in IST). */
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * The day a backlog order's lorry should be planned for.
+ *
+ * The order's due date, because that is the day the buyer is waiting on and
+ * the day the planner would have typed anyway. An order already past due has
+ * no such day left, so it opens on today instead - a slot cannot be loaded
+ * backwards.
+ */
+function dueDateKey(order: { reminderDate: string | null }, todayKey: string): string {
+  if (!order.reminderDate) return todayKey;
+  const due = ymd(new Date(order.reminderDate));
+  return due < todayKey ? todayKey : due;
 }
 
 /** Monday of the week containing `d`. */
@@ -136,6 +152,8 @@ function lorriesFor(counts: Record<number, number>, roomKg: number) {
 export default function LoadingCalendarPage() {
   const qc = useQueryClient();
   const [anchor, setAnchor] = useState(() => weekStart(new Date()));
+  // Two readings of one plan: the week, and the codes each transporter holds.
+  const [view, setView] = useState<'calendar' | 'codes'>('calendar');
   const [plan, setPlan] = useState<PlanDraft | null>(null);
   const [editing, setEditing] = useState<EditDraft | null>(null);
   const [confirming, setConfirming] = useState<DispatchSlot | null>(null);
@@ -319,6 +337,10 @@ export default function LoadingCalendarPage() {
       notes: '',
       counts: {},
     });
+    // A lorry planned for a date off-screen would be saved into a week the
+    // planner is not looking at, so bring that week to him.
+    const [y, m, d] = date.split('-').map(Number);
+    setAnchor(weekStart(new Date(y, m - 1, d)));
   };
 
   return (
@@ -326,22 +348,45 @@ export default function LoadingCalendarPage() {
       <PageHeader
         title="Loading Calendar"
         icon={CalendarDays}
-        description="Plan the lorries, not the orders. One card is one lorry on one day; drag an order from the backlog onto a date, then send each transporter his day's requirement."
+        description={
+          view === 'calendar'
+            ? "Plan the lorries, not the orders. One card is one lorry on one day; drag an order from the backlog onto a date, then send each transporter his day's requirement."
+            : 'Every code a transporter is holding, with the day, the size and where it goes - as one picture you can send him.'
+        }
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setAnchor(addDays(anchor, -7))}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setAnchor(weekStart(new Date()))}>
-              This week
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setAnchor(addDays(anchor, 7))}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented<'calendar' | 'codes'>
+              value={view}
+              onValueChange={setView}
+              size="sm"
+              options={[
+                { label: 'Calendar', value: 'calendar' },
+                { label: 'Code sheet', value: 'codes' },
+              ]}
+            />
+            {/* The week arrows only mean anything to the calendar; the code
+                sheet carries its own range. */}
+            {view === 'calendar' && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setAnchor(addDays(anchor, -7))}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setAnchor(weekStart(new Date()))}>
+                  This week
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setAnchor(addDays(anchor, 7))}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </>
+            )}
           </div>
         }
       />
 
+      {view === 'codes' ? (
+        <LorryCodeSheet transports={transports} weekFrom={from} weekTo={to} />
+      ) : (
+      <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Lorries this week" value={totals.lorries} icon={Truck} tone="amber" />
         <StatCard label="Planned tonnage" value={t(totals.kg)} icon={PackageOpen} tone="forest" />
@@ -399,7 +444,7 @@ export default function LoadingCalendarPage() {
                         size="icon"
                         className="h-7 w-7 shrink-0"
                         title="Plan a lorry"
-                        onClick={() => openPlan(todayKey, o)}
+                        onClick={() => openPlan(dueDateKey(o, todayKey), o)}
                       >
                         <Plus className="h-4 w-4" />
                       </Button>
@@ -582,6 +627,8 @@ export default function LoadingCalendarPage() {
           })}
         </div>
       </div>
+      </>
+      )}
 
       {plan && (
         <PlanDialog

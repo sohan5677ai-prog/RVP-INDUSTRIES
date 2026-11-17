@@ -109,15 +109,6 @@ type EditDraft = {
 };
 
 /**
- * Turn "two 25 t and a 40 t" into the lorries the API is handed.
- *
- * The fleet is laid out largest first, and the last lorry takes whatever is
- * left of the order rather than its full size: an order with 29.99 t to go
- * gets a 30 t lorry carrying 29.99 t, which is what actually leaves the gate.
- * That is why the dialog needs no kg boxes - the only load worth typing by
- * hand is a correction, and corrections are made on the card.
- */
-/**
  * The transporter the dialog opens on.
  *
  * Nearly every lorry goes to Sree Madhupuri Transport, so that is the one the
@@ -133,6 +124,15 @@ function defaultTransportId(transports: Transport[]) {
   return house?.id ?? transports[0]?.id ?? '';
 }
 
+/**
+ * Turn "two 25 t and a 40 t" into the lorries the API is handed.
+ *
+ * The fleet is laid out largest first, and the last lorry takes whatever is
+ * left of the order rather than its full size: an order with 29.99 t to go
+ * gets a 30 t lorry carrying 29.99 t, which is what actually leaves the gate.
+ * That is why the dialog needs no kg boxes - the only load worth typing by
+ * hand is a correction, and corrections are made on the card.
+ */
 function lorriesFor(counts: Record<number, number>, roomKg: number) {
   const out: { vehicleClassKg: number; plannedKg: number }[] = [];
   let left = roomKg;
@@ -145,6 +145,41 @@ function lorriesFor(counts: Record<number, number>, roomKg: number) {
     }
   }
   return out;
+}
+
+/** The smallest standard lorry that can carry `kg`. */
+function smallestClassFor(kg: number) {
+  return VEHICLE_CLASSES.find((c) => c >= kg) ?? VEHICLE_CLASSES[VEHICLE_CLASSES.length - 1];
+}
+
+/**
+ * Is this a fleet the order can justify?
+ *
+ * Two things make a lorry wrong on the sheet. One is a lorry with nothing
+ * left to carry. The other is a lorry a size too big: 30 t of order does not
+ * call for a 40 t lorry when a 30 t lorry carries it, and sending one means
+ * paying for air. So every lorry must either leave full or be the one
+ * finishing the order in the smallest size that holds the tail.
+ *
+ * This is the plan dialog's rule, not the API's. A lorry that genuinely has
+ * to run part-loaded - the only vehicle the transporter could give - is still
+ * set that way on its own card, where the figures are typed by hand.
+ */
+function fleetFits(counts: Record<number, number>, roomKg: number) {
+  const asked = VEHICLE_CLASSES.reduce((sum, c) => sum + (counts[c] ?? 0), 0);
+  if (asked === 0 || asked > MAX_LORRIES) return false;
+  const lorries = lorriesFor(counts, roomKg);
+  if (lorries.length !== asked) return false; // a lorry left with nothing to carry
+  return lorries.every(
+    (l) => l.plannedKg === l.vehicleClassKg || smallestClassFor(l.plannedKg) === l.vehicleClassKg
+  );
+}
+
+/** How many lorries of `cls` the order justifies, the other sizes standing. */
+function maxCountFor(cls: number, counts: Record<number, number>, roomKg: number) {
+  let n = 0;
+  while (n < MAX_LORRIES && fleetFits({ ...counts, [cls]: n + 1 }, roomKg)) n += 1;
+  return n;
 }
 
 export default function LoadingCalendarPage() {
@@ -701,12 +736,16 @@ function PlanDialog(props: {
   const totalKg = lorries.reduce((sum, l) => sum + l.plannedKg, 0);
   // The lorry finishing the order, when it is not a full load.
   const partLoad = lorries.find((l) => l.plannedKg < l.vehicleClassKg);
-  const full = totalKg >= roomKg || lorries.length >= MAX_LORRIES;
+
+  // A size is only offered while the order still justifies one more of it:
+  // the ceiling is worked out per size, so 30 t left offers a 30 t lorry and
+  // refuses a 40 t one rather than quietly sending it three-quarters empty.
+  const ceiling = (cls: number) => maxCountFor(cls, draft.counts, roomKg);
 
   const setCount = (cls: number, n: number) =>
     onChange({
       ...draft,
-      counts: { ...draft.counts, [cls]: Math.max(0, Math.min(MAX_LORRIES, n)) },
+      counts: { ...draft.counts, [cls]: Math.max(0, Math.min(ceiling(cls), n)) },
     });
 
   return (
@@ -762,6 +801,7 @@ function PlanDialog(props: {
             <div className="mt-1 divide-y rounded-md border">
               {VEHICLE_CLASSES.map((cls) => {
                 const n = draft.counts[cls] ?? 0;
+                const capped = n >= ceiling(cls);
                 return (
                   <div key={cls} className="flex items-center gap-3 px-3 py-2">
                     <span className={cn('w-12 text-sm', n > 0 ? 'font-semibold' : 'text-muted-foreground')}>
@@ -783,8 +823,9 @@ function PlanDialog(props: {
                       />
                       <Button
                         type="button" variant="outline" size="icon" className="h-8 w-8"
-                        disabled={full} onClick={() => setCount(cls, n + 1)}
+                        disabled={capped} onClick={() => setCount(cls, n + 1)}
                         aria-label={'One ' + t(cls) + ' lorry more'}
+                        title={capped && n === 0 ? t(cls) + ' is more lorry than the order has left' : undefined}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>

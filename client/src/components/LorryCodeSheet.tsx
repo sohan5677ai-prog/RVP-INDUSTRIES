@@ -31,44 +31,61 @@ import { Segmented } from '@/components/ui/segmented';
  */
 
 /**
- * The sheet's own palette.
+ * The document's own ink and paper.
  *
  * Fixed light colours, never the app's theme tokens: this is a picture that
  * leaves the building, and a planner working in dark mode must not send a
- * black card with grey text that a lorry driver cannot read in daylight. The
- * navy and the clay accent are the ERP's own, so a sheet on WhatsApp is
- * recognisably the same company as the screen it came from.
+ * black card with grey text that a lorry driver cannot read in daylight.
+ *
+ * There is no brand colour here on purpose. An indent is a printed office
+ * document - ruled, black on white, signed at the foot - and colour on it
+ * reads as decoration rather than authority.
  */
 const SHEET_W = 760;
-const NAVY = '#0F2742';
-const NAVY_LABEL = '#8CA6C4';
-const NAVY_SOFT_TEXT = '#B6C7DA';
-const ACCENT = '#C2410C';
 const PAPER = '#FFFFFF';
-const ZEBRA = '#FCFCFD';
-const TINT = '#F7F8FA';
-const BAND = '#EEF2F7';
-const LINE = '#E4E7EC';
-const LINE_STRONG = '#CDD3DB';
-const HAIRLINE = '#F1F2F5';
-const INK = '#111827';
-const INK_SOFT = '#374151';
-const MUTED = '#6B7280';
-const MUTED_SOFT = '#9CA3AF';
-const GREEN = '#15803D';
+const HEAD_FILL = '#F2F1EE';
+const RULE = '#D9D6D0';
+const RULE_DARK = '#1A1A1A';
+const INK = '#141414';
+const SUB = '#6B6660';
+const SERIF_FONT = "Georgia, 'Times New Roman', 'Nimbus Roman', serif";
+const BODY_FONT = "Arial, 'Helvetica Neue', Helvetica, system-ui, sans-serif";
 const MONO = "'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace";
 
-/**
- * The letterhead mark. A short first word is the house name itself ("RVP
- * Industries" is RVP, and that is what the transport office calls us);
- * anything longer falls back to initials.
- */
-function monogram(companyName: string): string {
+/** `17-11-2026` → `RVP/LC/171126`. Identifies the sheet, nothing accounting. */
+function sheetRef(companyName: string, issued: Date): string {
   const words = companyName.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 'RVP';
-  if (words[0].length <= 4) return words[0].toUpperCase();
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
+  const mark = (words[0]?.length ?? 0) <= 4 ? (words[0] ?? 'RVP') : words.map((w) => w[0]).join('').slice(0, 3);
+  const dd = String(issued.getDate()).padStart(2, '0');
+  const mm = String(issued.getMonth() + 1).padStart(2, '0');
+  const yy = String(issued.getFullYear()).slice(2);
+  return `${mark.toUpperCase()}/LC/${dd}${mm}${yy}`;
+}
+
+/** The running number down the left of the register, across every day. */
+function rowNumber(byDay: Array<[string, unknown[]]>, dayIndex: number, rowIndex: number): number {
+  let n = rowIndex + 1;
+  for (let d = 0; d < dayIndex; d += 1) n += byDay[d][1].length;
+  return n;
+}
+
+/** `Punganur, Chittoor, Andhra Pradesh - 517247` - the letterhead's second line. */
+function addressLine(c?: CompanyProfile): string | null {
+  if (!c) return null;
+  const parts = [c.address, c.dispatchFromPlace, c.stateName, c.pincode].map((x) => x?.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  const tail = c.pincode?.trim();
+  const head = parts.filter((x) => x !== tail).join(', ');
+  return tail ? `${head} - ${tail}` : head;
+}
+
+/** `Tel: 9440416639  ·  GSTIN: 37ABCDE1234F1Z5` - the line under the address. */
+function contactLine(c?: CompanyProfile): string | null {
+  if (!c) return null;
+  const bits: string[] = [];
+  if (c.contact?.trim()) bits.push(`Tel: ${c.contact.trim()}`);
+  if (c.gstin?.trim()) bits.push(`GSTIN: ${c.gstin.trim()}`);
+  return bits.length > 0 ? bits.join('   \u00b7   ') : null;
 }
 
 /** Already gone, or never going. Neither belongs on a sheet of future work. */
@@ -232,8 +249,8 @@ export function LorryCodeSheet(props: { transports: Transport[]; weekFrom: strin
             name={g.name}
             slots={g.slots}
             companyName={companyQ.data?.tradeName || companyQ.data?.name || 'RVP Industries'}
-            companyPlace={companyQ.data?.dispatchFromPlace || companyQ.data?.stateName || null}
-            companyContact={companyQ.data?.contact || null}
+            companyAddress={addressLine(companyQ.data)}
+            companyContact={contactLine(companyQ.data)}
             rangeLabel={rangeLabel}
             assigned={Boolean(g.id)}
           />
@@ -253,12 +270,12 @@ function TransporterSheet(props: {
   name: string;
   slots: DispatchSlot[];
   companyName: string;
-  companyPlace: string | null;
+  companyAddress: string | null;
   companyContact: string | null;
   rangeLabel: string;
   assigned: boolean;
 }) {
-  const { name, slots, companyName, companyPlace, companyContact, rangeLabel, assigned } = props;
+  const { name, slots, companyName, companyAddress, companyContact, rangeLabel, assigned } = props;
   const sheetRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<null | 'download' | 'copy' | 'share'>(null);
 
@@ -276,7 +293,13 @@ function TransporterSheet(props: {
   // load is our arithmetic, and a 40 t lorry is still a 40 t lorry to him.
   const totalKg = slots.reduce((sum, s) => sum + s.vehicleClassKg, 0);
   const pending = slots.filter((s) => !s.lorryNumber).length;
-  const fileName = `${slug(name)}-loading-codes.png`;
+  const fileName = `${slug(name)}-vehicle-indent.png`;
+
+  const issued = new Date();
+  const issueDate = issued.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const refNo = sheetRef(companyName, issued);
+  const addressLineText = companyAddress;
+  const contactLineText = companyContact;
 
   async function withCapture(kind: 'download' | 'copy' | 'share', run: (dataUrl: string) => Promise<void>) {
     if (!sheetRef.current || busy) return;
@@ -373,8 +396,8 @@ function TransporterSheet(props: {
         )}
       </div>
 
-      {/* The picture itself. A fixed width, so the capture is the same whatever
-          screen it was taken on. */}
+      {/* The document itself. A fixed width, so the capture is the same
+          whatever screen it was taken on. */}
       <div className="overflow-x-auto">
         <div
           ref={sheetRef}
@@ -382,236 +405,176 @@ function TransporterSheet(props: {
             width: SHEET_W,
             background: PAPER,
             color: INK,
-            fontFamily: "'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif",
-            border: `1px solid ${LINE}`,
-            borderRadius: 16,
-            overflow: 'hidden',
+            fontFamily: BODY_FONT,
+            border: `1px solid ${RULE_DARK}`,
           }}
         >
-          {/* Letterhead. The mill's name carries the sheet, so it is read
-              first; the monogram gives the picture a mark the transport office
-              can pick out of a crowded WhatsApp group. */}
-          <div style={{ padding: '22px 26px 20px', background: NAVY, color: '#ffffff' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-                <div
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 11,
-                    background: 'rgba(255,255,255,0.10)',
-                    border: '1px solid rgba(255,255,255,0.20)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 14,
-                    fontWeight: 700,
-                    letterSpacing: '0.04em',
-                  }}
-                >
-                  {monogram(companyName)}
-                </div>
-                <div>
-                  <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.01em' }}>{companyName}</div>
-                  <div style={{ fontSize: 11.5, color: NAVY_SOFT_TEXT, marginTop: 3 }}>
-                    {[companyPlace, companyContact].filter(Boolean).join('  ·  ') || 'Loading codes'}
-                  </div>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 9.5, letterSpacing: '0.18em', color: NAVY_LABEL, fontWeight: 700 }}>
-                  LOADING CODE SHEET
-                </div>
-                <div
-                  style={{
-                    display: 'inline-block',
-                    marginTop: 7,
-                    padding: '4px 11px',
-                    borderRadius: 999,
-                    background: 'rgba(255,255,255,0.12)',
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                  }}
-                >
-                  {rangeLabel}
-                </div>
-              </div>
+          {/* Letterhead. Name, address, GSTIN, closed by a double rule - the
+              head of every printed thing an Indian mill issues. */}
+          <div style={{ padding: '22px 30px 16px', textAlign: 'center', borderBottom: `3px double ${RULE_DARK}` }}>
+            <div
+              style={{
+                fontFamily: SERIF_FONT,
+                fontSize: 27,
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                lineHeight: 1.1,
+              }}
+            >
+              {companyName}
             </div>
+            {addressLineText && (
+              <div style={{ fontSize: 11, color: SUB, marginTop: 7, letterSpacing: '0.02em' }}>{addressLineText}</div>
+            )}
+            {contactLineText && (
+              <div style={{ fontSize: 10.5, color: SUB, marginTop: 3, letterSpacing: '0.02em' }}>{contactLineText}</div>
+            )}
           </div>
-          <div style={{ height: 3, background: ACCENT }} />
 
-          {/* Who it is for, and the three figures he checks before reading a
-              single row: how many lorries, how much tonnage, how many still
-              owe us a number. */}
+          {/* The document's name. Centred, spaced, on a tinted band - a reader
+              should know what he is holding before he reads a single row. */}
           <div
             style={{
-              padding: '16px 26px',
+              padding: '8px 0 9px',
+              textAlign: 'center',
+              background: HEAD_FILL,
+              borderBottom: `1px solid ${RULE}`,
+            }}
+          >
+            <span style={{ fontFamily: SERIF_FONT, fontSize: 13, fontWeight: 700, letterSpacing: '0.34em' }}>
+              VEHICLE INDENT
+            </span>
+          </div>
+
+          {/* Who it is addressed to, and the three facts that identify this
+              particular sheet. */}
+          <div
+            style={{
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 20,
-              borderBottom: `1px solid ${LINE}`,
+              alignItems: 'flex-start',
+              gap: 24,
+              padding: '14px 30px',
+              borderBottom: `1px solid ${RULE_DARK}`,
             }}
           >
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 9.5, letterSpacing: '0.16em', color: MUTED, fontWeight: 700 }}>PREPARED FOR</div>
-              <div style={{ fontSize: 17, fontWeight: 700, marginTop: 4, letterSpacing: '-0.01em' }}>{name}</div>
+              <div style={{ fontSize: 9.5, letterSpacing: '0.18em', color: SUB, fontWeight: 700 }}>TO</div>
+              <div style={{ fontFamily: SERIF_FONT, fontSize: 16, fontWeight: 700, marginTop: 5 }}>M/s. {name}</div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-              <Stat label="Lorries" value={String(slots.length)} />
-              <Stat label="Tonnage" value={tonnage(totalKg)} divider />
-              <Stat label="Awaiting no." value={String(pending)} divider tone={pending > 0 ? ACCENT : GREEN} />
-            </div>
+            <table style={{ borderCollapse: 'collapse', fontSize: 11.5, flexShrink: 0 }}>
+              <tbody>
+                <MetaRow label="Sheet ref." value={refNo} mono />
+                <MetaRow label="Date" value={issueDate} />
+                <MetaRow label="Period" value={rangeLabel} />
+              </tbody>
+            </table>
           </div>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          {/* The register. Ruled on every side, the loading date carried once
+              down the left in a merged cell, exactly as a loading programme is
+              written out by hand. */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
             <thead>
-              <tr style={{ background: TINT, color: MUTED }}>
-                <Th style={{ width: 128, paddingLeft: 26 }}>Code</Th>
-                <Th style={{ width: 92 }}>Size</Th>
+              <tr style={{ background: HEAD_FILL }}>
+                <Th style={{ width: 34, textAlign: 'center' }}>#</Th>
+                <Th style={{ width: 96 }}>Loading date</Th>
+                <Th style={{ width: 104 }}>Code</Th>
+                <Th style={{ width: 78 }}>Size</Th>
                 <Th>Delivery to</Th>
-                <Th style={{ width: 84 }}>Load at</Th>
-                <Th style={{ width: 138, paddingRight: 26 }}>Lorry no.</Th>
+                <Th style={{ width: 66, textAlign: 'center' }}>Load at</Th>
+                <Th style={{ width: 142 }}>Vehicle no.</Th>
               </tr>
             </thead>
             <tbody>
-              {byDay.map(([key, daySlots]) => (
-                <Fragment key={key}>
-                  <tr>
-                    <td colSpan={5} style={{ padding: 0, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}` }}>
-                      {/* The day band is the sheet's spine: a transport office
-                          reads it as "what am I sending on Thursday", so the
-                          date is given room and the day's own load sits against
-                          it. */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          padding: '8px 26px',
-                          background: BAND,
-                          borderLeft: `3px solid ${NAVY}`,
-                        }}
+              {byDay.map(([key, daySlots], dayIndex) =>
+                daySlots.map((s, i) => (
+                  <tr key={s.id}>
+                    <Td style={{ textAlign: 'center', color: SUB }}>{rowNumber(byDay, dayIndex, i)}</Td>
+                    {i === 0 && (
+                      <Td
+                        rowSpan={daySlots.length}
+                        style={{ verticalAlign: 'top', fontWeight: 700, whiteSpace: 'nowrap' }}
                       >
-                        <span
-                          style={{
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            letterSpacing: '0.08em',
-                            textTransform: 'uppercase',
-                            color: NAVY,
-                          }}
-                        >
-                          {dayLabel(key)}
-                        </span>
-                        <span style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
-                          {daySlots.length} {daySlots.length === 1 ? 'lorry' : 'lorries'} ·{' '}
-                          {tonnage(daySlots.reduce((sum, x) => sum + x.vehicleClassKg, 0))}
-                        </span>
-                      </div>
-                    </td>
+                        {dayLabel(key)}
+                        <div style={{ fontSize: 10, fontWeight: 400, color: SUB, marginTop: 3 }}>
+                          {daySlots.length} {daySlots.length === 1 ? 'lorry' : 'lorries'}
+                        </div>
+                      </Td>
+                    )}
+                    <Td style={{ fontFamily: MONO, fontWeight: 700, letterSpacing: '0.03em' }}>{s.code}</Td>
+                    <Td style={{ fontWeight: 700 }}>{tonsLabel(s.vehicleClassKg)}</Td>
+                    <Td>{s.saleOrder.destination || '-'}</Td>
+                    <Td style={{ textAlign: 'center' }}>{s.loadingPoint}</Td>
+                    <Td style={{ fontFamily: MONO, fontWeight: 700 }}>
+                      {s.lorryNumber ?? (
+                        // Left blank on purpose: this is the line the transport
+                        // office fills in and sends back.
+                        <span style={{ display: 'block', borderBottom: `1px dotted ${RULE_DARK}`, height: 11 }} />
+                      )}
+                    </Td>
                   </tr>
-                  {daySlots.map((s, i) => (
-                    <tr
-                      key={s.id}
-                      style={{ background: i % 2 === 1 ? ZEBRA : PAPER, borderBottom: `1px solid ${HAIRLINE}` }}
-                    >
-                      <Td style={{ paddingLeft: 26 }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '4px 9px',
-                            borderRadius: 7,
-                            background: NAVY,
-                            color: '#ffffff',
-                            fontFamily: MONO,
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            letterSpacing: '0.04em',
-                          }}
-                        >
-                          {s.code}
-                        </span>
-                      </Td>
-                      <Td style={{ fontWeight: 700 }}>{tonsLabel(s.vehicleClassKg)}</Td>
-                      <Td style={{ fontWeight: 600 }}>{s.saleOrder.destination || '-'}</Td>
-                      <Td>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: 999,
-                            border: `1px solid ${LINE}`,
-                            background: TINT,
-                            fontSize: 10.5,
-                            fontWeight: 700,
-                            letterSpacing: '0.04em',
-                            color: INK_SOFT,
-                          }}
-                        >
-                          {s.loadingPoint}
-                        </span>
-                      </Td>
-                      <Td style={{ paddingRight: 26 }}>
-                        {s.lorryNumber ? (
-                          <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 700, color: GREEN }}>
-                            {s.lorryNumber}
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '2px 9px',
-                              borderRadius: 999,
-                              border: `1px dashed ${LINE_STRONG}`,
-                              fontSize: 10.5,
-                              fontWeight: 600,
-                              color: MUTED,
-                            }}
-                          >
-                            awaiting
-                          </span>
-                        )}
-                      </Td>
-                    </tr>
-                  ))}
-                </Fragment>
-              ))}
+                ))
+              )}
             </tbody>
+            <tfoot>
+              <tr style={{ background: HEAD_FILL }}>
+                <Td colSpan={3} style={{ borderTop: `1px solid ${RULE_DARK}`, fontWeight: 700 }}>
+                  Total
+                </Td>
+                <Td style={{ borderTop: `1px solid ${RULE_DARK}`, fontWeight: 700 }}>{tonsLabel(totalKg)}</Td>
+                <Td colSpan={2} style={{ borderTop: `1px solid ${RULE_DARK}`, fontWeight: 700 }}>
+                  {slots.length} {slots.length === 1 ? 'vehicle' : 'vehicles'}
+                </Td>
+                <Td style={{ borderTop: `1px solid ${RULE_DARK}`, color: SUB, fontSize: 11 }}>
+                  {pending > 0 ? `${pending} awaited` : 'all confirmed'}
+                </Td>
+              </tr>
+            </tfoot>
           </table>
 
-          {/* The one thing he is being asked to do, said once and plainly. */}
-          <div style={{ padding: '16px 26px 18px', background: TINT, borderTop: `1px solid ${LINE}` }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
-              <div style={{ width: 3, borderRadius: 2, background: ACCENT, flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: INK, lineHeight: 1.45 }}>
-                  Kindly reply with the lorry number, driver name and driver mobile against each code.
-                </div>
-                <div style={{ fontSize: 11, color: MUTED, marginTop: 4, lineHeight: 1.5 }}>
-                  A code never changes - always quote the code, not the date.
-                </div>
+          {/* What he is asked to do, and who asked - the close of a letter. */}
+          <div style={{ display: 'flex', alignItems: 'stretch', borderTop: `1px solid ${RULE_DARK}` }}>
+            <div style={{ flex: 1, padding: '13px 20px 16px 30px', borderRight: `1px solid ${RULE}` }}>
+              <div style={{ fontSize: 9.5, letterSpacing: '0.18em', color: SUB, fontWeight: 700 }}>PLEASE NOTE</div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.75, marginTop: 6 }}>
+                1. Kindly confirm the vehicle number, driver name and driver mobile against each code.
+                <br />
+                2. A code never changes - always quote the code, not the date.
               </div>
             </div>
-            <div
-              style={{
-                marginTop: 12,
-                paddingTop: 10,
-                borderTop: `1px solid ${LINE}`,
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 10,
-                color: MUTED_SOFT,
-                letterSpacing: '0.04em',
-              }}
-            >
-              <span>{companyName.toUpperCase()}</span>
-              <span>
-                Issued {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-              </span>
+            <div style={{ width: 238, padding: '13px 30px 16px 20px', textAlign: 'right' }}>
+              <div style={{ fontSize: 11.5 }}>
+                For <span style={{ fontWeight: 700 }}>{companyName}</span>
+              </div>
+              <div style={{ height: 44 }} />
+              <div
+                style={{
+                  borderTop: `1px solid ${RULE_DARK}`,
+                  paddingTop: 5,
+                  fontSize: 10.5,
+                  color: SUB,
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Authorised Signatory
+              </div>
             </div>
+          </div>
+
+          <div
+            style={{
+              padding: '7px 30px 8px',
+              borderTop: `1px solid ${RULE}`,
+              background: HEAD_FILL,
+              fontSize: 9.5,
+              color: SUB,
+              letterSpacing: '0.04em',
+              textAlign: 'center',
+            }}
+          >
+            Issued electronically from the {companyName} ERP · {refNo}
           </div>
         </div>
       </div>
@@ -619,17 +582,22 @@ function TransporterSheet(props: {
   );
 }
 
-/** One figure in the sheet's summary strip. */
-function Stat(props: { label: string; value: string; divider?: boolean; tone?: string }) {
+/** One `label  value` line in the document's reference block. */
+function MetaRow(props: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{ padding: '0 16px', textAlign: 'right', borderLeft: props.divider ? `1px solid ${LINE}` : undefined }}>
-      <div style={{ fontSize: 17, fontWeight: 700, color: props.tone ?? INK, letterSpacing: '-0.01em' }}>
+    <tr>
+      <td style={{ padding: '2px 10px 2px 0', color: SUB, whiteSpace: 'nowrap' }}>{props.label}</td>
+      <td
+        style={{
+          padding: '2px 0',
+          fontWeight: 700,
+          whiteSpace: 'nowrap',
+          fontFamily: props.mono ? MONO : undefined,
+        }}
+      >
         {props.value}
-      </div>
-      <div style={{ fontSize: 9.5, letterSpacing: '0.12em', color: MUTED, fontWeight: 700, marginTop: 3 }}>
-        {props.label.toUpperCase()}
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 }
 
@@ -638,12 +606,15 @@ function Th(props: { children: ReactNode; style?: CSSProperties }) {
     <th
       style={{
         textAlign: 'left',
-        padding: '10px 10px',
+        padding: '7px 9px',
         fontSize: 9.5,
         letterSpacing: '0.14em',
         textTransform: 'uppercase',
         fontWeight: 700,
-        borderBottom: `1px solid ${LINE}`,
+        color: INK,
+        border: `1px solid ${RULE}`,
+        borderTop: `1px solid ${RULE_DARK}`,
+        borderBottom: `1px solid ${RULE_DARK}`,
         ...props.style,
       }}
     >
@@ -652,6 +623,14 @@ function Th(props: { children: ReactNode; style?: CSSProperties }) {
   );
 }
 
-function Td(props: { children: ReactNode; style?: CSSProperties }) {
-  return <td style={{ padding: '10px 10px', verticalAlign: 'middle', ...props.style }}>{props.children}</td>;
+function Td(props: { children: ReactNode; style?: CSSProperties; rowSpan?: number; colSpan?: number }) {
+  return (
+    <td
+      rowSpan={props.rowSpan}
+      colSpan={props.colSpan}
+      style={{ padding: '8px 9px', verticalAlign: 'middle', border: `1px solid ${RULE}`, ...props.style }}
+    >
+      {props.children}
+    </td>
+  );
 }

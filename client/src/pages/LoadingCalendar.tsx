@@ -106,10 +106,12 @@ type EditDraft = {
 /**
  * The transporter the dialog opens on.
  *
- * Nearly every lorry goes to Srinimadupuri Transport, so that is the one the
+ * Nearly every lorry goes to Sree Madhupuri Transport, so that is the one the
  * planner should find already chosen; anything else is a deliberate switch.
+ * Matched on the distinctive half of the name alone, so Sree/Sri and whatever
+ * follows it in the record all land on the same transporter.
  */
-const HOUSE_TRANSPORT = 'srinimadupuri';
+const HOUSE_TRANSPORT = 'madhupuri';
 
 function defaultTransportId(transports: Transport[]) {
   const key = (name: string) => name.toLowerCase().replace(/[^a-z]/g, '');

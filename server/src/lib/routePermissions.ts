@@ -126,6 +126,11 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // with the board it belongs to rather than as a purchase write, because the
   // people watching for an arriving lorry are the dispatch desk.
   { methods: ['POST'], path: '/gps/arrivals/sweep', permission: 'sale.view' },
+  // Backfilling party pins writes to the party master, so it is gated as a
+  // master edit rather than with the board that reads it. Stamping dispatch
+  // distances writes to shipment rows, so it is a sale write.
+  { methods: ['POST'], path: '/gps/pins/backfill', permission: 'master.party.manage' },
+  { methods: ['POST'], path: '/gps/distances/backfill', permission: 'sale.manage' },
 
   // --------------------------------------------------------------- money --
   { methods: READ, path: '/payments*', permission: 'payment.view' },

@@ -7,6 +7,7 @@ import {
   recordChanges,
 } from '../services/masterChange.service.js';
 import { diffFields } from '../lib/masterFields.js';
+import { reconcilePartyPins, invalidatePartyPin } from '../services/partyPin.service.js';
 
 export async function listParties(_req: Request, res: Response) {
   const parties = await prisma.party.findMany({
@@ -88,6 +89,10 @@ export async function createParty(req: Request, res: Response) {
     },
     include: { addresses: { orderBy: { createdAt: 'asc' } } },
   });
+  // Resolve the delivery pin behind the response. Following a short Google link
+  // is a network round trip with a ten-second ceiling, and a party form must
+  // not wait on it - nothing reads the pin until a dispatch is raised.
+  void reconcilePartyPins(party.id);
   res.status(201).json(party);
 }
 
@@ -210,6 +215,14 @@ export async function updateParty(req: Request, res: Response) {
       include: { addresses: { orderBy: { createdAt: 'asc' } } },
     });
   });
+
+  // A changed location link has to drop the old coordinates first, because the
+  // reconcile deliberately skips a party that already has a pin - otherwise an
+  // edited link would keep pointing at wherever the previous one did.
+  if (data.locationLink !== undefined && data.locationLink !== existing.locationLink) {
+    await invalidatePartyPin(existing.id);
+  }
+  void reconcilePartyPins(existing.id);
 
   // History for the fields that went straight through (plan item 3.5).
   await recordChanges({

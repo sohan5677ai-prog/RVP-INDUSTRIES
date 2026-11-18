@@ -50,6 +50,7 @@ import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.servic
 import { logger } from '../lib/logger.js';
 import { findWaitingConfirmation, markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
 import { resolveOrderEffectiveDetails, resolveOrderBuyerAddress } from '../lib/orderAddress.js';
+import { snapshotDispatchDestination } from '../services/dispatchDestination.service.js';
 
 const GST_RATE = 0.05; // fallback IGST fraction (5%) when a commodity has no configured rate
 
@@ -1127,6 +1128,13 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   });
 
   if (order.product === 'PAPPU' && fullyDispatched) await freezeOrderCost(order.id);
+
+  // Stamp where this lorry is going and how far, outside the transaction that
+  // just committed: measuring a lane can mean a call to a routing provider, and
+  // that must not be held open across a database transaction on the sale tables.
+  // Losing it is harmless - the dispatch board resolves the pin live when a row
+  // carries no snapshot.
+  void snapshotDispatchDestination(dispatch.id);
 
   // The transporter's WhatsApp booking for this lorry has now been used - flip
   // it to USED and point it at this dispatch (its freightAmount, if any, was

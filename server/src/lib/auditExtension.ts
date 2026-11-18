@@ -33,6 +33,9 @@ const UNAUDITED_MODELS: ReadonlySet<string> = new Set([
   // pings it is derived from, and chaining it would put a hash-chain write on
   // the hot path of a loop that runs every 35 seconds.
   'ApproachAlert',
+  // A measured road, cached. Nobody decided it and nobody disputes it - and a
+  // chain write per lane would sit on the dispatch board's render path.
+  'RouteLane',
   'WhatsAppLog',
   'EmailLog',
   'PrintJob',

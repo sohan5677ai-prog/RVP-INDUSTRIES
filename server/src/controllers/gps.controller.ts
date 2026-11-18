@@ -4,6 +4,9 @@ import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { HttpError } from '../lib/httpError.js';
 import { FACTORY, resolvePlace, kmBetween, ROAD_FACTOR, AVG_LORRY_KMPH } from '../lib/gpsPlaces.js';
+import { resolveDestination } from '../lib/destinationPin.js';
+import { progressAlongRoute, OFF_ROUTE_KM, type LatLng } from '../lib/routeGeometry.js';
+import { getLane, decodeLane, laneKey } from '../services/route.service.js';
 
 /**
  * GPS position ingestion.
@@ -516,6 +519,20 @@ export interface DispatchContext {
   driverName: string | null;
   driverPhone: string | null;
   transport: string | null;
+  /**
+   * The delivery point, and where the coordinates came from.
+   *
+   * Snapshotted on the dispatch when it was raised, so a buyer editing their
+   * pin later cannot change the distance a settled trip was measured against.
+   * `destSource` is carried onto the screen because a routed distance to the
+   * buyer's own gate and a straight line to a town centre are not the same
+   * claim.
+   */
+  destLat: number | null;
+  destLng: number | null;
+  destSource: string | null;
+  /** Road km for the whole lane, as snapshotted at dispatch. */
+  routeKm: number | null;
 }
 
 /**
@@ -551,13 +568,22 @@ export async function activeDispatchesByPlate(): Promise<Map<string, DispatchCon
       driverPhone: true,
       transportProvider: true,
       transport: { select: { name: true } },
+      destLat: true,
+      destLng: true,
+      routeKm: true,
+      routeSource: true,
       saleOrder: {
         select: {
           id: true,
           poNumber: true,
           product: true,
           destination: true,
-          buyer: { select: { name: true } },
+          // The order's own snapshot of the delivery pin, then the buyer's
+          // stored one. Read so that a dispatch raised before this feature
+          // existed - which is all of them - still resolves a pin rather than
+          // falling to the town table forever.
+          buyerLocationLink: true,
+          buyer: { select: { name: true, pinLat: true, pinLng: true, pinSource: true } },
           broker: { select: { name: true } },
         },
       },
@@ -582,39 +608,216 @@ export async function activeDispatchesByPlate(): Promise<Map<string, DispatchCon
       driverName: row.driverName ?? null,
       driverPhone: row.driverPhone ?? null,
       transport: row.transport?.name ?? row.transportProvider ?? null,
+      ...destinationOf(row),
     });
   }
   return byPlate;
 }
 
-/** Journey figures for a lorry that is on one of our dispatches. */
-function journeyOf(latitude: number, longitude: number, dispatch: DispatchContext | undefined) {
-  if (!dispatch) return null;
-  const destination = resolvePlace(dispatch.destination);
-  if (!destination) {
-    return { destination: null, totalKm: null, remainingKm: null, coveredKm: null, progressPct: null, etaAt: null };
+/**
+ * The delivery point for a dispatch row, snapshot first.
+ *
+ * A dispatch raised since this feature exists carries its own coordinates and
+ * road distance, and those are used as-is - that is the whole point of
+ * snapshotting them. An older row has nothing stored, so the pin is resolved
+ * live from the order's snapshot or the buyer's stored pin, with the town table
+ * last. No network: every path here reads either a column or a link that
+ * already spells its coordinates out.
+ */
+function destinationOf(row: {
+  destLat: number | null;
+  destLng: number | null;
+  routeKm: number | null;
+  routeSource: string | null;
+  saleOrder: {
+    destination: string | null;
+    buyerLocationLink: string | null;
+    buyer: { pinLat: number | null; pinLng: number | null; pinSource: string | null } | null;
+  };
+}): Pick<DispatchContext, 'destLat' | 'destLng' | 'destSource' | 'routeKm'> {
+  if (row.destLat !== null && row.destLng !== null) {
+    return {
+      destLat: row.destLat,
+      destLng: row.destLng,
+      destSource: row.routeSource,
+      routeKm: row.routeKm,
+    };
   }
 
-  const totalKm = kmBetween(FACTORY.latitude, FACTORY.longitude, destination.latitude, destination.longitude) * ROAD_FACTOR;
-  const remainingKm = kmBetween(latitude, longitude, destination.latitude, destination.longitude) * ROAD_FACTOR;
-  const coveredKm = Math.max(0, totalKm - remainingKm);
-  const progressPct = totalKm > 0 ? Math.max(0, Math.min(100, (coveredKm / totalKm) * 100)) : null;
-
-  // ETA off the long-run average, not the instantaneous speed: a lorry doing
-  // 70 km/h on a bypass is not going to average that, and a lorry stopped for
-  // chai is not going to take forever.
-  const etaAt = remainingKm > 1
-    ? new Date(Date.now() + (remainingKm / AVG_LORRY_KMPH) * 3_600_000).toISOString()
-    : null;
+  const resolved = resolveDestination({
+    orderLocationLink: row.saleOrder.buyerLocationLink,
+    partyPin: row.saleOrder.buyer
+      ? {
+          pinLat: row.saleOrder.buyer.pinLat,
+          pinLng: row.saleOrder.buyer.pinLng,
+          pinSource: row.saleOrder.buyer.pinSource as never,
+        }
+      : null,
+    destinationText: row.saleOrder.destination,
+  });
 
   return {
-    destination: destination.name,
+    destLat: resolved.point?.lat ?? null,
+    destLng: resolved.point?.lng ?? null,
+    // Mapped to the RouteSource vocabulary the screens read. An unrouted lane
+    // is PIN_STRAIGHT; the distance is filled in by journeyOf below.
+    destSource: resolved.point
+      ? resolved.source === 'TOWN_CENTRE'
+        ? 'TOWN_CENTRE'
+        : 'PIN_STRAIGHT'
+      : 'NONE',
+    routeKm: null,
+  };
+}
+
+/**
+ * Lorries run about ten hours a day on these lanes, not twenty-four.
+ *
+ * Without this a 1400 km run reads as arriving in thirty-five hours straight,
+ * which is not a trip any driver makes - and the arrival date, not the hour, is
+ * what a buyer is actually told. Applied only beyond a day's driving, so a
+ * same-day delivery still gets a real clock time.
+ */
+const RUNNING_HOURS_PER_DAY = 10;
+
+function etaFor(remainingKm: number, kmph: number): string | null {
+  if (remainingKm <= 1) return null;
+  const drivingHours = remainingKm / Math.max(10, kmph);
+  const elapsedHours =
+    drivingHours <= RUNNING_HOURS_PER_DAY
+      ? drivingHours
+      : (drivingHours / RUNNING_HOURS_PER_DAY) * 24;
+  return new Date(Date.now() + elapsedHours * 3_600_000).toISOString();
+}
+
+/**
+ * Journey figures for a lorry on one of our dispatches.
+ *
+ * Three ways of answering "how far is left", in descending order of how much
+ * they are worth:
+ *
+ * 1. **Projected onto the routed lane.** The lane was routed once and its
+ *    geometry stored, so the lorry's fix is matched to the actual road and the
+ *    remaining segments summed. This is the only one of the three that knows a
+ *    range has to be driven around rather than over, and it costs nothing per
+ *    fix. It also yields `offRouteKm`, which is the only way to notice a lorry
+ *    has left the road it was given.
+ * 2. **Straight line to the buyer's pin, times ROAD_FACTOR.** What happens
+ *    with no routing provider configured. The destination is still the buyer's
+ *    own gate, so it is a real target - just measured as the crow flies.
+ * 3. **Straight line to the town centre.** The old behaviour, now the last
+ *    resort rather than the only option, and labelled as such.
+ *
+ * `lane` is passed in because this is called per vehicle inside a map and must
+ * not touch the database; getFleetBoard loads the lanes it needs in one pass
+ * first.
+ */
+function journeyOf(
+  latitude: number,
+  longitude: number,
+  dispatch: DispatchContext | undefined,
+  lane?: { roadKm: number; geometry: { points: LatLng[]; cumulative: number[] } | null } | null,
+) {
+  if (!dispatch) return null;
+
+  const empty = {
+    destination: null, totalKm: null, remainingKm: null, coveredKm: null,
+    progressPct: null, etaAt: null, source: 'NONE' as string, offRouteKm: null as number | null,
+    offRoute: false,
+  };
+
+  if (dispatch.destLat === null || dispatch.destLng === null) return empty;
+
+  const destinationName =
+    dispatch.destination?.trim() || resolvePlace(dispatch.destination)?.name || 'Delivery point';
+
+  // (1) Projected along the real road.
+  if (lane?.geometry) {
+    const progress = progressAlongRoute(lane.geometry.points, lane.geometry.cumulative, {
+      lat: latitude,
+      lng: longitude,
+    });
+    if (progress) {
+      const offRoute = progress.offRouteKm > OFF_ROUTE_KM;
+      return {
+        destination: destinationName,
+        totalKm: Math.round(lane.roadKm),
+        remainingKm: Math.round(progress.remainingKm),
+        coveredKm: Math.round(progress.coveredKm),
+        progressPct: Math.round(progress.progressPct),
+        etaAt: etaFor(progress.remainingKm, AVG_LORRY_KMPH),
+        source: 'PIN_ROUTED',
+        offRouteKm: Math.round(progress.offRouteKm * 10) / 10,
+        // A lorry off the line has not covered what the projection claims, so
+        // the distance is reported with the deviation attached rather than
+        // quietly standing in for a measurement.
+        offRoute,
+      };
+    }
+  }
+
+  // (2) and (3) - straight line to whatever the destination resolved to.
+  const totalKm =
+    lane?.roadKm ??
+    kmBetween(FACTORY.latitude, FACTORY.longitude, dispatch.destLat, dispatch.destLng) * ROAD_FACTOR;
+  const remainingKm = kmBetween(latitude, longitude, dispatch.destLat, dispatch.destLng) * ROAD_FACTOR;
+  const coveredKm = Math.max(0, totalKm - remainingKm);
+
+  return {
+    destination: destinationName,
     totalKm: Math.round(totalKm),
     remainingKm: Math.round(remainingKm),
     coveredKm: Math.round(coveredKm),
-    progressPct: progressPct === null ? null : Math.round(progressPct),
-    etaAt,
+    progressPct: totalKm > 0 ? Math.round(Math.max(0, Math.min(100, (coveredKm / totalKm) * 100))) : null,
+    etaAt: etaFor(remainingKm, AVG_LORRY_KMPH),
+    source: dispatch.destSource ?? 'PIN_STRAIGHT',
+    offRouteKm: null,
+    offRoute: false,
   };
+}
+
+/**
+ * Every lane the dispatches on this board need, loaded in one pass.
+ *
+ * Called once per board render rather than once per lorry: two lorries to the
+ * same buyer share a lane, and `getLane` may have to ask a routing provider,
+ * which is not something to do forty times inside a map callback. Keyed by
+ * dispatch id so the lookup in the render loop is a Map hit.
+ *
+ * A lane that cannot be measured is simply absent, and journeyOf falls back to
+ * straight-line - the board never blocks on routing being available.
+ */
+async function lanesForDispatches(
+  dispatches: Iterable<DispatchContext>,
+): Promise<Map<string, { roadKm: number; geometry: { points: LatLng[]; cumulative: number[] } | null }>> {
+  const out = new Map<string, { roadKm: number; geometry: { points: LatLng[]; cumulative: number[] } | null }>();
+
+  // De-duplicate by destination first: one lane per distinct delivery point.
+  const byDestination = new Map<string, { lat: number; lng: number; dispatchIds: string[] }>();
+  for (const d of dispatches) {
+    if (d.destLat === null || d.destLng === null) continue;
+    const key = laneKey({ lat: d.destLat, lng: d.destLng });
+    const entry = byDestination.get(key);
+    if (entry) entry.dispatchIds.push(d.dispatchId);
+    else byDestination.set(key, { lat: d.destLat, lng: d.destLng, dispatchIds: [d.dispatchId] });
+  }
+
+  await Promise.all(
+    [...byDestination.values()].map(async (dest) => {
+      try {
+        const lane = await getLane(
+          { lat: FACTORY.latitude, lng: FACTORY.longitude },
+          { lat: dest.lat, lng: dest.lng },
+        );
+        const geometry = decodeLane(lane.polyline);
+        for (const id of dest.dispatchIds) out.set(id, { roadKm: lane.roadKm, geometry });
+      } catch {
+        /* a lane we cannot measure is a lane journeyOf answers straight-line */
+      }
+    }),
+  );
+
+  return out;
 }
 
 export interface FleetVehicle {
@@ -657,6 +860,9 @@ export async function getFleetBoard(req: Request, res: Response) {
   const dispatches = await activeDispatchesByPlate();
 
   const latest = await latestPingPerVehicle(dispatchOnly ? [...dispatches.keys()] : undefined);
+  // One pass for every lane on the board, before the render loop - see
+  // lanesForDispatches.
+  const lanes = await lanesForDispatches(dispatches.values());
 
   const now = Date.now();
   const seen = new Set<string>();
@@ -682,7 +888,7 @@ export async function getFleetBoard(req: Request, res: Response) {
       state: deriveState(p.providerStatus, p.speedKmph, ageMinutes),
       distanceFromFactoryKm: Math.round(kmBetween(FACTORY.latitude, FACTORY.longitude, p.latitude, p.longitude)),
       dispatch: dispatch ?? null,
-      journey: journeyOf(p.latitude, p.longitude, dispatch),
+      journey: journeyOf(p.latitude, p.longitude, dispatch, dispatch ? lanes.get(dispatch.dispatchId) : null),
       provider: p.provider,
     };
   });
@@ -875,7 +1081,14 @@ export async function getVehicleDetail(req: Request, res: Response) {
         }
       : null,
     dispatch: dispatch ?? null,
-    journey: newest ? journeyOf(newest.latitude, newest.longitude, dispatch) : null,
+    journey: newest
+      ? journeyOf(
+          newest.latitude,
+          newest.longitude,
+          dispatch,
+          dispatch ? (await lanesForDispatches([dispatch])).get(dispatch.dispatchId) : null,
+        )
+      : null,
     stats: {
       points: trail.length,
       distanceKm: Math.round(distanceKm * 10) / 10,
@@ -952,6 +1165,58 @@ export async function getArrivalsBoard(_req: Request, res: Response) {
 export async function triggerArrivalSweep(_req: Request, res: Response) {
   const { sweepApproachRings } = await import('../services/inboundArrivals.service.js');
   res.json(await sweepApproachRings());
+}
+
+/**
+ * `POST /api/gps/pins/backfill` - resolve delivery pins for existing parties.
+ *
+ * One pass for the buyers who were in the system before the pin columns were.
+ * The useful half of the answer is `needsAttention`: roughly half of Google's
+ * share links carry no coordinates anywhere, so this reports which buyers still
+ * need somebody to long-press their gate and paste the numbers.
+ */
+export async function backfillPins(req: Request, res: Response) {
+  const { backfillPartyPins } = await import('../services/partyPin.service.js');
+  const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
+  res.json(await backfillPartyPins(limit));
+}
+
+/**
+ * `POST /api/gps/distances/backfill` - stamp past dispatches with their distance.
+ *
+ * Turns the freight history into a per-km series immediately rather than in six
+ * months. Newest first, since those are the trips anyone will look at and the
+ * ones whose buyers' pins are most likely still right.
+ */
+export async function backfillDistances(req: Request, res: Response) {
+  const { backfillDispatchDistances } = await import('../services/dispatchDestination.service.js');
+  const limit = Math.min(Math.max(Number(req.query.limit) || 300, 1), 2000);
+  res.json(await backfillDispatchDistances(limit));
+}
+
+/**
+ * `GET /api/gps/routes/status` - is road routing actually on?
+ *
+ * Without a provider key every distance on the board is great-circle times
+ * ROAD_FACTOR, which is the state this server is in today. That is a
+ * materially different claim from a routed figure, so it is readable rather
+ * than something to infer from the numbers.
+ */
+export async function getRouteStatus(_req: Request, res: Response) {
+  const { routeConfig } = await import('../services/route.service.js');
+  const cfg = routeConfig();
+  const [lanes, routedLanes] = await Promise.all([
+    prisma.routeLane.count(),
+    prisma.routeLane.count({ where: { provider: { not: 'STRAIGHT' } } }),
+  ]);
+  res.json({
+    provider: cfg.provider,
+    available: cfg.available,
+    routingEnabled: cfg.provider !== 'NONE',
+    lanes,
+    routedLanes,
+    straightLineLanes: lanes - routedLanes,
+  });
 }
 
 /**

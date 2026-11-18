@@ -9,6 +9,9 @@ import {
   triggerGpsPoll,
   getArrivalsBoard,
   triggerArrivalSweep,
+  backfillPins,
+  backfillDistances,
+  getRouteStatus,
 } from '../controllers/gps.controller.js';
 
 /**
@@ -33,6 +36,14 @@ router.get('/gps/vehicles/:vehicleNumber/detail', asyncHandler(getVehicleDetail)
 // that cannot log in.
 router.get('/gps/arrivals', asyncHandler(getArrivalsBoard));
 router.post('/gps/arrivals/sweep', asyncHandler(triggerArrivalSweep));
+
+// Road distance to the delivery point. /routes/status says whether a routing
+// provider is configured at all - without one every figure is great-circle
+// times ROAD_FACTOR, which the screens have to be able to state.
+router.get('/gps/routes/status', asyncHandler(getRouteStatus));
+// The two one-off passes for data that predates these columns.
+router.post('/gps/pins/backfill', asyncHandler(backfillPins));
+router.post('/gps/distances/backfill', asyncHandler(backfillDistances));
 
 // Pull from the provider now, rather than waiting for the next tick. A write
 // only in the sense that it stores what it fetches - no ERP data changes - so

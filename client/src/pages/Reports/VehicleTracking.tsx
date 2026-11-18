@@ -72,7 +72,27 @@ interface Journey {
   coveredKm: number | null;
   progressPct: number | null;
   etaAt: string | null;
+  /**
+   * How the distance was arrived at. PIN_ROUTED is road kilometres measured
+   * along the actual route to the buyer's own pin - the only one that is a
+   * measurement. PIN_STRAIGHT is the right pin as the crow flies. TOWN_CENTRE
+   * is the town, which can be ten km from the gate. Shown on screen, because
+   * these are different claims and a number alone hides which one it is.
+   */
+  source: 'PIN_ROUTED' | 'PIN_STRAIGHT' | 'TOWN_CENTRE' | 'NONE' | string;
+  /** Km from the route the lorry was given. Only known on a routed lane. */
+  offRouteKm: number | null;
+  /** True when that gap is wide enough to mean he has left the route. */
+  offRoute: boolean;
 }
+
+/** What the distance figure beside a lorry actually rests on. */
+const SOURCE_NOTE: Record<string, string> = {
+  PIN_ROUTED: 'by road to the buyer’s pin',
+  PIN_STRAIGHT: 'straight line to the buyer’s pin',
+  TOWN_CENTRE: 'town centre - no pin for this buyer',
+  NONE: 'destination not located',
+};
 
 interface FleetVehicle {
   vehicleNumber: string;
@@ -322,6 +342,23 @@ function VehicleRow({
             {d.product} &middot; {tonnes(d.weightKg)}
             {j?.remainingKm != null && <> &middot; {j.remainingKm} km to go</>}
           </div>
+          {/* Where the distance came from. A routed figure needs no caption -
+              it is the one people should expect - but a straight line or a town
+              centre has to say so, or the board quietly overstates what it
+              knows. */}
+          {j?.remainingKm != null && j.source !== 'PIN_ROUTED' && (
+            <div className="mt-0.5 truncate text-[10px] text-muted-foreground/80">
+              {SOURCE_NOTE[j.source] ?? j.source}
+            </div>
+          )}
+          {/* The signal straight-line distance could never give: he is not on
+              the road he was given. */}
+          {j?.offRoute && (
+            <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+              <AlertTriangle className="h-3 w-3" />
+              {j.offRouteKm} km off route
+            </div>
+          )}
           {j?.progressPct != null && (
             <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
               <div

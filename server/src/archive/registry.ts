@@ -240,6 +240,8 @@ export const EXCLUDED: ArchiveModel[] = [
     note: 'Field-level history of the masters: who changed a bank account or GSTIN, from what, when and from which IP. Security evidence with its own retention, and it spans years - a party’s history is not bounded by a financial year, so archiving one must not carry it away. It also holds every previous bank account number, which has no place in a file handed to a CA.' },
   { name: 'VehiclePing', delegate: 'vehiclePing', cls: 'EXCLUDED', order: 0,
     note: 'GPS positions pushed by the tracking provider. Operational telemetry, not the books: thousands of rows per lorry-trip, and the dispatch document that matters (SaleDispatch, its kata and its invoice) is archived without them. Has its own pruning retention.' },
+  { name: 'RouteLane', delegate: 'routeLane', cls: 'EXCLUDED', order: 0,
+    note: 'Road distances and route geometry between the factory and a delivery point, measured once per lane and cached. Reference data about the map, not about a financial year - it is derived from parties’ pins and re-measurable from scratch at any time, so carrying it into an archive would be archiving a cache.' },
   { name: 'ApproachAlert', delegate: 'approachAlert', cls: 'EXCLUDED', order: 0,
     note: 'Which approach ring has already been announced for an arriving lorry. Derived from VehiclePing and excluded for the same reason, plus one of its own: the row exists to stop a second alert going out, so carrying it into an archive and out of the live database would re-arm every ring it had already fired. What matters about the arrival is the stock-in and its kata, both of which archive without it.' },
 ];

@@ -5,6 +5,7 @@ import cors from "cors";
 import helmet from "helmet";
 import apiRoutes from "./routes/index.js";
 import { errorHandler } from "./middleware/error.js";
+import { bulkReadAudit } from './middleware/bulkReadAudit.js';
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { assertJwtSecret } from "./lib/jwt.js";
 import { isOriginAllowed, originPolicyFromEnv } from "./lib/corsOrigin.js";
@@ -193,7 +194,8 @@ app.use('/webhooks', (req, res, next) => {
   apiRoutes(req, res, next);
 });
 
-app.use("/api", apiLimiter, apiRoutes);
+// bulkReadAudit before the routes so it wraps res.json for every one of them.
+app.use("/api", apiLimiter, bulkReadAudit(), apiRoutes);
 
 // Error handler must be registered last.
 app.use(errorHandler);

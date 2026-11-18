@@ -14,8 +14,8 @@ mismatch is the useful part — the plan was drafted against a generic Indian ER
 | 1. HTTPS, HSTS, TLS 1.2+, redirect | **Already done.** No code change — see below |
 | 2. Encrypt bank accounts, Aadhaar, PAN | **No Aadhaar or PAN column exists.** Reduces to one field; deferred by decision |
 | 3. Mask PII, `pii.view`, audit reveals | **The real exposure.** Done |
-| 4. Export controls, audit, watermark | **There are no server-side exports.** Reframed; outstanding |
-| 5. Masked copy of production for testing | Fits as written; outstanding |
+| 4. Export controls, audit, watermark | **There are no server-side exports.** Reframed and done; the watermark does not fit either |
+| 5. Masked copy of production for testing | Fits as written. Done |
 | 6. Remove sensitive data from logs | Fits as written. Done |
 
 ## 1. HTTPS and HSTS — verified, not changed
@@ -100,6 +100,80 @@ and it is the **only** client consumer of this field. A USER generating that sta
 `XXXXXX7890`. `brokerStatement.ts`, `InvoiceDocument.tsx` and the rest use `CompanyProfile`'s own
 account, which is published on invoices by design and is untouched.
 
+## 4. Export controls — recorded, not prevented
+
+`exceljs` and `jspdf` are **client** dependencies. Every spreadsheet and PDF export is assembled
+in the browser out of data it has already fetched, so a `report.export` check cannot gate what the
+browser does with bytes it already holds.
+
+What the server *can* see is the fetch that feeds the export. `middleware/bulkReadAudit.ts` wraps
+`res.json` once, centrally, and records a `data.bulk_read` row whenever a GET returns at or above
+`BULK_READ_AUDIT_ROWS` (default 500) — with the path, the row count and the scrubbed query string,
+because `?all=true` is what distinguishes a register dump from a page. At or above
+`BULK_READ_ALERT_ROWS` (default 5000) it also logs `[bulk-read]` with the size and who asked.
+
+Wrapped centrally rather than asking each controller to report its own count: a call site that has
+to be remembered is one a future endpoint forgets, which is the same reasoning as the Phase 4
+audit extension.
+
+### The gate I did not add
+
+Requiring `report.export` for `?all=true` was the obvious next step and would have been a bug. The
+dues and ledger pages **must** fetch `?all=true` or they compute phantom dues from a truncated
+page, and a USER holds `report.view` but not `report.export`. Gating it would have broken the dues
+screens for every ordinary user, in the name of security. Recording beats breaking.
+
+### The watermark does not fit either
+
+I proposed watermarking "the PDFs the server already generates" and then looked at what they are:
+`invoicePdf.ts` produces GST tax invoices, `notePdf.ts` credit and debit notes, and the statement
+PDFs go to suppliers and buyers over WhatsApp. Every one is a **document sent to a third party**,
+not an internal export. Stamping a customer's tax invoice with an internal username and timestamp
+would be wrong, and arguably not compliant. There is no internal-export PDF to watermark, so none
+is watermarked.
+
+**What this honestly does not do:** it does not stop anyone exporting. Someone with legitimate
+read access can still pull a register into a spreadsheet and take it home. What changed is that it
+is no longer invisible.
+
+## 5. A masked copy to test against
+
+`scripts/mask-database.mjs` turns a restored copy into something safe to hand around: party bank
+accounts, IFSCs, phones and emails replaced; user password hashes scrambled, MFA secrets cleared,
+`mustChangePassword` set; company bank details replaced; driver phones replaced; and every
+`UserSession` deleted, so a token from the real deployment cannot be replayed against the copy.
+
+Names, GSTINs, commodities and **every transaction, weight and amount are kept** — the point is to
+test against realistic volume and shape. GSTINs in particular stay, because they are printed on
+invoices anyway and a masked one breaks the GST reports.
+
+Masked values are derived by hashing the row id, so they are stable: the same party masks the same
+way every time, and "is this the same account" checks still behave.
+
+**Passwords are scrambled, not replaced with a known one.** A dev password written into a
+committed script is a secret in code, and the standing rule for this project is that there are
+none. After masking, no production password works; reset one through the normal admin flow.
+
+### The guards, and why they are shaped that way
+
+This is the most dangerous script in the repository — pointed at the wrong database it destroys
+suppliers' bank details. So it:
+
+1. reads `MASK_TARGET_DATABASE_URL` and **never falls back to `DATABASE_URL`**, so forgetting to
+   set it does nothing at all;
+2. refuses if the target resolves to the same host *and* database as `DATABASE_URL`;
+3. is a dry run unless `--apply` is given;
+4. with `--apply`, also requires `--confirm=<host>` matching the target's own host — a flag you can
+   add from muscle memory is not a guard, so the operator has to read and retype the thing they are
+   about to overwrite;
+5. runs in one transaction, so a failure half way rolls back rather than leaving a half-masked
+   database that looks fine.
+
+A "does the database name say dev" check would have been worthless here: a Supabase database is
+called `postgres` whatever project it belongs to. Hence the retype-the-host rule instead.
+
+All four refusals were exercised before committing, not assumed.
+
 ## 6. Keeping sensitive values out of the logs
 
 Render keeps stdout, and anyone who can read the service logs can read what we printed there.
@@ -151,12 +225,14 @@ nothing fails, they are just quietly wrong.
 
 ## Tests
 
-`npm test` in `server/` — **66 files, 759 tests.** 28 new.
+`npm test` in `server/` — **67 files, 771 tests.** 40 new.
 
-## Still to do in this phase
+## Left open
 
 | Item | Where |
 |---|---|
-| 4. Export controls, reframed | Gate and audit the `?all=true` bulk reads that feed every export, with a configurable row-count threshold that alerts; watermark the PDFs the server generates itself. A browser-side export stays unauditable — `exceljs` and `jspdf` are client dependencies, so a `report.export` permission cannot gate what the browser does with data it already has |
-| 5. Masked production copy | A script to dump and scrub, for testing against realistic data without real account numbers |
-| `report.export` is still enforced nowhere | Same position `pii.view` was in before item 3 |
+| Field-level encryption (item 2) | Deferred by decision, scope is one column — see above |
+| `report.export` is still enforced nowhere | Deliberate: there is nothing server-side to gate, and gating `?all=true` would break the dues pages. It stays a declared-but-unused permission until there is a server-side export to attach it to |
+| HSTS `preload` | A DNS decision about `rvpindustries.co.in`, flagged not taken |
+| `securityAlertEmails` is unset | So the bulk-read alert is a log line only. Wiring it to email is small once recipients exist — carried over from Phase 1 |
+| No masked copy has actually been made | The script's guards are tested; the end-to-end run needs a restored copy to point at |

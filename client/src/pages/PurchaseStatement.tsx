@@ -291,7 +291,13 @@ export default function PurchaseStatement() {
         {/* Letterhead */}
         <div className="flex items-start justify-between gap-6 border-b border-neutral-400 pb-3">
           <div className="min-w-0">
-            <h2 className="text-lg font-bold uppercase tracking-wide">{company?.name ?? 'RVP Industries'}</h2>
+            {/* The logo carries the name as artwork; the letterhead does not
+                repeat it in type. Matches the PDF twin. */}
+            <img
+              src="/rvp-logo-dark.webp"
+              alt={company?.name ?? 'RVP Industries'}
+              className="mb-1.5 block h-14 w-auto object-contain print:[print-color-adjust:exact]"
+            />
             {company?.address && (
               <p className="mt-0.5 text-[10px] leading-snug text-neutral-500">{company.address.replace(/\n/g, ', ')}</p>
             )}

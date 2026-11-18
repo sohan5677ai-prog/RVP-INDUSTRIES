@@ -36,7 +36,7 @@ export function signatureAssets(): { sign: Buffer | null; stamp: Buffer | null }
  * two big-endian uint32s at byte 16. PDFKit exposes `openImage` for this but
  * @types/pdfkit does not declare it, and the header is trivial to read.
  */
-function pngSize(buf: Buffer): { width: number; height: number } | null {
+export function pngSize(buf: Buffer): { width: number; height: number } | null {
   if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47) return null;
   const width = buf.readUInt32BE(16);
   const height = buf.readUInt32BE(20);

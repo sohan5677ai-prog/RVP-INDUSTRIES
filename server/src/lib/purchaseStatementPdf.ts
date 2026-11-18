@@ -7,6 +7,7 @@ import { logger } from './logger.js';
 import type { QualityAdjustmentRow, QualityAdjustmentMode } from './calc.js';
 import { drawSignatureMark } from './signatureAssets.js';
 import { TRANSLATIONS, type StatementLanguage } from './i18n/purchaseStatement.js';
+import { drawBrandLogo } from './brandAssets.js';
 
 /**
  * Renders the per-lorry PURCHASE STATEMENT (the bill we settle a supplier on)
@@ -226,11 +227,9 @@ export function renderPurchaseStatementPdf(data: PurchaseStatementData): Promise
       doc.lineWidth(width).strokeColor(color).moveTo(LEFT, y).lineTo(RIGHT, y).stroke();
 
     // --- Letterhead ---------------------------------------------------------
-    doc.font(F.display).fontSize(17).fillColor(INK).text(company.name.toUpperCase(), LEFT, PAGE.margin - 2, {
-      width: W * 0.62,
-      characterSpacing: 0.2,
-    });
-    let y = doc.y + 3;
+    // The logo carries the name and the tagline as artwork, so the letterhead
+    // does not repeat them in type - only the address and identifiers follow.
+    let y = drawBrandLogo(doc, { x: LEFT, y: PAGE.margin - 2, height: 42, gap: 6 });
     doc.font(F.body).fontSize(7.5).fillColor(MUTED);
     if (company.address) {
       doc.text(company.address.replace(/\n/g, ', '), LEFT, y, { width: W * 0.62 });

@@ -206,6 +206,20 @@ export function InvoiceDocument({ dispatch, order, company, taxRows, layout, pre
           <tr>
             <td rowSpan={8} style={{ padding: 0 }}>
               <div style={{ padding: '5px 8px', borderBottom: '1px solid #000' }}>
+                {/* Official mark on the seller block - prints with the sheet. */}
+                <img
+                  src="/rvp-logo-dark.webp"
+                  alt={company.name}
+                  style={{
+                    height: '11mm',
+                    width: 'auto',
+                    objectFit: 'contain',
+                    display: 'block',
+                    marginBottom: '3px',
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
+                  }}
+                />
                 <div style={{ fontWeight: 'bold', fontSize: '1.15em', letterSpacing: '0.02em' }}>{company.name}</div>
                 {company.address && <div className="lbl" style={{ whiteSpace: 'pre-line', marginTop: '2px' }}>{company.address}</div>}
                 {company.gstin && <div className="lbl" style={{ marginTop: '2px' }}>GSTIN/UIN: <span className="val">{company.gstin}</span></div>}

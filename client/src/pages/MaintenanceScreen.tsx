@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { api, clearToken } from '@/lib/api';
 import type { MaintenanceStatus } from '@/lib/types';
+import { BrandLogo } from '@/components/BrandLogo';
 
 interface MaintenanceScreenProps {
   initialStatus?: MaintenanceStatus | null;
@@ -166,18 +167,11 @@ export default function MaintenanceScreen({
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-md ring-1 ring-amber-400/30">
-              <span className="font-display font-bold text-lg text-white leading-none">R</span>
-            </div>
-            <div className="text-left">
-              <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                RVP Industries ERP
-              </h1>
-              <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
-                Tamarind Seed Processing • Enterprise Platform
-              </p>
-            </div>
+          <div className="flex flex-col items-center gap-2">
+            <BrandLogo tone="auto" className="h-20 sm:h-24" />
+            <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
+              Enterprise Platform
+            </p>
           </div>
         </div>
 

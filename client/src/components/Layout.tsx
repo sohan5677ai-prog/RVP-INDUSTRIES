@@ -68,6 +68,7 @@ import DispatchReminders from '@/components/DispatchReminders';
 import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
 import { ReminderQueueProvider, remindersShownToday } from '@/components/ReminderQueue';
+import { BrandMark } from '@/components/BrandLogo';
 
 type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean; roles?: string[] };
 type NavSection = { heading?: string; items: NavItem[] };
@@ -296,9 +297,7 @@ export default function Layout() {
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.025] via-transparent to-black/25" />
         <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-white/10 via-white/[0.04] to-transparent" />
         <div className="relative z-10 flex items-center gap-3 px-5 h-16 border-b border-sidebar-border shrink-0">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-amber-950/50 ring-1 ring-amber-300/20 shrink-0">
-            <span className="font-display font-semibold text-[15px] text-amber-50 leading-none">R</span>
-          </div>
+          <BrandMark className="h-9 w-9" />
           <div className="min-w-0 leading-tight">
             <div className="font-display font-semibold text-[15px] text-amber-50/95 truncate tracking-tight">RVP Industries</div>
             <div className="text-[10.5px] uppercase tracking-[0.16em] text-sidebar-foreground/55">Tamarind Seed Processing</div>

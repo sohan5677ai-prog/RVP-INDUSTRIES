@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Lock, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api, clearToken, getErrorMessage } from '@/lib/api';
+import { BrandLogo } from '@/components/BrandLogo';
 
 const RZP_SCRIPT = 'https://checkout.razorpay.com/v1/checkout.js';
 
@@ -104,6 +105,7 @@ export default function Paywall({ onBack }: { onBack?: () => void } = {}) {
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-background text-foreground p-4">
       <div className="w-full max-w-md rounded-2xl border bg-card/70 backdrop-blur-md p-8 shadow-xl text-center">
+        <BrandLogo tone="auto" className="mx-auto mb-5 h-16" />
         <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
           <Lock className="h-7 w-7 text-destructive" />
         </div>

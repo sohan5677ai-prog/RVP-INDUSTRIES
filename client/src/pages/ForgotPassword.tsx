@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Loader2, Mail } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
 
 /**
  * Request a password reset link.
@@ -43,6 +44,7 @@ export default function ForgotPassword() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4">
       <div className="w-full max-w-md">
+        <BrandLogo tone="light" className="mx-auto mb-7 h-20 drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]" />
         <div className="backdrop-blur-xl bg-zinc-900/50 border border-white/10 rounded-3xl p-8 shadow-2xl">
           {sent ? (
             <div className="space-y-5 text-center">

@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import { inr, rupeesInWords } from './invoice.js';
 import { IST_TZ } from './istDate.js';
 import { drawSignatureMark } from './signatureAssets.js';
+import { drawBrandLogo } from './brandAssets.js';
 
 export interface NotePdfParty {
   name: string;
@@ -228,6 +229,9 @@ export function renderNotePdf(data: NotePdfData): Promise<Buffer> {
 
     // Render left column: Seller, Consignee, Buyer
     let ly = headerTop + PAD_Y;
+    // Official mark on the seller block - the header box grows with it,
+    // exactly as the rowSpan does on the printed HTML twin.
+    ly = drawBrandLogo(doc, { x: bx, y: ly, height: 30, gap: 3 });
     ly = txt(data.company.name, bx, ly, leftInner, { bold: true, size: NAME });
     if (data.company.address) ly = txt(data.company.address, bx, ly, leftInner);
     if (data.company.gstin) ly = txt(`GSTIN/UIN: ${data.company.gstin}`, bx, ly, leftInner);

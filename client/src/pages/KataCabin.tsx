@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { LoaderCircle, MonitorCog, ShieldAlert } from 'lucide-react';
 import { API_BASE, setToken } from '@/lib/api';
 import WeighbridgeScreen from '@/pages/Reports/WeighbridgeScreen';
+import { BrandLogo } from '@/components/BrandLogo';
 
 const CABIN_KEY_STORAGE = 'rvp_kata_cabin_installation_key';
 
@@ -67,7 +68,7 @@ export default function KataCabin() {
         <div className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25">
           {notActivated ? <MonitorCog className="h-7 w-7" /> : state === 'error' ? <ShieldAlert className="h-7 w-7" /> : <LoaderCircle className="h-7 w-7 animate-spin" />}
         </div>
-        <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-amber-400">RVP Industries</p>
+        <BrandLogo tone="light" className="mx-auto h-16" />
         <h1 className="mt-2 font-display text-2xl font-semibold">Kata Cabin</h1>
         <p className="mt-3 text-sm leading-6 text-stone-400">
           {notActivated

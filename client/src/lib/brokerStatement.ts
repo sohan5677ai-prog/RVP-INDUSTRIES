@@ -185,8 +185,8 @@ export function buildBrokerStatementHtml(o: BrokerStatementOptions): string {
   /* ---------- letterhead ---------- */
   .head{display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
         border-bottom:2.5px solid var(--brand); padding-bottom:9px;}
-  .co-name{font-size:22px; font-weight:800; letter-spacing:.4px; color:var(--brand); text-transform:uppercase; line-height:1.1;}
-  .co-tag{font-size:9.5px; letter-spacing:2.2px; text-transform:uppercase; color:var(--muted); margin-top:2px;}
+  .co-logo{height:16mm; width:auto; object-fit:contain; display:block; margin-bottom:4px;
+           -webkit-print-color-adjust:exact; print-color-adjust:exact;}
   .co-lines{margin-top:6px; font-size:10px; color:#374151; max-width:105mm;}
   .co-lines div{margin-top:1px;}
   .doc{text-align:right; flex:0 0 auto;}
@@ -294,8 +294,9 @@ export function buildBrokerStatementHtml(o: BrokerStatementOptions): string {
   <!-- letterhead -->
   <div class="head">
     <div>
-      <div class="co-name">${esc(companyName)}</div>
-      <div class="co-tag">Tamarind Seed Processing</div>
+      <!-- The logo carries the name and the tagline as artwork; the letterhead
+           does not repeat them in type. -->
+      <img class="co-logo" src="/rvp-logo-dark.webp" alt="${esc(companyName)}" />
       <div class="co-lines">
         ${companyAddr ? `<div>${esc(companyAddr)}</div>` : ''}
         <div>${[

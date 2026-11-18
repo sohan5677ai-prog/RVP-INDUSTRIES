@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Lock, Mail, Loader2, ArrowRight, Eye, EyeOff, Wrench, Clock, ShieldAlert } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export default function Login() {
   const { login, completeMfa } = useAuth();
@@ -132,11 +133,11 @@ export default function Login() {
       <div className="relative z-10 w-full max-w-md p-6 sm:p-10">
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center mb-8">
-          <div className="h-16 w-16 mb-6 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-700 flex items-center justify-center shadow-2xl shadow-amber-900/50 ring-1 ring-white/10">
-            <span className="font-display font-bold text-3xl text-amber-50">R</span>
-          </div>
-          <h1 className="font-display text-3xl font-bold tracking-tight text-white mb-2">RVP Industries</h1>
-          <p className="text-zinc-400 text-sm tracking-wide">ENTERPRISE RESOURCE PLANNING</p>
+          <BrandLogo
+            tone="light"
+            className="h-28 sm:h-32 mb-5 drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]"
+          />
+          <p className="text-zinc-400 text-xs sm:text-sm tracking-[0.22em] uppercase">Enterprise Resource Planning</p>
         </div>
 
         {/* Maintenance Banner on Login */}

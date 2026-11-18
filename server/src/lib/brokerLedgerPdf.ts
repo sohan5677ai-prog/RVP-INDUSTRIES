@@ -5,6 +5,7 @@ import { inr, rupeesInWords } from './invoice.js';
 import { IST_TZ } from './istDate.js';
 import { logger } from './logger.js';
 import { drawSignatureMark } from './signatureAssets.js';
+import { drawBrandLogo } from './brandAssets.js';
 import type { BrokerLedgerData, BrokerLedgerTxn } from '../services/brokerLedger.service.js';
 
 /**
@@ -239,10 +240,9 @@ export function renderBrokerLedgerPdf(
     /* -- letterhead -------------------------------------------------------- */
 
     const headW = W * 0.6;
-    use('bold', 16.5, BRAND).text(companyName.toUpperCase(), LEFT, PAGE.margin, { width: headW, characterSpacing: 0.3 });
-    let ly = doc.y + 1.5;
-    use('body', 6.4, MUTED).text('TAMARIND SEED PROCESSING', LEFT, ly, { width: headW, characterSpacing: 1.6 });
-    ly = doc.y + 3.5;
+    // The logo carries the name and the tagline as artwork, so the letterhead
+    // does not repeat them in type - only the address and identifiers follow.
+    let ly = drawBrandLogo(doc, { x: LEFT, y: PAGE.margin, height: 46, gap: 7 });
     use('body', 7.2, SUB);
     if (companyAddr) { doc.text(companyAddr, LEFT, ly, { width: headW }); ly = doc.y + 0.5; }
     const idLine = [company.gstin ? `GSTIN: ${company.gstin}` : null, companyState ? `State: ${companyState}` : null]

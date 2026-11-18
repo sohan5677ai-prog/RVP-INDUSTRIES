@@ -45,6 +45,10 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   { methods: 'ALL', path: '/user-notes', permission: 'notes.manage' },
 
   // ------------------------------------------------------------- masters --
+  // Before the generic rule: first match wins, so the specific reveal path
+  // has to be listed above /parties/*. Either grant is accepted in the
+  // handler; the route table names the narrower one.
+  { methods: READ, path: '/parties/*/bank', permission: 'master.party.bank.view' },
   { methods: READ, path: '/parties/*', permission: 'master.party.view' },
   { methods: READ, path: '/parties', permission: 'master.party.view' },
   { methods: REMOVE, path: '/parties/*', permission: 'master.party.delete' },

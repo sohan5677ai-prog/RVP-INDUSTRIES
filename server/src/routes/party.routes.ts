@@ -3,6 +3,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import {
   listParties,
   getParty,
+  revealPartyBank,
   createParty,
   updateParty,
   deleteParty,
@@ -11,6 +12,8 @@ import {
 const router = Router();
 
 router.get('/', asyncHandler(listParties));
+// Before /:id so the specific path wins.
+router.get('/:id/bank', asyncHandler(revealPartyBank));
 router.get('/:id', asyncHandler(getParty));
 router.post('/', asyncHandler(createParty));
 router.put('/:id', asyncHandler(updateParty));

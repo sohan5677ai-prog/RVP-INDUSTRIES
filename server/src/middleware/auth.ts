@@ -7,6 +7,7 @@ import {
 } from '../lib/tokens.js';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
+import { setContextUser } from '../lib/requestContext.js';
 import {
   IDLE_TIMEOUT_MS,
   LAST_SEEN_WRITE_INTERVAL_MS,
@@ -71,11 +72,20 @@ async function authenticate(req: Request): Promise<void> {
   if (!payload.sid) throw new HttpError(401, 'Session ended. Please sign in again.');
   // The Slack bot and the kata cabin screen. No session row, no idle timeout,
   // and no password to have changed - see signServiceToken.
-  if (payload.sid === SERVICE_SESSION_ID) return;
+  if (payload.sid === SERVICE_SESSION_ID) {
+    setContextUser({ userId: payload.userId, userName: payload.name, role: payload.role });
+    return;
+  }
 
   const now = Date.now();
   const wroteAt = lastSeenCache.get(payload.sid);
-  if (wroteAt !== undefined && now - wroteAt < LAST_SEEN_WRITE_INTERVAL_MS) return;
+  if (wroteAt !== undefined && now - wroteAt < LAST_SEEN_WRITE_INTERVAL_MS) {
+    // Still set the context: without this, every request served from the
+    // 30-second lastSeen cache would write anonymous audit rows - which is
+    // most of them.
+    setContextUser({ userId: payload.userId, role: payload.role });
+    return;
+  }
 
   // One query for the session and the user state it depends on, rather than
   // two round-trips per request.
@@ -128,6 +138,7 @@ async function authenticate(req: Request): Promise<void> {
   // A role changed under a live token: trust the database, not the token. The
   // token is reissued with the new role on the next refresh.
   req.user = { ...payload, role: session.user.role };
+  setContextUser({ userId: payload.userId, role: session.user.role });
 
   await prisma.userSession.update({ where: { id: session.id }, data: { lastSeenAt: nowDate } });
   touchSession(session.id, nowDate);

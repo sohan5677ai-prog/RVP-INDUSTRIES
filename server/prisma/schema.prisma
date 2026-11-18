@@ -231,6 +231,95 @@ enum LoginOutcome {
   DEVICE_LIMIT
 }
 
+/// The audit trail (plan item 4.1).
+///
+/// One row per change, and the row is the evidence - so the shape is chosen
+/// for "prove to an auditor what happened" rather than for querying
+/// convenience.
+///
+/// Tamper-evidence is a hash chain (plan item 4.3): every row stores the hash
+/// of the row before it, so altering or removing any row breaks every hash
+/// after it. That is *detection*, not prevention - a database superuser can
+/// still rewrite rows, and would simply have to recompute the chain to hide
+/// it. Prevention is REVOKE UPDATE, DELETE on this table from the application
+/// role, which is documented in docs/security/PHASE-4.md rather than applied
+/// from here.
+model AuditLog {
+  id  String @id @default(cuid())
+  /// Position in the chain. Gapless and unique: a missing number is itself
+  /// evidence, which an `id` alone would not give.
+  seq BigInt @unique
+
+  /// SHA-256 over this row's own fields plus prevHash.
+  hash     String
+  /// The previous row's hash. The genesis row stores a fixed constant.
+  prevHash String
+
+  /// What happened, e.g. "payment.delete", "auth.login", "role.update".
+  action     String
+  /// Prisma model name, where the change was to a record.
+  entity     String?
+  entityId   String?
+  /// Enough to identify the record in the log without joining to a table that
+  /// may since have changed or been emptied.
+  entityLabel String?
+
+  /// Before and after. Null on a create and a delete respectively. Values the
+  /// log must never carry - password hashes, TOTP secrets - are stripped
+  /// before they reach here.
+  oldValues Json?
+  newValues Json?
+
+  userId    String?
+  userName  String?
+  userRole  Role?
+  ip        String?
+  userAgent String?
+  /// Ties every row written while serving one HTTP request together, so a
+  /// single action that touched four tables reads as one event.
+  requestId String?
+  /// Method and path, for the requests that came over HTTP.
+  method    String?
+  path      String?
+
+  /// Always UTC in the column; rendered in IST for people (lib/istDate.ts).
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity, entityId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([requestId])
+}
+
+/// A closed accounting period (plan item 4.5).
+///
+/// A row here means postings dated inside it are refused. Unlocking needs a
+/// permission and a reason, and both the lock and the unlock are themselves
+/// audited - a period that can be quietly reopened is not a close.
+model PeriodLock {
+  id        String   @id @default(cuid())
+  /// Inclusive first day of the closed period, at IST midnight.
+  fromDate  DateTime
+  /// Inclusive last day.
+  toDate    DateTime
+  reason    String?
+
+  lockedById   String
+  lockedByName String?
+  lockedAt     DateTime @default(now())
+
+  /// Set when reopened. The row is kept rather than deleted, so the fact that
+  /// a closed period was reopened survives in the record.
+  unlockedById   String?
+  unlockedByName String?
+  unlockedAt     DateTime?
+  unlockReason   String?
+
+  @@index([fromDate, toDate])
+  @@index([unlockedAt])
+}
+
 /// Field-level history for the master records (plan item 3.5).
 ///
 /// One row per field that actually changed, with the before and after. Not a
@@ -1480,6 +1569,11 @@ model CompanyProfile {
   /// changing would arrive in a stream of ordinary paperwork - which is where
   /// it would be missed. This should be the people who would actually act.
   securityAlertEmails            String?
+  /// How many days of audit trail stay queryable in the app (plan item 4.6).
+  /// Null means the default of 180. Nothing is deleted automatically: the
+  /// retention job archives beyond this, and pruning the table would break
+  /// the hash chain, so it is deliberately a separate, deliberate act.
+  auditRetentionDays             Int?
   // Bank details printed in the invoice footer.
   bankAccountName                String?
   bankName                       String?

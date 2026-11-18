@@ -316,7 +316,6 @@ function sheetHtml(s: VehicleIndentSheet, company: CompanyProfile | null | undef
       <div class="panel-h">Reporting Point</div>
       ${kv('Load at', points, false)}
       ${kv('Place', company?.dispatchFromPlace ?? null)}
-      ${kv('Reporting', 'By 09:00 hrs on the loading date')}
       <div class="panel-h" style="margin-top:8px">Confirm To</div>
       ${kv('Dispatch', company?.contact ?? null)}
     </div>

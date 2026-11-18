@@ -913,6 +913,48 @@ export async function getGpsStatus(_req: Request, res: Response) {
 }
 
 /**
+ * `GET /api/gps/arrivals` - the lorries on their way TO the factory.
+ *
+ * A separate endpoint rather than a scope on `/gps/fleet`, for two reasons.
+ * The board is the whole provider feed - 145 vehicles, about 70 KB - and the
+ * two screens that want arrivals both poll far more often than the fleet board
+ * does: the kata cabin sits on this all day. And the shape is genuinely
+ * different, because an arrival exists whether or not a position does, so it is
+ * keyed by booking, not by plate.
+ */
+export async function getArrivalsBoard(_req: Request, res: Response) {
+  const { buildArrivalsBoard } = await import('../services/inboundArrivals.service.js');
+  const { rings, arrivals } = await buildArrivalsBoard();
+  res.json({
+    generatedAt: new Date().toISOString(),
+    factory: FACTORY,
+    rings,
+    counts: {
+      total: arrivals.length,
+      atGate: arrivals.filter((a) => a.phase === 'AT_GATE').length,
+      approaching: arrivals.filter((a) => a.phase === 'APPROACHING').length,
+      enRoute: arrivals.filter((a) => a.phase === 'EN_ROUTE').length,
+      booked: arrivals.filter((a) => a.phase === 'BOOKED').length,
+      untracked: arrivals.filter((a) => !a.tracked).length,
+    },
+    arrivals,
+  });
+}
+
+/**
+ * `POST /api/gps/arrivals/sweep` - check the approach rings now.
+ *
+ * The same sweep the poll tick runs, exposed so the office can force it after
+ * switching the alerts on or moving a ring, rather than waiting for a lorry to
+ * produce a new fix. Latched exactly the same way, so clicking it twice cannot
+ * announce a lorry twice.
+ */
+export async function triggerArrivalSweep(_req: Request, res: Response) {
+  const { sweepApproachRings } = await import('../services/inboundArrivals.service.js');
+  res.json(await sweepApproachRings());
+}
+
+/**
  * `POST /api/gps/poll` - pull from the provider right now.
  *
  * The page's refresh button. `force` bypasses our own stand-down after a rate

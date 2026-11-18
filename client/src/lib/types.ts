@@ -786,6 +786,11 @@ export interface CompanyProfile {
   /** Who an arriving driver rings at the gate - sent in the inbound driver brief. */
   driverContactName?: string | null;
   driverContactPhone?: string | null;
+  // Approach rings for arriving purchase lorries, in km from the factory.
+  // The first messages the team, the second raises the kata ticket.
+  inboundApproachRingKm?: number;
+  inboundGateRingKm?: number;
+  inboundApproachAlertsEnabled?: boolean;
   ownerWhatsappNumber?: string | null;
   // JSON string: [{ name, phone }] - up to 3 internal-alert recipients.
   alertRecipients?: string | null;

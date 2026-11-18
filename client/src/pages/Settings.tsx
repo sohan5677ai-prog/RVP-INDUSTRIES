@@ -219,6 +219,22 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
     </div>
   );
 
+  /** Same as `field`, for the whole-number settings. */
+  const numField = (label: string, k: keyof CompanyProfile, placeholder = '') => (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{label}</Label>
+      <Input
+        type="number"
+        min={1}
+        value={(form[k] as number | undefined) ?? ''}
+        onChange={(e) =>
+          setForm((p) => ({ ...p, [k]: e.target.value === '' ? undefined : Number(e.target.value) }))
+        }
+        placeholder={placeholder}
+      />
+    </div>
+  );
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center gap-2">
@@ -243,6 +259,28 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             <p className="-mt-2 text-[10px] text-muted-foreground">
               Sent to the driver of every arriving purchase lorry, along with the factory pin and the hamali team's
               number. Keep it the yard, not accounts &mdash; "Contact" above is the number printed on invoices.
+            </p>
+            <div className="grid gap-4 md:grid-cols-3">
+              {numField('Tell the team at (km out)', 'inboundApproachRingKm', '10')}
+              {numField('Kata ready at (km out)', 'inboundGateRingKm', '3')}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Approach alerts</Label>
+                <label className="flex h-10 items-center gap-2 rounded-md border border-input px-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.inboundApproachAlertsEnabled !== false}
+                    onChange={(e) => setForm((p) => ({ ...p, inboundApproachAlertsEnabled: e.target.checked }))}
+                    className="h-4 w-4"
+                  />
+                  <span>Send WhatsApp</span>
+                </label>
+              </div>
+            </div>
+            <p className="-mt-2 text-[10px] text-muted-foreground">
+              When a booked purchase lorry comes within the first distance, the internal alert list and the hamali team
+              are messaged. At the second, the kata cabin raises its ticket with the lorry, supplier and driver already
+              filled in &mdash; no WhatsApp, because three km is four minutes. Tune these to the road: the Upcoming
+              Vehicles tab records the distance each ring actually fired at.
             </p>
             <div className="space-y-1.5">
               <Label className="text-xs">Address (printed as-is, multi-line)</Label>

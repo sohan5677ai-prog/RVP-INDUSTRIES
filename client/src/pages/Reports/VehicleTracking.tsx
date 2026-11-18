@@ -106,6 +106,57 @@ interface FleetResponse {
   vehicles: FleetVehicle[];
 }
 
+/**
+ * A purchase lorry on its way here, as /gps/arrivals returns it.
+ *
+ * Keyed by booking, not by plate: an arrival exists from the moment the
+ * transporter quotes the requirement code back, which is usually a day or two
+ * before any position does - and for a transporter outside the tracked account,
+ * forever. `tracked` says which of those two this row is, and nothing on screen
+ * may present an untracked row's ETA as a measurement.
+ */
+interface InboundArrival {
+  bookingId: string;
+  requirementCode: string | null;
+  lorryNumber: string | null;
+  driverName: string | null;
+  driverPhone: string | null;
+  fromPlace: string | null;
+  fromPhone: string;
+  bookedAt: string;
+  briefSentAt: string | null;
+  purchaseOrderId: string | null;
+  poNumber: string | null;
+  supplier: string;
+  load: string;
+  tonnageKg: number | null;
+  tracked: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  speedKmph: number | null;
+  headingDeg: number | null;
+  address: string | null;
+  recordedAt: string | null;
+  ageMinutes: number | null;
+  state: MapState;
+  distanceKm: number | null;
+  etaAt: string | null;
+  etaIsEstimate: boolean;
+  phase: 'BOOKED' | 'EN_ROUTE' | 'APPROACHING' | 'AT_GATE';
+  ringsFired: number[];
+}
+
+interface ArrivalsResponse {
+  generatedAt: string;
+  factory: { name: string; latitude: number; longitude: number };
+  rings: { approachKm: number; gateKm: number; alertsEnabled: boolean };
+  counts: {
+    total: number; atGate: number; approaching: number;
+    enRoute: number; booked: number; untracked: number;
+  };
+  arrivals: InboundArrival[];
+}
+
 interface TrailPoint {
   latitude: number;
   longitude: number;
@@ -149,6 +200,27 @@ const STATE_LABEL: Record<MapState, string> = {
   PARKED: 'Parked',
   OFFLINE: 'Out of contact',
   NO_SIGNAL: 'Never reported',
+};
+
+const PHASE_LABEL: Record<InboundArrival['phase'], string> = {
+  AT_GATE: 'At the gate',
+  APPROACHING: 'Approaching',
+  EN_ROUTE: 'On the road',
+  BOOKED: 'Booked',
+};
+
+/**
+ * Phase colours, deliberately not the vehicle-state colours.
+ *
+ * A row here answers "how soon", not "is the engine running": an arriving lorry
+ * parked two km away still needs the kata ready, and one moving at 70 km/h four
+ * hundred km out does not. Reusing STATE_COLOURS would say the opposite.
+ */
+const PHASE_TONE: Record<InboundArrival['phase'], string> = {
+  AT_GATE: 'bg-rose-500/15 text-rose-600 dark:text-rose-400',
+  APPROACHING: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  EN_ROUTE: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  BOOKED: 'bg-muted text-muted-foreground',
 };
 
 /** "2 min ago", "3 h ago" - an age, not a timestamp, because age is the question. */
@@ -267,6 +339,129 @@ function VehicleRow({
         </div>
       )}
     </button>
+  );
+}
+
+/* ----------------------------------------------------- the arriving-lorry row */
+
+/**
+ * One arriving purchase lorry.
+ *
+ * Reads top-down the way the yard asks about it: how far out, then whose load
+ * it is, then the driver's number - which is the first thing anyone reaches for
+ * when a lorry is late or lost on the approach road.
+ */
+function ArrivalRow({
+  arrival, rings, selected, onClick,
+}: {
+  arrival: InboundArrival;
+  rings: ArrivalsResponse['rings'];
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const a = arrival;
+  return (
+    <div
+      className={cn(
+        'w-full rounded-xl border p-3 text-left transition-colors duration-200',
+        selected
+          ? 'border-primary/50 bg-primary/[0.07]'
+          : 'border-border/60 bg-card/40 hover:border-primary/30'
+      )}
+    >
+      <button type="button" onClick={onClick} className="block w-full text-left">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-2">
+            <Truck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate font-mono text-sm font-semibold tracking-tight">
+              {a.lorryNumber ?? 'No lorry number'}
+            </span>
+          </span>
+          <span
+            className={cn(
+              'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold',
+              PHASE_TONE[a.phase]
+            )}
+          >
+            {a.distanceKm !== null ? `${a.distanceKm} km` : PHASE_LABEL[a.phase]}
+          </span>
+        </div>
+
+        <div className="mt-1.5 min-w-0">
+          <div className="truncate text-xs font-medium text-foreground">
+            {a.supplier}
+            {a.fromPlace && <span className="text-muted-foreground"> &middot; {a.fromPlace}</span>}
+          </div>
+          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {a.load}
+            {a.requirementCode && <> &middot; <span className="font-mono">{a.requirementCode}</span></>}
+          </div>
+
+          {/* Progress is measured inward, so the bar fills as the lorry gets
+              closer - and only for a tracked lorry, because there is nothing to
+              measure otherwise. Scaled to the approach ring rather than the
+              whole run: the last ten km is the part anyone is watching. */}
+          {a.distanceKm !== null && (
+            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  'h-full rounded-full transition-[width] duration-500',
+                  a.phase === 'AT_GATE' ? 'bg-rose-500' : a.phase === 'APPROACHING' ? 'bg-amber-500' : 'bg-emerald-500'
+                )}
+                style={{
+                  width: `${Math.max(
+                    4,
+                    Math.min(100, 100 - (a.distanceKm / Math.max(rings.approachKm, 1)) * 100)
+                  )}%`,
+                }}
+              />
+            </div>
+          )}
+
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {a.etaAt && (
+              <span className="inline-flex items-center gap-1">
+                <TimerReset className="h-3 w-3" />
+                {timeIst(a.etaAt)}
+                {/* An estimate off the booking is labelled as one. A board that
+                    presents a guess as a measurement is how a yard learns to
+                    stop believing the board. */}
+                {a.etaIsEstimate && <span className="opacity-70">(est.)</span>}
+              </span>
+            )}
+            {a.tracked ? (
+              <span className="inline-flex items-center gap-1">
+                <SatelliteDish className="h-3 w-3" /> {ago(a.ageMinutes)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-3 w-3" /> Not on the GPS feed
+              </span>
+            )}
+            {a.ringsFired.length > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Flag className="h-3 w-3" /> told at {a.ringsFired.join(', ')} km
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {a.driverPhone && (
+        <div className="mt-2 flex items-center gap-2 border-t border-border/50 pt-2">
+          <a
+            href={`tel:${a.driverPhone}`}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent/60 px-2 py-1 font-mono text-[11px] font-medium hover:bg-accent"
+          >
+            <Phone className="h-3 w-3" /> {a.driverPhone}
+          </a>
+          {a.driverName && <span className="truncate text-[11px] text-muted-foreground">{a.driverName}</span>}
+          {a.briefSentAt && (
+            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">briefed</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -577,7 +772,7 @@ function VehicleDetailDialog({
 
 /* ------------------------------------------------------------------ the page */
 
-type Filter = 'DISPATCH' | 'ALL' | MapState;
+type Filter = 'DISPATCH' | 'INBOUND' | 'ALL' | MapState;
 
 export default function VehicleTracking() {
   const queryClient = useQueryClient();
@@ -596,6 +791,21 @@ export default function VehicleTracking() {
     refetchInterval: 120_000,
   });
 
+  /**
+   * Arriving purchase lorries. Always fetched, not only on its own tab, so the
+   * count on the segmented control is live - a lorry two km out is news whether
+   * or not someone happens to be looking at that tab. Cheap enough to do that
+   * with: a handful of bookings, not the 145-vehicle feed.
+   *
+   * Polled twice as often as the fleet board for the same reason: the last ten
+   * km of an approach is where two minutes matters.
+   */
+  const arrivalsQuery = useQuery<ArrivalsResponse>({
+    queryKey: ['gps-arrivals'],
+    queryFn: () => api('/gps/arrivals'),
+    refetchInterval: 60_000,
+  });
+
   const status = useQuery<GpsStatus>({
     queryKey: ['gps-status'],
     queryFn: () => api('/gps/status'),
@@ -609,6 +819,7 @@ export default function VehicleTracking() {
       else toast.error(result.error ?? 'The provider did not return positions');
       queryClient.invalidateQueries({ queryKey: ['gps-fleet'] });
       queryClient.invalidateQueries({ queryKey: ['gps-status'] });
+      queryClient.invalidateQueries({ queryKey: ['gps-arrivals'] });
       if (selected) queryClient.invalidateQueries({ queryKey: ['gps-detail', selected] });
     },
     onError: (err) => toast.error(getErrorMessage(err)),
@@ -616,6 +827,24 @@ export default function VehicleTracking() {
 
   const vehicles = fleet.data?.vehicles ?? [];
   const counts = fleet.data?.counts;
+  const arrivals = arrivalsQuery.data?.arrivals ?? [];
+  const arrivalCounts = arrivalsQuery.data?.counts;
+  const rings = arrivalsQuery.data?.rings ?? { approachKm: 10, gateKm: 3, alertsEnabled: true };
+  const inbound = filter === 'INBOUND';
+
+  /** Arrivals matching the search box, which searches supplier and code too. */
+  const shownArrivals = useMemo(() => {
+    const needle = search.trim().toUpperCase();
+    const plate = needle.replace(/[^A-Z0-9]/g, '');
+    if (!needle) return arrivals;
+    return arrivals.filter(
+      (a) =>
+        (plate && (a.lorryNumber ?? '').includes(plate)) ||
+        (a.supplier ?? '').toUpperCase().includes(needle) ||
+        (a.requirementCode ?? '').toUpperCase().includes(needle) ||
+        (a.fromPlace ?? '').toUpperCase().includes(needle)
+    );
+  }, [arrivals, search]);
 
   /**
    * On-dispatch lorries we can actually draw.
@@ -664,17 +893,36 @@ export default function VehicleTracking() {
   }, [vehicles, filter, search]);
 
   const mapVehicles = useMemo(
-    () => shown.map((v) => ({
-      vehicleNumber: v.vehicleNumber,
-      vehicleLabel: v.vehicleLabel,
-      latitude: v.latitude,
-      longitude: v.longitude,
-      headingDeg: v.headingDeg,
-      speedKmph: v.speedKmph,
-      state: v.state,
-      subtitle: v.dispatch ? `${v.dispatch.buyer}${v.dispatch.destination ? ` - ${v.dispatch.destination}` : ''}` : null,
-    })),
-    [shown]
+    () => {
+      // On the inbound tab the map shows what is coming here, not the fleet.
+      // Untracked arrivals have no position and are simply absent from it - the
+      // list is where they are accounted for.
+      if (inbound) {
+        return shownArrivals
+          .filter((a) => a.latitude !== null && a.longitude !== null)
+          .map((a) => ({
+            vehicleNumber: a.lorryNumber ?? a.bookingId,
+            vehicleLabel: a.lorryNumber ?? 'Booked',
+            latitude: a.latitude,
+            longitude: a.longitude,
+            headingDeg: a.headingDeg,
+            speedKmph: a.speedKmph,
+            state: a.state,
+            subtitle: `${a.supplier}${a.distanceKm !== null ? ` - ${a.distanceKm} km out` : ''}`,
+          }));
+      }
+      return shown.map((v) => ({
+        vehicleNumber: v.vehicleNumber,
+        vehicleLabel: v.vehicleLabel,
+        latitude: v.latitude,
+        longitude: v.longitude,
+        headingDeg: v.headingDeg,
+        speedKmph: v.speedKmph,
+        state: v.state,
+        subtitle: v.dispatch ? `${v.dispatch.buyer}${v.dispatch.destination ? ` - ${v.dispatch.destination}` : ''}` : null,
+      }));
+    },
+    [shown, shownArrivals, inbound]
   );
 
   const landmarks = useMemo(
@@ -720,7 +968,31 @@ export default function VehicleTracking() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      {inbound && !rings.alertsEnabled && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-warning/40 bg-warning/[0.07] p-3 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <div>
+            <p className="font-medium">Approach alerts are switched off.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              This board still tracks every arriving lorry, but nobody is messaged when one crosses{' '}
+              {rings.approachKm} km. Switch them back on in Settings &rarr; WhatsApp.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <StatCard
+          label="Arriving"
+          value={arrivalCounts?.total ?? '-'}
+          icon={Flag}
+          tone="clay"
+          hint={
+            arrivalCounts && (arrivalCounts.atGate || arrivalCounts.approaching)
+              ? `${arrivalCounts.atGate} at the gate, ${arrivalCounts.approaching} within ${rings.approachKm} km`
+              : 'booked purchase lorries on their way'
+          }
+        />
         <StatCard label="On dispatch" value={counts?.onDispatch ?? '-'} icon={Truck} tone="forest" hint="carrying one of our loads" />
         <StatCard label="Moving" value={counts?.moving ?? '-'} icon={Gauge} tone="amber" hint="reporting speed right now" />
         <StatCard label="Idling / parked" value={counts ? counts.idling + counts.parked : '-'} icon={CircleDot} tone="gold" hint="engine on or standing" />
@@ -736,7 +1008,7 @@ export default function VehicleTracking() {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Lorry number, buyer or destination"
+              placeholder={inbound ? 'Lorry, supplier or requirement code' : 'Lorry number, buyer or destination'}
               className="pl-9"
             />
           </div>
@@ -750,6 +1022,7 @@ export default function VehicleTracking() {
               setFilter(v as Filter);
             }}
             options={[
+              { label: 'Upcoming', value: 'INBOUND', count: arrivalCounts?.total },
               { label: 'On dispatch', value: 'DISPATCH', count: counts?.onDispatch },
               { label: 'All', value: 'ALL', count: counts?.total },
               { label: 'Moving', value: 'MOVING', count: counts?.moving },
@@ -759,31 +1032,68 @@ export default function VehicleTracking() {
           />
 
           <div className="max-h-[calc(100vh-24rem)] space-y-2 overflow-y-auto pr-1 lg:max-h-[640px]">
-            {fleet.isLoading && (
-              <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reading positions&hellip;
-              </div>
-            )}
+            {inbound ? (
+              <>
+                {arrivalsQuery.isLoading && (
+                  <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reading bookings&hellip;
+                  </div>
+                )}
 
-            {!fleet.isLoading && shown.length === 0 && (
-              <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
-                {vehicles.length === 0
-                  ? 'No positions stored yet. The first pull lands within a minute of the server starting.'
-                  : 'No lorry matches this filter.'}
-              </div>
-            )}
+                {!arrivalsQuery.isLoading && shownArrivals.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+                    {arrivals.length === 0
+                      ? 'No lorry is booked against an open purchase order. A booking appears here as soon as a transporter quotes a requirement code back on WhatsApp.'
+                      : 'No arriving lorry matches this search.'}
+                  </div>
+                )}
 
-            {shown.map((v) => (
-              <VehicleRow
-                key={v.vehicleNumber}
-                vehicle={v}
-                selected={v.vehicleNumber === selected}
-                onClick={() => {
-                  setSelected(v.vehicleNumber);
-                  setDetailOpen(true);
-                }}
-              />
-            ))}
+                {shownArrivals.map((a) => (
+                  <ArrivalRow
+                    key={a.bookingId}
+                    arrival={a}
+                    rings={rings}
+                    selected={Boolean(a.lorryNumber) && a.lorryNumber === selected}
+                    onClick={() => {
+                      // Only a tracked lorry has a trail to open. For the rest
+                      // the row itself is all there is to show, and a dialog
+                      // saying "no positions" would be a dead end.
+                      if (!a.tracked || !a.lorryNumber) return;
+                      setSelected(a.lorryNumber);
+                      setDetailOpen(true);
+                    }}
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                {fleet.isLoading && (
+                  <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reading positions&hellip;
+                  </div>
+                )}
+
+                {!fleet.isLoading && shown.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+                    {vehicles.length === 0
+                      ? 'No positions stored yet. The first pull lands within a minute of the server starting.'
+                      : 'No lorry matches this filter.'}
+                  </div>
+                )}
+
+                {shown.map((v) => (
+                  <VehicleRow
+                    key={v.vehicleNumber}
+                    vehicle={v}
+                    selected={v.vehicleNumber === selected}
+                    onClick={() => {
+                      setSelected(v.vehicleNumber);
+                      setDetailOpen(true);
+                    }}
+                  />
+                ))}
+              </>
+            )}
           </div>
         </div>
 

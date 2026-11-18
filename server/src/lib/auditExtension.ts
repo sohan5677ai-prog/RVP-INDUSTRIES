@@ -28,6 +28,11 @@ const UNAUDITED_MODELS: ReadonlySet<string> = new Set([
   'MasterChangeLog',
   'UserSession',
   'VehiclePing',
+  // One row per arriving lorry per approach ring, written from the GPS poll
+  // tick with no user behind it. It is the same operational exhaust as the
+  // pings it is derived from, and chaining it would put a hash-chain write on
+  // the hot path of a loop that runs every 35 seconds.
+  'ApproachAlert',
   'WhatsAppLog',
   'EmailLog',
   'PrintJob',

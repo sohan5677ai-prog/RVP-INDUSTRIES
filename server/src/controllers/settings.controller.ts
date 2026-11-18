@@ -295,6 +295,14 @@ const companyProfileSchema = z.object({
   // Days a PO may sit PENDING before the arrival-reminder popup surfaces it.
   // 0 disables the popup.
   poReminderDays: z.coerce.number().int().min(0).max(365).optional(),
+  // How far out an arriving purchase lorry is when the team is told, and when
+  // the kata cabin raises its ticket. Capped at 100 km: a ring wider than that
+  // is a day's warning, not an approach, and would simply fire on every lorry
+  // the moment it was booked. The service clamps the gate ring inside the
+  // approach ring, so the two cannot be entered the wrong way round.
+  inboundApproachRingKm: z.coerce.number().int().min(1).max(100).optional(),
+  inboundGateRingKm: z.coerce.number().int().min(1).max(100).optional(),
+  inboundApproachAlertsEnabled: z.boolean().optional(),
   taxproGspId: z.string().optional().nullable(),
   taxproGspSecret: z.string().optional().nullable(),
   taxproGstUser: z.string().optional().nullable(),

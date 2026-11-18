@@ -533,6 +533,17 @@ async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean>
     void sendInboundDriverBrief(booking.id).catch((err) =>
       logger.warn(`[whatsapp] inbound driver brief failed for booking ${booking.id}: ${err?.message ?? err}`),
     );
+
+    // This lorry is now one of ours, so its fixes must be stored at full
+    // resolution instead of being thinned to one every five minutes. Without
+    // dropping the cache the plate spends up to the cache TTL in the thinned
+    // feed - and a lorry booked when it is already close to the factory would
+    // cross both approach rings inside that window. Imported here rather than
+    // at the top of the file: the GPS service is not otherwise part of the
+    // WhatsApp path.
+    void import('../services/locanix.service.js')
+      .then((m) => m.invalidateActiveDispatchPlates())
+      .catch(() => undefined);
   }
   return true;
 }

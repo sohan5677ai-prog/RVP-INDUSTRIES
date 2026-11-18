@@ -142,27 +142,68 @@ export function metresBetween(aLat: number, aLng: number, bLat: number, bLng: nu
   return Math.sqrt(x * x + y * y) * R;
 }
 
-/** Plates on a dispatch still in DISPATCHED - the lorries we actually care about. */
+/**
+ * The plates worth storing at full resolution: our own trips, in both
+ * directions.
+ *
+ * Outbound is a dispatch still in DISPATCHED. Inbound is a lorry a transporter
+ * has booked against a live purchase order - and that half is not a nicety.
+ * The thinning rule below keeps one fix per five minutes for everything that is
+ * not on this list, and a lorry at 50 km/h covers four km in five minutes. An
+ * inbound lorry left to the thinned feed can therefore go from eleven km to
+ * seven to three between two stored fixes, and the approach rings that are
+ * supposed to fire at ten and at three would both be stepped straight over.
+ * The rings are only as good as this set.
+ */
 async function getActiveDispatchPlates(): Promise<Set<string>> {
   if (activePlates && Date.now() - activePlates.at < ACTIVE_PLATES_TTL_MS) return activePlates.plates;
-  const rows = await prisma.saleDispatch.findMany({
-    where: {
-      status: 'DISPATCHED',
-      vehicleNumber: { not: null },
-      // Same window the board uses: a shipment nobody closed is not a lorry we
-      // should be spending full-resolution rows on.
-      dispatchDate: { gte: new Date(Date.now() - ACTIVE_DISPATCH_DAYS * 24 * 3_600_000) },
-    },
-    select: { vehicleNumber: true },
-  });
-  const plates = new Set(
-    rows.map((r) => normaliseVehicleNumber(r.vehicleNumber ?? '')).filter(Boolean)
-  );
+  const [dispatches, arrivals] = await Promise.all([
+    prisma.saleDispatch.findMany({
+      where: {
+        status: 'DISPATCHED',
+        vehicleNumber: { not: null },
+        // Same window the board uses: a shipment nobody closed is not a lorry we
+        // should be spending full-resolution rows on.
+        dispatchDate: { gte: new Date(Date.now() - ACTIVE_DISPATCH_DAYS * 24 * 3_600_000) },
+      },
+      select: { vehicleNumber: true },
+    }),
+    // The inbound equivalent of that window. A booking is live while its
+    // purchase order is still PENDING - stock-in moves the PO to ARRIVED, which
+    // drops the lorry off this list by itself with no status of its own to keep
+    // in step. The date floor is the same fourteen days, for a booking the
+    // office never dismissed.
+    prisma.transportConfirmation.findMany({
+      where: {
+        direction: 'INBOUND',
+        status: { in: ['WAITING', 'CONFIRMED'] },
+        lorryNumber: { not: null },
+        createdAt: { gte: new Date(Date.now() - ACTIVE_DISPATCH_DAYS * 24 * 3_600_000) },
+        purchaseOrder: { status: 'PENDING' },
+      },
+      select: { lorryNumber: true },
+    }),
+  ]);
+
+  const plates = new Set<string>();
+  for (const r of dispatches) {
+    const plate = normaliseVehicleNumber(r.vehicleNumber ?? '');
+    if (plate) plates.add(plate);
+  }
+  for (const r of arrivals) {
+    const plate = normaliseVehicleNumber(r.lorryNumber ?? '');
+    if (plate) plates.add(plate);
+  }
   activePlates = { at: Date.now(), plates };
   return plates;
 }
 
-/** Drop the cached plate list - called when a dispatch is created or closed. */
+/**
+ * Drop the cached plate list - called when a dispatch is created or closed, and
+ * when an inbound booking is filed. A booking that arrives mid-poll-cycle would
+ * otherwise spend up to the TTL in the thinned feed, which is exactly the
+ * window in which a lorry already close to the factory crosses both rings.
+ */
 export function invalidateActiveDispatchPlates(): void {
   activePlates = null;
 }
@@ -348,6 +389,23 @@ export async function pollLocanix(opts: { force?: boolean } = {}): Promise<Locan
       tookMs: Date.now() - started,
     };
     logger.info(`[locanix] ${stored}/${vehicles.length} stored (${onDispatch} on dispatch)`);
+
+    // Now that the positions are current, see whether any arriving lorry has
+    // crossed an approach ring. Here rather than on a schedule of its own: this
+    // tick is the moment the data changed, and a cron would only ever be
+    // reading a staler version of what we are holding right now.
+    //
+    // Deliberately NOT awaited into the poll result. The sweep sends WhatsApps,
+    // and a slow or failing provider there must not stretch or fail a poll tick
+    // whose job - storing the fixes - is already done. Lazily imported for the
+    // same reason it is fire-and-forget: the notifier pulls in a good part of
+    // the app, on a server where most ticks have nothing arriving.
+    if (stored > 0) {
+      void import('./inboundArrivals.service.js')
+        .then((m) => m.sweepApproachRings())
+        .catch((err) => logger.warn(`[arrivals] ring sweep failed: ${(err as Error)?.message ?? err}`));
+    }
+
     return lastResult;
   } catch (err) {
     const retryAfter = (err as Error & { retryAfterSeconds?: number }).retryAfterSeconds;

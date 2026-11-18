@@ -73,6 +73,20 @@ export type WaTemplateKey =
   // need at the gate before he starts. No driver-name slot: the transporter's
   // message carries a phone, not a name.
   | 'INBOUND_DRIVER_BRIEF'
+  // inbound_approach_alert (Utility, en, no header, 7 vars: lorry, supplier,
+  // load, distance, ETA, driver phone, requirement code). Sent to the internal
+  // alert list when a booked purchase lorry crosses the approach ring - ten km
+  // out by default, which is the warning the office and the weighbridge need.
+  // Note the STATIC label in the body: it already reads "Distance: {{4}} km
+  // away", so that slot carries the bare number, the same trap
+  // SALE_ORDER_CONFIRMED documents.
+  | 'INBOUND_APPROACH_OFFICE'
+  // inbound_hamali_ready (Utility, hi, no header, 4 vars: lorry, load,
+  // supplier, driver phone). The same crossing, told to the unloading team, who
+  // need the fifteen minutes rather than the detail. Sent at the APPROACH ring,
+  // not the gate ring: three km is four minutes, which is no use to a team that
+  // has to assemble.
+  | 'INBOUND_APPROACH_HAMALI'
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   // rvp_party_ledger (document header - statement PDF): name, period, total debits,

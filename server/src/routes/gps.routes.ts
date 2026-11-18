@@ -7,6 +7,8 @@ import {
   getVehicleDetail,
   getGpsStatus,
   triggerGpsPoll,
+  getArrivalsBoard,
+  triggerArrivalSweep,
 } from '../controllers/gps.controller.js';
 
 /**
@@ -24,6 +26,13 @@ router.get('/gps/status', asyncHandler(getGpsStatus));
 router.get('/gps/vehicles', asyncHandler(listVehiclePositions));
 router.get('/gps/vehicles/:vehicleNumber', asyncHandler(getVehicleTrail));
 router.get('/gps/vehicles/:vehicleNumber/detail', asyncHandler(getVehicleDetail));
+
+// Arriving purchase lorries - the Upcoming Vehicles tab and the kata cabin's
+// arrivals strip. Readable by the cabin's own narrowly-scoped token, which is
+// the point: the screen that needs to know a lorry is two km out is the one
+// that cannot log in.
+router.get('/gps/arrivals', asyncHandler(getArrivalsBoard));
+router.post('/gps/arrivals/sweep', asyncHandler(triggerArrivalSweep));
 
 // Pull from the provider now, rather than waiting for the next tick. A write
 // only in the sense that it stores what it fetches - no ERP data changes - so

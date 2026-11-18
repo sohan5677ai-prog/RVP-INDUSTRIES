@@ -35,6 +35,7 @@ import {
   Warehouse,
   ArrowRight,
   Camera,
+  Navigation,
 } from 'lucide-react';
 import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { withMediaToken } from '@/lib/mediaToken';
@@ -569,6 +570,27 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
 }
 
 
+/**
+ * An arriving purchase lorry, as /gps/arrivals returns it. Only the fields the
+ * cabin needs - the full shape lives on the Vehicle Tracking page.
+ */
+interface ArrivingLorry {
+  bookingId: string;
+  requirementCode: string | null;
+  lorryNumber: string | null;
+  driverPhone: string | null;
+  supplier: string;
+  tonnageKg: number | null;
+  distanceKm: number | null;
+  etaAt: string | null;
+  phase: 'BOOKED' | 'EN_ROUTE' | 'APPROACHING' | 'AT_GATE';
+}
+
+interface ArrivalsFeed {
+  rings: { approachKm: number; gateKm: number; alertsEnabled: boolean };
+  arrivals: ArrivingLorry[];
+}
+
 export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: boolean }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -720,6 +742,56 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   });
 
   const nextTicketNo = ticketNumData?.nextTicketNo ?? 1;
+
+  /**
+   * Lorries the transporter has booked against an open purchase order, with how
+   * far out each one is.
+   *
+   * The cabin's whole reason for having this: a lorry inside the gate ring is
+   * about to be on the weighbridge, and every field on its ticket is already
+   * known - the plate from the transporter's message, the supplier from the
+   * purchase order, the driver's phone from the booking. Typing them again at
+   * the moment the lorry is sitting on the plate is the slowest part of the job.
+   *
+   * No ticket row is created here. WeighbridgeTicket.ticketNo is a unique
+   * counter and the ticket book is an audited document: minting a number when a
+   * lorry comes within three km would leave a cancelled ticket behind every
+   * time one turned away or was diverted. The ticket is still created on the
+   * first weighment, exactly as before - this only fills the form.
+   */
+  const { data: arrivalsFeed } = useQuery<ArrivalsFeed>({
+    queryKey: ['gps-arrivals'],
+    queryFn: () => api<ArrivalsFeed>('/gps/arrivals'),
+    // The approach is the one thing on this screen that changes minute to
+    // minute, and the payload is a handful of bookings.
+    refetchInterval: 60_000,
+    // A cabin with no GPS configured must not show an error strip all day.
+    retry: false,
+  });
+
+  /** Only what is close enough to matter to someone standing at the kata. */
+  const arrivingNow = useMemo(
+    () =>
+      (arrivalsFeed?.arrivals ?? []).filter(
+        (a) => a.phase === 'AT_GATE' || a.phase === 'APPROACHING'
+      ),
+    [arrivalsFeed]
+  );
+
+  /** Fill the entry form from a booking. One tap, then weigh. */
+  const fillFromArrival = useCallback((a: ArrivingLorry) => {
+    if (a.lorryNumber) setVehicleNumber(a.lorryNumber);
+    setPartyName(a.supplier === '-' ? '' : a.supplier);
+    if (a.driverPhone) setDriverMobile(a.driverPhone);
+    // An inbound purchase lorry arrives loaded and is weighed on the way in, so
+    // this is a first weighment of a loaded vehicle - never a storage transfer.
+    setMaterial('TAMARIND SEED');
+    setLoadType('LOAD');
+    setTripType('FIRST');
+    setIsStorageTransfer(false);
+    setActiveTab('entry');
+    toast.success(`${a.lorryNumber ?? 'Lorry'} filled in - check the weight and save`);
+  }, []);
 
   // Fetch pending trucks (awaiting second weight)
   const { data: rawPendingTickets = [], refetch: refetchPending } = useQuery<WeighbridgeTicket[]>({
@@ -1661,6 +1733,74 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               {bothCamerasOnline ? 'Relay healthy' : 'Relay attention'}
             </b>
           </button>
+        </section>
+      )}
+
+      {/* ------------------------------------------------- arriving lorries */}
+      {/* Above the KPI cards and above the form, because when a lorry is two km
+          out this is the most important thing on the screen. Absent entirely
+          when nothing is close - an empty panel on a screen that is open all
+          day is just furniture. */}
+      {activeTab === 'entry' && arrivingNow.length > 0 && (
+        <section
+          className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-3"
+          aria-label="Arriving lorries"
+        >
+          <div className="mb-2 flex items-center gap-2">
+            <Navigation className="h-4 w-4 text-amber-600" />
+            <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-700 dark:text-amber-400">
+              Arriving {arrivingNow.length > 1 && <span className="opacity-70">({arrivingNow.length})</span>}
+            </h2>
+            <span className="text-[11px] text-muted-foreground">
+              booked against an open purchase order
+            </span>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {arrivingNow.map((a) => (
+              <div
+                key={a.bookingId}
+                className="rounded-xl border border-border/60 bg-card/70 p-2.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono text-sm font-semibold">
+                    {a.lorryNumber ?? 'No lorry number'}
+                  </span>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums',
+                      a.phase === 'AT_GATE'
+                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                        : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                    )}
+                  >
+                    {a.distanceKm !== null ? `${a.distanceKm} km` : 'close'}
+                  </span>
+                </div>
+
+                <div className="mt-1 truncate text-xs text-muted-foreground">
+                  {a.supplier}
+                  {a.tonnageKg ? ` · ${(a.tonnageKg / 1000).toFixed(2)} MT` : ''}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[11px] text-muted-foreground">
+                  {a.requirementCode && <span className="font-mono">{a.requirementCode}</span>}
+                  {a.driverPhone && (
+                    <a href={`tel:${a.driverPhone}`} className="inline-flex items-center gap-1 font-mono hover:underline">
+                      <Phone className="h-3 w-3" /> {a.driverPhone}
+                    </a>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => fillFromArrival(a)}
+                  className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-500/15 px-2 py-1.5 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-300"
+                >
+                  <ArrowRight className="h-3.5 w-3.5" /> Open ticket
+                </button>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

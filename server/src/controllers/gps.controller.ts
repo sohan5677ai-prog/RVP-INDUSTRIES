@@ -321,6 +321,64 @@ export async function handleGpsPush(req: Request, res: Response) {
 /* ------------------------------------------------------- reads for the ERP */
 
 /**
+ * The latest reading per vehicle, in one query.
+ *
+ * Written as raw SQL on purpose. Prisma's `distinct` is NOT a `DISTINCT ON`:
+ * the query engine issues an unbounded `SELECT ... ORDER BY` and throws the
+ * duplicates away in the client. VehiclePing is the one table here that grows
+ * on a timer rather than on someone doing business, so that meant reading a
+ * hundred thousand rows to answer with a hundred and thirty - about 190 MB of
+ * heap for a single request, and two overlapping map polls were enough to put
+ * the Render instance over its memory limit and restart it mid-weighment.
+ *
+ * `DISTINCT ON (vehicleNumber)` does the de-duplication inside Postgres over
+ * the (vehicleNumber, recordedAt) index, so what crosses the wire is one row
+ * per plate and the cost no longer grows with the length of the history.
+ */
+export interface LatestVehiclePing {
+  vehicleNumber: string;
+  vehicleLabel: string | null;
+  latitude: number;
+  longitude: number;
+  speedKmph: number | null;
+  address: string | null;
+  ignition: boolean | null;
+  headingDeg: number | null;
+  providerStatus: string | null;
+  odometerRaw: number | null;
+  recordedAt: Date;
+  receivedAt: Date;
+  provider: string;
+}
+
+/**
+ * `plates` undefined means the whole feed; an empty array means "no plates
+ * qualify" and is answered without touching the database at all.
+ */
+async function latestPingPerVehicle(plates?: string[]): Promise<LatestVehiclePing[]> {
+  if (plates && plates.length === 0) return [];
+
+  const columns = `
+    SELECT DISTINCT ON ("vehicleNumber")
+      "vehicleNumber", "vehicleLabel", "latitude", "longitude", "speedKmph",
+      "address", "ignition", "headingDeg", "providerStatus", "odometerRaw",
+      "recordedAt", "receivedAt", "provider"
+    FROM "VehiclePing"`;
+
+  // Two literal templates rather than one with a conditional fragment: the
+  // plate list is still a bound parameter either way, and `= ANY($1)` keeps a
+  // long dispatch list to a single placeholder.
+  return plates
+    ? prisma.$queryRawUnsafe<LatestVehiclePing[]>(
+        `${columns} WHERE "vehicleNumber" = ANY($1) ORDER BY "vehicleNumber" ASC, "recordedAt" DESC`,
+        plates
+      )
+    : prisma.$queryRawUnsafe<LatestVehiclePing[]>(
+        `${columns} ORDER BY "vehicleNumber" ASC, "recordedAt" DESC`
+      );
+}
+
+/**
  * `GET /api/gps/vehicles` - the latest reading per vehicle.
  *
  * `?active=true` narrows it to lorries on a dispatch still in DISPATCHED
@@ -344,28 +402,24 @@ export async function listVehiclePositions(req: Request, res: Response) {
     if (allowed.size === 0) return res.json([]);
   }
 
-  // Latest row per vehicle. Distinct-on over the (vehicleNumber, recordedAt)
-  // index does this in one query; fetching all pings and reducing in JS would
-  // grow with the history, not the fleet.
-  const latest = await prisma.vehiclePing.findMany({
-    where: allowed ? { vehicleNumber: { in: [...allowed] } } : undefined,
-    distinct: ['vehicleNumber'],
-    orderBy: [{ vehicleNumber: 'asc' }, { recordedAt: 'desc' }],
-    select: {
-      vehicleNumber: true,
-      vehicleLabel: true,
-      latitude: true,
-      longitude: true,
-      speedKmph: true,
-      address: true,
-      ignition: true,
-      recordedAt: true,
-      receivedAt: true,
-      provider: true,
-    },
-  });
+  const latest = await latestPingPerVehicle(allowed ? [...allowed] : undefined);
 
-  res.json(latest);
+  // Projected back down to the columns this endpoint has always returned, so
+  // the shared query feeding the fleet board does not widen this response.
+  res.json(
+    latest.map((p) => ({
+      vehicleNumber: p.vehicleNumber,
+      vehicleLabel: p.vehicleLabel,
+      latitude: p.latitude,
+      longitude: p.longitude,
+      speedKmph: p.speedKmph,
+      address: p.address,
+      ignition: p.ignition,
+      recordedAt: p.recordedAt,
+      receivedAt: p.receivedAt,
+      provider: p.provider,
+    }))
+  );
 }
 
 /**
@@ -602,17 +656,7 @@ export async function getFleetBoard(req: Request, res: Response) {
   const dispatchOnly = req.query.scope === 'dispatch';
   const dispatches = await activeDispatchesByPlate();
 
-  const latest = await prisma.vehiclePing.findMany({
-    where: dispatchOnly ? { vehicleNumber: { in: [...dispatches.keys()] } } : undefined,
-    distinct: ['vehicleNumber'],
-    orderBy: [{ vehicleNumber: 'asc' }, { recordedAt: 'desc' }],
-    select: {
-      vehicleNumber: true, vehicleLabel: true, latitude: true, longitude: true,
-      speedKmph: true, address: true, ignition: true, headingDeg: true,
-      providerStatus: true, odometerRaw: true, recordedAt: true, receivedAt: true,
-      provider: true,
-    },
-  });
+  const latest = await latestPingPerVehicle(dispatchOnly ? [...dispatches.keys()] : undefined);
 
   const now = Date.now();
   const seen = new Set<string>();

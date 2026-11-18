@@ -16,6 +16,16 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.11.0
+      # Cap V8's old space well under the Starter instance's 512 MB.
+      # Node sizes its default heap from the memory it can see, which on a
+      # container is not our share - so V8 happily grows past the instance
+      # limit and Render kills the process ("exceeded its memory limit")
+      # instead of V8 ever collecting harder. The cap makes a heavy moment
+      # a GC pause rather than a restart. Left room below 512 on purpose:
+      # sharp, pdfkit and multer buffers allocate OUTSIDE the JS heap and
+      # count towards the same limit.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
       # Set explicitly rather than relying on Render's default, because this is
       # a security control and not only a logging switch: when it is anything
       # other than "production" the API returns error messages and stack traces

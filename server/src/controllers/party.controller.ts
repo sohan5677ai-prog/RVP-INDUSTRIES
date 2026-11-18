@@ -1,5 +1,8 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
+import { permissionsFor } from '../services/permission.service.js';
+import { maskParty, maskParties, hasMaskableValue } from '../lib/pii.js';
+import { recordAudit } from '../services/audit.service.js';
 import { HttpError } from '../lib/httpError.js';
 import { createPartySchema, updatePartySchema } from '../schemas/party.schema.js';
 import {
@@ -9,12 +12,28 @@ import {
 import { diffFields } from '../lib/masterFields.js';
 import { reconcilePartyPins, invalidatePartyPin } from '../services/partyPin.service.js';
 
-export async function listParties(_req: Request, res: Response) {
+/**
+ * May this caller see a supplier's full bank account number?
+ *
+ * `master.party.bank.view` is the specific grant; `pii.view` is the broad one
+ * that also covers anything added later. Either is enough. Both already
+ * existed in the permission table and were enforced nowhere until now.
+ */
+async function canSeeBankDetails(req: Request): Promise<boolean> {
+  if (!req.user) return false;
+  const held = await permissionsFor(req.user.role);
+  return held.has('master.party.bank.view') || held.has('pii.view');
+}
+
+export async function listParties(req: Request, res: Response) {
   const parties = await prisma.party.findMany({
     orderBy: { createdAt: 'desc' },
     include: { addresses: { orderBy: { createdAt: 'asc' } } },
   });
-  res.json(parties);
+  // Masked by default. The list goes to every screen that needs a party
+  // picker, so it is the widest exposure of the lot.
+  const allowed = await canSeeBankDetails(req);
+  res.json(allowed ? parties : maskParties(parties as unknown as Record<string, unknown>[]));
 }
 
 export async function getParty(req: Request, res: Response) {
@@ -23,6 +42,44 @@ export async function getParty(req: Request, res: Response) {
     include: { addresses: { orderBy: { createdAt: 'asc' } } },
   });
   if (!party) throw new HttpError(404, 'Party not found');
+  const allowed = await canSeeBankDetails(req);
+  res.json(allowed ? party : maskParty(party as unknown as Record<string, unknown>));
+}
+
+/**
+ * Reveal one party's full bank details, and record that it happened
+ * (plan item 3: "full value only with permission, and each reveal is audited").
+ *
+ * A separate endpoint rather than a flag on the list, for two reasons. It
+ * keeps the audit row specific - "this person looked at this supplier's
+ * account number at this time" - where auditing the list would record only
+ * that someone opened a screen. And it means the bulk path has no way to
+ * return the real value at all, so a future caller cannot opt itself in.
+ */
+export async function revealPartyBank(req: Request, res: Response) {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+
+  const party = await prisma.party.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, name: true, bankAccountNumber: true, bankIfsc: true, bankName: true },
+  });
+  if (!party) throw new HttpError(404, 'Party not found');
+
+  // Only worth a row when there was something to reveal. "Looked at a party
+  // with no bank details on file" is noise, and this trail has already been
+  // through one round of being mostly noise.
+  if (hasMaskableValue(party as unknown as Record<string, unknown>)) {
+    await recordAudit({
+      action: 'party.bank.reveal',
+      entity: 'Party',
+      entityId: party.id,
+      entityLabel: party.name,
+      // Deliberately not the value itself: an audit trail that records the
+      // account number every time someone looks at it becomes the leak.
+      newValues: { revealed: 'bankAccountNumber' },
+    });
+  }
+
   res.json(party);
 }
 

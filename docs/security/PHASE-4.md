@@ -278,6 +278,33 @@ The FY archive registry test caught `AuditLog` and `PeriodLock` needing classifi
 it cannot be verified, and `PeriodLock` must stay put when a year is archived or archiving would
 quietly unlock it.
 
+## Cleaning up after the bug
+
+The 38 rows written under the broken scheme could never verify, so they were dealt with
+deliberately rather than left to report a break for ever — a verifier that is always red is one
+nobody reads. `scripts/reseal-audit-chain.mjs` did it on 18 Nov:
+
+- **36 deleted.** `account.update`, `transport.update` and `subscriptionPlanConfig.update` written
+  by `system` on each restart. They record no human action, so nothing was lost.
+- **2 kept and re-sealed.** The `user.update` rows, where a password and MFA secret changed. That
+  is exactly what an audit trail is for; deleting them because *my own* code sealed them wrongly
+  would have been the wrong trade.
+- **119 re-linked.** Unavoidable: removing rows from the middle of a hash chain breaks every link
+  after them, so pruning cannot be done without re-sealing the rest. `seq` was compacted back to
+  1..N as well, because a permanent gap reports as a break for ever.
+
+**What that costs, stated plainly:** after a prune, the gapless-`seq` property no longer evidences
+those deletions. The `audit.prune` row at seq 122 and the backup under `server/backups/` are what
+stand in for it. This is the same tension as the 4.6 retention job, met early and by accident.
+
+The script stays in the tree as the record of what was done. It is deliberately awkward — dry-run
+by default, `--apply` required, and four safety checks that abort rather than widen: every row it
+deletes must be named in an explicit reviewable list, must carry one of three expected actions,
+must have no `userId`, and **must already fail verification**. That last one matters most: it
+cannot touch a row written after the fix. Re-running it now aborts on the first check.
+
+Result: `audit chain intact: 122 rows verified`, exit 0.
+
 ## Deploying
 
 1. **The schema is already applied** — `AuditLog`, `PeriodLock`, the `cancelledAt` columns on
@@ -288,8 +315,8 @@ quietly unlock it.
 3. The first row writes with `prevHash` = 64 zeros. That is the genesis row, not a fault.
 4. Run `POST /api/audit-log/verify` once after deploying, so there is a known-good baseline.
    **Do this every time** — it is what found the Decimal bug above, which no test could have.
-   The 40 rows written before that fix cannot verify under the corrected scheme and need to be
-   dealt with knowingly; see Left open.
+   The 38 rows written before that fix could not verify under the corrected scheme; they were
+   pruned and re-sealed on 18 Nov — see "Cleaning up after the bug".
 5. Consider the `REVOKE` above once the retention story is settled.
 
 ## Left open
@@ -299,4 +326,4 @@ quietly unlock it.
 | Purchases, sales, credit/debit notes, loans still hard-delete | the larger half of "financial documents"; the mechanism is built and tested, each one needs its read paths guarded the way payments' were |
 | 4.6 retention job — the setting exists, nothing prunes | needs the `REVOKE` decision first, since pruning breaks the chain |
 | The viewer has not been rendered against a signed-in session | it typechecks and builds, and the endpoints it calls are tested; the screen itself wants one look |
-| **The 40 pre-fix rows still fail verification** | they were hashed under the broken scheme, so they will report as altered for ever. They are dev-only rows from 18 Nov. Either re-seal them (recompute from stored content, recorded as an audit event — but recomputing hashes is exactly what a tamperer does, so it must be a knowing act) or delete them so the chain starts clean at the point the trail became trustworthy. Leaving them is the one option with no upside: a verifier that always reports a break is one nobody reads |
+| **61% of the trail is restart noise** | 75 of the 122 remaining rows are `account.update`, `transport.update` and `subscriptionPlanConfig.update` — the same six records rewritten on every server boot, recording no human action. Something at startup writes identical values back. At six rows a restart this will bury the human actions the trail exists to show, so either make those writes conditional or exclude boot-time writes from capture |

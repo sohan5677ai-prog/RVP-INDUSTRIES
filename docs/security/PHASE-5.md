@@ -223,6 +223,15 @@ The transport-level tests exist for a second reason: winston carries `level` and
 a fresh object silently drops them and every line loses its level — the logs keep working, so
 nothing fails, they are just quietly wrong.
 
+## Closing an item Phase 6B deferred here
+
+[PHASE-6B](PHASE-6B.md) listed "request bodies logged verbatim in two places (M6)" against Phase 5.
+Item 6 above closes it: the weighbridge controller's `logger.warn('...', req.body)` and the
+WhatsApp controller's `JSON.stringify(req.body)` are both scrubbed now — the first by key name, the
+second by pattern, which is why both mechanisms had to exist.
+
+Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See Left open.
+
 ## Tests
 
 `npm test` in `server/` — **67 files, 771 tests.** 40 new.
@@ -236,3 +245,5 @@ nothing fails, they are just quietly wrong.
 | HSTS `preload` | A DNS decision about `rvpindustries.co.in`, flagged not taken |
 | `securityAlertEmails` is unset | So the bulk-read alert is a log line only. Wiring it to email is small once recipients exist — carried over from Phase 1 |
 | No masked copy has actually been made | The script's guards are tested; the end-to-end run needs a restored copy to point at |
+| **Invoice files in a public Supabase bucket on never-expiring URLs (M2)** | [PHASE-6B](PHASE-6B.md) deferred this *to Phase 5* and this phase did not pick it up — my miss, recorded here rather than left to be rediscovered. Invoice PDFs carry party names, GSTINs and amounts, and the URLs are shared over WhatsApp and email, so changing them is not a drop-in: anything already sent keeps working off the old link. It is the largest remaining data-protection gap |
+| Bulk-read recording not yet confirmed in production | The unit tests cover the logic and nothing has made a 500-row fetch since it deployed; the first `data.bulk_read` row with a non-localhost IP will confirm the wiring |

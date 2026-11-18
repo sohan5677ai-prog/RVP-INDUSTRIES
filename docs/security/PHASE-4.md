@@ -99,17 +99,39 @@ A second, latent instance of the same mistake went with it: `userId` was hashed 
 write would have failed verification too. Nothing had exercised that path yet.
 
 **Why the tests did not catch it.** They hashed a row and verified it against the same in-memory
-object, which is the one comparison that cannot fail. The invariant that was missing is the only
-one that matters: *the payload that goes into the hash must survive the trip through the database
-unchanged.* `auditRedact.test.ts` pins exactly that, by hashing `redact(values)` and
-`JSON.parse(JSON.stringify(redact(values)))` and requiring they agree — which covers Decimal,
-Date, bigint and whatever is added next, rather than the types someone remembered. It also asserts
-that hashing the **raw** value still does *not* survive, so the hazard cannot quietly stop being
-handled.
+object, which is the one comparison that cannot fail.
+
+Two tests now cover it, because one is not enough. `auditRedact.test.ts` pins the round-trip
+invariant — hash `redact(values)` and `JSON.parse(JSON.stringify(redact(values)))` and require
+they agree — which covers Decimal, Date, bigint and whatever is added next rather than the types
+someone remembered. But a round-trip test **cannot** catch the redaction or `userId` variants,
+because those are not round-trip failures: the hashed value and the stored value are simply
+different values. So `recordAudit.test.ts` asserts it where the bug actually lived — it takes the
+row `recordAudit` wrote, re-hashes it from its own stored columns exactly as the production
+verifier does, and requires that to equal the hash written beside them. A row that passes there
+cannot report as tampered in production.
+
+Both were checked against the pre-fix writer: **11 of the 20 fail**, including the credential and
+on-behalf-of cases. A regression test that passes on the broken code is decoration.
 
 The lesson generalises past this phase: a tamper-evidence mechanism that cries wolf is worse than
 none, because it teaches people to ignore it. It is only worth anything if it has been run against
 real data — which is why it was run.
+
+### Reading a break, for whoever reads the next one
+
+The shape of the failures said what kind of problem it was before any code was opened, and it is
+worth writing down:
+
+| What the report shows | What it means |
+|---|---|
+| Content hashes fail, **links all intact, no gaps** | the writer and the verifier disagree — a bug, not tampering |
+| **Links** break from one row onward | a row was altered or inserted; the chain points at where |
+| A **gap** in `seq` | a row was deleted |
+| Failures stop at a point in time and everything after verifies | whatever was wrong was fixed then — check what deployed |
+
+That last row is how the fix was confirmed: every failing row predates the corrected code reaching
+the server that wrote it, and all 8 rows after the last failure verify.
 
 Two details the tests forced out:
 
@@ -240,7 +262,7 @@ Reopening updates the row rather than deleting it, so the fact that a closed per
 
 ## Tests
 
-`npm test` in `server/` — **59 files, 672 tests.** 69 new. The chain tests name each tampering
+`npm test` in `server/` — **60 files, 680 tests.** 77 new. The chain tests name each tampering
 scenario: edit in place, edit with the hash recomputed (the break then shows at the *next* row),
 deletion from the middle, truncation from the end, insertion, and a chain not starting at
 genesis. The period-lock tests pin inclusivity at both ends — a posting on the last day of a

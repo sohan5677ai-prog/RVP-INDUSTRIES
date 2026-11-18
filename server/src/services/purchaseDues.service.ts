@@ -42,7 +42,7 @@ export async function computeSupplierDues(): Promise<SupplierDuesPortfolio> {
       },
     }),
     prisma.dustPurchase.findMany({ select: { partyId: true, purchaseDate: true, amount: true } }),
-    prisma.payment.findMany({ where: { type: 'SUPPLIER' }, select: { amount: true, partyId: true } }),
+    prisma.payment.findMany({ where: { type: 'SUPPLIER', cancelledAt: null }, select: { amount: true, partyId: true } }),
   ]);
 
   const bills: Bill[] = [];

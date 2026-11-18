@@ -299,7 +299,9 @@ export async function getTdsReport(req: Request, res: Response) {
   const { from, to } = resolvePeriod(req);
 
   const receipts = await prisma.receipt.findMany({
-    where: { tdsAmount: { gt: 0 }, date: { gte: from, lte: to } },
+    // A cancelled receipt's TDS was reversed too - it must not appear on a
+    // statutory return.
+    where: { tdsAmount: { gt: 0 }, date: { gte: from, lte: to }, cancelledAt: null },
     include: {
       party: true,
       saleDispatch: { include: { saleOrder: { include: { buyer: true } } } },

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { createAuditExtension, type AuditHooks } from './auditExtension.js';
 
 /**
  * Connection-pool defaults applied to DATABASE_URL when it doesn't set them.
@@ -49,9 +50,43 @@ const databaseUrl = process.env.DATABASE_URL ? withPoolDefaults(process.env.DATA
 // exhausting the connection pool.
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-export const prisma =
+const base =
   globalForPrisma.prisma ?? new PrismaClient(databaseUrl ? { datasourceUrl: databaseUrl } : undefined);
 
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma;
+  globalForPrisma.prisma = base;
 }
+
+/**
+ * Audit hooks, injected rather than imported.
+ *
+ * The extension needs the audit service, and the audit service needs this
+ * client - importing one from the other would be a cycle. So the hooks are
+ * registered at boot (services/audit.service.ts) and the extension is an inert
+ * passthrough until then. That also means a script or test that imports this
+ * module gets a plain client and writes no audit rows, which is the right
+ * default for a one-off maintenance script.
+ */
+let auditHooks: AuditHooks | null = null;
+
+export function registerAuditHooks(hooks: AuditHooks): void {
+  auditHooks = hooks;
+}
+
+export function auditingEnabled(): boolean {
+  return auditHooks !== null;
+}
+
+export const prisma = base.$extends(
+  createAuditExtension({
+    readBefore: async (model, id) => {
+      if (!auditHooks) return undefined;
+      return auditHooks.readBefore(model, id);
+    },
+    record: async (event) => {
+      if (!auditHooks) return;
+      await auditHooks.record(event);
+    },
+    onError: (message, err) => auditHooks?.onError(message, err),
+  })
+) as unknown as PrismaClient;

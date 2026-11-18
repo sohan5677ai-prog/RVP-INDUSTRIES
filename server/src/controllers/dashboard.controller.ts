@@ -302,7 +302,7 @@ async function computeHuskPoolUncached(): Promise<{ revenue: number; expenses: H
       // the deduction booked on the receipt is the real cost. GST-inclusive on
       // purpose: no credit note goes to the department, so the 5% is lost too.
       prisma.receipt.findMany({
-        where: { type: 'BUYER', shortageAmount: { gt: 0 }, saleDispatchId: { not: null } },
+        where: { type: 'BUYER', shortageAmount: { gt: 0 }, saleDispatchId: { not: null }, cancelledAt: null },
         select: {
           shortageAmount: true,
           saleDispatch: { select: { saleOrder: { select: { product: true } } } },

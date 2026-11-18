@@ -48,6 +48,7 @@ import {
   Mail,
   Keyboard,
   Search,
+  History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -68,12 +69,15 @@ import SalesDuesReminders from '@/components/SalesDuesReminders';
 import PurchaseOrderReminders from '@/components/PurchaseOrderReminders';
 import { ReminderQueueProvider, remindersShownToday } from '@/components/ReminderQueue';
 
-type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean };
+type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; end?: boolean; devOnly?: boolean; hideForDev?: boolean; roles?: string[] };
 type NavSection = { heading?: string; items: NavItem[] };
 
 function isItemVisible(it: NavItem, role?: string): boolean {
   if (it.devOnly && role !== 'DEVELOPER') return false;
   if (it.hideForDev && role === 'DEVELOPER') return false;
+  // Items whose endpoint is behind a permission no USER holds. This hides a
+  // link, which is not security - the server enforces it either way.
+  if (it.roles && !it.roles.includes(role ?? '')) return false;
   return true;
 }
 
@@ -181,6 +185,8 @@ const sections: NavSection[] = [
     items: [
       { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
       { to: '/users', label: 'Users', icon: Shield },
+      // Behind audit.view on the server, which USER does not hold.
+      { to: '/audit-trail', label: 'Audit trail', icon: History, roles: ['DEVELOPER', 'ADMIN', 'OWNER'] },
       // Licensing and financial-year archives are developer-only tooling - an
       // admin should never see, let alone open, either one.
       { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard, devOnly: true },

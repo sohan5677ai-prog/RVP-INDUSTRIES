@@ -11,6 +11,7 @@ import { isOriginAllowed, originPolicyFromEnv } from "./lib/corsOrigin.js";
 import { requireAuthOrCameraBridge } from "./middleware/cameraAuth.js";
 import { requireMediaRead, requireMediaWrite } from "./middleware/mediaAuth.js";
 import { requireAuth } from "./middleware/auth.js";
+import { requestContextMiddleware } from "./lib/requestContext.js";
 import { prisma } from "./lib/prisma.js";
 
 // Fail fast if the JWT secret isn't configured, rather than booting an insecure
@@ -60,6 +61,11 @@ app.use(
     },
   })
 );
+
+// Establish the per-request context (request id, IP, user agent) that the audit
+// trail reads. Before the routes, and before auth, because a failed sign-in has
+// to be auditable too - and that is exactly the case with no user to attribute.
+app.use(requestContextMiddleware);
 
 app.get("/api/health", (_req, res) => {
   // Keep-alive ping. Render sleeps after 15 min idle AND Supabase free tier
@@ -264,6 +270,13 @@ app.listen(port, "0.0.0.0", () => {
       .then(({ startSlackBot }) => startSlackBot())
       .catch((err) => logger.error("[slack] failed to start:", err));
   }
+
+  // Turn on automatic audit capture. Until this runs the Prisma extension is
+  // an inert passthrough, so nothing written during boot bootstrap is audited
+  // as if a person had done it.
+  import("./services/audit.service.js")
+    .then(({ registerAuditCapture }) => registerAuditCapture())
+    .catch((err) => logger.error("[audit] failed to register capture:", err));
 
   // Wire up how an approved master change is actually carried out. Without
   // this, a bank-detail change could be requested and approved but would fail

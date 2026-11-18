@@ -120,6 +120,12 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // Pulling from the provider stores telemetry and changes no ERP data, so it
   // is gated like the reads it refreshes rather than as a sales write.
   { methods: ['POST'], path: '/gps/poll', permission: 'sale.view' },
+  // Re-checking the approach rings is the same kind of act: it reads positions
+  // we already hold and may send an arrival alert, but it writes no ERP data,
+  // and it is latched - so clicking it cannot announce a lorry twice. Gated
+  // with the board it belongs to rather than as a purchase write, because the
+  // people watching for an arriving lorry are the dispatch desk.
+  { methods: ['POST'], path: '/gps/arrivals/sweep', permission: 'sale.view' },
 
   // --------------------------------------------------------------- money --
   { methods: READ, path: '/payments*', permission: 'payment.view' },
@@ -233,6 +239,14 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // record's own view permission, because the history shows previous bank
   // account numbers - more than someone merely reading the party needs.
   { methods: READ, path: '/master-history/*', permission: 'audit.view' },
+  // The audit trail itself. Reading it is audit.view; verifying the chain is
+  // a read of the same evidence, so it sits behind the same permission rather
+  // than an administrative one.
+  { methods: 'ALL', path: '/audit-log*', permission: 'audit.view' },
+  // Closing and reopening an accounting period is an administrative act with
+  // real consequences for the books, so it needs more than audit.view.
+  { methods: READ, path: '/period-locks*', permission: 'audit.view' },
+  { methods: 'ALL', path: '/period-locks*', permission: 'system.manage' },
   { methods: READ, path: '/system*', permission: 'system.view' },
   { methods: 'ALL', path: '/system*', permission: 'system.manage' },
   { methods: READ, path: '/archive*', permission: 'archive.view' },

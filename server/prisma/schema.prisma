@@ -231,6 +231,95 @@ enum LoginOutcome {
   DEVICE_LIMIT
 }
 
+/// The audit trail (plan item 4.1).
+///
+/// One row per change, and the row is the evidence - so the shape is chosen
+/// for "prove to an auditor what happened" rather than for querying
+/// convenience.
+///
+/// Tamper-evidence is a hash chain (plan item 4.3): every row stores the hash
+/// of the row before it, so altering or removing any row breaks every hash
+/// after it. That is *detection*, not prevention - a database superuser can
+/// still rewrite rows, and would simply have to recompute the chain to hide
+/// it. Prevention is REVOKE UPDATE, DELETE on this table from the application
+/// role, which is documented in docs/security/PHASE-4.md rather than applied
+/// from here.
+model AuditLog {
+  id  String @id @default(cuid())
+  /// Position in the chain. Gapless and unique: a missing number is itself
+  /// evidence, which an `id` alone would not give.
+  seq BigInt @unique
+
+  /// SHA-256 over this row's own fields plus prevHash.
+  hash     String
+  /// The previous row's hash. The genesis row stores a fixed constant.
+  prevHash String
+
+  /// What happened, e.g. "payment.delete", "auth.login", "role.update".
+  action     String
+  /// Prisma model name, where the change was to a record.
+  entity     String?
+  entityId   String?
+  /// Enough to identify the record in the log without joining to a table that
+  /// may since have changed or been emptied.
+  entityLabel String?
+
+  /// Before and after. Null on a create and a delete respectively. Values the
+  /// log must never carry - password hashes, TOTP secrets - are stripped
+  /// before they reach here.
+  oldValues Json?
+  newValues Json?
+
+  userId    String?
+  userName  String?
+  userRole  Role?
+  ip        String?
+  userAgent String?
+  /// Ties every row written while serving one HTTP request together, so a
+  /// single action that touched four tables reads as one event.
+  requestId String?
+  /// Method and path, for the requests that came over HTTP.
+  method    String?
+  path      String?
+
+  /// Always UTC in the column; rendered in IST for people (lib/istDate.ts).
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity, entityId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([requestId])
+}
+
+/// A closed accounting period (plan item 4.5).
+///
+/// A row here means postings dated inside it are refused. Unlocking needs a
+/// permission and a reason, and both the lock and the unlock are themselves
+/// audited - a period that can be quietly reopened is not a close.
+model PeriodLock {
+  id        String   @id @default(cuid())
+  /// Inclusive first day of the closed period, at IST midnight.
+  fromDate  DateTime
+  /// Inclusive last day.
+  toDate    DateTime
+  reason    String?
+
+  lockedById   String
+  lockedByName String?
+  lockedAt     DateTime @default(now())
+
+  /// Set when reopened. The row is kept rather than deleted, so the fact that
+  /// a closed period was reopened survives in the record.
+  unlockedById   String?
+  unlockedByName String?
+  unlockedAt     DateTime?
+  unlockReason   String?
+
+  @@index([fromDate, toDate])
+  @@index([unlockedAt])
+}
+
 /// Field-level history for the master records (plan item 3.5).
 ///
 /// One row per field that actually changed, with the before and after. Not a
@@ -619,6 +708,9 @@ model PurchaseOrder {
   createdAt        DateTime         @default(now())
   stockIns         StockIn[]
   allocations      SaleAllocation[]
+  /// Transporter bookings filed against this requirement - the lorries on
+  /// their way here. Normally one; more than one means a lorry was swapped.
+  inboundBookings  TransportConfirmation[]
   // PO-number components: poNumber = "{poSeriesKey}/{poSerial}/{poFy}" per lorry.
   // A poGroupId batch's collapsed display range is derived from min/max poSerial
   // across its members. Null on legacy/KNM_BATCH rows that predate this scheme.
@@ -1352,7 +1444,15 @@ model JournalEntry {
   receipt     Receipt?
   setOff      PartySetOff?
 
+  /// Set on a reversing entry, pointing at the entry it cancels out. The pair
+  /// stays in the ledger and nets to zero - which is what makes a cancellation
+  /// visible in the books instead of a hole where a posting used to be.
+  reversalOfId String?       @unique
+  reversalOf   JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversedBy   JournalEntry? @relation("JournalReversal")
+
   @@index([date])
+  @@index([reversalOfId])
 }
 
 model JournalLine {
@@ -1480,6 +1580,11 @@ model CompanyProfile {
   /// changing would arrive in a stream of ordinary paperwork - which is where
   /// it would be missed. This should be the people who would actually act.
   securityAlertEmails            String?
+  /// How many days of audit trail stay queryable in the app (plan item 4.6).
+  /// Null means the default of 180. Nothing is deleted automatically: the
+  /// retention job archives beyond this, and pruning the table would break
+  /// the hash chain, so it is deliberately a separate, deliberate act.
+  auditRetentionDays             Int?
   // Bank details printed in the invoice footer.
   bankAccountName                String?
   bankName                       String?
@@ -1541,6 +1646,20 @@ model CompanyProfile {
   // dispatch reminders, weekly summary and daily dues digest. Falls back to
   // ownerWhatsappNumber, then WHATSAPP_TEST_NUMBER, when empty.
   alertRecipients                String?
+  // --- Arriving-lorry approach rings ----------------------------------------
+  // How far out a booked inbound lorry is when the office and the hamali team
+  // are told it is coming, and when the kata cabin puts its ticket up. Settings
+  // values rather than constants because the right distance is a function of
+  // the road: ten km of the Punganur ghat approach is a very different warning
+  // time from ten km of highway, and this wants tuning after a week of real
+  // lorries. The gate ring must be the smaller of the two - the server clamps
+  // it rather than trusting the form.
+  inboundApproachRingKm          Int     @default(10)
+  inboundGateRingKm              Int     @default(3)
+  // Master switch for the two WhatsApp alerts. Off does not stop the Upcoming
+  // Vehicles tab or the cabin's arrivals strip - those are reads of positions
+  // we already hold, and are useful on their own.
+  inboundApproachAlertsEnabled   Boolean @default(true)
   // WhatsApp test-mode toggle (UI-controlled, no redeploy needed). When ON,
   // every outbound WhatsApp is rerouted to whatsappTestNumber instead of the
   // real party. Defaults ON as a safety net. Overrides the WHATSAPP_TEST_MODE env.
@@ -1820,6 +1939,19 @@ model Payment {
   @@index([brokerId])
   @@index([hamaliVerificationId])
   @@index([journalEntryId])
+
+  /// Cancellation, in place of deletion (plan item 4.4).
+  ///
+  /// A cancelled row stays, and a reversing journal entry is posted against
+  /// it, so the ledger nets to zero while the fact that the document existed -
+  /// and that somebody withdrew it - survives. Deleting it instead left no
+  /// trace that money had ever been recorded as moving.
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledByName String?
+  /// Required when cancelling: a withdrawal without a reason is not a record.
+  cancelReason    String?
+
   @@index([setOffId])
   @@index([date])
   @@index([type])
@@ -1851,6 +1983,19 @@ model Receipt {
   @@index([partyId])
   @@index([saleDispatchId])
   @@index([journalEntryId])
+
+  /// Cancellation, in place of deletion (plan item 4.4).
+  ///
+  /// A cancelled row stays, and a reversing journal entry is posted against
+  /// it, so the ledger nets to zero while the fact that the document existed -
+  /// and that somebody withdrew it - survives. Deleting it instead left no
+  /// trace that money had ever been recorded as moving.
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledByName String?
+  /// Required when cancelling: a withdrawal without a reason is not a record.
+  cancelReason    String?
+
   @@index([setOffId])
   @@index([date])
   @@index([type])
@@ -1892,7 +2037,20 @@ model PartySetOff {
   receipts       Receipt[]
   createdAt      DateTime      @default(now())
 
+  /// Cancellation, in place of deletion (plan item 4.4).
+  ///
+  /// A cancelled row stays, and a reversing journal entry is posted against
+  /// it, so the ledger nets to zero while the fact that the document existed -
+  /// and that somebody withdrew it - survives. Deleting it instead left no
+  /// trace that money had ever been recorded as moving.
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledByName String?
+  /// Required when cancelling: a withdrawal without a reason is not a record.
+  cancelReason    String?
+
   @@index([partyId])
+  @@index([cancelledAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2446,6 +2604,11 @@ model TransportConfirmation {
   // stranger the factory pin and the hamali team's number.
   requirementCode   String?
   purchaseOrderId   String?
+  // A real relation, not just the id: every screen that lists arriving lorries
+  // needs the supplier, the tonnage and the PO number in the same breath, and
+  // the lorry is only still "arriving" while its order is PENDING - which is a
+  // filter on the parent, so it has to be joinable.
+  purchaseOrder     PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
   // Set when the driver has been sent his brief (factory pin, load, contacts).
   // Stops a re-parse of the same WhatsApp message from messaging him twice.
   driverBriefSentAt DateTime?
@@ -2459,6 +2622,44 @@ model TransportConfirmation {
   @@index([saleDispatchId])
   @@index([requirementCode])
   @@index([purchaseOrderId])
+}
+
+/// One approach ring already announced for one arriving lorry.
+///
+/// The row IS the latch. A booked inbound lorry is re-evaluated on every GPS
+/// poll - every 35 to 120 seconds - so without a record of what has already
+/// gone out, a lorry parked for chai at 9.8 km would text the office and the
+/// hamali team on every tick until it moved. `@@unique([transportConfirmationId,
+/// ringKm])` makes the second announcement a constraint violation instead of a
+/// message, which is the cheapest correct latch there is: no read-then-write
+/// race, and it survives a restart (an in-memory set would not, and a restart
+/// is the normal case on a free Render instance).
+///
+/// Deliberately not a relation on TransportConfirmation. These rows are
+/// operational exhaust with their own retention, like VehiclePing - nothing
+/// reads a booking in order to list its alerts, and a cascade from the register
+/// would silently re-arm every ring if a booking were ever re-filed.
+model ApproachAlert {
+  id                      String   @id @default(cuid())
+  transportConfirmationId String
+  /// The ring crossed, in km (10 = warn the team, 3 = kata ready). Stored as
+  /// the configured number rather than an enum: the right ring depends on the
+  /// road, so it is a Settings value and history has to keep whatever was in
+  /// force at the time.
+  ringKm                  Int
+  /// How far out the lorry actually was when the ring fired. Not the same as
+  /// ringKm - a fix two minutes stale on a moving lorry crosses well inside -
+  /// and it is the number that tells you whether the ring is set sensibly.
+  distanceKm              Float
+  /// Null when the ring fired but nothing was sent (template not approved,
+  /// WhatsApp off, no recipients). The latch still holds, because re-firing a
+  /// ring every tick while a template is unapproved is the failure this table
+  /// exists to prevent; the register's manual button is the way out.
+  notifiedCount           Int      @default(0)
+  firedAt                 DateTime @default(now())
+
+  @@unique([transportConfirmationId, ringKm])
+  @@index([firedAt])
 }
 
 // Driver-submitted buyer weighbridge slip (kata) photo sent over WhatsApp.

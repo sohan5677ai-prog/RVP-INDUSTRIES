@@ -126,6 +126,7 @@ const Drawings = lazyWithPreload('/reports/drawings', () => import('@/pages/Draw
 const Interest = lazyWithPreload('/reports/interest', () => import('@/pages/Interest'));
 const Expenses = lazyWithPreload('/reports/expenses', () => import('@/pages/Expenses'));
 const Users = lazyWithPreload('/users', () => import('@/pages/Users'));
+const AuditTrail = lazyWithPreload('/audit-trail', () => import('@/pages/AuditTrail'));
 
 function Fallback() {
   return (
@@ -243,6 +244,7 @@ export default function App() {
                         <Route path="/notes-comments" element={<NotesComments />} />
                         <Route path="/settings/notes-comments" element={<Navigate to="/notes-comments" replace />} />
                         <Route path="/users" element={<Users />} />
+                        <Route path="/audit-trail" element={<AuditTrail />} />
                         <Route path="/subscription" element={<Navigate to="/settings?tab=subscription" replace />} />
                         <Route path="/archives" element={<Navigate to="/settings?tab=archives" replace />} />
                         <Route path="/maintenance" element={<Navigate to="/settings?tab=maintenance" replace />} />

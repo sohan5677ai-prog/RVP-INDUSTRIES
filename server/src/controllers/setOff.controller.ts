@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { createSetOffSchema, listSetOffsSchema, type CreateSetOffInput } from '../schemas/setOff.schema.js';
 import { LedgerService } from '../services/ledger.service.js';
+import { cancelDocumentInTx } from '../services/reversal.service.js';
+import { recordAudit } from '../services/audit.service.js';
 
 // ---------------------------------------------------------------------------
 // Party set-off (contra / knock-off).
@@ -58,11 +60,13 @@ async function buildOpenItems(partyId: string, excludeSetOffId?: string) {
     }),
     prisma.dustPurchase.findMany({ where: { partyId } }),
     prisma.payment.findMany({
-      where: { partyId, type: 'SUPPLIER', ...notThisSetOff },
+      // A cancelled payment has been reversed in the ledger, so it must not
+      // reduce what this party is owed when sizing a set-off.
+      where: { partyId, type: 'SUPPLIER', cancelledAt: null, ...notThisSetOff },
       orderBy: { date: 'asc' },
     }),
     prisma.saleOrder.findMany({ where: { buyerId: partyId }, include: { dispatches: true } }),
-    prisma.receipt.findMany({ where: { partyId, type: 'BUYER', ...notThisSetOff } }),
+    prisma.receipt.findMany({ where: { partyId, type: 'BUYER', cancelledAt: null, ...notThisSetOff } }),
   ]);
 
   // ── Purchase side ────────────────────────────────────────────────────────
@@ -506,13 +510,62 @@ export async function deleteSetOff(req: Request, res: Response) {
   const existing = await prisma.partySetOff.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new HttpError(404, 'Set-off not found');
 
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  const reason =
+    typeof req.body?.reason === 'string' && req.body.reason.trim().length >= 3
+      ? req.body.reason.trim()
+      : null;
+  if (!reason) {
+    throw new HttpError(400, 'Give a reason for reversing this set-off.');
+  }
+
+  const actorUser = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { name: true },
+  });
+  const actor = { userId: req.user.userId, name: actorUser?.name ?? null };
+
   await prisma.$transaction(async (tx) => {
-    // Deleting the set-off cascades its Payment / Receipt legs away.
-    await tx.partySetOff.delete({ where: { id: existing.id } });
-    if (existing.journalEntryId) {
-      await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+    // Deleting the set-off used to cascade its Payment / Receipt legs away, so
+    // a knock-off between a dual-role party left no record on either side.
+    // Under plan item 4.4 all three are cancelled instead, in one transaction:
+    // cancelling the contra while leaving a leg live would show the party as
+    // both paid and still owed.
+    //
+    // Only the set-off's own journal entry is reversed. The legs are its
+    // children and carry no separate posting of their own, so reversing them
+    // individually would double the contra.
+    const legs = await tx.payment.findMany({
+      where: { setOffId: existing.id, cancelledAt: null },
+      select: { id: true },
+    });
+    const receiptLegs = await tx.receipt.findMany({
+      where: { setOffId: existing.id, cancelledAt: null },
+      select: { id: true },
+    });
+
+    const stamp = {
+      cancelledAt: new Date(),
+      cancelledById: actor.userId,
+      cancelledByName: actor.name,
+      cancelReason: reason,
+    };
+    if (legs.length) {
+      await tx.payment.updateMany({ where: { id: { in: legs.map((l) => l.id) } }, data: stamp });
     }
+    if (receiptLegs.length) {
+      await tx.receipt.updateMany({ where: { id: { in: receiptLegs.map((l) => l.id) } }, data: stamp });
+    }
+
+    await cancelDocumentInTx(tx, { model: 'partySetOff', id: existing.id, reason, actor });
   });
 
-  res.json({ message: 'Set-off reversed' });
+  await recordAudit({
+    action: 'partySetOff.cancel',
+    entity: 'PartySetOff',
+    entityId: existing.id,
+    newValues: { cancelReason: reason, cancelledBy: actor.name ?? actor.userId },
+  });
+
+  res.json({ message: 'Set-off cancelled and reversed' });
 }

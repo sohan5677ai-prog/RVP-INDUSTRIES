@@ -405,10 +405,10 @@ function loadSales(buyerId?: string) {
 // brokered deal - so it's never worth narrating as "through RVP".
 const isOwnBroker = (name?: string | null) => (name ?? '').trim().toUpperCase() === 'RVP';
 function loadPayments(partyId?: string) {
-  return prisma.payment.findMany({ where: { partyId: partyId ? partyId : { not: null } } });
+  return prisma.payment.findMany({ where: { partyId: partyId ? partyId : { not: null }, cancelledAt: null } });
 }
 function loadReceipts(partyId?: string) {
-  return prisma.receipt.findMany({ where: { partyId: partyId ? partyId : { not: null } } });
+  return prisma.receipt.findMany({ where: { partyId: partyId ? partyId : { not: null }, cancelledAt: null } });
 }
 function loadDustPurchases(partyId?: string) {
   return prisma.dustPurchase.findMany({ where: partyId ? { partyId } : undefined });

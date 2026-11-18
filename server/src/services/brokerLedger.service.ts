@@ -43,7 +43,7 @@ export async function buildBrokerLedgerData(brokerId: string): Promise<BrokerLed
       where: { brokerId },
       include: { dispatches: true, buyer: { select: { name: true } } },
     }),
-    prisma.payment.findMany({ where: { type: 'BROKER', brokerId } }),
+    prisma.payment.findMany({ where: { type: 'BROKER', brokerId, cancelledAt: null } }),
   ]);
 
   const lines: Omit<BrokerLedgerTxn, 'runningBalance'>[] = [];

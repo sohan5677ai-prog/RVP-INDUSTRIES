@@ -82,6 +82,39 @@ export async function postReversal(
   return entryId;
 }
 
+/**
+ * Reverse every entry posted under a reference.
+ *
+ * Some documents spin off postings that are not children of their own journal
+ * entry - a "Mark Paid" receipt writes separate TDS-<dispatchId> and
+ * SHORTAGE-<dispatchId> entries. Those were hard-deleted alongside the
+ * receipt; under cancel-not-delete they have to be reversed too, or the
+ * receipt would be withdrawn while its TDS stayed in the ledger and on a
+ * statutory return.
+ *
+ * Returns how many were reversed. Zero is normal: a Sale-Dues receipt carries
+ * no such postings.
+ */
+export async function reverseByReference(
+  tx: Prisma.TransactionClient,
+  reference: string,
+  reason: string
+): Promise<number> {
+  const entries = await tx.journalEntry.findMany({
+    where: { reference, reversalOfId: null },
+    select: { id: true },
+  });
+
+  let reversed = 0;
+  for (const entry of entries) {
+    const already = await tx.journalEntry.findFirst({ where: { reversalOfId: entry.id } });
+    if (already) continue;
+    await postReversal(tx, entry.id, reason);
+    reversed++;
+  }
+  return reversed;
+}
+
 type CancellableModel = 'payment' | 'receipt' | 'partySetOff';
 
 const LABELS: Record<CancellableModel, string> = {
@@ -89,6 +122,40 @@ const LABELS: Record<CancellableModel, string> = {
   receipt: 'Receipt',
   partySetOff: 'Set-off',
 };
+
+/**
+ * The core of a cancellation, inside a caller's transaction.
+ *
+ * Exposed separately because some documents need side postings reversed in the
+ * same transaction - a receipt's TDS and shortage entries. Doing those in one
+ * transaction and the cancellation in another would leave a window where the
+ * TDS had been withdrawn but the receipt still looked live.
+ */
+export async function cancelDocumentInTx(
+  tx: Prisma.TransactionClient,
+  params: { model: CancellableModel; id: string; reason: string; actor: CancelActor }
+): Promise<void> {
+  const delegate = (tx as unknown as Record<string, any>)[params.model];
+  const doc = await delegate.findUnique({ where: { id: params.id } });
+  if (!doc) throw new HttpError(404, `${LABELS[params.model]} not found`);
+  if (doc.cancelledAt) {
+    throw new HttpError(409, `That ${LABELS[params.model].toLowerCase()} is already cancelled.`);
+  }
+
+  if (doc.journalEntryId) {
+    await postReversal(tx, doc.journalEntryId, params.reason);
+  }
+
+  await delegate.update({
+    where: { id: params.id },
+    data: {
+      cancelledAt: new Date(),
+      cancelledById: params.actor.userId,
+      cancelledByName: params.actor.name ?? null,
+      cancelReason: params.reason,
+    },
+  });
+}
 
 /**
  * Cancel a document: reverse its posting and mark it, in one transaction.
@@ -108,28 +175,7 @@ export async function cancelDocument(params: {
     throw new HttpError(400, 'Give a reason for cancelling this.');
   }
 
-  await prisma.$transaction(async (tx) => {
-    const delegate = (tx as unknown as Record<string, any>)[params.model];
-    const doc = await delegate.findUnique({ where: { id: params.id } });
-    if (!doc) throw new HttpError(404, `${LABELS[params.model]} not found`);
-    if (doc.cancelledAt) {
-      throw new HttpError(409, `That ${LABELS[params.model].toLowerCase()} is already cancelled.`);
-    }
-
-    if (doc.journalEntryId) {
-      await postReversal(tx, doc.journalEntryId, reason);
-    }
-
-    await delegate.update({
-      where: { id: params.id },
-      data: {
-        cancelledAt: new Date(),
-        cancelledById: params.actor.userId,
-        cancelledByName: params.actor.name ?? null,
-        cancelReason: reason,
-      },
-    });
-  });
+  await prisma.$transaction((tx) => cancelDocumentInTx(tx, { ...params, reason }));
 
   // Named explicitly as well as captured by the extension: "payment.cancel" is
   // the business event, and reading it out of a generic payment.update would

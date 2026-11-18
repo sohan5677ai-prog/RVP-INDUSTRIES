@@ -7,6 +7,8 @@ import { createReceiptSchema, listReceiptsSchema, updateReceiptSchema } from '..
 import { LedgerService } from '../services/ledger.service.js';
 import { extractTransactionData } from '../lib/gemini.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { cancelDocumentInTx, reverseByReference } from '../services/reversal.service.js';
+import { recordAudit } from '../services/audit.service.js';
 
 /**
  * Read an uploaded receipt screenshot (bank/UPI/cheque) with Gemini and return
@@ -411,33 +413,54 @@ export async function deleteReceipt(req: Request, res: Response) {
     throw new HttpError(400, 'This is the collection side of a set-off. Reverse the set-off to remove both sides together.');
   }
 
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  const reason =
+    typeof req.body?.reason === 'string' && req.body.reason.trim().length >= 3
+      ? req.body.reason.trim()
+      : null;
+  if (!reason) {
+    throw new HttpError(400, 'Give a reason for cancelling this receipt.');
+  }
+
+  const actorUser = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { name: true },
+  });
+  const actor = { userId: req.user.userId, name: actorUser?.name ?? null };
+
   await prisma.$transaction(async (tx) => {
     // A receipt raised from "Mark Paid" against a shipment also spins off SEPARATE
     // ledger postings - TDS-<dispatchId> / SHORTAGE-<dispatchId> - and stamps the
     // TDS onto the dispatch itself. None of those are children of the receipt's own
-    // journal entry, so deleting the receipt alone used to strand a phantom TDS /
-    // shortage on the dispatch and in the party ledger (and, now, the TDS report).
-    // Reverse them here. Sale-Dues receipts carry no such postings, so these are
-    // harmless no-ops there - the reference-scoped deletes match nothing.
+    // journal entry, so cancelling the receipt alone would strand a phantom TDS /
+    // shortage on the dispatch and in the party ledger (and in the TDS report).
+    //
+    // These used to be DELETED. Under plan item 4.4 they are reversed instead, in
+    // this same transaction: a window where the TDS had been withdrawn but the
+    // receipt still looked live is exactly the inconsistency an auditor would
+    // find. Sale-Dues receipts carry no such postings, so these are no-ops there.
     if (receipt.saleDispatchId) {
       if (Number(receipt.tdsAmount ?? 0) > 0) {
-        await tx.journalEntry.deleteMany({ where: { reference: `TDS-${receipt.saleDispatchId}` } });
+        await reverseByReference(tx, `TDS-${receipt.saleDispatchId}`, reason);
         await tx.saleDispatch.update({ where: { id: receipt.saleDispatchId }, data: { tdsAmount: null } });
       }
       if (Number(receipt.shortageAmount ?? 0) > 0) {
         // Only the ledger posting is reversed; the shortage stays recorded on the
         // dispatch (creditNoteAmount / shortageKg), matching how a delivery shortage
         // is held off the ledger until a receipt actually books the deduction.
-        await tx.journalEntry.deleteMany({ where: { reference: `SHORTAGE-${receipt.saleDispatchId}` } });
+        await reverseByReference(tx, `SHORTAGE-${receipt.saleDispatchId}`, reason);
       }
     }
 
-    if (receipt.journalEntryId) {
-      await tx.journalEntry.delete({ where: { id: receipt.journalEntryId } });
-    } else {
-      await tx.receipt.delete({ where: { id: receipt.id } });
-    }
+    await cancelDocumentInTx(tx, { model: 'receipt', id: receipt.id, reason, actor });
   });
 
-  res.json({ message: 'Receipt deleted' });
+  await recordAudit({
+    action: 'receipt.cancel',
+    entity: 'Receipt',
+    entityId: receipt.id,
+    newValues: { cancelReason: reason, cancelledBy: actor.name ?? actor.userId },
+  });
+
+  res.json({ message: 'Receipt cancelled and reversed' });
 }

@@ -6,6 +6,7 @@ import helmet from "helmet";
 import apiRoutes from "./routes/index.js";
 import { errorHandler } from "./middleware/error.js";
 import { bulkReadAudit } from './middleware/bulkReadAudit.js';
+import { fileUrlRewrite } from './middleware/fileUrlRewrite.js';
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { assertJwtSecret } from "./lib/jwt.js";
 import { isOriginAllowed, originPolicyFromEnv } from "./lib/corsOrigin.js";
@@ -195,7 +196,9 @@ app.use('/webhooks', (req, res, next) => {
 });
 
 // bulkReadAudit before the routes so it wraps res.json for every one of them.
-app.use("/api", apiLimiter, bulkReadAudit(), apiRoutes);
+// fileUrlRewrite before the routes so it wraps res.json for all of them: no
+// public bucket URL leaves the API, whatever endpoint it came from.
+app.use("/api", apiLimiter, bulkReadAudit(), fileUrlRewrite(), apiRoutes);
 
 // Error handler must be registered last.
 app.use(errorHandler);

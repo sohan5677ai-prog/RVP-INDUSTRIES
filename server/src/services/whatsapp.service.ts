@@ -2,6 +2,7 @@ import type { WaLanguage } from '@prisma/client';
 export type { WaLanguage };
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
+import { mintFileUrl, SHARED_FILE_TTL_SECONDS } from '../lib/fileAccessToken.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
 import { coordLabel, coordUrl, mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
 import { FACTORY } from '../lib/gpsPlaces.js';
@@ -839,7 +840,18 @@ export async function sendWhatsAppTemplate(args: SendArgs): Promise<{ ok: boolea
     if (phoneNumberId) params.set('phone_number_id', phoneNumberId);
     const variablesValues = args.variables.map(cleanVar).join('|');
     if (variablesValues) params.set('variables_values', variablesValues);
-    if (args.mediaUrl) params.set('media_url', args.mediaUrl);
+    if (args.mediaUrl) {
+      // The provider fetches this URL server-to-server with no credentials, so
+      // a stored file has to go out as a signed link rather than a public
+      // bucket URL. Minted here - the one point where a media URL is handed to
+      // the provider - so every caller is covered without each one
+      // remembering. A longer life than an in-app link, because the recipient
+      // may open the message hours or days later; still finite, which is the
+      // whole point. Anything that is not one of our stored files
+      // (mintFileUrl returns null) is passed through untouched.
+      const shared = mintFileUrl(args.mediaUrl, SHARED_FILE_TTL_SECONDS);
+      params.set('media_url', shared?.url ?? args.mediaUrl);
+    }
     if (args.documentFilename) params.set('document_filename', args.documentFilename);
 
     try {

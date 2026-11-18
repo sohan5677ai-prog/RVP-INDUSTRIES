@@ -272,20 +272,57 @@ for the audit script's coverage.
 The route-permission coverage test from Phase 2 failed when this route appeared, because a new
 public route has to be added to a reviewed list by hand. That is the mechanism working.
 
-### What is NOT done, and so the hole is NOT yet closed
+### Step two: no public URL leaves the API
 
-This is the serving machinery only. Deliberately so: switching everything at once, across twelve
-columns and five client files, risks breaking invoice viewing and WhatsApp document sends in
-production.
+Twelve columns across eight models hold one of these URLs — `StockIn.invoiceFileUrl`,
+`SaleOrder.kataFileUrl` and `.buyerKataFileUrl`, `SaleDispatch` the same pair, `Payment
+.screenshotUrl`, `SupportTicket.screenshotUrl`, `WishBroadcast.imageUrl`, `WhatsAppLog.mediaUrl`,
+`DriverKataSubmission.imageUrl`, `WeighbridgeTicket.slipImageUrl`.
 
-1. **Read paths still return the stored public URL.** Nothing uses `mintFileUrl` yet, so no
-   behaviour has changed and nothing can break.
-2. **Uploads still store the public URL.** `objectNameFromStored` already reads both shapes, so
-   switching what is written is safe whenever it happens.
-3. **The bucket is still public** — and that is the step that actually closes it. Flipping it is a
-   deliberate act with a consequence that cannot be undone: **every link already sent over WhatsApp
-   or email stops working.** Like the `REVOKE` in [PHASE-4](PHASE-4.md), it is left for a knowing
-   decision rather than made on someone's behalf.
+Rather than find every controller, every `include` and every nested shape, `middleware
+/fileUrlRewrite.ts` walks the outgoing JSON once, centrally, and replaces anything recognisably
+ours with a freshly minted link. Same reasoning as the Phase 4 audit extension and the bulk-read
+recorder: a call site that has to be remembered is one a future endpoint forgets.
+
+**Matched on value shape, not field name**, so the thirteenth column is covered the day it is
+added. `objectNameFromStored` only accepts our own storage URLs and bare 32-hex-plus-extension
+names, so an unrelated link is left alone — and the tests assert that an identical object comes
+back when nothing matched, because a 500-row register must not be rebuilt for nothing.
+
+**The happy consequence: nothing stored had to change.** Existing rows keep their public URL in the
+database; callers simply stop being told it. That kept this step off the write paths entirely and
+makes it reversible.
+
+Two things `res.json` does not cover, handled explicitly:
+
+- **WhatsApp media.** The provider fetches the URL server-to-server with no credentials. Minted at
+  the single point where a media URL is handed to Fast2SMS, so every caller is covered, with a
+  seven-day life rather than fifteen minutes — a recipient may open the message days later. Still
+  finite, which is the point.
+- **The one write that accepts a file URL from the body**, `wishes.schema.ts`, now normalises it
+  back to a bare object name. Otherwise a minted link handed to the client could be round-tripped
+  into the database, storing a URL with an expiry baked in.
+
+Verified on real rows, not fixtures: a `WeighbridgeTicket.slipImageUrl` holding a public URL comes
+back as `/api/files/…?exp=…&sig=…` with no `/object/public/` anywhere in the response, and
+following that link returns the actual 352,769-byte JPEG via a `/object/sign/` redirect.
+
+### What is still NOT done
+
+**The bucket is still public**, and that is the step that actually closes the hole. The app no
+longer hands out public URLs, so flipping it is now safe for everything inside the ERP — but it
+has one consequence that cannot be undone: **every link already sent over WhatsApp or email stops
+working.** Like the `REVOKE` in [PHASE-4](PHASE-4.md), it is left for a knowing decision.
+
+Uploads also still *store* the public URL. That is harmless now — `objectNameFromStored` reads
+either shape and the rewrite handles it on the way out — so switching what is written is tidying
+rather than a fix.
+
+```
+Supabase dashboard → Storage → invoices → make private
+```
+
+After that, `GET /api/files/:name` is the only way in, and it expires.
 
 ## Closing an item Phase 6B deferred here
 
@@ -298,7 +335,7 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 
 ## Tests
 
-`npm test` in `server/` — **68 files, 787 tests.** 56 new.
+`npm test` in `server/` — **69 files, 797 tests.** 66 new.
 
 ## Left open
 
@@ -309,5 +346,5 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 | HSTS `preload` | A DNS decision about `rvpindustries.co.in`, flagged not taken |
 | `securityAlertEmails` is unset | So the bulk-read alert is a log line only. Wiring it to email is small once recipients exist — carried over from Phase 1 |
 | No masked copy has actually been made | The script's guards are tested; the end-to-end run needs a restored copy to point at |
-| **The invoice bucket is still public (M2)** | The serving machinery is built and verified end to end; steps 2 and 3 — switching the read paths onto `mintFileUrl`, then making the bucket private — are what close it. See above |
+| **The invoice bucket is still public (M2)** | The API no longer hands out public URLs, so the last step is yours: make the bucket private. It kills links already sent over WhatsApp and email, which is why it is not done on your behalf. See above |
 | Bulk-read recording not yet confirmed in production | The unit tests cover the logic and nothing has made a 500-row fetch since it deployed; the first `data.bulk_read` row with a non-localhost IP will confirm the wiring |

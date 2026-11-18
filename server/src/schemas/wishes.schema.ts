@@ -1,3 +1,4 @@
+import { objectNameFromStored } from '../lib/fileAccessToken.js';
 import { z } from 'zod';
 
 export const wishCategoryEnum = z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER']);
@@ -37,7 +38,14 @@ export const generateWishSchema = z.object({
 export const sendWishSchema = recipientGroupsSchema.extend({
   occasion: z.string().min(1, 'Occasion is required'),
   messageText: z.string().min(1, 'Message is required'),
-  imageUrl: z.string().optional().nullable(),
+  // The only write that takes a file URL from the request body. Normalised
+  // back to a bare object name, so a minted link the client was handed - which
+  // carries an expiry - can never be round-tripped into the database.
+  imageUrl: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v ? (objectNameFromStored(v) ?? v) : v)),
 });
 
 export type CreateDriverInput = z.infer<typeof createDriverSchema>;

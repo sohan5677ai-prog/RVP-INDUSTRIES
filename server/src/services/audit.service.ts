@@ -31,11 +31,14 @@ const REDACTED_FIELDS = new Set([
 /** Values too large to be worth keeping in full. */
 const MAX_VALUE_CHARS = 2000;
 
-export function redact(values: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (values === null || values === undefined) return Prisma.JsonNull;
-  if (typeof values !== 'object') return values as Prisma.InputJsonValue;
+export function redact(values: unknown): JsonLike {
+  // Plain null, not Prisma.JsonNull: this result is hashed as well as stored,
+  // and the sentinel is an object that would hash differently from the SQL
+  // null it becomes. toJsonInput() puts the sentinel back at the write site.
+  if (values === null || values === undefined) return null;
+  if (typeof values !== 'object') return values as JsonLike;
 
-  const out: Record<string, unknown> = {};
+  const out: Record<string, JsonLike> = {};
   for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
     if (REDACTED_FIELDS.has(key)) {
       out[key] = '[redacted]';
@@ -49,15 +52,34 @@ export function redact(values: unknown): Prisma.InputJsonValue | typeof Prisma.J
       out[key] = value.toString();
       continue;
     }
+    // Money and weights arrive as Prisma Decimal, whose in-memory shape is
+    // {d,e,s} - nothing like the number it is stored and read back as. Kept as
+    // a string rather than a number so a paise-level value survives exactly.
+    if (Prisma.Decimal.isDecimal(value)) {
+      out[key] = (value as Prisma.Decimal).toString();
+      continue;
+    }
     if (typeof value === 'string' && value.length > MAX_VALUE_CHARS) {
       out[key] = `${value.slice(0, MAX_VALUE_CHARS)}…[truncated]`;
       continue;
     }
-    // Prisma Decimal and similar objects stringify usefully; plain objects are
-    // kept as-is so nested changes stay readable.
-    out[key] = value;
+    out[key] = value as JsonLike;
   }
-  return out as Prisma.InputJsonValue;
+  return out;
+}
+
+/** What `redact` produces: values that survive a JSON round-trip unchanged. */
+export type JsonLike =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonLike[]
+  | { [key: string]: JsonLike };
+
+/** Put the Prisma null sentinel back, at the write site only. */
+function toJsonInput(value: JsonLike): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  return value === null ? Prisma.JsonNull : (value as Prisma.InputJsonValue);
 }
 
 export interface AuditEvent {
@@ -100,15 +122,25 @@ export async function recordAudit(event: AuditEvent): Promise<void> {
         const seq = (tail[0]?.seq ?? 0n) + 1n;
         const createdAt = new Date();
 
+        // Every hashed field is computed once, here, and the same value is
+        // both hashed and written. Hashing the in-memory values and storing
+        // the redacted ones made the chain unverifiable for any row carrying a
+        // Decimal: it hashed as {d,e,s} and came back as a number. The rule is
+        // now structural rather than a list of types to remember - whatever
+        // goes into the hash is the value that goes into the column.
+        const oldValues = redact(event.oldValues);
+        const newValues = redact(event.newValues);
+        const userId = context?.onBehalfOf?.userId ?? context?.userId ?? null;
+
         const hash = hashRow(
           {
             seq,
             action: event.action,
             entity: event.entity ?? null,
             entityId: event.entityId ?? null,
-            oldValues: event.oldValues ?? null,
-            newValues: event.newValues ?? null,
-            userId: context?.userId ?? null,
+            oldValues,
+            newValues,
+            userId,
             ip: context?.ip ?? null,
             requestId: context?.requestId ?? null,
             createdAt,
@@ -125,9 +157,9 @@ export async function recordAudit(event: AuditEvent): Promise<void> {
             entity: event.entity ?? null,
             entityId: event.entityId ?? null,
             entityLabel: event.entityLabel ?? null,
-            oldValues: redact(event.oldValues),
-            newValues: redact(event.newValues),
-            userId: context?.onBehalfOf?.userId ?? context?.userId ?? null,
+            oldValues: toJsonInput(oldValues),
+            newValues: toJsonInput(newValues),
+            userId,
             userName: context?.onBehalfOf?.userName ?? context?.userName ?? null,
             userRole: context?.userRole ?? null,
             ip: context?.ip ?? null,

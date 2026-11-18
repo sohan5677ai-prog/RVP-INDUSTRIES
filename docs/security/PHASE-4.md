@@ -69,6 +69,48 @@ row breaks every hash after it.
   authorship. Keyed hashing would tie the chain to the server's secret — and rotating
   `JWT_SECRET` would then invalidate the entire history, which is a worse trade here.
 
+### The bug the live run found, and what it changed
+
+Deployed, `node scripts/verify-audit-chain.mjs` against production reported **30 of 40 rows
+altered** — with every link intact and no gaps. That shape is the tell: real tampering breaks
+links, so a content-only failure is the writer and the verifier disagreeing.
+
+The writer hashed the values **as Prisma handed them over** and stored the **redacted** copy. For
+any row carrying a `Decimal` those are not the same thing:
+
+```
+Decimal(0) canonicalises to {"constructor":undefined,"d":[0],"e":0,"s":1}
+the JSON column gives back   0
+```
+
+So every audited write touching money or a weight — `Account.openingBalance`,
+`SubscriptionPlanConfig.amount` — was unverifiable from the moment it was written. The ten rows
+that passed were the ones whose payload happened to be all strings.
+
+The fix is **structural, not another type in the list**: every hashed field is computed once and
+the same value is both hashed and written, so no in-memory/stored divergence is possible for a
+type nobody has thought of yet. `redact` now also returns plain `null` rather than
+`Prisma.JsonNull`, which is an object that would have hashed differently from the SQL null it
+becomes, and keeps a Decimal as a **string** so a paise-level value survives exactly instead of
+going through a float.
+
+A second, latent instance of the same mistake went with it: `userId` was hashed from
+`context.userId` but stored as `onBehalfOf?.userId ?? userId`, so every Slack-bot and kata-cabin
+write would have failed verification too. Nothing had exercised that path yet.
+
+**Why the tests did not catch it.** They hashed a row and verified it against the same in-memory
+object, which is the one comparison that cannot fail. The invariant that was missing is the only
+one that matters: *the payload that goes into the hash must survive the trip through the database
+unchanged.* `auditRedact.test.ts` pins exactly that, by hashing `redact(values)` and
+`JSON.parse(JSON.stringify(redact(values)))` and requiring they agree — which covers Decimal,
+Date, bigint and whatever is added next, rather than the types someone remembered. It also asserts
+that hashing the **raw** value still does *not* survive, so the hazard cannot quietly stop being
+handled.
+
+The lesson generalises past this phase: a tamper-evidence mechanism that cries wolf is worse than
+none, because it teaches people to ignore it. It is only worth anything if it has been run against
+real data — which is why it was run.
+
 Two details the tests forced out:
 
 1. **Object keys are sorted before hashing.** `{a:1,b:2}` and `{b:2,a:1}` are the same fact, and
@@ -198,7 +240,7 @@ Reopening updates the row rather than deleting it, so the fact that a closed per
 
 ## Tests
 
-`npm test` in `server/` — **58 files, 660 tests.** 57 new. The chain tests name each tampering
+`npm test` in `server/` — **59 files, 672 tests.** 69 new. The chain tests name each tampering
 scenario: edit in place, edit with the hash recomputed (the break then shows at the *next* row),
 deletion from the middle, truncation from the end, insertion, and a chain not starting at
 genesis. The period-lock tests pin inclusivity at both ends — a posting on the last day of a
@@ -223,6 +265,9 @@ quietly unlock it.
    switch is not a trail.
 3. The first row writes with `prevHash` = 64 zeros. That is the genesis row, not a fault.
 4. Run `POST /api/audit-log/verify` once after deploying, so there is a known-good baseline.
+   **Do this every time** — it is what found the Decimal bug above, which no test could have.
+   The 40 rows written before that fix cannot verify under the corrected scheme and need to be
+   dealt with knowingly; see Left open.
 5. Consider the `REVOKE` above once the retention story is settled.
 
 ## Left open
@@ -232,3 +277,4 @@ quietly unlock it.
 | Purchases, sales, credit/debit notes, loans still hard-delete | the larger half of "financial documents"; the mechanism is built and tested, each one needs its read paths guarded the way payments' were |
 | 4.6 retention job — the setting exists, nothing prunes | needs the `REVOKE` decision first, since pruning breaks the chain |
 | The viewer has not been rendered against a signed-in session | it typechecks and builds, and the endpoints it calls are tested; the screen itself wants one look |
+| **The 40 pre-fix rows still fail verification** | they were hashed under the broken scheme, so they will report as altered for ever. They are dev-only rows from 18 Nov. Either re-seal them (recompute from stored content, recorded as an audit event — but recomputing hashes is exactly what a tamperer does, so it must be a knowing act) or delete them so the chain starts clean at the point the trail became trustworthy. Leaving them is the one option with no upside: a verifier that always reports a break is one nobody reads |

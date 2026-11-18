@@ -134,8 +134,47 @@ cancelled rows:
 
 `?includeCancelled=true` on the registers, where seeing what was withdrawn is the point.
 
-**Scope note:** payments are converted. Receipts and set-offs have the columns and
-`cancelDocument` supports them, but their delete endpoints are not yet converted — see Left open.
+### Receipts and set-offs
+
+A receipt is not just its own posting. "Mark Paid" writes separate `TDS-<dispatchId>` and
+`SHORTAGE-<dispatchId>` entries that are **not children of the receipt's journal entry**, and the
+old delete removed them too. Cancelling has to reverse them as well, or the receipt would be
+withdrawn while its TDS stayed in the ledger and on a statutory return — so
+`reverseByReference` reverses every entry posted under a reference, and it runs in the **same
+transaction** as the cancellation. Doing them in two transactions would leave a window where the
+TDS had been withdrawn but the receipt still looked live.
+
+A set-off is cancelled together with both its Payment and Receipt legs. Only the set-off's own
+entry is reversed: the legs carry no separate posting, so reversing them would double the contra.
+
+**Still hard-deleting:** purchases, sales, credit and debit notes, loans — see Left open.
+
+## 4.7 The viewer
+
+`/audit-trail`, its own page rather than a Settings tab: this is where someone goes to answer "who
+changed this, and when", which is a task, not a setting.
+
+Three things on one screen, because they are one question:
+
+- **Verify chain** runs `POST /audit-log/verify` and says plainly what a break means — "not a
+  glitch to retry". A green tick nobody understands is worth nothing.
+- **Closed periods**, including the ones that were **reopened**. Those stay on screen rather than
+  being tidied away once released: that a closed period was reopened, by whom and why, is exactly
+  what an auditor asks about.
+- **The log**, newest first, each entry opening to show only the fields that actually **differ**.
+  A dump of every column makes the reader find the change; a diff tells them.
+
+Two details worth naming:
+
+1. **Cursor-paged, not offset-paged** — the table only ever grows, so an offset page would shift
+   under the reader as new rows arrive while they read. "Load older" walks `seq` backwards.
+2. **"Show the whole request"** filters by `requestId`. One action that touched four tables was
+   written as four rows; this is what turns them back into one event.
+
+The page hides the period-lock form from anyone who is not ADMIN or DEVELOPER, and the nav link
+from a USER. That is **not** the permission check — `/audit-log` is behind `audit.view` and writing
+a lock behind `system.manage`, both on the server. Hiding the control only avoids offering a button
+that is certain to come back 403.
 
 ## 4.5 Period lock
 
@@ -159,11 +198,16 @@ Reopening updates the row rather than deleting it, so the fact that a closed per
 
 ## Tests
 
-`npm test` in `server/` — **57 files, 645 tests.** 42 new. The chain tests name each tampering
+`npm test` in `server/` — **58 files, 660 tests.** 57 new. The chain tests name each tampering
 scenario: edit in place, edit with the hash recomputed (the break then shows at the *next* row),
 deletion from the middle, truncation from the end, insertion, and a chain not starting at
 genesis. The period-lock tests pin inclusivity at both ends — a posting on the last day of a
 closed month must be refused, not squeaked through by an off-by-one.
+
+`reversal.test.ts` carries the assertion that matters most in this phase: that a reversal
+**swaps** debits and credits rather than negating them. A negated line balances arithmetically, so
+no total would ever look wrong — it would only be wrong in every report that groups by sign, which
+is the kind of error found a year later during a reconciliation.
 
 The FY archive registry test caught `AuditLog` and `PeriodLock` needing classification — the
 **fifth** time across these phases. Both `EXCLUDED`: the audit log is a hash chain, so a slice of
@@ -172,8 +216,9 @@ quietly unlock it.
 
 ## Deploying
 
-1. **Two migrations are pending**, in order: the inbound-lorry columns from `c05474b`, then
-   `server/prisma/sql/phase-4-audit.sql`. Both additive.
+1. **The schema is already applied** — `AuditLog`, `PeriodLock`, the `cancelledAt` columns on
+   Payment / Receipt / PartySetOff and `JournalEntry.reversalOfId` are all live, checked against
+   the database on 2026-11-18. Nothing is pending.
 2. Audit capture starts the moment the server boots. There is no flag — a trail with an off
    switch is not a trail.
 3. The first row writes with `prevHash` = 64 zeros. That is the genesis row, not a fault.
@@ -184,8 +229,6 @@ quietly unlock it.
 
 | Item | Where |
 |---|---|
-| Audit viewer UI — the endpoint exists, there is no screen | a follow-up; the data is queryable now |
-| Receipt and set-off deletes still hard-delete | same mechanism, not yet wired |
-| Purchases, sales, credit/debit notes, loans | the larger half of "financial documents" |
+| Purchases, sales, credit/debit notes, loans still hard-delete | the larger half of "financial documents"; the mechanism is built and tested, each one needs its read paths guarded the way payments' were |
 | 4.6 retention job — the setting exists, nothing prunes | needs the `REVOKE` decision first, since pruning breaks the chain |
-| Period lock has no UI | `/api/period-locks` works; a Settings screen would help |
+| The viewer has not been rendered against a signed-in session | it typechecks and builds, and the endpoints it calls are tested; the screen itself wants one look |

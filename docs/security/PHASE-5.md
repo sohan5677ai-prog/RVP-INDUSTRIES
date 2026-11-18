@@ -223,6 +223,70 @@ The transport-level tests exist for a second reason: winston carries `level` and
 a fresh object silently drops them and every line loses its level — the logs keep working, so
 nothing fails, they are just quietly wrong.
 
+## The public invoice bucket (PHASE-6B M2) — step one of three
+
+**The hole, measured today:** the `invoices` bucket is public, and
+`curl https://<project>.supabase.co/storage/v1/object/public/invoices/<name>` returns `200`. It
+holds supplier invoice PDFs, kata slips, payment and support screenshots, verification PDFs and
+weighbridge slip images. Object names are 16 random bytes, so nobody can *enumerate* them — but the
+URLs are stored in twelve database columns, shared over WhatsApp and email, and **never expire and
+cannot be revoked.** Anyone ever forwarded one can read that invoice, with its party name, GSTIN
+and amounts, for ever.
+
+### Why authentication alone cannot fix it
+
+The files are fetched by things that cannot sign in. WhatsApp's media fetcher pulls the URL
+server-to-server with no headers; in the browser they are loaded by `<img src>` and `<a href>`,
+which cannot send an `Authorization` header. So the authorization has to live **in the URL** and
+expire.
+
+That is already the pattern here: the weighbridge slip is served from our own endpoint with an HMAC
+token in the query string, precisely so WhatsApp can fetch it. `lib/fileAccessToken.ts` generalises
+it and adds the part the slip link is missing — **an expiry.** The slip token is HMAC over the id
+and the paid-at time, so it is also a forever-link, just on our domain rather than Supabase's.
+
+The signature covers the object name **and** the expiry. Signing the name alone would let anyone
+extend their own link indefinitely by editing `exp`; signing the expiry alone would let one
+invoice's link open another's. Both are tested.
+
+`GET /api/files/:name?exp=…&sig=…` verifies the token and **302s to a 60-second Supabase signed
+URL** rather than streaming the bytes. Streaming would put every invoice download through Render,
+which bills outbound traffic — the same reason the CCTV relay was moved onto the LAN bridge.
+
+Mounted **ahead of the global `requireAuth`**, which is what makes it reachable at all; a
+`permission: null` row in the route table would not have been enough, since the table is only
+consulted after authentication has already happened. The row is there anyway, for documentation and
+for the audit script's coverage.
+
+### Verified against the real bucket, not asserted
+
+| Check | Result |
+|---|---|
+| No token | `403` |
+| Malformed object name (`../`, `.html`, wrong length) | `404` |
+| Forged signature | `403` |
+| Expired token | `403`, "that link has expired" |
+| Valid token | `302` → `/object/sign/…` (signed, not public) |
+| Following the redirect | `200`, 5,059,482 bytes, `application/pdf` |
+
+The route-permission coverage test from Phase 2 failed when this route appeared, because a new
+public route has to be added to a reviewed list by hand. That is the mechanism working.
+
+### What is NOT done, and so the hole is NOT yet closed
+
+This is the serving machinery only. Deliberately so: switching everything at once, across twelve
+columns and five client files, risks breaking invoice viewing and WhatsApp document sends in
+production.
+
+1. **Read paths still return the stored public URL.** Nothing uses `mintFileUrl` yet, so no
+   behaviour has changed and nothing can break.
+2. **Uploads still store the public URL.** `objectNameFromStored` already reads both shapes, so
+   switching what is written is safe whenever it happens.
+3. **The bucket is still public** — and that is the step that actually closes it. Flipping it is a
+   deliberate act with a consequence that cannot be undone: **every link already sent over WhatsApp
+   or email stops working.** Like the `REVOKE` in [PHASE-4](PHASE-4.md), it is left for a knowing
+   decision rather than made on someone's behalf.
+
 ## Closing an item Phase 6B deferred here
 
 [PHASE-6B](PHASE-6B.md) listed "request bodies logged verbatim in two places (M6)" against Phase 5.
@@ -234,7 +298,7 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 
 ## Tests
 
-`npm test` in `server/` — **67 files, 771 tests.** 40 new.
+`npm test` in `server/` — **68 files, 787 tests.** 56 new.
 
 ## Left open
 
@@ -245,5 +309,5 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 | HSTS `preload` | A DNS decision about `rvpindustries.co.in`, flagged not taken |
 | `securityAlertEmails` is unset | So the bulk-read alert is a log line only. Wiring it to email is small once recipients exist — carried over from Phase 1 |
 | No masked copy has actually been made | The script's guards are tested; the end-to-end run needs a restored copy to point at |
-| **Invoice files in a public Supabase bucket on never-expiring URLs (M2)** | [PHASE-6B](PHASE-6B.md) deferred this *to Phase 5* and this phase did not pick it up — my miss, recorded here rather than left to be rediscovered. Invoice PDFs carry party names, GSTINs and amounts, and the URLs are shared over WhatsApp and email, so changing them is not a drop-in: anything already sent keeps working off the old link. It is the largest remaining data-protection gap |
+| **The invoice bucket is still public (M2)** | The serving machinery is built and verified end to end; steps 2 and 3 — switching the read paths onto `mintFileUrl`, then making the bucket private — are what close it. See above |
 | Bulk-read recording not yet confirmed in production | The unit tests cover the logic and nothing has made a 500-row fetch since it deployed; the first `data.bulk_read` row with a non-localhost IP will confirm the wiring |

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import fileRoutes from './file.routes.js';
 import { requireAuthOrCameraBridge } from '../middleware/cameraAuth.js';
 import { requireMediaRead } from '../middleware/mediaAuth.js';
 import { enforceRoutePermissions } from '../middleware/routePermission.js';
@@ -91,6 +92,14 @@ router.use('/assets', (req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 }, express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets')));
+
+// Stored files (supplier invoices, kata slips, screenshots, weighbridge
+// slips), authorised by the signed expiring token in the URL rather than by a
+// session. Mounted here, ahead of the global requireAuth, because the WhatsApp
+// media fetcher and <img src> cannot send an Authorization header - the same
+// reason the CCTV endpoints below sit here. This replaces handing out
+// never-expiring Supabase public URLs (PHASE-6B M2).
+router.use('/files', fileRoutes);
 
 // Weighbridge CCTV direct streaming & snapshots for <img> tags.
 // index.ts registers these same paths at app level (ahead of the rate limiter)

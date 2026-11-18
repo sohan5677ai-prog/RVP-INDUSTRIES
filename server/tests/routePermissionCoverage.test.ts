@@ -59,6 +59,12 @@ const KNOWN_PUBLIC = new Set([
   'POST /api/weighbridge/cctv/broadcast',
   'GET /api/weighbridge/tickets/:id/slip.pdf',
   'GET /api/weighbridge/tickets/:id/slip.jpg',
+  // Stored supplier invoices, kata slips and screenshots. Public in the sense
+  // that no session is needed, because the WhatsApp media fetcher and <img src>
+  // cannot send a header - the signed, EXPIRING token in the URL is the
+  // authorization, and a missing or stale one is a 403. It replaces handing out
+  // never-expiring Supabase public URLs. See controllers/file.controller.ts.
+  'GET /api/files/:name',
 ]);
 
 const table = routeTable();

@@ -48,6 +48,11 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // Before the generic rule: first match wins, so the specific reveal path
   // has to be listed above /parties/*. Either grant is accepted in the
   // handler; the route table names the narrower one.
+  // Stored files. Mounted ahead of the global requireAuth, so this row is
+  // documentation and audit-script coverage rather than the thing that lets it
+  // through: the signed token in the URL is the authorization. See
+  // controllers/file.controller.ts.
+  { methods: READ, path: '/files/*', permission: null, note: 'signed expiring token in the URL' },
   { methods: READ, path: '/parties/*/bank', permission: 'master.party.bank.view' },
   { methods: READ, path: '/parties/*', permission: 'master.party.view' },
   { methods: READ, path: '/parties', permission: 'master.party.view' },

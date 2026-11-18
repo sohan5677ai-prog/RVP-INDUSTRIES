@@ -17,6 +17,7 @@ import {
   sendSessionTextMessage,
 } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText, parseBuyerKataImage } from '../lib/gemini.js';
+import { parseLorryCode } from '../lib/lorryCode.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import {
   normalizeLorryNumber,
@@ -483,6 +484,19 @@ async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean>
   if (/^(?:APPROVE|REJECT|DELIVER|CONFIRM|STATUS|CHECK|HELP|KATA)\b/i.test(text.trim())) return false;
   if (/\b(?:override\s*weight|confirm\s*delivery|kata\s*slip|kata\s*received)\b/i.test(text)) return false;
 
+  // The requirement code, read off the first lines before Gemini is asked for
+  // anything. It is a fixed shape on a line of its own, so a regex is both
+  // cheaper and more trustworthy here than a model - and what it finds decides
+  // whether this booking is allowed to message a driver, so "more trustworthy"
+  // is the whole point.
+  const requirementCode = parseLorryCode(text);
+  const requirement = requirementCode
+    ? await prisma.purchaseOrder.findUnique({
+        where: { requirementCode },
+        select: { id: true, tonnageKg: true, party: { select: { name: true } } },
+      })
+    : null;
+
   const parsed = await parseTransportConfirmationText(text);
   if (!parsed?.isTransportConfirmation) return false;
   if (!parsed.lorryNumber && !parsed.driverPhone) return false; // nothing actionable
@@ -502,10 +516,75 @@ async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean>
       driverPhone: parsed.driverPhone ?? null,
       freightAmount: parsed.freightAmount ?? null,
       status: 'WAITING',
+      // A code that matched a live requirement makes this a purchase lorry
+      // coming to us. An unmatched code is still recorded - the office can fix
+      // a typo on the register and send the brief by hand - but the row stays
+      // OUTBOUND, and nothing is sent.
+      requirementCode,
+      direction: requirement ? 'INBOUND' : 'OUTBOUND',
+      purchaseOrderId: requirement?.id ?? null,
     },
   });
   logger.info(`[whatsapp] lorry booking ${booking.id} (${booking.lorryNumber ?? 'no lorry no'}) filed from ${from} (log ${logRow.id})`);
+
+  if (requirement) {
+    // Fire-and-forget: a WhatsApp hiccup must not lose the register row, which
+    // is the part that matters.
+    void sendInboundDriverBrief(booking.id).catch((err) =>
+      logger.warn(`[whatsapp] inbound driver brief failed for booking ${booking.id}: ${err?.message ?? err}`),
+    );
+  }
   return true;
+}
+
+/**
+ * Send the arriving driver his brief - factory pin, load, and the two numbers
+ * he needs at the gate - and stamp the booking so it only ever goes once.
+ *
+ * Shared by the automatic path above and the manual button on the register, so
+ * the gate is in one place: a booking that is not INBOUND against a matched
+ * purchase order is refused, however it got here.
+ */
+export async function sendInboundDriverBrief(bookingId: string, force = false) {
+  const booking = await prisma.transportConfirmation.findUnique({ where: { id: bookingId } });
+  if (!booking) throw new HttpError(404, 'Lorry confirmation not found');
+  if (booking.direction !== 'INBOUND' || !booking.purchaseOrderId) {
+    throw new HttpError(
+      400,
+      'This booking is not linked to a purchase requirement. Add the requirement code the transporter was given, then send.',
+    );
+  }
+  if (!booking.driverPhone) throw new HttpError(400, 'No driver phone on this booking');
+  if (booking.driverBriefSentAt && !force) {
+    return { ok: true, skipped: true, error: 'Already sent', sentAt: booking.driverBriefSentAt };
+  }
+
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id: booking.purchaseOrderId },
+    select: { tonnageKg: true },
+  });
+  const kg = booking.tonnageKg ?? po?.tonnageKg ?? null;
+  const load = kg ? `Black seed - ${(kg / 1000).toFixed(2)} MT` : 'Black seed';
+
+  const result = await whatsappService.notifyInboundDriverBrief({
+    bookingId: booking.id,
+    driverPhone: booking.driverPhone,
+    lorryNumber: booking.lorryNumber,
+    load,
+    fromPlace: booking.fromPlace,
+    language: booking.driverLanguage,
+  });
+
+  // Only a real send is stamped. A skip for a missing template or a disabled
+  // integration has to stay re-sendable, or turning WhatsApp on later would
+  // leave every driver booked in the meantime silently un-briefed.
+  if (result?.ok) {
+    await prisma.transportConfirmation.update({
+      where: { id: booking.id },
+      data: { driverBriefSentAt: new Date() },
+    });
+  }
+  return result;
 }
 
 /**
@@ -1959,9 +2038,21 @@ export async function listTransportConfirmations(req: Request, res: Response) {
     : [];
   const byId = new Map(dispatches.map((d) => [d.id, d]));
 
+  // The requirement an inbound booking came in against, so the register can
+  // name the supplier rather than showing a bare code.
+  const poIds = rows.map((r) => r.purchaseOrderId).filter((id): id is string => !!id);
+  const pos = poIds.length
+    ? await prisma.purchaseOrder.findMany({
+        where: { id: { in: poIds } },
+        select: { id: true, poNumber: true, tonnageKg: true, party: { select: { name: true } } },
+      })
+    : [];
+  const poById = new Map(pos.map((p) => [p.id, p]));
+
   res.json(
     rows.map((r) => {
       const d = r.saleDispatchId ? byId.get(r.saleDispatchId) : null;
+      const po = r.purchaseOrderId ? poById.get(r.purchaseOrderId) : null;
       return {
         ...r,
         dispatch: d
@@ -1972,6 +2063,9 @@ export async function listTransportConfirmations(req: Request, res: Response) {
               buyer: d.saleOrder?.buyer?.name ?? null,
               destination: d.saleOrder?.destination ?? null,
             }
+          : null,
+        requirement: po
+          ? { id: po.id, poNumber: po.poNumber, supplier: po.party?.name ?? null, tonnageKg: po.tonnageKg }
           : null,
       };
     }),
@@ -2230,8 +2324,45 @@ export async function updateTransportConfirmation(req: Request, res: Response) {
     data[key] = key === 'tonnageKg' ? Math.round(n) : n;
   }
 
+  // Setting (or correcting) the requirement code is what links a booking to a
+  // purchase order, and therefore what unlocks the driver brief. Clearing it
+  // unlinks and sends the row back to OUTBOUND - the register must never be
+  // left pointing at a requirement that was typed in error.
+  if (body.requirementCode !== undefined) {
+    const raw = typeof body.requirementCode === 'string' ? body.requirementCode : '';
+    const code = parseLorryCode(raw) ?? (raw.trim() ? raw.trim().toUpperCase() : null);
+    if (!code) {
+      data.requirementCode = null;
+      data.purchaseOrderId = null;
+      data.direction = 'OUTBOUND';
+    } else {
+      const po = await prisma.purchaseOrder.findUnique({ where: { requirementCode: code }, select: { id: true } });
+      if (!po) throw new HttpError(404, `No purchase requirement is open under code ${code}`);
+      data.requirementCode = code;
+      data.purchaseOrderId = po.id;
+      data.direction = 'INBOUND';
+    }
+  }
+  if (body.driverLanguage !== undefined) {
+    const raw = String(body.driverLanguage ?? '').toUpperCase();
+    data.driverLanguage = ['EN', 'TE', 'TA', 'KN', 'HI'].includes(raw) ? raw : null;
+  }
+
   const updated = await prisma.transportConfirmation.update({ where: { id: row.id }, data });
   res.json(updated);
+}
+
+/**
+ * The manual "Send driver brief" button on the register.
+ *
+ * The automatic send only fires for a message that quoted its requirement code,
+ * which is most of them but never all - so the office needs a way to add the
+ * code and send by hand. `force` re-sends one that already went, for the case
+ * where the driver says he never got it.
+ */
+export async function sendInboundDriverBriefHandler(req: Request, res: Response) {
+  const force = req.body?.force === true || req.query.force === 'true';
+  res.json(await sendInboundDriverBrief(req.params.id, force));
 }
 
 /** Hide a mis-parsed or irrelevant message from the register. */

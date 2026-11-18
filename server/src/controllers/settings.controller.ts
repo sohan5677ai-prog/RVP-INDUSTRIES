@@ -269,6 +269,10 @@ const companyProfileSchema = z.object({
   nextInvoiceSeq: z.coerce.number().int().min(1).max(999999).optional().nullable(),
   nextUrsInvoiceSeq: z.coerce.number().int().min(1).max(999999).optional().nullable(),
   companyVehicles: z.string().optional().nullable(),
+  // Who an arriving driver rings at the gate. Separate from `contact` above,
+  // which is the invoice footer's accounts line.
+  driverContactName: z.string().optional().nullable(),
+  driverContactPhone: z.string().optional().nullable(),
   ownerWhatsappNumber: z.string().optional().nullable(),
   alertRecipients: z.string().optional().nullable(),
   whatsappTestMode: z.boolean().optional(),

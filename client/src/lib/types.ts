@@ -736,6 +736,21 @@ export interface LorryConfirmation {
     buyer: string | null;
     destination: string | null;
   } | null;
+  // --- Inbound (purchase) lorries -------------------------------------------
+  direction?: 'INBOUND' | 'OUTBOUND';
+  /** DDMON-NN, quoted back by the transporter on the first line. */
+  requirementCode?: string | null;
+  purchaseOrderId?: string | null;
+  /** When the driver was sent the factory pin and gate numbers. */
+  driverBriefSentAt?: string | null;
+  driverLanguage?: 'EN' | 'TE' | 'TA' | 'KN' | 'HI' | null;
+  /** The purchase requirement this booking came in against. */
+  requirement?: {
+    id: string;
+    poNumber: string | null;
+    supplier: string | null;
+    tonnageKg: number;
+  } | null;
 }
 
 export interface CompanyProfile {
@@ -768,6 +783,9 @@ export interface CompanyProfile {
   maxExistingUrsSeq?: number;
   currentFy?: string;
   companyVehicles?: string | null;
+  /** Who an arriving driver rings at the gate - sent in the inbound driver brief. */
+  driverContactName?: string | null;
+  driverContactPhone?: string | null;
   ownerWhatsappNumber?: string | null;
   // JSON string: [{ name, phone }] - up to 3 internal-alert recipients.
   alertRecipients?: string | null;

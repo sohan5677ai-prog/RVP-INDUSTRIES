@@ -236,6 +236,14 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
               {field('Owner WhatsApp number (internal alerts + dispatch copies)', 'ownerWhatsappNumber', '9876543210')}
               {field('Company Email for BCC (Invoices, EWBs & Notes)', 'companyBccEmail', 'e.g. accounts@rvpindustries.com')}
             </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {field('Gate contact for arriving drivers (name)', 'driverContactName', 'e.g. Suresh')}
+              {field('Gate contact for arriving drivers (mobile)', 'driverContactPhone', '9876543210')}
+            </div>
+            <p className="-mt-2 text-[10px] text-muted-foreground">
+              Sent to the driver of every arriving purchase lorry, along with the factory pin and the hamali team's
+              number. Keep it the yard, not accounts &mdash; "Contact" above is the number printed on invoices.
+            </p>
             <div className="space-y-1.5">
               <Label className="text-xs">Address (printed as-is, multi-line)</Label>
               <textarea

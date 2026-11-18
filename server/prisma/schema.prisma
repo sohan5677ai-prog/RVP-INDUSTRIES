@@ -625,6 +625,12 @@ model PurchaseOrder {
   poSeriesKey      String?
   poSerial         Int?
   poFy             String?
+  // The short code handed to the transporter when this lorry is asked for:
+  // DDMON-NN, the same shape the sale-side DispatchSlot already uses, and for
+  // the same reason - it is what the transporter quotes back on the first line
+  // of his WhatsApp reply, so a booking lands on THIS purchase order instead of
+  // being guessed at from the lorry number. Null until a requirement is issued.
+  requirementCode  String?          @unique
 
   // Party ledger + planner group/filter POs by supplier; index the FK so those
   // GROUP BY / WHERE partyId scans stay index-driven as the table grows.
@@ -1497,6 +1503,11 @@ model CompanyProfile {
   invoiceLayout                  String?
   // Comma or newline separated list of company vehicles exempt from kata & hamali
   companyVehicles                String?
+  // Who an arriving driver should call at the gate, and on what number. NOT
+  // `contact` above - that is the number printed in the invoice footer, which
+  // is the accounts line, not the yard. Sent in the inbound driver brief.
+  driverContactName              String?
+  driverContactPhone             String?
   // ₹ held back from each sale lorry freight until delivery, then paid to Surya
   // Roadlines once the kata slip is received (configurable; default ₹3000).
   freightRetentionPerTrip        Decimal @default(3000) @db.Decimal(12, 2)
@@ -2379,6 +2390,17 @@ model WhatsAppLog {
 // links the two. DISMISSED -> mis-parsed or irrelevant, hidden from the register.
 // DRAFT/CONFIRMED are the pre-register states, kept only so old rows still read
 // (DRAFT is shown as waiting, CONFIRMED as used).
+// Which way a booked lorry is travelling.
+//
+// The register was built for sale dispatches only, so every row that predates
+// the inbound work is OUTBOUND - hence the default. INBOUND rows are purchase
+// lorries coming to the factory: they are matched to a PurchaseOrder by the
+// requirement code the transporter quotes back, not to a SaleDispatch.
+enum TransportDirection {
+  INBOUND
+  OUTBOUND
+}
+
 enum TransportConfirmationStatus {
   DRAFT
   CONFIRMED
@@ -2413,9 +2435,30 @@ model TransportConfirmation {
   saleDispatchId String? // dispatch this booking went out on
   createdAt      DateTime                    @default(now())
 
+  // --- Inbound (purchase) lorries -------------------------------------------
+  // A lorry coming TO the factory against a purchase order. Everything below is
+  // null on the outbound rows the register was originally built for.
+  direction         TransportDirection @default(OUTBOUND)
+  // The DDMON-NN code handed to the transporter with the requirement, quoted
+  // back on the first line of his message. This is what turns the match from a
+  // guess by lorry number into an exact one - and it is the gate on the driver
+  // brief below, because a mis-parsed message must never be able to text a
+  // stranger the factory pin and the hamali team's number.
+  requirementCode   String?
+  purchaseOrderId   String?
+  // Set when the driver has been sent his brief (factory pin, load, contacts).
+  // Stops a re-parse of the same WhatsApp message from messaging him twice.
+  driverBriefSentAt DateTime?
+  // Language the brief goes out in. A driver is not a Party, so there is no
+  // waLanguage to read - inbound lanes are mostly MH/GJ, so this defaults to
+  // Hindi at the point of send rather than English.
+  driverLanguage    WaLanguage?
+
   @@index([status])
   @@index([lorryNumber])
   @@index([saleDispatchId])
+  @@index([requirementCode])
+  @@index([purchaseOrderId])
 }
 
 // Driver-submitted buyer weighbridge slip (kata) photo sent over WhatsApp.

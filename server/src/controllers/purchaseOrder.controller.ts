@@ -9,6 +9,7 @@ import {
 import { computeFY, derivePartyPrefix, formatPoNumber, normalizeSeriesKey, releasePoSerial, reservePoSerials } from '../lib/poNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { clearCache } from '../lib/cache.js';
+import { nextRequirementCode } from '../lib/lorryCode.js';
 
 export async function listPurchaseOrders(req: Request, res: Response) {
   const { status, skip, take, all } = listPurchaseOrdersSchema.parse(req.query);
@@ -306,4 +307,62 @@ export async function unvoidPurchaseOrder(req: Request, res: Response) {
   clearCache('unified_stock_engine');
 
   res.json(updated);
+}
+
+/**
+ * Issue (or re-read) the requirement code for a purchase order, and build the
+ * message that goes to the transporter.
+ *
+ * Idempotent: a PO that already has a code hands back the same one. The code is
+ * what the transporter quotes on the first line of his reply, so minting a
+ * second one for the same lorry would leave two codes in the conversation and
+ * put his booking on neither.
+ *
+ * The message is returned as text rather than sent. Transporters are messaged
+ * from whichever handset is doing the asking, over an ordinary chat - there is
+ * no approved template for "I need a lorry", and a requirement is usually
+ * haggled over before it is agreed.
+ */
+export async function issueRequirementCode(req: Request, res: Response) {
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      poNumber: true,
+      poDate: true,
+      tonnageKg: true,
+      requirementCode: true,
+      party: { select: { name: true, city: true } },
+    },
+  });
+  if (!po) throw new HttpError(404, 'Purchase order not found');
+
+  const code = po.requirementCode ?? (await nextRequirementCode(new Date()));
+  if (!po.requirementCode) {
+    await prisma.purchaseOrder.update({ where: { id: po.id }, data: { requirementCode: code } });
+  }
+
+  const company = await prisma.companyProfile.findFirst({ select: { name: true, dispatchFromPlace: true } });
+  const to = `${company?.name || 'RVP Industries'}, ${company?.dispatchFromPlace?.trim() || 'Punganur'}`;
+  const from = po.party?.city?.trim() || po.party?.name || '-';
+  const mt = (po.tonnageKg / 1000).toFixed(2).replace(/\.00$/, '');
+
+  // The reply format, spelled out in the same order it should come back in. The
+  // transporter is being asked to copy a shape, not fill a form - so the code
+  // sits on its own first line, which is the one line the parser depends on.
+  const message = [
+    `${code}`,
+    `Lorry required: ${from} to ${to}`,
+    `Load: ${mt} MT black seed`,
+    '',
+    'Please reply with:',
+    code,
+    '<lorry number>',
+    '<driver mobile>',
+    `${mt}MT`,
+    '<body type>',
+    '<loading place>',
+  ].join('\n');
+
+  res.json({ code, message, poNumber: po.poNumber });
 }

@@ -10,6 +10,7 @@ import {
   deletePurchaseOrder,
   voidPurchaseOrder,
   unvoidPurchaseOrder,
+  issueRequirementCode,
 } from '../controllers/purchaseOrder.controller.js';
 import {
   listStockIns,
@@ -51,6 +52,9 @@ router.delete('/purchase-orders/:id', asyncHandler(deletePurchaseOrder));
 router.post('/purchase-orders/:id/void', asyncHandler(voidPurchaseOrder));
 router.post('/purchase-orders/:id/unvoid', asyncHandler(unvoidPurchaseOrder));
 router.post('/purchase-orders/:id/restore', asyncHandler(unvoidPurchaseOrder));
+// The DDMON-NN code handed to the transporter when this lorry is asked for, plus
+// the message to send him. Idempotent - re-reading returns the same code.
+router.post('/purchase-orders/:id/requirement-code', asyncHandler(issueRequirementCode));
 
 // Stock-in (multipart invoice upload)
 router.post('/stock-in/extract', memoryUpload.single('invoice'), asyncHandler(extractStockInInvoice));

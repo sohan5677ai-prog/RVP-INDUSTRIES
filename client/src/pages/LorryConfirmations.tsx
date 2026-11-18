@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2, Truck, Hourglass, MessageCircle, Pencil, X, Undo2, CheckCircle2 } from 'lucide-react';
+import { Loader2, Truck, Hourglass, MessageCircle, Pencil, X, Undo2, CheckCircle2, MapPin, ArrowDownToLine } from 'lucide-react';
 
 type RegisterFilter = 'WAITING' | 'USED' | 'DISMISSED' | 'ALL';
 
@@ -113,6 +113,25 @@ export default function LorryConfirmations() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
+  // The driver's arrival brief - factory pin, load, gate and hamali numbers.
+  // It goes out on its own when the transporter quotes his requirement code;
+  // this is the by-hand path for the messages that didn't.
+  const briefMutation = useMutation({
+    // Typed on the call: api() is generic and infers `unknown` without an
+    // argument, which does not match the shape onSuccess reads below.
+    mutationFn: (id: string) =>
+      api<{ skipped?: boolean; error?: string }>(
+        `/whatsapp/transport-confirmations/${id}/driver-brief`,
+        { method: 'POST' }
+      ),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['lorry-confirmations'] });
+      if (r?.skipped) toast.info(r.error || 'Nothing sent');
+      else toast.success('Driver brief sent');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
   const waitingCount = waiting?.length ?? 0;
   const waitingTonnes = (waiting ?? []).reduce((s, r) => s + (r.tonnageKg ?? 0), 0) / 1000;
   const waitingFreight = (waiting ?? []).reduce((s, r) => s + (freightOf(r) ?? 0), 0);
@@ -127,6 +146,8 @@ export default function LorryConfirmations() {
     { header: 'Freight', value: (r) => { const f = freightOf(r); return f != null ? rupees(f) : ''; }, excel: (r) => freightOf(r) ?? '', numFmt: '#,##0.00', align: 'right' },
     { header: 'Status', value: (r) => (isWaiting(r) ? 'Waiting' : isUsed(r) ? 'Used' : 'Dismissed') },
     { header: 'Dispatched To', value: (r) => r.dispatch?.buyer ?? '' },
+    { header: 'Requirement', value: (r) => r.requirementCode ?? '' },
+    { header: 'Supplier', value: (r) => r.requirement?.supplier ?? '' },
   ];
 
   return (
@@ -135,6 +156,8 @@ export default function LorryConfirmations() {
         <p className="text-sm text-muted-foreground">
           Lorries booked over WhatsApp. Each message is filed here as <span className="font-medium">Waiting</span>;
           typing the lorry number on a dispatch fills in its driver and marks the booking used.
+          A message that quotes its <span className="font-medium">requirement code</span> is matched to that purchase
+          order instead, and its driver is sent the factory pin automatically.
         </p>
         <ExportButtons
           filename={`Lorry_Confirmations_${filter}`}
@@ -236,7 +259,20 @@ export default function LorryConfirmations() {
                     return (
                       <TableRow key={r.id}>
                         <TableCell className="whitespace-nowrap">{shortDate(bookingDate(r))}</TableCell>
-                        <TableCell className="font-mono text-sm font-semibold">{r.lorryNumber ?? '-'}</TableCell>
+                        <TableCell className="font-mono text-sm font-semibold">
+                          <div className="flex items-center gap-1.5">
+                            {r.direction === 'INBOUND' && (
+                              <ArrowDownToLine className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-label="Inbound" />
+                            )}
+                            {r.lorryNumber ?? '-'}
+                          </div>
+                          {r.requirementCode && (
+                            <div className="mt-0.5 text-[10px] font-sans font-normal text-muted-foreground">
+                              {r.requirementCode}
+                              {r.requirement?.supplier ? ` · ${r.requirement.supplier}` : ''}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-xs">
                           {r.fromPlace || r.toPlace ? `${r.fromPlace ?? '?'} → ${r.toPlace ?? '?'}` : '-'}
                         </TableCell>
@@ -268,6 +304,23 @@ export default function LorryConfirmations() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {r.direction === 'INBOUND' && r.driverPhone && (
+                              <Button
+                                size="sm"
+                                variant={r.driverBriefSentAt ? 'ghost' : 'outline'}
+                                className="h-7 gap-1.5 text-xs"
+                                title={
+                                  r.driverBriefSentAt
+                                    ? `Brief sent ${shortDate(r.driverBriefSentAt)} - click to send again`
+                                    : 'Send the driver the factory pin, load and gate numbers'
+                                }
+                                disabled={briefMutation.isPending}
+                                onClick={() => briefMutation.mutate(r.id)}
+                              >
+                                <MapPin className="h-3.5 w-3.5" />
+                                {r.driverBriefSentAt ? 'Re-send' : 'Brief driver'}
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="outline"
@@ -329,6 +382,7 @@ function EditBookingDialog({ booking, onClose }: { booking: LorryConfirmation | 
   const qc = useQueryClient();
   const [form, setForm] = useState({
     lorryNumber: '', driverName: '', driverPhone: '', tonnes: '', freightAmount: '', messageDate: '',
+    requirementCode: '',
   });
   // Re-seed whenever a different booking is opened.
   const [seededFor, setSeededFor] = useState<string | null>(null);
@@ -341,6 +395,7 @@ function EditBookingDialog({ booking, onClose }: { booking: LorryConfirmation | 
       tonnes: booking.tonnageKg != null ? String(booking.tonnageKg / 1000) : '',
       freightAmount: booking.freightAmount != null ? String(booking.freightAmount) : '',
       messageDate: (booking.messageDate ?? booking.createdAt).slice(0, 10),
+      requirementCode: booking.requirementCode ?? '',
     });
   }
 
@@ -355,6 +410,7 @@ function EditBookingDialog({ booking, onClose }: { booking: LorryConfirmation | 
           tonnageKg: form.tonnes.trim() === '' ? null : Math.round(Number(form.tonnes) * 1000),
           freightAmount: form.freightAmount.trim() === '' ? null : Number(form.freightAmount),
           messageDate: form.messageDate || null,
+          requirementCode: form.requirementCode,
         },
       }),
     onSuccess: () => {
@@ -413,6 +469,18 @@ function EditBookingDialog({ booking, onClose }: { booking: LorryConfirmation | 
               <Input type="number" step="1" value={form.freightAmount} onChange={(e) => setForm((s) => ({ ...s, freightAmount: e.target.value }))} placeholder="e.g. 75000" />
               {perTonne != null && <p className="text-[11px] text-muted-foreground">= {rupees(perTonne)}/tonne</p>}
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Requirement Code</Label>
+            <Input
+              value={form.requirementCode}
+              onChange={(e) => setForm((s) => ({ ...s, requirementCode: e.target.value }))}
+              placeholder="e.g. 16NOV-02"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              The code given to the transporter when this lorry was asked for. Filling it links the booking to that
+              purchase order and lets the driver be sent the factory pin. Leave it blank for a sale lorry.
+            </p>
           </div>
           <p className="text-[11px] text-muted-foreground">
             The freight here is the transporter's quote, kept for the record - it does not change what a dispatch was costed at.

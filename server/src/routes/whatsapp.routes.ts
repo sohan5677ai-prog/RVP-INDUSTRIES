@@ -20,6 +20,7 @@ import {
   updateTransportConfirmation,
   dismissTransportConfirmation,
   restoreTransportConfirmation,
+  sendInboundDriverBriefHandler,
   sendDispatchWhatsApp,
   resendDriverWhatsApp,
   getDuesOnDate,
@@ -78,6 +79,10 @@ router.get('/whatsapp/lorry/contact-info', asyncHandler(getLorryContactInfo));
 router.patch('/whatsapp/transport-confirmations/:id', asyncHandler(updateTransportConfirmation));
 router.post('/whatsapp/transport-confirmations/:id/dismiss', asyncHandler(dismissTransportConfirmation));
 router.post('/whatsapp/transport-confirmations/:id/restore', asyncHandler(restoreTransportConfirmation));
+// Factory pin + load + gate/hamali numbers → the driver of an arriving purchase
+// lorry. Fires automatically when the transporter's message quotes its
+// requirement code; this is the by-hand path for the ones that don't.
+router.post('/whatsapp/transport-confirmations/:id/driver-brief', asyncHandler(sendInboundDriverBriefHandler));
 
 // Invoice + EWB + driver bundle to the broker/buyer, and buyer details to the driver.
 router.post('/whatsapp/dispatches/:id/send', asyncHandler(sendDispatchWhatsApp));

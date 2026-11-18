@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
 import { coordLabel, coordUrl, mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
+import { FACTORY } from '../lib/gpsPlaces.js';
 
 /**
  * WhatsApp notifications via Fast2SMS (Meta Cloud API BSP), sharing the KNM
@@ -64,6 +65,14 @@ export type WaTemplateKey =
   | 'DISPATCH_PARTY_BROKER' // rvp_dispatch_party_broker (document header): buyer, invoice, lorry, qty, driver, phone, broker - buyer copy when a broker exists
   | 'DISPATCH_BROKER' // rvp_dispatch_broker (document header): broker, buyer, invoice, lorry, qty, driver, phone - broker copy
   | 'DISPATCH_DRIVER' // driver_industries (LOCATION header - name-addressed POST): driver, lorry, party, destination, load, party phone, maps link
+  // inbound_driver_brief (LOCATION header - name-addressed POST, same mechanics
+  // as DISPATCH_DRIVER): lorry, load, loading place, unloading point, factory
+  // contact, hamali contact, maps link. The mirror of DISPATCH_DRIVER pointed
+  // the other way - sent to the driver of a PURCHASE lorry as soon as the
+  // transporter books it, so he has the factory pin and the two numbers he will
+  // need at the gate before he starts. No driver-name slot: the transporter's
+  // message carries a phone, not a name.
+  | 'INBOUND_DRIVER_BRIEF'
   | 'REMINDER' // rvp_reminder: party, pending lorries, per-PO breakdown
   | 'PAYMENT_REMINDER' // payment_reminder: recipient, outstanding amount, comma-separated invoice list
   // rvp_party_ledger (document header - statement PDF): name, period, total debits,
@@ -292,6 +301,7 @@ export interface OwnerWeeklyStats {
 const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   OWNER_DISPATCH_REMINDER: 'owner_dispatch_reminder',
   DISPATCH_DRIVER: 'driver_industries',
+  INBOUND_DRIVER_BRIEF: 'inbound_driver_brief',
   WISHES: 'rvp_rema',
   BUYER_KATA_ALERT: 'rvp_buyer_kata_alert',
   BUYER_KATA_ALERT_TEXT: 'rvp_buyer_kata_alert_text',
@@ -302,7 +312,15 @@ const DEFAULT_TEMPLATE_NAMES: Partial<Record<WaTemplateKey, string>> = {
   INTERNAL_KATA_ALERT: 'rvp_kata_alert',
 };
 
-function templateName(key: WaTemplateKey): string | undefined {
+function templateName(key: WaTemplateKey, language?: WaLanguage | null): string | undefined {
+  // Meta approves one template per language, each under its own NAME. The
+  // language copy is tried first and English is the fallback, so a template
+  // whose Hindi copy is still in review keeps sending in English rather than
+  // skipping - the same rule the numeric message_id lookup follows.
+  if (language && language !== 'EN') {
+    const localised = process.env[`FAST2SMS_TMPL_NAME_${key}_${language}`]?.trim();
+    if (localised) return localised;
+  }
   return process.env[`FAST2SMS_TMPL_NAME_${key}`]?.trim() || DEFAULT_TEMPLATE_NAMES[key] || undefined;
 }
 
@@ -1040,6 +1058,8 @@ interface LocationSendArgs {
    */
   location: { lat: number; lng: number; name: string; address: string };
   variables: Array<string | number | null | undefined>;
+  /** Language copy to send, when one is approved. Falls back to English. */
+  language?: WaLanguage | null;
   relatedType?: string;
   relatedId?: string;
 }
@@ -1085,7 +1105,9 @@ export async function sendLocationWhatsAppTemplate(
     await log(logArgs, 'SKIPPED', { error: 'FAST2SMS_PHONE_NUMBER_ID not configured - required for location-header templates' });
     return { ok: false, skipped: true, error: 'FAST2SMS_PHONE_NUMBER_ID is not configured (required for location templates)' };
   }
-  const name = templateName(args.templateKey);
+  const localisedName = !!args.language && args.language !== 'EN'
+    && !!process.env[`FAST2SMS_TMPL_NAME_${args.templateKey}_${args.language}`]?.trim();
+  const name = templateName(args.templateKey, args.language);
   if (!name) {
     await log(logArgs, 'SKIPPED', { error: `FAST2SMS_TMPL_NAME_${args.templateKey} is not configured` });
     return { ok: false, skipped: true, error: `Template name for ${args.templateKey} is not configured` };
@@ -1108,7 +1130,11 @@ export async function sendLocationWhatsAppTemplate(
     type: 'template',
     template: {
       name,
-      language: { code: 'en' },
+      // Meta matches the template by name AND language code, so a Hindi copy
+      // sent with 'en' is "template not found" rather than an English message.
+      // Only claim a non-English code when a name for that language was
+      // actually resolved above - otherwise the fallback is the English copy.
+      language: { code: localisedName ? args.language!.toLowerCase() : 'en' },
       components: [
         {
           type: 'header',
@@ -1662,6 +1688,92 @@ export const whatsappService = {
       variables,
       relatedType: 'DISPATCH',
       relatedId: dispatch.id,
+    });
+  },
+
+  /**
+   * Booking → the driver of an INBOUND (purchase) lorry.
+   *
+   * The mirror of notifyDispatchDriver, pointed the other way. An outbound
+   * driver is sent the buyer's pin; an inbound driver is sent ours, as soon as
+   * the transporter's booking message is filed - so he has the gate location and
+   * the two numbers he will actually need (the yard contact, and the hamali team
+   * who will unload him) before he leaves the loading point rather than when he
+   * is circling Punganur asking for directions.
+   *
+   * Seven slots: lorry, load, loading place, unloading point, factory contact,
+   * hamali contact, maps link. There is no driver-name slot on purpose - the
+   * transporter sends a phone, not a name, so a greeting built on one would be
+   * "Namaste - " on most messages.
+   *
+   * Same LOCATION-header mechanics as DISPATCH_DRIVER: name-addressed POST,
+   * FAST2SMS_PHONE_NUMBER_ID required, a pin mandatory on every send. The pin
+   * here never fails to resolve - it is the FACTORY constant, not a party's
+   * pasted link - so there is no skip path for a missing location.
+   *
+   * CALLERS MUST GATE THIS ON A MATCHED REQUIREMENT CODE. The message carries
+   * the factory pin and the hamali team's mobile; the inbound parser that feeds
+   * it is the one with a history of reading digits out of media URLs and filing
+   * bookings that never happened. A code that matched a live purchase order is
+   * what makes the recipient a driver we asked for rather than a stranger.
+   *
+   * Never throws, like every notify helper here.
+   */
+  async notifyInboundDriverBrief(args: {
+    bookingId: string;
+    driverPhone: string | null;
+    lorryNumber: string | null;
+    /** Product and tonnage as the booking has them. */
+    load: string;
+    /** Where he loads, in the transporter's own words ("Sahada-MH"). */
+    fromPlace: string | null;
+    language?: WaLanguage | null;
+  }) {
+    if (!args.driverPhone) return { ok: false, skipped: true, error: 'No driver phone on the booking' };
+
+    const [company, hamali] = await Promise.all([
+      prisma.companyProfile.findFirst({
+        select: { name: true, driverContactName: true, driverContactPhone: true, contact: true, dispatchFromPlace: true },
+      }),
+      prisma.party.findFirst({ where: { type: 'HAMALI_TEAM' }, select: { name: true, phone: true, phone2: true } }),
+    ]);
+
+    // The yard number, not the invoice footer's. `contact` is the accounts line
+    // and is only reached for when nothing better is configured - a driver with
+    // a wrong number still rings someone at RVP, which beats "-".
+    const factoryContact = company?.driverContactPhone?.trim()
+      ? `${company.driverContactName?.trim() || company.name || 'RVP'} ${company.driverContactPhone.trim()}`
+      : company?.contact?.trim() || '-';
+    const hamaliPhone = hamali?.phone?.trim() || hamali?.phone2?.trim() || null;
+    const hamaliContact = hamaliPhone ? `${hamali?.name || 'Hamali Team'} ${hamaliPhone}` : '-';
+
+    return sendLocationWhatsAppTemplate({
+      templateKey: 'INBOUND_DRIVER_BRIEF',
+      to: args.driverPhone,
+      // Coordinates in the caption rather than the street address, for the same
+      // reason as the buyer card: tapping it hands the map app these strings to
+      // look up, and a mill on a village road comes back as a list of guesses.
+      location: {
+        lat: FACTORY.latitude,
+        lng: FACTORY.longitude,
+        name: company?.name || FACTORY.name,
+        address: coordLabel({ lat: FACTORY.latitude, lng: FACTORY.longitude }),
+      },
+      variables: [
+        args.lorryNumber ?? '-',
+        args.load,
+        args.fromPlace?.trim() || '-',
+        `${company?.name || FACTORY.name}, ${company?.dispatchFromPlace?.trim() || 'Punganur'}`,
+        factoryContact,
+        hamaliContact,
+        coordUrl({ lat: FACTORY.latitude, lng: FACTORY.longitude }),
+      ],
+      // Inbound lanes are mostly MH/GJ, so Hindi is the sensible default rather
+      // than English. Falls back to the English copy until the Hindi one is
+      // approved - see templateName.
+      language: args.language ?? 'HI',
+      relatedType: 'INBOUND_BOOKING',
+      relatedId: args.bookingId,
     });
   },
 

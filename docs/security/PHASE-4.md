@@ -305,6 +305,51 @@ cannot touch a row written after the fix. Re-running it now aborts on the first 
 
 Result: `audit chain intact: 122 rows verified`, exit 0.
 
+## Stopping the trail filling with noise
+
+The cleanup exposed something larger than the bug: **61% of the trail was machine noise** — 75 of
+122 rows were the same six records rewritten on every server boot, by `system`, recording nothing
+anyone did. An audit log you have to wade through is one nobody reads when it matters, which is
+the whole asset.
+
+Two causes, both worth naming because they look harmless in review:
+
+**1. `upsert` with `update: {}` is not "create if missing".** It reads as if it leaves an existing
+row alone. It does not — Prisma issues an UPDATE anyway, and the extension records a change that
+did not happen. Six such calls ran on every boot: two accounts, two transports, two subscription
+plans (the last pair on every load of the subscription page too).
+
+`lib/ensureRow.ts` replaces them: read, create only if absent, and update only the fields that
+actually differ. `keep` carries the fields that must hold a value; omitting it means "seed once,
+then it belongs to whoever edits it in the app" — which is right for the transports and the plan
+configs, where boot must not stamp hardcoded details back over an operator's edit.
+
+The comparison needs care that `===` does not give: a `Decimal` is an object and two `Date`s for
+the same instant are different objects, so a naive compare would report a change every time and
+defeat the point entirely. The tests pin both.
+
+**2. A bulk write that matched nothing was still audited.** The boot backfill
+`saleDispatch.updateMany({ where: { transportId: null, … } })` matched no rows once it had run
+once, but the extension recorded it anyway — an audit row stating `transportId` had been set when
+nothing had been. That is not noise, it is a **false record**, which is worse. Two per restart,
+42 rows by the time it was found.
+
+`affectedCount` now drops a bulk operation that touched zero rows, and adds `affectedRows` to the
+ones that did — without it a bulk row shows what was written but not how far it reached, which is
+the first thing anyone asks. Zero and "unrecognised result shape" are deliberately distinct: the
+first drops the row, the second records it, because losing an audit row is worse than keeping an
+odd one.
+
+I had asserted in a code comment that an empty `updateMany` wrote no audit row. It did. The
+measurement is what caught it, not the review.
+
+**Measured, not assumed.** A full boot before: 8 audit rows. After: **0**.
+
+| | account | transport | subscriptionPlanConfig | saleDispatch |
+|---|---|---|---|---|
+| before the restart | 28 | 26 | 27 | 44 |
+| after a full boot | 28 | 26 | 27 | 44 |
+
 ## Deploying
 
 1. **The schema is already applied** — `AuditLog`, `PeriodLock`, the `cancelledAt` columns on
@@ -326,4 +371,4 @@ Result: `audit chain intact: 122 rows verified`, exit 0.
 | Purchases, sales, credit/debit notes, loans still hard-delete | the larger half of "financial documents"; the mechanism is built and tested, each one needs its read paths guarded the way payments' were |
 | 4.6 retention job — the setting exists, nothing prunes | needs the `REVOKE` decision first, since pruning breaks the chain |
 | The viewer has not been rendered against a signed-in session | it typechecks and builds, and the endpoints it calls are tested; the screen itself wants one look |
-| **61% of the trail is restart noise** | 75 of the 122 remaining rows are `account.update`, `transport.update` and `subscriptionPlanConfig.update` — the same six records rewritten on every server boot, recording no human action. Something at startup writes identical values back. At six rows a restart this will bury the human actions the trail exists to show, so either make those writes conditional or exclude boot-time writes from capture |
+| A bulk write of an unknown result shape is still recorded | `affectedCount` fails open, so a future Prisma version returning something other than `{ count }` would log a row with no `affectedRows`. Preferred to silently dropping audit rows |

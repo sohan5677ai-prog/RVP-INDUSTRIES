@@ -77,6 +77,29 @@ export function isSingleRowOperation(operation: string): boolean {
   return operation === 'update' || operation === 'delete' || operation === 'upsert';
 }
 
+/** The operations that return `{ count }` instead of the row(s) they touched. */
+export function isBulkOperation(operation: string): boolean {
+  return operation === 'updateMany' || operation === 'deleteMany' || operation === 'createMany';
+}
+
+/**
+ * How many rows a bulk operation actually touched, or null if it was not one.
+ *
+ * Used to drop the row entirely when the answer is zero. A boot-time
+ * `updateMany` whose `where` matched nothing was writing an audit row saying
+ * "transportId was set" when nothing had been set - not merely noise but a
+ * false record, which is worse. Two of those per server restart.
+ */
+export function affectedCount(operation: string, result: unknown): number | null {
+  if (!isBulkOperation(operation)) return null;
+  if (result && typeof result === 'object' && 'count' in result) {
+    const count = (result as { count: unknown }).count;
+    if (typeof count === 'number') return count;
+  }
+  // Shape we do not recognise: record it rather than silently dropping it.
+  return null;
+}
+
 /**
  * Pull the record id out of a Prisma `where`, when it is a plain id lookup.
  *
@@ -139,6 +162,11 @@ export function createAuditExtension(hooks: AuditHooks) {
           const result = await query(args);
 
           try {
+            // A bulk operation that matched nothing changed nothing, and an
+            // audit row for it would state something untrue.
+            const affected = affectedCount(operation, result);
+            if (affected === 0) return result;
+
             const newValues =
               operation === 'delete' || operation === 'deleteMany'
                 ? undefined
@@ -149,7 +177,13 @@ export function createAuditExtension(hooks: AuditHooks) {
               entity: model as string,
               entityId: id ?? extractResultId(result),
               oldValues,
-              newValues,
+              // How many rows a bulk write hit. Without it the row shows what
+              // was written but not how far it reached, which for a bulk
+              // operation is the first thing anyone asks.
+              newValues:
+                affected === null
+                  ? newValues
+                  : { ...(newValues as Record<string, unknown> | undefined), affectedRows: affected },
             });
           } catch (err) {
             hooks.onError(`audit record failed for ${model}.${operation}`, err);

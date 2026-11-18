@@ -203,23 +203,29 @@ app.listen(port, "0.0.0.0", () => {
   logger.info(`rvp-server listening on http://localhost:${port}`);
 
   // Bootstrap missing accounts. (40040 Internal Weight Profit was decommissioned.)
-  import("./lib/prisma.js").then(async ({ prisma }) => {
+  //
+  // Via ensureRow, not upsert: an upsert with an empty or unchanged `update`
+  // still issues an UPDATE, and this block runs on every boot - which is how
+  // 61% of the audit trail came to be these same six rows. See lib/ensureRow.ts.
+  Promise.all([import("./lib/prisma.js"), import("./lib/ensureRow.js")]).then(
+    async ([{ prisma }, { ensureRow }]) => {
     try {
-      await prisma.account.upsert({
+      await ensureRow(prisma.account as never, {
         where: { code: '50080' },
-        update: { name: 'Interest Expense', type: 'EXPENSE' },
+        keep: { name: 'Interest Expense', type: 'EXPENSE' },
         create: { code: '50080', name: 'Interest Expense', type: 'EXPENSE' },
       });
-      await prisma.account.upsert({
+      await ensureRow(prisma.account as never, {
         where: { code: '50090' },
-        update: { name: 'Transport Expense (Internal)', type: 'EXPENSE' },
+        keep: { name: 'Transport Expense (Internal)', type: 'EXPENSE' },
         create: { code: '50090', name: 'Transport Expense (Internal)', type: 'EXPENSE' },
       });
 
-      // Bootstrap standard Transports
-      const surya = await prisma.transport.upsert({
+      // Bootstrap standard Transports. No `keep`: these are seeded once and
+      // then belong to whoever edits them in the app, so boot must not stamp
+      // the hardcoded details back over an edit.
+      const { row: surya } = await ensureRow(prisma.transport as never, {
         where: { name: 'Surya Road Lines' },
-        update: {},
         create: {
           name: 'Surya Road Lines',
           code: 'SURYA',
@@ -234,9 +240,8 @@ app.listen(port, "0.0.0.0", () => {
         },
       });
 
-      const knm = await prisma.transport.upsert({
+      const { row: knm } = await ensureRow(prisma.transport as never, {
         where: { name: 'KNM Transport' },
-        update: {},
         create: {
           name: 'KNM Transport',
           code: 'KNM',
@@ -246,22 +251,26 @@ app.listen(port, "0.0.0.0", () => {
       });
 
       // Backfill existing SaleDispatch records
+      // These need no guard of their own: a bulk operation that matches
+      // nothing is dropped by the audit extension (see affectedCount), so a
+      // boot where there is nothing to backfill writes no row.
       if (surya) {
         await prisma.saleDispatch.updateMany({
           where: { transportId: null, transportProvider: 'SURYA' },
-          data: { transportId: surya.id },
+          data: { transportId: surya.id as string },
         });
       }
       if (knm) {
         await prisma.saleDispatch.updateMany({
           where: { transportId: null, transportProvider: 'KNM' },
-          data: { transportId: knm.id },
+          data: { transportId: knm.id as string },
         });
       }
     } catch(e) {
       logger.error(e);
     }
-  });
+  }
+  );
 
   // Optionally start the Slack bot (Socket Mode) in the same process. A failure
   // here must never take down the API server, so it's isolated in try/catch.

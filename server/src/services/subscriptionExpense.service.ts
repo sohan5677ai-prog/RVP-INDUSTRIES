@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { ensureRow } from '../lib/ensureRow.js';
 import { logger } from '../lib/logger.js';
 import { LedgerService } from './ledger.service.js';
 import { istCalendar, istMidnight, daysInMonth } from '../lib/istDate.js';
@@ -50,9 +51,12 @@ function istToday(now: Date = new Date()): Date {
 export async function getSubscriptionPlans() {
   for (const plan of SUBSCRIPTION_PLANS) {
     const d = PLAN_DEFAULTS[plan];
-    await prisma.subscriptionPlanConfig.upsert({
+    // ensureRow, not upsert: an upsert with `update: {}` still issues an
+    // UPDATE, and this runs on every boot *and* every load of the
+    // subscription page - two audit rows a time, recording nothing. No
+    // `keep`, because once seeded these belong to whoever edits them.
+    await ensureRow(prisma.subscriptionPlanConfig as never, {
       where: { id: plan },
-      update: {},
       create: {
         id: plan,
         enabled: true,

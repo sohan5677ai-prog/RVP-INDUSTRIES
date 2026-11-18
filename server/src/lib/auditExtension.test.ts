@@ -5,6 +5,8 @@ import {
   isAuditedModel,
   isAuditedOperation,
   isSingleRowOperation,
+  affectedCount,
+  isBulkOperation,
 } from './auditExtension.js';
 
 describe('which models are audited', () => {
@@ -103,5 +105,46 @@ describe('isSingleRowOperation', () => {
     expect(isSingleRowOperation('upsert')).toBe(true);
     expect(isSingleRowOperation('updateMany')).toBe(false);
     expect(isSingleRowOperation('create')).toBe(false);
+  });
+});
+
+/**
+ * Bulk operations that touched nothing (Phase 4 follow-up).
+ *
+ * A boot-time `updateMany` whose `where` matched no rows was still writing an
+ * audit row saying `transportId` had been set. That is not noise, it is a
+ * false record - and it ran twice on every server restart.
+ */
+describe('affectedCount', () => {
+  it('reports the count for the operations that return one', () => {
+    expect(affectedCount('updateMany', { count: 37 })).toBe(37);
+    expect(affectedCount('deleteMany', { count: 0 })).toBe(0);
+    expect(affectedCount('createMany', { count: 2 })).toBe(2);
+  });
+
+  it('is null for a single-row operation, which has no count to read', () => {
+    // null means "record it normally", distinct from 0 which means "drop it".
+    expect(affectedCount('update', { id: 'x' })).toBeNull();
+    expect(affectedCount('create', { id: 'x' })).toBeNull();
+    expect(affectedCount('delete', { id: 'x' })).toBeNull();
+  });
+
+  it('records rather than drops a result shape it does not recognise', () => {
+    // Failing open: losing an audit row is worse than keeping an odd one.
+    expect(affectedCount('updateMany', undefined)).toBeNull();
+    expect(affectedCount('updateMany', {})).toBeNull();
+    expect(affectedCount('updateMany', { count: '3' })).toBeNull();
+  });
+
+  it('distinguishes zero from null, since they mean opposite things', () => {
+    expect(affectedCount('updateMany', { count: 0 })).toBe(0);
+    expect(affectedCount('updateMany', { count: 0 })).not.toBeNull();
+  });
+});
+
+describe('isBulkOperation', () => {
+  it('names the three that return a count', () => {
+    expect(['updateMany', 'deleteMany', 'createMany'].every(isBulkOperation)).toBe(true);
+    expect(['update', 'delete', 'create', 'upsert'].some(isBulkOperation)).toBe(false);
   });
 });

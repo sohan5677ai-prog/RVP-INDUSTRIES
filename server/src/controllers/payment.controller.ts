@@ -9,6 +9,7 @@ import { extractTransactionData } from '../lib/gemini.js';
 import { uploadFileToStorage } from '../lib/upload.js';
 import { whatsappService, type LorryPaymentDetails, resolveKnmTransportRecipient } from '../services/whatsapp.service.js';
 import { calcKataFee, calcHamali, pappuLoadingHamali, findCompanyVehicle, isVehicleExempt } from '../lib/calc.js';
+import { cancelDocument } from '../services/reversal.service.js';
 
 /**
  * Read an uploaded payment screenshot (bank/UPI/cheque) with Gemini and return
@@ -52,6 +53,14 @@ export async function listPayments(req: Request, res: Response) {
         { type: { contains: q, mode: 'insensitive' } },
       ],
     });
+  }
+
+  // A cancelled payment stays in the table but must not count: the Purchase
+  // Dues and Payment Planner pages sum this list client-side, so leaving them
+  // in would overstate what a supplier has been paid. `includeCancelled=true`
+  // is for the register, where seeing what was withdrawn is the point.
+  if (req.query.includeCancelled !== 'true') {
+    conditions.push({ cancelledAt: null });
   }
 
   const where: Prisma.PaymentWhereInput = conditions.length > 0 ? { AND: conditions } : {};
@@ -257,7 +266,9 @@ async function resolveLorryPaymentDetails(data: {
 
   const paymentsForLorry = (lorryNo || data.purchaseId)
     ? await prisma.payment.findMany({
-        where: paymentWhere,
+        // Cancelled payments are reversed in the ledger, so they must not
+        // count towards what this lorry has been paid either.
+        where: { ...paymentWhere, cancelledAt: null },
         select: { amount: true },
       })
     : [];
@@ -611,13 +622,30 @@ export async function deletePayment(req: Request, res: Response) {
     throw new HttpError(400, 'This is the payment side of a set-off. Reverse the set-off to remove both sides together.');
   }
 
-  await prisma.$transaction(async (tx) => {
-    if (payment.journalEntryId) {
-      await tx.journalEntry.delete({ where: { id: payment.journalEntryId } });
-    } else {
-      await tx.payment.delete({ where: { id: payment.id } });
-    }
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  const reason =
+    typeof req.body?.reason === 'string' && req.body.reason.trim().length >= 3
+      ? req.body.reason.trim()
+      : null;
+  if (!reason) {
+    throw new HttpError(400, 'Give a reason for cancelling this payment.');
+  }
+
+  const actor = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { name: true },
   });
 
-  res.json({ message: 'Payment deleted' });
+  // Plan item 4.4: cancelled, not deleted. The row stays and a reversing
+  // journal entry is posted, so the ledger nets to zero while the fact that a
+  // payment was recorded - and withdrawn, by whom and why - survives. Deleting
+  // the journal entry took the payment with it and left no trace at all.
+  await cancelDocument({
+    model: 'payment',
+    id: payment.id,
+    reason,
+    actor: { userId: req.user.userId, name: actor?.name ?? null },
+  });
+
+  res.json({ message: 'Payment cancelled and reversed' });
 }

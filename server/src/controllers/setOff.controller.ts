@@ -58,11 +58,13 @@ async function buildOpenItems(partyId: string, excludeSetOffId?: string) {
     }),
     prisma.dustPurchase.findMany({ where: { partyId } }),
     prisma.payment.findMany({
-      where: { partyId, type: 'SUPPLIER', ...notThisSetOff },
+      // A cancelled payment has been reversed in the ledger, so it must not
+      // reduce what this party is owed when sizing a set-off.
+      where: { partyId, type: 'SUPPLIER', cancelledAt: null, ...notThisSetOff },
       orderBy: { date: 'asc' },
     }),
     prisma.saleOrder.findMany({ where: { buyerId: partyId }, include: { dispatches: true } }),
-    prisma.receipt.findMany({ where: { partyId, type: 'BUYER', ...notThisSetOff } }),
+    prisma.receipt.findMany({ where: { partyId, type: 'BUYER', cancelledAt: null, ...notThisSetOff } }),
   ]);
 
   // ── Purchase side ────────────────────────────────────────────────────────

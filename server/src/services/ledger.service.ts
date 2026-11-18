@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from '@prisma/client';
 import { companyVehicleNumbers, hamaliSplit, parseQualityAdjustments, purchaseGst, qualityAdjustmentFreight } from '../lib/calc.js';
+import { assertPeriodOpen } from '../lib/periodLock.js';
 
 export interface JournalLineInput {
   accountCode: string;
@@ -86,6 +87,13 @@ export class LedgerService {
       lines: JournalLineInput[];
     }
   ) {
+    // Plan item 4.5. Checked here because this is the only place a journal
+    // entry is written, so every posting - payment, receipt, purchase, sale,
+    // set-off, loan - passes through it. Guarding the document tables instead
+    // would mean keeping a list, and the list would go stale the first time a
+    // new document type was added.
+    await assertPeriodOpen(tx, data.date, data.description || data.reference || 'this entry');
+
     const totalDebits = data.lines.reduce((sum, line) => sum + line.debit, 0);
     const totalCredits = data.lines.reduce((sum, line) => sum + line.credit, 0);
 

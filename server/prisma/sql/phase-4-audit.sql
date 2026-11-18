@@ -1,5 +1,29 @@
 -- AlterTable
-ALTER TABLE "CompanyProfile" ADD COLUMN     "auditRetentionDays" INTEGER;
+ALTER TABLE "JournalEntry" ADD COLUMN     "reversalOfId" TEXT;
+
+-- AlterTable
+ALTER TABLE "CompanyProfile" ADD COLUMN     "auditRetentionDays" INTEGER,
+ADD COLUMN     "inboundApproachAlertsEnabled" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "inboundApproachRingKm" INTEGER NOT NULL DEFAULT 10,
+ADD COLUMN     "inboundGateRingKm" INTEGER NOT NULL DEFAULT 3;
+
+-- AlterTable
+ALTER TABLE "Payment" ADD COLUMN     "cancelReason" TEXT,
+ADD COLUMN     "cancelledAt" TIMESTAMP(3),
+ADD COLUMN     "cancelledById" TEXT,
+ADD COLUMN     "cancelledByName" TEXT;
+
+-- AlterTable
+ALTER TABLE "Receipt" ADD COLUMN     "cancelReason" TEXT,
+ADD COLUMN     "cancelledAt" TIMESTAMP(3),
+ADD COLUMN     "cancelledById" TEXT,
+ADD COLUMN     "cancelledByName" TEXT;
+
+-- AlterTable
+ALTER TABLE "PartySetOff" ADD COLUMN     "cancelReason" TEXT,
+ADD COLUMN     "cancelledAt" TIMESTAMP(3),
+ADD COLUMN     "cancelledById" TEXT,
+ADD COLUMN     "cancelledByName" TEXT;
 
 -- CreateTable
 CREATE TABLE "AuditLog" (
@@ -43,6 +67,18 @@ CREATE TABLE "PeriodLock" (
     CONSTRAINT "PeriodLock_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "ApproachAlert" (
+    "id" TEXT NOT NULL,
+    "transportConfirmationId" TEXT NOT NULL,
+    "ringKm" INTEGER NOT NULL,
+    "distanceKm" DOUBLE PRECISION NOT NULL,
+    "notifiedCount" INTEGER NOT NULL DEFAULT 0,
+    "firedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ApproachAlert_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "AuditLog_seq_key" ON "AuditLog"("seq");
 
@@ -66,4 +102,25 @@ CREATE INDEX "PeriodLock_fromDate_toDate_idx" ON "PeriodLock"("fromDate", "toDat
 
 -- CreateIndex
 CREATE INDEX "PeriodLock_unlockedAt_idx" ON "PeriodLock"("unlockedAt");
+
+-- CreateIndex
+CREATE INDEX "ApproachAlert_firedAt_idx" ON "ApproachAlert"("firedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ApproachAlert_transportConfirmationId_ringKm_key" ON "ApproachAlert"("transportConfirmationId", "ringKm");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "JournalEntry_reversalOfId_key" ON "JournalEntry"("reversalOfId");
+
+-- CreateIndex
+CREATE INDEX "JournalEntry_reversalOfId_idx" ON "JournalEntry"("reversalOfId");
+
+-- CreateIndex
+CREATE INDEX "PartySetOff_cancelledAt_idx" ON "PartySetOff"("cancelledAt");
+
+-- AddForeignKey
+ALTER TABLE "JournalEntry" ADD CONSTRAINT "JournalEntry_reversalOfId_fkey" FOREIGN KEY ("reversalOfId") REFERENCES "JournalEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TransportConfirmation" ADD CONSTRAINT "TransportConfirmation_purchaseOrderId_fkey" FOREIGN KEY ("purchaseOrderId") REFERENCES "PurchaseOrder"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 

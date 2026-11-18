@@ -47,6 +47,12 @@ export async function listReceipts(req: Request, res: Response) {
     });
   }
 
+  // Same reasoning as payments: a cancelled receipt is reversed in the ledger
+  // and must not count towards what a buyer has paid.
+  if (req.query.includeCancelled !== 'true') {
+    conditions.push({ cancelledAt: null });
+  }
+
   const where: Prisma.ReceiptWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
   // all=true → whole history as a plain array (Sale Dues / ledger FIFO matching

@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -52,8 +52,15 @@ const SERIF_FONT = "Georgia, 'Times New Roman', 'Nimbus Roman', serif";
 const BODY_FONT = "Arial, 'Helvetica Neue', Helvetica, system-ui, sans-serif";
 const MONO = "'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace";
 
-/** `17-11-2026` → `RVP/LC/171126`. Identifies the sheet, nothing accounting. */
-function sheetRef(companyName: string, issued: Date): string {
+/**
+ * `17-11-2026` → `RVP/LC/171126`. Identifies the sheet, nothing accounting.
+ *
+ * Named `sheetRefNo` rather than `sheetRef` because the component below holds
+ * a `sheetRef` DOM ref for the image capture. While both had the same name the
+ * ref shadowed this function, so the call site got a ref object instead - it
+ * would have thrown the moment the sheet rendered.
+ */
+function sheetRefNo(companyName: string, issued: Date): string {
   const words = companyName.trim().split(/\s+/).filter(Boolean);
   const mark = (words[0]?.length ?? 0) <= 4 ? (words[0] ?? 'RVP') : words.map((w) => w[0]).join('').slice(0, 3);
   const dd = String(issued.getDate()).padStart(2, '0');
@@ -297,7 +304,7 @@ function TransporterSheet(props: {
 
   const issued = new Date();
   const issueDate = issued.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-  const refNo = sheetRef(companyName, issued);
+  const refNo = sheetRefNo(companyName, issued);
   const addressLineText = companyAddress;
   const contactLineText = companyContact;
 

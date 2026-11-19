@@ -3,6 +3,7 @@ export type { WaLanguage };
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { mintFileUrl, SHARED_FILE_TTL_SECONDS } from '../lib/fileAccessToken.js';
+import { weighbridgeSlipToken } from '../lib/weighbridgeSlipToken.js';
 import { istCalendar, istParts } from '../lib/istDate.js';
 import { coordLabel, coordUrl, mapsUrlFor, resolveLatLngFromMapsLink } from '../lib/mapsLink.js';
 import { FACTORY } from '../lib/gpsPlaces.js';
@@ -2822,13 +2823,18 @@ export async function notifyInternalKataCompleted(
   if (ticket.slipImageUrl && !ticket.slipImageUrl.toLowerCase().endsWith('.pdf') && !ticket.slipImageUrl.includes('.pdf?')) {
     photoUrl = ticket.slipImageUrl;
   } else {
-    // Generate dynamic slip.jpg url
-    const secret = process.env.JWT_SECRET || 'rvp-default-kata-secret-key-2026';
-    const crypto = await import('crypto');
-    const tokenTime = (ticket.paidAt ? new Date(ticket.paidAt) : dateObj).getTime();
-    const token = crypto.createHmac('sha256', secret).update(`weighbridge-slip:${ticket.id}:${tokenTime}`).digest('hex');
-    const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
-    photoUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}&_t=${Date.now()}`;
+    // Generate dynamic slip.jpg url. The token must be minted the same way the
+    // endpoint verifies it - over paidAt, or createdAt when the ticket has not
+    // been paid yet - or the link 403s and the alert goes out with no slip.
+    const token = weighbridgeSlipToken(ticket.id, ticket.paidAt, ticket.createdAt);
+    if (token) {
+      const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
+      photoUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.jpg?token=${token}&_t=${Date.now()}`;
+    } else {
+      // No createdAt on the payload: a minted link could not be verified, so
+      // fall back to a camera snapshot below rather than send a dead URL.
+      logger.warn(`[whatsapp] Ticket #${ticket.ticketNo} has no createdAt; using a camera snapshot for the Kata alert header`);
+    }
   }
 
   const rawPhoto = photoUrl || ticket.secondCam1PhotoUrl || ticket.cam1PhotoUrl || ticket.secondCam2PhotoUrl || ticket.cam2PhotoUrl;

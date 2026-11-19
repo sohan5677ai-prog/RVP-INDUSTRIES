@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { timingSafeEqual, createHmac } from 'crypto';
+import { timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { logger } from '../lib/logger.js';
@@ -16,6 +16,7 @@ import { calcKataFee, findCompanyVehicle, isVehicleExempt, clean10DigitPhone } f
 import { renderWeighbridgeSlipPdf } from '../lib/weighbridgeSlipPdf.js';
 import { generateWeighbridgeSlipJpeg } from '../lib/weighbridgeSlipImage.js';
 import { uploadBufferToStorage } from '../lib/upload.js';
+import { weighbridgeSlipToken } from '../lib/weighbridgeSlipToken.js';
 import {
   sendWeighbridgePaidSlip,
   sendWeighbridgeSecondWeightReminder,
@@ -49,11 +50,6 @@ async function calculateTicketFee(
 function paymentStatusFor(amount: number, billType: string): string {
   if (amount <= 0 || billType.toUpperCase() === 'FREE') return 'NOT_REQUIRED';
   return billType.toUpperCase() === 'CREDIT' ? 'CREDIT' : 'PENDING';
-}
-
-function slipToken(id: string, paidAt: Date): string {
-  const secret = process.env.JWT_SECRET || 'rvp-default-kata-secret-key-2026';
-  return createHmac('sha256', secret).update(`weighbridge-slip:${id}:${paidAt.getTime()}`).digest('hex');
 }
 
 function readWeight(value: unknown, field: string): number | null {
@@ -970,7 +966,7 @@ export async function verifyTicketPaymentHandler(req: Request, res: Response) {
       whatsapp = { ok: false, skipped: true, error: 'Driver mobile is missing' };
     } else {
       const driver = findCompanyVehicle(updated.vehicleNumber, company?.companyVehicles);
-      const token = slipToken(updated.id, paidAt);
+      const token = weighbridgeSlipToken(updated.id, updated.paidAt, updated.createdAt) ?? '';
       const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
       const url = `${apiBase}/weighbridge/tickets/${updated.id}/slip.pdf?token=${token}&_t=${Date.now()}`;
 
@@ -1082,7 +1078,7 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
 
   const chosenLang = ((req.body.language || 'TE') as string).toUpperCase() as WaLanguage;
   const driver = findCompanyVehicle(ticket.vehicleNumber, company?.companyVehicles);
-  const token = slipToken(ticket.id, ticket.paidAt || ticket.createdAt);
+  const token = weighbridgeSlipToken(ticket.id, ticket.paidAt, ticket.createdAt) ?? '';
   const apiBase = (process.env.PUBLIC_API_BASE_URL || 'https://rvp-server.onrender.com/api').replace(/\/$/, '');
   const slipUrl = `${apiBase}/weighbridge/tickets/${ticket.id}/slip.pdf?token=${token}&_t=${Date.now()}`;
   
@@ -1116,7 +1112,7 @@ export async function sendTicketSlipWhatsappHandler(req: Request, res: Response)
 export async function downloadSignedWeighbridgeSlipHandler(req: Request, res: Response) {
   const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
   if (!ticket || !ticket.paidAt) throw new HttpError(404, 'Signed Kata slip not found');
-  const expected = slipToken(ticket.id, ticket.paidAt);
+  const expected = weighbridgeSlipToken(ticket.id, ticket.paidAt, ticket.createdAt) ?? '';
   const received = String(req.query.token || '');
   const a = Buffer.from(received);
   const b = Buffer.from(expected);
@@ -1133,7 +1129,7 @@ export async function downloadSignedWeighbridgeSlipHandler(req: Request, res: Re
 export async function downloadSignedWeighbridgeSlipImageHandler(req: Request, res: Response) {
   const ticket = await prisma.weighbridgeTicket.findUnique({ where: { id: req.params.id } });
   if (!ticket) throw new HttpError(404, 'Signed Kata slip not found');
-  const expected = slipToken(ticket.id, ticket.paidAt || ticket.createdAt);
+  const expected = weighbridgeSlipToken(ticket.id, ticket.paidAt, ticket.createdAt) ?? '';
   const received = String(req.query.token || '');
   const a = Buffer.from(received);
   const b = Buffer.from(expected);

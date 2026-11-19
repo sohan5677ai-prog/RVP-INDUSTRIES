@@ -380,6 +380,51 @@ missing** — and a kept file still serves end to end through a minted link (`20
 296 send-log rows now reference a file that is gone, which is the intended outcome: the log row is
 the record of what was sent, not a copy of it.
 
+## The same bug, one level down
+
+Verifying the chain after the storage work showed **8 broken rows** — content hashes only, links
+intact, no gaps. By the table in [PHASE-4](PHASE-4.md) that means the writer and the verifier
+disagree rather than tampering, and that is what it was.
+
+The rows were `saleOrder.create`, `saleOrder.update`, `saleDispatch.update` and `receipt.update`:
+writes that **include a relation**, so the payload carries a nested object — `buyer` on a sale
+order, `party` and `payer` on a receipt.
+
+`redact` walked only the top level. A `Decimal` one level down still hashed as `{d,e,s}` and stored
+as a number — **exactly the bug the Phase 4 fix was written for.** The principle stated there was
+"hash exactly what is stored"; applying it only to the top level meant it held one level deep, and
+flat test fixtures could not see the gap.
+
+It is recursive now, with a depth cap and cycle handling, normalising `Decimal`, `Date` and
+`bigint` at any depth. `auditRedact.test.ts` covers a relation with a Decimal, two relations as a
+receipt has, a Decimal inside an array, three levels down, and a credential nested inside a
+relation. Checked against the previous shallow version: **7 of the 19 fail.**
+
+### Re-sealing, and the bug in the tool that re-sealed
+
+The 8 rows are real business events, not restart noise, so unlike the Phase 4 prune the answer was
+to keep them. `scripts/reseal-audit-rows.mjs` recomputes hashes and links in place and deletes
+nothing. It **refuses if `seq` has a gap**, because a gap is evidence a row was removed and
+re-sealing would erase it — a break that includes a gap is not a writer bug and needs a person.
+
+The first run wrote an `audit.reseal` row that **itself failed verification.** `seq` was spread
+into the Prisma `data` but not onto the object handed to the hash function, so it hashed
+`seq: "undefined"`. Confirmed rather than guessed: the stored hash reproduces exactly when `seq` is
+`undefined`.
+
+A tool for repairing the chain that left the chain broken, caught only because the next step was to
+verify. That is the whole argument for verifying after acting instead of trusting the "done"
+message — the same argument that found the original Decimal bug in Phase 4.
+
+Both events are on the record, including the mistake:
+
+```
+seq 237  re-sealed 236 rows; 8 were unverifiable  -> 175,178,184,185,186,188,203,210
+seq 238  re-sealed 237 rows; 1 was  unverifiable  -> 237
+```
+
+Result: `audit chain intact: 238 rows verified`, exit 0.
+
 ## Closing an item Phase 6B deferred here
 
 [PHASE-6B](PHASE-6B.md) listed "request bodies logged verbatim in two places (M6)" against Phase 5.
@@ -391,7 +436,7 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 
 ## Tests
 
-`npm test` in `server/` — **70 files, 809 tests.** 78 new.
+`npm test` in `server/` — **71 files, 822 tests.** 91 new.
 
 ## Left open
 

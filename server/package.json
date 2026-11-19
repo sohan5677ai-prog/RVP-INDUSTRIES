@@ -25,7 +25,6 @@
     "@google/genai": "^2.8.0",
     "@node-rs/argon2": "^2.2.2",
     "@prisma/client": "^6.2.1",
-    "@slack/bolt": "^4.7.3",
     "@supabase/supabase-js": "^2.110.7",
     "@types/pdfkit": "^0.17.6",
     "bcryptjs": "^2.4.3",

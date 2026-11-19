@@ -93,7 +93,7 @@
 
 ## Phase 8 – Monitoring and alerts
 
-Alert engine (email; Slack/WhatsApp hook optional) with configurable rules:
+Alert engine (email; WhatsApp hook optional) with configurable rules:
 - N failed logins for a user/IP, login at odd hours, login from new country/IP
 - role/permission changes, new admin user
 - vendor bank detail change requested/approved

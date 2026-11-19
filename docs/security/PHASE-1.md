@@ -15,7 +15,7 @@ revoked, 6-character passwords, bcrypt at cost 10, no MFA, and no lockout.
 | Question | Choice | Why |
 |---|---|---|
 | Argon2id or bcrypt cost ≥12 | **Argon2id** via `@node-rs/argon2` | Prebuilt binaries, no node-gyp; `bcryptjs` is pure JS and cost 12 would burn ~0.5–1s of server CPU per attempt. Native deps are proven here already (`sharp`, `serialport`). |
-| Cookies or token pair | **Short-lived access + rotating refresh** | The Slack bot, Tally agent, CCTV bridge, print agent and kata cabin all authenticate with headers. Cookies would have meant special-casing five non-browser clients and adding CSRF protection to every state-changing route. |
+| Cookies or token pair | **Short-lived access + rotating refresh** | The Tally agent, CCTV bridge, print agent and kata cabin all authenticate with headers. Cookies would have meant special-casing four non-browser clients and adding CSRF protection to every state-changing route. |
 | Reset/alert channel | **`email` column on `User`** | Resend is already wired and verified. The alternatives were recovery-codes-only (leaves 1.6 and 1.8 unimplemented) or WhatsApp (template needs Meta approval first). |
 
 ## What each item does

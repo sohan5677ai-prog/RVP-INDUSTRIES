@@ -70,7 +70,7 @@ async function authenticate(req: Request): Promise<void> {
   // Tokens minted before device sessions existed carry no sid; make the holder
   // sign in again so they get a real session row.
   if (!payload.sid) throw new HttpError(401, 'Session ended. Please sign in again.');
-  // The Slack bot and the kata cabin screen. No session row, no idle timeout,
+  // Service principals such as the kata cabin screen. No session row, no idle timeout,
   // and no password to have changed - see signServiceToken.
   if (payload.sid === SERVICE_SESSION_ID) {
     setContextUser({ userId: payload.userId, userName: payload.name, role: payload.role });

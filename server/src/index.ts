@@ -277,14 +277,6 @@ app.listen(port, "0.0.0.0", () => {
   }
   );
 
-  // Optionally start the Slack bot (Socket Mode) in the same process. A failure
-  // here must never take down the API server, so it's isolated in try/catch.
-  if (process.env.SLACK_ENABLED === "true") {
-    import("./slack/app.js")
-      .then(({ startSlackBot }) => startSlackBot())
-      .catch((err) => logger.error("[slack] failed to start:", err));
-  }
-
   // Turn on automatic audit capture. Until this runs the Prisma extension is
   // an inert passthrough, so nothing written during boot bootstrap is audited
   // as if a person had done it.

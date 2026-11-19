@@ -6,7 +6,7 @@ This document says how to report a problem and what we do about it.
 ## Reporting a vulnerability
 
 Report privately — please do **not** open a public GitHub issue, and do not post details in a
-Slack channel or WhatsApp group.
+public chat channel or WhatsApp group.
 
 - Email: **security@rvpindustries.example** with `SECURITY` in the subject line.
   <!-- TODO: replace with the real security contact before sharing this repo or
@@ -28,7 +28,7 @@ In scope: the ERP server (`server/`), the web client (`client/`), the cabin agen
 and the deployment configuration in this repository.
 
 Out of scope: findings that only affect a third-party service we consume (Supabase, Render,
-Vercel, Resend, Fast2SMS, Slack, Google Gemini, TaxPro, Razorpay) — report those to the vendor;
+Vercel, Resend, Fast2SMS, Google Gemini, TaxPro, Razorpay) — report those to the vendor;
 missing hardening on endpoints that are intentionally public (`/api/health`); and reports
 produced solely by an automated scanner with no demonstrated impact.
 

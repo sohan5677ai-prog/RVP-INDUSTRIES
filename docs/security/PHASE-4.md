@@ -95,7 +95,7 @@ becomes, and keeps a Decimal as a **string** so a paise-level value survives exa
 going through a float.
 
 A second, latent instance of the same mistake went with it: `userId` was hashed from
-`context.userId` but stored as `onBehalfOf?.userId ?? userId`, so every Slack-bot and kata-cabin
+`context.userId` but stored as `onBehalfOf?.userId ?? userId`, so every kata-cabin
 write would have failed verification too. Nothing had exercised that path yet.
 
 **Why the tests did not catch it.** They hashed a row and verified it against the same in-memory

@@ -101,9 +101,6 @@ model User {
   username    String   @unique
   password    String
   role        Role     @default(USER)
-  // Slack member ID (e.g. "U0123ABCD") used to attribute Slack-driven actions to
-  // this ERP user. Null until an admin links the account.
-  slackUserId String?  @unique
   createdAt   DateTime @default(now())
 
   /// Where password resets and new-device alerts go. Optional because existing
@@ -2723,13 +2720,9 @@ model DriverKataSubmission {
   // Team confirmation
   status          KataSubmissionStatus @default(PENDING)
   confirmedKg     Int? // Final weight (may differ from OCR if team edits)
-  confirmedBy     String? // Slack user or staff who approved/rejected
+  confirmedBy     String? // Staff member who approved/rejected
   confirmedAt     DateTime?
   rejectionReason String?
-
-  // Slack tracking
-  slackChannel String?
-  slackTs      String? // Message timestamp for updating the card
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2737,22 +2730,6 @@ model DriverKataSubmission {
   @@index([saleDispatchId])
   @@index([driverPhone])
   @@index([status])
-}
-
-// Persisted drafts for Slack multi-step flows (PO, Stock In, etc.)
-model SlackDraft {
-  id          String   @id @default(cuid())
-  key         String   @unique // channel:threadTs or channel:slackUserId
-  flow        String
-  step        String?
-  userId      String // ERP user ID
-  role        String // ERP user role
-  slackUserId String
-  channel     String
-  threadTs    String?
-  data        String // JSON string of accumulated fields
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------

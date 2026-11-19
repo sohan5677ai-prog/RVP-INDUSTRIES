@@ -22,7 +22,7 @@ export function enforceRoutePermissions(req: Request, _res: Response, next: Next
   const user = req.user;
   if (!user) return next(new HttpError(401, 'Not authenticated'));
 
-  // The Slack bot and the kata cabin. Neither is a person with a role; the
+  // Service principals such as the kata cabin. Not a person with a role; the
   // cabin is confined to the weighbridge by its scope check, which runs first.
   if (user.sid === SERVICE_SESSION_ID) return next();
 

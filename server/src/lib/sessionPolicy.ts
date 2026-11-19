@@ -22,7 +22,7 @@ export const MAX_DEVICES_PER_USER = 2;
 export const LAST_SEEN_WRITE_INTERVAL_MS = 30 * 1000;
 
 /**
- * Sentinel sid for tokens minted by internal services (the Slack bot) rather
+ * Sentinel sid for tokens minted by internal services (the kata cabin) rather
  * than by a browser login. These carry no UserSession row, never count against
  * the device cap and never go idle.
  */

@@ -131,7 +131,7 @@ export async function createVerification(req: Request, res: Response) {
 
   // Quality adjustments: any number of deduction rows (weight/price/flat
   // quality discounts, recovered expenses, and lorry freight the party bears).
-  // The Slack flow still posts the legacy single discountType/discountValue
+  // Older callers still post the legacy single discountType/discountValue
   // pair, so fold that into a one-row list when no explicit list came in.
   const adjustmentInputs: QualityAdjustmentInput[] =
     data.qualityAdjustments ??

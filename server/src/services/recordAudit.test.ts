@@ -116,11 +116,11 @@ describe('recordAudit writes a row that verifies', () => {
   });
 
   it('for a write made on behalf of someone else', async () => {
-    // The third, which nothing had exercised: the Slack bot and the kata
-    // cabin act for a user, and userId was hashed before that substitution.
+    // The third, which nothing had exercised: the kata cabin acts for a
+    // user, and userId was hashed before that substitution.
     context.current = {
       userId: 'service-bot',
-      userName: 'Slack bot',
+      userName: 'Kata cabin',
       onBehalfOf: { userId: 'u-real', userName: 'Sohan' },
       ip: '10.0.0.5',
       requestId: 'req-1',

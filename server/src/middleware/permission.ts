@@ -29,11 +29,11 @@ export function rbacEnforced(): boolean {
 /**
  * Require one permission.
  *
- * Service principals (the Slack bot, the kata cabin) bypass this. They are not
- * people and hold no role in the permission sense; the cabin is already
- * confined to the weighbridge routes by its scope check, and the Slack bot
- * acts as the ERP user who invoked it, which is checked where the command is
- * handled.
+ * Service principals (the kata cabin and the other header-authenticated
+ * agents) bypass this. They are not people and hold no role in the permission
+ * sense; the cabin is already confined to the weighbridge routes by its scope
+ * check, and an agent acts as the ERP user who invoked it, which is checked
+ * where the call is handled.
  */
 export function requirePermission(permission: Permission) {
   return (req: Request, res: Response, next: NextFunction) => {

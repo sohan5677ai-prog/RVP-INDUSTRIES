@@ -8,9 +8,9 @@ import { HttpError } from './httpError.js';
  *
  * Before this, one JWT lived for 7 days and nothing revoked it: a password
  * change or a role demotion left every issued token working until it expired.
- * Cookies were the other option the plan allows, but the Slack bot, the Tally
- * agent, the CCTV bridge, the print agent and the kata cabin all authenticate
- * with headers, so a cookie migration would have meant special-casing five
+ * Cookies were the other option the plan allows, but the Tally agent, the
+ * CCTV bridge, the print agent and the kata cabin all authenticate
+ * with headers, so a cookie migration would have meant special-casing four
  * non-browser clients. Instead:
  *
  *   - a short-lived access token, so a leaked one expires on its own;
@@ -68,13 +68,13 @@ export function signAccessToken(payload: AccessTokenPayload): string {
 }
 
 /**
- * Long-lived token for a non-browser principal: the Slack bot and the kata
- * cabin screen.
+ * Long-lived token for a non-browser principal: the kata cabin screen and the
+ * other header-authenticated agents.
  *
  * These carry `sid: 'service'` and no UserSession row, so they are exempt from
  * the idle timeout, the device cap and the refresh cycle - a kiosk bolted to a
- * wall cannot be asked to re-authenticate every fifteen minutes, and the Slack
- * bot has no one to prompt. `pwdAt: 0` makes the password-change check a no-op
+ * wall cannot be asked to re-authenticate every fifteen minutes, and an
+ * unattended agent has no one to prompt. `pwdAt: 0` makes the password-change check a no-op
  * for them, which is correct: they are not authenticated by a password, so a
  * password change has no bearing on them.
  *

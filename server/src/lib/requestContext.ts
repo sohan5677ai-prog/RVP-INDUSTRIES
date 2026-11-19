@@ -14,7 +14,7 @@ import type { Role } from '@prisma/client';
  * rides in AsyncLocalStorage instead, set once per request.
  *
  * A write with no context is not an error: cron jobs, the boot-time bootstrap
- * and the Slack bot all write legitimately outside a request. Those rows are
+ * and maintenance scripts all write legitimately outside a request. Those rows are
  * recorded with a null user and a source, which is more honest than attributing
  * them to whoever happened to be signed in.
  */
@@ -30,7 +30,7 @@ export interface RequestContext {
   method?: string;
   path?: string;
   /** Where a write came from when it was not an HTTP request. */
-  source?: 'cron' | 'boot' | 'slack' | 'script';
+  source?: 'cron' | 'boot' | 'script';
   /**
    * Set while applying an approved change, so the audit row can say it was
    * released by someone other than the person who asked for it.

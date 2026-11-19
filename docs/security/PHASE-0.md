@@ -19,7 +19,7 @@ Date: 2026-11-10 · Branch: `main`
 | Logging | `winston` (JSON to console; no file or SIEM transport) |
 | Files | `multer` → **Supabase Storage** (public bucket, capability URLs) |
 | Client | **React 18 + Vite 6 + TS**, react-router 6, TanStack Query, Tailwind 4, radix-ui |
-| Integrations | Slack Bolt (Socket Mode), Resend (email), Fast2SMS (WhatsApp), Google Gemini, TaxPro (e-invoice), Tally agent, Razorpay (dormant), CP PLUS CCTV, serial weighbridge |
+| Integrations | Resend (email), Fast2SMS (WhatsApp), Google Gemini, TaxPro (e-invoice), Tally agent, Razorpay (dormant), CP PLUS CCTV, serial weighbridge |
 | Deploy | Server on **Render**, client on **Vercel** (rewrites `/api/*` → `rvp-server.onrender.com`), DB + storage on **Supabase** |
 | Tests | **vitest**, 32 test files — all unit-level. No integration/HTTP harness (no supertest, no test DB) |
 | CI | **None.** No `.github/`, no pre-commit hooks, no `SECURITY.md` |
@@ -43,7 +43,7 @@ Date: 2026-11-10 · Branch: `main`
   throttled to 30s through an in-process `Map`, so a session revoked by another instance is
   noticed within 30s.
 - `JWT_SECRET` is asserted at boot (`assertJwtSecret()`), minimum 16 chars — good fail-fast.
-- Non-browser principals: the Slack bot uses `sid: 'service'` (no session row, never idles); the
+- Non-browser principals: the kata cabin uses `sid: 'service'` (no session row, never idles); the
   Tally agent presents a shared `TALLY_SYNC_TOKEN`; the CCTV bridge presents `X-CCTV-Bridge-Key`
   (timing-safe compare); cron uses `X-Cron-Secret`; the kata cabin exchanges an installation key
   for a `scope: 'KATA_CABIN'` token that is path-restricted to `/weighbridge` plus three
@@ -229,7 +229,7 @@ Each of these needs a decision before the phase it belongs to.
    the new `bank.*` permissions once Phase 2 lands.
 
 5. **Phase 1.5 cookie sessions is a cross-cutting change.** Moving off localStorage Bearer tokens
-   touches the client, the Slack bot, the Tally agent, the CCTV bridge, the print agent and the
+   touches the client, the Tally agent, the CCTV bridge, the print agent and the
    kata cabin — all of which authenticate with headers and must keep working. The good news:
    because `vercel.json` proxies `/api/*`, cookies would be **first-party** on the Vercel domain,
    so `SameSite=Lax` is viable.

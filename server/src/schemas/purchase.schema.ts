@@ -174,7 +174,7 @@ export const qualityAdjustmentSchema = z.object({
 
 export const createVerificationSchema = z.object({
   purchaseId: z.string().min(1),
-  // Legacy single-discount fields, still sent by the Slack verification flow.
+  // Legacy single-discount fields, kept for older callers.
   // Ignored when `qualityAdjustments` is supplied.
   discountType: z.enum(['WEIGHT', 'PRICE', 'AMOUNT']).optional().nullable(),
   discountValue: z.coerce.number().nonnegative().optional().default(0),

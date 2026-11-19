@@ -60,12 +60,6 @@ vi.mock('../lib/upload.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   uploadBufferToStorage: (...a: unknown[]) => uploadBuffer(...a),
 }));
-vi.mock('../slack/app.js', () => ({
-  getSlackApp: () => null,
-  postSlackMessage: vi.fn().mockResolvedValue(null),
-  updateSlackMessage: vi.fn().mockResolvedValue(false),
-  slackAlertChannel: () => null,
-}));
 vi.mock('../services/dispatchWhatsapp.service.js', () => ({
   sendDispatchBundleWhatsApp: vi.fn(),
   resendDispatchDriverWhatsApp: vi.fn(),

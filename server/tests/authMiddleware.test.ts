@@ -214,7 +214,7 @@ describe('the reasons a valid token stops working', () => {
 
 describe('service tokens', () => {
   it('skip the session lookup entirely', async () => {
-    // The Slack bot and the cabin screen have no UserSession row, no idle
+    // Service principals such as the cabin screen have no UserSession row, no idle
     // timeout and no password to have changed.
     const token = signServiceToken({
       userId: 'u1',

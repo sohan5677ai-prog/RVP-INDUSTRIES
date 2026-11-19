@@ -149,7 +149,7 @@ describe('principals outside the role model', () => {
   });
 
   it('lets a service token straight through', async () => {
-    // The Slack bot and the kata cabin hold no role in the permission sense;
+    // Service principals such as the kata cabin hold no role in the permission sense;
     // the cabin is confined to the weighbridge by its own scope check.
     const service = { ...USER, sid: SERVICE_SESSION_ID };
     expect((await request(buildApp(service)).delete('/api/payments/abc')).status).toBe(200);

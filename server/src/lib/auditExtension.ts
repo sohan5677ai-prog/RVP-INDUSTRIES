@@ -39,7 +39,6 @@ const UNAUDITED_MODELS: ReadonlySet<string> = new Set([
   'WhatsAppLog',
   'EmailLog',
   'PrintJob',
-  'SlackDraft',
   'PoSerialCounter',
   'NoteSerialCounter',
   'ChallanSerialCounter',

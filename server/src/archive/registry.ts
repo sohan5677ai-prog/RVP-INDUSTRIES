@@ -189,8 +189,6 @@ const COUNTERS: ArchiveModel[] = [
 
 // ── Class X: never archived ─────────────────────────────────────────────────
 export const EXCLUDED: ArchiveModel[] = [
-  { name: 'SlackDraft', delegate: 'slackDraft', cls: 'EXCLUDED', order: 0,
-    note: 'Ephemeral Slack flow state.' },
   { name: 'Subscription', delegate: 'subscription', cls: 'EXCLUDED', order: 0,
     note: 'Vendor billing, not the client’s books.' },
   { name: 'SubscriptionPayment', delegate: 'subscriptionPayment', cls: 'EXCLUDED', order: 0,

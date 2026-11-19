@@ -123,9 +123,9 @@ counters collide with the current year's numbering.
 Archives carry their year's counter rows so a re-mounted year can still reprint
 documents with correct numbers.
 
-### Class X — Excluded from archives (3 models)
+### Class X — Excluded from archives (2 models)
 
-`SlackDraft` (ephemeral flow state), `Subscription` and `SubscriptionPayment`
+`Subscription` and `SubscriptionPayment`
 (vendor billing — not the client's books, and containing Razorpay identifiers that
 have no business in a file handed to a CA).
 
@@ -346,7 +346,7 @@ carries GSTINs, bank account numbers and IFSC codes for every party.
 
 - `User.password` hashes — users are re-linked by `username` on mount; a bcrypt
   hash in a file that leaves the building is a liability with no upside.
-- Class X models (`SlackDraft`, `Subscription`, `SubscriptionPayment`).
+- Class X models (`Subscription`, `SubscriptionPayment`).
 - TaxPro / Razorpay credentials from `CompanyProfile` — stripped on export,
   preserved on the live row.
 - Uploaded file *bytes*. `invoiceFileUrl`, `kataFileUrl`, `screenshotUrl` point at

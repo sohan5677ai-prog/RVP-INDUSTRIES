@@ -72,9 +72,8 @@ export interface ConfirmDeliveryArgs {
 }
 
 /**
- * Shared delivery confirmation logic used by:
- * 1. Web UI delivery modal (POST /sale-dispatches/:id/deliver)
- * 2. Slack Driver Kata interactive confirmation
+ * Shared delivery confirmation logic used by the web UI delivery modal
+ * (POST /sale-dispatches/:id/deliver) and the WhatsApp driver-kata flow.
  */
 export async function confirmDelivery(args: ConfirmDeliveryArgs): Promise<SaleDispatch> {
   const { dispatchId, buyerKataKg, deliveredDate, buyerKataFileUrl, submissionId, confirmedBy } = args;

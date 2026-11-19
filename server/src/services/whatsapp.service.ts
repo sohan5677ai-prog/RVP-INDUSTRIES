@@ -29,7 +29,7 @@ import { FACTORY } from '../lib/gpsPlaces.js';
  *                              which go over the separate Meta-format POST
  *                              endpoint. Do NOT put a Meta phone-number-id here -
  *                              Fast2SMS rejects it.
- *  - WHATSAPP_ENABLED          'true' to send at all (default off, like SLACK_ENABLED)
+ *  - WHATSAPP_ENABLED          'true' to send at all (default off)
  *  - WHATSAPP_TEST_MODE        anything but 'false' reroutes to the test number
  *  - WHATSAPP_TEST_NUMBER      where test-mode messages land (owner's phone)
  *  - FAST2SMS_TMPL_<KEY>       numeric Fast2SMS message_id per approved template

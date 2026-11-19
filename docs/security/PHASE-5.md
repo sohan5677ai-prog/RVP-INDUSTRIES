@@ -324,6 +324,62 @@ Supabase dashboard → Storage → invoices → make private
 
 After that, `GET /api/files/:name` is the only way in, and it expires.
 
+## What the bucket actually held
+
+Chasing the public-bucket problem turned up a bigger one. The bucket was at **1,138 MB on a 1 GB
+plan**, and measuring what was in it corrected an assumption I had stated as fact: that these were
+supplier invoices under GST retention and therefore undeletable.
+
+**There are no supplier invoices in storage.** `StockIn.invoiceFileUrl` matches nothing.
+
+| | Objects | Size |
+|---|---|---|
+| Referenced only by `WhatsAppLog.mediaUrl` | 324 | 999 MB |
+| Referenced by nothing at all | 547 | 109 MB |
+| Genuinely uploaded files | ~90 | ~30 MB |
+
+Every media-bearing WhatsApp log is **OUTBOUND**, and the templates name themselves:
+`VERIFICATION_STATEMENT`, `DISPATCH_PARTY`, `PARTY_LEDGER`, `BROKER_LEDGER`, `WISHES`. All
+documents this ERP generated from its own data and sent, all regenerable on demand.
+
+They were kept **by accident of the send path, not by design**: Fast2SMS needs a URL it can fetch,
+so the PDF is uploaded to get one — and then never removed. The bucket only ever needed to be a
+drop-box for a few seconds.
+
+### The retention, and the two windows that matter
+
+`services/fileRetention.service.ts` classifies every object; `scripts/prune-storage.mjs` acts on
+it, dry-run by default and requiring `--apply --confirm=<bucket>`.
+
+- **Retention is 7 days, matching `SHARED_FILE_TTL_SECONDS`** — the life of a link handed to
+  WhatsApp. Shorter, and a link still inside its validity would 404 rather than expire; "the link
+  is invalid" is a worse answer to a supplier than "the link expired". Change one, change both.
+- **Orphans get a 48-hour grace window.** A file is uploaded *before* the row that points at it is
+  written, so every upload is briefly referenced by nothing. Without this, a cleanup at the wrong
+  second deletes a kata slip as it arrives and leaves the row pointing at nothing. It is the case
+  the tests lead with.
+
+A file a row points at always wins over a send log referencing the same object — a kata slip that
+was also WhatsApped is still a kata slip. `collectProtectedNames` **throws** rather than returning
+a short set if any column cannot be read, and `planRetention` refuses outright if nothing turns out
+to be referenced, because that means the queries are broken rather than the files unused.
+
+### Result, 19 Nov 2026
+
+```
+deleted 825 object(s), freed 1056.8 MB
+```
+
+| | Before | After |
+|---|---|---|
+| Objects | 959 | 134 |
+| Size | 1,137.9 MB | **81.1 MB** |
+
+Verified afterwards, not assumed: **all 104 files a row points at are still present — zero
+missing** — and a kept file still serves end to end through a minted link (`200`, 150,189 bytes).
+296 send-log rows now reference a file that is gone, which is the intended outcome: the log row is
+the record of what was sent, not a copy of it.
+
 ## Closing an item Phase 6B deferred here
 
 [PHASE-6B](PHASE-6B.md) listed "request bodies logged verbatim in two places (M6)" against Phase 5.
@@ -335,7 +391,7 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 
 ## Tests
 
-`npm test` in `server/` — **69 files, 797 tests.** 66 new.
+`npm test` in `server/` — **70 files, 809 tests.** 78 new.
 
 ## Left open
 

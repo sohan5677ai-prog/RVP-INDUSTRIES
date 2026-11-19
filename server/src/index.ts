@@ -310,6 +310,13 @@ app.listen(port, "0.0.0.0", () => {
     .then(({ registerSubscriptionCron }) => registerSubscriptionCron())
     .catch((err) => logger.error("[subscription-cron] failed to register:", err));
 
+  // Nightly sweep that keeps the storage bucket from becoming an archive of
+  // sent documents again. Deletes files unattended, so it says at boot whether
+  // it is on, and records every run in the audit trail.
+  import("./jobs/storagePruneJob.js")
+    .then(({ registerStoragePruneCron }) => registerStoragePruneCron())
+    .catch((err) => logger.error("[storage-prune] failed to register:", err));
+
   // Poll the GPS provider for lorry positions. No-op without LOCANIX_API_KEY.
   // The retention sweep registers either way - pings already written still
   // have to age out, or the trail fills the database on its own.

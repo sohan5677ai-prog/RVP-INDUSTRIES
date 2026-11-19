@@ -31,41 +31,59 @@ const REDACTED_FIELDS = new Set([
 /** Values too large to be worth keeping in full. */
 const MAX_VALUE_CHARS = 2000;
 
-export function redact(values: unknown): JsonLike {
+/**
+ * Depth cap. A Prisma result with relations included is a few levels at most;
+ * anything deeper is a cycle or a mistake, and a logger must not be the thing
+ * that runs out of stack.
+ */
+const MAX_REDACT_DEPTH = 8;
+
+/**
+ * Normalise a payload so that what is hashed is exactly what the JSON column
+ * will give back.
+ *
+ * **Recursive, and that is the whole point.** The first version of this walked
+ * only the top level, which was enough for the Decimal bug it was written to
+ * fix and not enough for the one underneath: a write that includes a relation
+ * carries a nested object - `saleOrder.create` includes `buyer`, a receipt
+ * includes `party` and `payer` - and a Decimal one level down hashed as
+ * {d,e,s} while storing as a number, exactly as before. The principle was
+ * "hash exactly what is stored"; applying it only to the top level meant it
+ * held one level deep.
+ */
+export function redact(values: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): JsonLike {
   // Plain null, not Prisma.JsonNull: this result is hashed as well as stored,
   // and the sentinel is an object that would hash differently from the SQL
   // null it becomes. toJsonInput() puts the sentinel back at the write site.
   if (values === null || values === undefined) return null;
+
+  if (values instanceof Date) return values.toISOString();
+  if (typeof values === 'bigint') return values.toString();
+  // Money and weights arrive as Prisma Decimal, whose in-memory shape is
+  // {d,e,s} - nothing like the number it is stored and read back as. Kept as
+  // a string rather than a number so a paise-level value survives exactly.
+  if (Prisma.Decimal.isDecimal(values)) return (values as Prisma.Decimal).toString();
+  if (typeof values === 'string') {
+    return values.length > MAX_VALUE_CHARS
+      ? `${values.slice(0, MAX_VALUE_CHARS)}…[truncated]`
+      : values;
+  }
   if (typeof values !== 'object') return values as JsonLike;
 
-  const out: Record<string, JsonLike> = {};
-  for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
-    if (REDACTED_FIELDS.has(key)) {
-      out[key] = '[redacted]';
-      continue;
+  if (depth >= MAX_REDACT_DEPTH) return '[depth limit]';
+  if (seen.has(values as object)) return '[circular]';
+  seen.add(values as object);
+  try {
+    if (Array.isArray(values)) return values.map((v) => redact(v, depth + 1, seen));
+
+    const out: Record<string, JsonLike> = {};
+    for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+      out[key] = REDACTED_FIELDS.has(key) ? '[redacted]' : redact(value, depth + 1, seen);
     }
-    if (value instanceof Date) {
-      out[key] = value.toISOString();
-      continue;
-    }
-    if (typeof value === 'bigint') {
-      out[key] = value.toString();
-      continue;
-    }
-    // Money and weights arrive as Prisma Decimal, whose in-memory shape is
-    // {d,e,s} - nothing like the number it is stored and read back as. Kept as
-    // a string rather than a number so a paise-level value survives exactly.
-    if (Prisma.Decimal.isDecimal(value)) {
-      out[key] = (value as Prisma.Decimal).toString();
-      continue;
-    }
-    if (typeof value === 'string' && value.length > MAX_VALUE_CHARS) {
-      out[key] = `${value.slice(0, MAX_VALUE_CHARS)}…[truncated]`;
-      continue;
-    }
-    out[key] = value as JsonLike;
+    return out;
+  } finally {
+    seen.delete(values as object);
   }
-  return out;
 }
 
 /** What `redact` produces: values that survive a JSON round-trip unchanged. */

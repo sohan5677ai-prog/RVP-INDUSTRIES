@@ -100,3 +100,47 @@ describe('redact', () => {
     expect(out.note).toHaveLength(2000 + '…[truncated]'.length);
   });
 });
+
+/**
+ * The same bug, one level down (found 19 Nov 2026).
+ *
+ * The first fix made `redact` normalise Decimals - but only at the top level.
+ * A write that includes a relation carries a nested object: `saleOrder.create`
+ * includes `buyer`, a receipt includes `party` and `payer`. A Decimal inside
+ * one of those still hashed as {d,e,s} and stored as a number, so eight rows
+ * failed verification in production for exactly the original reason.
+ *
+ * The principle was "hash exactly what is stored". Applying it only to the top
+ * level meant it held one level deep, which is the kind of gap a test over
+ * flat fixtures cannot see.
+ */
+describe('nested values survive the round-trip too', () => {
+  it.each([
+    ['a relation with a Decimal', { id: 's1', buyer: { name: 'Swami', openingBalance: new Prisma.Decimal('1500.50') } }],
+    ['two relations, as a receipt has', {
+      party: { openingBalance: new Prisma.Decimal(0) },
+      payer: { openingBalance: new Prisma.Decimal('99.99') },
+    }],
+    ['a Decimal inside an array', { lines: [{ amount: new Prisma.Decimal('10.01') }, { amount: new Prisma.Decimal(2) }] }],
+    ['three levels down', { a: { b: { c: { amount: new Prisma.Decimal('7.77') } } } }],
+    ['a nested Date and bigint', { rel: { at: new Date('2026-04-01T00:00:00.000Z'), seq: 42n } }],
+  ])('survives: %s', (_label, values) => {
+    const redacted = redact(values);
+    const atWrite = hashRow(row(redacted), GENESIS_HASH);
+    const atVerify = hashRow(row(JSON.parse(JSON.stringify(redacted))), GENESIS_HASH);
+    expect(atVerify).toBe(atWrite);
+  });
+
+  it('still strips a credential nested inside a relation', () => {
+    const out = redact({ rel: { user: { password: 'hunter2', name: 'Sohan' } } }) as any;
+    expect(out.rel.user.password).toBe('[redacted]');
+    expect(out.rel.user.name).toBe('Sohan');
+  });
+
+  it('survives a cycle rather than overflowing', () => {
+    const a: Record<string, unknown> = { amount: new Prisma.Decimal(1) };
+    a.self = a;
+    expect(() => redact(a)).not.toThrow();
+    expect((redact(a) as any).self).toBe('[circular]');
+  });
+});

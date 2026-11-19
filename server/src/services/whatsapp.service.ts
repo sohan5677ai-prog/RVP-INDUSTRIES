@@ -2298,14 +2298,60 @@ export async function downloadWhatsAppMedia(urlOrId: string): Promise<{ buffer: 
   const apiKey = process.env.FAST2SMS_API_KEY?.trim();
   try {
     // 1. Direct HTTP URL
+    //
+    // files.fast2sms.com serves chat uploads as a plain public CDN - no key is
+    // needed, and sending one is what used to break this: an `Authorization`
+    // header plus a bot-looking User-Agent is exactly the shape an edge filter
+    // turns away, and the single attempt then returned null. Nothing downstream
+    // could tell that apart from "not a kata slip", so a driver's weighbridge
+    // slip was quietly filed as an ordinary photo instead.
+    //
+    // So try the plain, browser-shaped request FIRST and only fall back to the
+    // keyed one, and say out loud which status each attempt came back with -
+    // a silent null here costs a lorry's shortage claim.
     if (urlOrId.startsWith('http://') || urlOrId.startsWith('https://')) {
-      const res = await fetch(urlOrId, {
-        headers: apiKey ? { Authorization: apiKey, 'User-Agent': 'RVP-ERP/1.0' } : undefined,
-      });
-      if (!res.ok) return null;
-      const arrayBuffer = await res.arrayBuffer();
-      const mimeType = res.headers.get('content-type') || 'image/jpeg';
-      return { buffer: Buffer.from(arrayBuffer), mimeType };
+      const attempts: { label: string; headers: Record<string, string> }[] = [
+        {
+          label: 'plain',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            Accept: 'image/avif,image/webp,image/jpeg,image/png,application/pdf,*/*',
+          },
+        },
+      ];
+      if (apiKey) {
+        attempts.push({
+          label: 'keyed',
+          headers: { Authorization: apiKey, 'User-Agent': 'RVP-ERP/1.0' },
+        });
+      }
+
+      for (const attempt of attempts) {
+        try {
+          const res = await fetch(urlOrId, {
+            headers: attempt.headers,
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (!res.ok) {
+            logger.warn(
+              `[whatsapp] media fetch (${attempt.label}) ${res.status} ${res.statusText} for ${urlOrId}`
+            );
+            continue;
+          }
+          const arrayBuffer = await res.arrayBuffer();
+          if (arrayBuffer.byteLength === 0) {
+            logger.warn(`[whatsapp] media fetch (${attempt.label}) returned 0 bytes for ${urlOrId}`);
+            continue;
+          }
+          const mimeType = res.headers.get('content-type') || 'image/jpeg';
+          return { buffer: Buffer.from(arrayBuffer), mimeType };
+        } catch (err) {
+          logger.warn(`[whatsapp] media fetch (${attempt.label}) threw for ${urlOrId}`, err);
+        }
+      }
+      logger.error(`[whatsapp] every media fetch attempt failed for ${urlOrId}`);
+      return null;
     }
 
     // 2. Fast2SMS / Meta media ID lookup

@@ -17,6 +17,7 @@ import {
   sendSessionTextMessage,
 } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText, parseBuyerKataImage } from '../lib/gemini.js';
+import type { ParsedBuyerKata } from '../lib/gemini.js';
 import { parseLorryCode } from '../lib/lorryCode.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import {
@@ -35,7 +36,7 @@ import { buildBrokerLedgerData, isOwnBroker } from '../services/brokerLedger.ser
 import { uploadFileToStorage, uploadBufferToStorage } from '../lib/upload.js';
 import { computeBuyerDues, computePartyDues, invoiceListText } from '../services/salesDues.service.js';
 import { duesScope, runPartyPaymentReminderCore } from '../services/partyReminder.service.js';
-import { getSlackApp } from '../slack/app.js';
+import { getSlackApp, postSlackMessage, updateSlackMessage } from '../slack/app.js';
 import { kataCardBlocks } from '../slack/flows/driverKata.js';
 import { confirmDelivery } from '../services/delivery.service.js';
 
@@ -263,19 +264,10 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
   const mediaSource = logRow.mediaUrl || logRow.mediaId || (logRow.text && /^https?:\/\//i.test(logRow.text) ? logRow.text : null);
   if (!mediaSource) return false;
 
-  // 1. Download image
-  const downloaded = await downloadWhatsAppMedia(mediaSource);
-  if (!downloaded) {
-    logger.warn(`[whatsapp] could not download kata media from ${mediaSource}`);
-    return false;
-  }
-
-  // 2. Run Gemini OCR
-  logger.info(`[whatsapp] running Gemini OCR on media from ${from}...`);
-  const parsed = await parseBuyerKataImage(downloaded.buffer, downloaded.mimeType);
-
-  // 3. Find matching dispatch:
-  // Primary: Match active DISPATCHED trip by driver phone
+  // 1. Primary match: the trip whose driver is this sender. It needs nothing
+  //    read off the image, so do it BEFORE the network work - if the download
+  //    or the OCR then fails, the slip is still filed against the right lorry
+  //    instead of falling through to "just another photo" and disappearing.
   let dispatch = await prisma.saleDispatch.findFirst({
     where: {
       status: 'DISPATCHED',
@@ -287,8 +279,30 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
     },
   });
 
-  // Secondary: If phone didn't match, try matching by lorry number extracted from the slip
-  if (!dispatch && parsed?.isBuyerKataSlip && parsed?.lorryNumber) {
+  // 2. Download image
+  const downloaded = await downloadWhatsAppMedia(mediaSource);
+  if (!downloaded) {
+    logger.error(`[whatsapp] could not download kata media from ${mediaSource}`);
+    if (!dispatch) return false;
+    // Nothing could be read, so file it against the driver's own trip with the
+    // sender's original link and no OCR, and let a human key the weight in.
+    // That is what was happening anyway while this path returned false - only
+    // with no row, no alert and no trace that a slip had ever arrived.
+    await fileKataSubmission({ dispatch, from, parsed: null, imageUrl: mediaSource });
+    return true;
+  }
+
+  // 3. Run Gemini OCR
+  logger.info(`[whatsapp] running Gemini OCR on media from ${from}...`);
+  const parsed = await parseBuyerKataImage(downloaded.buffer, downloaded.mimeType);
+
+  // 4. Secondary: if the phone didn't match, go by the lorry number on the slip.
+  //    No longer gated on isBuyerKataSlip - the model reads a registration
+  //    number off a photo it is unsure about often enough, and a number that
+  //    matches a live dispatch is evidence enough on its own. Most slips reach
+  //    us forwarded from the office or the transporter, not from the number in
+  //    driverPhone, so this is the path that actually carries the traffic.
+  if (!dispatch && parsed?.lorryNumber) {
     const cleanLorry = parsed.lorryNumber.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     const lorrySuffix = cleanLorry.slice(-4);
     logger.info(`[whatsapp] matching active dispatch for lorry ${cleanLorry} (suffix ${lorrySuffix})...`);
@@ -335,7 +349,7 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
 
   // If no dispatch was matched:
   if (!dispatch) {
-    if (parsed?.isBuyerKataSlip) {
+    if (parsed?.isBuyerKataSlip || parsed?.lorryNumber) {
       logger.warn(`[whatsapp] kata slip detected from ${from} for lorry ${parsed.lorryNumber} (${parsed.buyerKataKg} kg) but no matching dispatch found`);
 
       // 1. Notify Owners / Alert recipients on WhatsApp
@@ -358,31 +372,49 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
           logger.error('[whatsapp] failed to notify owners of unmatched kata slip', err);
         });
 
-      // 2. Mirror to Slack if configured
-      const slack = getSlackApp();
-      if (slack) {
-        const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'C0BVDE4MXHA';
-        slack.client.chat.postMessage({
-          channel,
-          text: `⚠️ *Buyer Weighbridge Slip Received (No Dispatch Match)*\n• Sender: +${from}\n• Lorry on Slip: *${parsed.lorryNumber || 'Unknown'}*\n• Net Weight: *${parsed.buyerKataKg ? `${parsed.buyerKataKg.toLocaleString('en-IN')} kg` : 'N/A'}*\n• Mill / Weighbridge: ${parsed.buyerName || 'N/A'}\n_Could not link to an active dispatch in ERP. Please verify manually._`,
-        }).catch(() => {});
-      }
+      // 2. Mirror to Slack
+      postSlackMessage({
+        text: `⚠️ *Buyer Weighbridge Slip Received (No Dispatch Match)*\n• Sender: +${from}\n• Lorry on Slip: *${parsed.lorryNumber || 'Unknown'}*\n• Net Weight: *${parsed.buyerKataKg ? `${parsed.buyerKataKg.toLocaleString('en-IN')} kg` : 'N/A'}*\n• Mill / Weighbridge: ${parsed.buyerName || 'N/A'}\n• Photo: ${mediaSource}\n_Could not link to an active dispatch in ERP. Please verify manually._`,
+      }).catch((err) => logger.error('[slack] unmatched kata mirror failed', err));
       return true;
     }
     return false;
   }
 
-  // 4. Upload to Supabase storage to persist public URL
+  // 5. Keep our own copy of the image, then file it. A failed upload is not a
+  //    reason to lose the slip - fall back to the sender's own link, which is
+  //    at least readable while someone looks at the row.
   const ext = downloaded.mimeType.includes('pdf') ? '.pdf' : '.jpg';
-  let publicUrl: string;
+  let imageUrl = mediaSource;
   try {
-    publicUrl = await uploadBufferToStorage(downloaded.buffer, downloaded.mimeType, ext);
+    imageUrl = await uploadBufferToStorage(downloaded.buffer, downloaded.mimeType, ext);
   } catch (uploadErr) {
-    logger.error('[whatsapp] failed to upload kata slip to Supabase', uploadErr);
-    return false;
+    logger.error('[whatsapp] failed to upload kata slip to storage - keeping the sender link', uploadErr);
   }
 
-  // 5. Save DriverKataSubmission
+  await fileKataSubmission({ dispatch, from, parsed, imageUrl });
+  return true;
+}
+
+type KataDispatch = Prisma.SaleDispatchGetPayload<{
+  include: { saleOrder: { include: { buyer: true } } };
+}>;
+
+/**
+ * Record a matched kata slip and tell everyone who needs to know: the driver
+ * gets an acknowledgement, the owners get the shortage, Slack gets the review
+ * card. Split out of the matching above so the paths where nothing could be
+ * read off the image - a download that failed, an OCR that came back empty -
+ * can still file the slip against the trip instead of dropping it.
+ */
+async function fileKataSubmission(args: {
+  dispatch: KataDispatch;
+  from: string;
+  parsed: ParsedBuyerKata | null;
+  imageUrl: string;
+}): Promise<void> {
+  const { dispatch, from, parsed, imageUrl: publicUrl } = args;
+
   const submission = await prisma.driverKataSubmission.create({
     data: {
       saleDispatchId: dispatch.id,
@@ -423,35 +455,22 @@ async function processDriverKataInbound(logRow: InboundLogRow): Promise<boolean>
     logger.error('[whatsapp] failed to notify owners of driver kata', err);
   });
 
-  // 8. Post Slack review card (if Slack configured)
-  const slack = getSlackApp();
-  if (slack) {
-    try {
-      const channel = process.env.SLACK_KATA_CHANNEL || process.env.SLACK_DISPATCH_CHANNEL || 'C0BVDE4MXHA';
-      const extraNote = dispatch.status === 'DELIVERED' ? '⚠️ Note: This dispatch was already marked DELIVERED.' : undefined;
-      const blocks = kataCardBlocks(submission, dispatch, dispatch.saleOrder, extraNote);
-      const postRes = await slack.client.chat.postMessage({
-        channel,
-        text: `📷 Buyer kata received from driver for lorry ${lorryNo} (${parsed?.buyerKataKg ? `${parsed.buyerKataKg} kg` : 'OCR pending'})`,
-        blocks,
-      });
-
-      if (postRes.ts) {
-        await prisma.driverKataSubmission.update({
-          where: { id: submission.id },
-          data: {
-            slackChannel: channel,
-            slackTs: postRes.ts,
-          },
-        });
-      }
-    } catch (err) {
-      logger.error('[slack] failed to post driver kata card', err);
-    }
+  // 8. Post the Slack review card. Goes over plain HTTP, so it does not depend
+  //    on the Socket-Mode bot being up - which is why cards stopped appearing.
+  const extraNote =
+    dispatch.status === 'DELIVERED' ? '⚠️ Note: This dispatch was already marked DELIVERED.' : undefined;
+  const posted = await postSlackMessage({
+    text: `📷 Buyer kata received from driver for lorry ${lorryNo} (${parsed?.buyerKataKg ? `${parsed.buyerKataKg} kg` : 'OCR pending'})`,
+    blocks: kataCardBlocks(submission, dispatch, dispatch.saleOrder, extraNote),
+  });
+  if (posted) {
+    await prisma.driverKataSubmission.update({
+      where: { id: submission.id },
+      data: { slackChannel: posted.channel, slackTs: posted.ts },
+    });
   }
 
   logger.info(`[whatsapp] DriverKataSubmission ${submission.id} created for dispatch ${dispatch.id}`);
-  return true;
 }
 
 /**
@@ -831,15 +850,12 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
 
       // Mirror update to Slack card if exists
       if (sub?.slackChannel && sub?.slackTs && updatedSub) {
-        const slack = getSlackApp();
-        if (slack) {
-          slack.client.chat.update({
-            channel: sub.slackChannel,
-            ts: sub.slackTs,
-            text: `✅ Kata approved for lorry ${dispatch.vehicleNumber || ''}`,
-            blocks: kataCardBlocks(updatedSub, dispatch, dispatch.saleOrder),
-          }).catch(() => {});
-        }
+        await updateSlackMessage({
+          channel: sub.slackChannel,
+          ts: sub.slackTs,
+          text: `✅ Kata approved for lorry ${dispatch.vehicleNumber || ''}`,
+          blocks: kataCardBlocks(updatedSub, dispatch, dispatch.saleOrder),
+        });
       }
 
       // Notify driver via WhatsApp
@@ -971,15 +987,12 @@ async function processOwnerKataCommand(logRow: InboundLogRow): Promise<boolean> 
 
       // Mirror to Slack if card exists
       if (sub.slackChannel && sub.slackTs) {
-        const slack = getSlackApp();
-        if (slack) {
-          slack.client.chat.update({
-            channel: sub.slackChannel,
-            ts: sub.slackTs,
-            text: `❌ Kata rejected for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
-            blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
-          }).catch(() => {});
-        }
+        await updateSlackMessage({
+          channel: sub.slackChannel,
+          ts: sub.slackTs,
+          text: `❌ Kata rejected for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
+          blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
+        });
       }
 
       // Notify driver via WhatsApp
@@ -2821,17 +2834,14 @@ export async function approveDriverKataSubmission(req: Request, res: Response) {
 
   // Update Slack card if exists
   if (sub.slackChannel && sub.slackTs) {
-    const slack = getSlackApp();
-    if (slack) {
-      const updatedSub = await prisma.driverKataSubmission.findUnique({ where: { id: sub.id } });
-      if (updatedSub) {
-        slack.client.chat.update({
-          channel: sub.slackChannel,
-          ts: sub.slackTs,
-          text: `✅ Kata approved for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
-          blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
-        }).catch(() => {});
-      }
+    const updatedSub = await prisma.driverKataSubmission.findUnique({ where: { id: sub.id } });
+    if (updatedSub) {
+      await updateSlackMessage({
+        channel: sub.slackChannel,
+        ts: sub.slackTs,
+        text: `✅ Kata approved for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
+        blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
+      });
     }
   }
 
@@ -2877,15 +2887,12 @@ export async function rejectDriverKataSubmission(req: Request, res: Response) {
 
   // Update Slack card if exists
   if (sub.slackChannel && sub.slackTs) {
-    const slack = getSlackApp();
-    if (slack) {
-      slack.client.chat.update({
-        channel: sub.slackChannel,
-        ts: sub.slackTs,
-        text: `❌ Kata rejected for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
-        blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
-      }).catch(() => {});
-    }
+    await updateSlackMessage({
+      channel: sub.slackChannel,
+      ts: sub.slackTs,
+      text: `❌ Kata rejected for lorry ${sub.saleDispatch.vehicleNumber || ''}`,
+      blocks: kataCardBlocks(updatedSub, sub.saleDispatch, sub.saleDispatch.saleOrder),
+    });
   }
 
   res.json({ ok: true, submission: updatedSub });

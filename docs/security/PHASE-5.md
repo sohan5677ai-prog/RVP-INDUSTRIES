@@ -307,22 +307,37 @@ Verified on real rows, not fixtures: a `WeighbridgeTicket.slipImageUrl` holding 
 back as `/api/files/…?exp=…&sig=…` with no `/object/public/` anywhere in the response, and
 following that link returns the actual 352,769-byte JPEG via a `/object/sign/` redirect.
 
-### What is still NOT done
+### Step three: the bucket is private — M2 is closed
 
-**The bucket is still public**, and that is the step that actually closes the hole. The app no
-longer hands out public URLs, so flipping it is now safe for everything inside the ERP — but it
-has one consequence that cannot be undone: **every link already sent over WhatsApp or email stops
-working.** Like the `REVOKE` in [PHASE-4](PHASE-4.md), it is left for a knowing decision.
+Done in the Supabase dashboard on 19 Nov 2026. `getBucket('invoices')` now reports
+`public = false`, and verified immediately afterwards:
 
-Uploads also still *store* the public URL. That is harmless now — `objectNameFromStored` reads
-either shape and the rewrite handles it on the way out — so switching what is written is tidying
-rather than a fix.
+| Check | Result |
+|---|---|
+| Raw public URL, `/object/public/invoices/<name>` | **400** — dead |
+| Minted link through `/api/files/…` | **200**, 5,059,482 bytes, `application/pdf` |
+| Its first hop | `302` → `/object/sign/…` |
+| Production `/api/files/<name>` with no token | **403** (not 401 — so it is correctly ahead of `requireAuth`) |
+| Production with a forged signature | **403**, "That link is not valid." |
+| Production with a malformed name | **404** |
 
-```
-Supabase dashboard → Storage → invoices → make private
-```
+So `GET /api/files/:name` is now the only way in, and it expires. Every link sent over WhatsApp or
+email before this point has stopped resolving, which was the known and accepted cost.
 
-After that, `GET /api/files/:name` is the only way in, and it expires.
+Uploads still *store* the public URL. That is harmless — `objectNameFromStored` reads either shape
+and the rewrite handles it on the way out — so switching what is written is tidying rather than a
+fix.
+
+**Not verified by an actual send:** a WhatsApp document goes out with a seven-day minted link,
+which is covered in code and by tests but has not been exercised against a real recipient, because
+that would message a real party.
+
+### Noticed while closing this
+
+The bucket has `fileSizeLimit: none` and `allowedMimeTypes: any`. The 10 MB cap and the PDF/image
+allow-list live only in `lib/upload.ts`, so anything holding the service-role key could put a file
+of any type or size there. Setting both at the bucket level is defence in depth and belongs with
+Phase 6's file-upload item.
 
 ## What the bucket actually held
 
@@ -447,5 +462,6 @@ Its other Phase 5 assignment, the public invoice bucket, is **not** closed. See 
 | HSTS `preload` | A DNS decision about `rvpindustries.co.in`, flagged not taken |
 | `securityAlertEmails` is unset | So the bulk-read alert is a log line only. Wiring it to email is small once recipients exist — carried over from Phase 1 |
 | No masked copy has actually been made | The script's guards are tested; the end-to-end run needs a restored copy to point at |
-| **The invoice bucket is still public (M2)** | The API no longer hands out public URLs, so the last step is yours: make the bucket private. It kills links already sent over WhatsApp and email, which is why it is not done on your behalf. See above |
+| The bucket has no file-size limit or MIME allow-list of its own | Both live only in `lib/upload.ts`, so the service-role key could bypass them. Defence in depth, belongs with Phase 6's upload item |
+| A WhatsApp document send has not been exercised end to end | Covered in code and tests; a real send would message a real party |
 | Bulk-read recording not yet confirmed in production | The unit tests cover the logic and nothing has made a 500-row fetch since it deployed; the first `data.bulk_read` row with a non-localhost IP will confirm the wiring |

@@ -12,11 +12,14 @@
 
 export const SIGNATURE_SRC = '/authorised-sign.png';
 export const STAMP_SRC = '/company-stamp.png';
+/** The letterhead mark. The dark variant is the one that prints on white. */
+export const LOGO_SRC = '/rvp-logo-dark.webp';
 
 /** Absolute URLs - needed by documents rendered into a blob: window, where a
  *  root-relative path has no origin to resolve against. */
 export const signatureUrl = () => new URL(SIGNATURE_SRC, window.location.origin).href;
 export const stampUrl = () => new URL(STAMP_SRC, window.location.origin).href;
+export const logoUrl = () => new URL(LOGO_SRC, window.location.origin).href;
 
 export interface SignatureBlockOptions {
   /** Rendered as "for <companyName>" above the mark. Omit to drop the line. */

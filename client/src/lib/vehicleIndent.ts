@@ -22,7 +22,7 @@
 // courtesy.
 
 import type { CompanyProfile, DispatchSlot } from './types';
-import { SIGNATURE_BLOCK_CSS, signatureBlockHtml } from './signatureAssets';
+import { SIGNATURE_BLOCK_CSS, logoUrl, signatureBlockHtml } from './signatureAssets';
 
 export interface VehicleIndentParty {
   name: string;
@@ -281,7 +281,7 @@ function sheetHtml(s: VehicleIndentSheet, company: CompanyProfile | null | undef
     <div>
       <!-- The logo carries the name and the tagline as artwork; the letterhead
            does not repeat them in type. -->
-      <img class="co-logo" src="/rvp-logo-dark.webp" alt="${esc(companyName)}" />
+      <img class="co-logo" src="${logoUrl()}" alt="${esc(companyName)}" />
       <div class="co-lines">
         ${companyAddr ? `<div>${esc(companyAddr)}</div>` : ''}
         <div>${[

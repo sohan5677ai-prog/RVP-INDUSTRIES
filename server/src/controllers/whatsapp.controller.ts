@@ -21,6 +21,7 @@ import type { ParsedBuyerKata, ParsedTransportConfirmation } from '../lib/gemini
 import { parseLorryCode } from '../lib/lorryCode.js';
 import { parseBookingReplies } from '../lib/bookingReply.js';
 import { flatTripFreight } from '../lib/transportFreight.js';
+import { bookingRoute, DEFAULT_HOME_PLACE } from '../lib/bookingRoute.js';
 import { ACTIVE_SLOT_STATUSES } from '../services/dispatchSlot.service.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import {
@@ -569,6 +570,12 @@ async function resolveRequirementCode(code: string | null): Promise<ResolvedRequ
   return { kind: 'NONE' };
 }
 
+/** Where our lorries load and unload, as the company profile has it. */
+async function homePlace(): Promise<string> {
+  const company = await prisma.companyProfile.findFirst({ select: { dispatchFromPlace: true } });
+  return company?.dispatchFromPlace?.trim() || DEFAULT_HOME_PLACE;
+}
+
 /**
  * File one lorry into the register, against whatever its code turned out to be.
  *
@@ -609,13 +616,23 @@ async function fileBooking(
     if (agreedFreight != null) freightAmount = agreedFreight;
   }
 
+  // The transporter names one place; which end of the trip it is depends on the
+  // code he answered. The factory is the other end either way.
+  const route = bookingRoute({
+    direction: requirement.kind === 'PURCHASE' ? 'INBOUND' : 'OUTBOUND',
+    fromPlace: parsed.fromPlace ?? null,
+    toPlace: parsed.toPlace ?? null,
+    destination,
+    home: await homePlace(),
+  });
+
   const booking = await prisma.transportConfirmation.create({
     data: {
       fromPhone: from ?? 'unknown',
       rawText: text,
       messageDate: parsed.messageDate ? new Date(parsed.messageDate) : null,
-      fromPlace: parsed.fromPlace ?? null,
-      toPlace: parsed.toPlace ?? destination,
+      fromPlace: route.fromPlace,
+      toPlace: route.toPlace,
       tonnageKg:
         parsed.tonnageKg ?? (requirement.kind === 'LOADING' ? requirement.plannedKg : null),
       // Normalised on the way in - the dispatch screen looks the row up by lorry
@@ -2463,6 +2480,7 @@ export async function updateTransportConfirmation(req: Request, res: Response) {
   // exactly as the automatic path does, so the two cannot disagree about what a
   // code means.
   if (body.requirementCode !== undefined) {
+    let linkedDestination: string | null = null;
     const raw = typeof body.requirementCode === 'string' ? body.requirementCode : '';
     const code = parseLorryCode(raw) ?? (raw.trim() ? raw.trim().toUpperCase() : null);
     if (!code) {
@@ -2483,6 +2501,7 @@ export async function updateTransportConfirmation(req: Request, res: Response) {
       // Linking by hand confirms the slot the same way the WhatsApp path does,
       // or the lorry would sit on the register with nothing watching it in.
       if (requirement.kind === 'LOADING') {
+        linkedDestination = requirement.destination;
         const lorryNumber =
           (data.lorryNumber as string | null | undefined) ?? row.lorryNumber ?? null;
         await prisma.dispatchSlot
@@ -2504,6 +2523,20 @@ export async function updateTransportConfirmation(req: Request, res: Response) {
           );
       }
     }
+
+    // A corrected code can turn the trip round - a row filed as a delivery that
+    // turns out to answer a purchase requirement, or the reverse - so the route
+    // is re-composed against whichever end the factory is now on. A place typed
+    // in the same edit is still honoured: it goes in as the away end.
+    const route = bookingRoute({
+      direction: data.direction as string,
+      fromPlace: (data.fromPlace as string | null | undefined) ?? row.fromPlace,
+      toPlace: (data.toPlace as string | null | undefined) ?? row.toPlace,
+      destination: linkedDestination,
+      home: await homePlace(),
+    });
+    data.fromPlace = route.fromPlace;
+    data.toPlace = route.toPlace;
   }
   if (body.driverLanguage !== undefined) {
     const raw = String(body.driverLanguage ?? '').toUpperCase();

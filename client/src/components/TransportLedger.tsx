@@ -1,4 +1,8 @@
 import { useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { api, getErrorMessage } from '@/lib/api';
+import { invalidatePayments } from '@/lib/invalidatePayments';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -7,12 +11,17 @@ import type { Payment, Transport } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
 import { normalizeLorryNumber } from '@/lib/calc';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
   Search, Truck, Phone, MapPin, Hash, UserRound, ReceiptText,
-  Scale, Wallet, TrendingDown, TrendingUp, Copy, Check,
+  Scale, Wallet, TrendingDown, TrendingUp, Copy, Check, Loader2, Banknote,
 } from 'lucide-react';
 
 /**
@@ -112,6 +121,12 @@ export function TransportLedger({
 }) {
   const [kind, setKind] = useState<'ALL' | LedgerKind>('ALL');
   const [q, setQ] = useState('');
+  const qc = useQueryClient();
+  // On-account settlement of the whole agency (see the Pay Agency dialog).
+  const [payOpen, setPayOpen] = useState(false);
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payAmount, setPayAmount] = useState('');
+  const [payReference, setPayReference] = useState('');
 
   const entries: LedgerEntry[] = useMemo(() => {
     // A freight payment is tagged with a lorry number, never with the agency,
@@ -202,8 +217,13 @@ export function TransportLedger({
 
     for (const p of payments) {
       if (p.type !== 'TRANSPORTER' && p.type !== 'TRANSPORTER_INWARD' && p.type !== 'TRANSPORTER_OUTWARD') continue;
+      // Either the payment names this agency (an on-account settlement, which
+      // carries no lorry at all) or it names one of its lorries. The lorry
+      // route is what every payment recorded before agency payments existed
+      // still travels, so both have to answer here.
       const lorry = normalizeLorryNumber(p.lorryNumber);
-      if (!lorry || !ownLorries.has(lorry)) continue;
+      const isOwnAgency = Boolean(transport?.id && p.transportId === transport.id);
+      if (!isOwnAgency && (!lorry || !ownLorries.has(lorry))) continue;
       const day = new Date(p.date).toISOString().slice(0, 10);
       if (startDate && day < startDate) continue;
       if (endDate && day > endDate) continue;
@@ -211,7 +231,7 @@ export function TransportLedger({
         id: `pay-${p.id}`,
         date: p.date,
         kind: 'PAYMENT',
-        particulars: 'Payment made',
+        particulars: isOwnAgency && !lorry ? 'Payment made - on account' : 'Payment made',
         detail: p.payee || p.description || null,
         lorryNumber: p.lorryNumber ?? null,
         invoiceNumber: null,
@@ -233,7 +253,7 @@ export function TransportLedger({
       running = round2(running + e.debit - e.credit);
       return { ...e, runningBalance: running };
     });
-  }, [trips, payments, startDate, endDate]);
+  }, [trips, payments, transport?.id, startDate, endDate]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -266,6 +286,48 @@ export function TransportLedger({
   const periodText = entries.length
     ? `${shortDate(entries[0].date)} – ${shortDate(entries[entries.length - 1].date)}`
     : '';
+
+  // What is still owed to the agency: a CR closing balance (negative here).
+  const payableNow = closing < 0 ? round2(-closing) : 0;
+
+  const payMutation = useMutation({
+    mutationFn: () => {
+      if (!transport?.id) throw new Error('No transport agency selected');
+      return api<Payment>('/payments', {
+        method: 'POST',
+        body: {
+          date: payDate,
+          amount: Number(payAmount) || 0,
+          // Outward freight is what an agency ledger is built from, and the
+          // same 20250 payable is what an on-account payment settles.
+          type: 'TRANSPORTER_OUTWARD',
+          transportId: transport.id,
+          payee: transportName,
+          reference: payReference || null,
+          description: `Freight payment on account - ${transportName}`,
+        },
+      });
+    },
+    onSuccess: () => {
+      void invalidatePayments(qc);
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      toast.success('Agency payment recorded');
+      setPayOpen(false);
+      setPayAmount('');
+      setPayReference('');
+    },
+    onError: (e: Error) => toast.error(getErrorMessage(e)),
+  });
+
+  const openPayDialog = () => {
+    // Prefilled with the whole outstanding balance, which is what a settlement
+    // usually is - overtypeable for a part payment or an advance.
+    setPayAmount(payableNow > 0 ? String(payableNow) : '');
+    setPayReference('');
+    setPayDate(new Date().toISOString().slice(0, 10));
+    setPayOpen(true);
+  };
 
   const ownerName = transport?.contactPerson?.trim() || '';
   const phones = [transport?.phone, transport?.phone2].map((p) => (p || '').trim()).filter(Boolean);
@@ -343,6 +405,10 @@ export function TransportLedger({
                 <p className="text-[11px] text-muted-foreground leading-snug pt-1 border-t">
                   Every lorry is settled on this one account - freight receipts go to the owner, never the driver.
                 </p>
+                <Button size="sm" className="w-full mt-1" onClick={openPayDialog} disabled={!transport?.id}>
+                  <Banknote className="h-4 w-4 mr-1.5" />
+                  Pay Agency
+                </Button>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground italic">
@@ -364,7 +430,12 @@ export function TransportLedger({
         />
         <KpiCard icon={Scale} label="Lifetime Freight" value={rupees(lifetime)} hint={`${entries.length} entries · ${trips.length} trips`} />
         <KpiCard icon={ReceiptText} label="Gross Freight" value={rupees(totalFreight)} tone="blue" hint={`${rupees(totalDeducted)} deducted`} />
-        <KpiCard icon={Wallet} label="Total Paid" value={rupees(totalPaid)} hint="Freight payments on these lorries" />
+        <KpiCard
+          icon={Wallet}
+          label="Total Paid"
+          value={rupees(totalPaid)}
+          hint={transport?.payToOwner ? 'On account and per lorry' : 'Freight payments on these lorries'}
+        />
       </div>
 
       {/* filters */}
@@ -482,6 +553,82 @@ export function TransportLedger({
       </div>
 
       <PaginationBar page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} totalPages={totalPages} total={total} />
+
+      {/* On-account settlement. Deliberately NOT allocated against particular
+          trips: this is a running account, so one transfer simply debits the
+          balance and the closing figure stays the answer to "what do we owe
+          him". Guessing which trips a round figure covered would put a wrong
+          paid date on real trips. */}
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pay {transportName}</DialogTitle>
+            <DialogDescription>
+              {payableNow > 0
+                ? <>Outstanding on this account: <strong>{rupees(payableNow)}</strong>. The payment debits the account as a whole - no lorry is tagged.</>
+                : <>Nothing outstanding on this account right now. A payment recorded here will sit as an advance.</>}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="agency-pay-date">Date</Label>
+                <Input
+                  id="agency-pay-date"
+                  type="date"
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="agency-pay-amount">Amount (₹)</Label>
+                <Input
+                  id="agency-pay-amount"
+                  type="number"
+                  inputMode="numeric"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="agency-pay-ref">UTR / Reference</Label>
+              <Input
+                id="agency-pay-ref"
+                value={payReference}
+                onChange={(e) => setPayReference(e.target.value)}
+                placeholder="Bank reference number"
+              />
+            </div>
+
+            {payableNow > 0 && Number(payAmount) > payableNow && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                This is more than the {rupees(payableNow)} outstanding - the extra will stand as an advance against future trips.
+              </p>
+            )}
+
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              The receipt goes to{' '}
+              {ownerName ? <strong>{ownerName}</strong> : <strong>{transportName}</strong>}
+              {phones[0] ? <> on {phones[0]}</> : <> (no number on file yet)</>}.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => payMutation.mutate()}
+              disabled={payMutation.isPending || !(Number(payAmount) > 0)}
+            >
+              {payMutation.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Record Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

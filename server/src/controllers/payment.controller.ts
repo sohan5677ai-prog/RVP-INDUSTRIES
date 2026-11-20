@@ -322,6 +322,7 @@ export async function createPayment(req: Request, res: Response) {
       partyId: data.partyId ?? null,
       brokerId: data.brokerId ?? null,
       lorryNumber: data.lorryNumber ?? null,
+      transportId: data.transportId ?? null,
       purchaseId: data.purchaseId ?? null,
       createdAt: { gte: new Date(Date.now() - 10_000) },
     },
@@ -345,6 +346,17 @@ export async function createPayment(req: Request, res: Response) {
       brokerName = broker.name;
     }
 
+    // Agency-level freight payment: the agency stands in for the lorry, so its
+    // name is what the journal's cost centre and the receipt are written
+    // against. Resolved here (not trusted from the client) so a bad id fails
+    // loudly instead of posting a payment to nobody.
+    let transportName = undefined;
+    if (data.transportId) {
+      const transport = await tx.transport.findUnique({ where: { id: data.transportId } });
+      if (!transport) throw new HttpError(404, 'Transport not found');
+      transportName = transport.name;
+    }
+
     const created = await tx.payment.create({
       data: {
         date: data.date,
@@ -354,6 +366,7 @@ export async function createPayment(req: Request, res: Response) {
         purchaseId: data.purchaseId ?? null,
         brokerId: data.brokerId ?? null,
         lorryNumber: data.lorryNumber ?? null,
+        transportId: data.transportId ?? null,
         payee: data.payee ?? null,
         reference: data.reference ?? null,
         description: cleanDescription,
@@ -368,6 +381,7 @@ export async function createPayment(req: Request, res: Response) {
       type: data.type,
       partyName,
       brokerName,
+      transportName,
       lorryNumber: data.lorryNumber ?? undefined,
       payee: data.payee ?? undefined,
       reference: data.reference ?? undefined,
@@ -438,7 +452,25 @@ export async function createPayment(req: Request, res: Response) {
       (cleanDescription && /lorry|freight|transfer transport/i.test(cleanDescription))
     );
 
-    if (isKnm) {
+    // Agency-level payment: there is no driver to tell, because no single lorry
+    // earned this money. The receipt goes to the agency's own number - the
+    // owner's, for a single-owner fleet - and resolveLorryPaymentDetails is
+    // skipped entirely, since it would otherwise look up the driver of some
+    // unrelated recent trip.
+    const agency = data.transportId
+      ? await prisma.transport.findUnique({
+          where: { id: data.transportId },
+          select: { name: true, phone: true, phone2: true, contactPerson: true, payToOwner: true },
+        }).catch(() => null)
+      : null;
+
+    if (agency) {
+      const owner = agency.contactPerson?.trim();
+      name = data.payee
+        || (agency.payToOwner && owner ? `${owner} (${agency.name})` : agency.name);
+      phone = agency.phone?.trim() || agency.phone2?.trim() || null;
+      phone2 = agency.phone?.trim() ? agency.phone2?.trim() || null : null;
+    } else if (isKnm) {
       // Per business requirement: For KNM Transport, do NOT send to driver! Send to Reddy 9440416639.
       name = data.payee || (lorryNo ? `KNM Transport - Lorry ${lorryNo}` : 'KNM Transport');
       phone = '9440416639';
@@ -557,6 +589,17 @@ export async function updatePayment(req: Request, res: Response) {
       brokerName = broker.name;
     }
 
+    // The agency link is never re-sent by the edit dialog, so it is carried
+    // over from the row - and dropped when the counterparty changed, for the
+    // same reason the purchase link is: money moved to somebody else can no
+    // longer be the agency's settlement.
+    const keptTransportId = counterpartyChanged ? null : existing.transportId;
+    let transportName: string | undefined;
+    if (keptTransportId) {
+      const transport = await tx.transport.findUnique({ where: { id: keptTransportId } });
+      transportName = transport?.name;
+    }
+
     // Unlink BEFORE deleting: Payment.journalEntry cascades on delete, so
     // dropping the entry while it is still attached would take the payment
     // row down with it.
@@ -581,6 +624,7 @@ export async function updatePayment(req: Request, res: Response) {
         payee: data.payee ?? null,
         reference: data.reference ?? null,
         description: cleanDescription,
+        transportId: keptTransportId,
         ...(counterpartyChanged ? { purchaseId: null, hamaliVerificationId: null } : {}),
       },
     });
@@ -591,6 +635,7 @@ export async function updatePayment(req: Request, res: Response) {
       type: data.type,
       partyName,
       brokerName,
+      transportName,
       lorryNumber: data.lorryNumber ?? undefined,
       payee: data.payee ?? undefined,
       reference: data.reference ?? undefined,

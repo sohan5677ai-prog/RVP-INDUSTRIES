@@ -885,6 +885,13 @@ export class LedgerService {
       type: string;
       partyName?: string;
       brokerName?: string;
+      /**
+       * Set when the freight payment went to a transport agency as a whole
+       * rather than to one lorry (single-owner fleets). It changes only WHO the
+       * entry is written against - the liability head is the same 20230 / 20250
+       * either way, because what is being settled is the same freight payable.
+       */
+      transportName?: string;
       lorryNumber?: string;
       payee?: string;
       reference?: string;
@@ -906,10 +913,10 @@ export class LedgerService {
       partyRef = data.partyName || '';
     } else if (data.type === 'TRANSPORTER_INWARD') {
       debitAccount = isKnm ? '20260' : '20230'; // Freight Payable - Transporters
-      partyRef = data.lorryNumber ? `Lorry ${data.lorryNumber}` : '';
+      partyRef = data.transportName || (data.lorryNumber ? `Lorry ${data.lorryNumber}` : '');
     } else if (data.type === 'TRANSPORTER_OUTWARD') {
       debitAccount = isKnm ? '20260' : '20250'; // Lorry Owner Payable - Freight
-      partyRef = data.lorryNumber ? `Lorry ${data.lorryNumber}` : '';
+      partyRef = data.transportName || (data.lorryNumber ? `Lorry ${data.lorryNumber}` : '');
     } else if (data.type === 'BROKER') {
       debitAccount = '20240'; // Brokerage Payable
       partyRef = data.brokerName || '';
@@ -943,7 +950,7 @@ export class LedgerService {
         credit: 0,
         costCenter:
           data.type === 'TRANSPORTER' || data.type === 'TRANSPORTER_INWARD' || data.type === 'TRANSPORTER_OUTWARD'
-            ? data.lorryNumber
+            ? (data.transportName || data.lorryNumber)
             : data.type === 'HAMALI'
               ? 'Hamali Team'
               : undefined,

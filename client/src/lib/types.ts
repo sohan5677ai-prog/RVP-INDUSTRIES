@@ -1021,6 +1021,10 @@ export interface Payment {
   brokerId: string | null;
   broker?: Broker | null;
   lorryNumber?: string | null;
+  // Set when the freight payment went to a transport agency as a whole rather
+  // than to one lorry - how single-owner fleets are settled. The agency's
+  // ledger picks the payment up by this, not by a lorry number.
+  transportId?: string | null;
   payee?: string | null;
   reference?: string | null;
   description?: string | null;

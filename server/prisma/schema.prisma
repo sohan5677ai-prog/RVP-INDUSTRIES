@@ -704,6 +704,7 @@ model Transport {
   saleDispatches SaleDispatch[]
   dispatchSlots  DispatchSlot[]
   freightRates   TransportFreightRate[]
+  payments       Payment[]
 }
 
 /// An agreed flat trip rate: what this agency is paid to run one lorry to one
@@ -1987,6 +1988,14 @@ model Payment {
   brokerId             String?
   broker               Broker?             @relation(fields: [brokerId], references: [id])
   lorryNumber          String?
+  // Agency-level freight payment: the money went to the transport agency as a
+  // whole, not to one lorry. Single-owner fleets (Transport.payToOwner) are
+  // settled this way - every lorry belongs to the same person and one transfer
+  // covers whatever trips it covers - so the payment carries the agency rather
+  // than a lorry number, and `lorryNumber` is left null. Ordinary agencies
+  // still pay per lorry, which is why this stays optional.
+  transportId          String?
+  transport            Transport?          @relation(fields: [transportId], references: [id])
   payee                String? // free-text recipient for expense/drawings payments (e.g. "Shabri Reddy")
   reference            String?
   description          String?
@@ -2022,6 +2031,7 @@ model Payment {
   @@index([partyId])
   @@index([purchaseId])
   @@index([brokerId])
+  @@index([transportId])
   @@index([hamaliVerificationId])
   @@index([journalEntryId])
   @@index([setOffId])

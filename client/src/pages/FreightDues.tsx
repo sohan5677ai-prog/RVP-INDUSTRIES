@@ -1087,7 +1087,19 @@ const FreightTable = memo(function FreightTable({
                           <span className="hidden sm:inline">Costs</span>
                         </Button>
                       )}
-                      {r.lorry && pay !== 'Paid' ? (
+                      {/* A single-owner fleet is settled on its running account,
+                          never trip by trip. Leaving a per-trip Pay button here
+                          would let the same transfer be entered twice - once
+                          against the lorry, once on account - and quietly
+                          double the agency's paid total. */}
+                      {r.ownerPayee ? (
+                        <span
+                          className="text-[10px] text-muted-foreground whitespace-nowrap"
+                          title="Settled on the agency's running account - use Pay Agency on its ledger."
+                        >
+                          On account
+                        </span>
+                      ) : r.lorry && pay !== 'Paid' ? (
                         <Button size="sm" variant="default" className="h-7 px-2.5 text-xs" onClick={() => onPay(r, due)}>
                           Pay
                         </Button>
@@ -1401,7 +1413,16 @@ const TransfersTable = memo(function TransfersTable({
                           <span className="hidden sm:inline">Receipt</span>
                         </Button>
                       )}
-                      {r.lorry && pay !== 'Paid' ? (
+                      {/* See the note on the freight table above: single-owner
+                          fleets settle on account, so no per-trip Pay here. */}
+                      {r.ownerPayee ? (
+                        <span
+                          className="text-[10px] text-muted-foreground whitespace-nowrap"
+                          title="Settled on the agency's running account - use Pay Agency on its ledger."
+                        >
+                          On account
+                        </span>
+                      ) : r.lorry && pay !== 'Paid' ? (
                         <Button size="sm" variant="outline" onClick={() => onPay(r, due)}>
                           Pay
                         </Button>

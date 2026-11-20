@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp from './sharpInstance.js';
 
 /**
  * Downscaled JPEGs for the live camera boxes.

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import sharp, { type OverlayOptions } from 'sharp';
+import { type OverlayOptions } from 'sharp';
+import sharp from './sharpInstance.js';
 import { logger } from './logger.js';
 
 const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/assets');

@@ -52,17 +52,52 @@ app.use(cors({
     cb(null, false);
   },
 }));
+// Body parsing, narrowest first. body-parser marks a request as parsed, so the
+// general parser below is a no-op for anything one of these has already taken.
+//
+// This used to be a single 15 MB parser that stashed `rawBody` on EVERY
+// request. Both halves of that cost memory on an instance with 512 MB: the
+// ceiling let any endpoint buffer 15 MB, and the `verify` hook kept the raw
+// Buffer alive alongside the parsed object for the whole request - so a
+// camera frame was held three times over (raw bytes, base64 string, decoded
+// JPEG) when only two webhooks ever read the raw form.
+
+/**
+ * The webhooks that authenticate by HMAC over the exact bytes they were sent,
+ * and so cannot work from a re-serialised body: Razorpay's subscription
+ * webhook and Resend's Svix-signed delivery events. Both payloads are small.
+ */
+const SIGNED_WEBHOOK_PATHS = [
+  '/api/subscription/webhook',
+  '/api/webhooks/resend',
+  // The same handler, reached without the /api prefix via the forwarder below.
+  '/webhooks/resend',
+];
 app.use(
+  SIGNED_WEBHOOK_PATHS,
   express.json({
-    limit: '15mb',
-    // Stash the raw request body so the Razorpay webhook can verify its HMAC
-    // signature over the exact bytes Razorpay signed (JSON.stringify of the
-    // parsed body would not byte-match).
+    limit: '256kb',
     verify: (req, _res, buf) => {
       (req as unknown as { rawBody?: Buffer }).rawBody = buf;
     },
   })
 );
+
+/**
+ * The cabin bridge posts a whole JPEG as a base64 string in a JSON body, which
+ * is the only thing here that legitimately needs megabytes.
+ */
+const CAMERA_FRAME_PATHS = [
+  '/api/weighbridge/cctv/broadcast',
+  '/api/weighbridge/cctv/detect-plate',
+];
+app.use(CAMERA_FRAME_PATHS, express.json({ limit: '15mb' }));
+
+/**
+ * Everything else. The largest ordinary body is a GPS push, capped at 500
+ * records (~100 KB) by the handler itself, so 1 MB is generous.
+ */
+app.use(express.json({ limit: '1mb' }));
 
 // Establish the per-request context (request id, IP, user agent) that the audit
 // trail reads. Before the routes, and before auth, because a failed sign-in has

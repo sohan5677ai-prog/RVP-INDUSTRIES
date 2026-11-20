@@ -256,6 +256,94 @@ function dispatchToSubscribers(camNum, frame) {
 }
 
 /**
+ * Restart policy for the RTSP workers.
+ *
+ * A camera that is simply not reachable used to be retried every 2 seconds
+ * for as long as it stayed unreachable - 8,127 worker launches in ten days,
+ * two log lines each, and no record anywhere of WHY ffmpeg gave up. The
+ * reconnect is still fast when a working camera hiccups (the counter resets
+ * the moment frames flow again), but a camera that is genuinely down now backs
+ * off towards a minute between attempts instead of hammering it.
+ */
+const RTSP_RETRY_BASE_MS = 2000;
+const RTSP_RETRY_MAX_MS = 60000;
+/** Log the first few failures in full, then at most one line a minute. */
+const RTSP_VERBOSE_FAILURES = 3;
+const RTSP_LOG_QUIET_MS = 60000;
+
+const rtspRetryState = {
+  1: { consecutive: 0, lastLoggedAt: 0, sinceLastLog: 0 },
+  2: { consecutive: 0, lastLoggedAt: 0, sinceLastLog: 0 },
+};
+
+/**
+ * The one line worth keeping out of ffmpeg's stderr.
+ *
+ * Everything ffmpeg prints before it fails is banner: the version, the build
+ * flags (one enormous line) and the library versions. That is what filled the
+ * old 800-character buffer, so the actual error - "Connection refused", "401
+ * Unauthorized", "Invalid data found" - was always the part that got dropped.
+ */
+function ffmpegFailureReason(stderr) {
+  const noise =
+    /^(ffmpeg version|\s*built with|\s*configuration:|\s*lib[a-z]+\s+\d|\s*Input #|\s*Stream #|\s*Metadata:|\s*encoder\s*:)/;
+  const lines = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim() && !noise.test(l) && !l.includes('--enable-'));
+  if (!lines.length) return `no diagnostic output from ffmpeg`;
+  return lines.slice(-2).join(' | ').slice(0, 300);
+}
+
+/**
+ * Queue the next attempt for a camera, with backoff and rate-limited logging.
+ * `useHd` picks which stream the next attempt uses, preserving the existing
+ * sub-stream -> main-stream alternation.
+ */
+function scheduleRtspRestart(camNum, useHd, reason) {
+  const st = rtspRetryState[camNum];
+  st.consecutive += 1;
+  st.sinceLastLog += 1;
+
+  const delay = Math.min(
+    RTSP_RETRY_BASE_MS * 2 ** (st.consecutive - 1),
+    RTSP_RETRY_MAX_MS
+  );
+  // Spread the two cameras out so they never retry in lockstep.
+  const jitter = Math.floor(Math.random() * 500);
+
+  const now = Date.now();
+  const quiet = st.consecutive > RTSP_VERBOSE_FAILURES;
+  if (!quiet || now - st.lastLoggedAt >= RTSP_LOG_QUIET_MS) {
+    const suffix = quiet
+      ? ` (${st.sinceLastLog} more attempts since the last line; ${st.consecutive} in a row)`
+      : '';
+    console.warn(
+      `[CCTV-BRIDGE] Cam ${camNum} RTSP failed: ${reason}. Next try in ${Math.round(
+        (delay + jitter) / 1000
+      )}s${suffix}`
+    );
+    st.lastLoggedAt = now;
+    st.sinceLastLog = 0;
+  }
+
+  setTimeout(() => startRtspWorker(camNum, useHd), delay + jitter);
+}
+
+/** A frame arrived: the camera is healthy again, so drop back to fast retries. */
+function noteRtspRecovered(camNum) {
+  const st = rtspRetryState[camNum];
+  if (st.consecutive > 0) {
+    console.log(
+      `[CCTV-BRIDGE] Cam ${camNum} recovered after ${st.consecutive} failed attempt(s).`
+    );
+  }
+  st.consecutive = 0;
+  st.sinceLastLog = 0;
+  st.lastLoggedAt = 0;
+}
+
+/**
  * High-Performance Persistent RTSP Worker using FFmpeg image2pipe
  * Streams JPEGs in real-time (~25 FPS, <50ms latency)
  */
@@ -296,17 +384,19 @@ function startRtspWorker(camNum, useHd = false) {
   let stderrBuffer = '';
 
   proc.stderr.on('data', (d) => {
-    stderrBuffer = (stderrBuffer + d.toString()).slice(-800);
+    stderrBuffer = (stderrBuffer + d.toString()).slice(-4000);
   });
 
   // Watchdog: 12 seconds grace for initial handshake/I-frame, 6 seconds once streaming
   const watchdog = setInterval(() => {
     const timeoutMs = hasReceivedAnyFrames ? 6000 : 12000;
     if (Date.now() - lastFrameTime > timeoutMs) {
-      console.warn(`[CCTV-BRIDGE] Cam ${camNum} RTSP watchdog: No frames for ${timeoutMs / 1000}s. Restarting worker...`);
-      if (stderrBuffer) {
-        console.warn(`[CCTV-BRIDGE] Cam ${camNum} FFmpeg last log:\n${stderrBuffer.trim()}`);
-      }
+      // Killing the worker makes 'close' fire, which schedules the restart -
+      // so this only reports the stall, and reports it in one line rather
+      // than dumping ffmpeg's version banner.
+      console.warn(
+        `[CCTV-BRIDGE] Cam ${camNum} RTSP watchdog: no frames for ${timeoutMs / 1000}s (${ffmpegFailureReason(stderrBuffer)}). Restarting worker...`
+      );
       clearInterval(watchdog);
       try { proc.kill('SIGKILL'); } catch {}
     }
@@ -314,6 +404,7 @@ function startRtspWorker(camNum, useHd = false) {
 
   proc.stdout.on('data', (chunk) => {
     lastFrameTime = Date.now();
+    if (!hasReceivedAnyFrames) noteRtspRecovered(camNum);
     hasReceivedAnyFrames = true;
     buffer = Buffer.concat([buffer, chunk]);
 
@@ -351,20 +442,33 @@ function startRtspWorker(camNum, useHd = false) {
     }
   });
 
-  proc.on('close', (code) => {
+  // 'error' and 'close' can both fire for one worker; restart exactly once.
+  let settled = false;
+  const settle = (reason, nextUsesHd) => {
+    if (settled) return;
+    settled = true;
     clearInterval(watchdog);
-    console.warn(`[CCTV-BRIDGE] RTSP worker for Cam ${camNum} stopped (exit code: ${code}).`);
-    if (!hasReceivedAnyFrames && !useHd) {
-      console.warn(`[CCTV-BRIDGE] Sub-stream failed for Cam ${camNum}. Trying Main-stream (subtype=0) in 2s...`);
-      setTimeout(() => startRtspWorker(camNum, true), 2000);
-    } else {
-      setTimeout(() => startRtspWorker(camNum, false), 2000);
-    }
+    scheduleRtspRestart(camNum, nextUsesHd, reason);
+  };
+
+  proc.on('close', (code) => {
+    // A worker that never produced a frame failed to connect, and ffmpeg's own
+    // stderr says why - that reason used to be discarded on this path, which is
+    // why thousands of these left nothing to go on. One that WAS streaming and
+    // then stopped is a drop, not a misconfiguration, and retries immediately
+    // because the counter was reset by the first frame.
+    const reason = hasReceivedAnyFrames
+      ? `stream ended after streaming (exit code ${code})`
+      : `could not start (exit code ${code}): ${ffmpegFailureReason(stderrBuffer)}`;
+    // Alternate sub-stream -> main-stream while nothing has ever come through.
+    settle(reason, !hasReceivedAnyFrames && !useHd);
   });
 
   proc.on('error', (err) => {
-    clearInterval(watchdog);
-    console.error(`[CCTV-BRIDGE] Cam ${camNum} worker error: ${err.message}. Retrying...`);
+    // Spawn itself failed (ffmpeg missing or not executable). This path used to
+    // clear the watchdog and return WITHOUT scheduling anything, so the camera
+    // stayed dead until the bridge was restarted by hand.
+    settle(`worker could not be started: ${err.message}`, useHd);
   });
 }
 

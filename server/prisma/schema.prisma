@@ -680,6 +680,11 @@ model Transport {
   pincode               String?
   gstin                 String?
   contactPerson         String?
+  // The person behind `phone2`. An agency is often two people who both need
+  // telling - Madhupuri has a manager on `phone` and the owner on `phone2` -
+  // and with one name field the second number showed up unattributed, or worse,
+  // under the first person's name and title.
+  contactPerson2        String?
   // Default retention per trip (e.g. ₹3,000 for Surya Road Lines, ₹0 for KNM)
   defaultRetention      Decimal       @default(0) @db.Decimal(12, 2)
   // Lorry association fee this agency's trips carry, in ₹ per trip (₹300 for

@@ -363,6 +363,13 @@ export function TransportLedger({
 
   const ownerName = transport?.contactPerson?.trim() || '';
   const phones = [transport?.phone, transport?.phone2].map((p) => (p || '').trim()).filter(Boolean);
+  // Who is told about this agency's money: one row per number on file, each
+  // under its own person's name. An agency is often two people - a manager and
+  // the owner - and both get every message, so both belong on this card.
+  const contacts = [
+    { name: transport?.contactPerson?.trim() || '', phone: (transport?.phone || '').trim() },
+    { name: transport?.contactPerson2?.trim() || '', phone: (transport?.phone2 || '').trim() },
+  ].filter((c) => c.phone);
   const address = [transport?.address, transport?.city, transport?.state].map((p) => (p || '').trim()).filter(Boolean).join(', ');
 
   const exportColumns: ExportColumn<LedgerEntry>[] = [
@@ -430,12 +437,24 @@ export function TransportLedger({
             </div>
             {transport?.payToOwner ? (
               <div className="space-y-1.5 text-sm">
-                <Info label="Owner" value={ownerName || `${transportName} (Owner)`} />
-                {phones[0] ? <Info label="WhatsApp" value={phones[0]} mono copy /> : (
-                  <p className="text-xs text-muted-foreground italic">No owner number on file yet.</p>
+                {contacts.length > 0 ? (
+                  contacts.map((c, i) => (
+                    <Info
+                      key={c.phone}
+                      label={c.name || (i === 0 ? 'Contact' : 'Second contact')}
+                      value={c.phone}
+                      mono
+                      copy
+                    />
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">No number on file yet.</p>
                 )}
                 <p className="text-[11px] text-muted-foreground leading-snug pt-1 border-t">
-                  Every lorry is settled on this one account - freight receipts go to the owner, never the driver.
+                  Every lorry is settled on this one account.{' '}
+                  {contacts.length > 1
+                    ? 'Both contacts get every receipt - never the driver.'
+                    : 'Freight receipts go to this contact, never the driver.'}
                 </p>
                 <Button size="sm" className="w-full mt-1" onClick={openPayDialog} disabled={!transport?.id}>
                   <Banknote className="h-4 w-4 mr-1.5" />
@@ -651,10 +670,15 @@ export function TransportLedger({
             )}
 
             <p className="text-[11px] text-muted-foreground leading-snug">
-              {phones[0] ? (
+              {contacts.length > 0 ? (
                 <>
                   A WhatsApp receipt goes to{' '}
-                  <strong>{ownerName || transportName}</strong> on {phones[0]}
+                  {contacts.map((c, i) => (
+                    <span key={c.phone}>
+                      {i > 0 && (i === contacts.length - 1 ? ' and ' : ', ')}
+                      <strong>{c.name || transportName}</strong> ({c.phone})
+                    </span>
+                  ))}
                   {payScreenshot
                     ? ', with the screenshot attached'
                     : ' - attach a screenshot above to send it with the receipt'}

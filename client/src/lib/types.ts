@@ -184,6 +184,8 @@ export interface Transport {
   pincode?: string | null;
   gstin?: string | null;
   contactPerson?: string | null;
+  /** The person behind phone2 - an agency's second contact, e.g. its owner. */
+  contactPerson2?: string | null;
   defaultRetention: string | number;
   /**
    * Mandatory lorry association fee per trip, in rupees. Above zero it is

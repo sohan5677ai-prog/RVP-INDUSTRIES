@@ -30,6 +30,8 @@ export const createTransportSchema = z.object({
   pincode: optionalText,
   gstin: optionalText,
   contactPerson: optionalText,
+  /** The person behind phone2 - see Transport.contactPerson2. */
+  contactPerson2: optionalText,
   defaultRetention: z.union([z.number(), z.string()]).transform((v) => Number(v) || 0).default(0),
   /**
    * Mandatory lorry association fee per trip (0 = this agency carries none).

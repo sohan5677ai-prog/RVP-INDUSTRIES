@@ -1,10 +1,19 @@
 import type { Transport } from './types';
 
 export interface TransportOwnerPayee {
-  /** Shown on the receipt dialog, e.g. "Rakesh (Madhupuri Transport)". */
+  /** Shown on the receipt dialog, e.g. "Praveen (Sree Madhupuri Transport)". */
   name: string;
-  /** The owner's WhatsApp number. Empty when the agency has none on file yet. */
+  /** The first number to tell. Empty when the agency has none on file yet. */
   phone: string;
+  /**
+   * The agency's second number, when it has one. An agency is often two people
+   * - Madhupuri has a manager and an owner - and both must get every message
+   * about it, so a single `phone` here was quietly cutting one of them out.
+   * Empty when there is no second number, or when it repeats the first.
+   */
+  phone2: string;
+  /** Both numbers, de-duplicated: what a send should actually address. */
+  phones: string[];
 }
 
 /**
@@ -20,8 +29,17 @@ export interface TransportOwnerPayee {
  */
 export function ownerPayeeOf(t?: Partial<Transport> | null): TransportOwnerPayee | null {
   if (!t?.payToOwner) return null;
-  const phone = String(t.phone || t.phone2 || '').trim();
   const person = String(t.contactPerson || '').trim();
   const agency = String(t.name || 'Transport').trim();
-  return { name: person ? `${person} (${agency})` : `${agency} (Owner)`, phone };
+  const phones: string[] = [];
+  for (const raw of [t.phone, t.phone2]) {
+    const p = String(raw || '').trim();
+    if (p && !phones.includes(p)) phones.push(p);
+  }
+  return {
+    name: person ? `${person} (${agency})` : `${agency} (Owner)`,
+    phone: phones[0] ?? '',
+    phone2: phones[1] ?? '',
+    phones,
+  };
 }

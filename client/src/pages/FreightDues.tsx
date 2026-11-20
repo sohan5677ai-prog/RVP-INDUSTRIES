@@ -133,7 +133,7 @@ interface FreightRow {
    * .payToOwner): the money and the freight receipt go to this one person, so
    * the driver's number is never the recipient however it was captured.
    */
-  ownerPayee?: { name: string; phone: string } | null;
+  ownerPayee?: { name: string; phone: string; phone2: string; phones: string[] } | null;
   kind?: 'Husk' | 'Seed' | 'Dust';
   weightKg?: number;
   rawDispatchId?: string;
@@ -1863,6 +1863,9 @@ export default function FreightDuesPage() {
     const ownerPayee = !isKnm ? (row.ownerPayee ?? null) : null;
     let driverPhone = isKnm ? '9440416639' : (ownerPayee ? (ownerPayee.phone || null) : (row.driverPhone || null));
     let driverName = isKnm ? 'KNM Transport (Reddy)' : (ownerPayee ? ownerPayee.name : (row.driverName || null));
+    // The agency's second contact, where it has one. A driver has no second
+    // number, so this stays null for an ordinary trip.
+    const driverPhone2 = !isKnm && ownerPayee ? (ownerPayee.phone2 || null) : null;
     if (!isKnm && !ownerPayee && !driverPhone && row.lorry) {
       const cv = findCompanyVehicle(row.lorry, company?.companyVehicles);
       if (cv?.driverPhone) {
@@ -1883,6 +1886,7 @@ export default function FreightDuesPage() {
       date: payDt || row.date,
       lorryNumber: row.lorry || '-',
       driverPhone,
+      driverPhone2,
       driverName,
       ownerPhone: company?.ownerWhatsappNumber || null,
       destination: row.destination,

@@ -95,7 +95,7 @@ async function resolveLorryPaymentDetails(data: {
   driverPhone?: string | null;
   driverName?: string | null;
   screenshotUrl?: string | null;
-}): Promise<{ details: LorryPaymentDetails; phone: string | null; name: string } | null> {
+}): Promise<{ details: LorryPaymentDetails; phone: string | null; phone2: string | null; name: string } | null> {
   const lorryNo = data.lorryNumber?.trim() || null;
   if (!lorryNo) return null;
 
@@ -113,6 +113,8 @@ async function resolveLorryPaymentDetails(data: {
   let netPayable = 0;
   let destination = '-';
   let phone: string | null = data.driverPhone?.trim() || null;
+  /** A second contact to tell, set only when the payee is a two-contact agency. */
+  let phone2: string | null = null;
   let name = data.driverName?.trim() ? `${data.driverName.trim()} (Lorry ${lorryNo})` : `Transporter (Lorry ${lorryNo})`;
 
   let foundTrip = false;
@@ -146,7 +148,14 @@ async function resolveLorryPaymentDetails(data: {
       otherDeductions = Math.max(0, transportRet + deductions - additions);
       netPayable = Math.round((grossFreight + additions - (kata + hamali + transportRet + deductions)) * 100) / 100;
       destination = dispatch.saleOrder?.destination || dispatch.saleOrder?.buyer?.city || '-';
-      if (!phone) phone = dispatch.driverPhone || dispatch.transport?.phone || null;
+      if (!phone) {
+        // A driver has one number; an agency can have two, and when the agency
+        // is who we fall back to, both of its contacts are told.
+        phone = dispatch.driverPhone || dispatch.transport?.phone || null;
+        if (!dispatch.driverPhone && dispatch.transport?.phone) {
+          phone2 = dispatch.transport.phone2?.trim() || null;
+        }
+      }
       if (dispatch.driverName && !data.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
     }
   }
@@ -211,7 +220,14 @@ async function resolveLorryPaymentDetails(data: {
       otherDeductions = Math.max(0, transportRet + deductions - additions);
       netPayable = Math.round((grossFreight + additions - (kata + hamali + transportRet + deductions)) * 100) / 100;
       destination = dispatch.saleOrder?.destination || dispatch.saleOrder?.buyer?.city || '-';
-      if (!phone) phone = dispatch.driverPhone || dispatch.transport?.phone || null;
+      if (!phone) {
+        // A driver has one number; an agency can have two, and when the agency
+        // is who we fall back to, both of its contacts are told.
+        phone = dispatch.driverPhone || dispatch.transport?.phone || null;
+        if (!dispatch.driverPhone && dispatch.transport?.phone) {
+          phone2 = dispatch.transport.phone2?.trim() || null;
+        }
+      }
       if (dispatch.driverName && !data.driverName) name = `${dispatch.driverName} (Lorry ${lorryNo})`;
     }
   }
@@ -293,6 +309,7 @@ async function resolveLorryPaymentDetails(data: {
       isKnm: isKnmLorry,
     },
     phone,
+    phone2,
     name,
   };
 }
@@ -493,6 +510,7 @@ export async function createPayment(req: Request, res: Response) {
           screenshotUrl,
         });
         phone = lorryRes?.phone ?? null;
+        phone2 = lorryRes?.phone2 ?? null;
       }
     } else if (data.partyId) {
       const party = await prisma.party.findUnique({ where: { id: data.partyId } });

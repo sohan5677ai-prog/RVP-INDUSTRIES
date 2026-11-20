@@ -181,8 +181,24 @@ export async function resolveWishRecipients(opts: {
       select: { id: true, name: true, phone: true, phone2: true },
     });
     for (const t of transports) {
-      const phone = t.phone?.trim() || t.phone2?.trim();
-      if (phone) recipients.push({ group: 'TRANSPORT', id: t.id, name: t.name, phone, waLanguage: 'EN' });
+      // Both numbers, not the first one that answers. An agency often has two
+      // people who both need to hear from us - Madhupuri has a manager and an
+      // owner - and `phone || phone2` silently greeted only one of them.
+      // De-duplicated so one number typed into both columns is not greeted
+      // twice, and given a per-number id so a send log can tell them apart.
+      const seen = new Set<string>();
+      for (const raw of [t.phone, t.phone2]) {
+        const phone = raw?.trim();
+        if (!phone || seen.has(phone)) continue;
+        seen.add(phone);
+        recipients.push({
+          group: 'TRANSPORT',
+          id: seen.size === 1 ? t.id : `${t.id}:${seen.size}`,
+          name: t.name,
+          phone,
+          waLanguage: 'EN',
+        });
+      }
     }
   }
 
@@ -269,8 +285,14 @@ export async function previewRecipients(req: Request, res: Response) {
         },
       })
     : 0;
-  const transportsWithPhone = recipients.filter((r) => r.group === 'TRANSPORT').length;
-  const transportsMissingPhone = Math.max(0, totalTransports - transportsWithPhone);
+  // An agency with a manager AND an owner contributes two recipients, so these
+  // two figures mean different things and must be counted differently: the
+  // "missing" tally compares AGENCIES against agencies (hence the id before the
+  // ':n' suffix), while "withPhone" is how many messages will actually go out.
+  const transportRecipients = recipients.filter((r) => r.group === 'TRANSPORT');
+  const transportsWithPhone = transportRecipients.length;
+  const transportsReached = new Set(transportRecipients.map((r) => r.id.split(':')[0])).size;
+  const transportsMissingPhone = Math.max(0, totalTransports - transportsReached);
 
   const driversCount = recipients.filter((r) => r.group === 'DRIVER').length;
   const ownersCount = recipients.filter((r) => r.group === 'OWNER').length;

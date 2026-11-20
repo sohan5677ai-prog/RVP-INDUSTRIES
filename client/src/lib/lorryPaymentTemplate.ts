@@ -2,6 +2,12 @@ export interface LorryPaymentData {
   date?: string | Date | null;
   lorryNumber: string;
   driverPhone?: string | null;
+  /**
+   * A second number that must get the same receipt. Set for a single-owner
+   * fleet whose agency has two contacts on file - Madhupuri's manager and its
+   * owner - both of whom are told about every payment to the agency.
+   */
+  driverPhone2?: string | null;
   driverName?: string | null;
   ownerPhone?: string | null;
   transporterPhone?: string | null;

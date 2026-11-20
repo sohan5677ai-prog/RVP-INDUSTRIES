@@ -176,43 +176,78 @@ function LorryPaymentShareDialogInner({
       return;
     }
 
+    // An agency can be two people - Madhupuri has a manager and an owner - and
+    // both are told about every payment to it. The second number rides along
+    // with whatever is in the box, so editing the recipient above still works:
+    // it replaces the first target, it does not cancel the second.
+    const targets = [targetPhone];
+    const second = (data.driverPhone2 ?? '').trim();
+    if (second && second !== targetPhone) targets.push(second);
+
     setSending(true);
     try {
-      const res = await api<{ ok: boolean; message: string }>('/whatsapp/lorry-payment/send-summary', {
-        method: 'POST',
-        body: {
-          lorryDetails: {
-            date: data.date,
-            lorryNumber: data.lorryNumber,
-            destination: data.destination,
-            grossFreight: data.grossFreight,
-            kata: data.kata,
-            hamali: data.hamali,
-            otherDeductions: data.otherDeductions,
-            netPayable: data.netPayable,
-            amountPaid: data.amountPaid,
-            reference: data.reference,
-            balance: data.balance,
-            isKnm,
-          },
-          targetPhone,
-          language: selectedLang,
-        },
-      });
+      const lorryDetails = {
+        date: data.date,
+        lorryNumber: data.lorryNumber,
+        destination: data.destination,
+        grossFreight: data.grossFreight,
+        kata: data.kata,
+        hamali: data.hamali,
+        otherDeductions: data.otherDeductions,
+        netPayable: data.netPayable,
+        amountPaid: data.amountPaid,
+        reference: data.reference,
+        balance: data.balance,
+        isKnm,
+      };
 
-      if (res.ok) {
-        toast.success(
-          res.message ||
-            (isKnm
-              ? 'WhatsApp receipt sent to KNM Transport (Reddy) & copy delivered to Shabari!'
-              : isOwnerPayee
-              ? `WhatsApp receipt sent to ${driverName || 'the fleet owner'} & copy delivered to Shabari!`
-              : 'WhatsApp receipt sent to driver & copy delivered to Shabari!')
-        );
-        onOpenChange(false);
-      } else {
-        toast.error(res.message || 'Failed to send WhatsApp message');
+      // One call per recipient, in sequence. The endpoint takes a single
+      // targetPhone, and each send is logged against its own number - so a
+      // failure to one of the two is visible rather than hidden behind the
+      // other's success.
+      const results: { phone: string; ok: boolean; message?: string }[] = [];
+      for (const to of targets) {
+        try {
+          const res = await api<{ ok: boolean; message: string }>('/whatsapp/lorry-payment/send-summary', {
+            method: 'POST',
+            body: { lorryDetails, targetPhone: to, language: selectedLang },
+          });
+          results.push({ phone: to, ok: !!res.ok, message: res.message });
+        } catch (err: any) {
+          results.push({ phone: to, ok: false, message: err?.message });
+        }
       }
+
+      const sent = results.filter((r) => r.ok);
+      const failed = results.filter((r) => !r.ok);
+
+      if (sent.length === 0) {
+        toast.error(failed[0]?.message || 'Failed to send WhatsApp message');
+        return;
+      }
+
+      if (failed.length > 0) {
+        // Partial delivery is its own outcome: say who missed out, because
+        // "sent" over a half-failure is how one of the two silently stops
+        // being told anything.
+        toast.warning(
+          `Receipt sent to ${sent.map((r) => r.phone).join(', ')}, but FAILED for ${failed
+            .map((r) => r.phone)
+            .join(', ')}. Send that one again.`
+        );
+      } else {
+        toast.success(
+          targets.length > 1
+            ? `WhatsApp receipt sent to both ${driverName || 'agency'} contacts (${targets.join(', ')}) & copy delivered to Shabari!`
+            : results[0]?.message ||
+              (isKnm
+                ? 'WhatsApp receipt sent to KNM Transport (Reddy) & copy delivered to Shabari!'
+                : isOwnerPayee
+                ? `WhatsApp receipt sent to ${driverName || 'the fleet owner'} & copy delivered to Shabari!`
+                : 'WhatsApp receipt sent to driver & copy delivered to Shabari!')
+        );
+      }
+      onOpenChange(false);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to send WhatsApp message');
     } finally {

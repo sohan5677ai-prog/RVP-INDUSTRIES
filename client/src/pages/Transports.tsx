@@ -83,6 +83,7 @@ const transportSchema = z.object({
   phone2: z.string().trim().optional(),
   email: z.string().trim().optional(),
   contactPerson: z.string().trim().optional(),
+  contactPerson2: z.string().trim().optional(),
   address: z.string().trim().optional(),
   city: z.string().trim().optional(),
   state: z.string().trim().optional(),
@@ -136,6 +137,7 @@ export default function Transports() {
       phone2: '',
       email: '',
       contactPerson: '',
+      contactPerson2: '',
       address: '',
       city: '',
       state: '',
@@ -160,6 +162,7 @@ export default function Transports() {
       phone2: '',
       email: '',
       contactPerson: '',
+      contactPerson2: '',
       address: '',
       city: '',
       state: '',
@@ -191,6 +194,7 @@ export default function Transports() {
       phone2: t.phone2 ?? '',
       email: t.email ?? '',
       contactPerson: t.contactPerson ?? '',
+      contactPerson2: t.contactPerson2 ?? '',
       address: t.address ?? '',
       city: t.city ?? '',
       state: t.state ?? '',
@@ -605,10 +609,27 @@ export default function Transports() {
                   name="contactPerson"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Contact Person</FormLabel>
+                      <FormLabel>Contact Person (Phone 1)</FormLabel>
                       <FormControl>
                         <Input {...field} placeholder="e.g. Jagan" />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="contactPerson2"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Second Contact (Phone 2)</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="e.g. Manish Shah (Owner)" />
+                      </FormControl>
+                      <p className="text-[11px] text-muted-foreground">
+                        Both numbers get every WhatsApp message about this agency.
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}

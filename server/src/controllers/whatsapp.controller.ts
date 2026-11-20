@@ -2299,11 +2299,22 @@ export async function getLorryContactInfo(req: Request, res: Response) {
   if (ownerFleetTrip?.transport) {
     const agency = ownerFleetTrip.transport;
     const person = (agency.contactPerson || '').trim();
-    const agencyPhone = clean10DigitPhone(agency.phone || agency.phone2 || '');
+    // Both of the agency's numbers, not the first one that answers: an agency
+    // can be two people (Madhupuri has a manager and an owner) and both are
+    // told about its freight money. De-duplicated, so one number entered in
+    // both columns does not produce two sends.
+    const agencyPhones: string[] = [];
+    for (const raw2 of [agency.phone, agency.phone2]) {
+      const cleaned = clean10DigitPhone(raw2 || '');
+      if (cleaned && !agencyPhones.includes(cleaned)) agencyPhones.push(cleaned);
+    }
+    const agencyPhone = agencyPhones[0] ?? '';
     return res.json({
       lorryNumber: ownerFleetTrip.vehicleNumber || raw,
       driverName: person ? `${person} (${agency.name})` : `${agency.name} (Owner)`,
       driverPhone: agencyPhone || null,
+      driverPhone2: agencyPhones[1] ?? null,
+      agencyPhones,
       ownerPhone,
       transporterName: agency.name,
       transporterPhone: agencyPhone || null,

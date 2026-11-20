@@ -199,7 +199,12 @@ export async function getGstReport(req: Request, res: Response) {
             arrivalDate: { gte: GST_PURCHASES_START, lt: from },
             purchaseOrder: { hasGst: true },
           },
-          include: { purchaseOrder: true },
+          // Everything before the period, read only to total the GST on it.
+          select: {
+            billingWeightKg: true,
+            billingRatePerKg: true,
+            purchaseOrder: { select: { pricePerKg: true } },
+          },
         });
   const priorPurchasesGst = sum(priorStockIns, (s) => {
     const { amount: gst } = purchaseGst({
@@ -211,6 +216,11 @@ export async function getGstReport(req: Request, res: Response) {
     return gst;
   });
 
+  // Every dispatch ever invoiced before the period - an unbounded sweep that
+  // grows with the business, and whose rows are read for one column. Select it
+  // alone rather than hydrating the whole SaleDispatch each time a GST return
+  // is opened. (A DB-side _sum would change the float accumulation order, and
+  // `sum` below rounds once at the end, so the reduce stays.)
   const priorDispatches = await prisma.saleDispatch.findMany({
     where: {
       gstAmount: { gt: 0 },
@@ -219,16 +229,19 @@ export async function getGstReport(req: Request, res: Response) {
         { AND: [{ invoiceDate: null }, { dispatchDate: { lt: from } }] },
       ],
     },
+    select: { gstAmount: true },
   });
   const priorDispatchesGst = sum(priorDispatches, (d) => Number(d.gstAmount));
 
   const priorCreditNotes = await prisma.creditNote.findMany({
     where: { status: 'ISSUED', noteDate: { lt: from } },
+    select: { gstAmount: true },
   });
   const priorCnGst = sum(priorCreditNotes, (n) => Number(n.gstAmount));
 
   const priorDebitNotes = await prisma.debitNote.findMany({
     where: { status: 'ISSUED', noteDate: { lt: from } },
+    select: { gstAmount: true },
   });
   const priorDnGst = sum(priorDebitNotes, (n) => Number(n.gstAmount));
 

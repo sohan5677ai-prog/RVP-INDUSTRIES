@@ -356,11 +356,39 @@ export class InventoryService {
    * the hamali.
    */
   static async computeBlackSeedRows() {
+    // Every purchase ever recorded, so the shape matters: `include` here pulled
+    // the whole Purchase row, the whole Verification, the whole StockIn, the
+    // whole PurchaseOrder and all ~40 Party columns, to read a dozen fields and
+    // throw the rest away a line later. These rows are mapped into the shape
+    // below before anything sees them, so narrowing the read changes nothing
+    // but the resident size - which on a 512 MB instance is the difference
+    // between a slow page and a restart.
     const purchases = await prisma.purchase.findMany({
       orderBy: { createdAt: 'desc' },
-      include: {
-        verification: true,
-        stockIn: { include: { purchaseOrder: { include: { party: true } } } },
+      select: {
+        id: true,
+        netWeightKg: true,
+        freightCharge: true,
+        freightTonnageKg: true,
+        hamaliCharge: true,
+        bunkerPlace: true,
+        verification: { select: { pricePerKg: true } },
+        stockIn: {
+          select: {
+            arrivalDate: true,
+            invoiceNumber: true,
+            lorryNumber: true,
+            loadingLocation: true,
+            purchaseOrder: {
+              select: {
+                pricePerKg: true,
+                priceType: true,
+                poNumber: true,
+                party: { select: { name: true } },
+              },
+            },
+          },
+        },
       },
     });
 

@@ -291,7 +291,16 @@ async function runDeferredDispatchReminders(opts: JobOpts = {}): Promise<string>
 
   const orders = await prisma.saleOrder.findMany({
     where: { status: { in: ['PENDING', 'PARTIAL'] }, closedAt: null },
-    include: { buyer: { select: { name: true } }, dispatches: { select: { weightKg: true } } },
+    select: {
+      id: true,
+      product: true,
+      tonnageKg: true,
+      saleDate: true,
+      reminderDate: true,
+      closedAt: true,
+      buyer: { select: { name: true } },
+      dispatches: { select: { weightKg: true } },
+    },
   });
 
   for (const order of orders) {

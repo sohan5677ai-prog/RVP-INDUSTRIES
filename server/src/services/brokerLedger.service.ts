@@ -41,7 +41,12 @@ export async function buildBrokerLedgerData(brokerId: string): Promise<BrokerLed
   const [saleOrders, payments] = await Promise.all([
     prisma.saleOrder.findMany({
       where: { brokerId },
-      include: { dispatches: true, buyer: { select: { name: true } } },
+      select: {
+        buyer: { select: { name: true } },
+        dispatches: {
+          select: { id: true, dispatchDate: true, invoiceNumber: true, vehicleNumber: true },
+        },
+      },
     }),
     prisma.payment.findMany({ where: { type: 'BROKER', brokerId, cancelledAt: null } }),
   ]);

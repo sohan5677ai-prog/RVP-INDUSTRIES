@@ -129,11 +129,26 @@ export async function computeBuyerDues(
   asOf: Date = new Date(),
   opts: { buyerId?: string } = {},
 ): Promise<DuesPortfolio> {
+  // Unscoped (no buyerId) this is every dispatch ever made, and the dues pages
+  // ask for exactly that - they FIFO across the full history, so it cannot be
+  // capped. What it can be is narrow: the loop below reads five fields off the
+  // order and builds a DuesPortfolio, so no caller ever sees these rows.
   const dispatches = await prisma.saleDispatch.findMany({
     where: opts.buyerId ? { saleOrder: { buyerId: opts.buyerId } } : undefined,
-    include: {
+    select: {
+      id: true,
+      weightKg: true,
+      gstAmount: true,
+      status: true,
+      dispatchDate: true,
+      deliveredDate: true,
+      invoiceNumber: true,
+      vehicleNumber: true,
       saleOrder: {
-        include: {
+        select: {
+          ratePerKg: true,
+          dueDays: true,
+          product: true,
           buyer: { select: { id: true, name: true, phone: true, phone2: true, waLanguage: true } },
           broker: { select: { id: true, name: true, phone: true, waLanguage: true } },
         },

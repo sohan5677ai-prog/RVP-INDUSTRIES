@@ -222,7 +222,13 @@ export async function computeProfitLossSummary() {
     computeHuskPool(),
     prisma.saleOrder.findMany({
       where: { product: { not: 'PAPPU' } },
-      include: { dispatches: { select: { weightKg: true } } },
+      // Three fields feed the byproduct income map below; the rest of the order
+      // row is dead weight on every P&L load.
+      select: {
+        product: true,
+        ratePerKg: true,
+        dispatches: { select: { weightKg: true } },
+      },
     }),
     computePappuOrderMargins(),
   ]);
@@ -389,16 +395,66 @@ type ReceiptRow = Awaited<ReturnType<typeof loadReceipts>>[number];
 type DustPurchaseRow = Awaited<ReturnType<typeof loadDustPurchases>>[number];
 type CreditNoteRow = Awaited<ReturnType<typeof loadCreditNotes>>[number];
 
+// Called with no party id for the all-parties ledger, which is every PO and
+// every sale order ever raised with their whole chain hanging off them. The
+// rows never leave this module - buildPartyLedger turns them into LedgerTxn -
+// so they are read field by field rather than hydrated whole. Adding a field
+// to the builder means adding it here; the types below are derived from these
+// selects, so leaving it out is a compile error, not a runtime undefined.
 function loadPurchaseOrders(partyId?: string) {
   return prisma.purchaseOrder.findMany({
     where: partyId ? { partyId } : undefined,
-    include: {
-      stockIns: { include: { purchase: { include: { verification: true } } } },
+    select: {
+      partyId: true,
+      poNumber: true,
+      pricePerKg: true,
+      stockIns: {
+        select: {
+          id: true,
+          arrivalDate: true,
+          invoiceNumber: true,
+          lorryNumber: true,
+          rvpKataKg: true,
+          purchase: {
+            select: {
+              id: true,
+              verification: {
+                select: { finalWeightKg: true, pricePerKg: true, totalAmount: true },
+              },
+            },
+          },
+        },
+      },
     },
   });
 }
 function loadSales(buyerId?: string) {
-  return prisma.saleOrder.findMany({ where: buyerId ? { buyerId } : undefined, include: { dispatches: true, broker: true } });
+  return prisma.saleOrder.findMany({
+    where: buyerId ? { buyerId } : undefined,
+    select: {
+      buyerId: true,
+      ratePerKg: true,
+      product: true,
+      destination: true,
+      broker: { select: { name: true } },
+      dispatches: {
+        select: {
+          id: true,
+          dispatchDate: true,
+          deliveredDate: true,
+          receivedDate: true,
+          weightKg: true,
+          gstAmount: true,
+          tdsAmount: true,
+          status: true,
+          vehicleNumber: true,
+          invoiceNumber: true,
+          invoiceSeq: true,
+          invoiceFy: true,
+        },
+      },
+    },
+  });
 }
 
 // A broker literally named "RVP" marks the company's own order, not a real

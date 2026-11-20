@@ -36,7 +36,8 @@ export async function getBlackSeedStock(_req: Request, res: Response) {
     // used to project the pappu we are committed to producing (60% out-turn).
     prisma.purchaseOrder.findMany({
       where: { status: { not: 'CANCELLED' } },
-      include: { stockIns: { select: { rvpKataKg: true } } },
+      // Only the ordered-vs-arrived gap is wanted from every live PO.
+      select: { tonnageKg: true, stockIns: { select: { rvpKataKg: true } } },
     }),
   ]);
 
@@ -307,7 +308,19 @@ async function _computePappuOrderMargins() {
 
   const orders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
-    include: { buyer: true, dispatches: { select: { weightKg: true, excessOutKg: true, freightCharge: true } } },
+    select: {
+      id: true,
+      saleDate: true,
+      product: true,
+      tonnageKg: true,
+      ratePerKg: true,
+      destination: true,
+      freightRatePerTonne: true,
+      closedAt: true,
+      costFrozenAt: true,
+      buyer: { select: { name: true, destination: true } },
+      dispatches: { select: { weightKg: true, excessOutKg: true, freightCharge: true } },
+    },
     // id is the tie-break, not decoration: two orders on the SAME sale date would
     // otherwise come back in arbitrary Postgres order, and whichever the
     // allocator reached first took the scarce seed. That silently moved money

@@ -80,12 +80,51 @@ async function _computeUnifiedStockEngine(
 ): Promise<StockEngineResult> {
   const EPS = 1e-6;
 
+  // `select`, not `include`. This is every non-cancelled PO ever raised, each
+  // with its party, its stock-ins, their purchases and those purchases'
+  // verifications - the single largest object graph the server builds, and it
+  // grows with the business. `include: { party: true }` hydrates all ~40 Party
+  // columns (bank details, GSTIN, addresses, PINs) when the loop below reads
+  // six of them, and the same holds down the rest of the tree. Naming the
+  // fields is identical in behaviour and a fraction of the resident bytes.
+  //
+  // Anything added to the loop below must be added here, or it reads undefined.
   const purchaseOrders = await prisma.purchaseOrder.findMany({
     where: { status: { not: 'CANCELLED' } },
-    include: {
-      party: true,
+    select: {
+      id: true,
+      poNumber: true,
+      poDate: true,
+      pricePerKg: true,
+      priceType: true,
+      status: true,
+      plannedLocation: true,
+      tonnageKg: true,
+      party: {
+        select: {
+          id: true,
+          name: true,
+          state: true,
+          address: true,
+          phone: true,
+          phone2: true,
+        },
+      },
       stockIns: {
-        include: { purchase: { include: { verification: true } } },
+        select: {
+          loadingLocation: true,
+          arrivalDate: true,
+          lorryNumber: true,
+          purchase: {
+            select: {
+              id: true,
+              netWeightKg: true,
+              freightCharge: true,
+              freightTonnageKg: true,
+              verification: { select: { pricePerKg: true } },
+            },
+          },
+        },
       },
     },
     orderBy: { poDate: 'asc' },
@@ -246,6 +285,16 @@ async function _computeUnifiedStockEngine(
 
   const transfers = await prisma.stockTransfer.findMany({
     where: { toLocation: 'RVP' },
+    select: {
+      id: true,
+      transferDate: true,
+      fromLocation: true,
+      weightKg: true,
+      loadingHamali: true,
+      unloadingHamali: true,
+      transportCharge: true,
+      interestCharge: true,
+    },
     orderBy: { transferDate: 'asc' },
   });
   for (const t of transfers) {
@@ -335,7 +384,11 @@ async function _computeUnifiedStockEngine(
 
   const pappuOrders = await prisma.saleOrder.findMany({
     where: { product: 'PAPPU' },
-    include: {
+    select: {
+      id: true,
+      saleDate: true,
+      tonnageKg: true,
+      closedAt: true,
       dispatches: { select: { weightKg: true, excessOutKg: true } },
       buyer: { select: { name: true } },
     },

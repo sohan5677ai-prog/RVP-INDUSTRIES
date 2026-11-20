@@ -1591,7 +1591,12 @@ const LORRY_WORDS: Record<WaLanguage, [string, string]> = {
 async function loadPendingLoads(partyId: string, language: WaLanguage = 'EN') {
   const pendingPOs = await prisma.purchaseOrder.findMany({
     where: { partyId, status: 'PENDING' },
-    include: { stockIns: { select: { id: true } } },
+    select: {
+      poNumber: true,
+      pricePerKg: true,
+      lorryCount: true,
+      stockIns: { select: { id: true } },
+    },
     orderBy: { poDate: 'asc' },
   });
   const pos = pendingPOs

@@ -262,6 +262,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [selectedTransportId, setSelectedTransportId] = useState<string>('');
   const [transportProvider, setTransportProvider] = useState<string>('SURYA');
   const [customRetention, setCustomRetention] = useState('');
+  // Set the moment the user picks a transport by hand. The agency auto-resolved
+  // off the lorry's WhatsApp booking must never overwrite a deliberate choice -
+  // the office knows when a lorry has been swapped between agencies.
+  const [transportTouched, setTransportTouched] = useState(false);
   // Tonnes of the current lorry declared as XS (excess out). Blank until the
   // user opts in; pre-filled with the shortfall so the common case is one click.
   const [excessOutTonnes, setExcessOutTonnes] = useState('');
@@ -356,6 +360,42 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const dispatchBlocked =
     (needsExcessOut && excessOutKg < dispatchShortfallKg) || invalidSplitTransfer;
 
+  /** Put a transport into the dispatch form (select, code and retention). */
+  function applyTransport(t: Transport) {
+    setSelectedTransportId(t.id);
+    setTransportProvider(t.code || t.name);
+    setCustomRetention(String(Number(t.defaultRetention || 0)));
+  }
+
+  /**
+   * Which agency a lorry belongs to, from the WhatsApp booking that announced
+   * it. The booking carries no transport id - what it carries is the number the
+   * message came FROM, which is the transporter's own WhatsApp, so the agency
+   * is resolved on that phone (either of the two the directory holds), and on
+   * the agency name where a lookup gave one instead.
+   */
+  function findTransportByPhone(phone: string | null | undefined): Transport | null {
+    const want = clean10DigitPhone(phone);
+    if (want.length < 10) return null;
+    return (
+      (transportsList ?? []).find(
+        (t) => clean10DigitPhone(t.phone) === want || clean10DigitPhone(t.phone2) === want
+      ) ?? null
+    );
+  }
+
+  function findTransportByName(name: string | null | undefined): Transport | null {
+    const want = (name || '').trim().toLowerCase();
+    if (!want) return null;
+    const list = transportsList ?? [];
+    return (
+      list.find((t) => t.name.trim().toLowerCase() === want) ??
+      list.find((t) => (t.code || '').trim().toLowerCase() === want) ??
+      list.find((t) => t.name.toLowerCase().includes(want) || want.includes(t.name.toLowerCase())) ??
+      null
+    );
+  }
+
   /**
    * Fill the driver in from the lorry's WhatsApp booking as the number is typed.
    *
@@ -382,17 +422,35 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
           if (booking) {
             if (booking.driverName) setDriverName((cur) => cur.trim() || booking.driverName!);
             if (booking.driverPhone) setDriverPhone((cur) => cur.trim() || clean10DigitPhone(booking.driverPhone));
+            // The agency that sent the booking, unless the user has already
+            // picked one by hand. The dialog opens on a Surya default, so this
+            // is replacing a guess, not a decision.
+            const agency =
+              (booking.transportId
+                ? (transportsList ?? []).find((t) => t.id === booking.transportId)
+                : null) ??
+              findTransportByName(booking.transportName) ??
+              findTransportByPhone(booking.fromPhone);
+            if (agency && !transportTouched) applyTransport(agency);
           } else {
             // Fallback: If no active waiting confirmation, check past dispatches, tickets, or used bookings via contact-info
             api<{
               driverName?: string | null;
               driverPhone?: string | null;
+              transporterName?: string | null;
+              transporterPhone?: string | null;
               source?: string | null;
             }>(`/whatsapp/lorry/contact-info?lorryNumber=${encodeURIComponent(key)}`)
               .then((info) => {
                 if (cancelled || !info) return;
                 if (info.driverName) setDriverName((cur) => cur.trim() || info.driverName!);
                 if (info.driverPhone) setDriverPhone((cur) => cur.trim() || clean10DigitPhone(info.driverPhone));
+                // Same agency fill from the wider lookup: a KNM lorry, a
+                // single-owner fleet, or simply the agency this lorry last ran
+                // a dispatch under.
+                const agency =
+                  findTransportByName(info.transporterName) ?? findTransportByPhone(info.transporterPhone);
+                if (agency && !transportTouched) applyTransport(agency);
               })
               .catch(() => {});
           }
@@ -402,7 +460,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
         .catch(() => { if (!cancelled) setMatchedBooking(null); });
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [vehicleNumber, dispatchOrder]);
+  }, [vehicleNumber, dispatchOrder, transportsList, transportTouched]);
 
   function openDispatch(o: SaleOrder) {
     setDispatchOrder(o);
@@ -414,6 +472,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
     setDispatchTonnes(String(remainingKgOf(o) / 1000));
     setInternalWeightTonnes('');
     setDispatchDate(new Date().toISOString().slice(0, 10));
+    setTransportTouched(false);
     const defaultTransport = (transportsList ?? []).find((t) => t.code === 'SURYA' || t.name.toLowerCase().includes('surya')) || (transportsList ?? [])[0];
     if (defaultTransport) {
       setSelectedTransportId(defaultTransport.id);
@@ -1818,6 +1877,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                   {matchedBooking.messageDate && <span>· {shortDate(matchedBooking.messageDate)}</span>}
                   {matchedBooking.tonnageKg != null && <span>· {(matchedBooking.tonnageKg / 1000).toFixed(2)} t</span>}
                   {matchedBooking.freightAmount != null && <span>· {rupees(Number(matchedBooking.freightAmount))} quoted</span>}
+                  {matchedBooking.transportName && <span>· {matchedBooking.transportName}</span>}
                 </p>
               )}
               {/* Our own lorry, matched against the KNM vehicle directory in Settings. */}
@@ -1846,11 +1906,10 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
               <Select
                 value={selectedTransportId || transportProvider}
                 onValueChange={(val) => {
+                  setTransportTouched(true);
                   const t = (transportsList ?? []).find((x) => x.id === val);
                   if (t) {
-                    setSelectedTransportId(t.id);
-                    setTransportProvider(t.code || t.name);
-                    setCustomRetention(String(Number(t.defaultRetention || 0)));
+                    applyTransport(t);
                   } else {
                     setSelectedTransportId('');
                     setTransportProvider(val);

@@ -2230,7 +2230,36 @@ export async function listTransportConfirmations(req: Request, res: Response) {
 export async function lookupLorryConfirmation(req: Request, res: Response) {
   const raw = typeof req.query.lorryNumber === 'string' ? req.query.lorryNumber : '';
   const row = await findWaitingConfirmation(raw);
-  res.json(row ?? null);
+  if (!row) return res.json(null);
+  // Which agency this lorry is running under, so the dispatch dialog can select
+  // the transport the moment the number is typed instead of leaving the office
+  // to remember it off the message. A booking that came back against a loading
+  // slot already names the agency; everything else is resolved on the number
+  // the message came FROM, which is the transporter's own WhatsApp.
+  const agency = await resolveBookingTransport(row.dispatchSlotId, row.fromPhone);
+  res.json({ ...row, transportId: agency?.id ?? null, transportName: agency?.name ?? null });
+}
+
+/** The Transport behind a booking: its loading slot first, then the sender's number. */
+async function resolveBookingTransport(dispatchSlotId: string | null, fromPhone: string | null) {
+  if (dispatchSlotId) {
+    const slot = await prisma.dispatchSlot.findUnique({
+      where: { id: dispatchSlotId },
+      select: { transport: { select: { id: true, name: true } } },
+    });
+    if (slot?.transport) return slot.transport;
+  }
+  const want = clean10DigitPhone(fromPhone);
+  if (want.length < 10) return null;
+  const transports = await prisma.transport.findMany({
+    where: { active: true },
+    select: { id: true, name: true, phone: true, phone2: true },
+  });
+  return (
+    transports.find(
+      (t) => clean10DigitPhone(t.phone) === want || clean10DigitPhone(t.phone2) === want,
+    ) ?? null
+  );
 }
 
 /**

@@ -747,6 +747,9 @@ export interface LorryConfirmation {
   status: LorryConfirmationStatus;
   saleDispatchId: string | null;
   createdAt: string;
+  /** The agency behind this booking, resolved by the lookup endpoint. */
+  transportId?: string | null;
+  transportName?: string | null;
   // The shipment this booking went out on, embedded by the list endpoint.
   dispatch?: {
     id: string;

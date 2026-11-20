@@ -13,6 +13,11 @@ import { ACTIVE_DISPATCH_DAYS, normaliseVehicleNumber } from '../controllers/gps
  * the rest of the ERP down with it, so retention is not housekeeping here -
  * it is what keeps the feature affordable.
  *
+ * The windows below are therefore chosen against that 500 MB, not against what
+ * would be nice to keep. Both are overridable - GPS_PING_RETENTION_DAYS and
+ * GPS_PING_HARD_RETENTION_DAYS - and the defaults are what should be widened
+ * first if the database is ever paid for.
+ *
  * Two windows, because the two kinds of row are worth keeping for different
  * lengths of time:
  *
@@ -27,10 +32,26 @@ import { ACTIVE_DISPATCH_DAYS, normaliseVehicleNumber } from '../controllers/gps
  * which would otherwise hold its plate's trail open forever.
  */
 
-/** Short window: plates with nothing of ours on them. */
-const DEFAULT_RETENTION_DAYS = 30;
-/** Long window: applies to everything, our own open dispatches included. */
-const DEFAULT_HARD_RETENTION_DAYS = 90;
+/**
+ * Short window: plates with nothing of ours on them.
+ *
+ * Sized for the free 500 MB database rather than for the feature. A fleet of
+ * ninety lorries that are not ours writes about 26,000 thinned rows a day,
+ * roughly 10 MB with indexes - so every day of this window is a permanent
+ * 10 MB of somebody else's lorries. These rows exist so the office can see
+ * which vehicle is free today, and a week answers that as well as a month
+ * does.
+ */
+const DEFAULT_RETENTION_DAYS = 7;
+/**
+ * Long window: applies to everything, our own open dispatches included.
+ *
+ * The one window that cannot be cut to taste. The provider has no history
+ * endpoint, so a pruned row is gone for good and this is the only record of
+ * where a lorry went - six weeks still covers a delivery dispute argued long
+ * after the load was signed for.
+ */
+const DEFAULT_HARD_RETENTION_DAYS = 45;
 
 /**
  * Rows per `deleteMany`. A single unbounded delete over a month of backlog is

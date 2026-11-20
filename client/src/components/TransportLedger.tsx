@@ -6,6 +6,7 @@ import { invalidatePayments } from '@/lib/invalidatePayments';
 import { usePagedRows } from '@/lib/usePagedRows';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { ExportButtons } from '@/components/ExportButtons';
+import { ScreenshotUpload, type ExtractedTransaction } from '@/components/ScreenshotUpload';
 import type { ExportColumn } from '@/lib/export';
 import type { Payment, Transport } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
@@ -127,6 +128,11 @@ export function TransportLedger({
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAmount, setPayAmount] = useState('');
   const [payReference, setPayReference] = useState('');
+  // Proof of payment. Its presence is what decides the WhatsApp template the
+  // owner receives: PAYMENT_SENT carries the image, PAYMENT_SENT_TEXT does not.
+  const [payScreenshot, setPayScreenshot] = useState<File | null>(null);
+  // Remounts the drop zone on each open so a previous file's preview is gone.
+  const [payFormKey, setPayFormKey] = useState(0);
 
   const entries: LedgerEntry[] = useMemo(() => {
     // A freight payment is tagged with a lorry number, never with the agency,
@@ -293,32 +299,56 @@ export function TransportLedger({
   const payMutation = useMutation({
     mutationFn: () => {
       if (!transport?.id) throw new Error('No transport agency selected');
-      return api<Payment>('/payments', {
-        method: 'POST',
-        body: {
-          date: payDate,
-          amount: Number(payAmount) || 0,
-          // Outward freight is what an agency ledger is built from, and the
-          // same 20250 payable is what an on-account payment settles.
-          type: 'TRANSPORTER_OUTWARD',
-          transportId: transport.id,
-          payee: transportName,
-          reference: payReference || null,
-          description: `Freight payment on account - ${transportName}`,
-        },
-      });
+      const fields = {
+        date: payDate,
+        amount: Number(payAmount) || 0,
+        // Outward freight is what an agency ledger is built from, and the
+        // same 20250 payable is what an on-account payment settles.
+        type: 'TRANSPORTER_OUTWARD',
+        transportId: transport.id,
+        payee: transportName,
+        reference: payReference || null,
+        description: `Freight payment on account - ${transportName}`,
+      };
+      // With a proof screenshot the create goes multipart, the same way the
+      // Payments register does it: the server stores the file and WhatsApps it
+      // to the owner on the image template. Plain JSON otherwise.
+      if (payScreenshot) {
+        const fd = new FormData();
+        for (const [k, v] of Object.entries(fields)) {
+          if (v !== null && v !== undefined) fd.append(k, String(v));
+        }
+        fd.append('screenshot', payScreenshot);
+        return api<Payment>('/payments', { method: 'POST', body: fd, multipart: true });
+      }
+      return api<Payment>('/payments', { method: 'POST', body: fields });
     },
     onSuccess: () => {
       void invalidatePayments(qc);
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
-      toast.success('Agency payment recorded');
+      toast.success(
+        payScreenshot
+          ? 'Agency payment recorded - receipt sent with the screenshot'
+          : 'Agency payment recorded'
+      );
       setPayOpen(false);
       setPayAmount('');
       setPayReference('');
+      setPayScreenshot(null);
+      setPayFormKey((k) => k + 1);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
+
+  // The OCR read off the screenshot. Only the amount and the reference are
+  // taken: the counterparty is already known (this is the agency's own ledger),
+  // and the date stays the value date the user picked.
+  const applyExtracted = (d: ExtractedTransaction) => {
+    if (d.amount && d.amount > 0) setPayAmount(String(Math.round(d.amount)));
+    if (d.reference) setPayReference(d.reference);
+    if (d.date) setPayDate(d.date);
+  };
 
   const openPayDialog = () => {
     // Prefilled with the whole outstanding balance, which is what a settlement
@@ -326,6 +356,8 @@ export function TransportLedger({
     setPayAmount(payableNow > 0 ? String(payableNow) : '');
     setPayReference('');
     setPayDate(new Date().toISOString().slice(0, 10));
+    setPayScreenshot(null);
+    setPayFormKey((k) => k + 1);
     setPayOpen(true);
   };
 
@@ -571,6 +603,14 @@ export function TransportLedger({
           </DialogHeader>
 
           <div className="space-y-4">
+            <ScreenshotUpload
+              key={payFormKey}
+              endpoint="/payments/extract"
+              hint="Drop the bank / UPI screenshot to auto-fill"
+              onExtracted={applyExtracted}
+              onFile={setPayScreenshot}
+            />
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="agency-pay-date">Date</Label>
@@ -611,9 +651,22 @@ export function TransportLedger({
             )}
 
             <p className="text-[11px] text-muted-foreground leading-snug">
-              The receipt goes to{' '}
-              {ownerName ? <strong>{ownerName}</strong> : <strong>{transportName}</strong>}
-              {phones[0] ? <> on {phones[0]}</> : <> (no number on file yet)</>}.
+              {phones[0] ? (
+                <>
+                  A WhatsApp receipt goes to{' '}
+                  <strong>{ownerName || transportName}</strong> on {phones[0]}
+                  {payScreenshot
+                    ? ', with the screenshot attached'
+                    : ' - attach a screenshot above to send it with the receipt'}
+                  .
+                </>
+              ) : (
+                <>
+                  No WhatsApp number on file for{' '}
+                  <strong>{ownerName || transportName}</strong>, so no receipt can be
+                  sent. Add one in Master Data → Transports.
+                </>
+              )}
             </p>
           </div>
 

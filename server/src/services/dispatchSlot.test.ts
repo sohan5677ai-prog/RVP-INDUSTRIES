@@ -8,21 +8,39 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const slotAggregate = vi.fn();
 const slotFindFirst = vi.fn();
+const slotFindUnique = vi.fn();
 const slotCreate = vi.fn();
 const orderFindUnique = vi.fn();
 const transportFindUnique = vi.fn();
+const poFindUnique = vi.fn();
+const counterUpsert = vi.fn();
 
 vi.mock('../lib/prisma.js', () => ({
   prisma: {
     dispatchSlot: {
       aggregate: (...a: unknown[]) => slotAggregate(...a),
       findFirst: (...a: unknown[]) => slotFindFirst(...a),
+      findUnique: (...a: unknown[]) => slotFindUnique(...a),
       create: (...a: unknown[]) => slotCreate(...a),
     },
     saleOrder: { findUnique: (...a: unknown[]) => orderFindUnique(...a) },
     transport: { findUnique: (...a: unknown[]) => transportFindUnique(...a) },
+    purchaseOrder: { findUnique: (...a: unknown[]) => poFindUnique(...a) },
+    poSerialCounter: { upsert: (...a: unknown[]) => counterUpsert(...a) },
   },
 }));
+
+/**
+ * Drive the shared day counter: each call hands out the next number, exactly as
+ * the atomic increment in the database does.
+ */
+function counterFrom(start: number) {
+  let n = start - 1;
+  counterUpsert.mockImplementation(() => {
+    n += 1;
+    return Promise.resolve({ lastSerial: n });
+  });
+}
 
 const {
   slotCode,
@@ -66,6 +84,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   slotAggregate.mockResolvedValue({ _sum: { plannedKg: 0 } });
   slotFindFirst.mockResolvedValue(null);
+  // Nothing holds a code unless a test says so, and the day counter starts at 1.
+  slotFindUnique.mockResolvedValue(null);
+  poFindUnique.mockResolvedValue(null);
+  counterFrom(1);
   slotCreate.mockImplementation((args: { data: unknown }) => Promise.resolve(args.data));
 });
 
@@ -88,19 +110,31 @@ describe('slot codes', () => {
     expect(() => parseSlotDate('16-11-2026')).toThrow(/Invalid date/);
   });
 
-  it('numbers a day from its highest slot, so a move onto that day cannot collide', async () => {
-    // seq is unique per date. A lorry moved onto a day that already has a
-    // seq 1 must take the next free number, not carry its old one across.
-    slotFindFirst.mockResolvedValue({ seq: 2 });
+  it('takes its number from the day sequence, not from the calendar alone', async () => {
+    // seq is unique per date, and the number comes from the counter the
+    // purchase side also draws on - so a lorry moved onto a day that already
+    // has a seq 1 takes the next free number rather than carrying its own.
+    counterFrom(3);
     await expect(nextSeqForDate(NOV16)).resolves.toBe(3);
-    slotFindFirst.mockResolvedValue(null);
-    await expect(nextSeqForDate(NOV16)).resolves.toBe(1);
+  });
+
+  it('skips a number a purchase requirement already holds', async () => {
+    // The bug this exists for: 18NOV-01 was minted as BOTH a loading slot and
+    // a purchase requirement, because the two series counted independently. A
+    // transporter's reply quoting it can only be filed against one of them, so
+    // the code has to mean one thing. 16NOV-01 is taken on the purchase side,
+    // so the slot gets 16NOV-02.
+    counterFrom(1);
+    poFindUnique.mockImplementation((args: { where: { requirementCode: string } }) =>
+      Promise.resolve(args.where.requirementCode === '16NOV-01' ? { id: 'po1' } : null)
+    );
+    await expect(nextSeqForDate(NOV16)).resolves.toBe(2);
   });
 
   it('never reuses a number already sent out, even after a cancellation', async () => {
-    // Three slots existed and the middle one was cancelled; the next lorry is
-    // 04, not 03 - the transporter already has a 16NOV-03 on his phone.
-    slotFindFirst.mockResolvedValue({ seq: 3 });
+    // Three numbers have gone out and the middle slot was cancelled; the next
+    // lorry is 04, not 03 - the transporter already has a 16NOV-03 on his phone.
+    counterFrom(4);
     orderWith();
     const slot = (await createSlot(input())) as { code: string; seq: number };
     expect(slot.seq).toBe(4);
@@ -155,14 +189,8 @@ describe('planning a whole fleet at once', () => {
   it('numbers the fleet one lorry after another', async () => {
     // Each lorry is a slot of its own: the transporter confirms them
     // separately, so they cannot share 16NOV-01 between them.
-    const created: { seq: number }[] = [];
-    slotFindFirst.mockImplementation(() =>
-      Promise.resolve(created.length ? { seq: created[created.length - 1].seq } : null)
-    );
-    slotCreate.mockImplementation((args: { data: { seq: number } }) => {
-      created.push(args.data);
-      return Promise.resolve(args.data);
-    });
+    counterFrom(1);
+    slotCreate.mockImplementation((args: { data: { seq: number } }) => Promise.resolve(args.data));
     orderWith();
 
     const slots = (await createSlots([input(), input(), input()])) as { code: string }[];

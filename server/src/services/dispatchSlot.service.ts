@@ -2,6 +2,7 @@ import type { Prisma, DispatchSlotStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { istCalendar, istMidnight } from '../lib/istDate.js';
+import { nextDaySequence } from '../lib/lorryCode.js';
 
 /**
  * The loading calendar's engine: slot codes, the planning arithmetic, and the
@@ -188,12 +189,13 @@ export async function validateSlots(inputs: SlotInput[]) {
  * collision under concurrency simply retries with the next number.
  */
 export async function nextSeqForDate(date: Date): Promise<number> {
-  const last = await prisma.dispatchSlot.findFirst({
-    where: { date },
-    orderBy: { seq: 'desc' },
-    select: { seq: true },
-  });
-  return (last?.seq ?? 0) + 1;
+  // Drawn from the day sequence the purchase side also draws from, so a
+  // loading slot and a purchase requirement can never be handed the same code.
+  // See lib/lorryCode: they used to be independent, and 18NOV-01 was minted as
+  // both. Numbers are therefore sparse on the calendar - a day with one slot
+  // and two purchase requirements reads 21NOV-02 - which is the right trade:
+  // the transporter only ever has to match the code he was given.
+  return nextDaySequence(date);
 }
 
 export async function createSlot(input: SlotInput) {

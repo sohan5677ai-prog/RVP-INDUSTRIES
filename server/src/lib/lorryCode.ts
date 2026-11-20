@@ -16,11 +16,22 @@ import { istCalendar } from './istDate.js';
  * nothing at all. With a code on the first line the match is exact, and a
  * message carrying no code simply never reaches the driver-brief path.
  *
- * The format is deliberately identical to the sale-side code rather than shared
- * with it: `slotCode` mints codes from the DispatchSlot sequence, this one from
- * a per-day counter over purchase orders, and the two sequences must be free to
- * collide (16NOV-02 can be both a loading slot and a requirement - they are
- * read in different conversations, with different transporters).
+ * The two series share ONE sequence per day, and that is not a tidiness choice.
+ * They were independent to begin with, on the reasoning that a loading slot and
+ * a purchase requirement are read in different conversations by different
+ * transporters, so `16NOV-02` could safely mean two things. That stopped being
+ * true the moment both kinds of lorry appeared on one arrivals board, were
+ * searched by one box, and - the part that actually breaks - were resolved by
+ * one lookup from one shared WhatsApp number. 18NOV-01 was minted as both a
+ * Shahada loading slot and a purchase requirement, and a reply quoting it can
+ * only be filed against one of them: whichever side the resolver happens to try
+ * first. The wrong guess books a lorry onto a stranger's order and, on the
+ * purchase side, texts that driver the factory pin.
+ *
+ * So `nextDaySequence` below is the only place either side takes a number from,
+ * and it will not hand out one that is already in use on either. Codes already
+ * minted in the old scheme are left alone - the transporter has seen them - and
+ * are simply skipped over.
  */
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -64,20 +75,46 @@ function counterKey(date: Date): { seriesKey: string; fy: string } {
 }
 
 /**
- * The next code for `date`, taken atomically.
+ * The next free sequence number for `date`, across BOTH code series.
  *
  * Reuses PoSerialCounter rather than adding a table: it exists to hand out
  * gap-free per-key sequences under concurrency, which is exactly this. A
- * cancelled requirement keeps its number - the transporter has already seen it,
- * so reusing it would point two lorries at one code.
+ * cancelled requirement or slot keeps its number - the transporter has already
+ * seen it, so reusing it would point two lorries at one code.
+ *
+ * The counter alone is not enough, for one transitional reason: codes minted
+ * before the two series were joined are not in it. 20NOV-03 exists as a loading
+ * slot on a day whose counter has never been touched, so a bare increment would
+ * hand 20NOV-01 straight back out. Each candidate is therefore checked against
+ * both tables and a taken one is skipped.
+ *
+ * The check is a read-then-use, which would normally be a race - but it is not,
+ * because the counter increment above it is atomic: two callers never test the
+ * same number, so the worst a concurrent mint can do is make both of them skip.
+ * The unique keys on `PurchaseOrder.requirementCode` and `DispatchSlot.code`
+ * remain the real guarantee, and both callers retry on a violation.
  */
-export async function nextRequirementCode(date: Date = new Date()): Promise<string> {
+export async function nextDaySequence(date: Date = new Date()): Promise<number> {
   const key = counterKey(date);
-  const row = await prisma.poSerialCounter.upsert({
-    where: { seriesKey_fy: key },
-    create: { ...key, lastSerial: 1 },
-    update: { lastSerial: { increment: 1 } },
-    select: { lastSerial: true },
-  });
-  return formatLorryCode(date, row.lastSerial);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const row = await prisma.poSerialCounter.upsert({
+      where: { seriesKey_fy: key },
+      create: { ...key, lastSerial: 1 },
+      update: { lastSerial: { increment: 1 } },
+      select: { lastSerial: true },
+    });
+    const code = formatLorryCode(date, row.lastSerial);
+    const [po, slot] = await Promise.all([
+      prisma.purchaseOrder.findUnique({ where: { requirementCode: code }, select: { id: true } }),
+      prisma.dispatchSlot.findUnique({ where: { code }, select: { id: true } }),
+    ]);
+    if (!po && !slot) return row.lastSerial;
+  }
+  // Fifty taken numbers in a row on one day is not a busy day, it is a bug.
+  throw new Error(`Could not find a free requirement code for ${formatLorryCode(date, 1).slice(0, 5)}`);
+}
+
+/** The next code for `date`, taken atomically from the shared day sequence. */
+export async function nextRequirementCode(date: Date = new Date()): Promise<string> {
+  return formatLorryCode(date, await nextDaySequence(date));
 }

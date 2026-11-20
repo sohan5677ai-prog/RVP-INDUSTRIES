@@ -17,8 +17,11 @@ import {
   sendSessionTextMessage,
 } from '../services/whatsapp.service.js';
 import { parseTransportConfirmationText, parseBuyerKataImage } from '../lib/gemini.js';
-import type { ParsedBuyerKata } from '../lib/gemini.js';
+import type { ParsedBuyerKata, ParsedTransportConfirmation } from '../lib/gemini.js';
 import { parseLorryCode } from '../lib/lorryCode.js';
+import { parseBookingReplies } from '../lib/bookingReply.js';
+import { flatTripFreight } from '../lib/transportFreight.js';
+import { ACTIVE_SLOT_STATUSES } from '../services/dispatchSlot.service.js';
 import { sendDispatchBundleWhatsApp, resendDispatchDriverWhatsApp } from '../services/dispatchWhatsapp.service.js';
 import {
   normalizeLorryNumber,
@@ -481,22 +484,130 @@ async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean>
   if (/^(?:APPROVE|REJECT|DELIVER|CONFIRM|STATUS|CHECK|HELP|KATA)\b/i.test(text.trim())) return false;
   if (/\b(?:override\s*weight|confirm\s*delivery|kata\s*slip|kata\s*received)\b/i.test(text)) return false;
 
-  // The requirement code, read off the first lines before Gemini is asked for
-  // anything. It is a fixed shape on a line of its own, so a regex is both
-  // cheaper and more trustworthy here than a model - and what it finds decides
-  // whether this booking is allowed to message a driver, so "more trustworthy"
-  // is the whole point.
-  const requirementCode = parseLorryCode(text);
-  const requirement = requirementCode
-    ? await prisma.purchaseOrder.findUnique({
-        where: { requirementCode },
-        select: { id: true, tonnageKg: true, party: { select: { name: true } } },
-      })
-    : null;
+  // The reply shape this ERP hands out (code / lorry / mobile / MT / place) is
+  // read deterministically; only free-written broker messages go to the model,
+  // whose prompt knows the sentence form and answers inconsistently on the
+  // terse one. See lib/bookingReply.ts.
+  //
+  // A day's indent lists the whole fleet, so one reply can answer for several
+  // codes. Each block is filed as its own booking against its own code - the
+  // alternative, reading only the first, loses the rest of the day's lorries
+  // without anybody noticing.
+  const blocks = parseBookingReplies(text);
+  if (blocks.length > 0) {
+    let filed = 0;
+    for (const block of blocks) {
+      if (await fileBooking(logRow, block.code, block.parsed)) filed += 1;
+    }
+    return filed > 0;
+  }
 
   const parsed = await parseTransportConfirmationText(text);
   if (!parsed?.isTransportConfirmation) return false;
   if (!parsed.lorryNumber && !parsed.driverPhone) return false; // nothing actionable
+  // A sentence-style message may still quote a code somewhere in its first few
+  // lines, so it gets the same lookup - just not the same confidence about
+  // where in the message the code was.
+  return fileBooking(logRow, parseLorryCode(text), parsed);
+}
+
+/**
+ * What a requirement code turned out to refer to.
+ *
+ * Two counters mint these codes - `nextRequirementCode` over purchase orders
+ * and `slotCode` over the loading calendar - and they are free to collide, so
+ * the lookup is ordered rather than keyed: the purchase side first, the
+ * calendar second. The two conversations are with different transporters, so in
+ * practice a collision is read correctly by whichever side has the live
+ * requirement; where both are live the purchase lorry wins, because that is the
+ * one with a driver brief waiting on it.
+ */
+type ResolvedRequirement =
+  | { kind: 'NONE' }
+  | { kind: 'PURCHASE'; purchaseOrderId: string; tonnageKg: number }
+  | {
+      kind: 'LOADING';
+      slotId: string;
+      transportId: string | null;
+      destination: string | null;
+      plannedKg: number;
+    };
+
+async function resolveRequirementCode(code: string | null): Promise<ResolvedRequirement> {
+  if (!code) return { kind: 'NONE' };
+
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { requirementCode: code },
+    select: { id: true, tonnageKg: true },
+  });
+  if (po) return { kind: 'PURCHASE', purchaseOrderId: po.id, tonnageKg: po.tonnageKg };
+
+  const slot = await prisma.dispatchSlot.findUnique({
+    where: { code },
+    select: {
+      id: true,
+      status: true,
+      plannedKg: true,
+      transportId: true,
+      saleDispatchId: true,
+      saleOrder: { select: { destination: true, buyer: { select: { city: true } } } },
+    },
+  });
+  // A slot that has already loaded is history: a late reply quoting its code is
+  // not a lorry on its way here, and confirming it would put a second plate on
+  // a trip that has gone.
+  if (slot && slot.saleDispatchId === null && ACTIVE_SLOT_STATUSES.includes(slot.status)) {
+    return {
+      kind: 'LOADING',
+      slotId: slot.id,
+      transportId: slot.transportId,
+      destination: slot.saleOrder.destination || slot.saleOrder.buyer.city || null,
+      plannedKg: slot.plannedKg,
+    };
+  }
+
+  return { kind: 'NONE' };
+}
+
+/**
+ * File one lorry into the register, against whatever its code turned out to be.
+ *
+ * Three outcomes, and the code is what separates them:
+ *
+ *  - **A purchase requirement.** An inbound lorry coming to us loaded. The
+ *    driver gets his brief, as before.
+ *  - **A loading slot.** An empty lorry coming to collect a sale load. The slot
+ *    is confirmed with his plate and driver, which is what puts him on the
+ *    Upcoming tab and inside the approach rings, and the freight is taken from
+ *    the rate agreed with that agency for that destination rather than from
+ *    whatever figure he typed.
+ *  - **Neither.** Still recorded. The office can put the right code on the row
+ *    by hand on the register, and nothing is sent in the meantime.
+ */
+async function fileBooking(
+  logRow: InboundLogRow,
+  requirementCode: string | null,
+  parsed: ParsedTransportConfirmation,
+): Promise<boolean> {
+  const { from, text } = logRow;
+  if (!text) return false;
+  if (!parsed.lorryNumber && !parsed.driverPhone) return false;
+
+  const requirement = await resolveRequirementCode(requirementCode);
+  const lorryNumber = normalizeLorryNumber(parsed.lorryNumber);
+
+  // The freight on a loading trip is ours to know, not his to quote: where we
+  // hold an agreed flat rate for that agency and destination, that figure is
+  // the booking's freight and the dispatch will carry it through. Only when
+  // there is no agreed rate does the told amount stand.
+  let freightAmount = parsed.freightAmount ?? null;
+  let agreedFreight: number | null = null;
+  let destination: string | null = null;
+  if (requirement.kind === 'LOADING') {
+    destination = requirement.destination;
+    agreedFreight = await flatTripFreight(requirement.transportId, requirement.destination);
+    if (agreedFreight != null) freightAmount = agreedFreight;
+  }
 
   const booking = await prisma.transportConfirmation.create({
     data: {
@@ -504,33 +615,66 @@ async function parseInboundIntoRegister(logRow: InboundLogRow): Promise<boolean>
       rawText: text,
       messageDate: parsed.messageDate ? new Date(parsed.messageDate) : null,
       fromPlace: parsed.fromPlace ?? null,
-      toPlace: parsed.toPlace ?? null,
-      tonnageKg: parsed.tonnageKg ?? null,
+      toPlace: parsed.toPlace ?? destination,
+      tonnageKg:
+        parsed.tonnageKg ?? (requirement.kind === 'LOADING' ? requirement.plannedKg : null),
       // Normalised on the way in - the dispatch screen looks the row up by lorry
       // number, and that only works if both sides are spelled the same way.
-      lorryNumber: normalizeLorryNumber(parsed.lorryNumber),
+      lorryNumber,
       driverName: parsed.driverName ?? null,
       driverPhone: parsed.driverPhone ?? null,
-      freightAmount: parsed.freightAmount ?? null,
+      freightAmount,
       status: 'WAITING',
-      // A code that matched a live requirement makes this a purchase lorry
-      // coming to us. An unmatched code is still recorded - the office can fix
-      // a typo on the register and send the brief by hand - but the row stays
-      // OUTBOUND, and nothing is sent.
       requirementCode,
-      direction: requirement ? 'INBOUND' : 'OUTBOUND',
-      purchaseOrderId: requirement?.id ?? null,
+      // A purchase requirement makes this a lorry coming to us loaded. A
+      // loading slot is an outbound trip, as is an unmatched code.
+      direction: requirement.kind === 'PURCHASE' ? 'INBOUND' : 'OUTBOUND',
+      purchaseOrderId: requirement.kind === 'PURCHASE' ? requirement.purchaseOrderId : null,
+      dispatchSlotId: requirement.kind === 'LOADING' ? requirement.slotId : null,
     },
   });
-  logger.info(`[whatsapp] lorry booking ${booking.id} (${booking.lorryNumber ?? 'no lorry no'}) filed from ${from} (log ${logRow.id})`);
+  logger.info(
+    `[whatsapp] lorry booking ${booking.id} (${booking.lorryNumber ?? 'no lorry no'}) filed from ${from} against ${requirementCode ?? 'no code'} [${requirement.kind}] (log ${logRow.id})`,
+  );
 
-  if (requirement) {
+  if (requirement.kind === 'PURCHASE') {
     // Fire-and-forget: a WhatsApp hiccup must not lose the register row, which
     // is the part that matters.
     void sendInboundDriverBrief(booking.id).catch((err) =>
       logger.warn(`[whatsapp] inbound driver brief failed for booking ${booking.id}: ${err?.message ?? err}`),
     );
+  }
 
+  if (requirement.kind === 'LOADING') {
+    // Confirming the slot is what makes the lorry real to the rest of the app:
+    // the calendar card stops asking for a plate, the Upcoming tab picks it up,
+    // and the ring sweep starts watching it in. Done after the register row so
+    // a failure here leaves a booking the office can act on by hand.
+    await prisma.dispatchSlot
+      .update({
+        where: { id: requirement.slotId },
+        data: {
+          lorryNumber,
+          driverName: parsed.driverName ?? undefined,
+          driverPhone: parsed.driverPhone ?? undefined,
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+          transportConfirmationId: booking.id,
+        },
+      })
+      .catch((err) =>
+        logger.warn(
+          `[whatsapp] booking ${booking.id} could not confirm slot ${requirement.slotId}: ${err?.message ?? err}`,
+        ),
+      );
+    if (agreedFreight != null) {
+      logger.info(
+        `[whatsapp] slot ${requirementCode} freight set from the agreed rate for ${destination ?? 'destination'}: ₹${agreedFreight}`,
+      );
+    }
+  }
+
+  if (requirement.kind !== 'NONE') {
     // This lorry is now one of ours, so its fixes must be stored at full
     // resolution instead of being thinned to one every five minutes. Without
     // dropping the cache the plate spends up to the cache TTL in the thinned
@@ -2308,23 +2452,57 @@ export async function updateTransportConfirmation(req: Request, res: Response) {
     data[key] = key === 'tonnageKg' ? Math.round(n) : n;
   }
 
-  // Setting (or correcting) the requirement code is what links a booking to a
-  // purchase order, and therefore what unlocks the driver brief. Clearing it
-  // unlinks and sends the row back to OUTBOUND - the register must never be
-  // left pointing at a requirement that was typed in error.
+  // Setting (or correcting) the requirement code is what links a booking to the
+  // thing it answers - a purchase order, which unlocks the driver brief, or a
+  // loading slot, which puts the lorry on the Upcoming tab and inside the
+  // approach rings. Clearing it unlinks both: the register must never be left
+  // pointing at a requirement that was typed in error.
+  //
+  // This is the by-hand path for a message the parse could not place: a
+  // transposed code, or a transporter who answered in a sentence. It resolves
+  // exactly as the automatic path does, so the two cannot disagree about what a
+  // code means.
   if (body.requirementCode !== undefined) {
     const raw = typeof body.requirementCode === 'string' ? body.requirementCode : '';
     const code = parseLorryCode(raw) ?? (raw.trim() ? raw.trim().toUpperCase() : null);
     if (!code) {
       data.requirementCode = null;
       data.purchaseOrderId = null;
+      data.dispatchSlotId = null;
       data.direction = 'OUTBOUND';
     } else {
-      const po = await prisma.purchaseOrder.findUnique({ where: { requirementCode: code }, select: { id: true } });
-      if (!po) throw new HttpError(404, `No purchase requirement is open under code ${code}`);
+      const requirement = await resolveRequirementCode(code);
+      if (requirement.kind === 'NONE') {
+        throw new HttpError(404, `No purchase requirement or loading slot is open under code ${code}`);
+      }
       data.requirementCode = code;
-      data.purchaseOrderId = po.id;
-      data.direction = 'INBOUND';
+      data.purchaseOrderId = requirement.kind === 'PURCHASE' ? requirement.purchaseOrderId : null;
+      data.dispatchSlotId = requirement.kind === 'LOADING' ? requirement.slotId : null;
+      data.direction = requirement.kind === 'PURCHASE' ? 'INBOUND' : 'OUTBOUND';
+
+      // Linking by hand confirms the slot the same way the WhatsApp path does,
+      // or the lorry would sit on the register with nothing watching it in.
+      if (requirement.kind === 'LOADING') {
+        const lorryNumber =
+          (data.lorryNumber as string | null | undefined) ?? row.lorryNumber ?? null;
+        await prisma.dispatchSlot
+          .update({
+            where: { id: requirement.slotId },
+            data: {
+              lorryNumber,
+              driverName: (data.driverName as string | null) ?? row.driverName ?? undefined,
+              driverPhone: (data.driverPhone as string | null) ?? row.driverPhone ?? undefined,
+              status: 'CONFIRMED',
+              confirmedAt: new Date(),
+              transportConfirmationId: row.id,
+            },
+          })
+          .catch((err) =>
+            logger.warn(
+              `[whatsapp] booking ${row.id} could not confirm slot ${requirement.slotId}: ${err?.message ?? err}`,
+            ),
+          );
+      }
     }
   }
   if (body.driverLanguage !== undefined) {

@@ -146,18 +146,23 @@ export function metresBetween(aLat: number, aLng: number, bLat: number, bLng: nu
  * The plates worth storing at full resolution: our own trips, in both
  * directions.
  *
- * Outbound is a dispatch still in DISPATCHED. Inbound is a lorry a transporter
- * has booked against a live purchase order - and that half is not a nicety.
- * The thinning rule below keeps one fix per five minutes for everything that is
- * not on this list, and a lorry at 50 km/h covers four km in five minutes. An
- * inbound lorry left to the thinned feed can therefore go from eleven km to
- * seven to three between two stored fixes, and the approach rings that are
- * supposed to fire at ten and at three would both be stepped straight over.
- * The rings are only as good as this set.
+ * Three sets, all of them ours:
+ *
+ *  - a dispatch still in DISPATCHED - a loaded lorry on the road;
+ *  - a lorry a transporter has booked against a live purchase order;
+ *  - an empty lorry confirmed against an open loading slot, on its way here to
+ *    collect a sale load.
+ *
+ * The last two are not a nicety. The thinning rule below keeps one fix per five
+ * minutes for everything that is not on this list, and a lorry at 50 km/h
+ * covers four km in five minutes. A lorry left to the thinned feed can
+ * therefore go from eleven km to seven to one between two stored fixes, and the
+ * approach rings that are supposed to fire at ten km and at the gate would both
+ * be stepped straight over. The rings are only as good as this set.
  */
 async function getActiveDispatchPlates(): Promise<Set<string>> {
   if (activePlates && Date.now() - activePlates.at < ACTIVE_PLATES_TTL_MS) return activePlates.plates;
-  const [dispatches, arrivals] = await Promise.all([
+  const [dispatches, arrivals, loadingSlots] = await Promise.all([
     prisma.saleDispatch.findMany({
       where: {
         status: 'DISPATCHED',
@@ -183,6 +188,22 @@ async function getActiveDispatchPlates(): Promise<Set<string>> {
       },
       select: { lorryNumber: true },
     }),
+    // An empty lorry coming in to load. Live while its slot is confirmed and
+    // unloaded - raising the dispatch sets the slot LOADED, which drops the
+    // plate off this list by itself. The window is the slot's own day plus a
+    // few either side, matching the arrivals board.
+    prisma.dispatchSlot.findMany({
+      where: {
+        status: 'CONFIRMED',
+        lorryNumber: { not: null },
+        saleDispatchId: null,
+        date: {
+          gte: new Date(Date.now() - 3 * 24 * 3_600_000),
+          lte: new Date(Date.now() + 7 * 24 * 3_600_000),
+        },
+      },
+      select: { lorryNumber: true },
+    }),
   ]);
 
   const plates = new Set<string>();
@@ -190,7 +211,7 @@ async function getActiveDispatchPlates(): Promise<Set<string>> {
     const plate = normaliseVehicleNumber(r.vehicleNumber ?? '');
     if (plate) plates.add(plate);
   }
-  for (const r of arrivals) {
+  for (const r of [...arrivals, ...loadingSlots]) {
     const plate = normaliseVehicleNumber(r.lorryNumber ?? '');
     if (plate) plates.add(plate);
   }

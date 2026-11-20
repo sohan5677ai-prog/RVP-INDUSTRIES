@@ -96,12 +96,12 @@ enum Commodity {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  name        String
-  username    String   @unique
-  password    String
-  role        Role     @default(USER)
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  name      String
+  username  String   @unique
+  password  String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
 
   /// Where password resets and new-device alerts go. Optional because existing
   /// accounts predate it: a user without one cannot self-serve a reset and
@@ -253,10 +253,10 @@ model AuditLog {
   prevHash String
 
   /// What happened, e.g. "payment.delete", "auth.login", "role.update".
-  action     String
+  action      String
   /// Prisma model name, where the change was to a record.
-  entity     String?
-  entityId   String?
+  entity      String?
+  entityId    String?
   /// Enough to identify the record in the log without joining to a table that
   /// may since have changed or been emptied.
   entityLabel String?
@@ -295,12 +295,12 @@ model AuditLog {
 /// permission and a reason, and both the lock and the unlock are themselves
 /// audited - a period that can be quietly reopened is not a close.
 model PeriodLock {
-  id        String   @id @default(cuid())
+  id       String   @id @default(cuid())
   /// Inclusive first day of the closed period, at IST midnight.
-  fromDate  DateTime
+  fromDate DateTime
   /// Inclusive last day.
-  toDate    DateTime
-  reason    String?
+  toDate   DateTime
+  reason   String?
 
   lockedById   String
   lockedByName String?
@@ -625,29 +625,29 @@ model Party {
 }
 
 model PartyAddress {
-  id           String   @id @default(cuid())
-  party        Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
-  partyId      String
-  label        String // e.g. "Head Office", "Surat Warehouse", "Factory Unit 2"
-  address      String
-  city         String?
-  state        String?
-  pincode      String?
-  gstin        String? // Optional branch-specific GSTIN
-  destination  String? // Optional address-specific freight delivery destination
-  phone        String? // Optional branch phone 1
-  phone2       String? // Optional branch phone 2
-  locationLink String? // Optional Google Maps / location link for this address
+  id            String     @id @default(cuid())
+  party         Party      @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  partyId       String
+  label         String // e.g. "Head Office", "Surat Warehouse", "Factory Unit 2"
+  address       String
+  city          String?
+  state         String?
+  pincode       String?
+  gstin         String? // Optional branch-specific GSTIN
+  destination   String? // Optional address-specific freight delivery destination
+  phone         String? // Optional branch phone 1
+  phone2        String? // Optional branch phone 2
+  locationLink  String? // Optional Google Maps / location link for this address
   // Same resolved-once coordinates as Party.pinLat, for a branch that unloads
   // somewhere other than the head office. Takes precedence over the party's own
   // pin when an order was placed against this address.
-  pinLat       Float?
-  pinLng       Float?
+  pinLat        Float?
+  pinLng        Float?
   pinResolvedAt DateTime?
-  pinSource    PinSource?
-  isDefault    Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  pinSource     PinSource?
+  isDefault     Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   @@index([partyId])
 }
@@ -668,65 +668,101 @@ model Broker {
 }
 
 model Transport {
-  id               String        @id @default(cuid())
-  name             String        @unique
-  code             String?       @unique
-  phone            String?
-  phone2           String?
-  email            String?
-  address          String?
-  city             String?
-  state            String?
-  pincode          String?
-  gstin            String?
-  contactPerson    String?
+  id                    String        @id @default(cuid())
+  name                  String        @unique
+  code                  String?       @unique
+  phone                 String?
+  phone2                String?
+  email                 String?
+  address               String?
+  city                  String?
+  state                 String?
+  pincode               String?
+  gstin                 String?
+  contactPerson         String?
   // Default retention per trip (e.g. ₹3,000 for Surya Road Lines, ₹0 for KNM)
-  defaultRetention Decimal       @default(0) @db.Decimal(12, 2)
+  defaultRetention      Decimal       @default(0) @db.Decimal(12, 2)
+  // Lorry association fee this agency's trips carry, in ₹ per trip (₹300 for
+  // Madhupuri, ₹0 for everyone else). Where it is non-zero the fee is NOT a
+  // choice: every dispatch on this agency's lorry gets the deduction line, and
+  // the Freight Dues editor will not let it be taken off. It was being typed by
+  // hand on every trip, which is exactly the kind of charge that gets missed on
+  // the one lorry whose paperwork was done in a hurry.
+  associationFeePerTrip Decimal       @default(0) @db.Decimal(12, 2)
   // Single-owner fleet: every lorry running under this agency belongs to one
   // person, who is paid directly and who gets the freight receipt. When set,
   // freight payment receipts go to `phone` (the owner) instead of the driver,
   // and the agency gets its own running ledger in the Transport Report.
-  payToOwner       Boolean       @default(false)
-  notes            String?
+  payToOwner            Boolean       @default(false)
+  notes                 String?
   // Settings -> Wishes targeting only (see WishCategory). Null = not tagged.
-  religion         WishCategory?
-  active           Boolean       @default(true)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  religion              WishCategory?
+  active                Boolean       @default(true)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   saleDispatches SaleDispatch[]
   dispatchSlots  DispatchSlot[]
+  freightRates   TransportFreightRate[]
+}
+
+/// An agreed flat trip rate: what this agency is paid to run one lorry to one
+/// destination, whatever the lorry weighs.
+///
+/// Deliberately NOT the per-tonne FreightRate table. That one answers "what
+/// does a tonne to Surat cost us", which is what costing and the order planner
+/// need. This one answers "what do we owe Madhupuri for this trip", and the
+/// answer is a lump sum: his fleet is all 35-tonners and the rate was agreed
+/// per lorry, so a load landing at 34.2 t is still the full ₹80,000. Applying
+/// a per-tonne figure to the kata weight would quietly short-pay him on every
+/// trip that fell a few hundred kilos light.
+///
+/// `destination` is stored upper-cased and matched after alias folding, so the
+/// same rate answers for AHILYANAGAR and AHMEDNAGAR (one town, renamed).
+model TransportFreightRate {
+  id           String    @id @default(cuid())
+  transport    Transport @relation(fields: [transportId], references: [id], onDelete: Cascade)
+  transportId  String
+  destination  String
+  /// ₹ for the whole trip.
+  flatAmount   Decimal   @default(0) @db.Decimal(12, 2)
+  /// The lorry size the rate was agreed for, kept for the record only - it is
+  /// never divided into. 35,000 kg for every Madhupuri lane today.
+  forTonnageKg Int?
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([transportId, destination])
 }
 
 model PurchaseOrder {
-  id               String           @id @default(cuid())
-  poNumber         String?          @unique
+  id               String                  @id @default(cuid())
+  poNumber         String?                 @unique
   poDate           DateTime
-  party            Party            @relation(fields: [partyId], references: [id])
+  party            Party                   @relation(fields: [partyId], references: [id])
   partyId          String
-  pricePerKg       Decimal          @db.Decimal(12, 2) // approx
+  pricePerKg       Decimal                 @db.Decimal(12, 2) // approx
   // Whether pricePerKg is quoted at the supplier's location (BASE) or landed at
   // our location (DELIVERY). Some suppliers quote one, some the other.
-  priceType        PriceType        @default(DELIVERY)
+  priceType        PriceType               @default(DELIVERY)
   // Coarse intended destination for this PO's stock, set when the order is placed.
   // STOCK-bound POs are held OUT of the Order Planner's pending pool (not sellable)
   // until their lorry is actually stocked in - the real landing spot is chosen at
   // stock-in (loadingLocation). A STOCK-planned lorry stocked into RVP at arrival
   // still flows into the planner, because the arrived band keys off the real
   // stock-in location, not this flag. Defaults to RVP so existing POs are unaffected.
-  plannedLocation  PlannedLocation  @default(RVP)
-  hasGst           Boolean          @default(false)
-  gstAmount        Decimal          @default(0) @db.Decimal(14, 2)
+  plannedLocation  PlannedLocation         @default(RVP)
+  hasGst           Boolean                 @default(false)
+  gstAmount        Decimal                 @default(0) @db.Decimal(14, 2)
   tonnageKg        Int // approx, in kg
   actualTonnageKg  Int? // actual arrived weight in kg (set at stock-in)
   lorryCount       Int? // approx number of lorries ordered
   // Links all per-lorry POs created together from one order, so they can be
   // grouped back into a single logical order in the UI.
   poGroupId        String?
-  status           POStatus         @default(PENDING)
-  expectedYieldPct Decimal          @default(60) @db.Decimal(5, 2)
+  status           POStatus                @default(PENDING)
+  expectedYieldPct Decimal                 @default(60) @db.Decimal(5, 2)
   createdBy        String
-  createdAt        DateTime         @default(now())
+  createdAt        DateTime                @default(now())
   stockIns         StockIn[]
   allocations      SaleAllocation[]
   /// Transporter bookings filed against this requirement - the lorries on
@@ -743,7 +779,7 @@ model PurchaseOrder {
   // the same reason - it is what the transporter quotes back on the first line
   // of his WhatsApp reply, so a booking lands on THIS purchase order instead of
   // being guessed at from the lorry number. Null until a requirement is issued.
-  requirementCode  String?          @unique
+  requirementCode  String?                 @unique
 
   // Party ledger + planner group/filter POs by supplier; index the FK so those
   // GROUP BY / WHERE partyId scans stay index-driven as the table grows.
@@ -1317,22 +1353,22 @@ model SaleDispatch {
   // Deliberately NOT fed into ewbDistance below. NIC computes that from the two
   // PIN codes and returns its own figure, and that figure is the legal one; a
   // number of ours in that field would be a second opinion nobody asked for.
-  destLat     Float?
-  destLng     Float?
-  routeKm     Int?
-  routeSource RouteSource?
+  destLat          Float?
+  destLng          Float?
+  routeKm          Int?
+  routeSource      RouteSource?
 
   // Approx transport distance (km). When 0 is submitted NIC auto-computes it from
   // the two PIN codes and returns the figure - that returned value is what gets
   // stored, so the printed bill never shows "0 km".
-  ewbDistance      Int?
+  ewbDistance     Int?
   // Part-A/Part-B details as actually submitted to NIC. Stored so the reprint
   // (which is rendered from a payload we rebuild, not fetched from NIC) shows the
   // same mode/vehicle type/document that the live bill carries.
-  ewbTransMode     String? // '1'-Road, '2'-Rail, '3'-Air, '4'-Ship
-  ewbVehicleType   String? // 'R'-Regular, 'O'-ODC
-  ewbTransDocNo    String?
-  ewbTransDocDate  DateTime?
+  ewbTransMode    String? // '1'-Road, '2'-Rail, '3'-Air, '4'-Ship
+  ewbVehicleType  String? // 'R'-Regular, 'O'-ODC
+  ewbTransDocNo   String?
+  ewbTransDocDate DateTime?
 
   createdAt DateTime @default(now())
 
@@ -1692,7 +1728,7 @@ model CompanyProfile {
   // lorries. The gate ring must be the smaller of the two - the server clamps
   // it rather than trusting the form.
   inboundApproachRingKm          Int     @default(10)
-  inboundGateRingKm              Int     @default(3)
+  inboundGateRingKm              Int     @default(2)
   // Master switch for the two WhatsApp alerts. Off does not stop the Upcoming
   // Vehicles tab or the cabin's arrivals strip - those are reads of positions
   // we already hold, and are useful on their own.
@@ -1971,12 +2007,6 @@ model Payment {
   journalEntry         JournalEntry?       @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt            DateTime            @default(now())
 
-  @@index([partyId])
-  @@index([purchaseId])
-  @@index([brokerId])
-  @@index([hamaliVerificationId])
-  @@index([journalEntryId])
-
   /// Cancellation, in place of deletion (plan item 4.4).
   ///
   /// A cancelled row stays, and a reversing journal entry is posted against
@@ -1989,6 +2019,11 @@ model Payment {
   /// Required when cancelling: a withdrawal without a reason is not a record.
   cancelReason    String?
 
+  @@index([partyId])
+  @@index([purchaseId])
+  @@index([brokerId])
+  @@index([hamaliVerificationId])
+  @@index([journalEntryId])
   @@index([setOffId])
   @@index([date])
   @@index([type])
@@ -2017,10 +2052,6 @@ model Receipt {
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())
 
-  @@index([partyId])
-  @@index([saleDispatchId])
-  @@index([journalEntryId])
-
   /// Cancellation, in place of deletion (plan item 4.4).
   ///
   /// A cancelled row stays, and a reversing journal entry is posted against
@@ -2033,6 +2064,9 @@ model Receipt {
   /// Required when cancelling: a withdrawal without a reason is not a record.
   cancelReason    String?
 
+  @@index([partyId])
+  @@index([saleDispatchId])
+  @@index([journalEntryId])
   @@index([setOffId])
   @@index([date])
   @@index([type])
@@ -2641,6 +2675,12 @@ model TransportConfirmation {
   // stranger the factory pin and the hamali team's number.
   requirementCode   String?
   purchaseOrderId   String?
+  // The loading slot this reply confirmed, when the code was a sale-side one.
+  // A requirement code is minted by two different counters - `nextRequirementCode`
+  // over purchase orders and `slotCode` over DispatchSlot - and they are free to
+  // collide, so a reply is matched against the purchase side first and the
+  // calendar second. Exactly one of these two ids is ever set.
+  dispatchSlotId    String?
   // A real relation, not just the id: every screen that lists arriving lorries
   // needs the supplier, the tonnage and the PO number in the same breath, and
   // the lorry is only still "arriving" while its order is PENDING - which is a
@@ -2659,6 +2699,7 @@ model TransportConfirmation {
   @@index([saleDispatchId])
   @@index([requirementCode])
   @@index([purchaseOrderId])
+  @@index([dispatchSlotId])
 }
 
 /// One approach ring already announced for one arriving lorry.
@@ -2678,7 +2719,19 @@ model TransportConfirmation {
 /// would silently re-arm every ring if a booking were ever re-filed.
 model ApproachAlert {
   id                      String   @id @default(cuid())
-  transportConfirmationId String
+  /// Set for an arriving PURCHASE lorry, whose subject is its register row.
+  /// Nullable since the column was made to carry one kind of arrival and now
+  /// carries two - see `dispatchSlotId`.
+  transportConfirmationId String?
+  /// Set for an empty lorry coming in to LOAD, whose subject is its calendar
+  /// slot rather than a register row: a slot can be confirmed by hand on the
+  /// calendar, with no WhatsApp reply behind it, and that lorry still has to be
+  /// announced. Exactly one of the two ids is set on any row.
+  ///
+  /// Two unique keys rather than one over a subject string: Postgres treats
+  /// NULLs as distinct in a unique index, so each key only ever latches its own
+  /// kind of arrival and neither can block the other.
+  dispatchSlotId          String?
   /// The ring crossed, in km (10 = warn the team, 3 = kata ready). Stored as
   /// the configured number rather than an enum: the right ring depends on the
   /// road, so it is a Settings value and history has to keep whatever was in
@@ -2696,6 +2749,7 @@ model ApproachAlert {
   firedAt                 DateTime @default(now())
 
   @@unique([transportConfirmationId, ringKm])
+  @@unique([dispatchSlotId, ringKm])
   @@index([firedAt])
 }
 
@@ -3149,18 +3203,18 @@ model RouteLane {
 }
 
 model VehiclePing {
-  id            String   @id @default(cuid())
-  vehicleNumber String
-  vehicleLabel  String?
-  latitude      Float
-  longitude     Float
-  speedKmph     Float?
-  address       String?
-  ignition      Boolean?
+  id             String   @id @default(cuid())
+  vehicleNumber  String
+  vehicleLabel   String?
+  latitude       Float
+  longitude      Float
+  speedKmph      Float?
+  address        String?
+  ignition       Boolean?
   // Course over ground in degrees (0 = north). The provider sends it on every
   // fix and it is what lets the board draw a lorry pointing the way it is
   // actually going instead of a dot.
-  headingDeg    Float?
+  headingDeg     Float?
   // The provider's own word for the vehicle's state - "Moving", "Idling",
   // "Parked", "Offline". Kept verbatim rather than re-derived from speed,
   // because their device knows things we do not (ignition history, how long
@@ -3169,16 +3223,16 @@ model VehiclePing {
   // Device odometer as reported. Units are NOT reliable across devices on the
   // same feed - some report metres - so this is displayed as a raw reading and
   // never used to compute a distance. Trip distance comes from the trail.
-  odometerRaw   Float?
+  odometerRaw    Float?
   // When the device recorded the fix. Falls back to arrival time when the
   // provider sends no timestamp, so the column is never null and the trail
   // can always be ordered.
-  recordedAt    DateTime
-  receivedAt    DateTime @default(now())
-  provider      String   @default("LOCANIX")
+  recordedAt     DateTime
+  receivedAt     DateTime @default(now())
+  provider       String   @default("LOCANIX")
   // The untouched payload for this reading. Kept because the first weeks of a
   // GPS integration are spent arguing about which field meant what.
-  raw           Json?
+  raw            Json?
 
   @@unique([provider, vehicleNumber, recordedAt])
   @@index([vehicleNumber, recordedAt])

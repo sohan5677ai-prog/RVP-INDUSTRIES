@@ -596,6 +596,12 @@ Transport brokers send lorry-booking confirmations that look roughly like:
 "18/7/26 Punganur To Surat 30 Tones Loading Lorry Details AP 39 T 8217 (14W) Driver Moula 7207012803 Lorry Freight Per Tone Rate Rs 80000/-"
 Wording, order and spelling vary a lot (Tones/Tons/MT, Frieght, etc).
 
+They also reply in a short line-per-field form, which is just as much a booking
+confirmation even though it carries no driver name, no route and no freight:
+"18NOV-01 / GJ18BV1872 / +919772764986 / 35MT / 14W / SAHADA" written one field
+per line. The first line is a requirement code, the last is the LOADING place
+(fromPlace). Treat this form as isTransportConfirmation: true.
+
 Decide whether THIS message is such a lorry-booking confirmation and return JSON:
 - isTransportConfirmation: true only if the message clearly confirms a newly booked lorry
   (it should mention at least a vehicle registration number, plus typically route/driver/freight).

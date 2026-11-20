@@ -262,7 +262,7 @@ function CompanySection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             </p>
             <div className="grid gap-4 md:grid-cols-3">
               {numField('Tell the team at (km out)', 'inboundApproachRingKm', '10')}
-              {numField('Kata ready at (km out)', 'inboundGateRingKm', '3')}
+              {numField('Kata ready at (km out)', 'inboundGateRingKm', '2')}
               <div className="space-y-1.5">
                 <Label className="text-xs">Approach alerts</Label>
                 <label className="flex h-10 items-center gap-2 rounded-md border border-input px-3 text-sm">

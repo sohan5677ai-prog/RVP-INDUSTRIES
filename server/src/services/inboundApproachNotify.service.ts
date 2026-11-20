@@ -83,7 +83,7 @@ export async function notifyInboundApproach(
       to: office,
       variables: [
         lorry,
-        arrival.supplier,
+        arrival.counterparty,
         arrival.load,
         // The body already reads "Distance: {{4}} km away", so this slot
         // carries the bare number. Putting "9.4 km" here would print "km km" -
@@ -94,7 +94,9 @@ export async function notifyInboundApproach(
         arrival.requirementCode ?? '-',
       ],
       relatedType: 'INBOUND_APPROACH',
-      relatedId: arrival.bookingId,
+      // A loading lorry may have no register row behind it (a slot confirmed by
+      // hand on the calendar), so the slot is the fallback subject.
+      relatedId: arrival.bookingId ?? arrival.slotId ?? undefined,
     });
     if (result.ok) notified += office.length;
   }
@@ -103,12 +105,14 @@ export async function notifyInboundApproach(
     const result = await sendWhatsAppTemplate({
       templateKey: 'INBOUND_APPROACH_HAMALI',
       to: hamali,
-      variables: [lorry, arrival.load, arrival.supplier, arrival.driverPhone ?? '-'],
+      variables: [lorry, arrival.load, arrival.counterparty, arrival.driverPhone ?? '-'],
       // The team on the floor is Hindi-speaking; the English copy is the
       // fallback until the Hindi one is approved (see templateId).
       language: 'HI',
       relatedType: 'INBOUND_APPROACH',
-      relatedId: arrival.bookingId,
+      // A loading lorry may have no register row behind it (a slot confirmed by
+      // hand on the calendar), so the slot is the fallback subject.
+      relatedId: arrival.bookingId ?? arrival.slotId ?? undefined,
     });
     if (result.ok) notified += 1;
   }

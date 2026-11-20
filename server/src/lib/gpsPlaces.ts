@@ -41,8 +41,16 @@ const PLACES: Record<string, Place> = {
   surat: { name: 'Surat', latitude: 21.1702, longitude: 72.8311 },
   sachin: { name: 'Sachin, Surat', latitude: 21.0833, longitude: 72.8833 },
   barshi: { name: 'Barshi', latitude: 18.2333, longitude: 75.6833 },
-  nagar: { name: 'Ahmednagar', latitude: 19.0948, longitude: 74.7480 },
-  ahmednagar: { name: 'Ahmednagar', latitude: 19.0948, longitude: 74.7480 },
+  nagar: { name: 'Ahilyanagar', latitude: 19.0948, longitude: 74.7480 },
+  ahmednagar: { name: 'Ahilyanagar', latitude: 19.0948, longitude: 74.7480 },
+  // One town, renamed in 2024. Both spellings are in use on our own orders.
+  ahilyanagar: { name: 'Ahilyanagar', latitude: 19.0948, longitude: 74.7480 },
+  // The Madhupuri lanes. Added with their flat trip rates - a lane we pay a
+  // lorry to run is a lane whose ETA the board should be able to show.
+  ausa: { name: 'Ausa', latitude: 18.2456, longitude: 76.4986 },
+  shahada: { name: 'Shahada', latitude: 21.5455, longitude: 74.4694 },
+  sahada: { name: 'Shahada', latitude: 21.5455, longitude: 74.4694 },
+  silvassa: { name: 'Silvassa', latitude: 20.2738, longitude: 73.0140 },
   solapur: { name: 'Solapur', latitude: 17.6599, longitude: 75.9064 },
   sholapur: { name: 'Solapur', latitude: 17.6599, longitude: 75.9064 },
   pune: { name: 'Pune', latitude: 18.5204, longitude: 73.8567 },

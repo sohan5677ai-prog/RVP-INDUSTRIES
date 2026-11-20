@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Truck, Phone, MapPin, Building2, Wallet } from 'lucide-react';
+import { Plus, Pencil, Trash2, Truck, Phone, MapPin, Building2, Wallet, X } from 'lucide-react';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Transport } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -88,6 +89,12 @@ const transportSchema = z.object({
   pincode: z.string().trim().optional(),
   gstin: z.string().trim().optional(),
   defaultRetention: z.string().min(0).default('0'),
+  /**
+   * Mandatory lorry association fee per trip. Non-zero makes it compulsory:
+   * every dispatch on this agency carries the deduction, and the freight-cost
+   * form cannot save without it.
+   */
+  associationFeePerTrip: z.string().min(0).default('0'),
   payToOwner: z.boolean().default(false),
   notes: z.string().trim().optional(),
   religion: z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER', 'NONE']).default('NONE'),
@@ -101,6 +108,17 @@ export default function Transports() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Transport | null>(null);
   const [search, setSearch] = useState('');
+  /**
+   * The agreed trip rates, held outside the zod form.
+   *
+   * They are a table the user adds and removes rows from, which react-hook-form
+   * would want a field array for; the form has no other repeating field, and the
+   * rates are sent as their own key on the payload rather than validated field by
+   * field. Kept as strings so a half-typed amount is not coerced to 0 mid-keystroke.
+   */
+  const [rateRows, setRateRows] = useState<
+    { destination: string; flatAmount: string; forTonnageKg: string }[]
+  >([]);
 
   const { data: transports, isLoading } = useQuery({
     queryKey: ['transports'],
@@ -124,6 +142,7 @@ export default function Transports() {
       pincode: '',
       gstin: '',
       defaultRetention: '0',
+      associationFeePerTrip: '0',
       payToOwner: false,
       notes: '',
       religion: 'NONE',
@@ -133,6 +152,7 @@ export default function Transports() {
 
   function openCreate() {
     setEditing(null);
+    setRateRows([]);
     form.reset({
       name: '',
       code: '',
@@ -146,6 +166,7 @@ export default function Transports() {
       pincode: '',
       gstin: '',
       defaultRetention: '0',
+      associationFeePerTrip: '0',
       payToOwner: false,
       notes: '',
       religion: 'NONE',
@@ -156,6 +177,13 @@ export default function Transports() {
 
   function openEdit(t: Transport) {
     setEditing(t);
+    setRateRows(
+      (t.freightRates ?? []).map((r) => ({
+        destination: r.destination,
+        flatAmount: String(Number(r.flatAmount) || 0),
+        forTonnageKg: r.forTonnageKg == null ? '' : String(r.forTonnageKg),
+      })),
+    );
     form.reset({
       name: t.name,
       code: t.code ?? '',
@@ -169,6 +197,7 @@ export default function Transports() {
       pincode: t.pincode ?? '',
       gstin: t.gstin ?? '',
       defaultRetention: String(Number(t.defaultRetention || 0)),
+      associationFeePerTrip: String(Number(t.associationFeePerTrip || 0)),
       payToOwner: t.payToOwner ?? false,
       notes: t.notes ?? '',
       religion: t.religion ?? 'NONE',
@@ -182,7 +211,18 @@ export default function Transports() {
       const payload = {
         ...values,
         defaultRetention: Number(values.defaultRetention) || 0,
+        associationFeePerTrip: Number(values.associationFeePerTrip) || 0,
         religion: values.religion === 'NONE' ? null : values.religion,
+        // The whole set, every save - a lane the user deleted has to disappear,
+        // so the server replaces rather than merges. Blank and zero rows are
+        // dropped here so a half-typed line never lands as a free trip.
+        freightRates: rateRows
+          .filter((r) => r.destination.trim() !== '' && Number(r.flatAmount) > 0)
+          .map((r) => ({
+            destination: r.destination.trim(),
+            flatAmount: Number(r.flatAmount) || 0,
+            forTonnageKg: r.forTonnageKg.trim() === '' ? null : Number(r.forTonnageKg) || null,
+          })),
       };
       return editing
         ? api<Transport>(`/transports/${editing.id}`, { method: 'PUT', body: payload })
@@ -453,6 +493,110 @@ export default function Transports() {
                     </FormItem>
                   )}
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
+                  name="associationFeePerTrip"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Lorry association fee per trip (₹)</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="number" step="1" placeholder="e.g. 300" />
+                      </FormControl>
+                      <FormDescription>
+                        Anything above zero is compulsory. It is deducted on every dispatch of
+                        this agency and cannot be taken off on the freight-cost form.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* ------------------------------------------- agreed trip rates */}
+              <div className="rounded-xl border border-border/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold">Agreed trip rates</div>
+                    <p className="text-xs text-muted-foreground">
+                      A flat rupee figure per lorry per destination, used as the dispatch
+                      freight whatever the kata weighs. Leave a lane out to keep settling it
+                      per tonne from Settings, Freight Rates.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setRateRows((rows) => [
+                        ...rows,
+                        { destination: '', flatAmount: '', forTonnageKg: '35000' },
+                      ])
+                    }
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Add lane
+                  </Button>
+                </div>
+
+                {rateRows.length === 0 ? (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    No flat rates agreed with this agency.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {rateRows.map((row, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_120px_110px_36px] items-center gap-2">
+                        <Input
+                          value={row.destination}
+                          onChange={(e) =>
+                            setRateRows((rows) =>
+                              rows.map((r, j) => (j === i ? { ...r, destination: e.target.value } : r)),
+                            )
+                          }
+                          placeholder="Destination, e.g. Ausa"
+                        />
+                        <Input
+                          value={row.flatAmount}
+                          onChange={(e) =>
+                            setRateRows((rows) =>
+                              rows.map((r, j) => (j === i ? { ...r, flatAmount: e.target.value } : r)),
+                            )
+                          }
+                          type="number"
+                          step="1"
+                          placeholder="63000"
+                        />
+                        <Input
+                          value={row.forTonnageKg}
+                          onChange={(e) =>
+                            setRateRows((rows) =>
+                              rows.map((r, j) => (j === i ? { ...r, forTonnageKg: e.target.value } : r)),
+                            )
+                          }
+                          type="number"
+                          step="500"
+                          placeholder="kg"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setRateRows((rows) => rows.filter((_, j) => j !== i))}
+                          aria-label="Remove this lane"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-muted-foreground">
+                      The tonnage is the lorry size the rate was agreed for. It is recorded,
+                      never divided into: the rate is the whole trip.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

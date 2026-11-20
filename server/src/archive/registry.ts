@@ -67,6 +67,8 @@ const MASTERS: ArchiveModel[] = [
   { name: 'Party', delegate: 'party', cls: 'MASTER', order: 20 },
   { name: 'PartyAddress', delegate: 'partyAddress', cls: 'MASTER', order: 22 },
   { name: 'Transport', delegate: 'transport', cls: 'MASTER', order: 25 },
+  // After Transport - it is a child of it, cascade-deleted with the agency.
+  { name: 'TransportFreightRate', delegate: 'transportFreightRate', cls: 'MASTER', order: 26 },
   { name: 'KnmDriver', delegate: 'knmDriver', cls: 'MASTER', order: 28 },
   { name: 'Broker', delegate: 'broker', cls: 'MASTER', order: 30 },
   { name: 'AccountGroup', delegate: 'accountGroup', cls: 'MASTER', order: 40,

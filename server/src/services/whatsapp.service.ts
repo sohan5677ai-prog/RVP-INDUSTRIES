@@ -75,13 +75,17 @@ export type WaTemplateKey =
   // need at the gate before he starts. No driver-name slot: the transporter's
   // message carries a phone, not a name.
   | 'INBOUND_DRIVER_BRIEF'
-  // inbound_approach_alert (Utility, en, no header, 7 vars: lorry, supplier,
-  // load, distance, ETA, driver phone, requirement code). Sent to the internal
-  // alert list when a booked purchase lorry crosses the approach ring - ten km
-  // out by default, which is the warning the office and the weighbridge need.
-  // Note the STATIC label in the body: it already reads "Distance: {{4}} km
-  // away", so that slot carries the bare number, the same trap
-  // SALE_ORDER_CONFIRMED documents.
+  // lorry_coming (Utility, en, no header, 7 vars: lorry, supplier/buyer, load,
+  // distance, ETA, driver phone, requirement code). Sent to the internal alert
+  // list when a booked lorry crosses the approach ring - ten km out by default,
+  // which is the warning the office and the weighbridge need.
+  //
+  // Note the STATIC labels in the body: it reads "Distance: {{4}} km away", so
+  // that slot carries the bare number, the same trap SALE_ORDER_CONFIRMED
+  // documents. The "Supplier:" label is static too, and {{2}} now also carries
+  // a BUYER when the arrival is an empty lorry coming in to load - the template
+  // is approved copy and cannot be re-worded per kind, so the label reads a
+  // little oddly on those. Changing it means a fresh Meta submission.
   | 'INBOUND_APPROACH_OFFICE'
   // inbound_hamali_ready (Utility, hi, no header, 4 vars: lorry, load,
   // supplier, driver phone). The same crossing, told to the unloading team, who
@@ -233,6 +237,13 @@ const DEFAULT_TEMPLATE_IDS: Partial<Record<WaTemplateKey, string>> = {
   // Fast2SMS message_id 43900 (Meta template ID 2042323199808316). 43900 is the
   // Message ID the send API wants - never the 15-digit Meta "Template ID".
   VEHICLE_INDENT: '43900',
+  // Approach alert to the internal team (Utility template lorry_coming, no
+  // header, 7 vars). Approved on the shared KNM number (+917207146094) with
+  // Fast2SMS message_id 45276 (Meta template ID 23144919...). As with
+  // PARTY_LEDGER and VEHICLE_INDENT above: 45276 is the Message ID the send API
+  // wants - never the 15-digit Meta "Template ID", or every send 400s with
+  // "Template ID (message_id) is invalid or not approved".
+  INBOUND_APPROACH_OFFICE: '45276',
 };
 
 /**

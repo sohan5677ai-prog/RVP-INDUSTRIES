@@ -127,7 +127,13 @@ interface FleetResponse {
 }
 
 /**
- * A purchase lorry on its way here, as /gps/arrivals returns it.
+ * A lorry on its way to the gate, as /gps/arrivals returns it.
+ *
+ * Two kinds share this shape. A PURCHASE lorry is coming to us loaded against
+ * a purchase order; a LOADING lorry is an empty one the transporter has sent to
+ * collect a sale load, confirmed against a slot on the loading calendar. Both
+ * are "a lorry arriving that nobody has told the yard about", which is the
+ * question this tab answers.
  *
  * Keyed by booking, not by plate: an arrival exists from the moment the
  * transporter quotes the requirement code back, which is usually a day or two
@@ -136,7 +142,10 @@ interface FleetResponse {
  * may present an untracked row's ETA as a measurement.
  */
 interface InboundArrival {
-  bookingId: string;
+  id: string;
+  kind: 'PURCHASE' | 'LOADING';
+  bookingId: string | null;
+  slotId: string | null;
   requirementCode: string | null;
   lorryNumber: string | null;
   driverName: string | null;
@@ -147,7 +156,11 @@ interface InboundArrival {
   briefSentAt: string | null;
   purchaseOrderId: string | null;
   poNumber: string | null;
-  supplier: string;
+  /** The supplier on a purchase arrival, the buyer on a loading one. */
+  counterparty: string;
+  transportName: string | null;
+  /** Where a LOADING lorry goes once loaded. Null on a purchase arrival. */
+  destination: string | null;
   load: string;
   tonnageKg: number | null;
   tracked: boolean;
@@ -173,6 +186,7 @@ interface ArrivalsResponse {
   counts: {
     total: number; atGate: number; approaching: number;
     enRoute: number; booked: number; untracked: number;
+    purchase: number; loading: number;
   };
   arrivals: InboundArrival[];
 }
@@ -426,12 +440,20 @@ function ArrivalRow({
 
         <div className="mt-1.5 min-w-0">
           <div className="truncate text-xs font-medium text-foreground">
-            {a.supplier}
+            {a.counterparty}
+            {/* Where he came from on a purchase lorry; where he is taking it on
+                a loading one. Only one of the two is ever set. */}
             {a.fromPlace && <span className="text-muted-foreground"> &middot; {a.fromPlace}</span>}
+            {a.destination && <span className="text-muted-foreground"> &middot; to {a.destination}</span>}
           </div>
           <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            {a.load}
+            {/* An empty lorry is labelled as one. The load is what it has come
+                for, not what it is carrying, and a yard reading "Pappu 35 MT"
+                on an inbound row would go looking for a load that is not
+                there. */}
+            {a.kind === 'LOADING' ? `Empty - for ${a.load}` : a.load}
             {a.requirementCode && <> &middot; <span className="font-mono">{a.requirementCode}</span></>}
+            {a.transportName && <> &middot; {a.transportName}</>}
           </div>
 
           {/* Progress is measured inward, so the bar fills as the lorry gets
@@ -877,7 +899,7 @@ export default function VehicleTracking() {
     return arrivals.filter(
       (a) =>
         (plate && (a.lorryNumber ?? '').includes(plate)) ||
-        (a.supplier ?? '').toUpperCase().includes(needle) ||
+        (a.counterparty ?? '').toUpperCase().includes(needle) ||
         (a.requirementCode ?? '').toUpperCase().includes(needle) ||
         (a.fromPlace ?? '').toUpperCase().includes(needle)
     );
@@ -938,14 +960,14 @@ export default function VehicleTracking() {
         return shownArrivals
           .filter((a) => a.latitude !== null && a.longitude !== null)
           .map((a) => ({
-            vehicleNumber: a.lorryNumber ?? a.bookingId,
+            vehicleNumber: a.lorryNumber ?? a.id,
             vehicleLabel: a.lorryNumber ?? 'Booked',
             latitude: a.latitude,
             longitude: a.longitude,
             headingDeg: a.headingDeg,
             speedKmph: a.speedKmph,
             state: a.state,
-            subtitle: `${a.supplier}${a.distanceKm !== null ? ` - ${a.distanceKm} km out` : ''}`,
+            subtitle: `${a.counterparty}${a.distanceKm !== null ? ` - ${a.distanceKm} km out` : ''}`,
           }));
       }
       return shown.map((v) => ({
@@ -1045,7 +1067,7 @@ export default function VehicleTracking() {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={inbound ? 'Lorry, supplier or requirement code' : 'Lorry number, buyer or destination'}
+              placeholder={inbound ? 'Lorry, party or requirement code' : 'Lorry number, buyer or destination'}
               className="pl-9"
             />
           </div>
@@ -1080,14 +1102,14 @@ export default function VehicleTracking() {
                 {!arrivalsQuery.isLoading && shownArrivals.length === 0 && (
                   <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
                     {arrivals.length === 0
-                      ? 'No lorry is booked against an open purchase order. A booking appears here as soon as a transporter quotes a requirement code back on WhatsApp.'
+                      ? 'No lorry is on its way in. A row appears here as soon as a transporter quotes a requirement code back on WhatsApp - a purchase lorry against its order, or an empty one against its loading slot.'
                       : 'No arriving lorry matches this search.'}
                   </div>
                 )}
 
                 {shownArrivals.map((a) => (
                   <ArrivalRow
-                    key={a.bookingId}
+                    key={a.id}
                     arrival={a}
                     rings={rings}
                     selected={Boolean(a.lorryNumber) && a.lorryNumber === selected}

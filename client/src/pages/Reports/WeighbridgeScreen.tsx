@@ -575,11 +575,25 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
  * cabin needs - the full shape lives on the Vehicle Tracking page.
  */
 interface ArrivingLorry {
-  bookingId: string;
+  id: string;
+  /**
+   * PURCHASE: a loaded lorry arriving against a purchase order - weighed in on
+   * its way to the pit. LOADING: an empty one the transporter sent to collect a
+   * sale load - weighed for its tare before it goes under the spout. The ticket
+   * the cabin opens differs in its load type and its material, so the strip has
+   * to say which.
+   */
+  kind: 'PURCHASE' | 'LOADING';
+  bookingId: string | null;
+  slotId: string | null;
   requirementCode: string | null;
   lorryNumber: string | null;
+  driverName: string | null;
   driverPhone: string | null;
-  supplier: string;
+  /** Supplier on a purchase arrival, buyer on a loading one. */
+  counterparty: string;
+  destination: string | null;
+  kataMaterial: string;
   tonnageKg: number | null;
   distanceKm: number | null;
   etaAt: string | null;
@@ -781,17 +795,45 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   /** Fill the entry form from a booking. One tap, then weigh. */
   const fillFromArrival = useCallback((a: ArrivingLorry) => {
     if (a.lorryNumber) setVehicleNumber(a.lorryNumber);
-    setPartyName(a.supplier === '-' ? '' : a.supplier);
+    setPartyName(a.counterparty === '-' ? '' : a.counterparty);
     if (a.driverPhone) setDriverMobile(a.driverPhone);
-    // An inbound purchase lorry arrives loaded and is weighed on the way in, so
-    // this is a first weighment of a loaded vehicle - never a storage transfer.
-    setMaterial('TAMARIND SEED');
-    setLoadType('LOAD');
+    setMaterial(a.kataMaterial);
+    // A purchase lorry arrives loaded and is weighed on the way in; a lorry
+    // coming to load arrives empty and this weighment is its tare. Either way
+    // it is a first weighment, and neither is a storage transfer.
+    setLoadType(a.kind === 'LOADING' ? 'EMPTY' : 'LOAD');
     setTripType('FIRST');
     setIsStorageTransfer(false);
     setActiveTab('entry');
     toast.success(`${a.lorryNumber ?? 'Lorry'} filled in - check the weight and save`);
   }, []);
+
+  /**
+   * Open the ticket by itself for the first lorry to reach the gate ring.
+   *
+   * The office asked for this: at two km out there is nothing left to decide,
+   * and the operator should find the form already filled rather than hunting
+   * the right card on the strip while a lorry waits on the plate.
+   *
+   * Three things keep it from fighting the operator. It only fires on the entry
+   * tab with the form still untouched - an empty vehicle box is the test, so a
+   * ticket already being typed is never overwritten. It fires once per lorry,
+   * latched by the arrival id in a ref that survives the minute-by-minute
+   * refetch. And it takes the nearest lorry only, so two arriving together do
+   * not race: the second is one tap away on the strip, as before.
+   */
+  const autoOpenedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (activeTab !== 'entry') return;
+    if (vehicleNumber.trim() !== '') return;
+    const atGate = (arrivalsFeed?.arrivals ?? [])
+      .filter((a) => a.phase === 'AT_GATE' && a.lorryNumber && !autoOpenedRef.current.has(a.id))
+      .sort((x, y) => (x.distanceKm ?? 99) - (y.distanceKm ?? 99));
+    const next = atGate[0];
+    if (!next) return;
+    autoOpenedRef.current.add(next.id);
+    fillFromArrival(next);
+  }, [arrivalsFeed, activeTab, vehicleNumber, fillFromArrival]);
 
   // Fetch pending trucks (awaiting second weight)
   const { data: rawPendingTickets = [], refetch: refetchPending } = useQuery<WeighbridgeTicket[]>({
@@ -1752,14 +1794,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               Arriving {arrivingNow.length > 1 && <span className="opacity-70">({arrivingNow.length})</span>}
             </h2>
             <span className="text-[11px] text-muted-foreground">
-              booked against an open purchase order
+              purchase lorries arriving, and empty ones coming to load
             </span>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {arrivingNow.map((a) => (
               <div
-                key={a.bookingId}
+                key={a.id}
                 className="rounded-xl border border-border/60 bg-card/70 p-2.5"
               >
                 <div className="flex items-center justify-between gap-2">
@@ -1779,8 +1821,13 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </div>
 
                 <div className="mt-1 truncate text-xs text-muted-foreground">
-                  {a.supplier}
+                  {a.counterparty}
                   {a.tonnageKg ? ` · ${(a.tonnageKg / 1000).toFixed(2)} MT` : ''}
+                </div>
+                <div className="truncate text-[11px] font-medium text-muted-foreground">
+                  {a.kind === 'LOADING'
+                    ? `Empty · to load ${a.kataMaterial}${a.destination ? ` for ${a.destination}` : ''}`
+                    : `Loaded · ${a.kataMaterial}`}
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[11px] text-muted-foreground">
                   {a.requirementCode && <span className="font-mono">{a.requirementCode}</span>}

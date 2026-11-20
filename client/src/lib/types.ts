@@ -161,6 +161,16 @@ export interface Broker {
   brokerageAmount: string;
 }
 
+/** A flat rupee figure for one lorry to one destination, whatever it weighs. */
+export interface TransportFreightRate {
+  id: string;
+  transportId: string;
+  destination: string;
+  flatAmount: string | number;
+  /** The lorry size the rate was agreed for. Recorded, never divided into. */
+  forTonnageKg: number | null;
+}
+
 export interface Transport {
   id: string;
   name: string;
@@ -175,6 +185,13 @@ export interface Transport {
   gstin?: string | null;
   contactPerson?: string | null;
   defaultRetention: string | number;
+  /**
+   * Mandatory lorry association fee per trip, in rupees. Above zero it is
+   * deducted on every dispatch of this agency and cannot be removed.
+   */
+  associationFeePerTrip?: string | number;
+  /** Agreed flat trip rates: a lump sum per lorry per destination. */
+  freightRates?: TransportFreightRate[];
   /**
    * Single-owner fleet: every lorry under this agency belongs to one person who
    * is paid directly, so freight receipts are addressed to `phone` (the owner)

@@ -271,6 +271,46 @@ app.listen(port, "0.0.0.0", () => {
           data: { transportId: knm.id as string },
         });
       }
+
+      // The house transporter's agreed terms: a flat rate per lorry per
+      // destination, and the ₹300 lorry association fee every one of his trips
+      // carries. Both were being applied by hand.
+      //
+      // Found by the distinctive half of the name rather than created by it:
+      // the row is already there under whichever of "Madhupuri Transport" and
+      // "Sree Madhupuri Transport" the office typed, and a second one would
+      // split his ledger in two. Seeded ONCE - the condition is an agency with
+      // no rates and no fee, which is what "never configured" looks like - so
+      // a rate the office later edits, or a lane it deletes, is never stamped
+      // back on the next restart.
+      const madhupuri = await prisma.transport.findFirst({
+        where: { name: { contains: 'adhupuri', mode: 'insensitive' } },
+        select: { id: true, associationFeePerTrip: true, _count: { select: { freightRates: true } } },
+      });
+      if (madhupuri && madhupuri._count.freightRates === 0 && Number(madhupuri.associationFeePerTrip) === 0) {
+        // ₹ per 35 t lorry, Punganur to each lane, as agreed Nov 2026.
+        const lanes: Array<[string, number]> = [
+          ['AUSA', 63_000],
+          ['BARSHI', 52_500],
+          ['SHAHADA', 80_000],
+          ['SILVASSA', 80_000],
+          ['SURAT', 80_000],
+          ['AHILYANAGAR', 66_500],
+        ];
+        await prisma.transportFreightRate.createMany({
+          data: lanes.map(([destination, flatAmount]) => ({
+            transportId: madhupuri.id,
+            destination,
+            flatAmount,
+            forTonnageKg: 35_000,
+          })),
+        });
+        await prisma.transport.update({
+          where: { id: madhupuri.id },
+          data: { associationFeePerTrip: 300 },
+        });
+        logger.info(`[boot] seeded ${lanes.length} agreed trip rates and the ₹300 association fee for Madhupuri Transport`);
+      }
     } catch(e) {
       logger.error(e);
     }

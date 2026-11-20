@@ -87,7 +87,11 @@ describe('journey arithmetic', () => {
   it('resolves the destinations the office actually types', () => {
     expect(resolvePlace('Surat')?.name).toBe('Surat');
     expect(resolvePlace('surat (sachin)')?.name).toBe('Sachin, Surat');
-    expect(resolvePlace('Nagar')?.name).toBe('Ahmednagar');
+    // One town, renamed in 2024. Both spellings the office types resolve to
+    // the new name, so a lane priced as one is not reported as the other.
+    expect(resolvePlace('Nagar')?.name).toBe('Ahilyanagar');
+    expect(resolvePlace('Ahmednagar')?.name).toBe('Ahilyanagar');
+    expect(resolvePlace('Ausa')?.name).toBe('Ausa');
     expect(resolvePlace('')).toBeNull();
     expect(resolvePlace('somewhere nobody has heard of')).toBeNull();
   });

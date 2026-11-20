@@ -442,3 +442,58 @@ export function buildIndentMessage(args: {
     'Kindly reply with the lorry number, driver name and driver mobile against each code.',
   ].join('\n');
 }
+
+
+/**
+ * Close the loading slot a dispatch just went out on.
+ *
+ * Until now nothing ever set a slot to LOADED: the status existed, the guards
+ * read it, but a lorry that actually left kept its CONFIRMED row on the
+ * calendar until somebody tidied it by hand. That was tolerable while the slot
+ * was only a planning note. It is not tolerable now that a confirmed slot puts
+ * a lorry on the arrivals board and inside the approach rings - a slot that
+ * never closes is a lorry the yard is told to expect for the rest of the week,
+ * and an alert channel that cries wolf is one nobody reads.
+ *
+ * Matched on the lorry number within that order's own open slots, because that
+ * is the one fact the dispatch and the slot are certain to share. No match is a
+ * normal outcome - a lorry that turned up without being booked, or a plate
+ * typed differently at the gate - and it does nothing rather than guessing at
+ * which of the day's slots this was: closing the wrong one would retire a lorry
+ * that is still on the road.
+ *
+ * Fire-and-forget from the dispatch path. A dispatch is the record that matters;
+ * a calendar card left open is a tidying job, not a lost transaction.
+ */
+export async function markSlotLoaded(args: {
+  saleOrderId: string;
+  vehicleNumber: string | null | undefined;
+  saleDispatchId: string;
+}): Promise<string | null> {
+  const plate = String(args.vehicleNumber ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!plate) return null;
+
+  const open = await prisma.dispatchSlot.findMany({
+    where: {
+      saleOrderId: args.saleOrderId,
+      status: { in: ACTIVE_SLOT_STATUSES },
+      saleDispatchId: null,
+      lorryNumber: { not: null },
+    },
+    orderBy: { date: 'asc' },
+    select: { id: true, lorryNumber: true },
+  });
+
+  // Oldest first: when the same lorry runs an order twice, the trip that was
+  // booked first is the one that has now gone.
+  const match = open.find(
+    (slot) => String(slot.lorryNumber ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') === plate,
+  );
+  if (!match) return null;
+
+  await prisma.dispatchSlot.update({
+    where: { id: match.id },
+    data: { status: 'LOADED', saleDispatchId: args.saleDispatchId },
+  });
+  return match.id;
+}

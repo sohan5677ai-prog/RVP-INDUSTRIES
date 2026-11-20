@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee, SlidersHorizontal, Plus, Trash2, RotateCcw } from 'lucide-react';
+import { Loader2, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowLeftRight, MessageCircle, ChevronRight, IndianRupee, SlidersHorizontal, Plus, Trash2, RotateCcw, Lock } from 'lucide-react';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import { SearchInput } from '@/components/ui/search-input';
 import { usePagedRows } from '@/lib/usePagedRows';
@@ -29,6 +29,21 @@ import type { ExportColumn } from '@/lib/export';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { LorryPaymentShareDialog } from '@/components/LorryPaymentShareDialog';
 import type { LorryPaymentData } from '@/lib/lorryPaymentTemplate';
+
+/**
+ * The deduction lines that belong to the agency's terms rather than to this
+ * trip, and so are shown but not editable here.
+ *
+ * Matched on the label because that is what the stored JSON carries - the same
+ * constant the server writes (ASSOCIATION_FEE_LABEL in lib/transportFreight).
+ * Keep the two spellings in step.
+ */
+const LOCKED_DEDUCTION_LABELS = ['lorry association fee'];
+
+function isLockedDeduction(label: string): boolean {
+  return LOCKED_DEDUCTION_LABELS.includes(label.trim().toLowerCase());
+}
+
 
 const SuryaRoadTransport = lazy(() => import('@/pages/SuryaRoadTransport'));
 const LorryConfirmations = lazy(() => import('@/pages/LorryConfirmations'));
@@ -701,17 +716,30 @@ function AdjustFreightCostsDialog({
               <div className="text-xs text-muted-foreground py-2 italic text-center">No other expense deductions added.</div>
             ) : (
               <div className="space-y-2">
-                {deductions.map((item, idx) => (
+                {deductions.map((item, idx) => {
+                  // The association fee is the agency's terms, not this trip's
+                  // paperwork: it is shown here so the net reads correctly, but
+                  // it cannot be edited away. The server re-asserts it on every
+                  // save regardless, so letting the form change it would only
+                  // produce an edit that silently did not stick.
+                  const locked = isLockedDeduction(item.label);
+                  return (
                   <div key={item.id} className="flex items-center gap-2">
                     <Input
                       placeholder="e.g. Diesel Advance, Driver Expense, TDS"
                       value={item.label}
+                      readOnly={locked}
                       onChange={(e) => {
+                        if (locked) return;
                         const next = [...deductions];
                         next[idx].label = e.target.value;
                         setDeductions(next);
                       }}
-                      className="h-8 text-xs flex-1 bg-background"
+                      className={cn(
+                        'h-8 text-xs flex-1 bg-background',
+                        locked && 'cursor-not-allowed text-muted-foreground',
+                      )}
+                      title={locked ? 'Set on the transport agency - it applies to every trip' : undefined}
                     />
                     <div className="relative w-32 shrink-0">
                       <span className="absolute left-2.5 top-2 text-xs text-muted-foreground">₹</span>
@@ -720,25 +748,33 @@ function AdjustFreightCostsDialog({
                         step="0.01"
                         placeholder="Amount"
                         value={item.amount}
+                        readOnly={locked}
                         onChange={(e) => {
+                          if (locked) return;
                           const next = [...deductions];
                           next[idx].amount = e.target.value;
                           setDeductions(next);
                         }}
-                        className="h-8 pl-6 text-xs font-mono bg-background text-right"
+                        className={cn(
+                          'h-8 pl-6 text-xs font-mono bg-background text-right',
+                          locked && 'cursor-not-allowed text-muted-foreground',
+                        )}
                       />
                     </div>
                     <Button
                       size="sm"
                       variant="ghost"
                       type="button"
+                      disabled={locked}
                       onClick={() => setDeductions(deductions.filter((_, i) => i !== idx))}
                       className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                      title={locked ? 'Mandatory on this agency - change it on the Transports page' : undefined}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      {locked ? <Lock className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
                     </Button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

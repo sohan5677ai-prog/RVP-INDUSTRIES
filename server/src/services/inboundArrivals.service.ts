@@ -32,7 +32,7 @@ import { normaliseVehicleNumber, deriveState, type TrackedState } from '../contr
 
 /** Ring defaults, used when CompanyProfile has nothing set. */
 export const DEFAULT_APPROACH_RING_KM = 10;
-export const DEFAULT_GATE_RING_KM = 3;
+export const DEFAULT_GATE_RING_KM = 2;
 
 export interface ArrivalRings {
   approachKm: number;
@@ -81,8 +81,27 @@ export async function resolveArrivalRings(): Promise<ArrivalRings> {
 /** How close an arriving lorry is, in the words the yard uses. */
 export type ArrivalPhase = 'BOOKED' | 'EN_ROUTE' | 'APPROACHING' | 'AT_GATE';
 
+/**
+ * Why the lorry is coming.
+ *
+ * Both kinds are "a lorry on its way to the gate that nobody has told the yard
+ * about", which is why they share this board, the rings and the cabin strip.
+ * They differ in what happens when it gets here: a PURCHASE lorry arrives
+ * loaded and is weighed in, a LOADING lorry arrives empty for a sale load and
+ * is weighed for its tare. The kata cabin needs to know which, because the
+ * ticket it opens is a different ticket.
+ */
+export type ArrivalKind = 'PURCHASE' | 'LOADING';
+
 export interface InboundArrival {
-  bookingId: string;
+  /** Stable row key across both kinds: `tc:<id>` or `slot:<id>`. */
+  id: string;
+  kind: ArrivalKind;
+  /** The register row, when there is one. Null on a slot confirmed by hand. */
+  bookingId: string | null;
+  /** The loading slot, on a LOADING arrival. */
+  slotId: string | null;
+  /** The code the transporter was given and quoted back, either side. */
   requirementCode: string | null;
   lorryNumber: string | null;
   driverName: string | null;
@@ -96,9 +115,25 @@ export interface InboundArrival {
 
   purchaseOrderId: string | null;
   poNumber: string | null;
-  supplier: string;
+  /**
+   * Who this lorry concerns: the supplier on a purchase arrival, the buyer on a
+   * loading one. One field rather than two because every screen that shows an
+   * arrival shows exactly one name next to the plate, and a board with both a
+   * supplier and a buyer column, each empty half the time, reads worse.
+   */
+  counterparty: string;
+  /** The transport agency supplying the lorry, where we know it. */
+  transportName: string | null;
+  /** Where a LOADING lorry is going once it is loaded. Null on a purchase. */
+  destination: string | null;
   /** Product and tonnage, as the driver brief words it. */
   load: string;
+  /**
+   * The commodity in the weighbridge's own vocabulary, so the kata cabin can
+   * fill its material box without translating a sale-product enum. Mapped here
+   * rather than on the screen because this is where the enum is known.
+   */
+  kataMaterial: string;
   tonnageKg: number | null;
 
   /**
@@ -149,6 +184,18 @@ interface BookingRow {
 /** The window a booking stays on the board for. Matches the dispatch side. */
 const ARRIVAL_WINDOW_DAYS = 14;
 
+/**
+ * How far back and forward a confirmed loading slot counts as "coming".
+ *
+ * Tighter than the purchase window on purpose. A purchase booking has no date
+ * of its own - it is live until its order is stocked in, however long the lorry
+ * takes - whereas a loading slot is planned for a day. Three days past that day
+ * it is a slot somebody forgot to close, not a lorry at the gate; a week ahead
+ * is as far as the yard can usefully look.
+ */
+const SLOT_WINDOW_BACK_DAYS = 3;
+const SLOT_WINDOW_AHEAD_DAYS = 7;
+
 /** A fix older than this says where the lorry WAS, and cannot ring a bell. */
 export const ALERT_MAX_FIX_AGE_MINUTES = 30;
 
@@ -188,6 +235,74 @@ async function liveBookings(): Promise<BookingRow[]> {
           poNumber: true,
           tonnageKg: true,
           party: { select: { name: true } },
+        },
+      },
+    },
+  });
+}
+
+interface SlotRow {
+  id: string;
+  code: string;
+  date: Date;
+  plannedKg: number;
+  lorryNumber: string | null;
+  driverName: string | null;
+  driverPhone: string | null;
+  confirmedAt: Date | null;
+  createdAt: Date;
+  transportConfirmationId: string | null;
+  transport: { name: string; phone: string | null } | null;
+  saleOrder: {
+    product: string;
+    destination: string | null;
+    buyer: { name: string; city: string | null };
+  };
+}
+
+/**
+ * Confirmed loading slots that are still empty lorries on their way here.
+ *
+ * `saleDispatchId: null` is the lifecycle, and it is the slot's equivalent of
+ * the purchase side reading its order's status: a slot drops off this board the
+ * moment it is loaded, because that is the same event the weighbridge records,
+ * and an arrivals board with its own "arrived" flag is a second thing to keep
+ * in step with the kata.
+ *
+ * A plate is required. A slot the transporter has not answered yet is a lorry
+ * that does not exist, and putting it on a tracking board would invite the yard
+ * to wait for it.
+ */
+async function liveLoadingSlots(): Promise<SlotRow[]> {
+  const now = Date.now();
+  return prisma.dispatchSlot.findMany({
+    where: {
+      status: 'CONFIRMED',
+      lorryNumber: { not: null },
+      saleDispatchId: null,
+      date: {
+        gte: new Date(now - SLOT_WINDOW_BACK_DAYS * 24 * 3_600_000),
+        lte: new Date(now + SLOT_WINDOW_AHEAD_DAYS * 24 * 3_600_000),
+      },
+    },
+    orderBy: { date: 'asc' },
+    select: {
+      id: true,
+      code: true,
+      date: true,
+      plannedKg: true,
+      lorryNumber: true,
+      driverName: true,
+      driverPhone: true,
+      confirmedAt: true,
+      createdAt: true,
+      transportConfirmationId: true,
+      transport: { select: { name: true, phone: true } },
+      saleOrder: {
+        select: {
+          product: true,
+          destination: true,
+          buyer: { select: { name: true, city: true } },
         },
       },
     },
@@ -256,6 +371,106 @@ function loadLabel(kg: number | null): string {
   return kg ? `Black seed - ${(kg / 1000).toFixed(2)} MT` : 'Black seed';
 }
 
+/** The sale products, in the words the office and the hamali team use. */
+const SALE_PRODUCT_LABEL: Record<string, string> = {
+  PAPPU: 'Pappu',
+  HUSK: 'Husk',
+  WASTE: 'Tamarind waste',
+  TPS: 'TPS',
+  SHELL: 'Shell',
+  PRECLEANER_DUST: 'Pre cleaner dust',
+  NALLA_POKKULU: 'Nalla pokkulu',
+  NALLA_CHINTAPANDU: 'Nalla chintapandu',
+};
+
+/**
+ * The sale products in the words the weighbridge's material box uses.
+ *
+ * Deliberately a second map and not a re-use of SALE_PRODUCT_LABEL: those are
+ * sentences for people, these are exactly the strings in the cabin's dropdown,
+ * and an unlisted value would leave the box empty on a lorry at the gate.
+ */
+const KATA_MATERIAL: Record<string, string> = {
+  PAPPU: 'PAPPU',
+  HUSK: 'HUSK',
+  WASTE: 'T WASTE',
+  TPS: 'TPS BROKENS',
+  SHELL: 'T SHELL',
+  PRECLEANER_DUST: 'PRE CLEANER DUST',
+  NALLA_POKKULU: 'NALLA POKKULU',
+  NALLA_CHINTAPANDU: 'NALLA CHINTAPANDU',
+};
+
+/** What an empty lorry has come to collect. */
+function slotLoadLabel(product: string, kg: number): string {
+  const name = SALE_PRODUCT_LABEL[product] ?? product;
+  return `${name} - ${(kg / 1000).toFixed(2)} MT`;
+}
+
+/**
+ * The part of an arrival that comes from a position rather than from paperwork.
+ *
+ * One function for both kinds, because "how far out is it" must be one piece of
+ * arithmetic: the distance the cabin shows, the distance in the WhatsApp and the
+ * distance a ring fired on are all read from here.
+ */
+function positionOf(
+  fix: Fix | undefined,
+  fromPlace: string | null,
+  bookedAt: Date,
+  now: number,
+): {
+  tracked: boolean;
+  distanceKm: number | null;
+  etaAt: string | null;
+  etaIsEstimate: boolean;
+  ageMinutes: number | null;
+  state: TrackedState;
+} {
+  if (fix) {
+    const ageMinutes = Math.max(0, Math.round((now - fix.recordedAt.getTime()) / 60_000));
+    const distanceKm = Math.round(
+      kmBetween(fix.latitude, fix.longitude, FACTORY.latitude, FACTORY.longitude) * ROAD_FACTOR,
+    );
+    return {
+      tracked: true,
+      distanceKm,
+      // Off the long-run average rather than the instantaneous speed, for the
+      // same reason the dispatch board does it: a lorry stopped for chai is not
+      // going to take forever, and one doing 70 on a bypass will not keep it.
+      etaAt:
+        distanceKm > 1
+          ? new Date(now + (distanceKm / AVG_LORRY_KMPH) * 3_600_000).toISOString()
+          : null,
+      etaIsEstimate: false,
+      ageMinutes,
+      state: deriveState(fix.providerStatus, fix.speedKmph, ageMinutes),
+    };
+  }
+
+  // Untracked: the best that can honestly be said is "this far from the
+  // loading place at lorry speed, from the day it was booked". Marked an
+  // estimate, and absent entirely when the place is not in the places table -
+  // a made-up ETA is worse than no ETA.
+  const origin = resolvePlace(fromPlace);
+  let etaAt: string | null = null;
+  if (origin) {
+    const totalKm =
+      kmBetween(origin.latitude, origin.longitude, FACTORY.latitude, FACTORY.longitude) * ROAD_FACTOR;
+    // Lorries run about ten hours a day on these lanes, not twenty-four.
+    const days = totalKm / (AVG_LORRY_KMPH * 10);
+    etaAt = new Date(bookedAt.getTime() + days * 24 * 3_600_000).toISOString();
+  }
+  return {
+    tracked: false,
+    distanceKm: null,
+    etaAt,
+    etaIsEstimate: true,
+    ageMinutes: null,
+    state: 'NO_SIGNAL',
+  };
+}
+
 /**
  * Which ring this lorry is inside.
  *
@@ -283,71 +498,67 @@ export async function buildArrivalsBoard(): Promise<{
   rings: ArrivalRings;
   arrivals: InboundArrival[];
 }> {
-  const [rings, bookings] = await Promise.all([resolveArrivalRings(), liveBookings()]);
+  const [rings, bookings, slots] = await Promise.all([
+    resolveArrivalRings(),
+    liveBookings(),
+    liveLoadingSlots(),
+  ]);
 
-  const plates = [...new Set(
-    bookings.map((b) => normaliseVehicleNumber(b.lorryNumber ?? '')).filter(Boolean),
-  )];
+  const plates = [
+    ...new Set(
+      [...bookings, ...slots]
+        .map((row) => normaliseVehicleNumber(row.lorryNumber ?? ''))
+        .filter(Boolean),
+    ),
+  ];
 
-  const [fixes, firedRows] = await Promise.all([
+  // A ring is latched against whichever subject owns the arrival: the register
+  // row for a purchase lorry, the slot for a loading one. Read in one query per
+  // kind and merged into a map keyed by subject id, so the board does not care
+  // which column the row came from.
+  const [fixes, firedBookings, firedSlots] = await Promise.all([
     latestFixes(plates),
     bookings.length
       ? prisma.approachAlert.findMany({
           where: { transportConfirmationId: { in: bookings.map((b) => b.id) } },
           select: { transportConfirmationId: true, ringKm: true },
         })
-      : Promise.resolve([] as { transportConfirmationId: string; ringKm: number }[]),
+      : Promise.resolve([] as { transportConfirmationId: string | null; ringKm: number }[]),
+    slots.length
+      ? prisma.approachAlert.findMany({
+          where: { dispatchSlotId: { in: slots.map((s) => s.id) } },
+          select: { dispatchSlotId: true, ringKm: true },
+        })
+      : Promise.resolve([] as { dispatchSlotId: string | null; ringKm: number }[]),
   ]);
 
-  const firedByBooking = new Map<string, number[]>();
-  for (const row of firedRows) {
-    const list = firedByBooking.get(row.transportConfirmationId) ?? [];
-    list.push(row.ringKm);
-    firedByBooking.set(row.transportConfirmationId, list);
-  }
+  const firedBySubject = new Map<string, number[]>();
+  const noteFired = (subject: string | null, ringKm: number) => {
+    if (!subject) return;
+    const list = firedBySubject.get(subject) ?? [];
+    list.push(ringKm);
+    firedBySubject.set(subject, list);
+  };
+  for (const row of firedBookings) noteFired(row.transportConfirmationId, row.ringKm);
+  for (const row of firedSlots) noteFired(row.dispatchSlotId, row.ringKm);
 
   const now = Date.now();
 
-  const arrivals: InboundArrival[] = bookings.map((b) => {
-    const plate = normaliseVehicleNumber(b.lorryNumber ?? '');
-    const fix = plate ? fixes.get(plate) : undefined;
+  const fixFor = (lorryNumber: string | null) => {
+    const plate = normaliseVehicleNumber(lorryNumber ?? '');
+    return plate ? fixes.get(plate) : undefined;
+  };
+
+  const purchaseArrivals: InboundArrival[] = bookings.map((b) => {
+    const fix = fixFor(b.lorryNumber);
     const kg = b.tonnageKg ?? b.purchaseOrder?.tonnageKg ?? null;
-
-    let distanceKm: number | null = null;
-    let etaAt: string | null = null;
-    let etaIsEstimate = true;
-    let ageMinutes: number | null = null;
-    let state: TrackedState = 'NO_SIGNAL';
-
-    if (fix) {
-      ageMinutes = Math.max(0, Math.round((now - fix.recordedAt.getTime()) / 60_000));
-      state = deriveState(fix.providerStatus, fix.speedKmph, ageMinutes);
-      distanceKm = Math.round(
-        kmBetween(fix.latitude, fix.longitude, FACTORY.latitude, FACTORY.longitude) * ROAD_FACTOR,
-      );
-      // Off the long-run average rather than the instantaneous speed, for the
-      // same reason the dispatch board does it: a lorry stopped for chai is not
-      // going to take forever, and one doing 70 on a bypass will not keep it.
-      etaAt = distanceKm > 1
-        ? new Date(now + (distanceKm / AVG_LORRY_KMPH) * 3_600_000).toISOString()
-        : null;
-      etaIsEstimate = false;
-    } else {
-      // Untracked: the best that can honestly be said is "this far from the
-      // loading place at lorry speed, from the day it was booked". Marked an
-      // estimate, and absent entirely when the loading place is not in the
-      // places table - a made-up ETA is worse than no ETA.
-      const origin = resolvePlace(b.fromPlace);
-      if (origin) {
-        const totalKm = kmBetween(origin.latitude, origin.longitude, FACTORY.latitude, FACTORY.longitude) * ROAD_FACTOR;
-        // Lorries run about ten hours a day on these lanes, not twenty-four.
-        const days = totalKm / (AVG_LORRY_KMPH * 10);
-        etaAt = new Date(b.createdAt.getTime() + days * 24 * 3_600_000).toISOString();
-      }
-    }
+    const pos = positionOf(fix, b.fromPlace, b.createdAt, now);
 
     return {
+      id: `tc:${b.id}`,
+      kind: 'PURCHASE',
       bookingId: b.id,
+      slotId: null,
       requirementCode: b.requirementCode,
       lorryNumber: b.lorryNumber,
       driverName: b.driverName,
@@ -358,25 +569,66 @@ export async function buildArrivalsBoard(): Promise<{
       briefSentAt: b.driverBriefSentAt?.toISOString() ?? null,
       purchaseOrderId: b.purchaseOrderId,
       poNumber: b.purchaseOrder?.poNumber ?? null,
-      supplier: b.purchaseOrder?.party?.name ?? '-',
+      counterparty: b.purchaseOrder?.party?.name ?? '-',
+      transportName: null,
+      destination: null,
       load: loadLabel(kg),
+      kataMaterial: 'TAMARIND SEED',
       tonnageKg: kg,
-      tracked: Boolean(fix),
       latitude: fix?.latitude ?? null,
       longitude: fix?.longitude ?? null,
       speedKmph: fix?.speedKmph ?? null,
       headingDeg: fix?.headingDeg ?? null,
       address: fix?.address ?? null,
       recordedAt: fix?.recordedAt.toISOString() ?? null,
-      ageMinutes,
-      state,
-      distanceKm,
-      etaAt,
-      etaIsEstimate,
-      phase: phaseOf(distanceKm, rings),
-      ringsFired: (firedByBooking.get(b.id) ?? []).sort((a, z) => z - a),
+      ...pos,
+      phase: phaseOf(pos.distanceKm, rings),
+      ringsFired: (firedBySubject.get(b.id) ?? []).sort((a, z) => z - a),
     };
   });
+
+  const loadingArrivals: InboundArrival[] = slots.map((s) => {
+    const fix = fixFor(s.lorryNumber);
+    // The slot is the booking date for an estimate: a lorry confirmed for
+    // tomorrow's loading is not running towards us today.
+    const pos = positionOf(fix, null, s.confirmedAt ?? s.createdAt, now);
+
+    return {
+      id: `slot:${s.id}`,
+      kind: 'LOADING',
+      bookingId: s.transportConfirmationId,
+      slotId: s.id,
+      requirementCode: s.code,
+      lorryNumber: s.lorryNumber,
+      driverName: s.driverName,
+      driverPhone: s.driverPhone,
+      fromPlace: null,
+      // The agency's own number, not a driver's: when a confirmed lorry goes
+      // quiet, the transport office is who you ring.
+      fromPhone: s.transport?.phone ?? '-',
+      bookedAt: (s.confirmedAt ?? s.createdAt).toISOString(),
+      briefSentAt: null,
+      purchaseOrderId: null,
+      poNumber: null,
+      counterparty: s.saleOrder.buyer.name,
+      transportName: s.transport?.name ?? null,
+      destination: s.saleOrder.destination || s.saleOrder.buyer.city || null,
+      load: slotLoadLabel(s.saleOrder.product, s.plannedKg),
+      kataMaterial: KATA_MATERIAL[s.saleOrder.product] ?? 'OTHERS',
+      tonnageKg: s.plannedKg,
+      latitude: fix?.latitude ?? null,
+      longitude: fix?.longitude ?? null,
+      speedKmph: fix?.speedKmph ?? null,
+      headingDeg: fix?.headingDeg ?? null,
+      address: fix?.address ?? null,
+      recordedAt: fix?.recordedAt.toISOString() ?? null,
+      ...pos,
+      phase: phaseOf(pos.distanceKm, rings),
+      ringsFired: (firedBySubject.get(s.id) ?? []).sort((a, z) => z - a),
+    };
+  });
+
+  const arrivals: InboundArrival[] = [...purchaseArrivals, ...loadingArrivals];
 
   // Closest first, and the untracked ones after everything that has a position:
   // the order someone standing in the cabin wants to read.
@@ -394,7 +646,9 @@ export async function buildArrivalsBoard(): Promise<{
 export interface RingSweepResult {
   checked: number;
   fired: {
-    bookingId: string;
+    /** The arrival's row key - `tc:<id>` or `slot:<id>`. */
+    arrivalId: string;
+    kind: ArrivalKind;
     lorryNumber: string | null;
     ringKm: number;
     distanceKm: number;
@@ -444,6 +698,16 @@ export async function sweepApproachRings(): Promise<RingSweepResult> {
     // put the team at the gate for a lorry still three districts away.
     if (arrival.ageMinutes === null || arrival.ageMinutes > ALERT_MAX_FIX_AGE_MINUTES) continue;
 
+    // Whichever of the two columns owns this arrival. A loading lorry latches
+    // on its slot even when a register row exists behind it: the slot is what
+    // survives an office edit to the booking, and it is the one key the kata
+    // cabin and the calendar both already hold.
+    const latch =
+      arrival.kind === 'LOADING'
+        ? { dispatchSlotId: arrival.slotId }
+        : { transportConfirmationId: arrival.bookingId };
+    if (arrival.kind === 'LOADING' ? !arrival.slotId : !arrival.bookingId) continue;
+
     for (const ringKm of [rings.approachKm, rings.gateKm]) {
       if (arrival.distanceKm > ringKm) continue;
       if (arrival.ringsFired.includes(ringKm)) continue;
@@ -451,7 +715,7 @@ export async function sweepApproachRings(): Promise<RingSweepResult> {
       try {
         await prisma.approachAlert.create({
           data: {
-            transportConfirmationId: arrival.bookingId,
+            ...latch,
             ringKm,
             distanceKm: arrival.distanceKm,
           },
@@ -467,33 +731,33 @@ export async function sweepApproachRings(): Promise<RingSweepResult> {
         notified = await notifyInboundApproach(arrival, ringKm, rings);
       } catch (err) {
         logger.warn(
-          `[arrivals] ring ${ringKm}km fired for ${arrival.lorryNumber ?? arrival.bookingId} but the alert failed: ${(err as Error)?.message ?? err}`,
+          `[arrivals] ring ${ringKm}km fired for ${arrival.lorryNumber ?? arrival.id} but the alert failed: ${(err as Error)?.message ?? err}`,
         );
       }
 
       if (notified > 0) {
         await prisma.approachAlert
-          .update({
-            where: {
-              transportConfirmationId_ringKm: {
-                transportConfirmationId: arrival.bookingId,
-                ringKm,
-              },
-            },
+          .updateMany({
+            // By the two latch columns rather than a compound where: which of
+            // them is set depends on the kind, and `updateMany` takes the same
+            // filter shape for either. There is exactly one matching row - the
+            // unique keys guarantee it.
+            where: { ...latch, ringKm },
             data: { notifiedCount: notified },
           })
           .catch(() => undefined);
       }
 
       result.fired.push({
-        bookingId: arrival.bookingId,
+        arrivalId: arrival.id,
+        kind: arrival.kind,
         lorryNumber: arrival.lorryNumber,
         ringKm,
         distanceKm: arrival.distanceKm,
         notified,
       });
       logger.info(
-        `[arrivals] ${arrival.lorryNumber ?? arrival.bookingId} crossed the ${ringKm} km ring at ${arrival.distanceKm} km - ${notified} notified`,
+        `[arrivals] ${arrival.lorryNumber ?? arrival.id} crossed the ${ringKm} km ring at ${arrival.distanceKm} km - ${notified} notified`,
       );
     }
   }

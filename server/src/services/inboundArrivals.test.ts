@@ -19,8 +19,8 @@ describe('phaseOf', () => {
     expect(phaseOf(400, rings)).toBe('EN_ROUTE');
     expect(phaseOf(11, rings)).toBe('EN_ROUTE');
     expect(phaseOf(10, rings)).toBe('APPROACHING');
-    expect(phaseOf(4, rings)).toBe('APPROACHING');
-    expect(phaseOf(3, rings)).toBe('AT_GATE');
+    expect(phaseOf(3, rings)).toBe('APPROACHING');
+    expect(phaseOf(2, rings)).toBe('AT_GATE');
     expect(phaseOf(0, rings)).toBe('AT_GATE');
   });
 

@@ -1149,6 +1149,9 @@ export async function getArrivalsBoard(_req: Request, res: Response) {
       enRoute: arrivals.filter((a) => a.phase === 'EN_ROUTE').length,
       booked: arrivals.filter((a) => a.phase === 'BOOKED').length,
       untracked: arrivals.filter((a) => !a.tracked).length,
+      // Split by why the lorry is coming, for the two tab counts.
+      purchase: arrivals.filter((a) => a.kind === 'PURCHASE').length,
+      loading: arrivals.filter((a) => a.kind === 'LOADING').length,
     },
     arrivals,
   });

@@ -35,6 +35,12 @@ import {
   DEFAULT_SALE_CLOSE_TOLERANCE_BYPRODUCT_PCT,
 } from '../lib/calc.js';
 import {
+  flatTripFreight,
+  associationFeePerTrip,
+  withAssociationFee,
+  readCostItems,
+} from '../lib/transportFreight.js';
+import {
   getFreightRateForDestination,
   getCompanyProfileRow,
   getHamaliRate,
@@ -48,6 +54,7 @@ import { allocateSaleOrderNumber, releaseSaleSerial } from '../lib/saleOrderNumb
 import { whatsappService } from '../services/whatsapp.service.js';
 import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.service.js';
 import { logger } from '../lib/logger.js';
+import { markSlotLoaded } from '../services/dispatchSlot.service.js';
 import { findWaitingConfirmation, markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
 import { resolveOrderEffectiveDetails, resolveOrderBuyerAddress } from '../lib/orderAddress.js';
 import { snapshotDispatchDestination } from '../services/dispatchDestination.service.js';
@@ -377,6 +384,17 @@ export async function updateDispatchFreightCosts(req: Request, res: Response) {
 
   const data = updateFreightCostsSchema.parse(req.body);
 
+  // The association fee is re-asserted on every save, not just at dispatch.
+  // This form sends the whole deduction list back, so without this a user who
+  // deleted the ₹300 line - or who saved a form rendered before the fee was
+  // configured - would quietly settle the trip without it. Clearing the list
+  // entirely (null) is likewise not a way around the fee.
+  const associationFee = await associationFeePerTrip(dispatch.transportId);
+  const deductions =
+    data.freightDeductions !== undefined
+      ? withAssociationFee(readCostItems(data.freightDeductions ?? []), associationFee)
+      : null;
+
   const updated = await prisma.saleDispatch.update({
     where: { id: req.params.id },
     data: {
@@ -385,7 +403,13 @@ export async function updateDispatchFreightCosts(req: Request, res: Response) {
       ...(data.customKata !== undefined ? { customKata: data.customKata != null ? Number(data.customKata) : null } : {}),
       ...(data.customRetention !== undefined ? { customRetention: data.customRetention != null ? Number(data.customRetention) : null } : {}),
       ...(data.freightAdditions !== undefined ? { freightAdditions: data.freightAdditions === null ? Prisma.JsonNull : (data.freightAdditions as unknown as Prisma.InputJsonValue) } : {}),
-      ...(data.freightDeductions !== undefined ? { freightDeductions: data.freightDeductions === null ? Prisma.JsonNull : (data.freightDeductions as unknown as Prisma.InputJsonValue) } : {}),
+      ...(deductions !== null
+        ? {
+            freightDeductions: deductions.length
+              ? (deductions as unknown as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
+          }
+        : {}),
     },
   });
 
@@ -932,6 +956,30 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   const transportProvider = transportRecord?.code || transportRecord?.name || data.transportProvider || 'SURYA';
   const isCompanyVehicle = transportProvider === 'KNM' || (transportRecord?.name?.toUpperCase().includes('KNM') ?? false);
   const retentionConfig = Number(company.freightRetentionPerTrip ?? 3000);
+
+  // An agreed flat trip rate outranks both the per-tonne formula and whatever
+  // figure the transporter typed into WhatsApp. Where we have settled a price
+  // per lorry per destination with an agency - Punganur to Ausa, ₹63,000 - that
+  // IS the freight: his fleet is all 35-tonners, the rate was agreed per lorry,
+  // and re-deriving it from the kata weight would short-pay him by a few
+  // hundred rupees on every load that came in light. See lib/transportFreight.
+  const freightDestination = order.destination || order.buyer.destination || order.buyer.city || null;
+  if (order.priceType !== 'BASE' && transportRecord) {
+    const agreed = await flatTripFreight(transportRecord.id, freightDestination);
+    if (agreed != null) freightCharge = agreed;
+  }
+
+  // The agency's per-trip association fee, where it carries one. ₹300 a lorry
+  // for Madhupuri, which was being typed onto every dispatch by hand and is
+  // therefore the kind of charge that goes missing on a busy afternoon. It is
+  // not offered as a choice: the line goes on here and is re-asserted on every
+  // edit, so a saved freight-cost form cannot drop it.
+  const associationFee = await associationFeePerTrip(transportRecord?.id ?? data.transportId ?? null);
+  const freightDeductionsIn = withAssociationFee(
+    readCostItems(data.freightDeductions ?? []),
+    associationFee,
+  );
+
   const hasFreight = freightCharge > 0;
   const freightKata = calcKataFee(weightKg, isCompanyVehicle);
   let freightRetention = 0;
@@ -1070,7 +1118,9 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
         customHamali: data.customHamali != null ? Number(data.customHamali) : null,
         customKata: data.customKata != null ? Number(data.customKata) : null,
         freightAdditions: data.freightAdditions ? (data.freightAdditions as unknown as Prisma.InputJsonValue) : undefined,
-        freightDeductions: data.freightDeductions ? (data.freightDeductions as unknown as Prisma.InputJsonValue) : undefined,
+        freightDeductions: freightDeductionsIn.length
+          ? (freightDeductionsIn as unknown as Prisma.InputJsonValue)
+          : undefined,
         excessOutKg,
         excessOutNote: excessOutKg > 0 ? (data.excessOutNote ?? null) : null,
         fromTransfer: order.product !== 'PAPPU' && order.product !== 'TPS' ? data.fromTransfer : false,
@@ -1128,6 +1178,18 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   });
 
   if (order.product === 'PAPPU' && fullyDispatched) await freezeOrderCost(order.id);
+
+  // Retire the loading slot this lorry was booked on. Fire-and-forget: the
+  // dispatch is the record that matters, and a calendar card left open is a
+  // tidying job rather than a lost transaction. It is what takes the lorry off
+  // the arrivals board now that it has actually loaded.
+  void markSlotLoaded({
+    saleOrderId: order.id,
+    vehicleNumber: data.vehicleNumber,
+    saleDispatchId: dispatch.id,
+  }).catch((err) =>
+    logger.warn(`[dispatch] could not close the loading slot for ${dispatch.id}: ${err?.message ?? err}`),
+  );
 
   // Stamp where this lorry is going and how far, outside the transaction that
   // just committed: measuring a lane can mean a call to a routing provider, and

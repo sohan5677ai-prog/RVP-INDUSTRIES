@@ -164,6 +164,11 @@ interface InboundArrival {
   load: string;
   tonnageKg: number | null;
   tracked: boolean;
+  /** On the feed, but the last fix is too old to be read as a position. */
+  positionIsStale: boolean;
+  /** Due today or overdue, with nothing live to say where it is. */
+  awaitingAtMill: boolean;
+  dueAt: string | null;
   latitude: number | null;
   longitude: number | null;
   speedKmph: number | null;
@@ -488,13 +493,25 @@ function ArrivalRow({
                 {a.etaIsEstimate && <span className="opacity-70">(est.)</span>}
               </span>
             )}
-            {a.tracked ? (
+            {a.positionIsStale ? (
+              // On the feed but long silent. Said plainly, because the board
+              // used to draw this lorry a confident distance away off a fix
+              // weeks old - on a day it was standing in the yard.
+              <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-3 w-3" /> Last seen {ago(a.ageMinutes)}
+              </span>
+            ) : a.tracked ? (
               <span className="inline-flex items-center gap-1">
                 <SatelliteDish className="h-3 w-3" /> {ago(a.ageMinutes)}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="h-3 w-3" /> Not on the GPS feed
+              </span>
+            )}
+            {a.awaitingAtMill && (
+              <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400">
+                <Flag className="h-3 w-3" /> Due at the mill
               </span>
             )}
             {a.ringsFired.length > 0 && (
@@ -958,7 +975,10 @@ export default function VehicleTracking() {
       // list is where they are accounted for.
       if (inbound) {
         return shownArrivals
-          .filter((a) => a.latitude !== null && a.longitude !== null)
+          // A stale fix is left off too. A row can say "last seen 15 d ago"
+          // and be read correctly; a pin on a map cannot - it asserts the
+          // lorry is there now.
+          .filter((a) => a.latitude !== null && a.longitude !== null && !a.positionIsStale)
           .map((a) => ({
             vehicleNumber: a.lorryNumber ?? a.id,
             vehicleLabel: a.lorryNumber ?? 'Booked',

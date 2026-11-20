@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { FACTORY, resolvePlace, kmBetween, ROAD_FACTOR, AVG_LORRY_KMPH } from '../lib/gpsPlaces.js';
 import { normaliseVehicleNumber, deriveState, type TrackedState } from '../controllers/gps.controller.js';
+import { istCalendar } from '../lib/istDate.js';
 
 /**
  * Arriving purchase lorries - the inbound mirror of the dispatch board.
@@ -141,6 +142,26 @@ export interface InboundArrival {
    * is not an error - see the file header.
    */
   tracked: boolean;
+  /**
+   * On the feed, but its last fix is too old to be read as a position. The row
+   * carries `ageMinutes` and the coordinates as a last-known, and no distance,
+   * ETA or phase. See POSITION_MAX_AGE_MINUTES.
+   */
+  positionIsStale: boolean;
+  /**
+   * The day this lorry is due, for a LOADING arrival - the slot's loading date.
+   * Null on a purchase arrival, which has no date of its own.
+   */
+  dueAt: string | null;
+  /**
+   * The lorry is due (today or overdue) and there is no live position to say
+   * where it is. The kata cabin shows these alongside the ones it can see
+   * approaching: a lorry booked to load on Wednesday that is standing in the
+   * yard on Friday with a dead tracker is exactly the lorry the operator is
+   * about to weigh, and leaving it off the strip is what sent him hunting for
+   * it by hand.
+   */
+  awaitingAtMill: boolean;
   latitude: number | null;
   longitude: number | null;
   speedKmph: number | null;
@@ -198,6 +219,24 @@ const SLOT_WINDOW_AHEAD_DAYS = 7;
 
 /** A fix older than this says where the lorry WAS, and cannot ring a bell. */
 export const ALERT_MAX_FIX_AGE_MINUTES = 30;
+
+/**
+ * How old a fix may be and still be read as a position at all.
+ *
+ * Longer than the alert window on purpose: thirty minutes is the bar for waking
+ * the hamali team, but a lorry halted overnight with a four-hour-old fix is
+ * still honestly "180 km out", and blanking that would make the board useless
+ * every morning. Twelve hours covers a night halt and a long stop.
+ *
+ * Beyond it the fix is not a position, it is a memory. GJ18BV1872 last reported
+ * on 5 Nov and the board drew it at 286 km with a progress bar and an ETA, on a
+ * day the lorry was standing in the yard - the device had simply been off for a
+ * fortnight. A stale fix therefore yields no distance, no ETA and no phase, and
+ * the row shows how long ago it was last seen instead. The same principle the
+ * untracked branch below already follows: a guess wearing the clothes of a
+ * measurement is worse than admitting there is nothing to measure.
+ */
+export const POSITION_MAX_AGE_MINUTES = 12 * 60;
 
 /**
  * Bookings that are still lorries on their way here.
@@ -309,7 +348,7 @@ async function liveLoadingSlots(): Promise<SlotRow[]> {
   });
 }
 
-interface Fix {
+export interface Fix {
   latitude: number;
   longitude: number;
   speedKmph: number | null;
@@ -371,6 +410,15 @@ function loadLabel(kg: number | null): string {
   return kg ? `Black seed - ${(kg / 1000).toFixed(2)} MT` : 'Black seed';
 }
 
+/**
+ * `YYYY-MM-DD` in IST. Render runs UTC, so "is this lorry due today" asked with
+ * getDate() would roll over at 5:30 in the morning - half a loading day early.
+ */
+function istDayKey(date: Date): string {
+  const { year, month, day } = istCalendar(date);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 /** The sale products, in the words the office and the hamali team use. */
 const SALE_PRODUCT_LABEL: Record<string, string> = {
   PAPPU: 'Pappu',
@@ -414,13 +462,14 @@ function slotLoadLabel(product: string, kg: number): string {
  * arithmetic: the distance the cabin shows, the distance in the WhatsApp and the
  * distance a ring fired on are all read from here.
  */
-function positionOf(
+export function positionOf(
   fix: Fix | undefined,
   fromPlace: string | null,
   bookedAt: Date,
   now: number,
 ): {
   tracked: boolean;
+  positionIsStale: boolean;
   distanceKm: number | null;
   etaAt: string | null;
   etaIsEstimate: boolean;
@@ -429,11 +478,26 @@ function positionOf(
 } {
   if (fix) {
     const ageMinutes = Math.max(0, Math.round((now - fix.recordedAt.getTime()) / 60_000));
+    // Too old to be a position. `tracked` stays true - the lorry IS on the feed,
+    // its device has just gone quiet, which is a different thing from a lorry we
+    // never had a fix for and reads differently on screen.
+    if (ageMinutes > POSITION_MAX_AGE_MINUTES) {
+      return {
+        tracked: true,
+        positionIsStale: true,
+        distanceKm: null,
+        etaAt: null,
+        etaIsEstimate: true,
+        ageMinutes,
+        state: deriveState(fix.providerStatus, fix.speedKmph, ageMinutes),
+      };
+    }
     const distanceKm = Math.round(
       kmBetween(fix.latitude, fix.longitude, FACTORY.latitude, FACTORY.longitude) * ROAD_FACTOR,
     );
     return {
       tracked: true,
+      positionIsStale: false,
       distanceKm,
       // Off the long-run average rather than the instantaneous speed, for the
       // same reason the dispatch board does it: a lorry stopped for chai is not
@@ -463,6 +527,7 @@ function positionOf(
   }
   return {
     tracked: false,
+    positionIsStale: false,
     distanceKm: null,
     etaAt,
     etaIsEstimate: true,
@@ -543,6 +608,7 @@ export async function buildArrivalsBoard(): Promise<{
   for (const row of firedSlots) noteFired(row.dispatchSlotId, row.ringKm);
 
   const now = Date.now();
+  const todayKey = istDayKey(new Date(now));
 
   const fixFor = (lorryNumber: string | null) => {
     const plate = normaliseVehicleNumber(lorryNumber ?? '');
@@ -572,6 +638,10 @@ export async function buildArrivalsBoard(): Promise<{
       counterparty: b.purchaseOrder?.party?.name ?? '-',
       transportName: null,
       destination: null,
+      // A purchase booking is live until its order is stocked in; there is no
+      // day it is "due", so it is never pulled onto the cabin strip this way.
+      dueAt: null,
+      awaitingAtMill: false,
       load: loadLabel(kg),
       kataMaterial: 'TAMARIND SEED',
       tonnageKg: kg,
@@ -592,6 +662,10 @@ export async function buildArrivalsBoard(): Promise<{
     // The slot is the booking date for an estimate: a lorry confirmed for
     // tomorrow's loading is not running towards us today.
     const pos = positionOf(fix, null, s.confirmedAt ?? s.createdAt, now);
+    // Due today or overdue, with nothing live to say where it is. A lorry
+    // booked for Wednesday standing in the yard on Friday with a dead tracker
+    // is exactly the one the kata is about to weigh.
+    const awaitingAtMill = pos.distanceKm === null && istDayKey(s.date) <= todayKey;
 
     return {
       id: `slot:${s.id}`,
@@ -613,6 +687,8 @@ export async function buildArrivalsBoard(): Promise<{
       counterparty: s.saleOrder.buyer.name,
       transportName: s.transport?.name ?? null,
       destination: s.saleOrder.destination || s.saleOrder.buyer.city || null,
+      dueAt: s.date.toISOString(),
+      awaitingAtMill,
       load: slotLoadLabel(s.saleOrder.product, s.plannedKg),
       kataMaterial: KATA_MATERIAL[s.saleOrder.product] ?? 'OTHERS',
       tonnageKg: s.plannedKg,

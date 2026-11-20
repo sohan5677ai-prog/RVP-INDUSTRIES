@@ -25,7 +25,14 @@ vi.mock('../lib/prisma.js', () => ({
     party: { findFirst: vi.fn().mockResolvedValue(null) },
     broker: { findFirst: vi.fn().mockResolvedValue(null) },
     saleDispatch: { findFirst: vi.fn().mockResolvedValue(null) },
-    companyProfile: { findUnique: vi.fn().mockResolvedValue({ alertRecipients: JSON.stringify([{ name: 'Owner', phone: '9902953300' }]) }) },
+    companyProfile: {
+      findUnique: vi.fn().mockResolvedValue({ alertRecipients: JSON.stringify([{ name: 'Owner', phone: '9902953300' }]) }),
+      // bookingRoute's homePlace() reads this. Without it every booking threw
+      // on the way into the register, and the throw was swallowed by the
+      // webhook's catch - so the tests failed on a missing create, three
+      // layers from the cause.
+      findFirst: vi.fn().mockResolvedValue({ dispatchFromPlace: 'Punganur' }),
+    },
   },
 }));
 

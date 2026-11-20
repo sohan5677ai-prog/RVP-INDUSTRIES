@@ -598,6 +598,12 @@ interface ArrivingLorry {
   distanceKm: number | null;
   etaAt: string | null;
   phase: 'BOOKED' | 'EN_ROUTE' | 'APPROACHING' | 'AT_GATE';
+  /**
+   * Due today or overdue with no live position. These belong on the strip as
+   * much as the ones the board can see coming: a lorry whose tracker died is
+   * still a lorry the operator is about to weigh.
+   */
+  awaitingAtMill: boolean;
 }
 
 interface ArrivalsFeed {
@@ -783,11 +789,19 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     retry: false,
   });
 
-  /** Only what is close enough to matter to someone standing at the kata. */
+  /**
+   * Only what matters to someone standing at the kata: what the board can see
+   * coming in, plus what is due and cannot be seen at all.
+   *
+   * That second group is not a nicety. A confirmed lorry whose tracker has been
+   * off for a fortnight has no distance, so it never reaches APPROACHING and
+   * never appeared here - on the day it was parked outside the cabin. The
+   * operator went looking for it by hand instead.
+   */
   const arrivingNow = useMemo(
     () =>
       (arrivalsFeed?.arrivals ?? []).filter(
-        (a) => a.phase === 'AT_GATE' || a.phase === 'APPROACHING'
+        (a) => a.phase === 'AT_GATE' || a.phase === 'APPROACHING' || a.awaitingAtMill
       ),
     [arrivalsFeed]
   );
@@ -1811,12 +1825,12 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <span
                     className={cn(
                       'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums',
-                      a.phase === 'AT_GATE'
+                      a.phase === 'AT_GATE' || a.distanceKm === null
                         ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
                         : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                     )}
                   >
-                    {a.distanceKm !== null ? `${a.distanceKm} km` : 'close'}
+                    {a.distanceKm !== null ? `${a.distanceKm} km` : 'Due'}
                   </span>
                 </div>
 

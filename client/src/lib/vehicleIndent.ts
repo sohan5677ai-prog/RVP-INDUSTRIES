@@ -174,7 +174,8 @@ const INDENT_CSS = `
   .sum.accent .sum-v small{color:#9ca3af;}
 
   /* ---------- register ---------- */
-  table{width:100%; border-collapse:collapse; margin-top:10px; table-layout:fixed;}
+  table{width:100%; border-collapse:collapse; margin-top:0; table-layout:fixed;}
+  thead tr.gutter th{background:#fff; border:0; padding:0; height:10px;}
   thead th{background:var(--band); color:#fff; font-size:8.5px; font-weight:700;
            letter-spacing:1.1px; text-transform:uppercase; padding:6px; text-align:left;
            border-right:1px solid rgba(255,255,255,.14);}
@@ -217,11 +218,15 @@ const INDENT_CSS = `
   .foot{display:flex; justify-content:space-between; margin-top:auto; padding-top:6px;
         border-top:1px solid var(--line); font-size:8.5px; color:#9ca3af;}
 
-  @page{size:A4 portrait; margin:11mm 10mm 12mm;}
+  /* No @page margin: Chrome's "Margins: None" throws it away and the sheet
+     then prints flush to the paper edge. The gutter is the sheet's own
+     padding instead, which no print-dialog setting can take off. */
+  @page{size:A4 portrait; margin:0;}
   @media print{
     body{background:#fff;}
-    .sheet{width:auto; min-height:0; margin:0; padding:0; box-shadow:none;}
+    .sheet{width:auto; min-height:0; margin:0; padding:12mm 11mm 14mm; box-shadow:none;}
     thead{display:table-header-group;}
+    thead tr.gutter th{height:10mm;}
   }
 `;
 
@@ -354,6 +359,10 @@ function sheetHtml(s: VehicleIndentSheet, company: CompanyProfile | null | undef
       <col style="width:12%"><col style="width:26%"><col style="width:11.5%"><col style="width:19%">
     </colgroup>
     <thead>
+      <!-- A spacer row inside the repeating header group: on a continuation
+           page it is the top gutter, which the sheet's own padding cannot
+           reach (padding lands on the first fragment only). -->
+      <tr class="gutter"><th colspan="7"></th></tr>
       <tr>
         <th class="c">#</th>
         <th>Loading Code</th>

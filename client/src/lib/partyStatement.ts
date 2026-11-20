@@ -374,11 +374,16 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
         border-top:1px solid var(--line); font-size:8.5px; color:#9ca3af;}
 
   /* ---------- print ---------- */
-  @page{size:A4 portrait; margin:11mm 10mm 12mm;}
+  /* No @page margin: Chrome's "Margins: None" throws it away and the sheet
+     then prints flush to the paper edge. The gutter is the sheet's own
+     padding instead, which no print-dialog setting can take off. */
+  thead tr.gutter th{background:#fff; border:0; padding:0; height:4px;}
+  @page{size:A4 portrait; margin:0;}
   @media print{
     body{background:#fff;}
-    .sheet{width:auto; min-height:0; margin:0; padding:0; box-shadow:none;}
+    .sheet{width:auto; min-height:0; margin:0; padding:12mm 11mm 14mm; box-shadow:none;}
     thead{display:table-header-group;}
+    thead tr.gutter th{height:10mm;}
     tfoot{display:table-row-group;}
     .no-print{display:none !important;}
   }
@@ -473,6 +478,10 @@ export function buildPartyStatementHtml(o: PartyStatementOptions): string {
       <col style="width:11%"><col style="width:11%"><col style="width:11.5%">
     </colgroup>
     <thead>
+      <!-- A spacer row inside the repeating header group: on a continuation
+           page it is the top gutter, which the sheet's own padding cannot
+           reach (padding lands on the first fragment only). -->
+      <tr class="gutter"><th colspan="8"></th></tr>
       <tr>
         <th>Date</th>
         <th>Particulars &amp; Narration</th>

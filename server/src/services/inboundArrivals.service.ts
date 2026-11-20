@@ -559,6 +559,28 @@ export function phaseOf(distanceKm: number | null, rings: ArrivalRings): Arrival
  * WhatsApp and the distance a ring fired on are one piece of arithmetic in one
  * place.
  */
+/**
+ * Just the plates of the lorries this board is watching, for callers that need
+ * the set without the board.
+ *
+ * The Vehicle Tracking board uses it to decide which lorries belong on it at
+ * all: ours on a dispatch, plus these on their way in. Everything else pinging
+ * our account is somebody else's load and is not the mill's business.
+ *
+ * Deliberately the same two queries the board itself runs, so a lorry can
+ * never be on one and missing from the other.
+ */
+export async function inboundPlates(): Promise<string[]> {
+  const [bookings, slots] = await Promise.all([liveBookings(), liveLoadingSlots()]);
+  return [
+    ...new Set(
+      [...bookings, ...slots]
+        .map((row) => normaliseVehicleNumber(row.lorryNumber ?? ''))
+        .filter(Boolean),
+    ),
+  ];
+}
+
 export async function buildArrivalsBoard(): Promise<{
   rings: ArrivalRings;
   arrivals: InboundArrival[];

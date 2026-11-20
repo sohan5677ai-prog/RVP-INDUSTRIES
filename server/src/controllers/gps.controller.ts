@@ -859,10 +859,37 @@ export async function getFleetBoard(req: Request, res: Response) {
   const dispatchOnly = req.query.scope === 'dispatch';
   const dispatches = await activeDispatchesByPlate();
 
-  const latest = await latestPingPerVehicle(dispatchOnly ? [...dispatches.keys()] : undefined);
+  /**
+   * Which plates the board is allowed to show.
+   *
+   * `scope=dispatch` is the mill's own traffic: a lorry out on one of our
+   * dispatches, or one on its way in against a purchase order or a loading
+   * slot. The GPS account also carries lorries running somebody else's load,
+   * and those are not the mill's business - showing them makes the board a
+   * list of a transporter's fleet rather than a list of our consignments.
+   *
+   * The inbound half is dynamically imported because inboundArrivals.service
+   * imports from this file; the two other call sites below do the same.
+   */
+  let scopePlates: string[] | undefined;
+  if (dispatchOnly) {
+    const { inboundPlates } = await import('../services/inboundArrivals.service.js');
+    scopePlates = [...new Set([...dispatches.keys(), ...(await inboundPlates())])];
+  }
+
+  const latest = await latestPingPerVehicle(scopePlates);
   // One pass for every lane on the board, before the render loop - see
   // lanesForDispatches.
-  const lanes = await lanesForDispatches(dispatches.values());
+  //
+  // Only the dispatches that actually reported a fix. A dispatch whose lorry
+  // has never pinged still earns a row below, but as NO_SIGNAL with no journey
+  // - there is no position to project, so an ETA is not a thing that exists
+  // for it. Routing its lane would buy a measurement no screen ever reads, and
+  // a routed lane is the one part of this board that costs money per call.
+  const reporting = new Set(latest.map((p) => p.vehicleNumber));
+  const lanes = await lanesForDispatches(
+    [...dispatches.entries()].filter(([plate]) => reporting.has(plate)).map(([, d]) => d),
+  );
 
   const now = Date.now();
   const seen = new Set<string>();

@@ -858,8 +858,12 @@ export default function VehicleTracking() {
   const [detailOpen, setDetailOpen] = useState(false);
 
   const fleet = useQuery<FleetResponse>({
-    queryKey: ['gps-fleet'],
-    queryFn: () => api('/gps/fleet'),
+    queryKey: ['gps-fleet', 'dispatch'],
+    // Our consignments only - lorries out on a dispatch, plus the ones coming
+    // in against a purchase order or a loading slot. The GPS account also
+    // carries loads that are not ours, and listing those turns this page into
+    // a transporter's fleet view.
+    queryFn: () => api('/gps/fleet?scope=dispatch'),
     // Match the server's poll interval: asking more often than the provider is
     // pulled just re-reads the same row, and this response is the whole feed -
     // every refetch is ~70 KB out of Render and 145 rows out of Supabase, for

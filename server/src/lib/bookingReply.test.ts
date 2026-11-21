@@ -38,6 +38,15 @@ describe('parseBookingReply', () => {
     expect(r?.tonnageKg).toBe(30000);
   });
 
+  it('reads a reply whose code line also names the indent it answers', () => {
+    // Pravin, 20 Nov 2026. The code is where it should be; he just said which
+    // indent it was on the same line, and the whole booking was dropped for it.
+    const r = parseBookingReply('20NOV-01 30 Tons to Surat\nGJ18BW7697\n9974458416\n35 MT');
+    expect(r?.lorryNumber).toBe('GJ18BW7697');
+    expect(r?.driverPhone).toBe('9974458416');
+    expect(r?.tonnageKg).toBe(35000);
+  });
+
   it('leaves sentence-style broker messages to the model', () => {
     expect(
       parseBookingReply('16/11/26 - Punganur to Shahada - 35 Tones - GJ18BV5741 - Driver Robin 9050306685 - Frieght - 80000'),

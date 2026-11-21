@@ -45,24 +45,54 @@ export function formatLorryCode(date: Date, seq: number): string {
 /**
  * Read a requirement code out of a transporter's message.
  *
- * Only the first few lines are searched, and the line must be *nothing but* the
- * code. Transporters write "35MT", "14W", "GJ18BV5741" and dates all through
- * these messages, and a loose scan reads half of them as codes. Asking for the
- * code on its own line is a rule the transporter can actually follow, and it is
- * what makes this parse deterministic enough to gate an outbound WhatsApp on.
+ * Only the first few lines are searched, and the code must START its line.
+ * Transporters write "35MT", "14W", "GJ18BV5741" and dates all through these
+ * messages, and a loose scan reads half of them as codes. Asking for the code
+ * at the head of the line is a rule the transporter can actually follow, and it
+ * is what makes this parse deterministic enough to gate an outbound WhatsApp on.
  */
 export function parseLorryCode(text: string | null | undefined): string | null {
   if (!text) return null;
   const lines = String(text).split(/\r?\n/).slice(0, 4);
   for (const line of lines) {
-    const m = /^\s*([0-3]?\d)\s*-?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*-\s*(\d{1,3})\s*$/i.exec(line);
-    if (!m) continue;
-    const day = Number(m[1]);
-    const seq = Number(m[3]);
-    if (day < 1 || day > 31 || seq < 1) continue;
-    return `${String(day).padStart(2, '0')}${m[2].toUpperCase()}-${String(seq).padStart(2, '0')}`;
+    const code = readCodeAtHead(line);
+    if (code) return code;
   }
   return null;
+}
+
+/**
+ * The code at the START of one line, with whatever the transporter wrote after
+ * it on that line.
+ *
+ * The rule was once "the line is nothing but the code", and it cost bookings. A
+ * transporter answering a particular indent writes its code and then says which
+ * indent it was - "20NOV-01 30 Tons to Surat" - before giving the plate, the
+ * driver and the tonnage on the lines below. That line is a code line by every
+ * reading except the regex's, so the whole message fell through to the model,
+ * came back with no code, and the lorry was filed against nothing: no slot
+ * confirmed, nothing on the Upcoming tab, and an office waiting on a lorry the
+ * register could not point at.
+ *
+ * What the strictness actually protected against is a code read out of the
+ * MIDDLE of a sentence, where "35MT", "14W" and plates live. Anchoring to the
+ * head of the line keeps all of that out - "Lorry for 16NOV-02 is GJ18BV5741"
+ * still reads as no code - while letting the transporter annotate his own
+ * answer. The sequence must end at a boundary, so "20NOV-012" is not 20NOV-01.
+ */
+function readCodeAtHead(line: string): string | null {
+  const m =
+    /^\s*([0-3]?\d)\s*-?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*-\s*(\d{1,3})(?![\d-])(.*)$/i.exec(
+      line,
+    );
+  if (!m) return null;
+  // Whatever follows has to be separated from the code: a letter or digit
+  // running straight on is part of some other token, not a note about it.
+  if (m[4].trim() && !/^[\s,;:.\/|)\]]/.test(m[4])) return null;
+  const day = Number(m[1]);
+  const seq = Number(m[3]);
+  if (day < 1 || day > 31 || seq < 1) return null;
+  return `${String(day).padStart(2, '0')}${m[2].toUpperCase()}-${String(seq).padStart(2, '0')}`;
 }
 
 /** The counter row key for a day. One sequence per calendar day, IST. */

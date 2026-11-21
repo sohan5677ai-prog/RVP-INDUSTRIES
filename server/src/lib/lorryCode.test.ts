@@ -24,6 +24,19 @@ describe('parseLorryCode', () => {
     expect(parseLorryCode('  16NOV-2  \nGJ18BV5741')).toBe('16NOV-02');
   });
 
+  it('reads a code the transporter annotated with the indent it answers', () => {
+    // Pravin, 20 Nov: the code, then which indent it was, then the lorry.
+    const msg = ['20NOV-01 30 Tons to Surat', 'GJ18BW7697', '9974458416', '35 MT'].join('\n');
+    expect(parseLorryCode(msg)).toBe('20NOV-01');
+    expect(parseLorryCode('18NOV-02 - Shahada')).toBe('18NOV-02');
+    expect(parseLorryCode('18NOV-02 / GJ18BV1872 / 35MT')).toBe('18NOV-02');
+  });
+
+  it('will not let the sequence run on into another token', () => {
+    expect(parseLorryCode('20NOV-012')).toBe('20NOV-12');
+    expect(parseLorryCode('20NOV-01X')).toBeNull();
+  });
+
   it('ignores a code buried mid-line', () => {
     // The rule given to the transporter is "the code on its own first line".
     // A loose scan reads lorry numbers, dates and "14W" as codes, and this

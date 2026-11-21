@@ -12,6 +12,9 @@ const findFirst = vi.fn();
 const create = vi.fn();
 const update = vi.fn();
 const tcCreate = vi.fn();
+const tcFindFirst = vi.fn();
+const slotFindUnique = vi.fn();
+const slotUpdate = vi.fn();
 const parseTransport = vi.fn();
 
 vi.mock('../lib/prisma.js', () => ({
@@ -21,7 +24,15 @@ vi.mock('../lib/prisma.js', () => ({
       create: (...a: unknown[]) => create(...a),
       update: (...a: unknown[]) => update(...a),
     },
-    transportConfirmation: { create: (...a: unknown[]) => tcCreate(...a) },
+    transportConfirmation: {
+      create: (...a: unknown[]) => tcCreate(...a),
+      findFirst: (...a: unknown[]) => tcFindFirst(...a),
+    },
+    purchaseOrder: { findUnique: vi.fn().mockResolvedValue(null) },
+    dispatchSlot: {
+      findUnique: (...a: unknown[]) => slotFindUnique(...a),
+      update: (...a: unknown[]) => slotUpdate(...a),
+    },
     party: { findFirst: vi.fn().mockResolvedValue(null) },
     broker: { findFirst: vi.fn().mockResolvedValue(null) },
     saleDispatch: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -55,6 +66,7 @@ vi.mock('../services/whatsapp.service.js', async (importOriginal) => ({
 }));
 
 const { handleWhatsAppWebhook } = await import('./whatsapp.controller.js');
+const { notifyInboundMessageToMembers } = await import('../services/whatsapp.service.js');
 
 /** Drive the handler and wait for its detached background processing. */
 async function post(body: unknown, headers: Record<string, string> = {}) {
@@ -79,6 +91,9 @@ beforeEach(() => {
   findFirst.mockResolvedValue(null);
   create.mockResolvedValue({ id: 'log1' });
   tcCreate.mockResolvedValue({ id: 'tc1' });
+  tcFindFirst.mockResolvedValue(null);
+  slotFindUnique.mockResolvedValue(null);
+  slotUpdate.mockResolvedValue({});
   parseTransport.mockResolvedValue({
     isTransportConfirmation: true,
     lorryNumber: 'TN86A6588',
@@ -123,6 +138,33 @@ describe('Fast2SMS webhook routing', () => {
       driverPhone: '9943262021',
       tonnageKg: 30000,
       freightAmount: 80000,
+    });
+  });
+
+  it('files nothing when the same lorry is resent against the same code', async () => {
+    // Pravin resent 20NOV-01 on 21 Nov and the register took a second row for
+    // the one lorry, which reads as a second trip to anybody looking at it.
+    tcFindFirst.mockResolvedValue({ id: 'tc-already' });
+    const body = '20NOV-01 35 Tons to Surat\nGJ18BW7697\n9974458416\n35 MT';
+    const res = await post({ webhook_type: 'incoming_message', from: '917227021924', body, message_id: 'wamid.DUP' });
+    expect(tcFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { requirementCode: '20NOV-01', lorryNumber: 'GJ18BW7697' } }),
+    );
+    expect(tcCreate).not.toHaveBeenCalled();
+    // Still "handled", so it is not forwarded to the members as a stray
+    // message - the slot update below is the only write a repeat may make.
+    expect(notifyInboundMessageToMembers).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('files a different lorry quoting the same code - that is a replacement', async () => {
+    tcFindFirst.mockResolvedValue(null);
+    const body = '20NOV-01 35 Tons to Surat\nGJ18BV9999\n9974458416\n35 MT';
+    await post({ webhook_type: 'incoming_message', from: '917227021924', body, message_id: 'wamid.REPL' });
+    expect(tcCreate).toHaveBeenCalledOnce();
+    expect(tcCreate.mock.calls[0][0].data).toMatchObject({
+      requirementCode: '20NOV-01',
+      lorryNumber: 'GJ18BV9999',
     });
   });
 

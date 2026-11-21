@@ -577,6 +577,53 @@ async function homePlace(): Promise<string> {
 }
 
 /**
+ * Put the booked lorry on its loading slot.
+ *
+ * This is what makes the lorry real to the rest of the app: the calendar card
+ * stops asking for a plate, the Upcoming tab picks it up, and the ring sweep
+ * starts watching it in. Always called AFTER the register row, so a failure
+ * here leaves a booking the office can act on by hand.
+ *
+ * `onlyIfUnset` is for the repeat path: a resend must not overwrite a slot the
+ * office has since given a different lorry, but it should still finish the job
+ * if the first message filed its booking and then failed on this update.
+ */
+async function confirmSlotWithBooking(
+  slotId: string,
+  bookingId: string,
+  lorryNumber: string | null,
+  parsed: ParsedTransportConfirmation,
+  opts: { onlyIfUnset?: boolean } = {},
+): Promise<void> {
+  if (opts.onlyIfUnset) {
+    const slot = await prisma.dispatchSlot.findUnique({
+      where: { id: slotId },
+      select: { lorryNumber: true, transportConfirmationId: true },
+    });
+    if (!slot) return;
+    if (slot.lorryNumber && slot.lorryNumber !== lorryNumber) return;
+    if (slot.lorryNumber && slot.transportConfirmationId) return;
+  }
+  await prisma.dispatchSlot
+    .update({
+      where: { id: slotId },
+      data: {
+        lorryNumber,
+        driverName: parsed.driverName ?? undefined,
+        driverPhone: parsed.driverPhone ?? undefined,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+        transportConfirmationId: bookingId,
+      },
+    })
+    .catch((err) =>
+      logger.warn(
+        `[whatsapp] booking ${bookingId} could not confirm slot ${slotId}: ${err?.message ?? err}`,
+      ),
+    );
+}
+
+/**
  * File one lorry into the register, against whatever its code turned out to be.
  *
  * Three outcomes, and the code is what separates them:
@@ -590,6 +637,12 @@ async function homePlace(): Promise<string> {
  *    whatever figure he typed.
  *  - **Neither.** Still recorded. The office can put the right code on the row
  *    by hand on the register, and nothing is sent in the meantime.
+ *
+ * A message that says again what the register already knows files nothing. A
+ * transporter resends - he is asked to, when the first one was not read, or he
+ * simply answers the day's indent twice - and 20NOV-01 ended up on the register
+ * twice over one lorry, which is a second trip as far as anyone reading it is
+ * concerned. Same code, same plate is the same booking.
  */
 async function fileBooking(
   logRow: InboundLogRow,
@@ -602,6 +655,27 @@ async function fileBooking(
 
   const requirement = await resolveRequirementCode(requirementCode);
   const lorryNumber = normalizeLorryNumber(parsed.lorryNumber);
+
+  // Only a coded message can be recognised as a repeat: without a code there is
+  // no requirement to be the same lorry ON, and two trips by one plate are
+  // ordinary. The slot is still reconciled below, so a resend after a failed
+  // slot update repairs it instead of filing a twin.
+  if (requirementCode && lorryNumber) {
+    const twin = await prisma.transportConfirmation.findFirst({
+      where: { requirementCode, lorryNumber },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (twin) {
+      logger.info(
+        `[whatsapp] ${lorryNumber} is already on the register against ${requirementCode} (${twin.id}) - nothing filed for log ${logRow.id}`,
+      );
+      if (requirement.kind === 'LOADING') {
+        await confirmSlotWithBooking(requirement.slotId, twin.id, lorryNumber, parsed, { onlyIfUnset: true });
+      }
+      return true;
+    }
+  }
 
   // The freight on a loading trip is ours to know, not his to quote: where we
   // hold an agreed flat rate for that agency and destination, that figure is
@@ -663,27 +737,7 @@ async function fileBooking(
   }
 
   if (requirement.kind === 'LOADING') {
-    // Confirming the slot is what makes the lorry real to the rest of the app:
-    // the calendar card stops asking for a plate, the Upcoming tab picks it up,
-    // and the ring sweep starts watching it in. Done after the register row so
-    // a failure here leaves a booking the office can act on by hand.
-    await prisma.dispatchSlot
-      .update({
-        where: { id: requirement.slotId },
-        data: {
-          lorryNumber,
-          driverName: parsed.driverName ?? undefined,
-          driverPhone: parsed.driverPhone ?? undefined,
-          status: 'CONFIRMED',
-          confirmedAt: new Date(),
-          transportConfirmationId: booking.id,
-        },
-      })
-      .catch((err) =>
-        logger.warn(
-          `[whatsapp] booking ${booking.id} could not confirm slot ${requirement.slotId}: ${err?.message ?? err}`,
-        ),
-      );
+    await confirmSlotWithBooking(requirement.slotId, booking.id, lorryNumber, parsed);
     if (agreedFreight != null) {
       logger.info(
         `[whatsapp] slot ${requirementCode} freight set from the agreed rate for ${destination ?? 'destination'}: ₹${agreedFreight}`,

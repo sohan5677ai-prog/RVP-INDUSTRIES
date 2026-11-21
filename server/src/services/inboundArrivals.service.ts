@@ -492,8 +492,11 @@ export function positionOf(
         state: deriveState(fix.providerStatus, fix.speedKmph, ageMinutes),
       };
     }
+    // The straight line to the gate, the same figure the tracking cabin shows
+    // as "from the factory". One number on every screen matters more here than
+    // the 1.25 road estimate did: he reads the card and the cabin side by side.
     const distanceKm = Math.round(
-      kmBetween(fix.latitude, fix.longitude, FACTORY.latitude, FACTORY.longitude) * ROAD_FACTOR,
+      kmBetween(fix.latitude, fix.longitude, FACTORY.latitude, FACTORY.longitude),
     );
     return {
       tracked: true,
@@ -502,9 +505,13 @@ export function positionOf(
       // Off the long-run average rather than the instantaneous speed, for the
       // same reason the dispatch board does it: a lorry stopped for chai is not
       // going to take forever, and one doing 70 on a bypass will not keep it.
+      // The ETA still has to travel by road, so the road estimate stays in the
+      // arithmetic even though the distance on screen is the straight line.
       etaAt:
         distanceKm > 1
-          ? new Date(now + (distanceKm / AVG_LORRY_KMPH) * 3_600_000).toISOString()
+          ? new Date(
+              now + ((distanceKm * ROAD_FACTOR) / AVG_LORRY_KMPH) * 3_600_000,
+            ).toISOString()
           : null,
       etaIsEstimate: false,
       ageMinutes,

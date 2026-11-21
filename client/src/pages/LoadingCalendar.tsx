@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -910,7 +910,11 @@ function EditSlotDialog(props: {
 }) {
   const { draft, backlog, transports, saving, onChange } = props;
   const order = backlog.find((o) => o.id === draft.saleOrderId);
-  const custom = !VEHICLE_CLASSES.includes(draft.vehicleClassKg);
+  // A size off the preset list is custom by itself; a size that happens to
+  // match one is custom only while he has said so, which is what this holds.
+  const [customPicked, setCustomPicked] = useState(false);
+  const sizeRef = useRef<HTMLInputElement>(null);
+  const custom = customPicked || !VEHICLE_CLASSES.includes(draft.vehicleClassKg);
   const overClass = draft.plannedKg > draft.vehicleClassKg;
   // An edit re-plans tonnage the slot itself already holds, so the rail's
   // unplanned figure understates what is available by exactly this slot.
@@ -965,13 +969,16 @@ function EditSlotDialog(props: {
                 <Button
                   key={c}
                   type="button"
-                  variant={draft.vehicleClassKg === c ? 'default' : 'outline'}
+                  variant={!custom && draft.vehicleClassKg === c ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => onChange({
-                    ...draft,
-                    vehicleClassKg: c,
-                    plannedKg: Math.min(c, order ? order.unplannedKg + draft.plannedKg : c),
-                  })}
+                  onClick={() => {
+                    setCustomPicked(false);
+                    onChange({
+                      ...draft,
+                      vehicleClassKg: c,
+                      plannedKg: Math.min(c, order ? order.unplannedKg + draft.plannedKg : c),
+                    });
+                  }}
                 >
                   {t(c)}
                 </Button>
@@ -980,7 +987,14 @@ function EditSlotDialog(props: {
                 type="button"
                 variant={custom ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => onChange({ ...draft, vehicleClassKg: draft.plannedKg })}
+                onClick={() => {
+                  setCustomPicked(true);
+                  // Hand him the box to type in rather than a size he has to clear.
+                  setTimeout(() => {
+                    sizeRef.current?.focus();
+                    sizeRef.current?.select();
+                  }, 0);
+                }}
               >
                 Custom
               </Button>
@@ -991,8 +1005,19 @@ function EditSlotDialog(props: {
             <div>
               <Label htmlFor="slot-class">Lorry size (kg)</Label>
               <Input
-                id="slot-class" type="number" value={draft.vehicleClassKg}
-                onChange={(e) => onChange({ ...draft, vehicleClassKg: Number(e.target.value) })}
+                id="slot-class" type="number" ref={sizeRef} value={draft.vehicleClassKg}
+                onChange={(e) => {
+                  setCustomPicked(true);
+                  onChange({ ...draft, vehicleClassKg: Number(e.target.value) });
+                }}
+                // A smaller lorry carries less, so the load follows the size down
+                // the way the preset buttons do - but only once he has finished
+                // typing, or the half-typed "2" of 28500 would take the load with it.
+                onBlur={() => {
+                  if (draft.vehicleClassKg > 0 && draft.plannedKg > draft.vehicleClassKg) {
+                    onChange({ ...draft, plannedKg: draft.vehicleClassKg });
+                  }
+                }}
               />
             </div>
             <div>

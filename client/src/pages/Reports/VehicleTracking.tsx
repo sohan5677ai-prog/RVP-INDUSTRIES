@@ -857,18 +857,35 @@ export default function VehicleTracking() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
+  /**
+   * How much of the feed this tab is asking for.
+   *
+   * The two tabs about our own traffic - a lorry out on a dispatch, a lorry
+   * coming in against an order or a loading slot - ask for `scope=dispatch`
+   * and get a handful of plates. The fleet tabs ask for the whole feed,
+   * because "which vehicle is free today" and "what is moving right now" are
+   * questions about every lorry on the GPS account, not only ours.
+   *
+   * The scope is tied to the tab rather than set once for the page so that the
+   * full feed is only pulled while someone is actually looking at it. Nothing
+   * extra is stored either way - the provider pushes every vehicle it has
+   * regardless of what this page displays - but the response itself is paid
+   * for in Render egress on every poll, and the dispatch scope is a tenth of
+   * the size.
+   */
+  const wholeFleet = filter !== 'DISPATCH' && filter !== 'INBOUND';
+
   const fleet = useQuery<FleetResponse>({
-    queryKey: ['gps-fleet', 'dispatch'],
-    // Our consignments only - lorries out on a dispatch, plus the ones coming
-    // in against a purchase order or a loading slot. The GPS account also
-    // carries loads that are not ours, and listing those turns this page into
-    // a transporter's fleet view.
-    queryFn: () => api('/gps/fleet?scope=dispatch'),
+    queryKey: ['gps-fleet', wholeFleet ? 'all' : 'dispatch'],
+    queryFn: () => api(wholeFleet ? '/gps/fleet' : '/gps/fleet?scope=dispatch'),
     // Match the server's poll interval: asking more often than the provider is
-    // pulled just re-reads the same row, and this response is the whole feed -
-    // every refetch is ~70 KB out of Render and 145 rows out of Supabase, for
-    // as long as anyone leaves the page open.
+    // pulled just re-reads the same row, and the fleet-scope response is the
+    // whole feed - every refetch is ~70 KB out of Render and 145 rows out of
+    // Supabase, for as long as anyone leaves the page open.
     refetchInterval: 120_000,
+    // Keep the previous tab's rows on screen while the other scope loads, so
+    // switching tabs does not blank the map and the counts for a moment.
+    placeholderData: (previous) => previous,
   });
 
   /**
@@ -1080,7 +1097,16 @@ export default function VehicleTracking() {
         <StatCard label="Moving" value={counts?.moving ?? '-'} icon={Gauge} tone="amber" hint="reporting speed right now" />
         <StatCard label="Idling / parked" value={counts ? counts.idling + counts.parked : '-'} icon={CircleDot} tone="gold" hint="engine on or standing" />
         <StatCard label="Out of contact" value={counts ? counts.offline + counts.noSignal : '-'} icon={AlertTriangle} tone="rose" hint={`no fix in ${fleet.data?.staleAfterMinutes ?? 45} min`} />
-        <StatCard label="Fleet seen" value={counts?.total ?? '-'} icon={SatelliteDish} tone="taupe" hint={`${status.data?.rowsLast24h ?? 0} fixes stored today`} />
+        {/* Counted from the response, so it says "ours" on a dispatch-scope
+            tab and "fleet" on a tab that pulled every vehicle - the number
+            genuinely means two different things. */}
+        <StatCard
+          label={wholeFleet ? 'Fleet seen' : 'Ours tracked'}
+          value={counts?.total ?? '-'}
+          icon={SatelliteDish}
+          tone="taupe"
+          hint={`${status.data?.rowsLast24h ?? 0} fixes stored today`}
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[400px_1fr]">
@@ -1107,7 +1133,7 @@ export default function VehicleTracking() {
             options={[
               { label: 'Upcoming', value: 'INBOUND', count: arrivalCounts?.total },
               { label: 'On dispatch', value: 'DISPATCH', count: counts?.onDispatch },
-              { label: 'All', value: 'ALL', count: counts?.total },
+              { label: 'All fleet', value: 'ALL', count: counts?.total },
               { label: 'Moving', value: 'MOVING', count: counts?.moving },
               { label: 'Parked', value: 'PARKED', count: counts?.parked },
               { label: 'Offline', value: 'OFFLINE', count: counts?.offline },

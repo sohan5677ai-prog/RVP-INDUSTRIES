@@ -1130,13 +1130,28 @@ export default function VehicleTracking() {
               setFilterTouched(true);
               setFilter(v as Filter);
             }}
+            /*
+             * A count is shown only where the loaded scope can answer it.
+             *
+             * These numbers are counted off the response in hand, and on a
+             * dispatch-scope tab that response holds our five lorries - so
+             * "All fleet" would read 5 and the fleet tabs would advertise a
+             * fraction of what they open. A badge that undercounts is worse
+             * than no badge: it says the fleet is not there, and nobody
+             * clicks through to find out otherwise.
+             *
+             * So the fleet tabs carry a number once a fleet-scope response is
+             * loaded, and none before it. "On dispatch" and "Upcoming" are
+             * right either way - onDispatch is counted from the dispatch join
+             * and the arrivals board is its own query.
+             */
             options={[
               { label: 'Upcoming', value: 'INBOUND', count: arrivalCounts?.total },
               { label: 'On dispatch', value: 'DISPATCH', count: counts?.onDispatch },
-              { label: 'All fleet', value: 'ALL', count: counts?.total },
-              { label: 'Moving', value: 'MOVING', count: counts?.moving },
-              { label: 'Parked', value: 'PARKED', count: counts?.parked },
-              { label: 'Offline', value: 'OFFLINE', count: counts?.offline },
+              { label: 'All fleet', value: 'ALL', count: wholeFleet ? counts?.total : undefined },
+              { label: 'Moving', value: 'MOVING', count: wholeFleet ? counts?.moving : undefined },
+              { label: 'Parked', value: 'PARKED', count: wholeFleet ? counts?.parked : undefined },
+              { label: 'Offline', value: 'OFFLINE', count: wholeFleet ? counts?.offline : undefined },
             ]}
           />
 
@@ -1216,7 +1231,11 @@ export default function VehicleTracking() {
               setSelected(plate);
               setDetailOpen(true);
             }}
-            fitKey={`${filter}-${mapVehicles.length}`}
+            // The scope is part of the key, not just the tab and the count:
+            // switching from our five lorries to the whole fleet has to
+            // re-frame the map, and a tab change alone would not if the two
+            // responses happened to hold the same number of rows.
+            fitKey={`${filter}-${wholeFleet ? 'all' : 'ours'}-${mapVehicles.length}`}
             className="h-[560px] w-full overflow-hidden rounded-2xl border border-border/60 lg:h-[704px]"
           />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground">

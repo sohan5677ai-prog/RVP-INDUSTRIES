@@ -79,16 +79,20 @@ export function parseLorryCode(text: string | null | undefined): string | null {
  * head of the line keeps all of that out - "Lorry for 16NOV-02 is GJ18BV5741"
  * still reads as no code - while letting the transporter annotate his own
  * answer. The sequence must end at a boundary, so "20NOV-012" is not 20NOV-01.
+ *
+ * The brackets are allowed for the same reason. A transporter quoting a code
+ * back out of our own indent copies its punctuation with it - "(21NOV-01)) 1-
+ * SURAT" - and a stray parenthesis is not a reason to lose a lorry.
  */
 function readCodeAtHead(line: string): string | null {
   const m =
-    /^\s*([0-3]?\d)\s*-?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*-\s*(\d{1,3})(?![\d-])(.*)$/i.exec(
+    /^[\s(\[{"'*#]*([0-3]?\d)\s*-?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*-\s*(\d{1,3})(?![\d-])(.*)$/i.exec(
       line,
     );
   if (!m) return null;
   // Whatever follows has to be separated from the code: a letter or digit
   // running straight on is part of some other token, not a note about it.
-  if (m[4].trim() && !/^[\s,;:.\/|)\]]/.test(m[4])) return null;
+  if (m[4].trim() && !/^[\s,;:.\/|)\]}"'*#]/.test(m[4])) return null;
   const day = Number(m[1]);
   const seq = Number(m[3]);
   if (day < 1 || day > 31 || seq < 1) return null;

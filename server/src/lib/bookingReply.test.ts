@@ -47,6 +47,21 @@ describe('parseBookingReply', () => {
     expect(r?.tonnageKg).toBe(35000);
   });
 
+  it('reads a code he quoted back with our own brackets on it', () => {
+    // Pravin, 21 Nov 16:25. "(21NOV-01)) 1-SURAT" - the indent's punctuation
+    // copied back, and "35M" for the tonnage.
+    const r = parseBookingReply('(21NOV-01)) 1-SURAT\nGJ18BW9208\n+918708590371\n35M');
+    expect(r?.lorryNumber).toBe('GJ18BW9208');
+    expect(r?.driverPhone).toBe('8708590371');
+    expect(r?.tonnageKg).toBe(35000);
+  });
+
+  it('keeps the tonnage when the body type runs on after it', () => {
+    const r = parseBookingReply('20NOV-02 35 Tons to Shahada\nGJ18BV6581\n8434524758\n30MT OPAN');
+    expect(r?.tonnageKg).toBe(30000);
+    expect(r?.lorryNumber).toBe('GJ18BV6581');
+  });
+
   it('leaves sentence-style broker messages to the model', () => {
     expect(
       parseBookingReply('16/11/26 - Punganur to Shahada - 35 Tones - GJ18BV5741 - Driver Robin 9050306685 - Frieght - 80000'),

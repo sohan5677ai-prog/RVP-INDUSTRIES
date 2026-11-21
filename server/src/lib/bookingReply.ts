@@ -34,8 +34,16 @@ import type { ParsedTransportConfirmation } from './gemini.js';
 
 /** `GJ18BV1872`, `AP 39 T 8217`, `TN-38-AB-1234`. */
 const PLATE = /^[A-Z]{2}\s*-?\s*\d{1,2}\s*-?\s*[A-Z]{0,3}\s*-?\s*\d{3,4}$/;
-/** `35MT`, `35 MT`, `30 Tonnes`, `35 T`. */
-const TONNAGE = /^(\d+(?:\.\d+)?)\s*(?:MT|M\.T\.?|TONNES?|TONS?|T)$/;
+/**
+ * `35MT`, `35 MT`, `30 Tonnes`, `35 T`, `35M`, and the same with the body type
+ * run on after it: `30MT OPAN`, `35 MT CONTAINER`.
+ *
+ * The unit is written every way a hurried man writes it, and the line was
+ * dropped whole when it did not match - which costs the tonnage off an
+ * otherwise good booking. Letters after the unit are the body type, never a
+ * number, so nothing we would have stored is lost by allowing them.
+ */
+const TONNAGE = /^(\d+(?:\.\d+)?)\s*(?:MTS?|M\.T\.?|M|TONNES?|TONS?|T)\b\s*(?:[A-Z][A-Z ]{0,19})?$/;
 /** `14W`, `12 wheeler`, `22 W` - body type, carried on the shape but not stored. */
 const BODY = /^\d{1,2}\s*(?:W|WHEELER|WHEELS?)$/;
 

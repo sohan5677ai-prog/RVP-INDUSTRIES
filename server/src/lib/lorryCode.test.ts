@@ -32,6 +32,12 @@ describe('parseLorryCode', () => {
     expect(parseLorryCode('18NOV-02 / GJ18BV1872 / 35MT')).toBe('18NOV-02');
   });
 
+  it('reads a code quoted back inside brackets', () => {
+    expect(parseLorryCode('(21NOV-01)) 1-SURAT\nGJ18BW9208')).toBe('21NOV-01');
+    expect(parseLorryCode('[18NOV-02]')).toBe('18NOV-02');
+    expect(parseLorryCode('*20NOV-03*')).toBe('20NOV-03');
+  });
+
   it('will not let the sequence run on into another token', () => {
     expect(parseLorryCode('20NOV-012')).toBe('20NOV-12');
     expect(parseLorryCode('20NOV-01X')).toBeNull();

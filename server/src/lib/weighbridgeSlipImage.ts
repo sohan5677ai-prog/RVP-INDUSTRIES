@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { type OverlayOptions } from 'sharp';
 import sharp from './sharpInstance.js';
 import { logger } from './logger.js';
+import { readStoredFile, isStoredFile } from './storageRead.js';
 
 const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/assets');
 
@@ -71,6 +72,15 @@ function formatTicketNo(no: number | string | undefined | null): string {
 async function fetchOrReadImage(urlOrPath: string | null | undefined): Promise<Buffer | null> {
   if (!urlOrPath) return null;
   try {
+    // One of our own stored objects - read it from storage with the service
+    // role. The value in the database is still the old public URL and the
+    // bucket is private now, so fetching it would 400; see readStoredFile.
+    if (isStoredFile(urlOrPath)) {
+      const stored = await readStoredFile(urlOrPath);
+      if (stored) return stored;
+      // Fall through: a pre-Supabase row may still have the file on disk.
+    }
+
     if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 4000);

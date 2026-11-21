@@ -2440,13 +2440,18 @@ export async function sendSessionTextMessage(args: {
       };
 
       if (args.imageUrl && /^https?:\/\//i.test(args.imageUrl)) {
+        // Same handoff, same reason as the media_url above: the provider
+        // fetches this link with no credentials, and the invoices bucket is
+        // private, so a stored file has to go out signed. A URL that is not
+        // one of ours is passed through untouched.
+        const shared = mintFileUrl(args.imageUrl, SHARED_FILE_TTL_SECONDS);
         body = {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: targetNumber,
           type: 'image',
           image: {
-            link: args.imageUrl,
+            link: shared?.url ?? args.imageUrl,
             caption: args.text,
           },
         };

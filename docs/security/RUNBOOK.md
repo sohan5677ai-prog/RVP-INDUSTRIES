@@ -158,6 +158,36 @@ To be thorough afterwards: check the audit trail for their last actions
 
 ---
 
+## Access review — every quarter, and whenever someone leaves
+
+```bash
+cd server && node scripts/access-review.mjs          # print it
+cd server && node scripts/access-review.mjs --save   # keep a dated copy
+```
+
+Leads with findings rather than the table: privileged roles without two-factor, accounts that have
+never logged in, dormant accounts, passwords over a year old, and disabled accounts that somehow
+still hold a session (which should be impossible — disabling revokes them — so if it ever appears,
+investigate rather than tidy).
+
+The point is not the list, it is the questions it forces: does this person still work here, do they
+still need that role, and why has nobody used that account since August?
+
+## Secret scan
+
+```bash
+cd server && node scripts/scan-secrets.mjs            # all tracked files
+cd server && node scripts/scan-secrets.mjs --staged   # pre-commit use
+```
+
+Deliberately narrow — PEM keys, JWTs and Supabase keys, AWS and Slack and Google keys, and
+assignments to secret-ish names whose value is not a placeholder. It does **not** flag every long
+hex string: hashes and cuids are full of them, and a scanner that cries wolf gets run with
+`--no-verify`.
+
+If it finds something real: **rotate it first**, then remove it. Deleting it from the working tree
+is not enough — it stays in the history, so treat it as disclosed.
+
 ## Key rotation
 
 | Secret | Where | Effect of rotating |

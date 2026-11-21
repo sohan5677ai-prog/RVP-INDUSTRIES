@@ -133,15 +133,73 @@ function readBlock(lines: string[]): ParsedTransportConfirmation | null {
 }
 
 /**
+ * The same block, read without the one-field-per-line rule.
+ *
+ * `readBlock` wants the form the ERP asks for, and when the transporter writes
+ * it any other way - all on one line, the plate with the word "lorry" in front
+ * of it, the mobile tucked after a driver's name - it gives up and the message
+ * goes to the model, which is where bookings have been lost all along.
+ *
+ * Once the message carries a requirement code we already know what it is, so
+ * there is nothing left to judge: a plate is a plate and an Indian mobile is an
+ * Indian mobile, wherever in the block they were written. Both patterns are
+ * strict and anchored to token boundaries, so this reads what is there and
+ * invents nothing - which is the part the model could never promise.
+ *
+ * The code's own line is searched too, minus the code itself. Its tonnage is
+ * taken only when no other line gives one: that line usually quotes the indent
+ * ("20NOV-01 30 Tons to Surat"), and the lorry's real capacity is below.
+ */
+const LOOSE_PLATE = /(?<![A-Z0-9])([A-Z]{2})[\s-]?(\d{1,2})[\s-]?([A-Z]{1,3})[\s-]?(\d{3,4})(?![A-Z0-9])/;
+const LOOSE_PHONE = /(?<!\d)(?:\+?91[\s-]?)?([6-9]\d{9})(?!\d)/;
+const LOOSE_TONNAGE = /(?<![\d.])(\d{1,2}(?:\.\d+)?)\s*(?:MTS?|M\.T\.?|M|TONNES?|TONS?|T)(?![A-Z])/;
+
+function readLooseBlock(lines: string[]): ParsedTransportConfirmation | null {
+  if (lines.length === 0 || lines.length > 12) return null;
+  const code = parseLorryCode(lines[0]);
+  if (!code) return null;
+
+  // The code is removed before anything is looked for, so its own digits can
+  // never be read back as a plate, a tonnage or half a phone number.
+  const head = lines[0].toUpperCase().replace(/\(?\s*[0-3]?\d\s*-?\s*[A-Z]{3}\s*-\s*\d{1,3}\s*\)*/, ' ');
+  const rest = lines.slice(1).join('\n').toUpperCase();
+
+  const out: ParsedTransportConfirmation = { isTransportConfirmation: true };
+
+  const plate = LOOSE_PLATE.exec(rest) ?? LOOSE_PLATE.exec(head);
+  if (plate) out.lorryNumber = `${plate[1]}${plate[2]}${plate[3]}${plate[4]}`;
+
+  const phone = LOOSE_PHONE.exec(rest) ?? LOOSE_PHONE.exec(head);
+  if (phone) out.driverPhone = phone[1];
+
+  const tonnage = LOOSE_TONNAGE.exec(rest) ?? LOOSE_TONNAGE.exec(head);
+  if (tonnage) {
+    const tonnes = Number(tonnage[1]);
+    if (tonnes > 0 && tonnes < 100) out.tonnageKg = Math.round(tonnes * 1000);
+  }
+
+  // A plate alone is enough to book the lorry; a phone alone is enough to reach
+  // its driver. Neither, and there is no booking in this message - a code and a
+  // sentence is a transporter talking, not a lorry.
+  if (!out.lorryNumber && !out.driverPhone) return null;
+  return out;
+}
+
+/**
  * Every lorry in a reply, in the order the transporter wrote them.
  *
- * The split is on code lines, and a code line is a line that is *nothing but* a
- * code - the same rule `parseLorryCode` already enforces, which is why this can
- * be a split rather than a guess. The first line has to be a code: a sentence
- * that happens to quote one further down is a broker message and belongs to the
- * model, exactly as before. A block whose details are unreadable is dropped
- * rather than filed empty, so a six-lorry message with one mangled entry still
- * books the other five.
+ * The split is on code lines - a line whose code is at its head, the rule
+ * `parseLorryCode` enforces - which is why this can be a split rather than a
+ * guess. The first line has to be a code: a sentence that happens to quote one
+ * further down is a broker message and belongs to the model, exactly as before.
+ * A block whose details are unreadable is dropped rather than filed empty, so a
+ * six-lorry message with one mangled entry still books the other five.
+ *
+ * Each block is read twice if need be: first by the shape the ERP asks for,
+ * then, if that comes to nothing, by `readLooseBlock`, which looks for the
+ * plate and the mobile wherever in the block they were written. A coded reply
+ * therefore does not reach the model at all - which is the point, because the
+ * model is what dropped them.
  *
  * Returns an empty array when the text is not in this shape at all, which is
  * the signal to fall back to the sentence-style parser.
@@ -160,7 +218,7 @@ export function parseBookingReplies(text: string | null | undefined): BookingRep
   for (let b = 0; b < starts.length; b += 1) {
     const block = lines.slice(starts[b], starts[b + 1] ?? lines.length);
     const code = parseLorryCode(block[0]);
-    const parsed = readBlock(block);
+    const parsed = readBlock(block) ?? readLooseBlock(block);
     if (code && parsed) out.push({ code, parsed });
   }
   return out;

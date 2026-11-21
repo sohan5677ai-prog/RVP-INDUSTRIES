@@ -62,6 +62,42 @@ describe('parseBookingReply', () => {
     expect(r?.lorryNumber).toBe('GJ18BV6581');
   });
 
+  it('reads the lorry wherever in a coded message it was written', () => {
+    // Once the code is there, the rest is a plate and a mobile - the shape they
+    // are written in is the transporter's business, not ours.
+    const oneLine = parseBookingReply('21NOV-02 - GJ18BW9208 - 8708590371 - 35MT');
+    expect(oneLine?.lorryNumber).toBe('GJ18BW9208');
+    expect(oneLine?.driverPhone).toBe('8708590371');
+    expect(oneLine?.tonnageKg).toBe(35000);
+
+    const wordy = parseBookingReply('20NOV-03\nLorry no GJ 18 BW 7540 driver Ramesh 7378146792\n35 MT');
+    expect(wordy?.lorryNumber).toBe('GJ18BW7540');
+    expect(wordy?.driverPhone).toBe('7378146792');
+    expect(wordy?.tonnageKg).toBe(35000);
+  });
+
+  it('prefers the lorry tonnage below over the indent quoted on the code line', () => {
+    const r = parseBookingReply('20NOV-01 30 Tons to Surat\nGJ18BW7697 9974458416\n35MT');
+    expect(r?.tonnageKg).toBe(35000);
+  });
+
+  it('takes the code line tonnage only when nothing else gives one', () => {
+    const r = parseBookingReply('20NOV-01 30 Tons to Surat\nGJ18BW7697 9974458416');
+    expect(r?.tonnageKg).toBe(30000);
+  });
+
+  it('does not read a booking out of a transporter just talking', () => {
+    expect(parseBookingReply('20NOV-04 cancelled sir')).toBeNull();
+    expect(parseBookingReply('21NOV-01 lorry not available, will arrange tomorrow')).toBeNull();
+  });
+
+  it('never reads the code itself back as a lorry or a phone', () => {
+    // "20NOV-01" is two letters, digits and more digits - close enough to a
+    // plate to be worth proving it cannot become one.
+    expect(parseBookingReply('20NOV-01\n9974458416')).toMatchObject({ driverPhone: '9974458416' });
+    expect(parseBookingReply('20NOV-01\n9974458416')?.lorryNumber).toBeUndefined();
+  });
+
   it('leaves sentence-style broker messages to the model', () => {
     expect(
       parseBookingReply('16/11/26 - Punganur to Shahada - 35 Tones - GJ18BV5741 - Driver Robin 9050306685 - Frieght - 80000'),

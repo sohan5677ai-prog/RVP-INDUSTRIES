@@ -305,7 +305,7 @@ export class TaxproService {
    */
   private static authCacheKey(config: TaxproConfig, gstin: string): string {
     const secretFingerprint = createHash('sha256')
-      .update([config.taxproGspId, config.taxproGspSecret, config.taxproGstPass].join(' '))
+      .update([config.taxproGspId, config.taxproGspSecret, config.taxproGstPass].join('\x00'))
       .digest('hex')
       .slice(0, 16);
     return [
@@ -696,6 +696,14 @@ export class TaxproService {
       };
     } catch (err: any) {
       logger.error('TaxPro IRN Cancellation Error:', err);
+      const msg = String(err?.message || '');
+      if (/2271|9999|already.*cancel/i.test(msg)) {
+        return {
+          success: true,
+          cancelledDate: new Date(),
+          message: 'IRN is already cancelled on the government portal (NIC 2271)',
+        };
+      }
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -954,6 +962,14 @@ export class TaxproService {
       };
     } catch (err: any) {
       logger.error(`TaxPro ${kind} Note IRN Cancellation Error:`, err);
+      const msg = String(err?.message || '');
+      if (/2271|9999|already.*cancel/i.test(msg)) {
+        return {
+          success: true,
+          cancelledDate: new Date(),
+          message: `${kind === 'CREDIT' ? 'Credit' : 'Debit'} Note IRN is already cancelled on the government portal (NIC 2271)`,
+        };
+      }
       throw new Error(`TaxPro GSP Error: ${err.message}`);
     }
   }
@@ -1403,11 +1419,11 @@ export class TaxproService {
     } catch (err: any) {
       logger.error('TaxPro EWB Cancellation Error:', err);
       const msg = String(err?.message || '');
-      if (/412|already.*cancel|multi.*vehicle/i.test(msg)) {
+      if (/312|314|412|700|already.*cancel|or cancelled|multi.*vehicle/i.test(msg)) {
         return {
           success: true,
           cancelledDate: new Date(),
-          message: 'E-Way Bill is already cancelled on the government portal (NIC 412 / Precondition Met)',
+          message: 'E-Way Bill is already cancelled on the government portal (NIC 312 / Precondition Met)',
         };
       }
       throw new Error(`TaxPro GSP Error: ${err.message}`);
@@ -2146,11 +2162,11 @@ export class TaxproService {
     } catch (err: any) {
       logger.error('TaxPro CANEWB Error:', err);
       const msg = String(err?.message || '');
-      if (/412|already.*cancel|multi.*vehicle/i.test(msg)) {
+      if (/312|314|412|700|already.*cancel|or cancelled|multi.*vehicle/i.test(msg)) {
         return {
           success: true,
           cancelledDate: new Date(),
-          message: 'E-Way Bill is already cancelled on the government portal (NIC 412)',
+          message: 'E-Way Bill is already cancelled on the government portal (NIC 312)',
         };
       }
       throw new Error(`TaxPro GSP Error: ${err.message}`);

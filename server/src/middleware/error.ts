@@ -36,8 +36,13 @@ export function errorHandler(
   // HttpError messages are written for the user ("Invalid credentials",
   // "This account is already signed in on 2 devices"), so they are safe to
   // return as-is - unlike the message on an error we did not expect.
-  if (err instanceof HttpError) {
-    return res.status(err.status).json({ error: err.message });
+  const isHttpError =
+    err instanceof HttpError ||
+    (err && typeof err === 'object' && ((err as any).name === 'HttpError' || (typeof (err as any).status === 'number' && typeof (err as any).message === 'string')));
+  if (isHttpError) {
+    const status = (err as any).status || 500;
+    const message = (err as any).message || 'Request failed';
+    return res.status(status).json({ error: message });
   }
   if (err instanceof SyntaxError && 'status' in err && (err as any).status === 400) {
     return res.status(400).json({ error: 'Malformed JSON payload in request body' });

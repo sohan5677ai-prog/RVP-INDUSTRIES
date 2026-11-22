@@ -168,7 +168,7 @@ async function apiOnce<T>(path: string, opts: ApiOptions, mayRetry: boolean): Pr
       let details: unknown;
       try {
         const data = await res.json();
-        message = data.error ?? message;
+        message = (data.error && data.error !== 'Internal server error' ? data.error : data.message) ?? data.error ?? message;
         details = data.details ?? data.maintenance;
         if (data.code === 'MAINTENANCE_MODE' || data.maintenance) {
           window.dispatchEvent(

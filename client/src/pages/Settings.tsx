@@ -626,6 +626,7 @@ function InvoiceTaxSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
   const fyShort = (company?.currentFy || '2026-27').slice(2);
   const rvpEffectiveSeq = nextSeq ? parseInt(nextSeq, 10) : (company?.currentNextRvpSeq || 1);
   const ursEffectiveSeq = nextUrsSeq ? parseInt(nextUrsSeq, 10) : (company?.currentNextUrsSeq || 1);
+  const voided = company?.voidedInvoiceNumbers ?? [];
   const rvpPreviewNum = `${prefix || 'RVP'}/${String(rvpEffectiveSeq).padStart(2, '0')}/${fyShort}`;
   const ursPreviewNum = `URS/${String(ursEffectiveSeq).padStart(2, '0')}/${fyShort}`;
 
@@ -687,9 +688,32 @@ function InvoiceTaxSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             </div>
           </div>
 
+          {voided.length > 0 ? (
+            <div className="rounded-md border border-dashed bg-background/60 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h5 className="text-xs font-semibold text-foreground">Cancelled numbers (kept nil)</h5>
+                <span className="text-[10px] text-muted-foreground">{voided.length} number{voided.length > 1 ? 's' : ''} · never reissued</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {voided.map((v) => (
+                  <span
+                    key={`${v.invoiceSeries}-${v.invoiceSeq}`}
+                    title={[v.buyerName, v.reason].filter(Boolean).join(' · ') || 'Withdrawn'}
+                    className="font-mono text-[11px] rounded bg-muted px-1.5 py-0.5 text-muted-foreground line-through"
+                  >
+                    {v.invoiceNumber}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                These were raised and then withdrawn. GST does not allow a document number to be used twice, so the sequence skips them automatically.
+              </p>
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
             <p className="text-[11px] text-amber-700 dark:text-amber-400 max-w-xl">
-              💡 <strong>GST Error 2278 fix:</strong> If a document number was cancelled on NIC, increment the sequence number above (e.g. 152 → 153) and click Save Numbering to skip the cancelled number.
+              💡 <strong>GST Error 2278 fix:</strong> Undoing a dispatch now burns its invoice number automatically, so the next invoice always moves forward. For a number cancelled outside the ERP, push the sequence above past it and click Save Numbering.
             </p>
             <Button
               size="sm"

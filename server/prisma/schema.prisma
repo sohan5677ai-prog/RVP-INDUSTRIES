@@ -3374,3 +3374,26 @@ model DispatchSlot {
   @@index([status])
   @@index([transportId])
 }
+
+/// Invoice numbers that were issued and then withdrawn - the shipment was undone
+/// after its tax invoice had been raised, or the IRN was cancelled on the NIC
+/// portal. GST does not allow a document number to be used twice: NIC answers a
+/// second IRN on the same number with error 2278 ("IRN is already generated and
+/// is cancelled for this Document number"). So a withdrawn number is parked here
+/// permanently as a nil entry and the allocator counts it as consumed - the next
+/// invoice always moves forward, never back into a burnt number.
+model VoidInvoiceNumber {
+  id            String    @id @default(cuid())
+  invoiceSeries String    @default("RVP")
+  invoiceFy     String // full Indian financial year, e.g. "2026-27"
+  invoiceSeq    Int
+  invoiceNumber String // the number as it was printed, e.g. "RVP/187/26-27"
+  invoiceDate   DateTime?
+  buyerName     String?
+  reason        String?
+  voidedBy      String? // user name/email that withdrew it, when known
+  voidedAt      DateTime  @default(now())
+
+  @@unique([invoiceFy, invoiceSeq, invoiceSeries])
+  @@index([invoiceFy, invoiceSeries])
+}

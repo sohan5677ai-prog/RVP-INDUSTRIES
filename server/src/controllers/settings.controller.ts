@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { indianFinancialYear } from '../lib/invoice.js';
+import { maxConsumedInvoiceSeq } from '../lib/invoiceSeries.js';
 
 export async function listFreightRates(_req: Request, res: Response) {
   const rates = await prisma.freightRate.findMany({ orderBy: { destination: 'asc' } });
@@ -224,19 +225,29 @@ export async function getCompanyProfile(_req: Request, res: Response) {
   const profile = await getCompanyProfileRow();
   const fy = indianFinancialYear(new Date());
 
-  const lastRvp = await prisma.saleDispatch.aggregate({
-    where: { invoiceFy: fy, invoiceSeries: 'RVP' },
-    _max: { invoiceSeq: true },
-  });
-  const maxRvpSeq = lastRvp._max.invoiceSeq ?? 0;
+  // "Highest used" counts withdrawn numbers too: once a number has been issued it
+  // is spent for good, so the next-number preview must sit past the burnt ones.
+  const maxRvpSeq = await maxConsumedInvoiceSeq(prisma, 'RVP', fy);
   const currentNextRvpSeq = Math.max(profile.nextInvoiceSeq ?? 1, maxRvpSeq + 1);
 
-  const lastUrs = await prisma.saleDispatch.aggregate({
-    where: { invoiceFy: fy, invoiceSeries: 'URS' },
-    _max: { invoiceSeq: true },
-  });
-  const maxUrsSeq = lastUrs._max.invoiceSeq ?? 0;
+  const maxUrsSeq = await maxConsumedInvoiceSeq(prisma, 'URS', fy);
   const currentNextUrsSeq = Math.max(profile.nextUrsInvoiceSeq ?? 1, maxUrsSeq + 1);
+
+  // The nil register for this FY - numbers raised and then withdrawn, kept so
+  // they can be reported as cancelled and never reissued.
+  const voidedInvoiceNumbers = await prisma.voidInvoiceNumber.findMany({
+    where: { invoiceFy: fy },
+    orderBy: [{ invoiceSeries: 'asc' }, { invoiceSeq: 'asc' }],
+    select: {
+      invoiceNumber: true,
+      invoiceSeries: true,
+      invoiceSeq: true,
+      invoiceDate: true,
+      buyerName: true,
+      reason: true,
+      voidedAt: true,
+    },
+  });
 
   res.json({
     ...redactCompanyProfile(profile),
@@ -244,6 +255,7 @@ export async function getCompanyProfile(_req: Request, res: Response) {
     currentNextUrsSeq,
     maxExistingRvpSeq: maxRvpSeq,
     maxExistingUrsSeq: maxUrsSeq,
+    voidedInvoiceNumbers,
     currentFy: fy,
   });
 }

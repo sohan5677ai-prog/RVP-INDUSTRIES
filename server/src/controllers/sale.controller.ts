@@ -50,6 +50,7 @@ import {
 import { uploadFileToStorage } from '../lib/upload.js';
 import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
+import { nextInvoiceSeq, formatInvoiceNumber } from '../lib/invoiceSeries.js';
 import { allocateSaleOrderNumber, releaseSaleSerial } from '../lib/saleOrderNumber.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.service.js';
@@ -1232,7 +1233,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
 export async function undoSaleDispatch(req: Request, res: Response) {
   const dispatch = await prisma.saleDispatch.findUnique({
     where: { id: req.params.id },
-    include: { saleOrder: true },
+    include: { saleOrder: { include: { buyer: true } } },
   });
   if (!dispatch) throw new HttpError(404, 'Dispatch not found');
 
@@ -1290,7 +1291,36 @@ export async function undoSaleDispatch(req: Request, res: Response) {
       },
     });
 
-    // 4. Remove the dispatch itself.
+    // 4a. If a tax invoice had already been raised, burn its number before the
+    //     row goes. A document number is spent the moment it is issued - GST does
+    //     not allow it to be used again, and NIC refuses a second IRN on it with
+    //     error 2278 - so it is parked as a permanent nil entry that the invoice
+    //     allocator counts as consumed. Without this, deleting the shipment
+    //     released the number and the next invoice walked straight back into it.
+    if (dispatch.invoiceNumber && dispatch.invoiceSeq && dispatch.invoiceFy) {
+      await tx.voidInvoiceNumber.upsert({
+        where: {
+          invoiceFy_invoiceSeq_invoiceSeries: {
+            invoiceFy: dispatch.invoiceFy,
+            invoiceSeq: dispatch.invoiceSeq,
+            invoiceSeries: dispatch.invoiceSeries,
+          },
+        },
+        create: {
+          invoiceSeries: dispatch.invoiceSeries,
+          invoiceFy: dispatch.invoiceFy,
+          invoiceSeq: dispatch.invoiceSeq,
+          invoiceNumber: dispatch.invoiceNumber,
+          invoiceDate: dispatch.invoiceDate,
+          buyerName: order.buyer?.name ?? null,
+          reason: dispatch.irn ? 'Dispatch undone after IRN cancellation' : 'Dispatch undone after invoice was raised',
+          voidedBy: req.user?.name ?? req.user?.userId ?? null,
+        },
+        update: {},
+      });
+    }
+
+    // 4b. Remove the dispatch itself.
     await tx.saleDispatch.delete({ where: { id: dispatch.id } });
 
     // 4. Recompute the order's status from whatever shipments remain, on the
@@ -1435,18 +1465,14 @@ export async function raiseSaleInvoice(req: Request, res: Response) {
 
   const updated = await prisma.$transaction(async (tx) => {
     // Next sequence within this financial year, scoped to this series so RVP and
-    // URS each run their own 01, 02, 03… independently.
-    const last = await tx.saleDispatch.aggregate({
-      where: { invoiceFy: fy, invoiceSeries: series },
-      _max: { invoiceSeq: true },
-    });
-    const maxExisting = last._max.invoiceSeq ?? 0;
+    // URS each run their own 01, 02, 03… independently. A number that was raised
+    // and later withdrawn stays consumed (VoidInvoiceNumber), so the sequence only
+    // ever moves forward - a cancelled number is never handed out a second time.
     const configuredFloor = series === 'URS' ? (company.nextUrsInvoiceSeq ?? 1) : (company.nextInvoiceSeq ?? 1);
-    const seq = Math.max(configuredFloor, maxExisting + 1);
+    const seq = await nextInvoiceSeq(tx, series, fy, configuredFloor);
     // Displayed number uses the short financial-year form (e.g. "26-27"), while
     // invoiceFy keeps the full "2026-27" used for the sequence + unique key.
-    const fyShort = fy.slice(2);
-    const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fyShort}`;
+    const invoiceNumber = formatInvoiceNumber(prefix, seq, fy);
 
     return tx.saleDispatch.update({
       where: { id: dispatch.id },
@@ -1495,14 +1521,9 @@ export async function previewSaleInvoiceNumber(req: Request, res: Response) {
   const invoiceDate = new Date();
   const fy = indianFinancialYear(invoiceDate);
 
-  const last = await prisma.saleDispatch.aggregate({
-    where: { invoiceFy: fy, invoiceSeries: series },
-    _max: { invoiceSeq: true },
-  });
-  const maxExisting = last._max.invoiceSeq ?? 0;
   const configuredFloor = series === 'URS' ? (company.nextUrsInvoiceSeq ?? 1) : (company.nextInvoiceSeq ?? 1);
-  const seq = Math.max(configuredFloor, maxExisting + 1);
-  const invoiceNumber = `${prefix}/${String(seq).padStart(2, '0')}/${fy.slice(2)}`;
+  const seq = await nextInvoiceSeq(prisma, series, fy, configuredFloor);
+  const invoiceNumber = formatInvoiceNumber(prefix, seq, fy);
 
   res.json({ invoiceNumber, invoiceDate, series, raised: false });
 }

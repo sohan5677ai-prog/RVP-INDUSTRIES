@@ -811,6 +811,8 @@ export interface CompanyProfile {
   currentNextUrsSeq?: number;
   maxExistingRvpSeq?: number;
   maxExistingUrsSeq?: number;
+  /** Invoice numbers raised and then withdrawn - kept nil, never reissued. */
+  voidedInvoiceNumbers?: VoidedInvoiceNumber[];
   currentFy?: string;
   companyVehicles?: string | null;
   /** Who an arriving driver rings at the gate - sent in the inbound driver brief. */
@@ -1595,4 +1597,14 @@ export interface DispatchIndentPreview {
   slotCount: number;
   totalKg: number;
   message: string;
+}
+
+export interface VoidedInvoiceNumber {
+  invoiceNumber: string;
+  invoiceSeries: string;
+  invoiceSeq: number;
+  invoiceDate?: string | null;
+  buyerName?: string | null;
+  reason?: string | null;
+  voidedAt: string;
 }

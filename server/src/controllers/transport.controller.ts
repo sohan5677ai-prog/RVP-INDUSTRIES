@@ -18,7 +18,13 @@ const TRANSPORT_INCLUDE = {
   },
 };
 
-type RateInput = { destination: string; flatAmount: number; forTonnageKg: number | null };
+type RateInput = {
+  destination: string;
+  flatAmount: number;
+  amount30?: number | null;
+  perTonneBelow30?: number | null;
+  forTonnageKg: number | null;
+};
 
 /**
  * Replace an agency's rate set with what the form sent.
@@ -39,6 +45,8 @@ async function replaceFreightRates(transportId: string, rates: RateInput[]) {
     rows.push({
       destination: rate.destination.trim().toUpperCase(),
       flatAmount: rate.flatAmount,
+      amount30: rate.amount30 ?? null,
+      perTonneBelow30: rate.perTonneBelow30 ?? null,
       forTonnageKg: rate.forTonnageKg,
     });
   }

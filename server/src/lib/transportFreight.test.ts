@@ -5,6 +5,7 @@ import {
   readCostItems,
   ASSOCIATION_FEE_LABEL,
   calcAssociationFee,
+  tripFreightForWeight,
 } from './transportFreight.js';
 
 describe('freightDestinationKey', () => {
@@ -123,5 +124,51 @@ describe('calcAssociationFee', () => {
     expect(calcAssociationFee(300, null)).toBe(300);
     expect(calcAssociationFee(300, 0)).toBe(300);
     expect(calcAssociationFee(300, undefined)).toBe(300);
+  });
+});
+
+/** Madhupuri's Shahada lane, as quoted: 35 t / 30 t / per tonne under 30 t. */
+const shahada = { flatAmount: 80_000, amount30: 69_000, perTonneBelow30: 2_300 };
+
+describe('tripFreightForWeight', () => {
+  it('pays the full lump sum on a full lorry', () => {
+    expect(tripFreightForWeight(shahada, 35_000)).toBe(80_000);
+  });
+
+  it('still pays the full lump sum when the kata comes in light', () => {
+    // The whole point of a per-lorry rate: 34.21 t is a full load, not a part
+    // load, and must not be re-derived from the weighbridge figure.
+    expect(tripFreightForWeight(shahada, 34_210)).toBe(80_000);
+  });
+
+  it('pays the 30 t lump sum on a 30 t lorry', () => {
+    expect(tripFreightForWeight(shahada, 30_000)).toBe(69_000);
+    expect(tripFreightForWeight(shahada, 31_500)).toBe(69_000);
+  });
+
+  it('pays a part load by the tonne', () => {
+    expect(tripFreightForWeight(shahada, 25_000)).toBe(57_500);
+    expect(tripFreightForWeight(shahada, 28_500)).toBe(65_550);
+  });
+
+  it('meets the 30 t lump sum where the tiers join', () => {
+    // 30 x 2,300 is the 30 t figure itself, so a lorry either side of the
+    // boundary is paid near enough the same - there is no cliff at 29.99 t.
+    expect(tripFreightForWeight(shahada, 29_999)).toBeCloseTo(68_997.7, 1);
+  });
+
+  it('falls back to the lump sums where the card has no part-load figure', () => {
+    const oneRate = { flatAmount: 63_000, amount30: null, perTonneBelow30: null };
+    expect(tripFreightForWeight(oneRate, 22_000)).toBe(63_000);
+    expect(tripFreightForWeight(oneRate, 35_000)).toBe(63_000);
+  });
+
+  it('answers the full rate when no weight is known', () => {
+    expect(tripFreightForWeight(shahada, null)).toBe(80_000);
+    expect(tripFreightForWeight(shahada)).toBe(80_000);
+  });
+
+  it('treats an unfinished rate row as no agreement at all', () => {
+    expect(tripFreightForWeight({ flatAmount: 0 }, 35_000)).toBeNull();
   });
 });

@@ -677,18 +677,7 @@ async function fileBooking(
     }
   }
 
-  // The freight on a loading trip is ours to know, not his to quote: where we
-  // hold an agreed flat rate for that agency and destination, that figure is
-  // the booking's freight and the dispatch will carry it through. Only when
-  // there is no agreed rate does the told amount stand.
-  let freightAmount = parsed.freightAmount ?? null;
-  let agreedFreight: number | null = null;
-  let destination: string | null = null;
-  if (requirement.kind === 'LOADING') {
-    destination = requirement.destination;
-    agreedFreight = await flatTripFreight(requirement.transportId, requirement.destination);
-    if (agreedFreight != null) freightAmount = agreedFreight;
-  }
+  let destination: string | null = requirement.kind === 'LOADING' ? requirement.destination : null;
 
   // The transporter names one place; which end of the trip it is depends on the
   // code he answered. The factory is the other end either way.
@@ -700,6 +689,31 @@ async function fileBooking(
     home: await homePlace(),
   });
 
+  const bookedKg =
+    parsed.tonnageKg ?? (requirement.kind === 'LOADING' ? requirement.plannedKg : null);
+
+  // The freight on an outgoing trip is ours to know, not his to quote: where we
+  // hold an agreed rate card for that agency and destination, the figure off
+  // the card at the booked tonnage is the booking's freight and the dispatch
+  // will carry it through. Only when there is no agreed rate does the told
+  // amount stand.
+  //
+  // Resolved for EVERY outbound booking, not only the ones that quoted a
+  // requirement code. A message that arrived without a code still names the
+  // town and the tonnage, which is all the card needs - and without this the
+  // register showed those rows with an empty freight column while the coded
+  // ones beside them carried the rate.
+  let freightAmount = parsed.freightAmount ?? null;
+  let agreedFreight: number | null = null;
+  if (requirement.kind !== 'PURCHASE') {
+    const transportId =
+      requirement.kind === 'LOADING' && requirement.transportId
+        ? requirement.transportId
+        : (await resolveBookingTransport(null, from ?? null))?.id ?? null;
+    agreedFreight = await flatTripFreight(transportId, destination ?? route.toPlace, bookedKg);
+    if (agreedFreight != null) freightAmount = agreedFreight;
+  }
+
   const booking = await prisma.transportConfirmation.create({
     data: {
       fromPhone: from ?? 'unknown',
@@ -707,8 +721,7 @@ async function fileBooking(
       messageDate: parsed.messageDate ? new Date(parsed.messageDate) : null,
       fromPlace: route.fromPlace,
       toPlace: route.toPlace,
-      tonnageKg:
-        parsed.tonnageKg ?? (requirement.kind === 'LOADING' ? requirement.plannedKg : null),
+      tonnageKg: bookedKg,
       // Normalised on the way in - the dispatch screen looks the row up by lorry
       // number, and that only works if both sides are spelled the same way.
       lorryNumber,
@@ -2750,6 +2763,32 @@ export async function updateTransportConfirmation(req: Request, res: Response) {
   if (body.driverLanguage !== undefined) {
     const raw = String(body.driverLanguage ?? '').toUpperCase();
     data.driverLanguage = ['EN', 'TE', 'TA', 'KN', 'HI'].includes(raw) ? raw : null;
+  }
+
+  // Correcting the tonnage or the town re-reads the agreed rate card: those are
+  // exactly the two things the card is keyed on, and a 35 t row fixed to 25 t
+  // that kept the 35 t freight is worse than one that was blank. Skipped when
+  // the same edit typed a freight by hand - a figure the office entered always
+  // outranks the card - and when the lane has no card to read.
+  // "Typed" means the figure in the box is not the one already on the row: the
+  // edit dialog posts every field back, so merely opening it and fixing the
+  // tonnage must not read as a decision about the freight.
+  const submittedFreight = data.freightAmount == null ? null : Number(data.freightAmount);
+  const storedFreight = row.freightAmount == null ? null : Number(row.freightAmount);
+  const freightTyped =
+    data.freightAmount !== undefined && submittedFreight !== storedFreight;
+  const rateKeyChanged =
+    data.tonnageKg !== undefined || data.toPlace !== undefined || data.requirementCode !== undefined;
+  const direction = (data.direction as string | undefined) ?? row.direction;
+  if (!freightTyped && rateKeyChanged && direction !== 'INBOUND') {
+    const agency = await resolveBookingTransport(
+      (data.dispatchSlotId as string | null | undefined) ?? row.dispatchSlotId,
+      row.fromPhone,
+    );
+    const toPlace = (data.toPlace as string | null | undefined) ?? row.toPlace;
+    const tonnageKg = (data.tonnageKg as number | null | undefined) ?? row.tonnageKg;
+    const agreed = await flatTripFreight(agency?.id ?? null, toPlace, tonnageKg);
+    if (agreed != null) data.freightAmount = agreed;
   }
 
   const updated = await prisma.transportConfirmation.update({ where: { id: row.id }, data });

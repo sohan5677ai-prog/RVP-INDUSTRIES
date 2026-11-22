@@ -928,8 +928,12 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // quoted ₹30,000 into ₹30,048). Falls back to the formula when there's no
   // matching booking or it carried no figure. BASE orders never carry freight.
   let freightCharge = computedFreightCharge;
+  // Kept for the agreed-rate lookup further down, which wants the tonnage this
+  // lorry was booked at rather than the kata it came back with.
+  let matchedBookingForFreight: { tonnageKg: number | null } | null = null;
   if (order.priceType !== 'BASE') {
     const matchedBooking = await findWaitingConfirmation(data.vehicleNumber);
+    matchedBookingForFreight = matchedBooking;
     const bookedFreight = matchedBooking?.freightAmount != null ? Number(matchedBooking.freightAmount) : null;
     if (bookedFreight != null && bookedFreight > 0) freightCharge = bookedFreight;
   }
@@ -965,7 +969,13 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // hundred rupees on every load that came in light. See lib/transportFreight.
   const freightDestination = order.destination || order.buyer.destination || order.buyer.city || null;
   if (order.priceType !== 'BASE' && transportRecord) {
-    const agreed = await flatTripFreight(transportRecord.id, freightDestination);
+    // Paid on the tonnage the lorry was BOOKED at where the register has one,
+    // and only on the kata otherwise. The rate card's tiers are a per-lorry
+    // agreement - a 25 t lorry is a 25 t lorry even if the kata reads 24.86 -
+    // so tiering off the weighbridge figure would drop a booking across a tier
+    // boundary on nothing more than a few hundred kilos.
+    const ratedKg = matchedBookingForFreight?.tonnageKg ?? weightKg;
+    const agreed = await flatTripFreight(transportRecord.id, freightDestination, ratedKg);
     if (agreed != null) freightCharge = agreed;
   }
 

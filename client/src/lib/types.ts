@@ -161,13 +161,21 @@ export interface Broker {
   brokerageAmount: string;
 }
 
-/** A flat rupee figure for one lorry to one destination, whatever it weighs. */
+/**
+ * The agreed rate card for one lorry to one destination: a lump sum for a full
+ * lorry, a lump sum for a 30 t one, and a per-tonne figure for a part load.
+ */
 export interface TransportFreightRate {
   id: string;
   transportId: string;
   destination: string;
+  /** Lump sum for a full (35 t) lorry. */
   flatAmount: string | number;
-  /** The lorry size the rate was agreed for. Recorded, never divided into. */
+  /** Lump sum for a 30 t lorry, where the agency quotes one. */
+  amount30?: string | number | null;
+  /** Rupees per tonne for a part load under 30 t, where one is agreed. */
+  perTonneBelow30?: string | number | null;
+  /** The lorry size the top rate was agreed for. Recorded, never divided into. */
   forTonnageKg: number | null;
 }
 

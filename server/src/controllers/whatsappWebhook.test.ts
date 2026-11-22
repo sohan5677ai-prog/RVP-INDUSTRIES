@@ -33,6 +33,12 @@ vi.mock('../lib/prisma.js', () => ({
       findUnique: (...a: unknown[]) => slotFindUnique(...a),
       update: (...a: unknown[]) => slotUpdate(...a),
     },
+    // Filing an outbound booking now reads the agreed rate card: which agency
+    // the message came from, and what that agency charges for the lane. No
+    // agency matches the test numbers, so both come back empty and the quoted
+    // freight stands - but the models have to exist or the register throws.
+    transport: { findMany: vi.fn().mockResolvedValue([]) },
+    transportFreightRate: { findMany: vi.fn().mockResolvedValue([]) },
     party: { findFirst: vi.fn().mockResolvedValue(null) },
     broker: { findFirst: vi.fn().mockResolvedValue(null) },
     saleDispatch: { findFirst: vi.fn().mockResolvedValue(null) },

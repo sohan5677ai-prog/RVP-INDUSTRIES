@@ -713,8 +713,14 @@ model Transport {
   payments       Payment[]
 }
 
-/// An agreed flat trip rate: what this agency is paid to run one lorry to one
-/// destination, whatever the lorry weighs.
+/// An agreed trip rate card: what this agency is paid to run one lorry to one
+/// destination.
+///
+/// Three figures, because that is how the rate was actually agreed: a lump sum
+/// for a full 35 t lorry, a second lump sum for a 30 t one, and a per-tonne
+/// figure for anything smaller. The lump sums are NOT divided into - a 35 t
+/// lorry that katas 34.2 t is still the full amount - and only a genuine part
+/// load drops to the per-tonne line.
 ///
 /// Deliberately NOT the per-tonne FreightRate table. That one answers "what
 /// does a tonne to Surat cost us", which is what costing and the order planner
@@ -731,10 +737,18 @@ model TransportFreightRate {
   transport    Transport @relation(fields: [transportId], references: [id], onDelete: Cascade)
   transportId  String
   destination  String
-  /// ₹ for the whole trip.
+  /// ₹ for the whole trip on a full (35 t) lorry.
   flatAmount   Decimal   @default(0) @db.Decimal(12, 2)
-  /// The lorry size the rate was agreed for, kept for the record only - it is
-  /// never divided into. 35,000 kg for every Madhupuri lane today.
+  /// ₹ for the whole trip on a 30 t lorry, where the agency quotes a second
+  /// flat figure for the smaller load. Null means the lane has only one flat
+  /// rate and every lorry on it is paid `flatAmount`.
+  amount30     Decimal?  @db.Decimal(12, 2)
+  /// ₹ per tonne for a part load - anything under 30 t, which is where the
+  /// agreed lump sums stop and the lane goes back to being paid by weight.
+  /// Null means part loads on this lane are still settled by hand.
+  perTonneBelow30 Decimal? @db.Decimal(12, 2)
+  /// The lorry size the top flat rate was agreed for, kept for the record only
+  /// - it is never divided into. 35,000 kg for every Madhupuri lane today.
   forTonnageKg Int?
   updatedAt    DateTime  @updatedAt
 

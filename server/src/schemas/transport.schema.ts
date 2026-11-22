@@ -49,6 +49,23 @@ export const createTransportSchema = z.object({
       z.object({
         destination: z.string().min(1).trim(),
         flatAmount: z.union([z.number(), z.string()]).transform((v) => Number(v) || 0),
+        // The 30 t lump sum and the part-load per-tonne figure. Optional: a
+        // lane may still be a single flat rate, and an empty box must store
+        // null rather than a zero that would read as "carried for nothing".
+        amount30: z
+          .union([z.number(), z.string(), z.null()])
+          .optional()
+          .transform((v) => {
+            const n = Number(v);
+            return Number.isFinite(n) && n > 0 ? n : null;
+          }),
+        perTonneBelow30: z
+          .union([z.number(), z.string(), z.null()])
+          .optional()
+          .transform((v) => {
+            const n = Number(v);
+            return Number.isFinite(n) && n > 0 ? n : null;
+          }),
         forTonnageKg: z.union([z.number(), z.string(), z.null()]).optional().transform((v) => {
           const n = Number(v);
           return Number.isFinite(n) && n > 0 ? Math.round(n) : null;

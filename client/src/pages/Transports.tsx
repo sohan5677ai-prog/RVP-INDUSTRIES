@@ -118,7 +118,13 @@ export default function Transports() {
    * field. Kept as strings so a half-typed amount is not coerced to 0 mid-keystroke.
    */
   const [rateRows, setRateRows] = useState<
-    { destination: string; flatAmount: string; forTonnageKg: string }[]
+    {
+      destination: string;
+      flatAmount: string;
+      amount30: string;
+      perTonneBelow30: string;
+      forTonnageKg: string;
+    }[]
   >([]);
 
   const { data: transports, isLoading } = useQuery({
@@ -184,6 +190,9 @@ export default function Transports() {
       (t.freightRates ?? []).map((r) => ({
         destination: r.destination,
         flatAmount: String(Number(r.flatAmount) || 0),
+        amount30: r.amount30 == null ? '' : String(Number(r.amount30) || ''),
+        perTonneBelow30:
+          r.perTonneBelow30 == null ? '' : String(Number(r.perTonneBelow30) || ''),
         forTonnageKg: r.forTonnageKg == null ? '' : String(r.forTonnageKg),
       })),
     );
@@ -225,6 +234,9 @@ export default function Transports() {
           .map((r) => ({
             destination: r.destination.trim(),
             flatAmount: Number(r.flatAmount) || 0,
+            amount30: r.amount30.trim() === '' ? null : Number(r.amount30) || null,
+            perTonneBelow30:
+              r.perTonneBelow30.trim() === '' ? null : Number(r.perTonneBelow30) || null,
             forTonnageKg: r.forTonnageKg.trim() === '' ? null : Number(r.forTonnageKg) || null,
           })),
       };
@@ -525,9 +537,11 @@ export default function Transports() {
                   <div>
                     <div className="text-sm font-semibold">Agreed trip rates</div>
                     <p className="text-xs text-muted-foreground">
-                      A flat rupee figure per lorry per destination, used as the dispatch
-                      freight whatever the kata weighs. Leave a lane out to keep settling it
-                      per tonne from Settings, Freight Rates.
+                      What one lorry to this destination is paid: a lump sum for a full
+                      lorry, a lump sum for a 30 t one, and a rupees-per-tonne figure for a
+                      part load under 30 t. The lump sums are never divided into, whatever
+                      the kata weighs. Leave a lane out to keep settling it per tonne from
+                      Settings, Freight Rates.
                     </p>
                   </div>
                   <Button
@@ -537,7 +551,13 @@ export default function Transports() {
                     onClick={() =>
                       setRateRows((rows) => [
                         ...rows,
-                        { destination: '', flatAmount: '', forTonnageKg: '35000' },
+                        {
+                          destination: '',
+                          flatAmount: '',
+                          amount30: '',
+                          perTonneBelow30: '',
+                          forTonnageKg: '35000',
+                        },
                       ])
                     }
                   >
@@ -552,7 +572,10 @@ export default function Transports() {
                 ) : (
                   <div className="mt-3 space-y-2">
                     {rateRows.map((row, i) => (
-                      <div key={i} className="grid grid-cols-[1fr_120px_110px_36px] items-center gap-2">
+                      <div
+                        key={i}
+                        className="grid grid-cols-[1fr_110px_110px_100px_100px_36px] items-center gap-2"
+                      >
                         <Input
                           value={row.destination}
                           onChange={(e) =>
@@ -571,7 +594,31 @@ export default function Transports() {
                           }
                           type="number"
                           step="1"
-                          placeholder="63000"
+                          placeholder="35 t, e.g. 63000"
+                        />
+                        <Input
+                          value={row.amount30}
+                          onChange={(e) =>
+                            setRateRows((rows) =>
+                              rows.map((r, j) => (j === i ? { ...r, amount30: e.target.value } : r)),
+                            )
+                          }
+                          type="number"
+                          step="1"
+                          placeholder="30 t, e.g. 54000"
+                        />
+                        <Input
+                          value={row.perTonneBelow30}
+                          onChange={(e) =>
+                            setRateRows((rows) =>
+                              rows.map((r, j) =>
+                                j === i ? { ...r, perTonneBelow30: e.target.value } : r,
+                              ),
+                            )
+                          }
+                          type="number"
+                          step="1"
+                          placeholder="₹/t under 30"
                         />
                         <Input
                           value={row.forTonnageKg}
@@ -596,8 +643,10 @@ export default function Transports() {
                       </div>
                     ))}
                     <p className="text-[11px] text-muted-foreground">
-                      The tonnage is the lorry size the rate was agreed for. It is recorded,
-                      never divided into: the rate is the whole trip.
+                      A lorry of 34 t or more is paid the full-lorry figure, 30 t to 34 t the
+                      30 t figure, and anything under 30 t its weight times the per-tonne
+                      figure. The tonnage box is the lorry size the top rate was agreed for -
+                      recorded, never divided into.
                     </p>
                   </div>
                 )}

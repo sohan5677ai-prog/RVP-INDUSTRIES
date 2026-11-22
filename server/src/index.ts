@@ -16,6 +16,7 @@ import { requireAuth } from "./middleware/auth.js";
 import { requestContextMiddleware } from "./lib/requestContext.js";
 import { prisma } from "./lib/prisma.js";
 import { calcAssociationFee } from "./lib/calc.js";
+import { syncTransportRateCards } from "./services/transportRateCard.service.js";
 
 // Fail fast if the JWT secret isn't configured, rather than booting an insecure
 // server that only errors on the first login.
@@ -379,6 +380,10 @@ app.listen(port, "0.0.0.0", () => {
           }
         }
       }
+      // The agreed rate card now carries three figures a lane (35 t, 30 t and
+      // per tonne under 30 t), and bookings that arrived without a requirement
+      // code were filed with no freight at all. Both are put right once, here.
+      await syncTransportRateCards();
     } catch(e) {
       logger.error(e);
     }

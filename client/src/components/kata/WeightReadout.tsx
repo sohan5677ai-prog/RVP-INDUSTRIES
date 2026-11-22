@@ -1,17 +1,14 @@
 import type { RefObject } from 'react';
-import { AlertTriangle, Cable, CheckCircle2, Keyboard, Radio, WifiOff } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { AlertTriangle, Cable, Keyboard, Lock, Radio, Target, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface WeightReadoutProps {
-  /** The weight the ticket will record: the live reading, or the typed one. */
+  /** The live reading: off the scale, or the typed one. */
   weightKg: number;
   isManual: boolean;
   onToggleManual: () => void;
   manualInput: string;
   onManualInput: (value: string) => void;
-  manualReason: string;
-  onManualReason: (value: string) => void;
   inputRef: RefObject<HTMLInputElement>;
 
   scaleOnline: boolean;
@@ -32,46 +29,51 @@ export interface WeightReadoutProps {
   tripType: 'FIRST' | 'SECOND' | 'SINGLE';
   loadType: 'LOAD' | 'EMPTY';
   firstWeightKg: number | null;
+  /** Net the ticket will record (the target when one is applied). */
   netKg: number | null;
+  /** Second weight the ticket will record (adjusted when a target is applied). */
+  recordedSecondKg: number | null;
+  /** Target net in force for this weighment, when applied. */
+  targetNetKg: number | null;
 }
 
-type Status = { key: string; label: string; tone: 'ok' | 'warn' | 'bad' | 'idle'; detail?: string };
+type Tone = 'ok' | 'warn' | 'bad' | 'idle';
+type Status = { key: string; label: string; tone: Tone; detail: string };
 
 function statusOf(p: WeightReadoutProps): Status {
   if (p.faultLabel) {
     const detail = p.faultLabel === 'OVERLOAD' ? 'Indicator over range' : p.faultLabel === 'SCALE ERROR' ? 'Indicator reported an error' : 'Load cell signal lost';
-    return { key: 'fault', label: `FAULT · ${p.faultLabel}`, tone: 'bad', detail };
+    return { key: 'fault', label: p.faultLabel, tone: 'bad', detail };
   }
-  if (p.isManual) return { key: 'manual', label: 'MANUAL ENTRY', tone: 'warn', detail: 'Typed from the indicator' };
-  if (!p.scaleOnline) return { key: 'offline', label: 'SCALE OFFLINE', tone: 'idle', detail: `${p.portLabel} not detected` };
-  if (p.recentFault) return { key: 'recovering', label: 'RECOVERING', tone: 'warn', detail: 'Verify against the display' };
-  if (p.stable) return { key: 'stable', label: 'STABLE', tone: 'ok', detail: 'Weight is locked - safe to save' };
-  return { key: 'motion', label: 'IN MOTION', tone: 'warn', detail: 'Wait for the reading to settle' };
+  if (p.isManual) return { key: 'manual', label: 'Manual', tone: 'warn', detail: 'Typed from the indicator' };
+  if (!p.scaleOnline) return { key: 'offline', label: 'Offline', tone: 'idle', detail: `${p.portLabel} not detected` };
+  if (p.recentFault) return { key: 'recovering', label: 'Recovering', tone: 'warn', detail: 'Verify against the display' };
+  if (p.stable) return { key: 'stable', label: 'Stable', tone: 'ok', detail: 'Reading locked' };
+  return { key: 'motion', label: 'In motion', tone: 'warn', detail: 'Wait for it to settle' };
 }
 
-const CHIP: Record<Status['tone'], string> = {
-  ok: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300',
-  warn: 'border-amber-400/40 bg-amber-500/15 text-amber-300',
-  bad: 'border-red-400/50 bg-red-500/20 text-red-300',
-  idle: 'border-stone-600 bg-stone-800 text-stone-400',
+const PILL: Record<Tone, string> = {
+  ok: 'text-emerald-300 bg-emerald-400/10 ring-emerald-400/25',
+  warn: 'text-amber-300 bg-amber-400/10 ring-amber-400/25',
+  bad: 'text-red-300 bg-red-500/15 ring-red-400/35',
+  idle: 'text-stone-400 bg-white/5 ring-white/10',
 };
-const DOT: Record<Status['tone'], string> = {
-  ok: 'bg-emerald-400',
-  warn: 'bg-amber-400',
-  bad: 'bg-red-500',
+const DOT: Record<Tone, string> = {
+  ok: 'bg-emerald-400 shadow-[0_0_10px_rgb(52_211_153/0.8)]',
+  warn: 'bg-amber-400 shadow-[0_0_10px_rgb(251_191_36/0.7)]',
+  bad: 'bg-red-500 shadow-[0_0_10px_rgb(239_68_68/0.8)]',
   idle: 'bg-stone-500',
 };
 
-const fmt = (n: number) => n.toLocaleString('en-IN');
+const fmt = (n: number) => Math.round(n).toLocaleString('en-IN');
 
-/** Gross, tare and net, labelled by what the lorry was doing on each pass. */
+/** Gross, tare and net as the ticket will record them. */
 function breakdown(p: WeightReadoutProps) {
-  if (p.tripType === 'SECOND' && p.firstWeightKg != null) {
-    // On the return pass an EMPTY lorry means the first pass was loaded.
-    const firstWasLoaded = p.loadType === 'EMPTY';
+  if (p.tripType === 'SECOND' && p.firstWeightKg != null && p.recordedSecondKg != null && p.weightKg > 0) {
+    const second = p.recordedSecondKg;
     return {
-      gross: firstWasLoaded ? p.firstWeightKg : p.weightKg,
-      tare: firstWasLoaded ? p.weightKg : p.firstWeightKg,
+      gross: Math.max(p.firstWeightKg, second),
+      tare: Math.min(p.firstWeightKg, second),
       net: p.netKg,
       ready: true,
     };
@@ -84,27 +86,18 @@ export function WeightReadout(props: WeightReadoutProps) {
   const { gross, tare, net, ready } = breakdown(props);
   const faulted = props.faultLabel !== null;
   const faultAge = props.lastFaultTime ? Math.round((Date.now() - props.lastFaultTime) / 1000) : null;
+  // On the second weight the operator cares about the net, not the plate reading.
+  const netMode = props.tripType === 'SECOND' && props.firstWeightKg != null;
+  const heroKg = netMode ? (props.weightKg > 0 ? props.netKg ?? 0 : 0) : props.weightKg;
+  const targetOn = netMode && props.targetNetKg != null;
 
   return (
-    <section
-      aria-label="Live weight"
-      className="kata-scale-panel relative overflow-hidden rounded-2xl border border-stone-800 p-5 text-stone-100"
-    >
-      {/* Status row */}
-      <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+    <section aria-label="Live weight" className="kata-console relative overflow-hidden rounded-[22px] text-stone-100">
+      {/* Header */}
+      <header className="relative z-10 flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
         <div className="flex items-center gap-3">
-          <span
-            className={cn(
-              'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold tracking-widest',
-              CHIP[status.tone],
-            )}
-          >
-            <span className="relative flex h-2 w-2">
-              {status.tone !== 'idle' && (
-                <span className={cn('absolute inline-flex h-full w-full animate-ping rounded-full opacity-60', DOT[status.tone])} />
-              )}
-              <span className={cn('relative inline-flex h-2 w-2 rounded-full', DOT[status.tone])} />
-            </span>
+          <span className={cn('inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ring-1', PILL[status.tone])}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', DOT[status.tone])} />
             {status.label}
           </span>
           <span className="hidden text-xs text-stone-400 sm:inline">{status.detail}</span>
@@ -112,27 +105,22 @@ export function WeightReadout(props: WeightReadoutProps) {
 
         <div className="flex items-center gap-2">
           {props.canConnectUsb && (
-            <Button
-              size="sm"
+            <button
+              type="button"
               onClick={props.onConnectUsb}
-              className="h-8 gap-1.5 bg-amber-500 px-3 text-xs font-bold text-stone-950 hover:bg-amber-400"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-400 px-3 text-xs font-semibold text-stone-950 transition-colors hover:bg-amber-300"
               title="Connect this browser straight to the scale's USB cable"
             >
-              <Cable className="h-3.5 w-3.5" />
-              Connect USB
-            </Button>
+              <Cable className="h-3.5 w-3.5" /> Connect USB
+            </button>
           )}
-          {/* Source switch: the scale is the default, typing is the exception */}
-          <div role="radiogroup" aria-label="Weight source" className="flex rounded-lg border border-stone-700 bg-stone-900/80 p-0.5 text-xs font-semibold">
+          <div role="radiogroup" aria-label="Weight source" className="flex rounded-lg bg-black/30 p-0.5 text-xs font-medium ring-1 ring-white/10">
             <button
               type="button"
               role="radio"
               aria-checked={!props.isManual}
               onClick={() => props.isManual && props.onToggleManual()}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors',
-                !props.isManual ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-200',
-              )}
+              className={cn('flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors', !props.isManual ? 'bg-white/10 text-white' : 'text-stone-400 hover:text-stone-200')}
             >
               <Radio className="h-3.5 w-3.5" /> Scale
             </button>
@@ -141,111 +129,121 @@ export function WeightReadout(props: WeightReadoutProps) {
               role="radio"
               aria-checked={props.isManual}
               onClick={() => !props.isManual && props.onToggleManual()}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors',
-                props.isManual ? 'bg-amber-500 text-stone-950' : 'text-stone-400 hover:text-stone-200',
-              )}
-              title="Type the weight from the indicator (F8). A reason is required."
+              className={cn('flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors', props.isManual ? 'bg-amber-400 text-stone-950' : 'text-stone-400 hover:text-stone-200')}
+              title="Type the weight from the indicator (F8)"
             >
-              <Keyboard className="h-3.5 w-3.5" /> Manual <kbd className="font-mono text-[10px] opacity-70">F8</kbd>
+              <Keyboard className="h-3.5 w-3.5" /> Manual <kbd className="font-mono text-[10px] opacity-60">F8</kbd>
             </button>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Readout */}
-      <div className="relative z-10 py-6 text-center">
-        {faulted && !props.isManual ? (
-          <button
-            type="button"
-            onClick={props.onToggleManual}
-            className="mx-auto flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-red-500/50 bg-red-950/30 px-4 py-5 transition-colors hover:border-red-400"
-          >
-            <AlertTriangle className="h-8 w-8 text-red-400" />
-            <span className="font-mono text-5xl font-black tracking-tight text-red-400 md:text-6xl">{props.faultLabel}</span>
-            <span className="text-sm text-red-200">The indicator has lost the load cell signal.</span>
-            <span className="text-xs font-semibold text-amber-300 underline underline-offset-4">Enter the weight manually (F8)</span>
-          </button>
-        ) : props.isManual ? (
-          <div className="mx-auto max-w-md">
-            <div className="flex items-baseline justify-center gap-3">
-              <input
-                ref={props.inputRef}
-                type="number"
-                inputMode="numeric"
-                value={props.manualInput}
-                onChange={(e) => props.onManualInput(e.target.value)}
-                placeholder="0"
-                aria-label="Manual weight in kilograms"
-                className="w-64 rounded-xl border-2 border-amber-500 bg-stone-900 px-2 py-1 text-center font-mono text-6xl font-black text-amber-400 outline-none"
-                autoFocus
-              />
-              <span className="font-mono text-2xl font-bold text-stone-400">kg</span>
-            </div>
-            <input
-              type="text"
-              value={props.manualReason}
-              onChange={(e) => props.onManualReason(e.target.value)}
-              placeholder="Why is it being typed? (required)"
-              maxLength={80}
-              aria-label="Reason for manual weight"
-              className="mt-3 w-full rounded-lg border border-amber-500/50 bg-stone-900 px-3 py-2 text-center text-sm text-amber-100 outline-none placeholder:text-amber-300/40 focus:border-amber-400"
-            />
-            <p className="mt-2 text-xs text-amber-300/80">This ticket will be stamped MANUAL WEIGHT with your reason.</p>
+      {/* Display window */}
+      <div className="relative z-10 px-5 pb-1 pt-4">
+        <div className="kata-display-window relative rounded-2xl px-5 py-6 sm:px-8">
+          <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-[0.22em] text-stone-400">
+            <span className="flex items-center gap-2">
+              {netMode ? 'Net weight' : props.tripType === 'SINGLE' ? 'Weight' : 'Live weight'}
+              {targetOn && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] tracking-[0.14em] text-amber-300 ring-1 ring-amber-400/30">
+                  <Target className="h-3 w-3" /> Target
+                </span>
+              )}
+            </span>
+            <span className="font-mono tracking-[0.12em]">{props.viaUsb ? 'USB' : 'NET'} · {props.portLabel}</span>
           </div>
-        ) : (
-          <>
-            <div className="flex items-baseline justify-center gap-3">
-              <span
-                className={cn(
-                  'kata-weight-digits font-mono font-black tabular-nums',
-                  props.weightKg < 0 ? 'text-red-400' : status.key === 'stable' ? 'text-emerald-300' : 'text-amber-400',
+
+          {faulted && !props.isManual ? (
+            <button
+              type="button"
+              onClick={props.onToggleManual}
+              className="mx-auto mt-4 flex w-full max-w-xl flex-col items-center gap-2 rounded-xl border border-red-500/40 bg-red-950/30 px-4 py-5 transition-colors hover:border-red-400"
+            >
+              <AlertTriangle className="h-7 w-7 text-red-400" />
+              <span className="font-mono text-5xl font-semibold tracking-tight text-red-400 md:text-6xl">{props.faultLabel}</span>
+              <span className="text-sm text-red-200">The indicator has lost the load cell signal.</span>
+              <span className="text-xs font-semibold text-amber-300 underline underline-offset-4">Enter the weight manually (F8)</span>
+            </button>
+          ) : props.isManual ? (
+            <div className="mx-auto mt-3 max-w-md text-center">
+              <div className="flex items-baseline justify-center gap-3">
+                <input
+                  ref={props.inputRef}
+                  type="number"
+                  inputMode="numeric"
+                  value={props.manualInput}
+                  onChange={(e) => props.onManualInput(e.target.value)}
+                  placeholder="0"
+                  aria-label="Manual weight in kilograms"
+                  className="w-64 rounded-xl border border-amber-400/60 bg-black/40 px-2 py-1 text-center font-mono text-6xl font-semibold text-amber-300 outline-none focus:border-amber-300"
+                  autoFocus
+                />
+                <span className="font-mono text-xl text-stone-500">kg</span>
+              </div>
+              {netMode && props.weightKg > 0 && props.netKg != null && (
+                <p className="mt-3 font-mono text-sm text-stone-300">
+                  Net <span className="text-lg font-semibold text-white">{fmt(props.netKg)} kg</span>
+                </p>
+              )}
+              <p className="mt-1 text-xs text-amber-300/70">The ticket will be stamped MANUAL WEIGHT.</p>
+            </div>
+          ) : (
+            <>
+              <div className="mt-2 flex items-baseline justify-center gap-3">
+                <span
+                  className={cn(
+                    'kata-digits font-mono font-semibold tabular-nums',
+                    heroKg < 0 ? 'text-red-400' : status.key === 'stable' ? 'text-[#fbf3e4]' : 'text-amber-300',
+                  )}
+                >
+                  {heroKg < 0 ? `−${fmt(Math.abs(heroKg))}` : fmt(heroKg)}
+                </span>
+                <span className="font-mono text-2xl font-medium text-stone-500">kg</span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 font-mono text-[13px] text-stone-400">
+                <span>{(heroKg / 1000).toFixed(3)} MT</span>
+                {netMode && (
+                  <span className="text-stone-500">
+                    plate <span className="text-stone-300">{fmt(props.weightKg)}</span> kg
+                  </span>
                 )}
-              >
-                {props.weightKg < 0 ? `−${fmt(Math.abs(props.weightKg))}` : fmt(props.weightKg)}
-              </span>
-              <span className="font-mono text-2xl font-bold text-stone-400">kg</span>
-            </div>
-            <div className="mt-2 flex items-center justify-center gap-3 font-mono text-sm text-stone-400">
-              <span>{(props.weightKg / 1000).toFixed(3)} MT</span>
-              {status.key === 'stable' && (
-                <span className="inline-flex items-center gap-1 text-emerald-300">
-                  <CheckCircle2 className="h-4 w-4" /> Locked
-                </span>
-              )}
-              {status.key === 'offline' && (
-                <span className="inline-flex items-center gap-1 text-stone-400">
-                  <WifiOff className="h-4 w-4" /> Use Manual (F8)
-                </span>
-              )}
-            </div>
-          </>
-        )}
+                {status.key === 'stable' && (
+                  <span className="inline-flex items-center gap-1 text-emerald-300">
+                    <Lock className="h-3.5 w-3.5" /> Locked
+                  </span>
+                )}
+                {status.key === 'offline' && (
+                  <span className="inline-flex items-center gap-1">
+                    <WifiOff className="h-3.5 w-3.5" /> Use Manual (F8)
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Recovery notice */}
       {!faulted && props.recentFault && (
-        <p className="relative z-10 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          A load-cell fault was detected {faultAge != null ? `${faultAge}s ago` : 'recently'}. The scale has recovered, but verify
-          this reading against the physical display.
+        <p className="relative z-10 mx-5 mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          A load-cell fault was seen {faultAge != null ? `${faultAge}s ago` : 'recently'}. The scale has recovered - verify this reading against the indicator.
         </p>
       )}
 
-      {/* Gross / tare / net */}
-      <div className="relative z-10 grid grid-cols-3 gap-2 border-t border-stone-800 pt-4">
-        <Cell label="Gross" value={gross} muted={!ready} hint={ready ? undefined : 'after 2nd weight'} />
-        <Cell label="Tare" value={tare} muted={!ready} hint={ready ? undefined : 'after 2nd weight'} />
-        <Cell label="Net" value={net} accent />
+      {/* Ledger: what the ticket will print */}
+      <div className="relative z-10 mt-4 grid grid-cols-3 border-t border-white/[0.07]">
+        <LedgerCell label="Gross" value={gross} muted={!ready} />
+        <LedgerCell label="Tare" value={tare} muted={!ready} />
+        <LedgerCell label="Net" value={net} accent />
       </div>
 
-      <div className="relative z-10 mt-3 flex justify-end">
+      <div className="relative z-10 flex items-center justify-between border-t border-white/[0.05] px-5 py-2.5">
+        <span className="text-[11px] text-stone-500">
+          {ready ? 'As printed on the ticket' : 'Gross and tare appear on the second weight'}
+        </span>
         <button
           type="button"
           onClick={props.onToggleFault}
-          className={cn(
-            'text-[11px] font-medium underline-offset-4 hover:underline',
-            props.faultFlaggedManually ? 'text-red-300' : 'text-stone-500 hover:text-stone-300',
-          )}
+          className={cn('text-[11px] font-medium underline-offset-4 hover:underline', props.faultFlaggedManually ? 'text-red-300' : 'text-stone-500 hover:text-stone-300')}
           title="Use if the indicator shows NO DLC but the ERP has not picked it up"
         >
           {props.faultFlaggedManually ? 'Clear manual NO DLC flag' : 'Indicator shows NO DLC?'}
@@ -255,14 +253,14 @@ export function WeightReadout(props: WeightReadoutProps) {
   );
 }
 
-function Cell({ label, value, accent, muted, hint }: { label: string; value: number | null; accent?: boolean; muted?: boolean; hint?: string }) {
+function LedgerCell({ label, value, accent, muted }: { label: string; value: number | null; accent?: boolean; muted?: boolean }) {
   return (
-    <div className={cn('rounded-xl border px-3 py-2.5 text-center', accent ? 'border-amber-500/40 bg-amber-500/10' : 'border-stone-800 bg-stone-900/70')}>
-      <div className={cn('text-[10px] font-bold uppercase tracking-[0.14em]', accent ? 'text-amber-400' : 'text-stone-500')}>{label}</div>
-      <div className={cn('mt-1 whitespace-nowrap font-mono text-base font-bold tabular-nums sm:text-lg', accent ? 'text-amber-300' : muted ? 'text-stone-600' : 'text-stone-100')}>
-        {value != null ? `${fmt(value)} kg` : '—'}
+    <div className={cn('px-5 py-3.5 [&:not(:first-child)]:border-l [&:not(:first-child)]:border-white/[0.07]', accent && 'bg-amber-400/[0.06]')}>
+      <div className={cn('text-[10px] font-semibold uppercase tracking-[0.2em]', accent ? 'text-amber-300/90' : 'text-stone-500')}>{label}</div>
+      <div className={cn('mt-1 whitespace-nowrap font-mono text-lg font-medium tabular-nums', accent ? 'text-amber-200' : muted || value == null ? 'text-stone-600' : 'text-stone-100')}>
+        {value != null ? fmt(value) : '—'}
+        {value != null && <span className="ml-1 text-xs text-stone-500">kg</span>}
       </div>
-      {hint && value == null && <div className="text-[10px] text-stone-600">{hint}</div>}
     </div>
   );
 }

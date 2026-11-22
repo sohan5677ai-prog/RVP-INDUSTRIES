@@ -3000,6 +3000,11 @@ model WeighbridgeTicket {
   isStorageTransfer          Boolean   @default(false)
   storageLocation            String?
   transferDirection          String? // STORAGE_TO_RVP | RVP_TO_STORAGE
+  // Target net (Pappu): set on the first weight; the second weight is recorded
+  // so the net equals it. The real scale reading is kept in the actual* fields.
+  targetNetKg                Int?
+  actualSecondWeightKg       Int?
+  actualNetWeightKg          Int?
   stockIns                   StockIn[]
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt

@@ -1518,6 +1518,11 @@ export interface WeighbridgeTicket {
   isStorageTransfer: boolean;
   storageLocation: string | null;
   transferDirection: 'STORAGE_TO_RVP' | 'RVP_TO_STORAGE' | string | null;
+  /** Target net set on the first weight; the recorded second weight hits it. */
+  targetNetKg?: number | null;
+  /** Real scale reading / real net when a target was applied. */
+  actualSecondWeightKg?: number | null;
+  actualNetWeightKg?: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -32,11 +32,14 @@ import {
   Warehouse,
   ArrowRight,
   Navigation,
+  Target,
 } from 'lucide-react';
 import { SERVER_ORIGIN } from '@/lib/apiBase';
 import { KataClock } from '@/components/kata/KataClock';
 import { SegmentedToggle } from '@/components/kata/SegmentedToggle';
 import { WeightReadout } from '@/components/kata/WeightReadout';
+import { OriginalWeightPanel } from '@/components/kata/OriginalWeightPanel';
+import { parseTargetNet, projectTargetNet } from '@/lib/kataTarget';
 import { api, ApiError, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useCameraPreview } from '@/lib/useCameraPreview';
 import { useAuth } from '@/lib/auth';
@@ -193,6 +196,7 @@ const TICKET_EXPORT_COLUMNS: ExportColumn<WeighbridgeTicket>[] = [
   { header: 'First Weight (kg)', value: (t) => t.firstWeightKg ?? '', excel: (t) => t.firstWeightKg, numFmt: '#,##0', align: 'right' },
   { header: 'Second Weight (kg)', value: (t) => t.secondWeightKg ?? '', excel: (t) => t.secondWeightKg, numFmt: '#,##0', align: 'right' },
   { header: 'Net Weight (kg)', value: (t) => t.netWeightKg ?? '', excel: (t) => t.netWeightKg, numFmt: '#,##0', align: 'right' },
+  { header: 'Original Net (kg)', value: (t) => t.actualNetWeightKg ?? '', excel: (t) => t.actualNetWeightKg ?? null, numFmt: '#,##0', align: 'right' },
   { header: 'Charge', value: (t) => Number(t.amount || 0), numFmt: '#,##0.00', align: 'right' },
   { header: 'Status', value: (t) => t.status },
   { header: 'Operator', value: (t) => t.operatorName ?? '' },
@@ -597,9 +601,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [firstWeight, setFirstWeight] = useState<number | null>(null);
   const [manualWeightInput, setManualWeightInput] = useState<string>('');
   const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
-  // A typed weight must say why; the server rejects a manual weight without it.
-  const [manualWeightReason, setManualWeightReason] = useState<string>('');
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
+  // Target net (Pappu): entered on the first weight, applied on the second.
+  const [targetNetInput, setTargetNetInput] = useState<string>('');
 
   const manualInputRef = useRef<HTMLInputElement>(null);
 
@@ -1031,21 +1035,30 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     return null;
   }, [tripType, firstWeight, currentLiveWeight]);
 
+  const targetNetKg = tripType === 'SINGLE' ? null : parseTargetNet(targetNetInput);
+  const targetProjection = useMemo(() => {
+    if (tripType !== 'SECOND' || firstWeight == null || targetNetKg == null) return null;
+    return projectTargetNet(firstWeight, currentLiveWeight, targetNetKg);
+  }, [tripType, firstWeight, targetNetKg, currentLiveWeight]);
+  // What the ticket will record: the target when applied, else the real net.
+  const targetInForce = Boolean(targetProjection && !targetProjection.tooFar && currentLiveWeight > 0);
+  const recordedNetWeight = targetInForce ? targetProjection!.recordedNetKg : calculatedNetWeight;
+  const recordedSecondWeight = targetInForce ? targetProjection!.recordedSecondKg : currentLiveWeight;
+
   /**
    * Why Save is not allowed right now, or null. A scale weight needs a live,
    * settled reading; a typed weight needs a reason.
    */
   const weightBlockReason = useMemo<string | null>(() => {
-    if (isManualOverride) {
-      return manualWeightReason.trim().length < 3
-        ? 'Type the reason for entering the weight manually'
-        : null;
+    if (targetProjection?.tooFar && currentLiveWeight > 0) {
+      return 'Target net is more than 15% away from the real net - check or clear the target';
     }
-    if (isNoDls) return `Scale shows ${noDlcLabel} - use Manual override (F8) and give a reason`;
-    if (!scale.isScaleOnline) return 'Scale is not connected - use Manual override (F8) and give a reason';
+    if (isManualOverride) return null;
+    if (isNoDls) return `Scale shows ${noDlcLabel} - use Manual override (F8)`;
+    if (!scale.isScaleOnline) return 'Scale is not connected - use Manual override (F8)';
     if (!scale.isStable) return 'Weight is still moving - wait for STABLE';
     return null;
-  }, [isManualOverride, manualWeightReason, isNoDls, noDlcLabel, scale.isScaleOnline, scale.isStable]);
+  }, [targetProjection, currentLiveWeight, isManualOverride, isNoDls, noDlcLabel, scale.isScaleOnline, scale.isStable]);
 
   const storageTransferDirection = transferDirectionForMaterial(material);
 
@@ -1060,12 +1073,12 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   }, [isCurrentVehicleExempt, billType]);
 
   const calculatedKataFee = useMemo(() => {
-    if (billType === 'FREE' || isCurrentVehicleExempt || calculatedNetWeight == null || calculatedNetWeight <= 0) return 0;
+    if (billType === 'FREE' || isCurrentVehicleExempt || recordedNetWeight == null || recordedNetWeight <= 0) return 0;
     return calcKataFee(
-      calculatedNetWeight,
+      recordedNetWeight,
       isCurrentVehicleExempt,
     );
-  }, [billType, isCurrentVehicleExempt, calculatedNetWeight]);
+  }, [billType, isCurrentVehicleExempt, recordedNetWeight]);
 
   useEffect(() => {
     setCharges(String(calculatedKataFee));
@@ -1109,9 +1122,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setRemarks('');
     setFirstWeight(null);
     setManualWeightInput('');
-    setManualWeightReason('');
     setIsManualOverride(false);
     setPendingTicketId(null);
+    setTargetNetInput('');
     setActiveSnapshots(null);
   }, []);
 
@@ -1131,6 +1144,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setDriverMobile(ticket.partyMobile || '');
     setCharges('0');
     setRemarks(ticket.remarks || '');
+    setTargetNetInput(ticket.targetNetKg ? String(ticket.targetNetKg) : '');
     setActiveTab('entry');
     toast.info(`Loaded truck ${ticket.vehicleNumber} (First Weight: ${ticket.firstWeightKg} Kg)`);
   }, []);
@@ -1171,7 +1185,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         throw new Error(weightBlockReason);
       }
       const weightSource: 'SCALE' | 'MANUAL' = isManualOverride ? 'MANUAL' : 'SCALE';
-      const manualReason = manualWeightReason.trim();
 
       // Capture live snapshots at the exact moment of kata (weighment)
       const [snap1Base64, snap2Base64] = await Promise.all([
@@ -1217,8 +1230,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             loadType,
             remarks: remarks.trim() || undefined,
             weightSource,
-            manualWeightReason: weightSource === 'MANUAL' ? manualReason : undefined,
             forceDirection: (opts ? opts.forceDirection : false) === true,
+            // Always sent on a second weight so a cleared target is honoured.
+            targetNetKg: targetNetKg ?? '',
             snapCam1: snap1Base64,
             snapCam2: snap2Base64,
           }),
@@ -1251,8 +1265,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             remarks: remarks.trim(),
             operatorName: user?.name || 'OPERATOR',
             weightSource,
-            manualWeightReason: weightSource === 'MANUAL' ? manualReason : undefined,
             forceDirection: (opts ? opts.forceDirection : false) === true,
+            targetNetKg: tripType === 'SINGLE' ? undefined : (targetNetKg ?? ''),
             snapCam1: snap1Base64,
             snapCam2: snap2Base64,
           }),
@@ -1267,6 +1281,12 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       }
     },
     onSuccess: ({ ticket, snapshots }) => {
+      if (ticket.actualNetWeightKg != null && ticket.netWeightKg != null) {
+        toast.info(
+          `Target applied: net recorded ${ticket.netWeightKg.toLocaleString('en-IN')} kg (original ${ticket.actualNetWeightKg.toLocaleString('en-IN')} kg)`,
+          { duration: 8000 },
+        );
+      }
       const saveMsg = ticket.secondWeightKg != null
         ? `Ticket #${formatTicketNo(ticket.ticketNo)} saved & Kata sent to internal team on WhatsApp!`
         : `Ticket #${formatTicketNo(ticket.ticketNo)} saved successfully!`;
@@ -1839,14 +1859,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       </div>}
 
       {/* Navigation Tabs */}
-      <div className="kata-tabs flex items-center gap-1 border-b border-border pb-1">
+      <div className="kata-tabs flex w-fit max-w-full items-center gap-1 rounded-xl bg-muted/60 p-1 ring-1 ring-border/60">
         <button
           type="button"
           onClick={() => setActiveTab('entry')}
           className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            'flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-[13px] font-semibold transition-all',
             activeTab === 'entry'
-              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              ? 'bg-card text-foreground shadow-[var(--shadow-sm)] ring-1 ring-border/80'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -1858,9 +1878,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           type="button"
           onClick={() => setActiveTab('pending')}
           className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            'flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-[13px] font-semibold transition-all',
             activeTab === 'pending'
-              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              ? 'bg-card text-foreground shadow-[var(--shadow-sm)] ring-1 ring-border/80'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -1877,9 +1897,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           type="button"
           onClick={() => setActiveTab('payment')}
           className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            'flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-[13px] font-semibold transition-all',
             activeTab === 'payment'
-              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              ? 'bg-card text-foreground shadow-[var(--shadow-sm)] ring-1 ring-border/80'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -1896,9 +1916,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           type="button"
           onClick={() => setActiveTab('history')}
           className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all',
+            'flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-[13px] font-semibold transition-all',
             activeTab === 'history'
-              ? 'bg-primary/10 text-primary border border-primary/20 shadow-xs'
+              ? 'bg-card text-foreground shadow-[var(--shadow-sm)] ring-1 ring-border/80'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -2111,6 +2131,49 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   />
                 </div>
 
+                {/* Target net: the buyer's exact figure. Shown for Pappu, or once set. */}
+                {tripType !== 'SINGLE' && (material === 'PAPPU' || targetNetInput !== '') && (
+                  <div className="kata-target-field sm:col-span-2">
+                    <div className="flex items-start gap-3">
+                      <span className="kata-target-icon">
+                        <Target className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <Label htmlFor="kata-target-net" className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                          Target net weight
+                        </Label>
+                        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                          {tripType === 'SECOND'
+                            ? 'The second weight is recorded so the net equals this. The real reading stays on screen.'
+                            : "Buyer's exact figure. On the second weight the net is recorded as this."}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Input
+                          id="kata-target-net"
+                          type="number"
+                          inputMode="numeric"
+                          value={targetNetInput}
+                          onChange={(e) => setTargetNetInput(e.target.value)}
+                          placeholder="e.g. 35010"
+                          className="h-11 bg-background pr-12 font-mono text-lg font-semibold tabular-nums"
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs text-muted-foreground">kg</span>
+                      </div>
+                      <span className="w-24 text-right font-mono text-sm text-muted-foreground">
+                        {targetNetKg != null ? `${(targetNetKg / 1000).toFixed(3)} MT` : '—'}
+                      </span>
+                      {targetNetInput !== '' && (
+                        <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => setTargetNetInput('')}>
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Payment type (the fee itself is shown in the charge card below) */}
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -2177,7 +2240,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </div>
                 <div>
                   <span className="kata-eyebrow">Payment display</span>
-                  <p>{calculatedNetWeight == null
+                  <p>{recordedNetWeight == null
                     ? 'Charge after second weight'
                     : isCurrentVehicleExempt
                       ? 'KNM Company Vehicle (Exempt)'
@@ -2189,7 +2252,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </div>
                 <div className="kata-payment-amount">
                   <span>{isCurrentVehicleExempt ? 'EXEMPT' : billType}</span>
-                  <strong>{calculatedNetWeight == null ? 'Pending' : `₹${Number(charges || 0).toLocaleString('en-IN')}`}</strong>
+                  <strong>{recordedNetWeight == null ? 'Pending' : `₹${Number(charges || 0).toLocaleString('en-IN')}`}</strong>
                 </div>
               </div>
 
@@ -2291,8 +2354,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               }}
               manualInput={manualWeightInput}
               onManualInput={setManualWeightInput}
-              manualReason={manualWeightReason}
-              onManualReason={setManualWeightReason}
               inputRef={manualInputRef}
               scaleOnline={scale.isScaleOnline}
               stable={scale.isStable}
@@ -2315,8 +2376,19 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               tripType={tripType}
               loadType={loadType}
               firstWeightKg={firstWeight}
-              netKg={calculatedNetWeight}
+              netKg={recordedNetWeight}
+              recordedSecondKg={recordedSecondWeight}
+              targetNetKg={targetInForce ? targetNetKg : null}
             />
+
+            {targetProjection && firstWeight != null && targetNetKg != null && (
+              <OriginalWeightPanel
+                targetKg={targetNetKg}
+                liveKg={currentLiveWeight}
+                firstKg={firstWeight}
+                projection={targetProjection}
+              />
+            )}
 
             {/* 2. CP PLUS Live Dual CCTV Cameras */}
             <Card className="kata-camera-card overflow-hidden border-border">
@@ -2889,6 +2961,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       {t.netWeightKg != null
                         ? `${t.netWeightKg.toLocaleString('en-IN')} Kg`
                         : `${t.firstWeightKg?.toLocaleString('en-IN') || 0} Kg`}
+                      {t.actualNetWeightKg != null && (
+                        <div
+                          className="mt-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                          title={`Target net applied. Real reading ${t.actualSecondWeightKg?.toLocaleString('en-IN')} kg, real net ${t.actualNetWeightKg.toLocaleString('en-IN')} kg`}
+                        >
+                          orig {t.actualNetWeightKg.toLocaleString('en-IN')}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-mono font-bold text-xs">
                       ₹{Number(t.amount || 0).toLocaleString('en-IN')}

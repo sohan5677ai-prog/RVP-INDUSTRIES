@@ -1,3 +1,4 @@
+import { applyTargetNet, readTargetNet, TargetNetError } from '../lib/kataTargetNet.js';
 import { Request, Response } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma.js';
@@ -121,17 +122,31 @@ function assertSecondWeightSane(
 }
 
 /**
- * A manually typed weight must say why, and the slip/register must show it was
- * typed. Returns the note to append to remarks (no schema change needed), or
- * null for a weight that came off the scale.
+ * The slip/register must show a weight was typed rather than read off the
+ * scale. A reason is optional. Returns the note to append to remarks, or null
+ * for a weight that came off the scale.
  */
 function manualWeightNote(weightSource: unknown, reason: unknown): string | null {
   if (String(weightSource ?? '').toUpperCase() !== 'MANUAL') return null;
   const why = String(reason ?? '').trim();
-  if (why.length < 3) {
-    throw new HttpError(400, 'A manually entered weight needs a reason (scale fault, display only, etc.)');
+  return why ? `[MANUAL WEIGHT: ${why}]` : '[MANUAL WEIGHT]';
+}
+
+/**
+ * Applies the ticket's target net (if any) to a second weighment. A target in
+ * the request body overrides the one saved on the first weight; an explicit
+ * empty value clears it.
+ */
+function resolveTargetNet(body: any, storedTarget: number | null | undefined, firstKg: number, actualSecondKg: number) {
+  try {
+    const target = Object.prototype.hasOwnProperty.call(body ?? {}, 'targetNetKg')
+      ? readTargetNet(body.targetNetKg)
+      : (storedTarget ?? null);
+    return { target, ...applyTargetNet(firstKg, actualSecondKg, target) };
+  } catch (err) {
+    if (err instanceof TargetNetError) throw new HttpError(400, err.message);
+    throw err;
   }
-  return `[MANUAL WEIGHT: ${why}]`;
 }
 
 function joinRemarks(...parts: Array<string | null | undefined>): string | undefined {
@@ -578,7 +593,8 @@ export async function createTicketHandler(req: Request, res: Response) {
       const secondWeightNum = Number(secondWeight ?? firstWeight ?? 0);
       const firstWeightExisting = existingPending.firstWeightKg ?? 0;
       assertSecondWeightSane(firstWeightExisting, secondWeightNum, existingPending.loadType, forceDirection === true);
-      const netWeight = Math.abs(secondWeightNum - firstWeightExisting);
+      const tn = resolveTargetNet(req.body, existingPending.targetNetKg, firstWeightExisting, secondWeightNum);
+      const netWeight = tn.netKg;
       const transfer = resolveStorageTransfer(
         Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
           ? isStorageTransfer
@@ -610,9 +626,12 @@ export async function createTicketHandler(req: Request, res: Response) {
       const updated = await prisma.weighbridgeTicket.update({
         where: { id: existingPending.id },
         data: {
-          secondWeightKg: secondWeightNum,
+          secondWeightKg: tn.secondKg,
           secondWeighedAt,
           netWeightKg: netWeight,
+          targetNetKg: tn.target,
+          actualSecondWeightKg: tn.actualSecondKg,
+          actualNetWeightKg: tn.actualNetKg,
           status: 'COMPLETED',
           tripType: 'SECOND',
           billType: finalBillType,
@@ -656,6 +675,13 @@ export async function createTicketHandler(req: Request, res: Response) {
   }
 
   const isPending = tripType === 'FIRST' && secondWeight == null;
+  let targetNet: number | null = null;
+  try {
+    targetNet = readTargetNet(req.body.targetNetKg);
+  } catch (err) {
+    if (err instanceof TargetNetError) throw new HttpError(400, err.message);
+    throw err;
+  }
   const status = isPending ? 'PENDING_SECOND' : 'COMPLETED';
   const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
   const isExempt = isVehicleExempt(cleanVehNo, company?.companyVehicles) || /knm/i.test(cleanVehNo) || (partyName && /knm/i.test(partyName));
@@ -712,6 +738,7 @@ export async function createTicketHandler(req: Request, res: Response) {
       firstWeightKg: firstWeight,
       secondWeightKg: secondWeight,
       netWeightKg: netWeight,
+      targetNetKg: isPending ? targetNet : null,
       firstWeighedAt: firstWeight != null ? new Date() : null,
       secondWeighedAt: secondWeight != null ? new Date() : null,
       status,
@@ -776,7 +803,8 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   const secondWeightNum = checkedSecond;
   const firstWeight = existing.firstWeightKg;
   assertSecondWeightSane(firstWeight, secondWeightNum, existing.loadType, forceDirection === true);
-  const netWeight = Math.abs(secondWeightNum - firstWeight);
+  const tn = resolveTargetNet(req.body, existing.targetNetKg, firstWeight, secondWeightNum);
+  const netWeight = tn.netKg;
   const finalParty = (partyName ? String(partyName).trim() : existing.partyName);
   const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
   const isExempt = isVehicleExempt(existing.vehicleNumber, company?.companyVehicles) || /knm/i.test(existing.vehicleNumber) || (finalParty && /knm/i.test(finalParty));
@@ -809,9 +837,12 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   const updated = await prisma.weighbridgeTicket.update({
     where: { id },
     data: {
-      secondWeightKg: secondWeightNum,
+      secondWeightKg: tn.secondKg,
       secondWeighedAt,
       netWeightKg: netWeight,
+      targetNetKg: tn.target,
+      actualSecondWeightKg: tn.actualSecondKg,
+      actualNetWeightKg: tn.actualNetKg,
       status: 'COMPLETED',
       tripType: 'SECOND',
       billType: finalBillType,

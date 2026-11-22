@@ -1519,11 +1519,16 @@ export async function configScalePortHandler(req: Request, res: Response) {
   res.json({ success: true, reading: service.getReading() });
 }
 
+const SCALE_FAULTS = ['NO DLC', 'NO DLS', 'OVERLOAD', 'SCALE ERROR'] as const;
+function parseFault(value: unknown): (typeof SCALE_FAULTS)[number] | null {
+  return SCALE_FAULTS.find((f) => f === value) ?? null;
+}
+
 /**
  * Broadcast live scale weight pushed from a terminal (e.g. Kata Cabin via Web Serial).
  */
 export async function broadcastScaleReadingHandler(req: Request, res: Response) {
-  const { liveWeight, isStable, rawText, port, isConnected, error } = req.body;
+  const { liveWeight, isStable, rawText, port, isConnected, error, fault } = req.body;
   const { getServerScaleService } = await import('../lib/serverScaleService.js');
   const service = getServerScaleService();
 
@@ -1536,6 +1541,8 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
       rawText: rawText ? String(rawText) : undefined,
       port: port ? String(port) : undefined,
       error: error ? String(error) : undefined,
+      // Present (null or a label) from current terminals; absent from older ones.
+      fault: 'fault' in (req.body ?? {}) ? parseFault(fault) : undefined,
     });
   }
 

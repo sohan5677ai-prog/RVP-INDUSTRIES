@@ -1,4 +1,4 @@
-import { detectScaleFault } from './scaleFault.js';
+import { createFaultTracker, describeScaleFault, detectScaleFault, type ScaleFault } from './scaleFault.js';
 import { SerialPort } from 'serialport';
 import { logger } from './logger.js';
 import type { Response } from 'express';
@@ -13,6 +13,12 @@ export interface ScaleReading {
   baudRate: number;
   error?: string | null;
   availablePorts?: Array<{ path: string; manufacturer?: string; friendlyName?: string }>;
+  /**
+   * The indicator's own fault ('NO DLC' etc.) while it is showing one, else
+   * null. This is the ONLY field that means "load-cell fault"; `error` also
+   * carries connection problems, which are an offline scale, not a fault.
+   */
+  fault: ScaleFault | null;
   /** True when a DLC/hardware fault was detected recently but the scale has since recovered */
   recentFault?: boolean;
   /** Human-readable label for the recent fault (e.g. 'NO DLC') */
@@ -45,6 +51,7 @@ class ServerScaleService {
     port: process.env.SCALE_COM_PORT || 'COM4',
     baudRate: Number(process.env.SCALE_BAUD_RATE || 2400),
     error: null,
+    fault: null,
     availablePorts: [],
     recentFault: false,
     recentFaultLabel: null,
@@ -55,6 +62,7 @@ class ServerScaleService {
   private recentWeights: number[] = [];
   private lastFaultTime: number = 0;
   private lastFaultLabel: string = '';
+  private faultTracker = createFaultTracker();
 
   constructor() {
     if (!this.localEnabled) {
@@ -64,6 +72,10 @@ class ServerScaleService {
   }
 
   public getReading(): ScaleReading {
+    // A disconnected scale is OFFLINE, not faulted: never report a stale fault for it.
+    if (!this.currentReading.isConnected) {
+      return { ...this.currentReading, fault: null };
+    }
     return { ...this.currentReading };
   }
 
@@ -111,6 +123,8 @@ class ServerScaleService {
     port?: string;
     baudRate?: number;
     error?: string | null;
+    /** Debounced indicator fault from the terminal; undefined from older terminals. */
+    fault?: ScaleFault | null;
   }) {
     this.isRemoteActive = true;
     if (this.remoteWatchdogTimer) {
@@ -128,34 +142,32 @@ class ServerScaleService {
     }, 6000);
 
     const raw = reading.rawText || '';
-    let err = reading.error || null;
-    const rawFault = detectScaleFault(raw);
-    if (!err && rawFault) {
-      err = `${rawFault} (Load Cell Signal Lost)`;
-    }
-
-    // Track fault timestamp for DLC cooldown
-    if (err) {
-      this.lastFaultTime = Date.now();
-      this.lastFaultLabel = rawFault ?? 'NO DLC';
-    }
-
-    const weight = Math.round(Number(reading.liveWeight) || 0);
+    // A current cabin terminal debounces and sends `fault` itself. An older one
+    // only sends the frame text, so classify that. A plain `error` is NOT a fault.
+    const fault: ScaleFault | null =
+      reading.fault !== undefined ? reading.fault : detectScaleFault(raw);
     const now = Date.now();
-    const withinCooldown = !err && this.lastFaultTime > 0 && (now - this.lastFaultTime) < DLC_COOLDOWN_MS;
+    if (fault) {
+      this.lastFaultTime = now;
+      this.lastFaultLabel = fault;
+    }
+    const err = fault ? `${fault} (${describeScaleFault(fault)})` : reading.error || null;
+    const weight = Math.round(Number(reading.liveWeight) || 0);
+    const withinCooldown = !fault && this.lastFaultTime > 0 && (now - this.lastFaultTime) < DLC_COOLDOWN_MS;
 
     this.currentReading = {
       ...this.currentReading,
-      liveWeight: err ? 0 : weight,
-      isStable: err ? false : !!reading.isStable,
+      liveWeight: fault ? 0 : weight,
+      isStable: fault ? false : !!reading.isStable,
       rawText: raw || `${weight} kg`,
       lastUpdated: now,
       isConnected: true,
       port: reading.port || this.portName,
       baudRate: reading.baudRate || this.baudRate,
       error: err,
-      recentFault: !!err || withinCooldown,
-      recentFaultLabel: err ? this.lastFaultLabel : (withinCooldown ? this.lastFaultLabel : null),
+      fault,
+      recentFault: !!fault || withinCooldown,
+      recentFaultLabel: fault || withinCooldown ? this.lastFaultLabel : null,
       lastFaultTime: this.lastFaultTime || null,
     };
 
@@ -230,6 +242,8 @@ class ServerScaleService {
         this.serialPort = port;
         this.currentReading.isConnected = true;
         this.currentReading.error = null;
+        this.currentReading.fault = null;
+        this.faultTracker.reset();
         this.notifyListeners();
 
         port.on('data', (chunk: Buffer) => {
@@ -306,25 +320,38 @@ class ServerScaleService {
     const clean = raw.replace(/[^\x20-\x7E]/g, '').trim();
     if (!clean) return;
 
-    // Check for hardware faults or power surge error codes (e.g. "no dlc", "no dls", "oL", "Err 02")
+    // Hardware fault frames ("no dlc", "no dls", "oL", "Err 02"). The state
+    // only flips after consecutive frames agree, so one noisy line is ignored.
     const lineFault = detectScaleFault(clean);
-    if (lineFault) {
-      const faultLabel = lineFault;
-      logger.warn(`[scale] Hardware fault indicator received: "${clean}" (${faultLabel})`);
+    const wasFault = this.faultTracker.fault;
+    const fault = this.faultTracker.push(lineFault);
+    if (lineFault && fault && !wasFault) {
+      logger.warn(`[scale] Indicator fault: "${clean}" (${fault})`);
+    } else if (!fault && wasFault) {
+      logger.info(`[scale] Indicator recovered from ${wasFault}: "${clean}"`);
+    }
+    if (fault) {
       this.lastFaultTime = Date.now();
-      this.lastFaultLabel = faultLabel;
+      this.lastFaultLabel = fault;
+      this.recentWeights = [];
       this.currentReading = {
         ...this.currentReading,
+        liveWeight: 0,
+        isStable: false,
         rawText: clean,
         lastUpdated: Date.now(),
-        error: `${faultLabel} (Load Cell Signal Lost / Power Cut)`,
+        isConnected: true,
+        error: `${fault} (${describeScaleFault(fault)})`,
+        fault,
         recentFault: true,
-        recentFaultLabel: faultLabel,
+        recentFaultLabel: fault,
         lastFaultTime: this.lastFaultTime,
       };
       this.notifyListeners();
       return;
     }
+    // A single unconfirmed fault frame carries no weight: skip it.
+    if (lineFault) return;
 
     // Detect stability markers (e.g. ST = Stable, US/MO = Motion/Unstable)
     let isStable = false;
@@ -366,6 +393,7 @@ class ServerScaleService {
           port: this.portName,
           baudRate: this.baudRate,
           error: null,
+          fault: null,
           recentFault: withinCooldown,
           recentFaultLabel: withinCooldown ? this.lastFaultLabel : null,
           lastFaultTime: this.lastFaultTime || null,

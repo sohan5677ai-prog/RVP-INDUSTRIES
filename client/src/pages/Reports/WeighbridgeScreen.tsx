@@ -1,4 +1,3 @@
-import { detectScaleFault } from '@/lib/scaleFault';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -604,34 +603,29 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
   const manualInputRef = useRef<HTMLInputElement>(null);
 
-  // Manual toggle for NO DLC state, initialized from localStorage so it persists across page refreshes
-  const [manualNoDls, setManualNoDls] = useState<boolean>(() => {
+  // Operator's own "the indicator says NO DLC" flag, for when the ERP has not
+  // picked it up. Lives for this page session only: a flag saved across
+  // refreshes kept blocking scale weights long after the load cell was fixed.
+  const [manualNoDls, setManualNoDls] = useState<boolean>(false);
+  useEffect(() => {
     try {
-      return localStorage.getItem('rvp_kata_manual_no_dlc') === '1';
-    } catch {
-      return false;
-    }
-  });
+      localStorage.removeItem('rvp_kata_manual_no_dlc'); // drop the old persisted flag
+    } catch {}
+  }, []);
 
   const toggleNoDlc = useCallback(() => {
     setManualNoDls((prev) => {
       const next = !prev;
-      try {
-        if (next) {
-          localStorage.setItem('rvp_kata_manual_no_dlc', '1');
-          toast.warning('Scale flagged as NO DLC (load cell lost)');
-        } else {
-          localStorage.removeItem('rvp_kata_manual_no_dlc');
-          toast.success('Scale returned to standard mode');
-        }
-      } catch {}
+      if (next) toast.warning('Scale flagged as NO DLC (load cell lost)');
+      else toast.success('Scale returned to standard mode');
       return next;
     });
   }, []);
 
-  const detectedFault = detectScaleFault(scale.error) ?? detectScaleFault(scale.rawText);
-  const detectedNoDlc = detectedFault !== null;
-  const isNoDls = manualNoDls || detectedNoDlc;
+  // The fault comes only from the indicator's own frames (scale.fault). A
+  // connection error is an OFFLINE scale and is handled as such below.
+  const detectedFault = scale.fault;
+  const isNoDls = manualNoDls || detectedFault !== null;
 
   const noDlcLabel = detectedFault ?? 'NO DLC';
 

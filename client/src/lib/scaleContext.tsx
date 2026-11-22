@@ -1,4 +1,4 @@
-import { detectScaleFault } from './scaleFault';
+import { createFaultTracker, describeScaleFault, detectScaleFault, type ScaleFault } from './scaleFault';
 import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { getScaleApiUrl } from '@/lib/api';
@@ -53,6 +53,12 @@ export interface ScaleContextType {
   serverPort: string;
   availablePorts: Array<{ path: string; manufacturer?: string; friendlyName?: string }>;
   switchServerPort: (port: string, baudRate?: number) => Promise<boolean>;
+  /**
+   * The indicator's own fault ('NO DLC', 'NO DLS', 'OVERLOAD', 'SCALE ERROR')
+   * while it is showing one, else null. This is the ONLY "load-cell fault"
+   * signal: `error` also carries connection problems, which mean OFFLINE.
+   */
+  fault: ScaleFault | null;
   /** True when a DLC/hardware fault was recently detected but the scale has recovered */
   recentFault: boolean;
   /** Timestamp (ms) of the last DLC/hardware fault */
@@ -64,6 +70,8 @@ const ScaleContext = createContext<ScaleContextType | undefined>(undefined);
 const STORAGE_AUTO_CONNECT = 'rvp_scale_auto_connect';
 const STORAGE_BAUD_RATE = 'rvp_scale_baud_rate';
 const DEFAULT_BAUD_RATE = 2400;
+/** Matches the server's DLC_COOLDOWN_MS: how long "RECOVERING" shows after a fault clears. */
+const RECOVERY_WINDOW_MS = 30_000;
 
 export function ScaleProvider({ children }: { children: ReactNode }) {
   // The scale SSE stream and live-reading poll are no longer anonymous; this
@@ -85,6 +93,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   const [hardwareConnected, setHardwareConnected] = useState<boolean>(false);
   const [serverPort, setServerPort] = useState<string>('COM4');
   const [availablePorts, setAvailablePorts] = useState<Array<{ path: string; manufacturer?: string; friendlyName?: string }>>([]);
+  const [fault, setFault] = useState<ScaleFault | null>(null);
   const [recentFault, setRecentFault] = useState<boolean>(false);
   const [lastFaultTime, setLastFaultTime] = useState<number | null>(null);
 
@@ -102,13 +111,17 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const keepReadingRef = useRef<boolean>(false);
   const recentReadingsRef = useRef<number[]>([]);
+  // Debounces per-frame fault results from the local USB indicator.
+  const faultTrackerRef = useRef(createFaultTracker());
+  const lastLocalFaultRef = useRef<number>(0);
 
   // Throttle broadcast to universal server hub
   const lastBroadcastRef = useRef<{
     time: number;
     weight: number | null;
     isStable: boolean;
-  }>({ time: 0, weight: null, isStable: false });
+    fault: ScaleFault | null;
+  }>({ time: 0, weight: null, isStable: false, fault: null });
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setBaudRate = (rate: number) => {
@@ -130,14 +143,14 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
    * Broadcast live scale reading from this PC to the universal server stream.
    * This transmits live weight to all other computers on the factory/mill network!
    */
-  const broadcastReading = useCallback((weight: number, stable: boolean, raw: string, err?: string | null) => {
+  const broadcastReading = useCallback((weight: number, stable: boolean, raw: string, frameFault: ScaleFault | null = null) => {
     const now = Date.now();
     const last = lastBroadcastRef.current;
-    const weightChanged = last.weight !== weight || last.isStable !== stable;
+    const weightChanged = last.weight !== weight || last.isStable !== stable || last.fault !== frameFault;
     const timeElapsed = now - last.time;
 
     const doSend = async () => {
-      lastBroadcastRef.current = { time: Date.now(), weight, isStable: stable };
+      lastBroadcastRef.current = { time: Date.now(), weight, isStable: stable, fault: frameFault };
       try {
         const url = getScaleApiUrl('/weighbridge/scale/broadcast');
         await fetch(url, {
@@ -151,7 +164,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
             rawText: raw,
             port: serverPort || 'COM4',
             isConnected: true,
-            error: err || null,
+            fault: frameFault,
+            error: frameFault ? `${frameFault} (${describeScaleFault(frameFault)})` : null,
           }),
         });
       } catch {
@@ -200,101 +214,111 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
   const processChunk = useCallback((textChunk: string, bufferRef: { current: string }) => {
     bufferRef.current += textChunk;
 
-    // Show friendly preview in UI (render \x03 as ♥ and newlines as ↵)
+    // Show friendly preview in UI (render \x03 as ♥ and newlines as ↵). Display only:
+    // fault and weight are decided from complete frames below, never from this.
     const preview = bufferRef.current.slice(-25).replace(/\x03/g, '♥').replace(/[\r\n]+/g, '↵');
     setRawText(preview);
 
-    // Check for hardware faults / NO DLC / NO DLS
-    const bufferFault = detectScaleFault(bufferRef.current);
-    if (bufferFault) {
-      const fault = bufferFault;
-      setError(`${fault} (Load Cell Signal Lost)`);
-      setLiveWeight(null);
-      setIsStable(false);
-      setLastUpdated(new Date());
-      broadcastReading(0, false, fault, fault);
-      if (bufferRef.current.length > 80) {
-        bufferRef.current = bufferRef.current.slice(-20);
-      }
-      return;
-    }
+    // The newest complete frame decides. Each entry is either a weight or a fault.
+    let frameText: string | null = null;
+    let frameWeight: number | null = null;
+    let frameFault: ScaleFault | null = null;
 
-    // Split accumulated buffer into frames by ETX (\x03), STX (\x02), CR, or LF
+    // Split accumulated buffer into frames by ETX (\x03), STX (\x02), CR, LF or EOT
     const frames = bufferRef.current.split(/[\x02\x03\r\n\x04]+/);
-
-    let parsedWeight: number | null = null;
-
-    // If we have completed frames (frames before the current open tail)
     if (frames.length > 1) {
       for (let i = frames.length - 2; i >= 0; i--) {
         const frame = frames[i].trim();
-        const frameFault = detectScaleFault(frame);
-        if (frameFault) {
-          const fault = frameFault;
-          setError(`${fault} (Load Cell Signal Lost)`);
-          setLiveWeight(null);
-          setIsStable(false);
-          setLastUpdated(new Date());
-          broadcastReading(0, false, fault, fault);
-          bufferRef.current = frames[frames.length - 1];
-          return;
+        if (!frame) continue;
+        const f = detectScaleFault(frame);
+        if (f) {
+          frameFault = f;
+          frameText = frame;
+          break;
         }
-
         const numMatch = frame.match(/-?\d{2,8}/);
         if (numMatch) {
           const val = parseInt(numMatch[0], 10);
           if (!isNaN(val)) {
-            parsedWeight = val;
+            frameWeight = val;
+            frameText = frame;
             break;
           }
         }
       }
       // Retain only the incomplete tail
       bufferRef.current = frames[frames.length - 1];
-    }
-
-    // Fallback: If no delimiter was found, match any sequence of 4-8 digits (with optional leading minus)
-    if (parsedWeight == null) {
-      const directMatches = bufferRef.current.match(/-?\d{4,8}/g);
-      if (directMatches && directMatches.length > 0) {
-        const latest = directMatches[directMatches.length - 1];
-        const val = parseInt(latest, 10);
+    } else {
+      // Indicator without delimiters: the latest 4-8 digit run is the weight,
+      // unless fault text arrived after it.
+      const directMatches = [...bufferRef.current.matchAll(/-?\d{4,8}/g)];
+      const latest = directMatches[directMatches.length - 1];
+      const afterLatest = latest ? bufferRef.current.slice(latest.index! + latest[0].length) : bufferRef.current;
+      const tailFault = detectScaleFault(afterLatest);
+      if (tailFault) {
+        frameFault = tailFault;
+        frameText = afterLatest.trim();
+        bufferRef.current = '';
+      } else if (latest) {
+        const val = parseInt(latest[0], 10);
         if (!isNaN(val)) {
-          parsedWeight = val;
-          const idx = bufferRef.current.lastIndexOf(latest);
-          if (idx !== -1) {
-            bufferRef.current = bufferRef.current.slice(idx + latest.length);
-          }
+          frameWeight = val;
+          frameText = latest[0];
+          bufferRef.current = afterLatest;
         }
       }
-    }
-
-    if (parsedWeight != null) {
-      setError(null);
-      setLiveWeight(parsedWeight);
-      setLastUpdated(new Date());
-
-      // Track stability (last 4 readings within +/- 2 kg)
-      const recent = recentReadingsRef.current;
-      recent.push(parsedWeight);
-      if (recent.length > 5) recent.shift();
-
-      let stable = false;
-      if (recent.length >= 3) {
-        const min = Math.min(...recent);
-        const max = Math.max(...recent);
-        stable = max - min <= 2;
-        setIsStable(stable);
-      }
-
-      // Broadcast universally to server for all other PCs!
-      broadcastReading(parsedWeight, stable, preview, null);
     }
 
     // Prevent buffer memory leak
     if (bufferRef.current.length > 150) {
       bufferRef.current = bufferRef.current.slice(-30);
     }
+
+    if (frameFault === null && frameWeight === null) return;
+
+    const tracker = faultTrackerRef.current;
+    const wasFault = tracker.fault;
+    const steadyFault = tracker.push(frameFault);
+
+    if (steadyFault) {
+      const now = Date.now();
+      lastLocalFaultRef.current = now;
+      setFault(steadyFault);
+      setError(`${steadyFault} (${describeScaleFault(steadyFault)})`);
+      setLiveWeight(null);
+      setIsStable(false);
+      setRecentFault(true);
+      setLastFaultTime(now);
+      setLastUpdated(new Date());
+      recentReadingsRef.current = [];
+      broadcastReading(0, false, frameText ?? steadyFault, steadyFault);
+      return;
+    }
+
+    // One unconfirmed fault frame: no weight in it, and not enough to raise the fault.
+    if (frameWeight === null) return;
+
+    if (wasFault) setFault(null);
+    setError(null);
+    setLiveWeight(frameWeight);
+    setLastUpdated(new Date());
+    setRecentFault(lastLocalFaultRef.current > 0 && Date.now() - lastLocalFaultRef.current < RECOVERY_WINDOW_MS);
+
+    // Track stability (last readings within +/- 2 kg)
+    const recent = recentReadingsRef.current;
+    recent.push(frameWeight);
+    if (recent.length > 5) recent.shift();
+
+    let stable = false;
+    if (recent.length >= 3) {
+      const min = Math.min(...recent);
+      const max = Math.max(...recent);
+      stable = max - min <= 2;
+      setIsStable(stable);
+    }
+
+    // Broadcast the decided frame (not the rolling buffer) to the other PCs.
+    broadcastReading(frameWeight, stable, frameText ?? String(frameWeight), null);
   }, [broadcastReading]);
 
   /**
@@ -353,6 +377,8 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       });
 
       portRef.current = port;
+      faultTrackerRef.current.reset();
+      setFault(null);
       setIsConnected(true);
       setIsLocalConnected(true);
       setIsConnecting(false);
@@ -458,6 +484,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
       setIsConnecting(false);
       setLiveWeight(null);
       setIsStable(false);
+      // Unplugged is OFFLINE, not a load-cell fault.
+      faultTrackerRef.current.reset();
+      setFault(null);
       reportDisconnect();
     }
   }, [reportDisconnect]);
@@ -520,6 +549,47 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     const streamUrl = getScaleApiUrl('/weighbridge/scale/stream');
     const liveUrl = getScaleApiUrl('/weighbridge/scale/live');
 
+    /**
+     * Apply one reading from the server (SSE or poll). The fault comes from the
+     * server's explicit `fault` field. Older servers did not send it, so fall
+     * back to classifying the indicator frame text. `error` alone is never a
+     * fault: a connection error means OFFLINE, not NO DLC.
+     */
+    const applyServerReading = (data: any) => {
+      setIsServerStreaming(true);
+      if (data.port) setServerPort(data.port);
+      if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
+      setHardwareConnected(!!data.isConnected);
+      if (portRef.current) return;
+
+      if (!data.isConnected) {
+        setFault(null);
+        if (data.error) setError(data.error);
+        setIsConnected(false);
+        return;
+      }
+
+      const serverFault: ScaleFault | null =
+        'fault' in data ? (data.fault ?? null) : detectScaleFault(data.rawText);
+      setFault(serverFault);
+      if (serverFault) {
+        setError(data.error || `${serverFault} (${describeScaleFault(serverFault)})`);
+        setLiveWeight(null);
+        setIsStable(false);
+        setRecentFault(true);
+        setLastFaultTime(data.lastFaultTime || Date.now());
+      } else {
+        setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
+        setIsStable(!!data.isStable);
+        setError(data.error || null);
+        setRecentFault(!!data.recentFault);
+        setLastFaultTime(data.lastFaultTime || null);
+      }
+      setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
+      setLastUpdated(new Date(data.lastUpdated || Date.now()));
+      setIsConnected(true);
+    };
+
     const fetchLiveScale = async () => {
       if (portRef.current || isCancelled || pollController || Date.now() - lastStreamMessage < 3000) return;
       const controller = new AbortController();
@@ -530,38 +600,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         if (res.ok) {
           const data = await res.json();
           if (isCancelled || portRef.current || Date.now() - lastStreamMessage < 3000) return;
-          setIsServerStreaming(true);
-          if (data.port) setServerPort(data.port);
-          if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
-          setHardwareConnected(!!data.isConnected);
-
-          if (!portRef.current) {
-            if (data.isConnected) {
-              const rawFault = detectScaleFault(data.rawText);
-              const hasFault = Boolean(data.error || rawFault);
-              const faultName = rawFault ?? 'NO DLC';
-
-              if (hasFault) {
-                setError(data.error || faultName);
-                setLiveWeight(null);
-                setIsStable(false);
-                setRecentFault(true);
-                setLastFaultTime(data.lastFaultTime || Date.now());
-              } else {
-                setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
-                setIsStable(!!data.isStable);
-                setError(null);
-                setRecentFault(!!data.recentFault);
-                setLastFaultTime(data.lastFaultTime || null);
-              }
-              setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
-              setLastUpdated(new Date(data.lastUpdated || Date.now()));
-              setIsConnected(true);
-            } else {
-              if (data.error) setError(data.error);
-              setIsConnected(false);
-            }
-          }
+          applyServerReading(data);
         }
       } catch {} finally {
         clearTimeout(timeout);
@@ -585,38 +624,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         try {
           const data = JSON.parse(event.data);
           lastStreamMessage = Date.now();
-          setIsServerStreaming(true);
-          if (data.port) setServerPort(data.port);
-          if (Array.isArray(data.availablePorts)) setAvailablePorts(data.availablePorts);
-          setHardwareConnected(!!data.isConnected);
-
-          if (!portRef.current) {
-            if (data.isConnected) {
-              const rawFault = detectScaleFault(data.rawText);
-              const hasFault = Boolean(data.error || rawFault);
-              const faultName = rawFault ?? 'NO DLC';
-
-              if (hasFault) {
-                setError(data.error || faultName);
-                setLiveWeight(null);
-                setIsStable(false);
-                setRecentFault(true);
-                setLastFaultTime(data.lastFaultTime || Date.now());
-              } else {
-                setLiveWeight(data.liveWeight != null ? Number(data.liveWeight) : 0);
-                setIsStable(!!data.isStable);
-                setError(null);
-                setRecentFault(!!data.recentFault);
-                setLastFaultTime(data.lastFaultTime || null);
-              }
-              setRawText(data.rawText || `${data.liveWeight ?? 0} kg`);
-              setLastUpdated(new Date(data.lastUpdated || Date.now()));
-              setIsConnected(true);
-            } else {
-              if (data.error) setError(data.error);
-              setIsConnected(false);
-            }
-          }
+          applyServerReading(data);
         } catch {}
       };
 
@@ -685,6 +693,7 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
         serverPort,
         availablePorts,
         switchServerPort,
+        fault,
         recentFault,
         lastFaultTime,
       }}

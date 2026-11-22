@@ -54,6 +54,26 @@ describe('scale connection logging', () => {
     expect(mocks.warn).toHaveBeenCalledTimes(2);
   });
 
+  it('treats a connection error as offline, never as NO DLC', async () => {
+    vi.stubEnv('SCALE_LOCAL_ENABLED', 'false');
+    const { getServerScaleService } = await import('./serverScaleService.js');
+    const service = getServerScaleService();
+    service.updateClientReading({ liveWeight: 0, isStable: false, error: 'Failed to open COM4', fault: null });
+    expect(service.getReading().fault).toBeNull();
+    service.reportClientDisconnect('Could not open COM4: Error');
+    expect(service.getReading()).toMatchObject({ isConnected: false, fault: null });
+  });
+
+  it('uses the terminal fault field and clears it on the next good reading', async () => {
+    vi.stubEnv('SCALE_LOCAL_ENABLED', 'false');
+    const { getServerScaleService } = await import('./serverScaleService.js');
+    const service = getServerScaleService();
+    service.updateClientReading({ liveWeight: 0, isStable: false, rawText: 'NO DLC', fault: 'NO DLC' });
+    expect(service.getReading()).toMatchObject({ fault: 'NO DLC', liveWeight: 0 });
+    service.updateClientReading({ liveWeight: 14170, isStable: true, rawText: '014170', fault: null });
+    expect(service.getReading()).toMatchObject({ fault: null, liveWeight: 14170, recentFault: true });
+  });
+
   it('disables serial attempts while retaining remote readings and timeout detection', async () => {
     vi.stubEnv('SCALE_LOCAL_ENABLED', 'false');
     const { getServerScaleService } = await import('./serverScaleService.js');

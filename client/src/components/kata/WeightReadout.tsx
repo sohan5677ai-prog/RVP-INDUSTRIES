@@ -18,7 +18,7 @@ export interface WeightReadoutProps {
   stable: boolean;
   recentFault: boolean;
   lastFaultTime: number | null;
-  /** 'NO DLC' / 'NO DLS' while the indicator reports a load-cell fault. */
+  /** 'NO DLC' / 'NO DLS' / 'OVERLOAD' / 'SCALE ERROR' while the indicator reports a fault. */
   faultLabel: string | null;
   /** True when the fault was flagged by hand rather than detected. */
   faultFlaggedManually: boolean;
@@ -38,7 +38,10 @@ export interface WeightReadoutProps {
 type Status = { key: string; label: string; tone: 'ok' | 'warn' | 'bad' | 'idle'; detail?: string };
 
 function statusOf(p: WeightReadoutProps): Status {
-  if (p.faultLabel) return { key: 'fault', label: `FAULT · ${p.faultLabel}`, tone: 'bad', detail: 'Load cell signal lost' };
+  if (p.faultLabel) {
+    const detail = p.faultLabel === 'OVERLOAD' ? 'Indicator over range' : p.faultLabel === 'SCALE ERROR' ? 'Indicator reported an error' : 'Load cell signal lost';
+    return { key: 'fault', label: `FAULT · ${p.faultLabel}`, tone: 'bad', detail };
+  }
   if (p.isManual) return { key: 'manual', label: 'MANUAL ENTRY', tone: 'warn', detail: 'Typed from the indicator' };
   if (!p.scaleOnline) return { key: 'offline', label: 'SCALE OFFLINE', tone: 'idle', detail: `${p.portLabel} not detected` };
   if (p.recentFault) return { key: 'recovering', label: 'RECOVERING', tone: 'warn', detail: 'Verify against the display' };

@@ -1,4 +1,3 @@
-import { detectScaleFault } from '@/lib/scaleFault';
 import { useState, useRef, useEffect } from 'react';
 import { Scale, Wifi, WifiOff, RefreshCw, Radio, Settings2, AlertTriangle, CheckCircle2, Cable } from 'lucide-react';
 import { useScale } from '@/lib/scaleContext';
@@ -18,6 +17,7 @@ export default function ScaleTopBarWidget() {
     isStable,
     lastUpdated,
     error,
+    fault,
     connect,
     isConnecting,
   } = useScale();
@@ -31,7 +31,9 @@ export default function ScaleTopBarWidget() {
     if (serverPort) setSelectedPort(serverPort);
   }, [serverPort]);
 
-  const isNoDlc = detectScaleFault(error) !== null || detectScaleFault(rawText) !== null;
+  // Only the indicator's own fault frames count; a connection error shows as OFFLINE.
+  const isNoDlc = fault !== null;
+  const faultLabel = fault ?? 'NO DLC';
 
   // Close popover when clicking outside
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function ScaleTopBarWidget() {
         {isNoDlc ? (
           <div className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="font-mono font-black text-xs text-red-500 tracking-wider">NO DLC</span>
+            <span className="font-mono font-black text-xs text-red-500 tracking-wider">{faultLabel}</span>
             <span className="text-[9px] font-bold text-red-400 bg-red-500/20 px-1 py-0.2 rounded border border-red-500/30">
               FAULT
             </span>
@@ -152,7 +154,7 @@ export default function ScaleTopBarWidget() {
                 {isNoDlc ? (
                   <>
                     <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                    <span className="text-red-400 font-bold">FAULT · NO DLC</span>
+                    <span className="text-red-400 font-bold">FAULT · {faultLabel}</span>
                   </>
                 ) : isScaleOnline ? (
                   <>
@@ -175,7 +177,7 @@ export default function ScaleTopBarWidget() {
               {isNoDlc ? (
                 <div className="flex items-center justify-center gap-2">
                   <span className="text-5xl font-extrabold tracking-wider text-red-500 animate-pulse drop-shadow-[0_0_20px_rgba(239,68,68,0.6)]">
-                    NO DLC
+                    {faultLabel}
                   </span>
                 </div>
               ) : (

@@ -1302,6 +1302,37 @@ export class TaxproService {
         }
       }
 
+      // NIC 4002 "EwayBill is already generated for this IRN": an earlier attempt
+      // landed at NIC but its response never reached us (timeout / dropped
+      // connection), so the ERP holds no number. Read the live bill back by IRN
+      // and adopt it rather than leaving the dispatch stuck.
+      const isAlreadyForIrn =
+        /\b4002\b|already generated for this irn/i.test(err?.message || '') ||
+        (Array.isArray(err?.errorDetails) &&
+          err.errorDetails.some((e: any) => String(e?.ErrorCode) === '4002'));
+      if (isAlreadyForIrn && dispatch.irn) {
+        logger.warn(`[taxpro] NIC 4002 for ${dispatch.invoiceNumber}: recovering the existing E-Way Bill by IRN...`);
+        const live = await this.getEwbByIrn(dispatch.irn);
+        const raw = live?.raw || {};
+        if (live?.ewbNo && !/^(C|CNL|CAN)/.test(live.status)) {
+          const nicDistance = Number(raw.Distance ?? raw.distance);
+          return {
+            success: true,
+            ewbNumber: live.ewbNo,
+            ewbDate: this.parseNicDate(raw.EwbDt),
+            ewbValidUpto: raw.EwbValidTill ? this.parseNicDate(raw.EwbValidTill) : null,
+            distance: Number.isFinite(nicDistance) && nicDistance > 0
+              ? Math.round(nicDistance)
+              : (Number(transportDetails.transDistance) || null),
+            message: `E-Way Bill ${live.ewbNo} was already generated at NIC for this invoice - recovered and saved to the ERP`,
+          };
+        }
+        throw new Error(
+          `TaxPro GSP Error: ${err.message}. The ERP could not read that E-Way Bill back from NIC - ` +
+          `look it up on ewaybillgst.gov.in (by invoice ${dispatch.invoiceNumber}) before trying again.`,
+        );
+      }
+
       // If NIC rejected because an EWB was already generated for this document (e.g. earlier network blip),
       // attempt to recover it directly using GetEwayBillGeneratedByConsigner
       const isAlreadyExistsError =

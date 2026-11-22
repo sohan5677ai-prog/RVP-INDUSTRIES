@@ -7,6 +7,7 @@ import type { WeighbridgeTicket, CompanyProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { withMediaToken } from '@/lib/mediaToken';
+import { SERVER_ORIGIN } from '@/lib/apiBase';
 import { useMediaToken } from '@/lib/useMediaToken';
 import { toast } from 'sonner';
 import { toJpeg } from 'html-to-image';
@@ -17,12 +18,11 @@ import { isVehicleExempt } from '@/lib/calc';
  * including inside isolated print iframes and on different devices.
  * Base64 data URIs are passed through unchanged.
  */
-function resolveAbsoluteCamUrl(url: string | null | undefined, camNum: 1 | 2): string {
+function resolveAbsoluteCamUrl(url: string | null | undefined, _camNum: 1 | 2): string {
   if (!url) {
-    // No URL at all — use the cloud server snapshot endpoint
-    return withMediaToken(
-      `https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=${camNum}&t=${Date.now()}`
-    );
+    // No stored photo for this ticket. Never substitute the live camera: it
+    // would print whatever is in front of the camera now, not this lorry.
+    return '';
   }
   // Base64 data URIs work directly in any context
   if (url.startsWith('data:')) {
@@ -36,10 +36,10 @@ function resolveAbsoluteCamUrl(url: string | null | undefined, camNum: 1 | 2): s
   }
   // Relative /api/ path — prefix with cloud server origin so it works in print iframes
   if (url.startsWith('/api/')) {
-    return withMediaToken(`https://rvp-server.onrender.com${url}`);
+    return withMediaToken(`${SERVER_ORIGIN}${url}`);
   }
   // Any other relative path
-  return withMediaToken(`https://rvp-server.onrender.com/api/weighbridge/snapshots/${url}`);
+  return withMediaToken(`${SERVER_ORIGIN}/api/weighbridge/snapshots/${url}`);
 }
 
 interface WeighbridgeSlipModalProps {
@@ -1187,13 +1187,7 @@ export default function WeighbridgeSlipModal({
                   <img
                     src={cam1Url}
                     alt="CCTV Cam 1"
-                    onError={() => {
-                      if (!cam1Url.includes('/api/weighbridge/cctv/snapshot')) {
-                        setCam1Url('/api/weighbridge/cctv/snapshot?cam=1');
-                      } else {
-                        setCam1Failed(true);
-                      }
-                    }}
+                    onError={() => setCam1Failed(true)}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -1203,7 +1197,7 @@ export default function WeighbridgeSlipModal({
                   </div>
                 )}
                 {/* CP PLUS OSD Stamp */}
-                {!cam1Failed && (
+                {cam1Url && !cam1Failed && (
                   <div className="absolute bottom-1 right-1.5 bg-black/65 text-white font-sans text-[8.5px] font-bold px-1.5 py-0.5 rounded-xs pointer-events-none" style={{ fontFamily: "Arial, sans-serif" }}>
                     {formattedDate} {formattedTime}
                   </div>
@@ -1216,13 +1210,7 @@ export default function WeighbridgeSlipModal({
                   <img
                     src={cam2Url}
                     alt="CCTV Cam 2"
-                    onError={() => {
-                      if (!cam2Url.includes('/api/weighbridge/cctv/snapshot')) {
-                        setCam2Url('/api/weighbridge/cctv/snapshot?cam=2');
-                      } else {
-                        setCam2Failed(true);
-                      }
-                    }}
+                    onError={() => setCam2Failed(true)}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -1232,7 +1220,7 @@ export default function WeighbridgeSlipModal({
                   </div>
                 )}
                 {/* CP PLUS OSD Stamp */}
-                {!cam2Failed && (
+                {cam2Url && !cam2Failed && (
                   <div className="absolute bottom-1 right-1.5 bg-black/65 text-white font-sans text-[8.5px] font-bold px-1.5 py-0.5 rounded-xs pointer-events-none" style={{ fontFamily: "Arial, sans-serif" }}>
                     {formattedDate} {formattedTime}
                   </div>

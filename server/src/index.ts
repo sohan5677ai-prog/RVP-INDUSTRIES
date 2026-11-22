@@ -10,7 +10,6 @@ import { fileUrlRewrite } from './middleware/fileUrlRewrite.js';
 import { apiLimiter } from "./middleware/rateLimit.js";
 import { assertJwtSecret } from "./lib/jwt.js";
 import { isOriginAllowed, originPolicyFromEnv } from "./lib/corsOrigin.js";
-import { requireAuthOrCameraBridge } from "./middleware/cameraAuth.js";
 import { requireMediaRead, requireMediaWrite } from "./middleware/mediaAuth.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requestContextMiddleware } from "./lib/requestContext.js";
@@ -91,7 +90,6 @@ app.use(
  */
 const CAMERA_FRAME_PATHS = [
   '/api/weighbridge/cctv/broadcast',
-  '/api/weighbridge/cctv/detect-plate',
 ];
 app.use(CAMERA_FRAME_PATHS, express.json({ limit: '15mb' }));
 
@@ -188,12 +186,6 @@ app.post("/api/weighbridge/cctv/broadcast", (req, res, next) => {
 });
 app.get("/api/weighbridge/cctv/status", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getCctvStatusHandler(req, res)).catch(next);
-});
-// Number-plate recognition runs a billed Gemini call, so it is never anonymous.
-// The client reaches it through api() with a Bearer token and the cabin bridge
-// has its own key, so requiring one of the two changes nothing for either.
-app.post("/api/weighbridge/cctv/detect-plate", requireAuthOrCameraBridge, (req, res, next) => {
-  import("./controllers/weighbridge.controller.js").then((m) => m.detectPlateCctvHandler(req, res)).catch(next);
 });
 app.get("/api/weighbridge/snapshots/:filename", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getStoredSnapshotHandler(req, res)).catch(next);

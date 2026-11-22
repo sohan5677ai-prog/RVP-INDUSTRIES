@@ -100,3 +100,14 @@ export function refreshAccessToken(): Promise<string | null> {
 
   return refreshInFlight;
 }
+
+/**
+ * Origin of the API server ("https://host" with no /api), absolute so it works
+ * inside print iframes and on other devices. Derived from API_BASE so a staging
+ * build never quietly reads photos from production.
+ */
+export const SERVER_ORIGIN: string = /^https?:\/\//.test(API_BASE)
+  ? API_BASE.replace(/\/api$/, '')
+  : typeof window !== 'undefined'
+    ? window.location.origin
+    : '';

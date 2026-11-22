@@ -8,8 +8,7 @@ import { isTrustedCameraBridge } from '../lib/cameraBridgeKey.js';
  * Used for the camera routes that are mounted outside the authenticated router
  * (they sit in front of the API rate limiter so a live MJPEG stream cannot
  * exhaust it). They used to be reachable by anyone on the internet: a browser
- * tab pointed at the API could watch the weighbridge, and POST /detect-plate
- * would run a billed Gemini call for an anonymous caller.
+ * tab pointed at the API could watch the weighbridge.
  *
  * Both callers that matter already send credentials — the client goes through
  * api() with a Bearer token, the bridge sends x-cctv-bridge-key — so this adds

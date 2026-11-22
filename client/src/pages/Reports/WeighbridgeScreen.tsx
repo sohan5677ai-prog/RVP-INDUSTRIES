@@ -1,3 +1,4 @@
+import { detectScaleFault } from '@/lib/scaleFault';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -15,10 +16,8 @@ import {
   Package,
   CreditCard,
   Phone,
-  Tag,
   CheckCircle2,
   RefreshCw,
-  AlertTriangle,
   Pencil,
   Settings,
   ShieldCheck,
@@ -27,18 +26,19 @@ import {
   Cloud,
   CloudOff,
   IndianRupee,
-  Cable,
   Trash2,
   Banknote,
   MessageCircle,
   BadgeCheck,
   Warehouse,
   ArrowRight,
-  Camera,
   Navigation,
 } from 'lucide-react';
-import { api, getErrorMessage, getScaleApiUrl } from '@/lib/api';
-import { withMediaToken } from '@/lib/mediaToken';
+import { SERVER_ORIGIN } from '@/lib/apiBase';
+import { KataClock } from '@/components/kata/KataClock';
+import { SegmentedToggle } from '@/components/kata/SegmentedToggle';
+import { WeightReadout } from '@/components/kata/WeightReadout';
+import { api, ApiError, getErrorMessage, getScaleApiUrl } from '@/lib/api';
 import { useCameraPreview } from '@/lib/useCameraPreview';
 import { useAuth } from '@/lib/auth';
 import { useScale } from '@/lib/scaleContext';
@@ -232,13 +232,10 @@ interface CctvLiveBoxProps {
   camNumber: 1 | 2;
   cameraIp: string;
   label: string;
-  currentTime: string;
   refreshTrigger?: number;
   onStatusChange?: (online: boolean, isLocal: boolean) => void;
   onExpand?: (camNumber: 1 | 2) => void;
   relayStatus?: CctvCameraStatus;
-  onDetectPlate?: (camNumber: 1 | 2) => void;
-  isDetectingPlate?: boolean;
 }
 
 interface CctvCameraStatus {
@@ -257,7 +254,7 @@ interface CctvStatusResponse {
   cam2: CctvCameraStatus;
 }
 
-function CctvLiveBox({ paused = false, camNumber, cameraIp, label, currentTime, refreshTrigger, onStatusChange, onExpand, relayStatus, onDetectPlate, isDetectingPlate }: CctvLiveBoxProps) {
+function CctvLiveBox({ paused = false, camNumber, cameraIp, label, refreshTrigger, onStatusChange, onExpand, relayStatus }: CctvLiveBoxProps) {
   const { frameUrl, onFrameSettled, onFrameError, usingLocalBridge } = useCameraPreview(camNumber, !paused, refreshTrigger);
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const errCountRef = useRef<number>(0);
@@ -327,27 +324,8 @@ function CctvLiveBox({ paused = false, camNumber, cameraIp, label, currentTime, 
           </span>
         </div>
         <div className="flex items-center gap-1.5 pointer-events-auto">
-          {onDetectPlate && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDetectPlate(camNumber);
-              }}
-              disabled={isDetectingPlate}
-              title={`Auto-detect vehicle number plate from ${label}`}
-              className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-stone-950 px-2 py-0.5 rounded-md border border-amber-500/50 text-[10px] font-mono font-bold transition-all shadow-xs cursor-pointer"
-            >
-              {isDetectingPlate ? (
-                <RefreshCw className="h-3 w-3 animate-spin text-amber-400" />
-              ) : (
-                <Camera className="h-3 w-3" />
-              )}
-              <span>ANPR</span>
-            </button>
-          )}
           <span className="bg-stone-900/80 backdrop-blur-xs text-[10px] font-mono font-medium text-stone-200 px-2 py-0.5 rounded-md border border-stone-700/60 shadow-xs">
-            {currentTime}
+            <KataClock part="time" />
           </span>
         </div>
       </div>
@@ -387,12 +365,9 @@ interface CctvFullViewDialogProps {
   camNumber: 1 | 2 | null;
   onClose: () => void;
   onSelectCam: (camNumber: 1 | 2) => void;
-  currentTime: string;
-  onDetectPlate?: (camNumber: 1 | 2) => void;
-  isDetectingPlate?: boolean;
 }
 
-function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDetectPlate, isDetectingPlate }: CctvFullViewDialogProps) {
+function CctvFullViewDialog({ camNumber, onClose, onSelectCam }: CctvFullViewDialogProps) {
   // 'lg': the expanded view is a big box, so it gets the higher-quality encode.
   const { frameUrl, onFrameSettled, onFrameError } = useCameraPreview(camNumber, true, 0, 'lg');
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -516,7 +491,7 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
             </div>
 
             <div className="bg-stone-950/80 backdrop-blur-md px-2.5 py-1 rounded-md border border-stone-700/60 text-xs font-mono font-medium text-stone-200 shadow-md">
-              {currentTime}
+              <KataClock part="time" />
             </div>
           </div>
 
@@ -540,22 +515,6 @@ function CctvFullViewDialog({ camNumber, onClose, onSelectCam, currentTime, onDe
               <Download className="h-3.5 w-3.5 text-amber-400" />
               <span>Save HD Snapshot</span>
             </Button>
-            {onDetectPlate && camNumber && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onDetectPlate(camNumber)}
-                disabled={isDetectingPlate}
-                className="bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500 hover:text-stone-950 text-xs h-8 gap-1.5 font-bold transition-all"
-              >
-                {isDetectingPlate ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Camera className="h-3.5 w-3.5" />
-                )}
-                <span>Scan Plate (ANPR)</span>
-              </Button>
-            )}
           </div>
 
           <Button
@@ -639,6 +598,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [firstWeight, setFirstWeight] = useState<number | null>(null);
   const [manualWeightInput, setManualWeightInput] = useState<string>('');
   const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
+  // A typed weight must say why; the server rejects a manual weight without it.
+  const [manualWeightReason, setManualWeightReason] = useState<string>('');
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
 
   const manualInputRef = useRef<HTMLInputElement>(null);
@@ -658,7 +619,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       try {
         if (next) {
           localStorage.setItem('rvp_kata_manual_no_dlc', '1');
-          toast.warning('⚠️ Scale set to NO DLC (Load Cell Lost)');
+          toast.warning('Scale flagged as NO DLC (load cell lost)');
         } else {
           localStorage.removeItem('rvp_kata_manual_no_dlc');
           toast.success('Scale returned to standard mode');
@@ -668,33 +629,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     });
   }, []);
 
-  const rawUpper = (scale.rawText || '').toUpperCase();
-  const errUpper = (scale.error || '').toUpperCase();
-  const detectedNoDlc = Boolean(
-    errUpper.includes('DLC') ||
-      rawUpper.includes('DLC') ||
-      errUpper.includes('DLS') ||
-      rawUpper.includes('DLS') ||
-      errUpper.includes('NO DL') ||
-      rawUpper.includes('NO DL') ||
-      errUpper.includes('NODL') ||
-      rawUpper.includes('NODL') ||
-      rawUpper.includes('?') ||
-      errUpper.includes('ERR') ||
-      rawUpper.includes('ERR') ||
-      errUpper.includes('OPEN') ||
-      rawUpper.includes('OPEN') ||
-      errUpper.includes('FAIL') ||
-      rawUpper.includes('FAIL')
-  );
+  const detectedFault = detectScaleFault(scale.error) ?? detectScaleFault(scale.rawText);
+  const detectedNoDlc = detectedFault !== null;
   const isNoDls = manualNoDls || detectedNoDlc;
 
-  const noDlcLabel =
-    (errUpper.includes('DLS') || rawUpper.includes('DLS')) &&
-    !errUpper.includes('DLC') &&
-    !rawUpper.includes('DLC')
-      ? 'NO DLS'
-      : 'NO DLC';
+  const noDlcLabel = detectedFault ?? 'NO DLC';
 
   // Cameras & Snapshot triggers
   const [camRefreshTrigger, setCamRefreshTrigger] = useState<number>(0);
@@ -725,35 +664,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   const [sendSlipMobile, setSendSlipMobile] = useState<string>('');
   const [sendSlipLanguage, setSendSlipLanguage] = useState<WaLanguage>('TE');
 
-  // Clock
-  const [clockString, setClockString] = useState<string>('');
-  const [dateString, setDateString] = useState<string>('');
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setClockString(
-        now.toLocaleTimeString('en-IN', {
-          timeZone: 'Asia/Kolkata',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: true,
-        })
-      );
-      const dateParts = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Kolkata',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }).replace(/\//g, '-');
-      setDateString(dateParts);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Fetch next ticket number
   const { data: ticketNumData } = useQuery({
     queryKey: ['weighbridge-next-ticket'],
@@ -764,7 +674,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         return await api<{ nextTicketNo: number }>('/weighbridge/tickets/next-number');
       }
     },
-    refetchInterval: 15000,
+    // Refreshed on save and on window focus; no need to poll it.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const nextTicketNo = ticketNumData?.nextTicketNo ?? 1;
@@ -865,7 +777,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         return await api<WeighbridgeTicket[]>('/weighbridge/tickets/pending');
       }
     },
-    refetchInterval: 10000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   // Fetch all tickets for history
@@ -1038,7 +951,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
   }>({
     queryKey: ['weighbridge-print-agent-status'],
     queryFn: () => api('/weighbridge/print-queue/status'),
-    refetchInterval: 10000,
+    refetchInterval: 30_000,
     retry: false,
   });
 
@@ -1075,7 +988,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 Boolean(savedLocallyAt && Date.now() - savedLocallyAt < 15000);
 
               if (!isDuplicateAutoPrint) {
-                toast.info(`🖨️ Cabin Printer: Printing Ticket #${formatTicketNo(job.ticketNo)}...`);
+                toast.info(`Cabin Printer: Printing Ticket #${formatTicketNo(job.ticketNo)}...`);
                 await triggerDirectPrint(job.ticket);
               } else {
                 console.log(`[Cabin] Skipped duplicate auto-print for Ticket #${formatTicketNo(job.ticketNo)} (already printed on save)`);
@@ -1124,6 +1037,22 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     return null;
   }, [tripType, firstWeight, currentLiveWeight]);
 
+  /**
+   * Why Save is not allowed right now, or null. A scale weight needs a live,
+   * settled reading; a typed weight needs a reason.
+   */
+  const weightBlockReason = useMemo<string | null>(() => {
+    if (isManualOverride) {
+      return manualWeightReason.trim().length < 3
+        ? 'Type the reason for entering the weight manually'
+        : null;
+    }
+    if (isNoDls) return `Scale shows ${noDlcLabel} - use Manual override (F8) and give a reason`;
+    if (!scale.isScaleOnline) return 'Scale is not connected - use Manual override (F8) and give a reason';
+    if (!scale.isStable) return 'Weight is still moving - wait for STABLE';
+    return null;
+  }, [isManualOverride, manualWeightReason, isNoDls, noDlcLabel, scale.isScaleOnline, scale.isStable]);
+
   const storageTransferDirection = transferDirectionForMaterial(material);
 
   const isCurrentVehicleExempt = useMemo(() => {
@@ -1148,19 +1077,27 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setCharges(String(calculatedKataFee));
   }, [calculatedKataFee]);
 
-  // Daily statistics for KPI cards
+  // Today's numbers come from the server for the whole IST day. They used to be
+  // computed from the 100 newest tickets, so a busy day under-counted, and a
+  // pending ticket's first weight was added into "net cargo weighed".
+  const todayIst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const { data: todayTickets = [] } = useQuery<WeighbridgeTicket[]>({
+    queryKey: ['weighbridge-today', todayIst],
+    queryFn: () => api<WeighbridgeTicket[]>(`/weighbridge/tickets?fromDate=${todayIst}&toDate=${todayIst}&all=true`),
+    refetchInterval: 60_000,
+    enabled: !cabinMode,
+  });
   const stats = useMemo(() => {
-    const today = new Date().toDateString();
-    const todayTickets = allTickets.filter((t) => new Date(t.createdAt).toDateString() === today);
-    const totalTodayKg = todayTickets.reduce((sum, t) => sum + (t.netWeightKg || t.firstWeightKg || 0), 0);
-    const totalTodayFees = todayTickets.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const live = todayTickets.filter((t) => t.status !== 'CANCELLED');
+    const done = live.filter((t) => t.status === 'COMPLETED');
+    const totalKg = done.reduce((sum, t) => sum + (t.netWeightKg || 0), 0);
     return {
-      todayCount: todayTickets.length,
-      todayTonnes: (totalTodayKg / 1000).toFixed(2),
+      todayCount: live.length,
+      todayTonnes: (totalKg / 1000).toFixed(2),
       pendingCount: pendingTickets.length,
-      todayFees: totalTodayFees,
+      todayFees: done.reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
     };
-  }, [allTickets, pendingTickets]);
+  }, [todayTickets, pendingTickets]);
 
   // Reset form
   const handleResetForm = useCallback(() => {
@@ -1178,6 +1115,8 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     setRemarks('');
     setFirstWeight(null);
     setManualWeightInput('');
+    setManualWeightReason('');
+    setIsManualOverride(false);
     setPendingTicketId(null);
     setActiveSnapshots(null);
   }, []);
@@ -1202,9 +1141,27 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     toast.info(`Loaded truck ${ticket.vehicleNumber} (First Weight: ${ticket.firstWeightKg} Kg)`);
   }, []);
 
+  /**
+   * The trip type should not be a question. If the plate typed or picked has
+   * exactly one open first-weight ticket, this is its second weight: load that
+   * ticket. The operator can still choose "First" by hand - that choice is
+   * remembered for the plate so it is not flipped back.
+   */
+  const declinedPairingRef = useRef<string>('');
+  useEffect(() => {
+    if (activeTab !== 'entry' || pendingTicketId || tripType !== 'FIRST') return;
+    const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const plate = norm(vehicleNumber);
+    if (plate.length < 6 || declinedPairingRef.current === plate) return;
+    const hits = pendingTickets.filter((t) => norm(t.vehicleNumber) === plate);
+    if (hits.length === 1) {
+      handleSelectPendingTruck(hits[0]);
+    }
+  }, [vehicleNumber, pendingTickets, pendingTicketId, tripType, activeTab, handleSelectPendingTruck]);
+
   // Save ticket mutation
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts: { forceDirection?: boolean } | void) => {
       if (!vehicleNumber.trim()) {
         throw new Error('Vehicle number is mandatory');
       }
@@ -1214,6 +1171,13 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       if (currentLiveWeight <= 0) {
         throw new Error('Weight must be greater than 0 kg');
       }
+      // The ticket records whatever weight is on screen at this instant, so a
+      // reading that is still moving, or a dead scale, must not be saved.
+      if (weightBlockReason) {
+        throw new Error(weightBlockReason);
+      }
+      const weightSource: 'SCALE' | 'MANUAL' = isManualOverride ? 'MANUAL' : 'SCALE';
+      const manualReason = manualWeightReason.trim();
 
       // Capture live snapshots at the exact moment of kata (weighment)
       const [snap1Base64, snap2Base64] = await Promise.all([
@@ -1223,17 +1187,24 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       if (!snap1Base64 || !snap2Base64) {
         toast.warning('One or more browser snapshots were unavailable. The server will use the freshest cabin relay frame.');
       }
-      const localSnap1 = snap1Base64 || withMediaToken(`https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=1&t=${Date.now()}`);
-      const localSnap2 = snap2Base64 || withMediaToken(`https://rvp-server.onrender.com/api/weighbridge/cctv/snapshot?cam=2&t=${Date.now()}`);
+      // No "live camera URL" fallback: a link to the live feed shows whatever is
+      // in front of the camera when it is opened, not the lorry that was
+      // weighed. Only a frame actually captured for this ticket is shown.
+      const localSnap1 = snap1Base64 ?? undefined;
+      const localSnap2 = snap2Base64 ?? undefined;
       const snapObj = { cam1: localSnap1, cam2: localSnap2 };
       setActiveSnapshots(snapObj);
 
       const activePendingId =
         pendingTicketId ||
         (tripType === 'SECOND'
-          ? pendingTickets.find(
-              (p) => p.vehicleNumber.toUpperCase() === vehicleNumber.trim().toUpperCase()
-            )?.id
+          ? (() => {
+              // Plate compared without spaces/dashes; if two open tickets share
+              // it we do not guess - the server asks the operator to pick one.
+              const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+              const hits = pendingTickets.filter((p) => norm(p.vehicleNumber) === norm(vehicleNumber));
+              return hits.length === 1 ? hits[0].id : null;
+            })()
           : null);
 
       if (tripType === 'SECOND' && activePendingId) {
@@ -1251,6 +1222,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             billType,
             loadType,
             remarks: remarks.trim() || undefined,
+            weightSource,
+            manualWeightReason: weightSource === 'MANUAL' ? manualReason : undefined,
+            forceDirection: (opts ? opts.forceDirection : false) === true,
             snapCam1: snap1Base64,
             snapCam2: snap2Base64,
           }),
@@ -1282,6 +1256,9 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
             partyMobile: driverMobile.trim(),
             remarks: remarks.trim(),
             operatorName: user?.name || 'OPERATOR',
+            weightSource,
+            manualWeightReason: weightSource === 'MANUAL' ? manualReason : undefined,
+            forceDirection: (opts ? opts.forceDirection : false) === true,
             snapCam1: snap1Base64,
             snapCam2: snap2Base64,
           }),
@@ -1300,6 +1277,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         ? `Ticket #${formatTicketNo(ticket.ticketNo)} saved & Kata sent to internal team on WhatsApp!`
         : `Ticket #${formatTicketNo(ticket.ticketNo)} saved successfully!`;
       toast.success(saveMsg);
+      queryClient.invalidateQueries({ queryKey: ['weighbridge-today'] });
+      if (!ticket.cam1PhotoUrl || !ticket.cam2PhotoUrl) {
+        toast.warning(`Ticket #${formatTicketNo(ticket.ticketNo)} was saved WITHOUT a camera photo (${!ticket.cam1PhotoUrl ? 'Cam 1' : ''}${!ticket.cam1PhotoUrl && !ticket.cam2PhotoUrl ? ' + ' : ''}${!ticket.cam2PhotoUrl ? 'Cam 2' : ''}). Check the cameras.`, { duration: 10000 });
+      }
       queryClient.invalidateQueries({ queryKey: ['weighbridge-next-ticket'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-pending'] });
       queryClient.invalidateQueries({ queryKey: ['weighbridge-tickets'] });
@@ -1316,12 +1297,12 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
       if (cabinMode) {
         // Dedicated Kata Cabin PC: trigger immediate direct print to the cabin printer!
-        toast.info(`🖨️ Printing Ticket #${formatTicketNo(ticket.ticketNo)}...`, { duration: 3000 });
+        toast.info(`Printing Ticket #${formatTicketNo(ticket.ticketNo)}...`, { duration: 3000 });
         triggerDirectPrint(ticket, undefined, snapshots).catch(() => {});
       } else {
         // Non-cabin office/laptop PC: do NOT popup browser print dialog!
         // The ticket is automatically queued in the cloud for the Kata Cabin Printer.
-        toast.success(`🖨️ Ticket #${formatTicketNo(ticket.ticketNo)} queued for Kata Cabin Printer.`);
+        toast.success(`Ticket #${formatTicketNo(ticket.ticketNo)} queued for Kata Cabin Printer.`);
         setSlipModalTicket(ticket);
         if (snapshots) {
           setActiveSnapshots(snapshots);
@@ -1339,6 +1320,15 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       handleResetForm();
     },
     onError: (err) => {
+      // A reading on the wrong side of the first weight is a warning, not a
+      // dead end: the load condition on the first ticket may simply be wrong.
+      if (err instanceof ApiError && err.status === 409 && /^Weight direction:/.test(err.message)) {
+        const proceed = window.confirm(
+          `${err.message.replace(/^Weight direction:\s*/, '')}\n\nThis usually means the wrong lorry or a wrong first ticket. Save anyway?`,
+        );
+        if (proceed) saveMutation.mutate({ forceDirection: true });
+        return;
+      }
       toast.error(getErrorMessage(err));
     },
   });
@@ -1611,56 +1601,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
-  const lastAutoScannedPlateRef = useRef<number | null>(null);
-
-  // Automatic Number Plate Recognition (ANPR) via CCTV Camera & Gemini Vision
-  const detectPlateMutation = useMutation({
-    mutationFn: async (cam: 1 | 2 = 1) => {
-      return api<{
-        success: boolean;
-        vehicleNumber: string | null;
-        confidence?: string | null;
-        plateColor?: string | null;
-        vehicleType?: string | null;
-        rawText?: string | null;
-        cam?: number;
-        message?: string;
-      }>('/weighbridge/cctv/detect-plate', {
-        method: 'POST',
-        body: JSON.stringify({ cam }),
-      });
-    },
-    onSuccess: (data, variables) => {
-      if (data.success && data.vehicleNumber) {
-        selectVehicle(data.vehicleNumber);
-        toast.success(`📷 ANPR Plate Detected: ${data.vehicleNumber}`, {
-          description: `Auto-filled from Camera ${variables} (${data.confidence || 'HIGH'} confidence)`,
-        });
-      } else {
-        toast.warning(data.message || `No vehicle number plate was detected on Camera ${variables}.`);
-      }
-    },
-    onError: (err) => toast.error(getErrorMessage(err)),
-  });
-
-  // Scale auto-trigger: when vehicle rolls onto weighbridge scale and stabilizes (>1500 kg), auto-scan Cam 1
-  useEffect(() => {
-    if (
-      scale.isStable &&
-      (scale.liveWeight ?? 0) > 1500 &&
-      !vehicleNumber.trim() &&
-      activeTab === 'entry' &&
-      !pendingTicketId &&
-      !detectPlateMutation.isPending
-    ) {
-      const now = Date.now();
-      if (!lastAutoScannedPlateRef.current || now - lastAutoScannedPlateRef.current > 25000) {
-        lastAutoScannedPlateRef.current = now;
-        detectPlateMutation.mutate(1);
-      }
-    }
-  }, [scale.isStable, scale.liveWeight, vehicleNumber, activeTab, pendingTicketId, detectPlateMutation]);
-
   const exportTickets = useCallback(() => api<WeighbridgeTicket[]>(
     `/weighbridge/tickets?${historyQuery}`,
   ), [historyQuery]);
@@ -1715,7 +1655,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       <PageHeader
         icon={Scale}
         title="Weighbridge (Kata)"
-        description={cabinMode ? 'Dedicated cabin console · live scale, dual camera verification, and ticket printing.' : 'Electronic weighbridge recording, digital LED indicator stream, and CP PLUS dual CCTV camera verification.'}
+        description={cabinMode ? 'Cabin console · live scale, camera capture and ticket printing' : 'Weighment tickets, live scale and camera capture'}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* Universal Scale Network Hub Status Badge */}
@@ -1730,7 +1670,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                   </span>
                   <span>
-                    Scale Hub: Online ({scale.serverPort || 'COM4'}{scale.connectionMode === 'LOCAL_USB' ? ' · USB' : ' · NET'})
+                    Scale online · {scale.serverPort || 'COM4'}{scale.connectionMode === 'LOCAL_USB' ? ' · USB' : ' · NET'}
                   </span>
                 </div>
               ) : (
@@ -1739,7 +1679,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   title="Scale not detected on USB or network"
                 >
                   <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span>Scale Hub: Offline ({scale.serverPort || 'COM4'} not detected)</span>
+                  <span>Scale offline · {scale.serverPort || 'COM4'} not detected</span>
                 </div>
               )}
 
@@ -1757,26 +1697,11 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 <span>
                   {(printAgentStatus?.pendingCount ?? 0) > 0
                     ? `Cabin Printer: Printing queued (${printAgentStatus?.pendingCount})`
-                    : 'Canon LBP2900: Ready'}
+                    : `${printAgentStatus?.printerName || 'Cabin printer'}: ready`}
                 </span>
               </div>
             </div>
 
-            {/* Pending Trucks Counter Button */}
-            <Button
-              variant={activeTab === 'pending' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setActiveTab('pending')}
-              className="h-9 gap-2 font-medium"
-            >
-              <Truck className="h-4 w-4" />
-              <span>Pending Trucks</span>
-              {pendingTickets.length > 0 && (
-                <span className="ml-1 px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-stone-950">
-                  {pendingTickets.length}
-                </span>
-              )}
-            </Button>
           </div>
         }
       />
@@ -1789,14 +1714,14 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
           </div>
           <div className="kata-ops-cell">
             <Calendar className="h-4 w-4" />
-            <span>{dateString}</span>
-            <b>{clockString}</b>
+            <KataClock part="date" />
+            <b><KataClock part="time" /></b>
           </div>
           <div className="kata-ops-cell">
             <Scale className="h-4 w-4" />
             <span>Scale link</span>
             <b className={scale.isScaleOnline ? 'text-emerald-700' : 'text-amber-700'}>
-              {scale.isScaleOnline ? 'Online' : 'Manual fallback'}
+              {scale.isScaleOnline ? 'Online' : 'Offline · manual'}
             </b>
           </div>
           <button
@@ -2015,10 +1940,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
 
                 <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-muted/40 px-2.5 py-1 rounded-lg border border-border/50">
                   <Calendar className="h-3.5 w-3.5 text-primary" />
-                  <span>{dateString}</span>
+                  <KataClock part="date" />
                   <span className="text-border">|</span>
                   <Clock className="h-3.5 w-3.5 text-primary" />
-                  <span className="font-semibold text-foreground">{clockString}</span>
+                  <KataClock part="time" className="font-semibold text-foreground" />
                 </div>
               </div>
             </CardHeader>
@@ -2033,38 +1958,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       <Truck className="h-3.5 w-3.5 text-primary" />
                       Vehicle Number *
                     </Label>
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => detectPlateMutation.mutate(1)}
-                        disabled={detectPlateMutation.isPending}
-                        className="h-6 px-2 text-[11px] font-semibold gap-1 text-primary border-primary/30 bg-primary/5 hover:bg-primary/10 shadow-2xs cursor-pointer"
-                        title="Auto-scan number plate from Cam 1 (Entry / Front)"
-                      >
-                        {detectPlateMutation.isPending && detectPlateMutation.variables === 1 ? (
-                          <RefreshCw className="h-3 w-3 animate-spin text-primary" />
-                        ) : (
-                          <Camera className="h-3 w-3 text-primary" />
-                        )}
-                        <span>Scan Plate (Cam 1)</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => detectPlateMutation.mutate(2)}
-                        disabled={detectPlateMutation.isPending}
-                        className="h-6 px-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer"
-                        title="Scan number plate from Cam 2 (Exit / Rear)"
-                      >
-                        {detectPlateMutation.isPending && detectPlateMutation.variables === 2 ? (
-                          <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
-                        ) : null}
-                        <span>Cam 2</span>
-                      </Button>
-                    </div>
                   </div>
                   <Combobox
                     options={vehicleOptions}
@@ -2080,28 +1973,44 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   />
                 </div>
 
-                {/* Vehicle Type */}
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Vehicle Type
-                  </Label>
-                  <Combobox options={VEHICLE_TYPES} value={vehicleType} onChange={setVehicleType}
-                    placeholder="Select vehicle type" searchPlaceholder="Search vehicle type…" ariaLabel="Vehicle type" className="bg-background" />
-                </div>
-
-                {/* Trip Type */}
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Trip Type
-                  </Label>
-                  <Combobox
-                    options={TRIP_TYPE_OPTIONS}
+                {/* What this weighing is. Trip type is derived from the plate; the
+                    toggle stays for the rare override. */}
+                <div className="space-y-2 sm:col-span-2">
+                  <div
+                    className={cn(
+                      'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs',
+                      tripType === 'SECOND'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+                        : 'border-primary/20 bg-primary/5 text-foreground',
+                    )}
+                    role="status"
+                  >
+                    <Scale className="h-4 w-4 shrink-0" />
+                    <span className="font-semibold">
+                      {tripType === 'SECOND'
+                        ? `Second weight${firstWeight != null ? ` · first was ${firstWeight.toLocaleString('en-IN')} kg` : ''}`
+                        : tripType === 'SINGLE'
+                          ? 'Single weighment · one reading is the net weight'
+                          : 'First weight · the lorry will wait for its second weighing'}
+                    </span>
+                  </div>
+                  <SegmentedToggle
+                    ariaLabel="Trip type"
                     value={tripType}
                     onChange={(val) => {
-                      setTripType(val as 'FIRST' | 'SECOND' | 'SINGLE');
-                      if (val === 'FIRST') setFirstWeight(null);
+                      if (val === 'FIRST') {
+                        // Remember the refusal so the plate is not paired again.
+                        declinedPairingRef.current = vehicleNumber.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                        setFirstWeight(null);
+                        setPendingTicketId(null);
+                      }
+                      setTripType(val);
                     }}
-                    placeholder="Select trip type" searchPlaceholder="Search trip type…" ariaLabel="Trip type" className="bg-background font-medium"
+                    options={[
+                      { value: 'FIRST', label: 'First weight' },
+                      { value: 'SECOND', label: 'Second weight' },
+                      { value: 'SINGLE', label: 'Single' },
+                    ]}
                   />
                 </div>
 
@@ -2192,39 +2101,39 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     placeholder="Select material" searchPlaceholder="Search material…" ariaLabel="Material" className="bg-background font-medium" />
                 </div>
 
-                {/* Load Type */}
+                {/* Load condition */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Load Condition
+                    Lorry is
                   </Label>
-                  <Combobox options={LOAD_TYPE_OPTIONS} value={loadType} onChange={(v) => setLoadType(v as 'LOAD' | 'EMPTY')}
-                    placeholder="Select condition" searchPlaceholder="Search load condition…" ariaLabel="Load condition" className="bg-background font-medium" />
-                </div>
-
-                {/* Kata Fee (Charges) */}
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Tag className="h-3.5 w-3.5 text-primary" />
-                    Weighment Fee (₹)
-                  </Label>
-                  <Input
-                    type="number"
-                    value={charges}
-                    readOnly
-                    aria-readonly="true"
-                    className="h-10 bg-muted/50 font-mono font-bold"
+                  <SegmentedToggle
+                    ariaLabel="Load condition"
+                    value={loadType}
+                    onChange={setLoadType}
+                    options={[
+                      { value: 'LOAD', label: 'Loaded', tone: 'primary' },
+                      { value: 'EMPTY', label: 'Empty', tone: 'slate' },
+                    ]}
                   />
-                  <p className="text-[10px] text-muted-foreground">Auto-calculated from final net weight after both weights are saved.</p>
                 </div>
 
-                {/* Payment mode */}
-                <div className="space-y-1.5">
+                {/* Payment type (the fee itself is shown in the charge card below) */}
+                <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <CreditCard className="h-3.5 w-3.5 text-primary" />
-                    Payment Type
+                    Payment
                   </Label>
-                  <Combobox options={BILL_TYPE_OPTIONS} value={billType} onChange={(v) => setBillType(v as 'CASH' | 'CREDIT' | 'FREE')}
-                    placeholder="Select payment type" searchPlaceholder="Search payment type…" ariaLabel="Payment type" className="bg-background font-medium" />
+                  <SegmentedToggle
+                    ariaLabel="Payment type"
+                    value={billType}
+                    onChange={setBillType}
+                    disabled={isCurrentVehicleExempt}
+                    options={[
+                      { value: 'CASH', label: 'Cash', tone: 'emerald' },
+                      { value: 'CREDIT', label: 'Credit', tone: 'amber' },
+                      { value: 'FREE', label: 'Free', tone: 'slate' },
+                    ]}
+                  />
                 </div>
 
                 {/* Driver Mobile */}
@@ -2243,18 +2152,29 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   />
                 </div>
 
-                {/* Remarks */}
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Remarks (Optional)
-                  </Label>
-                  <Input
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="e.g. Delivery directly to Warehouse #2"
-                    className="h-10 bg-background"
-                  />
-                </div>
+                {/* Rarely-changed fields stay out of the way */}
+                <details className="group sm:col-span-2 rounded-xl border border-border/70 bg-muted/20" open={remarks.trim() !== '' || vehicleType !== 'LORRY'}>
+                  <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <span>More details</span>
+                    <span className="text-[10px] font-normal normal-case">vehicle type · remarks</span>
+                  </summary>
+                  <div className="grid grid-cols-1 gap-3 border-t border-border/60 p-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vehicle type</Label>
+                      <Combobox options={VEHICLE_TYPES} value={vehicleType} onChange={setVehicleType}
+                        placeholder="Select vehicle type" searchPlaceholder="Search vehicle type…" ariaLabel="Vehicle type" className="bg-background" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Remarks</Label>
+                      <Input
+                        value={remarks}
+                        onChange={(e) => setRemarks(e.target.value)}
+                        placeholder="e.g. Deliver to warehouse 2"
+                        className="h-10 bg-background"
+                      />
+                    </div>
+                  </div>
+                </details>
               </div>
 
               <div className="kata-payment-display">
@@ -2340,310 +2260,69 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                   <Button
                     type="button"
                     onClick={() => saveMutation.mutate()}
-                    disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim() || (isStorageTransfer && !storageLocation)}
+                    disabled={saveMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim() || (isStorageTransfer && !storageLocation) || weightBlockReason !== null}
+                    title={weightBlockReason ?? undefined}
                     className="h-11 px-6 font-bold gap-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-transform active:scale-98"
                   >
                     <Printer className="h-4 w-4" />
                     <span>Save Ticket & Print (F12)</span>
                   </Button>
                 </div>
+                {weightBlockReason && (
+                  <p className="basis-full text-right text-xs font-medium text-amber-700 dark:text-amber-400" role="status">
+                    {weightBlockReason}
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
 
           {/* Instrument console: live weight and dual cameras */}
           <div className="lg:col-span-7 space-y-5">
-            {/* 1. Digital Scale Instrument Panel */}
-            <div className="kata-scale-panel relative overflow-hidden rounded-2xl border border-stone-800 text-stone-100 p-5">
-              {/* Radial ambient glow */}
-              <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
-
-              {/* Hardware Fault / NO DLC Alert Banner */}
-              {isNoDls && (
-                <div className="mb-3.5 p-3.5 rounded-xl bg-red-500/15 border border-red-500/50 text-red-200 text-xs flex items-start justify-between gap-3 shadow-lg shadow-red-950/40">
-                  <div className="flex items-start gap-2.5">
-                    <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5 animate-bounce" />
-                    <div>
-                      <div className="font-bold text-red-100 text-sm">Scale Hardware Alert: "{noDlcLabel}" (Load Cell Signal Lost)</div>
-                      <p className="text-xs text-red-300/90 mt-1 leading-relaxed">
-                        The physical scale indicator is showing {noDlcLabel}. You can click <strong>Override (F8)</strong> or click the box below to manually type the weight from the physical display.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {!isManualOverride && (
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setIsManualOverride(true);
-                          setTimeout(() => manualInputRef.current?.focus(), 60);
-                        }}
-                        className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold font-mono h-7 px-2.5 gap-1 shadow-xs"
-                      >
-                        <Pencil className="h-3 w-3" />
-                        Override (F8)
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={toggleNoDlc}
-                      className="text-red-300 hover:text-white hover:bg-red-500/20 text-xs font-mono h-7 px-2 border border-red-500/40"
-                    >
-                      Clear {noDlcLabel}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* DLC Cooldown Warning Banner — shows for 30s after DLC fault clears */}
-              {!isNoDls && scale.recentFault && (
-                <div className="mb-3.5 p-3 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-200 text-xs flex items-start gap-2.5 shadow-lg shadow-amber-950/30 animate-pulse">
-                  <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <div className="font-bold text-amber-100 text-sm">⚠️ Recent DLC Fault Detected</div>
-                    <p className="text-xs text-amber-300/90 mt-1 leading-relaxed">
-                      A load cell signal loss was detected {scale.lastFaultTime ? `${Math.round((Date.now() - scale.lastFaultTime) / 1000)}s ago` : 'recently'}.
-                      The scale has recovered, but the current reading <strong>may be unreliable</strong>.
-                      Wait for the indicator to stabilize or verify against the physical display.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Top readout status row */}
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-xs font-mono">
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className={cn(
-                      'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
-                      isNoDls ? 'bg-red-400' : scale.recentFault ? 'bg-amber-400' : isManualOverride ? 'bg-amber-400' : scale.isStable ? 'bg-emerald-400' : 'bg-amber-400'
-                    )} />
-                    <span className={cn(
-                      'relative inline-flex rounded-full h-2.5 w-2.5',
-                      isNoDls ? 'bg-red-500' : scale.recentFault ? 'bg-amber-500' : isManualOverride ? 'bg-amber-500' : scale.isStable ? 'bg-emerald-500' : 'bg-amber-500'
-                    )} />
-                  </span>
-                  <span className="font-bold tracking-wider text-stone-300">
-                    {isNoDls
-                      ? `${noDlcLabel} (FAULT)`
-                      : scale.recentFault
-                      ? `⚠️ RECENTLY FAULTED (${scale.lastFaultTime ? `${Math.round((Date.now() - scale.lastFaultTime) / 1000)}s ago` : 'recovering'})`
-                      : isManualOverride
-                      ? 'MANUAL OVERRIDE'
-                      : scale.isScaleOnline
-                        ? `SCALE INDICATOR (${scale.serverPort || 'COM4'}${scale.connectionMode === 'LOCAL_USB' ? ' · USB' : ''})`
-                        : `SCALE INDICATOR (${scale.serverPort || 'COM4'} OFFLINE)`}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {/* Connect USB button if Web Serial is supported and not connected locally */}
-                  {!scale.isLocalConnected && scale.isSupported && (
-                    <Button
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          const ok = await scale.connect();
-                          if (ok) toast.success('Scale connected to COM4!');
-                        } catch (err: any) {
-                          toast.error(err?.message || 'Failed to connect scale USB');
-                        }
-                      }}
-                      className="h-7 px-2 text-[11px] font-mono font-bold bg-amber-500 hover:bg-amber-400 text-stone-950 flex items-center gap-1 shadow-xs animate-pulse"
-                      title="Click to connect browser directly to COM4 USB cable"
-                    >
-                      <Cable className="h-3 w-3" />
-                      Connect USB
-                    </Button>
-                  )}
-
-                  {/* NO DLC Toggle button */}
-                  <Button
-                    size="sm"
-                    onClick={toggleNoDlc}
-                    className={cn(
-                      "h-7 px-2.5 text-[11px] font-mono font-bold gap-1.5 border transition-all shadow-xs",
-                      isNoDls
-                        ? "bg-red-600 hover:bg-red-500 text-white border-red-400 animate-pulse shadow-red-500/40"
-                        : "text-red-400 hover:text-red-200 bg-red-950/40 hover:bg-red-900/60 border-red-800/80"
-                    )}
-                    title={isNoDls ? "Click to turn off NO DLC status" : "Click to activate NO DLC display"}
-                  >
-                    <AlertTriangle className="h-3 w-3" />
-                    {isNoDls ? `${noDlcLabel} ACTIVE` : noDlcLabel}
-                  </Button>
-
-                  {isManualOverride ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setIsManualOverride(false);
-                        setManualWeightInput('');
-                      }}
-                      className="h-7 px-2 text-[11px] font-mono text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 gap-1"
-                    >
-                      <RotateCcw className="h-3 w-3" />
-                      Resume COM4
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setIsManualOverride(true);
-                        setManualWeightInput(String(currentLiveWeight || ''));
-                        setTimeout(() => manualInputRef.current?.focus(), 60);
-                      }}
-                      className="h-7 px-2 text-[11px] font-mono text-stone-400 hover:text-stone-200 bg-stone-800/80 border border-stone-700/60 gap-1"
-                      title="Manually override weight displayed in this box (F8)"
-                    >
-                      <Pencil className="h-3 w-3" />
-                      Override (F8)
-                    </Button>
-                  )}
-
-                  {!isManualOverride && (
-                    <span className={cn(
-                      'px-2 py-1 rounded text-[10px] font-bold tracking-wider',
-                      isNoDls
-                        ? 'bg-red-500/20 text-red-400 border border-red-500/30 font-black'
-                        : scale.recentFault
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse'
-                          : !scale.isScaleOnline
-                            ? 'bg-stone-800 text-stone-400 border border-stone-700'
-                            : scale.isStable
-                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    )}>
-                      {isNoDls
-                        ? noDlcLabel
-                        : scale.recentFault
-                          ? '⚠️ RECOVERING'
-                          : !scale.isScaleOnline
-                            ? 'OFFLINE'
-                            : scale.isStable
-                              ? 'STABLE'
-                              : 'IN MOTION'}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Large Digital Weight Display */}
-              {isNoDls && !isManualOverride ? (
-                <div
-                  className="py-6 text-center select-none cursor-pointer group bg-red-950/25 rounded-2xl border-2 border-red-500/50 hover:border-red-400 transition-all p-4 my-2 shadow-inner"
-                  onClick={() => {
-                    setIsManualOverride(true);
+            {/* 1. Live weight */}
+            <WeightReadout
+              weightKg={currentLiveWeight}
+              isManual={isManualOverride}
+              onToggleManual={() => {
+                setIsManualOverride((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setManualWeightInput(String(scale.liveWeight || ''));
                     setTimeout(() => manualInputRef.current?.focus(), 60);
-                  }}
-                  title="Click to type weight manually (F8)"
-                >
-                  <div className="flex items-center justify-center gap-3">
-                    <AlertTriangle className="h-10 w-10 text-red-500 animate-bounce" />
-                    <span className="font-mono font-black text-6xl md:text-7xl text-red-500 tracking-tight drop-shadow-[0_0_30px_rgba(239,68,68,0.7)] animate-pulse">
-                      {noDlcLabel}
-                    </span>
-                    <AlertTriangle className="h-10 w-10 text-red-500 animate-bounce" />
-                  </div>
-                  <div className="text-red-400 font-mono text-xs mt-3 font-bold flex flex-wrap items-center justify-center gap-2">
-                    <span className="bg-red-500/20 px-2.5 py-0.5 rounded-full border border-red-500/40">
-                      Digital Load Cell Signal Lost ({noDlcLabel})
-                    </span>
-                    <span>·</span>
-                    <span className="underline underline-offset-4 text-amber-300 hover:text-amber-200">
-                      Click here to enter weight manually (F8)
-                    </span>
-                  </div>
-                </div>
-              ) : isManualOverride ? (
-                <div className="py-2 text-center select-none">
-                  {isNoDls && (
-                    <div className="flex items-center justify-center gap-1.5 mb-1 text-[11px] font-mono font-bold text-red-400">
-                      <AlertTriangle className="h-3 w-3" />
-                      <span>{noDlcLabel} ACTIVE · Enter weight manually from physical scale below</span>
-                    </div>
-                  )}
-                  <div className="flex items-baseline justify-center gap-2">
-                    <input
-                      ref={manualInputRef}
-                      type="number"
-                      value={manualWeightInput}
-                      onChange={(e) => setManualWeightInput(e.target.value)}
-                      placeholder="0"
-                      className="w-56 font-mono font-black text-5xl text-center text-amber-400 bg-stone-900 border-2 border-amber-500 rounded-xl px-2 py-1 outline-none shadow-inner drop-shadow-[0_0_15px_rgba(251,191,36,0.3)]"
-                      autoFocus
-                    />
-                    <span className="font-mono font-bold text-xl text-stone-400">KG</span>
-                  </div>
-                  <div className="text-amber-400/90 font-mono text-xs mt-1">
-                    ✏️ Manual Override Active (Press F8 or click 'Resume COM4' to exit)
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="py-2 text-center select-none group cursor-pointer"
-                  onClick={() => {
-                    setIsManualOverride(true);
-                    setManualWeightInput(String(currentLiveWeight || ''));
-                    setTimeout(() => manualInputRef.current?.focus(), 60);
-                  }}
-                  title="Click to manually override weight displayed in this box (F8)"
-                >
-                  <div className="flex items-baseline justify-center gap-2">
-                    <span className={cn(
-                      'kata-weight-digits font-mono font-black tracking-tight transition-transform group-hover:scale-102',
-                      currentLiveWeight < 0 ? 'text-red-400 drop-shadow-[0_0_20px_rgba(239,68,68,0.5)]' : 'text-amber-400'
-                    )}>
-                      {currentLiveWeight < 0 ? `−${Math.abs(currentLiveWeight).toLocaleString('en-IN')}` : currentLiveWeight.toLocaleString('en-IN')}
-                    </span>
-                    <span className="font-mono font-bold text-xl text-stone-400">
-                      KG
-                    </span>
-                  </div>
-
-                  {/* Sub-readout in metric tonnes */}
-                  <div className={cn(
-                    'font-mono text-xs mt-1 flex items-center justify-center gap-2',
-                    currentLiveWeight < 0 ? 'text-red-400' : 'text-stone-400'
-                  )}>
-                    <span>≈ {(currentLiveWeight / 1000).toFixed(3)} Metric Tonnes (MT)</span>
-                    <span className="text-stone-500 text-[10px]">· Click to override (F8)</span>
-                  </div>
-
-                  {!scale.isScaleOnline && (
-                    <div className="text-amber-400/90 font-mono text-[11px] mt-1.5 flex items-center justify-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                      <span>USB-RS232 Cable not detected on {scale.serverPort || 'COM4'} · Click here or press F8 to enter manually</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 3 Weight Breakdown Pills */}
-              <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-stone-800 text-center text-xs font-mono">
-                <div className="bg-stone-900/80 p-2 rounded-lg border border-stone-800">
-                  <span className="block text-[10px] text-stone-400 font-sans">1st Weight</span>
-                  <span className="font-bold text-stone-200">
-                    {firstWeight != null ? `${firstWeight} Kg` : '-'}
-                  </span>
-                </div>
-                <div className="bg-stone-900/80 p-2 rounded-lg border border-stone-800">
-                  <span className="block text-[10px] text-stone-400 font-sans">2nd Weight</span>
-                  <span className="font-bold text-stone-200">
-                    {tripType === 'SECOND' ? `${currentLiveWeight} Kg` : '-'}
-                  </span>
-                </div>
-                <div className="bg-stone-900/80 p-2 rounded-lg border border-stone-800">
-                  <span className="block text-[10px] text-amber-400 font-sans font-semibold">Net Weight</span>
-                  <span className="font-bold text-amber-400">
-                    {calculatedNetWeight != null ? `${calculatedNetWeight} Kg` : '-'}
-                  </span>
-                </div>
-              </div>
-            </div>
+                  } else {
+                    setManualWeightInput('');
+                  }
+                  return next;
+                });
+              }}
+              manualInput={manualWeightInput}
+              onManualInput={setManualWeightInput}
+              manualReason={manualWeightReason}
+              onManualReason={setManualWeightReason}
+              inputRef={manualInputRef}
+              scaleOnline={scale.isScaleOnline}
+              stable={scale.isStable}
+              recentFault={scale.recentFault}
+              lastFaultTime={scale.lastFaultTime}
+              faultLabel={isNoDls ? noDlcLabel : null}
+              faultFlaggedManually={manualNoDls}
+              onToggleFault={toggleNoDlc}
+              portLabel={scale.serverPort || 'COM4'}
+              viaUsb={scale.connectionMode === 'LOCAL_USB'}
+              canConnectUsb={!scale.isLocalConnected && scale.isSupported}
+              onConnectUsb={async () => {
+                try {
+                  const ok = await scale.connect();
+                  if (ok) toast.success('Scale connected');
+                } catch (err: any) {
+                  toast.error(err?.message || 'Could not connect the scale USB');
+                }
+              }}
+              tripType={tripType}
+              loadType={loadType}
+              firstWeightKg={firstWeight}
+              netKg={calculatedNetWeight}
+            />
 
             {/* 2. CP PLUS Live Dual CCTV Cameras */}
             <Card className="kata-camera-card overflow-hidden border-border">
@@ -2706,24 +2385,18 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     camNumber={1}
                     cameraIp="192.168.1.101"
                     label="CAM 1: ENTRY"
-                    currentTime={clockString}
                     refreshTrigger={camRefreshTrigger}
                     onExpand={(cam) => setExpandedCam(cam)}
                     relayStatus={cctvStatus?.cam1}
-                    onDetectPlate={(cam) => detectPlateMutation.mutate(cam)}
-                    isDetectingPlate={detectPlateMutation.isPending && detectPlateMutation.variables === 1}
                   />
                   <CctvLiveBox
                     paused={expandedCam !== null}
                     camNumber={2}
                     cameraIp="192.168.1.102"
                     label="CAM 2: EXIT"
-                    currentTime={clockString}
                     refreshTrigger={camRefreshTrigger}
                     onExpand={(cam) => setExpandedCam(cam)}
                     relayStatus={cctvStatus?.cam2}
-                    onDetectPlate={(cam) => detectPlateMutation.mutate(cam)}
-                    isDetectingPlate={detectPlateMutation.isPending && detectPlateMutation.variables === 2}
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground text-center font-mono">
@@ -2792,10 +2465,30 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                         #{formatTicketNo(t.ticketNo)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {new Date(t.createdAt).toLocaleTimeString('en-IN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {(() => {
+                          // A lorry that never came back for its second weight
+                          // otherwise sits here forever and can be matched to
+                          // the wrong visit. Age it, and flag the stale ones.
+                          const ageMs = Date.now() - new Date(t.firstWeighedAt || t.createdAt).getTime();
+                          const hours = Math.floor(ageMs / 3_600_000);
+                          const stale = hours >= 12;
+                          return (
+                            <div className="space-y-0.5">
+                              <div>
+                                {new Date(t.createdAt).toLocaleString('en-IN', {
+                                  day: hours >= 12 ? '2-digit' : undefined,
+                                  month: hours >= 12 ? 'short' : undefined,
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </div>
+                              <div className={stale ? 'font-semibold text-red-600' : ''}>
+                                {hours < 1 ? `${Math.max(1, Math.floor(ageMs / 60_000))} min ago` : `${hours} h ago`}
+                                {stale ? ' · STALE - verify or cancel' : ''}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="font-mono font-bold text-foreground">
                         {t.vehicleNumber}
@@ -3235,7 +2928,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                             const resolvePrintUrl = (url?: string | null) => {
                               if (!url) return undefined;
                               if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) return url;
-                              if (url.startsWith('/api/')) return `https://rvp-server.onrender.com${url}`;
+                              if (url.startsWith('/api/')) return `${SERVER_ORIGIN}${url}`;
                               return url;
                             };
                             setActiveSnapshots({
@@ -3734,9 +3427,6 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
         camNumber={expandedCam}
         onClose={() => setExpandedCam(null)}
         onSelectCam={(num) => setExpandedCam(num)}
-        currentTime={clockString}
-        onDetectPlate={(num) => detectPlateMutation.mutate(num)}
-        isDetectingPlate={detectPlateMutation.isPending}
       />
 
       {/* CCTV & RTSP Network Status & Configuration Dialog */}

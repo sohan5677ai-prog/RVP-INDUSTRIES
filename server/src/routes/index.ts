@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import fileRoutes from './file.routes.js';
-import { requireAuthOrCameraBridge } from '../middleware/cameraAuth.js';
 import { requireMediaRead } from '../middleware/mediaAuth.js';
 import { enforceRoutePermissions } from '../middleware/routePermission.js';
 import { isOriginAllowed, originPolicyFromEnv } from '../lib/corsOrigin.js';
@@ -60,7 +59,6 @@ import gpsRoutes from './gps.routes.js';
 import {
   streamCctvHandler,
   snapshotCctvHandler,
-  detectPlateCctvHandler,
   broadcastCctvHandler,
   getCctvStatusHandler,
   queuePrintJobHandler,
@@ -107,7 +105,6 @@ router.use('/files', fileRoutes);
 // the app-level copies must not silently reopen them to the internet.
 router.get('/weighbridge/cctv/stream', requireMediaRead, asyncHandler(streamCctvHandler));
 router.get('/weighbridge/cctv/snapshot', requireMediaRead, asyncHandler(snapshotCctvHandler));
-router.post('/weighbridge/cctv/detect-plate', requireAuthOrCameraBridge, asyncHandler(detectPlateCctvHandler));
 router.post('/weighbridge/cctv/broadcast', asyncHandler(broadcastCctvHandler));
 router.get('/weighbridge/cctv/status', requireMediaRead, asyncHandler(getCctvStatusHandler));
 router.get('/weighbridge/tickets/:id/slip.pdf', asyncHandler(downloadSignedWeighbridgeSlipHandler));

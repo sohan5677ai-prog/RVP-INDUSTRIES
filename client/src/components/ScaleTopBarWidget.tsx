@@ -1,3 +1,4 @@
+import { detectScaleFault } from '@/lib/scaleFault';
 import { useState, useRef, useEffect } from 'react';
 import { Scale, Wifi, WifiOff, RefreshCw, Radio, Settings2, AlertTriangle, CheckCircle2, Cable } from 'lucide-react';
 import { useScale } from '@/lib/scaleContext';
@@ -30,21 +31,7 @@ export default function ScaleTopBarWidget() {
     if (serverPort) setSelectedPort(serverPort);
   }, [serverPort]);
 
-  const rawUpper = (rawText || '').toUpperCase();
-  const errUpper = (error || '').toUpperCase();
-  const isNoDlc = Boolean(
-    errUpper.includes('DLC') ||
-    rawUpper.includes('DLC') ||
-    errUpper.includes('DLS') ||
-    rawUpper.includes('DLS') ||
-    errUpper.includes('NO DL') ||
-    rawUpper.includes('NO DL') ||
-    errUpper.includes('NODL') ||
-    rawUpper.includes('NODL') ||
-    rawUpper.includes('?') ||
-    errUpper.includes('ERR') ||
-    rawUpper.includes('ERR')
-  );
+  const isNoDlc = detectScaleFault(error) !== null || detectScaleFault(rawText) !== null;
 
   // Close popover when clicking outside
   useEffect(() => {

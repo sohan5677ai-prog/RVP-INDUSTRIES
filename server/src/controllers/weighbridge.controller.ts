@@ -58,7 +58,107 @@ function readWeight(value: unknown, field: string): number | null {
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new HttpError(400, `${field} must be greater than 0 kg`);
   }
+  if (parsed > MAX_WEIGHT_KG) {
+    throw new HttpError(
+      400,
+      `${field} of ${Math.round(parsed).toLocaleString('en-IN')} kg is above the ${MAX_WEIGHT_KG.toLocaleString('en-IN')} kg limit - check the scale reading`,
+    );
+  }
   return Math.round(parsed);
+}
+
+/** A loaded lorry never legitimately reads above this on the plate. */
+const MAX_WEIGHT_KG = 100_000;
+
+/** Plate with spaces, dashes and case removed, so "ap 02-te 1234" == "AP02TE1234". */
+function normalizePlate(value: string | null | undefined): string {
+  return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/** True when two normalised plates differ by at most one character. */
+function isCloseTo(a: string, b: string): boolean {
+  if (!a || !b || Math.abs(a.length - b.length) > 1) return false;
+  if (a === b) return true;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1); // one substitution
+  const [long, short] = a.length > b.length ? [a, b] : [b, a];
+  return long.slice(i + 1) === short.slice(i); // one missing / extra character
+}
+
+/**
+ * Second weighment sanity: a lorry that arrived loaded must come back lighter,
+ * one that arrived empty must come back heavier. A reading on the wrong side
+ * means the wrong lorry, a stale first ticket or a mislabelled load condition,
+ * and would otherwise be billed as a normal (wrong) net weight silently.
+ *
+ * Identical weights are never valid. The direction rule can be overridden
+ * (`forceDirection`) once the operator has seen the warning and confirmed.
+ */
+function assertSecondWeightSane(
+  firstKg: number,
+  secondKg: number,
+  firstLoadType: string | null | undefined,
+  forceDirection: boolean,
+) {
+  if (firstKg === secondKg) {
+    throw new HttpError(400, 'First and second weights are identical - the lorry has not been re-weighed');
+  }
+  if (forceDirection) return;
+  const first = String(firstLoadType ?? '').toUpperCase();
+  if (first === 'LOAD' && secondKg > firstKg) {
+    throw new HttpError(
+      409,
+      `Weight direction: first weight was a LOADED lorry (${firstKg.toLocaleString('en-IN')} kg) but the second reading is heavier (${secondKg.toLocaleString('en-IN')} kg)`,
+    );
+  }
+  if (first === 'EMPTY' && secondKg < firstKg) {
+    throw new HttpError(
+      409,
+      `Weight direction: first weight was an EMPTY lorry (${firstKg.toLocaleString('en-IN')} kg) but the second reading is lighter (${secondKg.toLocaleString('en-IN')} kg)`,
+    );
+  }
+}
+
+/**
+ * A manually typed weight must say why, and the slip/register must show it was
+ * typed. Returns the note to append to remarks (no schema change needed), or
+ * null for a weight that came off the scale.
+ */
+function manualWeightNote(weightSource: unknown, reason: unknown): string | null {
+  if (String(weightSource ?? '').toUpperCase() !== 'MANUAL') return null;
+  const why = String(reason ?? '').trim();
+  if (why.length < 3) {
+    throw new HttpError(400, 'A manually entered weight needs a reason (scale fault, display only, etc.)');
+  }
+  return `[MANUAL WEIGHT: ${why}]`;
+}
+
+function joinRemarks(...parts: Array<string | null | undefined>): string | undefined {
+  const joined = parts.map((p) => (p ?? '').trim()).filter(Boolean).join(' ');
+  return joined || undefined;
+}
+
+/**
+ * Create a ticket with the next ticket number, retrying when another cabin took
+ * the same number between our read and our insert (ticketNo is unique). Only
+ * that specific collision is retried; any other database error is thrown as is.
+ */
+async function createTicketWithNextNumber<T>(attempt: (ticketNo: number) => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    const latest = await prisma.weighbridgeTicket.findFirst({
+      orderBy: { ticketNo: 'desc' },
+      select: { ticketNo: true },
+    });
+    const ticketNo = latest ? latest.ticketNo + 1 : STARTING_TICKET_NUMBER;
+    try {
+      return await attempt(ticketNo);
+    } catch (err: any) {
+      const target = JSON.stringify(err?.meta?.target ?? '');
+      const isNumberCollision = err?.code === 'P2002' && /ticketNo/i.test(target);
+      if (!isNumberCollision || i >= 4) throw err;
+    }
+  }
 }
 
 const STORAGE_TRANSFER_LOCATIONS = new Set(['PGR COLD', 'Murugan', 'KNM Multi']);
@@ -423,6 +523,9 @@ export async function createTicketHandler(req: Request, res: Response) {
     snapCam2,
     isStorageTransfer,
     storageLocation,
+    weightSource,
+    manualWeightReason,
+    forceDirection,
   } = req.body;
 
   if (!vehicleNumber?.trim()) {
@@ -431,25 +534,50 @@ export async function createTicketHandler(req: Request, res: Response) {
 
   const cleanVehNo = vehicleNumber.trim().toUpperCase();
 
-  // Compute next sequential ticket number atomically
-  const latest = await prisma.weighbridgeTicket.findFirst({
-    orderBy: { ticketNo: 'desc' },
-    select: { ticketNo: true },
-  });
-  const ticketNo = latest ? latest.ticketNo + 1 : STARTING_TICKET_NUMBER;
-
   const firstWeight = readWeight(firstWeightKg ?? req.body.firstWeight, 'First weight');
   const secondWeight = readWeight(secondWeightKg ?? req.body.secondWeight, 'Second weight');
+  const manualNote = manualWeightNote(weightSource, manualWeightReason);
+  const remarksWithNote = joinRemarks(typeof remarks === 'string' ? remarks : '', manualNote);
 
   // If operator is submitting 2nd weight on an existing pending ticket
   if (tripType === 'SECOND') {
-    const existingPending = await prisma.weighbridgeTicket.findFirst({
-      where: { vehicleNumber: cleanVehNo, status: 'PENDING_SECOND' },
+    // Match on the plate with spacing/dashes ignored, so "AP 02 TE 1234" finds
+    // the ticket opened as "AP02TE1234" instead of silently opening a new one.
+    const wanted = normalizePlate(cleanVehNo);
+    const allPending = await prisma.weighbridgeTicket.findMany({
+      where: { status: 'PENDING_SECOND' },
       orderBy: { createdAt: 'desc' },
     });
-    if (existingPending) {
+    const pendingForPlate = allPending.filter((t) => normalizePlate(t.vehicleNumber) === wanted);
+
+    if (pendingForPlate.length > 1) {
+      throw new HttpError(
+        409,
+        `${cleanVehNo} has ${pendingForPlate.length} open first-weight tickets (${pendingForPlate
+          .map((t) => '#' + t.ticketNo)
+          .join(', ')}). Pick the right one from the Pending tab.`,
+      );
+    }
+    const existingPending = pendingForPlate[0] ?? null;
+
+    if (!existingPending) {
+      // This used to open a brand-new ticket whose first and second weight were
+      // the same reading - a zero-net "completed" ticket. A second weight with
+      // nothing to pair to is almost always a mistyped plate.
+      const similar = allPending
+        .filter((t) => isCloseTo(normalizePlate(t.vehicleNumber), wanted))
+        .map((t) => `${t.vehicleNumber} (#${t.ticketNo})`);
+      throw new HttpError(
+        404,
+        `No open first-weight ticket for ${cleanVehNo}.` +
+          (similar.length ? ` Did you mean ${similar.join(' or ')}?` : ' Check the vehicle number, or weigh it as a First weight.'),
+      );
+    }
+
+    {
       const secondWeightNum = Number(secondWeight ?? firstWeight ?? 0);
       const firstWeightExisting = existingPending.firstWeightKg ?? 0;
+      assertSecondWeightSane(firstWeightExisting, secondWeightNum, existingPending.loadType, forceDirection === true);
       const netWeight = Math.abs(secondWeightNum - firstWeightExisting);
       const transfer = resolveStorageTransfer(
         Object.prototype.hasOwnProperty.call(req.body, 'isStorageTransfer')
@@ -501,7 +629,7 @@ export async function createTicketHandler(req: Request, res: Response) {
           ...(partyMobile ? { partyMobile: partyMobile.trim() } : {}),
           ...(material ? { material: material.trim() } : {}),
           ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
-          ...(remarks ? { remarks: remarks.trim() } : {}),
+          ...(remarksWithNote ? { remarks: remarksWithNote } : {}),
           secondCam1PhotoUrl,
           secondCam2PhotoUrl,
         },
@@ -511,6 +639,10 @@ export async function createTicketHandler(req: Request, res: Response) {
       );
       return res.status(200).json(updated);
     }
+  }
+
+  if (firstWeight != null && secondWeight != null && firstWeight === secondWeight) {
+    throw new HttpError(400, 'First and second weights are identical - the lorry has not been re-weighed');
   }
 
   let netWeight: number | null = null;
@@ -536,13 +668,18 @@ export async function createTicketHandler(req: Request, res: Response) {
   const operatorName = user?.name || (user?.scope === 'KATA_CABIN' ? 'Kata Cabin' : 'ADMIN');
   const transfer = resolveStorageTransfer(isStorageTransfer, storageLocation, material);
 
-  // Capture and persist CCTV snapshots taken during this kata weighment
+  // Capture and persist CCTV snapshots taken during this kata weighment. They
+  // are saved once, against the number we expect; if another cabin wins that
+  // number the create below retries with the next one and keeps these photos.
+  const expectedTicketNo =
+    ((await prisma.weighbridgeTicket.findFirst({ orderBy: { ticketNo: 'desc' }, select: { ticketNo: true } }))?.ticketNo ??
+      STARTING_TICKET_NUMBER - 1) + 1;
   const [cam1PhotoUrl, cam2PhotoUrl] = await Promise.all([
-    saveWeighbridgeSnapshot(ticketNo, 1, snapCam1, false),
-    saveWeighbridgeSnapshot(ticketNo, 2, snapCam2, false),
+    saveWeighbridgeSnapshot(expectedTicketNo, 1, snapCam1, false),
+    saveWeighbridgeSnapshot(expectedTicketNo, 2, snapCam2, false),
   ]);
 
-  const ticket = await prisma.weighbridgeTicket.create({
+  const ticket = await createTicketWithNextNumber((ticketNo) => prisma.weighbridgeTicket.create({
     data: {
       ticketNo,
       vehicleNumber: cleanVehNo,
@@ -579,11 +716,11 @@ export async function createTicketHandler(req: Request, res: Response) {
       secondWeighedAt: secondWeight != null ? new Date() : null,
       status,
       operatorName,
-      remarks: remarks?.trim() || null,
+      remarks: remarksWithNote ?? null,
       cam1PhotoUrl,
       cam2PhotoUrl,
     },
-  });
+  }));
 
   if (ticket.secondWeightKg != null) {
     await recordAutomaticTransfer(ticket);
@@ -610,13 +747,15 @@ export async function createTicketHandler(req: Request, res: Response) {
  */
 export async function completeSecondWeightHandler(req: Request, res: Response) {
   const { id } = req.params;
-  const { secondWeightKg, secondWeight, partyName, partyMobile, material, loadType, billType, remarks, snapCam1, snapCam2, isStorageTransfer, storageLocation } = req.body;
+  const { secondWeightKg, secondWeight, partyName, partyMobile, material, loadType, billType, remarks, snapCam1, snapCam2, isStorageTransfer, storageLocation, weightSource, manualWeightReason, forceDirection } = req.body;
   const weightVal = secondWeightKg ?? secondWeight ?? req.body.weight ?? req.body.liveWeight;
 
   if (weightVal == null || isNaN(Number(weightVal))) {
     logger.warn(`Second weight missing or invalid in completeSecondWeightHandler (id=${id})`, req.body);
     throw new HttpError(400, 'Second weight (kg) is required');
   }
+  const checkedSecond = readWeight(weightVal, 'Second weight') as number;
+  const manualNote = manualWeightNote(weightSource, manualWeightReason);
 
   const existing = await prisma.weighbridgeTicket.findUnique({
     where: { id },
@@ -625,9 +764,18 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
   if (!existing) {
     throw new HttpError(404, 'Weighbridge ticket not found');
   }
+  // Without this a double-click or a stale pending list re-completed a finished
+  // ticket: net weight overwritten, the stock transfer posted a second time.
+  if (existing.status !== 'PENDING_SECOND') {
+    throw new HttpError(409, `Ticket #${existing.ticketNo} is already ${existing.status.toLowerCase().replace('_', ' ')} - it cannot take a second weight`);
+  }
+  if (existing.firstWeightKg == null) {
+    throw new HttpError(409, `Ticket #${existing.ticketNo} has no first weight recorded`);
+  }
 
-  const secondWeightNum = Number(weightVal);
-  const firstWeight = existing.firstWeightKg ?? 0;
+  const secondWeightNum = checkedSecond;
+  const firstWeight = existing.firstWeightKg;
+  assertSecondWeightSane(firstWeight, secondWeightNum, existing.loadType, forceDirection === true);
   const netWeight = Math.abs(secondWeightNum - firstWeight);
   const finalParty = (partyName ? String(partyName).trim() : existing.partyName);
   const company = await prisma.companyProfile.findFirst({ select: { companyVehicles: true } });
@@ -682,7 +830,9 @@ export async function completeSecondWeightHandler(req: Request, res: Response) {
       ...(partyMobile ? { partyMobile: String(partyMobile).trim() } : {}),
       ...(material ? { material: String(material).trim() } : {}),
       ...(loadType ? { loadType: String(loadType).toUpperCase() } : {}),
-      ...(remarks ? { remarks: remarks.trim() } : {}),
+      ...((remarks || manualNote)
+        ? { remarks: joinRemarks(typeof remarks === 'string' ? remarks : existing.remarks, manualNote) }
+        : {}),
       secondCam1PhotoUrl,
       secondCam2PhotoUrl,
     },
@@ -1226,7 +1376,7 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
     const frame = await getCameraSnapshotWithMeta(camNum);
     // `preview=lg` for the expanded dialog, `preview=sm` (or the older
     // `preview=1`) for the grid thumbnails. Anything else - ticket capture,
-    // ANPR, the slip modal - gets the untouched full-resolution frame.
+    // the slip modal - gets the untouched full-resolution frame.
     const previewParam = String(req.query.preview ?? '');
     const previewVariant =
       previewParam === 'lg' ? 'lg' : previewParam === 'sm' || previewParam === '1' ? 'sm' : null;
@@ -1243,68 +1393,6 @@ export async function snapshotCctvHandler(req: Request, res: Response) {
     res.send(image);
   } catch (err: any) {
     res.status(502).json({ error: err.message || 'Snapshot failed' });
-  }
-}
-
-/**
- * Automatic Number Plate Recognition (ANPR / ALPR) using CCTV camera snapshot.
- */
-export async function detectPlateCctvHandler(req: Request, res: Response) {
-  const camQuery = req.query.cam || req.body?.cam;
-  const camNum = camQuery === '2' || camQuery === 2 ? 2 : 1;
-  // Keep the relay at full rate around a capture, so a follow-up scan of the
-  // same lorry reads a current frame rather than the tail of an idle trickle.
-  markViewerInterest(camNum);
-
-  try {
-    let frameBuffer: Buffer;
-    let timestamp = Date.now();
-
-    if (req.body?.image && typeof req.body.image === 'string') {
-      const cleanBase64 = req.body.image.replace(/^data:image\/\w+;base64,/, '');
-      frameBuffer = Buffer.from(cleanBase64, 'base64');
-    } else {
-      const frame = await getCameraSnapshotWithMeta(camNum);
-      if (!frame || !frame.buffer || frame.buffer.length < 500) {
-        return res.status(502).json({
-          success: false,
-          vehicleNumber: null,
-          message: `Unable to capture a fresh snapshot from Camera ${camNum}. Check camera connection.`,
-        });
-      }
-      frameBuffer = frame.buffer;
-      timestamp = frame.timestamp;
-    }
-
-    const { detectVehiclePlateFromImage } = await import('../lib/gemini.js');
-    const result = await detectVehiclePlateFromImage(frameBuffer, 'image/jpeg');
-
-    if (!result || !result.isPlateDetected || !result.vehicleNumber) {
-      return res.json({
-        success: false,
-        vehicleNumber: null,
-        confidence: null,
-        cam: camNum,
-        timestamp,
-        message: result?.notes || 'No vehicle number plate was detected in the camera frame.',
-      });
-    }
-
-    res.json({
-      success: true,
-      vehicleNumber: result.vehicleNumber,
-      confidence: result.confidence || 'HIGH',
-      plateColor: result.plateColor || null,
-      vehicleType: result.vehicleType || null,
-      rawText: result.rawText || result.vehicleNumber,
-      cam: camNum,
-      timestamp,
-    });
-  } catch (err: any) {
-    res.status(500).json({
-      success: false,
-      error: err.message || 'Plate detection encountered an internal error',
-    });
   }
 }
 
@@ -1354,8 +1442,7 @@ export async function getCctvStatusHandler(_req: Request, res: Response) {
   // The Weighbridge screen polls this every 5s and - unlike the frames - it
   // still comes to the cloud even when the cabin PC is pulling pictures off
   // its local bridge. So it is our one dependable signal that a Kata screen is
-  // open somewhere, and it is what keeps the relay warm for the auto-ANPR that
-  // fires when a lorry settles on the scale.
+  // open somewhere, and it is what keeps the relay warm for ticket capture.
   markAllViewerInterest();
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

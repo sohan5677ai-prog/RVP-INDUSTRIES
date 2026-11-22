@@ -18,7 +18,7 @@ import sharp from './sharpInstance.js';
  * bridge's MJPEG frames are written at a far higher quality than a preview
  * needs.
  *
- * Ticket capture and ANPR never come through here - they read the untouched
+ * Ticket capture never come through here - they read the untouched
  * full-resolution frame.
  */
 const VARIANTS = {

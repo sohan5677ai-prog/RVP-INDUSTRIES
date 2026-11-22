@@ -13,7 +13,7 @@ import {
  *
  * `sm` is the live grid thumbnail, `lg` the expanded full-view dialog. Only
  * matters on the cloud path - the local bridge serves whatever the camera gave
- * it, and costs nothing either way. Ticket capture and ANPR keep using the
+ * it, and costs nothing either way. Ticket capture keeps using the
  * untouched full-resolution snapshot endpoint.
  */
 export type CameraPreviewVariant = 'sm' | 'lg';

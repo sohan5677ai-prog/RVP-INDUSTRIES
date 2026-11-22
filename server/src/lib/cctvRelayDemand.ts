@@ -19,15 +19,14 @@
  *
  * What counts as a viewer:
  *   - a snapshot or stream request (someone pulling cloud frames)
- *   - an ANPR capture
  *   - a `/cctv/status` poll, which the Weighbridge screen sends every 5s
  *
  * That last one matters since the LAN-bridge change: a cabin PC now pulls its
  * frames from `127.0.0.1` and never touches this server for them, so snapshot
  * requests alone would make an actively-watched camera look idle. The status
  * poll deliberately still goes to the cloud, so it is our reliable "a Kata
- * screen is open somewhere" heartbeat - and it keeps the relay warm for the
- * auto-ANPR that fires when a lorry settles on the scale.
+ * screen is open somewhere" heartbeat - and it keeps the relay warm for ticket
+ * capture.
  */
 
 /** How long a viewer's interest keeps the relay at full rate. */

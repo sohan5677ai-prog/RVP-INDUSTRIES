@@ -1,3 +1,4 @@
+import { detectScaleFault } from './scaleFault.js';
 import { SerialPort } from 'serialport';
 import { logger } from './logger.js';
 import type { Response } from 'express';
@@ -127,26 +128,16 @@ class ServerScaleService {
     }, 6000);
 
     const raw = reading.rawText || '';
-    const upperRaw = raw.toUpperCase();
     let err = reading.error || null;
-    if (
-      !err &&
-      (upperRaw.includes('DLC') ||
-        upperRaw.includes('DLS') ||
-        upperRaw.includes('NO DL') ||
-        upperRaw.includes('NODL') ||
-        upperRaw.includes('?'))
-    ) {
-      err =
-        upperRaw.includes('DLS') && !upperRaw.includes('DLC')
-          ? 'NO DLS (Load Cell Signal Lost)'
-          : 'NO DLC (Load Cell Signal Lost)';
+    const rawFault = detectScaleFault(raw);
+    if (!err && rawFault) {
+      err = `${rawFault} (Load Cell Signal Lost)`;
     }
 
     // Track fault timestamp for DLC cooldown
     if (err) {
       this.lastFaultTime = Date.now();
-      this.lastFaultLabel = upperRaw.includes('DLS') && !upperRaw.includes('DLC') ? 'NO DLS' : 'NO DLC';
+      this.lastFaultLabel = rawFault ?? 'NO DLC';
     }
 
     const weight = Math.round(Number(reading.liveWeight) || 0);
@@ -316,25 +307,9 @@ class ServerScaleService {
     if (!clean) return;
 
     // Check for hardware faults or power surge error codes (e.g. "no dlc", "no dls", "oL", "Err 02")
-    const upper = clean.toUpperCase();
-    if (
-      upper.includes('NO DLC') ||
-      upper.includes('NODLC') ||
-      upper.includes('NO-DLC') ||
-      upper.includes('NO DLS') ||
-      upper.includes('NODLS') ||
-      upper.includes('NO-DLS') ||
-      upper.includes('NO DL') ||
-      upper.includes('NO-DL') ||
-      upper.includes('DLC') ||
-      upper.includes('DLS') ||
-      upper.includes('ERR') ||
-      upper.includes('OVERLOAD') ||
-      upper.includes('------') ||
-      upper === 'OL'
-    ) {
-      const faultLabel =
-        upper.includes('DLS') && !upper.includes('DLC') ? 'NO DLS' : 'NO DLC';
+    const lineFault = detectScaleFault(clean);
+    if (lineFault) {
+      const faultLabel = lineFault;
       logger.warn(`[scale] Hardware fault indicator received: "${clean}" (${faultLabel})`);
       this.lastFaultTime = Date.now();
       this.lastFaultLabel = faultLabel;

@@ -1,3 +1,4 @@
+import { detectScaleFault } from './scaleFault';
 import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { getScaleApiUrl } from '@/lib/api';
@@ -204,25 +205,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     setRawText(preview);
 
     // Check for hardware faults / NO DLC / NO DLS
-    const upperBuffer = bufferRef.current.toUpperCase();
-    if (
-      upperBuffer.includes('NO DLC') ||
-      upperBuffer.includes('NODLC') ||
-      upperBuffer.includes('NO-DLC') ||
-      upperBuffer.includes('NO DLS') ||
-      upperBuffer.includes('NODLS') ||
-      upperBuffer.includes('NO-DLS') ||
-      upperBuffer.includes('NO DL') ||
-      upperBuffer.includes('DLC') ||
-      upperBuffer.includes('DLS') ||
-      upperBuffer.includes('?') ||
-      upperBuffer.includes('OPEN') ||
-      upperBuffer.includes('FAIL')
-    ) {
-      const fault =
-        upperBuffer.includes('DLS') && !upperBuffer.includes('DLC')
-          ? 'NO DLS'
-          : 'NO DLC';
+    const bufferFault = detectScaleFault(bufferRef.current);
+    if (bufferFault) {
+      const fault = bufferFault;
       setError(`${fault} (Load Cell Signal Lost)`);
       setLiveWeight(null);
       setIsStable(false);
@@ -243,21 +228,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
     if (frames.length > 1) {
       for (let i = frames.length - 2; i >= 0; i--) {
         const frame = frames[i].trim();
-        const upperFrame = frame.toUpperCase();
-        if (
-          upperFrame.includes('?') ||
-          upperFrame.includes('DLC') ||
-          upperFrame.includes('DLS') ||
-          upperFrame.includes('NO DL') ||
-          upperFrame.includes('NODL') ||
-          upperFrame.includes('ERR') ||
-          upperFrame.includes('OPEN') ||
-          upperFrame.includes('FAIL')
-        ) {
-          const fault =
-            upperFrame.includes('DLS') && !upperFrame.includes('DLC')
-              ? 'NO DLS'
-              : 'NO DLC';
+        const frameFault = detectScaleFault(frame);
+        if (frameFault) {
+          const fault = frameFault;
           setError(`${fault} (Load Cell Signal Lost)`);
           setLiveWeight(null);
           setIsStable(false);
@@ -564,18 +537,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
           if (!portRef.current) {
             if (data.isConnected) {
-              const rawUpper = (data.rawText || '').toUpperCase();
-              const hasFault = Boolean(
-                data.error ||
-                  rawUpper.includes('DLC') ||
-                  rawUpper.includes('DLS') ||
-                  rawUpper.includes('NO DL') ||
-                  rawUpper.includes('?')
-              );
-              const faultName =
-                rawUpper.includes('DLS') && !rawUpper.includes('DLC')
-                  ? 'NO DLS'
-                  : 'NO DLC';
+              const rawFault = detectScaleFault(data.rawText);
+              const hasFault = Boolean(data.error || rawFault);
+              const faultName = rawFault ?? 'NO DLC';
 
               if (hasFault) {
                 setError(data.error || faultName);
@@ -628,18 +592,9 @@ export function ScaleProvider({ children }: { children: ReactNode }) {
 
           if (!portRef.current) {
             if (data.isConnected) {
-              const rawUpper = (data.rawText || '').toUpperCase();
-              const hasFault = Boolean(
-                data.error ||
-                  rawUpper.includes('DLC') ||
-                  rawUpper.includes('DLS') ||
-                  rawUpper.includes('NO DL') ||
-                  rawUpper.includes('?')
-              );
-              const faultName =
-                rawUpper.includes('DLS') && !rawUpper.includes('DLC')
-                  ? 'NO DLS'
-                  : 'NO DLC';
+              const rawFault = detectScaleFault(data.rawText);
+              const hasFault = Boolean(data.error || rawFault);
+              const faultName = rawFault ?? 'NO DLC';
 
               if (hasFault) {
                 setError(data.error || faultName);

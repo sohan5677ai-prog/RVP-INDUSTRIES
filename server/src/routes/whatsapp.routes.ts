@@ -3,6 +3,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { requireRole } from '../middleware/auth.js';
 import {
   listWhatsAppLogs,
+  listWhatsAppDeliveryFailures,
   listOwnerWhatsAppJobs,
   runOwnerWhatsAppJobNow,
   updateOwnerWhatsAppJobSchedule,
@@ -37,6 +38,8 @@ import {
 const router = Router();
 
 router.get('/whatsapp/logs', asyncHandler(listWhatsAppLogs));
+// What didn't land, for the Settings -> WhatsApp panel.
+router.get('/whatsapp/delivery-failures', asyncHandler(listWhatsAppDeliveryFailures));
 
 // Owner daily digests (Settings -> WhatsApp -> Owner Daily Messages): list the
 // 5 toggleable jobs with their current on/off state + last-sent time, and let

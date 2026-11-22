@@ -129,13 +129,19 @@ export async function generateWeighbridgeSlipJpeg(ticket: SlipTicketData): Promi
   const WIDTH = 1050;
   const HEIGHT = 740;
 
-  const dateObj = ticket.createdAt ? new Date(ticket.createdAt) : new Date();
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const year = dateObj.getFullYear();
-  const formattedDate = `${day}-${month}-${year}`;
+  const rawDate = ticket.secondWeighedAt || ticket.paidAt || ticket.firstWeighedAt || ticket.createdAt || new Date();
+  const dateObj = typeof rawDate === 'string' ? new Date(rawDate) : (rawDate instanceof Date ? rawDate : new Date(rawDate));
+  const safeDate = isNaN(dateObj.getTime()) ? new Date() : dateObj;
 
-  const formattedTime = dateObj.toLocaleTimeString('en-IN', {
+  const formattedDate = safeDate.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).replace(/\//g, '-');
+
+  const formattedTime = safeDate.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',

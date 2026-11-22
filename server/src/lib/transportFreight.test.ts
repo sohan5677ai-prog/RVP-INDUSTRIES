@@ -4,6 +4,7 @@ import {
   withAssociationFee,
   readCostItems,
   ASSOCIATION_FEE_LABEL,
+  calcAssociationFee,
 } from './transportFreight.js';
 
 describe('freightDestinationKey', () => {
@@ -97,5 +98,30 @@ describe('readCostItems', () => {
     expect(readCostItems(null)).toEqual([]);
     expect(readCostItems({})).toEqual([]);
     expect(readCostItems('[]')).toEqual([]);
+  });
+});
+
+describe('calcAssociationFee', () => {
+  it('charges ₹200 for loads below 30 tons', () => {
+    expect(calcAssociationFee(300, 24000)).toBe(200);
+    expect(calcAssociationFee(300, 29000)).toBe(200);
+    expect(calcAssociationFee(300, 29999)).toBe(200);
+  });
+
+  it('charges ₹300 for loads of 30 tons and above', () => {
+    expect(calcAssociationFee(300, 30000)).toBe(300);
+    expect(calcAssociationFee(300, 35000)).toBe(300);
+    expect(calcAssociationFee(300, 40000)).toBe(300);
+  });
+
+  it('returns 0 for agencies that do not carry an association fee', () => {
+    expect(calcAssociationFee(0, 24000)).toBe(0);
+    expect(calcAssociationFee(0, 35000)).toBe(0);
+  });
+
+  it('falls back to the base fee when weight is not known', () => {
+    expect(calcAssociationFee(300, null)).toBe(300);
+    expect(calcAssociationFee(300, 0)).toBe(300);
+    expect(calcAssociationFee(300, undefined)).toBe(300);
   });
 });

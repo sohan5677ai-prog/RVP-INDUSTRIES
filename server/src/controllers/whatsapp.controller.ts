@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type { WaLanguage } from '@prisma/client';
+import type { WaDelivery, WaLanguage } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
@@ -1231,8 +1231,29 @@ type StatusEvent = { providerId: string | null; phone: string | null; status: st
 
 /** Terminal states that mean the recipient did NOT get the message. */
 const DELIVERY_FAILED = new Set(['failed', 'undelivered', 'rejected', 'error']);
-/** States that mean it's still on track - nothing to record beyond the existing SENT. */
+/** States that mean it's still on track - the send itself stands. */
 const DELIVERY_OK = new Set(['sent', 'accepted', 'delivered', 'read']);
+
+/**
+ * Receipt word -> the WaDelivery we file. 'sent'/'accepted' are in DELIVERY_OK
+ * but map to nothing: they only repeat what the send call already told us, and
+ * writing them would overwrite a DELIVERED that arrived first (Fast2SMS does
+ * not promise ordering).
+ */
+const DELIVERY_STATE: Record<string, WaDelivery> = {
+  delivered: 'DELIVERED',
+  read: 'READ',
+  ...Object.fromEntries([...DELIVERY_FAILED].map((w) => [w, 'UNDELIVERED' as const])),
+};
+
+/**
+ * How far along a receipt is. A later callback may only move a row FORWARD:
+ * 'delivered' and 'read' can arrive out of order, and a redelivered webhook can
+ * arrive hours late, so without this a stale 'delivered' would quietly undo a
+ * 'read' - and worse, undo an UNDELIVERED and hide the failure we added all
+ * this for.
+ */
+const DELIVERY_RANK: Record<WaDelivery, number> = { DELIVERED: 1, READ: 2, UNDELIVERED: 3 };
 
 function asRecord(x: unknown): Record<string, unknown> | null {
   return x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>) : null;
@@ -1331,12 +1352,14 @@ function extractStatusEvents(body: unknown): StatusEvent[] {
  * often won't match - fall back to the most recent still-SENT outbound message
  * to that number.
  */
+const STATUS_ROW_FIELDS = { id: true, template: true, phone: true, delivery: true } as const;
+
 async function findLogRowForStatus(ev: StatusEvent) {
   if (ev.providerId) {
     const byId = await prisma.whatsAppLog.findFirst({
       where: { direction: 'OUTBOUND', providerId: ev.providerId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, template: true, phone: true },
+      select: STATUS_ROW_FIELDS,
     });
     if (byId) return byId;
   }
@@ -1346,29 +1369,57 @@ async function findLogRowForStatus(ev: StatusEvent) {
   return prisma.whatsAppLog.findFirst({
     where: { direction: 'OUTBOUND', phone, status: 'SENT', createdAt: { gte: since } },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, template: true, phone: true },
+    select: STATUS_ROW_FIELDS,
   });
 }
 
-/** Record a delivery failure against the originating log row. Never throws. */
+/**
+ * File a delivery receipt against the originating log row. Never throws - this
+ * runs after the webhook has already been acknowledged.
+ *
+ * A failure writes BOTH `status: 'FAILED'` (as it always did - every existing
+ * reader keys off that, and it reopens the double-send guards so the message
+ * can be sent again) and the delivery columns. A success touches only the
+ * delivery columns, so `status` keeps meaning "handed to Fast2SMS" and the
+ * guards keep matching.
+ */
 async function applyStatusEvent(ev: StatusEvent) {
-  if (!DELIVERY_FAILED.has(ev.status)) {
-    // 'delivered'/'read' would be worth storing, but WaStatus has no state for
-    // them and adding one means a schema change; SENT already covers the happy path.
+  const state = DELIVERY_STATE[ev.status];
+  if (!state) {
     if (!DELIVERY_OK.has(ev.status)) logger.warn(`[whatsapp] unrecognised delivery status "${ev.status}"`);
     return;
   }
+
+  const failed = state === 'UNDELIVERED';
+  const reason = failed ? `Delivery failed (${ev.status})${ev.error ? `: ${ev.error}` : ''}` : null;
+
   const row = await findLogRowForStatus(ev);
-  const reason = `Delivery failed (${ev.status})${ev.error ? `: ${ev.error}` : ''}`;
   if (!row) {
-    logger.warn(`[whatsapp] ${reason} - no matching log row (id=${ev.providerId}, phone=${ev.phone})`);
+    const note = reason ?? `Delivery receipt "${ev.status}"`;
+    logger.warn(`[whatsapp] ${note} - no matching log row (id=${ev.providerId}, phone=${ev.phone})`);
     return;
   }
+
+  // Forward only. See DELIVERY_RANK.
+  if (row.delivery && DELIVERY_RANK[row.delivery] >= DELIVERY_RANK[state]) return;
+
+  const now = new Date();
   await prisma.whatsAppLog.update({
     where: { id: row.id },
-    data: { status: 'FAILED', errorMessage: reason },
+    data: {
+      delivery: state,
+      deliveryError: reason,
+      // 'read' implies delivered, and the delivered receipt is the one that can
+      // go missing, so stamp both rather than leaving a read message undated.
+      ...(state === 'DELIVERED' ? { deliveredAt: now } : {}),
+      ...(state === 'READ' ? { readAt: now, deliveredAt: row.delivery === 'DELIVERED' ? undefined : now } : {}),
+      ...(failed ? { status: 'FAILED' as const, errorMessage: reason } : {}),
+    },
   });
-  logger.error(`[whatsapp] ${row.template ?? 'message'} to ${row.phone} - ${reason}`);
+
+  const what = `${row.template ?? 'message'} to ${row.phone}`;
+  if (failed) logger.error(`[whatsapp] ${what} - ${reason}`);
+  else logger.info(`[whatsapp] ${what} - ${state.toLowerCase()}`);
 }
 
 /** A delivery receipt we know how to interpret. "received" is NOT one - it means inbound. */
@@ -1613,6 +1664,65 @@ export async function listWhatsAppLogs(req: Request, res: Response) {
     take,
   });
   res.json(logs);
+}
+
+/**
+ * Settings -> WhatsApp -> "Messages that didn't land": every outbound message in
+ * the window that either never left (status FAILED from the send call) or left
+ * and came back undelivered (delivery UNDELIVERED from the receipt webhook).
+ *
+ * `receiptsSeen` is the honest part. Delivery receipts only exist if Fast2SMS is
+ * configured to POST `status_update` to our webhook; if it isn't, every row sits
+ * at delivery=null forever and an empty failure list means NOTHING. So the count
+ * of rows that DID get a receipt in the window goes back with the list, and the
+ * panel says "receipts aren't arriving" rather than a reassuring green tick.
+ */
+export async function listWhatsAppDeliveryFailures(req: Request, res: Response) {
+  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const [rows, receiptsSeen, sentCount] = await Promise.all([
+    prisma.whatsAppLog.findMany({
+      where: {
+        direction: 'OUTBOUND',
+        createdAt: { gte: since },
+        OR: [{ status: 'FAILED' }, { delivery: 'UNDELIVERED' }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        createdAt: true,
+        phone: true,
+        template: true,
+        status: true,
+        errorMessage: true,
+        delivery: true,
+        deliveryError: true,
+        body: true,
+      },
+    }),
+    prisma.whatsAppLog.count({
+      where: { direction: 'OUTBOUND', createdAt: { gte: since }, delivery: { not: null } },
+    }),
+    prisma.whatsAppLog.count({ where: { direction: 'OUTBOUND', createdAt: { gte: since } } }),
+  ]);
+
+  res.json({
+    days,
+    sentCount,
+    receiptsSeen,
+    failures: rows.map((r) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      // One line to show in the table: the delivery reason when WhatsApp gave
+      // one, otherwise whatever the send call failed with.
+      reason: r.deliveryError ?? r.errorMessage ?? 'Unknown',
+      // "never left us" vs "left us and bounced" - different things to fix.
+      stage: r.delivery === 'UNDELIVERED' ? ('UNDELIVERED' as const) : ('SEND_FAILED' as const),
+      body: (r.body ?? '').slice(0, 300),
+    })),
+  });
 }
 
 const REMINDER_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4h - a double-click must not spam the party

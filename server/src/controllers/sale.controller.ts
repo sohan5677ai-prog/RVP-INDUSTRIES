@@ -389,7 +389,7 @@ export async function updateDispatchFreightCosts(req: Request, res: Response) {
   // deleted the ₹300 line - or who saved a form rendered before the fee was
   // configured - would quietly settle the trip without it. Clearing the list
   // entirely (null) is likewise not a way around the fee.
-  const associationFee = await associationFeePerTrip(dispatch.transportId);
+  const associationFee = await associationFeePerTrip(dispatch.transportId, dispatch.weightKg);
   const deductions =
     data.freightDeductions !== undefined
       ? withAssociationFee(readCostItems(data.freightDeductions ?? []), associationFee)
@@ -974,7 +974,7 @@ export async function dispatchSaleOrder(req: Request, res: Response) {
   // therefore the kind of charge that goes missing on a busy afternoon. It is
   // not offered as a choice: the line goes on here and is re-asserted on every
   // edit, so a saved freight-cost form cannot drop it.
-  const associationFee = await associationFeePerTrip(transportRecord?.id ?? data.transportId ?? null);
+  const associationFee = await associationFeePerTrip(transportRecord?.id ?? data.transportId ?? null, weightKg);
   const freightDeductionsIn = withAssociationFee(
     readCostItems(data.freightDeductions ?? []),
     associationFee,

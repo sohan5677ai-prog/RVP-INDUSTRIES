@@ -11,7 +11,7 @@ import { TransportLedger, type TransportLedgerTrip } from '@/components/Transpor
 import type { ExportColumn } from '@/lib/export';
 import type { SaleOrder, SaleProduct, CompanyProfile, Transport, Payment } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { calcHamali, calcKataFee, companyVehicleNumbers, pappuLoadingHamali } from '@/lib/calc';
+import { calcHamali, calcKataFee, calcAssociationFee, companyVehicleNumbers, pappuLoadingHamali } from '@/lib/calc';
 import { productDescription } from '@/lib/productNames';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -190,6 +190,29 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           (Array.isArray(raw) ? raw : [])
             .map((x: any) => ({ label: String(x?.label ?? 'Other'), amount: Number(x?.amount) || 0 }))
             .filter((x) => x.amount !== 0);
+
+        const assocBaseFee = Number(transportObj?.associationFeePerTrip || 0);
+        const isMadhupuri = !!transportObj && transportObj.name.toLowerCase().includes('madhupuri');
+        const hasAssocFee = assocBaseFee > 0 || isMadhupuri;
+        const assocFee = hasAssocFee ? calcAssociationFee(assocBaseFee || 300, d.weightKg) : 0;
+
+        const rawDeductions = toCostItems((d as any).freightDeductions);
+        let otherDeductions: { label: string; amount: number }[] = rawDeductions;
+        if (hasAssocFee) {
+          const assocLabel = 'Lorry association fee';
+          let foundAssoc = false;
+          otherDeductions = rawDeductions.map((item) => {
+            if (item.label.trim().toLowerCase() === 'lorry association fee') {
+              foundAssoc = true;
+              return { label: assocLabel, amount: assocFee };
+            }
+            return item;
+          });
+          if (!foundAssoc && assocFee > 0) {
+            otherDeductions = [...otherDeductions, { label: assocLabel, amount: assocFee }];
+          }
+        }
+
         return {
           id: d.id,
           date: d.dispatchDate,
@@ -212,7 +235,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           gcEnabled: o.buyer?.lorryReceiptEnabled ?? false,
           hamali,
           kata,
-          otherDeductions: toCostItems((d as any).freightDeductions),
+          otherDeductions,
           extraCosts: toCostItems((d as any).freightAdditions),
         };
       })

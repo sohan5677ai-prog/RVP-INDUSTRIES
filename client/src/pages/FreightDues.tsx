@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { api, getErrorMessage } from '@/lib/api';
 import type { Purchase, SaleOrder, Payment, CompanyProfile, SaleStatus, HuskTransfer, ShellTransfer, StockTransfer, LorryConfirmation } from '@/lib/types';
 import { rupees, shortDate } from '@/lib/format';
-import { calcHamali, calcKataFee, companyVehicleNumbers, findCompanyVehicle, normalizeLorryNumber, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
+import { calcHamali, calcKataFee, calcAssociationFee, companyVehicleNumbers, findCompanyVehicle, normalizeLorryNumber, pappuLoadingHamali, qualityAdjustmentFreight } from '@/lib/calc';
 import { ownerPayeeOf } from '@/lib/transportPayee';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1599,7 +1599,25 @@ export default function FreightDuesPage() {
       const transport = customRetention != null ? customRetention : defaultTransport;
 
       const additions: FreightCostItem[] = Array.isArray((d as any).freightAdditions) ? (d as any).freightAdditions : [];
-      const deductions: FreightCostItem[] = Array.isArray((d as any).freightDeductions) ? (d as any).freightDeductions : [];
+      const rawDeductions: FreightCostItem[] = Array.isArray((d as any).freightDeductions) ? (d as any).freightDeductions : [];
+      const assocBaseFee = Number(d.transport?.associationFeePerTrip || 0);
+      const isMadhupuri = !!d.transport && d.transport.name.toLowerCase().includes('madhupuri');
+      const hasAssocFee = assocBaseFee > 0 || isMadhupuri;
+      const assocFee = hasAssocFee ? calcAssociationFee(assocBaseFee || 300, d.weightKg) : 0;
+      let deductions: FreightCostItem[] = rawDeductions;
+      if (hasAssocFee) {
+        let foundAssoc = false;
+        deductions = rawDeductions.map((item) => {
+          if (item.label.trim().toLowerCase() === 'lorry association fee') {
+            foundAssoc = true;
+            return { label: 'Lorry association fee', amount: assocFee };
+          }
+          return item;
+        });
+        if (!foundAssoc && assocFee > 0) {
+          deductions = [...deductions, { label: 'Lorry association fee', amount: assocFee }];
+        }
+      }
       const totalAdditions = round2(additions.reduce((s, a) => s + (Number(a.amount) || 0), 0));
       const totalOtherDeductions = round2(deductions.reduce((s, a) => s + (Number(a.amount) || 0), 0));
       const net = round2(freight + totalAdditions - (hamali + kata + transport + totalOtherDeductions));

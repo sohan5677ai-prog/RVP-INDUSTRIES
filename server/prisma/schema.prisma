@@ -2390,6 +2390,21 @@ enum WaStatus {
   RECEIVED // inbound event captured by the webhook
 }
 
+// What WhatsApp said happened to a message AFTER Fast2SMS accepted it, read off
+// the `status_update` webhook. Deliberately a SEPARATE field from WaStatus:
+// `status` answers "did we hand it over", this answers "did it land", and they
+// are not the same question. Several double-send guards key off
+// `status: 'SENT'` (sendDriverLocationIfNotSent, lastSentAt, the owner-digest
+// dedupe) - folding delivery into WaStatus would make those guards stop
+// matching the moment a receipt arrived, and the driver would get a second
+// copy of his location. Null = no receipt seen yet, which is also every row
+// written before this field existed.
+enum WaDelivery {
+  DELIVERED // handset acknowledged it
+  READ // opened (only when the recipient has read receipts on)
+  UNDELIVERED // Meta gave up - see deliveryError
+}
+
 // Audit trail of every WhatsApp message sent (or received) via Fast2SMS.
 // Mirrors EmailLog: one row per attempt, success or failure, so the UI can
 // show delivery state and offer a resend.
@@ -2608,25 +2623,34 @@ model WishBroadcast {
 }
 
 model WhatsAppLog {
-  id           String      @id @default(cuid())
-  direction    WaDirection @default(OUTBOUND)
-  phone        String? // counterparty number (recipient for outbound, sender for inbound)
-  template     String? // template key, e.g. 'PO_CREATED' (outbound only)
-  language     WaLanguage? // which language copy was sent (outbound only)
-  body         String? // rendered variable values (outbound) / raw text (inbound)
-  mediaUrl     String?
-  mediaType    String?
+  id            String      @id @default(cuid())
+  direction     WaDirection @default(OUTBOUND)
+  phone         String? // counterparty number (recipient for outbound, sender for inbound)
+  template      String? // template key, e.g. 'PO_CREATED' (outbound only)
+  language      WaLanguage? // which language copy was sent (outbound only)
+  body          String? // rendered variable values (outbound) / raw text (inbound)
+  mediaUrl      String?
+  mediaType     String?
   // Loose link back to the record that triggered the message, e.g.
   // ('PO', purchaseOrderId) or ('REMINDER', partyId). No FK - logs outlive edits.
-  relatedType  String?
-  relatedId    String?
-  status       WaStatus
-  errorMessage String?
-  providerId   String? // Fast2SMS request/message id, when returned
-  createdAt    DateTime    @default(now())
+  relatedType   String?
+  relatedId     String?
+  status        WaStatus
+  errorMessage  String?
+  providerId    String? // Fast2SMS request/message id, when returned
+  createdAt     DateTime    @default(now())
+  // Delivery receipts. Null until the `status_update` webhook says otherwise -
+  // and it stays null forever if Fast2SMS is not configured to post them, so
+  // "no receipt" never means "not delivered".
+  delivery      WaDelivery?
+  deliveredAt   DateTime?
+  readAt        DateTime?
+  deliveryError String? // Meta's reason when delivery is UNDELIVERED
 
   @@index([relatedType, relatedId])
   @@index([createdAt])
+  // Powers the "what didn't land" panel without scanning the whole log.
+  @@index([delivery, createdAt])
 }
 
 // WAITING -> the lorry has been booked on WhatsApp but nothing has gone out on

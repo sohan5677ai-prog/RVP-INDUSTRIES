@@ -237,12 +237,17 @@ function generateSlipHtml(ticket) {
     netWeight = firstWeight;
   }
 
-  const ticketDate = new Date(ticket.createdAt);
-  const day = String(ticketDate.getDate()).padStart(2, '0');
-  const month = String(ticketDate.getMonth() + 1).padStart(2, '0');
-  const year = ticketDate.getFullYear();
-  const formattedDate = `${day}-${month}-${year}`;
-  const formattedTime = ticketDate.toLocaleTimeString('en-IN', {
+  const rawDate = ticket.secondWeighedAt || ticket.paidAt || ticket.firstWeighedAt || ticket.createdAt || new Date();
+  const ticketDate = typeof rawDate === 'string' ? new Date(rawDate) : (rawDate instanceof Date ? rawDate : new Date(rawDate));
+  const safeDate = isNaN(ticketDate.getTime()) ? new Date() : ticketDate;
+  const formattedDate = safeDate.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).replace(/\//g, '-');
+  const formattedTime = safeDate.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
   }).toUpperCase();
 

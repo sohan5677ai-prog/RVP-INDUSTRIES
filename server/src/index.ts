@@ -15,6 +15,7 @@ import { requireMediaRead, requireMediaWrite } from "./middleware/mediaAuth.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requestContextMiddleware } from "./lib/requestContext.js";
 import { prisma } from "./lib/prisma.js";
+import { calcAssociationFee } from "./lib/calc.js";
 
 // Fail fast if the JWT secret isn't configured, rather than booting an insecure
 // server that only errors on the first login.
@@ -345,6 +346,38 @@ app.listen(port, "0.0.0.0", () => {
           data: { associationFeePerTrip: 300 },
         });
         logger.info(`[boot] seeded ${lanes.length} agreed trip rates and the ₹300 association fee for Madhupuri Transport`);
+      }
+
+      // Ensure existing dispatches for transports with association fee
+      // (e.g. Madhupuri) reflect the tiered metric:
+      // Below 30 tons (< 30,000 kg): ₹200; 30 tons and above (>= 30,000 kg): ₹300.
+      if (madhupuri) {
+        const baseFee = Number(madhupuri.associationFeePerTrip || 300);
+        const dispatches = await prisma.saleDispatch.findMany({
+          where: { transportId: madhupuri.id },
+          select: { id: true, weightKg: true, freightDeductions: true },
+        });
+        for (const d of dispatches) {
+          const expectedFee = calcAssociationFee(baseFee, d.weightKg);
+          const raw = Array.isArray(d.freightDeductions) ? (d.freightDeductions as any[]) : [];
+          let changed = false;
+          const updated = raw.map((item) => {
+            if (String(item.label || '').trim().toLowerCase() === 'lorry association fee') {
+              if (Number(item.amount) !== expectedFee) {
+                changed = true;
+                return { label: 'Lorry association fee', amount: expectedFee };
+              }
+            }
+            return item;
+          });
+          if (changed) {
+            await prisma.saleDispatch.update({
+              where: { id: d.id },
+              data: { freightDeductions: updated as any },
+            });
+            logger.info(`[boot] updated association fee for dispatch ${d.id} (${d.weightKg} kg) -> ₹${expectedFee}`);
+          }
+        }
       }
     } catch(e) {
       logger.error(e);

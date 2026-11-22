@@ -161,7 +161,13 @@ router.use(requireAuth);
 router.use((req, _res, next) => {
   if (req.user?.scope !== 'KATA_CABIN') return next();
   const isWeighbridge = req.path === '/weighbridge' || req.path.startsWith('/weighbridge/');
-  const isReadonlyCabinData = req.method === 'GET' && (req.path === '/parties' || req.path === '/company-profile' || req.path === '/settings/company');
+  const isReadonlyCabinData = req.method === 'GET' && (
+    req.path === '/parties' ||
+    req.path === '/company-profile' ||
+    req.path === '/settings/company' ||
+    req.path === '/gps/arrivals' ||
+    req.path.startsWith('/gps/arrivals')
+  );
   if (!isWeighbridge && !isReadonlyCabinData) {
     return next(new HttpError(403, 'This device is limited to Kata Cabin operations'));
   }

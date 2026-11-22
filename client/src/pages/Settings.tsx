@@ -127,6 +127,7 @@ export default function Settings() {
 
         <TabsContent value="whatsapp" className="focus-visible:outline-none focus-visible:ring-0 space-y-4">
           <WhatsAppSection qc={qc} />
+          <DeliveryFailuresSection />
           <OwnerDigestsSection qc={qc} />
         </TabsContent>
 
@@ -1486,3 +1487,138 @@ function TaxproGspSection({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
   );
 }
 
+
+// --- What didn't land: send errors + WhatsApp delivery receipts ----------------
+
+interface DeliveryFailureRow {
+  id: string;
+  createdAt: string;
+  phone: string | null;
+  template: string | null;
+  reason: string;
+  stage: 'SEND_FAILED' | 'UNDELIVERED';
+  body: string;
+}
+
+interface DeliveryFailuresResponse {
+  days: number;
+  sentCount: number;
+  receiptsSeen: number;
+  failures: DeliveryFailureRow[];
+}
+
+const fmtFailedAt = (iso: string) =>
+  new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+/**
+ * Two different failures in one table, because to the person reading it they are
+ * the same problem - the message isn't on the phone.
+ *
+ *   SEND_FAILED  Fast2SMS refused it (bad template id, 503, no credits).
+ *   UNDELIVERED  Fast2SMS took it and WhatsApp couldn't deliver it.
+ *
+ * The second kind is only ever visible if the `status_update` webhook is wired
+ * up at Fast2SMS, so an empty table is not proof of anything on its own - hence
+ * the receipts banner above it.
+ */
+function DeliveryFailuresSection() {
+  const [days, setDays] = useState('7');
+  const { data, isLoading } = useQuery({
+    queryKey: ['whatsapp-delivery-failures', days],
+    queryFn: () => api<DeliveryFailuresResponse>(`/whatsapp/delivery-failures?days=${days}`),
+  });
+
+  const rows = data?.failures ?? [];
+  const receiptsWired = (data?.receiptsSeen ?? 0) > 0;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+        <div>
+          <CardTitle className="text-base">Messages that didn&rsquo;t land</CardTitle>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Messages Fast2SMS refused, plus the ones WhatsApp accepted and then failed to deliver.
+          </p>
+        </div>
+        <Select value={days} onValueChange={setDays}>
+          <SelectTrigger className="w-[130px] h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1" className="text-xs">Last 24 hours</SelectItem>
+            <SelectItem value="7" className="text-xs">Last 7 days</SelectItem>
+            <SelectItem value="30" className="text-xs">Last 30 days</SelectItem>
+          </SelectContent>
+        </Select>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading&hellip;
+          </div>
+        ) : (
+          <>
+            {!receiptsWired && (
+              <p className="text-[11px] rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                No delivery receipts have arrived in this window, so undelivered messages cannot be
+                detected &mdash; only outright send errors are listed below. Turn on the{' '}
+                <span className="font-medium">status_update</span> webhook for this number in the
+                Fast2SMS panel, pointed at the same URL as incoming messages.
+              </p>
+            )}
+
+            {rows.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {data?.sentCount
+                  ? `No failures in the last ${data.days} day(s) out of ${data.sentCount} message(s).`
+                  : 'No messages sent in this window.'}
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-1.5 pr-3 font-medium">When</th>
+                      <th className="py-1.5 pr-3 font-medium">To</th>
+                      <th className="py-1.5 pr-3 font-medium">Message</th>
+                      <th className="py-1.5 pr-3 font-medium">Stage</th>
+                      <th className="py-1.5 font-medium">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.id} className="border-b last:border-0 align-top">
+                        <td className="py-1.5 pr-3 whitespace-nowrap">{fmtFailedAt(r.createdAt)}</td>
+                        <td className="py-1.5 pr-3 whitespace-nowrap">{r.phone ?? '—'}</td>
+                        <td className="py-1.5 pr-3">{r.template ?? '—'}</td>
+                        <td className="py-1.5 pr-3 whitespace-nowrap">
+                          <span
+                            className={
+                              r.stage === 'UNDELIVERED'
+                                ? 'rounded px-1.5 py-0.5 bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200'
+                                : 'rounded px-1.5 py-0.5 bg-red-100 text-red-900 dark:bg-red-950/60 dark:text-red-200'
+                            }
+                          >
+                            {r.stage === 'UNDELIVERED' ? 'Not delivered' : 'Never sent'}
+                          </span>
+                        </td>
+                        <td className="py-1.5 text-muted-foreground break-words">{r.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {receiptsWired && (
+              <p className="text-[11px] text-muted-foreground">
+                {data?.receiptsSeen} of {data?.sentCount} message(s) in this window have a delivery
+                receipt. The rest are still waiting on one &mdash; WhatsApp does not always send it.
+              </p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

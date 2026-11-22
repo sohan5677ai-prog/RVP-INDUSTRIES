@@ -288,18 +288,32 @@ export async function matchTicketHandler(req: Request, res: Response) {
  * Used primarily for Pappu dispatches before moisture absorption.
  */
 export async function recordInternalWeightHandler(req: Request, res: Response) {
-  const { vehicleNumber, partyName, weightKg, material } = req.body;
+  const { vehicleNumber, partyName, weightKg, netWeightKg, material } = req.body;
 
   if (!vehicleNumber?.trim()) {
     throw new HttpError(400, 'Vehicle number is required');
   }
-  const weight = Number(weightKg);
-  if (!weight || weight <= 0) {
-    throw new HttpError(400, 'A valid weight greater than 0 kg is required');
-  }
 
   const cleanVehNo = vehicleNumber.trim().toUpperCase();
   const cleanParty = partyName?.trim() || null;
+
+  // Compute or validate weight - prioritize explicit netWeightKg if passed
+  let finalWeight = Number(netWeightKg ?? weightKg);
+
+  // If netWeightKg was not explicitly provided, check if this vehicle has an active pending 1st weight
+  if (netWeightKg == null) {
+    const pending = await prisma.weighbridgeTicket.findFirst({
+      where: { vehicleNumber: cleanVehNo, status: 'PENDING_SECOND' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (pending && pending.firstWeightKg != null && pending.firstWeightKg > 0) {
+      finalWeight = Math.abs(finalWeight - pending.firstWeightKg);
+    }
+  }
+
+  if (!finalWeight || finalWeight <= 0) {
+    throw new HttpError(400, 'A valid net weight greater than 0 kg is required');
+  }
 
   let partyId: string | null = null;
   if (cleanParty) {
@@ -315,7 +329,7 @@ export async function recordInternalWeightHandler(req: Request, res: Response) {
       vehicleNumber: cleanVehNo,
       partyName: cleanParty,
       partyId,
-      weightKg: Math.round(weight),
+      weightKg: Math.round(finalWeight),
       material: material?.trim() || 'PAPPU',
       weighedAt: new Date(),
     },

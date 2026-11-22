@@ -244,6 +244,25 @@ export function calcKataFee(netKg: number, isCompanyVehicle: boolean = false): n
   return 200;
 }
 
+/**
+ * Lorry association fee based on trip tonnage.
+ *
+ * Applicable to transport agencies carrying an association fee (e.g. Madhupuri):
+ *  - Below 30 tons (< 30,000 kg): ₹200
+ *  - 30 tons and above (>= 30,000 kg): ₹300 (or configured base fee if higher)
+ *
+ * Returns 0 if baseFee <= 0.
+ * Falls back to baseFee (or 300) if weightKg is not provided or <= 0.
+ */
+export function calcAssociationFee(baseFee: number, weightKg?: number | null): number {
+  if (baseFee <= 0) return 0;
+  if (weightKg != null && weightKg > 0) {
+    const tonnes = weightKg / 1000;
+    return tonnes < 30 ? 200 : Math.max(baseFee, 300);
+  }
+  return baseFee > 0 ? baseFee : 300;
+}
+
 /** The company's share of the hamali charge (the half we actually bear). */
 export function companyHamaliShare(hamaliCharge: number, isCompanyVehicle: boolean = false): number {
   if (isCompanyVehicle) return hamaliCharge;

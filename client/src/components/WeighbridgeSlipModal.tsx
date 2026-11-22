@@ -99,13 +99,18 @@ export function renderTicketPrintHtml(
     }
   }
 
-  const ticketDateObj = ticket.createdAt ? new Date(ticket.createdAt) : new Date();
-  const day = String(ticketDateObj.getDate()).padStart(2, '0');
-  const month = String(ticketDateObj.getMonth() + 1).padStart(2, '0');
-  const year = ticketDateObj.getFullYear();
-  const formattedDate = `${day}-${month}-${year}`;
+  const rawDate = ticket.secondWeighedAt || ticket.paidAt || ticket.firstWeighedAt || ticket.createdAt || new Date();
+  const ticketDateObj = typeof rawDate === 'string' ? new Date(rawDate) : (rawDate instanceof Date ? rawDate : new Date(rawDate));
+  const safeDate = isNaN(ticketDateObj.getTime()) ? new Date() : ticketDateObj;
+  const formattedDate = safeDate.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).replace(/\//g, '-');
 
-  const formattedTime = ticketDateObj.toLocaleTimeString('en-IN', {
+  const formattedTime = safeDate.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -627,11 +632,23 @@ export default function WeighbridgeSlipModal({
     }
   }
 
-  const ticketDateObj = ticket?.createdAt ? new Date(ticket.createdAt) : new Date();
-  const day = String(ticketDateObj.getDate()).padStart(2, '0');
-  const month = String(ticketDateObj.getMonth() + 1).padStart(2, '0');
-  const year = ticketDateObj.getFullYear();
-  const formattedDate = `${day}-${month}-${year}`;
+  const rawDate = ticket?.secondWeighedAt || ticket?.paidAt || ticket?.firstWeighedAt || ticket?.createdAt || new Date();
+  const ticketDateObj = typeof rawDate === 'string' ? new Date(rawDate) : (rawDate instanceof Date ? rawDate : new Date(rawDate));
+  const safeDate = isNaN(ticketDateObj.getTime()) ? new Date() : ticketDateObj;
+  const formattedDate = safeDate.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).replace(/\//g, '-');
+
+  const formattedTime = safeDate.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  }).toUpperCase();
 
   const isKnm = ticket
     ? isVehicleExempt(ticket.vehicleNumber, _companyProfile?.companyVehicles) ||
@@ -645,13 +662,6 @@ export default function WeighbridgeSlipModal({
     ticket?.transferDirection ||
     (ticket?.partyName && (ticket.partyName.includes('→') || ticket.partyName.includes('->') || /cold|storage|godown/i.test(ticket.partyName)))
   );
-
-  const formattedTime = ticketDateObj.toLocaleTimeString('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  }).toUpperCase();
 
   const formatWeight = (val: number | null | undefined): string => {
     if (val == null || isNaN(val)) return '';

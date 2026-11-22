@@ -104,6 +104,7 @@ const MATERIALS = [
   'NALLA POKKULU',
   'NALLA CHINTAPANDU',
   'TAMARIND',
+  'PLASTIC BAGS',
   'OTHERS',
 ];
 
@@ -117,6 +118,7 @@ const TRANSFER_MATERIALS = [
   'NALLA POKKULU',
   'NALLA CHINTAPANDU',
   'TAMARIND',
+  'PLASTIC BAGS',
 ];
 
 const STORAGE_LOCATIONS = [
@@ -182,8 +184,8 @@ type EditTicketDraft = {
 
 const TICKET_EXPORT_COLUMNS: ExportColumn<WeighbridgeTicket>[] = [
   { header: 'Ticket No', value: (t) => formatTicketNo(t.ticketNo), numFmt: '@', align: 'right' },
-  { header: 'Date', value: (t) => shortDate(t.createdAt) },
-  { header: 'Time', value: (t) => new Date(t.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) },
+  { header: 'Date', value: (t) => shortDate(t.secondWeighedAt || t.createdAt) },
+  { header: 'Time', value: (t) => new Date(t.secondWeighedAt || t.createdAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) },
   { header: 'Vehicle No', value: (t) => t.vehicleNumber },
   { header: 'Party / Route', value: (t) => ticketTransferRoute(t) || t.partyName || '' },
   { header: 'Movement', value: (t) => t.isStorageTransfer ? 'STORAGE TRANSFER' : 'PARTY WEIGHMENT' },
@@ -732,16 +734,20 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       const now = new Date();
       setClockString(
         now.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
           hour12: true,
         })
       );
-      const day = String(now.getDate()).padStart(2, '0');
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const year = now.getFullYear();
-      setDateString(`${day}-${month}-${year}`);
+      const dateParts = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).replace(/\//g, '-');
+      setDateString(dateParts);
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
@@ -1571,18 +1577,34 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
       if (!vehicleNumber.trim()) {
         throw new Error('Vehicle number is required');
       }
+      const cleanVeh = vehicleNumber.trim().toUpperCase();
+      const matchingPending = pendingTickets.find(
+        (p) => p.vehicleNumber.toUpperCase() === cleanVeh
+      );
+      const effectiveFirstWeight = firstWeight ?? matchingPending?.firstWeightKg ?? null;
+      // Record Net weight, not the 2nd weight alone
+      let netWeight = currentLiveWeight;
+      if (effectiveFirstWeight != null && effectiveFirstWeight > 0) {
+        netWeight = Math.abs(currentLiveWeight - effectiveFirstWeight);
+      }
+      if (netWeight <= 0) {
+        throw new Error('Calculated net weight must be greater than 0 kg');
+      }
+
       return api<InternalWeightRecord>('/weighbridge/internal-weight', {
         method: 'POST',
         body: JSON.stringify({
-          vehicleNumber: vehicleNumber.trim().toUpperCase(),
+          vehicleNumber: cleanVeh,
           partyName: isStorageTransfer ? undefined : (partyName.trim() || undefined),
-          weightKg: currentLiveWeight,
+          weightKg: netWeight,
+          netWeightKg: netWeight,
+          firstWeightKg: effectiveFirstWeight,
           material: material || 'PAPPU',
         }),
       });
     },
     onSuccess: (rec) => {
-      toast.success(`Internal / Original weight recorded: ${rec.weightKg.toLocaleString('en-IN')} kg for ${rec.vehicleNumber}. (No ticket or fee created)`);
+      toast.success(`Internal / Original Net weight recorded: ${rec.weightKg.toLocaleString('en-IN')} kg for ${rec.vehicleNumber}. (No ticket or fee created)`);
       queryClient.invalidateQueries({ queryKey: ['internal-weights'] });
       queryClient.invalidateQueries({ queryKey: ['internal-weight-match'] });
     },
@@ -2284,17 +2306,36 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => recordInternalWeightMutation.mutate()}
-                    disabled={recordInternalWeightMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim()}
-                    className="h-11 px-4 font-semibold gap-2 text-xs border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500 transition-colors"
-                    title="Record live weight against party & vehicle without generating a ticket, fee, or print slip"
-                  >
-                    <Scale className="h-4 w-4 text-amber-500" />
-                    <span>Record Original / Internal Weight</span>
-                  </Button>
+                  {(() => {
+                    const cleanVeh = vehicleNumber.trim().toUpperCase();
+                    const matchingPendingTruck = cleanVeh
+                      ? pendingTickets.find((p) => p.vehicleNumber.toUpperCase() === cleanVeh)
+                      : null;
+                    const effectiveFirstWeight = firstWeight ?? matchingPendingTruck?.firstWeightKg ?? null;
+                    const effectiveNet = effectiveFirstWeight != null && effectiveFirstWeight > 0 && currentLiveWeight > 0
+                      ? Math.abs(currentLiveWeight - effectiveFirstWeight)
+                      : null;
+
+                    return (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => recordInternalWeightMutation.mutate()}
+                        disabled={recordInternalWeightMutation.isPending || currentLiveWeight <= 0 || !vehicleNumber.trim()}
+                        className="h-11 px-4 font-semibold gap-2 text-xs border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500 transition-colors"
+                        title={effectiveNet != null
+                          ? `Record calculated Net Weight (${effectiveNet.toLocaleString('en-IN')} kg) against vehicle without generating a ticket or fee`
+                          : 'Record live weight against party & vehicle without generating a ticket, fee, or print slip'}
+                      >
+                        <Scale className="h-4 w-4 text-amber-500" />
+                        <span>
+                          {effectiveNet != null
+                            ? `Record Internal Net Weight (${effectiveNet.toLocaleString('en-IN')} kg)`
+                            : 'Record Original / Internal Weight'}
+                        </span>
+                      </Button>
+                    );
+                  })()}
 
                   <Button
                     type="button"
@@ -3126,9 +3167,10 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                       #{formatTicketNo(t.ticketNo)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {shortDate(t.createdAt)}{' '}
+                      {shortDate(t.secondWeighedAt || t.createdAt)}{' '}
                       <span className="text-[10px]">
-                        {new Date(t.createdAt).toLocaleTimeString('en-IN', {
+                        {new Date(t.secondWeighedAt || t.createdAt).toLocaleTimeString('en-IN', {
+                          timeZone: 'Asia/Kolkata',
                           hour: '2-digit',
                           minute: '2-digit',
                         })}

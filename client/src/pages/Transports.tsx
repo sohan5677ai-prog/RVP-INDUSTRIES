@@ -511,7 +511,7 @@ export default function Transports() {
                       </FormControl>
                       <FormDescription>
                         Anything above zero is compulsory. It is deducted on every dispatch of
-                        this agency and cannot be taken off on the freight-cost form.
+                        this agency (₹200 below 30 tons, ₹300 for 30 tons and above) and cannot be taken off on the freight-cost form.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

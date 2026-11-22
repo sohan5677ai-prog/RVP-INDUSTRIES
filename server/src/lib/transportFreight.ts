@@ -1,4 +1,6 @@
 import { prisma } from './prisma.js';
+import { calcAssociationFee } from './calc.js';
+export { calcAssociationFee };
 
 /**
  * What we owe a transport agency for one trip, and what comes off it.
@@ -79,6 +81,7 @@ export async function flatTripFreight(
 /** The agency's per-trip association fee in ₹, or 0 where it carries none. */
 export async function associationFeePerTrip(
   transportId: string | null | undefined,
+  weightKg?: number | null,
 ): Promise<number> {
   if (!transportId) return 0;
   const transport = await prisma.transport.findUnique({
@@ -86,7 +89,7 @@ export async function associationFeePerTrip(
     select: { associationFeePerTrip: true },
   });
   const fee = Number(transport?.associationFeePerTrip ?? 0);
-  return fee > 0 ? fee : 0;
+  return calcAssociationFee(fee, weightKg);
 }
 
 /** Read a dispatch's stored freightDeductions JSON into a usable list. */

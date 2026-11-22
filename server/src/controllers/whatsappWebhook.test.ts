@@ -209,6 +209,64 @@ describe('Fast2SMS webhook routing', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('files a delivered receipt WITHOUT touching the send status', async () => {
+    // The double-send guards (sendDriverLocationIfNotSent, lastSentAt) all read
+    // `status: 'SENT'`. If a receipt moved the row off SENT they would stop
+    // matching and the driver would get a second copy of his location.
+    findFirst.mockResolvedValue({ id: 'log9', template: 'DISPATCH_DRIVER', phone: '919943262021', delivery: null });
+    await post({
+      webhook_type: 'status_update',
+      status: 'delivered',
+      message_id: 'wamid.D',
+      recipient_id: '919943262021',
+    });
+    expect(update).toHaveBeenCalledOnce();
+    const { data } = update.mock.calls[0][0];
+    expect(data.delivery).toBe('DELIVERED');
+    expect(data.deliveredAt).toBeInstanceOf(Date);
+    expect(data.status).toBeUndefined();
+    expect(data.errorMessage).toBeUndefined();
+  });
+
+  it('stamps deliveredAt too when only a read receipt arrives', async () => {
+    // The delivered callback is the one that goes missing; a read message with
+    // no delivery timestamp would read as never delivered.
+    findFirst.mockResolvedValue({ id: 'log9', template: 'PO_CREATED', phone: '919943262021', delivery: null });
+    await post({ webhook_type: 'status_update', status: 'read', message_id: 'wamid.R', recipient_id: '919943262021' });
+    const { data } = update.mock.calls[0][0];
+    expect(data.delivery).toBe('READ');
+    expect(data.readAt).toBeInstanceOf(Date);
+    expect(data.deliveredAt).toBeInstanceOf(Date);
+  });
+
+  it('ignores a late delivered receipt for a row already marked read', async () => {
+    findFirst.mockResolvedValue({ id: 'log9', template: 'PO_CREATED', phone: '919943262021', delivery: 'READ' });
+    await post({ webhook_type: 'status_update', status: 'delivered', message_id: 'wamid.D2', recipient_id: '919943262021' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('never lets a replayed success overwrite a recorded delivery failure', async () => {
+    findFirst.mockResolvedValue({ id: 'log9', template: 'PO_CREATED', phone: '919943262021', delivery: 'UNDELIVERED' });
+    await post({ webhook_type: 'status_update', status: 'delivered', message_id: 'wamid.D3', recipient_id: '919943262021' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('records a failure in both the status and the delivery columns', async () => {
+    findFirst.mockResolvedValue({ id: 'log9', template: 'INBOUND_MESSAGE', phone: '919440416639', delivery: null });
+    await post({
+      webhook_type: 'status_update',
+      status: 'undelivered',
+      message_id: 'wamid.F',
+      recipient_id: '919440416639',
+      errors: [{ code: 131026, title: 'Message undeliverable' }],
+    });
+    const { data } = update.mock.calls[0][0];
+    expect(data.status).toBe('FAILED');
+    expect(data.delivery).toBe('UNDELIVERED');
+    expect(data.deliveryError).toContain('131026');
+    expect(data.errorMessage).toContain('Message undeliverable');
+  });
+
   it('ignores a retried duplicate of an inbound message', async () => {
     findFirst.mockResolvedValue({ id: 'logExisting' });
     await post({ webhook_type: 'incoming_message', from: '91994', body: TRANSPORT_TEXT, message_id: 'wamid.SAME' });

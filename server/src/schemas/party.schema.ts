@@ -5,7 +5,7 @@ export const partyTypeEnum = z.enum(['SUPPLIER', 'BUYER', 'BOTH', 'HAMALI_TEAM']
 export const waLanguageEnum = z.enum(['EN', 'TE', 'TA', 'KN', 'HI']);
 /** Settings -> Wishes targeting only - mirrors the WishCategory enum. */
 export const wishCategoryEnum = z.enum(['HINDU', 'MUSLIM', 'CHRISTIAN', 'OTHER']);
-export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SHELL', 'TAMARIND_WASTE', 'TPS_BROKENS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU']);
+export const commodityEnum = z.enum(['BLACK_SEED', 'PAPPU', 'HUSK', 'TAMARIND_SHELL', 'TAMARIND_WASTE', 'TPS_BROKENS', 'PRECLEANER_DUST', 'NALLA_POKKULU', 'NALLA_CHINTAPANDU', 'PLASTIC_BAGS']);
 
 export const balanceTypeEnum = z.enum(['DR', 'CR']);
 

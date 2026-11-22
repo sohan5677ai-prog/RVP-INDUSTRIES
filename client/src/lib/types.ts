@@ -146,7 +146,7 @@ export interface WishBroadcast {
   createdAt: string;
 }
 
-export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS' | 'PRECLEANER_DUST' | 'NALLA_POKKULU' | 'NALLA_CHINTAPANDU';
+export type Commodity = 'BLACK_SEED' | 'PAPPU' | 'HUSK' | 'TAMARIND_SHELL' | 'TAMARIND_WASTE' | 'TPS_BROKENS' | 'PRECLEANER_DUST' | 'NALLA_POKKULU' | 'NALLA_CHINTAPANDU' | 'PLASTIC_BAGS';
 
 export interface Broker {
   id: string;

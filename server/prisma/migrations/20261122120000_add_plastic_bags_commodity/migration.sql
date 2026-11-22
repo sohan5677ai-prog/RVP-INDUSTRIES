@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "Commodity" ADD VALUE IF NOT EXISTS 'PLASTIC_BAGS';

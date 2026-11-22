@@ -82,6 +82,7 @@ const COMMODITIES: { value: string; label: string }[] = [
   { value: 'HUSK', label: 'Husk' },
   { value: 'TAMARIND_BYPRODUCTS', label: 'Tamarind By-Products' },
   { value: 'TPS_BROKENS', label: 'TPS (Brokens)' },
+  { value: 'PLASTIC_BAGS', label: 'Plastic Bags' },
 ];
 
 // Diacritic/case/whitespace-insensitive name key, used for duplicate detection.

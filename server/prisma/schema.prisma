@@ -93,6 +93,7 @@ enum Commodity {
   PRECLEANER_DUST
   NALLA_POKKULU
   NALLA_CHINTAPANDU
+  PLASTIC_BAGS
 }
 
 model User {

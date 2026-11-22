@@ -1779,6 +1779,13 @@ model CompanyProfile {
   taxproGspSecret String?
   taxproGstUser   String?
   taxproGstPass   String?
+  // Separate NIC *E-Way Bill API* registration (ewaybillgst.gov.in -> API user).
+  // Distinct from the e-invoice API user above: NIC treats them as different API
+  // users, which is why an EWB raised through the e-invoice system cannot be
+  // cancelled with the e-invoice credentials (error 312). Optional - when blank,
+  // E-Way Bill API calls fall back to the e-invoice token as before.
+  taxproEwbUser   String?
+  taxproEwbPass   String?
   taxproSandbox   Boolean @default(true)
   // Signature & Company Stamp dimensions (px)
   signatureHeight Int?    @default(55)

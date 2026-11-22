@@ -843,6 +843,8 @@ export interface CompanyProfile {
   taxproGspSecret?: string | null;
   taxproGstUser?: string | null;
   taxproGstPass?: string | null;
+  taxproEwbUser?: string | null;
+  taxproEwbPass?: string | null;
   taxproSandbox?: boolean;
   signatureHeight?: number | null;
   stampSize?: number | null;

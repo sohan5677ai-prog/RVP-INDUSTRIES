@@ -26,6 +26,7 @@ const REDACTED_FIELDS = new Set([
   'prevHash',
   'taxproGspSecret',
   'taxproGstPass',
+  'taxproEwbPass',
 ]);
 
 /** Values too large to be worth keeping in full. */

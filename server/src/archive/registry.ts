@@ -80,7 +80,7 @@ const MASTERS: ArchiveModel[] = [
   { name: 'SubscriptionPlanConfig', delegate: 'subscriptionPlanConfig', cls: 'MASTER', order: 75,
     note: 'generatedThrough is a live cursor, not FY data - it carries forward untouched.' },
   { name: 'CompanyProfile', delegate: 'companyProfile', cls: 'MASTER', order: 80,
-    omit: ['taxproGspId', 'taxproGspSecret', 'taxproGstUser', 'taxproGstPass'],
+    omit: ['taxproGspId', 'taxproGspSecret', 'taxproGstUser', 'taxproGstPass', 'taxproEwbUser', 'taxproEwbPass'],
     note: 'GSP credentials stripped on export, preserved on the live row.' },
   { name: 'ProductTaxInfo', delegate: 'productTaxInfo', cls: 'MASTER', order: 90 },
   { name: 'TallyLedgerMap', delegate: 'tallyLedgerMap', cls: 'MASTER', order: 100 },

@@ -211,7 +211,7 @@ export async function getCompanyProfileRow() {
 // Secret credential fields that must never be sent back to the client. They are
 // write-only from the UI's perspective: the form shows them blank and only
 // overwrites the stored value when the admin types a new one.
-const SECRET_FIELDS = ['taxproGspSecret', 'taxproGstPass'] as const;
+const SECRET_FIELDS = ['taxproGspSecret', 'taxproGstPass', 'taxproEwbPass'] as const;
 
 /** Strip write-only secrets from a company-profile row before returning it. */
 function redactCompanyProfile<T extends Record<string, unknown>>(row: T): T {
@@ -307,6 +307,8 @@ const companyProfileSchema = z.object({
   taxproGspSecret: z.string().optional().nullable(),
   taxproGstUser: z.string().optional().nullable(),
   taxproGstPass: z.string().optional().nullable(),
+  taxproEwbUser: z.string().optional().nullable(),
+  taxproEwbPass: z.string().optional().nullable(),
   taxproSandbox: z.boolean().optional().default(true),
   signatureHeight: z.coerce.number().int().min(10).max(300).optional().nullable(),
   stampSize: z.coerce.number().int().min(10).max(300).optional().nullable(),

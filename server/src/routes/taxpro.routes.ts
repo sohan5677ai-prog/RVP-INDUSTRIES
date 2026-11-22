@@ -173,6 +173,9 @@ router.post(
     if (!dispatch.irn) throw new HttpError(400, 'No E-Invoice found to cancel');
     if (dispatch.irnStatus === 'CANCELLED') throw new HttpError(400, 'E-Invoice is already cancelled');
 
+    let ewbCancelUnverified = false;
+    let ewbCancelNote: string | null = null;
+
     // Under GST rules, IRN CANNOT be cancelled while an active E-Way Bill exists.
     if (dispatch.ewbNumber && dispatch.ewbStatus !== 'CANCELLED') {
       if (!forceCascade) {
@@ -186,6 +189,11 @@ router.post(
       const ewbCancel = await runTaxpro(() =>
         TaxproService.cancelEWayBill(id, '2', 'Order cancelled with invoice'),
       );
+      // NIC refused the cancellation and its live status could not be read back:
+      // the local row still moves to CANCELLED so the IRN cancellation can be
+      // attempted, but it is rolled back below if NIC rejects that too.
+      ewbCancelUnverified = ewbCancel.verified === false;
+      ewbCancelNote = ewbCancelUnverified ? ewbCancel.message : null;
       await prisma.saleDispatch.update({
         where: { id },
         data: {
@@ -195,7 +203,20 @@ router.post(
       });
     }
 
-    const result = await runTaxpro(() => TaxproService.cancelIRN(id, cancelReason, cancelRemarks));
+    let result;
+    try {
+      result = await runTaxpro(() => TaxproService.cancelIRN(id, cancelReason, cancelRemarks));
+    } catch (err) {
+      if (ewbCancelUnverified) {
+        // The E-Way Bill cancellation was never confirmed at NIC, so do not leave
+        // a live bill showing as cancelled in the ERP.
+        await prisma.saleDispatch.update({
+          where: { id },
+          data: { ewbStatus: dispatch.ewbStatus, ewbCancelledDate: dispatch.ewbCancelledDate },
+        });
+      }
+      throw err;
+    }
 
     const updated = await prisma.saleDispatch.update({
       where: { id },
@@ -206,7 +227,10 @@ router.post(
       include: { saleOrder: { include: { buyer: true } } },
     });
 
-    res.json({ updated, message: result.message });
+    res.json({
+      updated,
+      message: ewbCancelNote ? `${result.message} ${ewbCancelNote}` : result.message,
+    });
   })
 );
 

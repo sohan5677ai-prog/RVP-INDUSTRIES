@@ -297,8 +297,8 @@ export default function SaleOrders() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  // Order confirmation re-send. The same WhatsApp template fires automatically
-  // when the order is booked; this covers an order edited afterwards.
+  // Order confirmation on WhatsApp. Manual only - creating an order sends
+  // nothing; the office clicks this row button when it's ready to go out.
   const confirmMutation = useMutation({
     mutationFn: (id: string) => api<{ message: string }>(`/whatsapp/sale-orders/${id}/confirmation`, { method: 'POST' }),
     onSuccess: (r) => toast.success(r?.message ?? 'Order confirmation sent'),

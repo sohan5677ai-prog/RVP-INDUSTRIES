@@ -52,7 +52,6 @@ import { extractInvoiceData, type DocumentKind } from '../lib/gemini.js';
 import { indianFinancialYear } from '../lib/invoice.js';
 import { nextInvoiceSeq, formatInvoiceNumber } from '../lib/invoiceSeries.js';
 import { allocateSaleOrderNumber, releaseSaleSerial } from '../lib/saleOrderNumber.js';
-import { whatsappService } from '../services/whatsapp.service.js';
 import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.service.js';
 import { logger } from '../lib/logger.js';
 import { markSlotLoaded, releaseSlotForDispatch } from '../services/dispatchSlot.service.js';
@@ -593,19 +592,9 @@ export async function createSaleOrder(req: Request, res: Response) {
     });
   });
 
-  // Order confirmation → buyer, fire-and-forget (never blocks the booking).
-  // Phones come from the address snapshotted onto the order where the buyer has
-  // several delivery sites, falling back to the party's own numbers.
-  void whatsappService.notifySaleOrderConfirmed(
-    order,
-    {
-      name: order.buyer.name,
-      phone: order.buyerPhone || order.buyer.phone,
-      phone2: order.buyerPhone2 || order.buyer.phone2,
-      waLanguage: order.buyer.waLanguage,
-    },
-    order.broker
-  );
+  // No WhatsApp here on purpose: the order confirmation is sent manually from
+  // the Sale Orders row's WhatsApp button (POST /whatsapp/sale-orders/:id/confirmation),
+  // so the office can check the order before the buyer sees it.
 
   res.status(201).json(order);
 }

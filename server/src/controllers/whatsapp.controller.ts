@@ -3153,9 +3153,8 @@ export async function sendLorryPaymentWhatsApp(req: Request, res: Response) {
 }
 
 /**
- * Re-send a sale order's confirmation to the buyer (Sale Orders → row action).
- * The same message fires automatically when the order is booked; this is for
- * the order that was edited afterwards, or whose buyer says nothing arrived.
+ * Send a sale order's confirmation to the buyer (Sale Orders → row action).
+ * This is the ONLY path that sends it - booking an order sends nothing.
  */
 export async function sendSaleOrderConfirmation(req: Request, res: Response) {
   const order = await prisma.saleOrder.findUnique({

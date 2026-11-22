@@ -499,3 +499,35 @@ export async function markSlotLoaded(args: {
   });
   return match.id;
 }
+
+/**
+ * Put a calendar card back on the board when its dispatch is undone.
+ *
+ * `saleDispatchId` is a pointer with no FK behind it (same convention as
+ * TransportConfirmation), so deleting the dispatch leaves the slot sitting at
+ * LOADED against a row that no longer exists. That is not cosmetic: LOADED is
+ * the one status the slot endpoints refuse to touch, so the card can neither be
+ * edited nor re-confirmed, and the next dispatch of the same lorry cannot match
+ * it either - markSlotLoaded only looks at slots whose saleDispatchId is null.
+ * The lorry would be stranded on the calendar at the weight it was undone from.
+ *
+ * It goes back to CONFIRMED when the plate is still on the card (the lorry was
+ * real - only the shipment was wrong) and to PLANNED otherwise, mirroring how
+ * releaseConfirmationForDispatch returns the WhatsApp booking to the queue.
+ */
+export async function releaseSlotForDispatch(saleDispatchId: string): Promise<string | null> {
+  const slot = await prisma.dispatchSlot.findUnique({
+    where: { saleDispatchId },
+    select: { id: true, lorryNumber: true },
+  });
+  if (!slot) return null;
+
+  await prisma.dispatchSlot.update({
+    where: { id: slot.id },
+    data: {
+      saleDispatchId: null,
+      status: slot.lorryNumber ? 'CONFIRMED' : 'PLANNED',
+    },
+  });
+  return slot.id;
+}

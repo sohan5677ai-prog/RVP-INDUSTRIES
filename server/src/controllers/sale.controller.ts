@@ -54,7 +54,7 @@ import { allocateSaleOrderNumber, releaseSaleSerial } from '../lib/saleOrderNumb
 import { whatsappService } from '../services/whatsapp.service.js';
 import { sendDriverLocationIfNotSent } from '../services/dispatchWhatsapp.service.js';
 import { logger } from '../lib/logger.js';
-import { markSlotLoaded } from '../services/dispatchSlot.service.js';
+import { markSlotLoaded, releaseSlotForDispatch } from '../services/dispatchSlot.service.js';
 import { findWaitingConfirmation, markConfirmationUsed, releaseConfirmationForDispatch } from '../services/lorryConfirmation.service.js';
 import { resolveOrderEffectiveDetails, resolveOrderBuyerAddress } from '../lib/orderAddress.js';
 import { snapshotDispatchDestination } from '../services/dispatchDestination.service.js';
@@ -1314,8 +1314,11 @@ export async function undoSaleDispatch(req: Request, res: Response) {
   });
 
   // The lorry was still booked - only the shipment was a mistake - so its
-  // WhatsApp booking goes back on the waiting list for the next dispatch.
+  // WhatsApp booking goes back on the waiting list for the next dispatch, and
+  // its loading-calendar card comes off LOADED so it can be re-planned and
+  // matched again.
   await releaseConfirmationForDispatch(dispatch.id);
+  await releaseSlotForDispatch(dispatch.id);
 
   res.json({ message: 'Dispatch undone' });
 }

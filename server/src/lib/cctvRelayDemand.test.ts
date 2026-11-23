@@ -1,80 +1,96 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ACTIVE_INTERVAL_MS,
+  BRIDGE_ALIVE_MS,
   IDLE_INTERVAL_MS,
+  LORRY_ON_SCALE_KG,
+  LORRY_TAIL_MS,
+  PARKED_MS,
   VIEWER_TTL_MS,
   getRelayDirective,
+  isBridgeAlive,
   isRelayWanted,
-  markAllViewerInterest,
+  markBridgeSeen,
   markViewerInterest,
+  noteScaleOffline,
+  noteScaleWeight,
   resetRelayDemand,
 } from './cctvRelayDemand.js';
 
-describe('CCTV relay viewer demand', () => {
+describe('CCTV relay demand', () => {
   beforeEach(() => resetRelayDemand());
 
-  it('idles until somebody actually asks for a camera', () => {
+  it('stays off with no lorry and nobody watching', () => {
     const now = 1_000_000;
-    expect(isRelayWanted(1, now)).toBe(false);
     const directive = getRelayDirective(1, now);
     expect(directive.wanted).toBe(false);
+    expect(directive.reason).toBeNull();
     expect(directive.intervalMs).toBe(IDLE_INTERVAL_MS);
-    // Never watched at all, as opposed to watched a long time ago.
     expect(directive.idleForMs).toBeNull();
   });
 
-  it('runs at full rate while a viewer is active', () => {
+  it('ignores an empty scale drifting a few kilos', () => {
     const now = 1_000_000;
-    markViewerInterest(1, now);
-    const directive = getRelayDirective(1, now + 1_000);
-    expect(directive.wanted).toBe(true);
-    expect(directive.intervalMs).toBe(ACTIVE_INTERVAL_MS);
+    noteScaleWeight(0, now);
+    noteScaleWeight(40, now + 1_000);
+    noteScaleWeight(LORRY_ON_SCALE_KG - 1, now + 2_000);
+    expect(isRelayWanted(1, now + 2_000)).toBe(false);
   });
 
-  it('falls back to the trickle once interest goes stale', () => {
+  it('turns both cameras on when a lorry drives onto the scale', () => {
     const now = 1_000_000;
-    markViewerInterest(1, now);
-    expect(getRelayDirective(1, now + VIEWER_TTL_MS - 1).wanted).toBe(true);
-    const stale = getRelayDirective(1, now + VIEWER_TTL_MS + 1);
-    expect(stale.wanted).toBe(false);
-    expect(stale.intervalMs).toBe(IDLE_INTERVAL_MS);
-    expect(stale.idleForMs).toBe(VIEWER_TTL_MS + 1);
+    noteScaleWeight(0, now);
+    noteScaleWeight(18_500, now + 1_000);
+    for (const cam of [1, 2] as const) {
+      const d = getRelayDirective(cam, now + 2_000);
+      expect(d.wanted).toBe(true);
+      expect(d.reason).toBe('WEIGHING');
+      expect(d.intervalMs).toBe(ACTIVE_INTERVAL_MS);
+    }
   });
 
-  it('tracks the two cameras apart', () => {
+  it('keeps them on for a tail after the lorry drives off, then stops', () => {
+    const now = 1_000_000;
+    noteScaleWeight(18_500, now);
+    noteScaleWeight(0, now + 60_000);
+    expect(isRelayWanted(1, now + 60_000 + LORRY_TAIL_MS - 1)).toBe(true);
+    expect(isRelayWanted(1, now + 60_000 + LORRY_TAIL_MS + 1)).toBe(false);
+  });
+
+  it('stops for a lorry parked on the scale, and restarts when the weight moves', () => {
+    const now = 1_000_000;
+    noteScaleWeight(18_500, now);
+    // Same weight reported over and over: not movement.
+    noteScaleWeight(18_505, now + PARKED_MS / 2);
+    expect(isRelayWanted(1, now + PARKED_MS - 1)).toBe(true);
+    expect(isRelayWanted(1, now + PARKED_MS + 1)).toBe(false);
+    // Loading starts again.
+    noteScaleWeight(19_200, now + PARKED_MS + 5_000);
+    expect(isRelayWanted(1, now + PARKED_MS + 6_000)).toBe(true);
+  });
+
+  it('treats a scale that goes offline as the lorry leaving', () => {
+    const now = 1_000_000;
+    noteScaleWeight(18_500, now);
+    noteScaleOffline(now + 10_000);
+    expect(isRelayWanted(1, now + 10_000 + LORRY_TAIL_MS + 1)).toBe(false);
+  });
+
+  it('turns one camera on for a remote viewer, and lets it lapse', () => {
     const now = 1_000_000;
     markViewerInterest(2, now);
     expect(getRelayDirective(1, now).wanted).toBe(false);
-    expect(getRelayDirective(2, now).wanted).toBe(true);
+    const d = getRelayDirective(2, now + 1_000);
+    expect(d.wanted).toBe(true);
+    expect(d.reason).toBe('VIEWER');
+    expect(isRelayWanted(2, now + VIEWER_TTL_MS + 1)).toBe(false);
   });
 
-  it('keeps both cameras warm from a single status poll', () => {
-    // The Weighbridge screen's 5s /cctv/status poll is the only demand signal
-    // left once the cabin PC pulls its frames off the LAN bridge instead.
+  it('knows the bridge is alive from its demand checks', () => {
     const now = 1_000_000;
-    markAllViewerInterest(now);
-    expect(getRelayDirective(1, now).wanted).toBe(true);
-    expect(getRelayDirective(2, now).wanted).toBe(true);
-  });
-
-  it('survives a screen left open: each poll renews the window', () => {
-    let now = 1_000_000;
-    markAllViewerInterest(now);
-    // Five seconds between polls, well inside the TTL, so it never drops out.
-    for (let i = 0; i < 20; i += 1) {
-      now += 5_000;
-      expect(isRelayWanted(1, now)).toBe(true);
-      markAllViewerInterest(now);
-    }
-    // Screen closed - the relay winds down on its own.
-    expect(isRelayWanted(1, now + VIEWER_TTL_MS + 1)).toBe(false);
-  });
-
-  it('idles far less often than it used to run', () => {
-    // The point of the change: no viewer means a fraction of the uploads.
-    expect(IDLE_INTERVAL_MS).toBeGreaterThan(ACTIVE_INTERVAL_MS);
-    const perDayActive = 86_400_000 / ACTIVE_INTERVAL_MS;
-    const perDayIdle = 86_400_000 / IDLE_INTERVAL_MS;
-    expect(perDayIdle).toBeLessThanOrEqual(perDayActive / 2);
+    expect(isBridgeAlive(now)).toBe(false);
+    markBridgeSeen(now);
+    expect(isBridgeAlive(now + BRIDGE_ALIVE_MS - 1)).toBe(true);
+    expect(isBridgeAlive(now + BRIDGE_ALIVE_MS + 1)).toBe(false);
   });
 });

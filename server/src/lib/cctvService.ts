@@ -2,6 +2,7 @@ import http from 'http';
 import crypto from 'crypto';
 import type { Response } from 'express';
 import { logger } from './logger.js';
+import { isBridgeAlive, isRelayWanted } from './cctvRelayDemand.js';
 
 interface CameraConfig {
   ip: string;
@@ -170,12 +171,17 @@ export function getCctvStatus() {
       serverFrameAgeMs < LIVE_RELAY_MAX_AGE_MS &&
       (globalFeedManager?.getConsecutiveErrors(num) ?? 0) === 0;
 
+    // The bridge is checking in but nothing needs pictures right now (no lorry
+    // on the scale, nobody watching remotely): healthy, deliberately quiet.
+    const standby = !relayOnline && !serverLanOnline && !isRelayWanted(num, now) && isBridgeAlive(now);
+
     return {
       cam: num,
       ip: cfg.ip,
       port: cfg.port,
-      online: relayOnline || serverLanOnline,
-      source: relayOnline ? 'CLOUD_RELAY' : serverLanOnline ? 'SERVER_LAN' : 'OFFLINE',
+      online: relayOnline || serverLanOnline || standby,
+      standby,
+      source: relayOnline ? 'CLOUD_RELAY' : serverLanOnline ? 'SERVER_LAN' : standby ? 'STANDBY' : 'OFFLINE',
       relayOnline,
       serverLanOnline,
       lastSeen: b?.timestamp || null,
@@ -200,6 +206,16 @@ class CameraFeedManager {
   private consecutiveErrors: Record<1 | 2, number> = { 1: 0, 2: 0 };
 
   constructor() {
+    // The cameras sit on the mill's LAN (192.168.1.x). From Render they can
+    // never be reached, so polling them there is a loop that only fails.
+    // Render sets RENDER=true; CCTV_LAN_POLL overrides either way.
+    const lanPoll = process.env.CCTV_LAN_POLL
+      ? process.env.CCTV_LAN_POLL === 'true'
+      : !process.env.RENDER;
+    if (!lanPoll) {
+      logger.info('[cctv] running in the cloud - camera pictures come only from the cabin bridge');
+      return;
+    }
     this.pollLoop(1);
     this.pollLoop(2);
   }

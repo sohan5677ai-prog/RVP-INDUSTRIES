@@ -81,6 +81,9 @@ const CONFIG = {
   // One fresh frame per second is enough for a remote operating console and
   // avoids piling up uploads while Render is waking or the internet is slow.
   cloudBroadcastIntervalMs: Number(setting('CCTV_CLOUD_FRAME_INTERVAL_MS', 1000)),
+  // How often an idle bridge asks the cloud whether pictures are wanted. This
+  // is the delay between a lorry rolling onto the scale and the relay turning on.
+  demandCheckIntervalMs: Number(setting('CCTV_DEMAND_CHECK_INTERVAL_MS', 3000)),
   bridgeKey: setting('CCTV_BRIDGE_KEY') || getDefaultBridgeKey(),
   cameras: {
     1: {
@@ -136,15 +139,14 @@ const streamSubscribers = {
 };
 
 /**
- * `nextUploadAt` / `relayWanted` / `relayIntervalMs` carry the server's
- * viewer-demand directive. The server answers every broadcast with how fast it
- * wants the next one: full rate while a Kata screen is open, a slow trickle
- * when nobody is watching. Until the first reply we use the configured
- * interval, so a server that does not send a directive changes nothing.
+ * `relayWanted` / `relayReason` / `relayIntervalMs` carry the server's
+ * directive from GET /cctv/demand: send pictures while a lorry is on the
+ * weighbridge or someone outside the cabin is watching, nothing otherwise.
+ * Starts OFF; the first demand check (3 s after start) turns it on if needed.
  */
 const cloudUpload = {
-  1: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0, nextUploadAt: 0, relayWanted: true, relayIntervalMs: null },
-  2: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0, nextUploadAt: 0, relayWanted: true, relayIntervalMs: null },
+  1: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0, nextUploadAt: 0, relayWanted: false, relayReason: null, relayIntervalMs: null },
+  2: { inFlight: false, lastAttemptAt: 0, lastSuccessAt: 0, lastErrorAt: 0, lastError: null, consecutiveErrors: 0, nextUploadAt: 0, relayWanted: false, relayReason: null, relayIntervalMs: null },
 };
 
 function md5(str) {
@@ -515,89 +517,171 @@ async function startHttpPollingFallback(camNum) {
 }
 
 /**
- * Push latest frame to cloud server broadcast endpoint
+ * One small HTTPS request to the cloud ERP. Resolves with the parsed JSON reply
+ * (or null when it is not JSON); rejects on a network error or non-2xx status,
+ * with `statusCode` on the error so callers can tell "old server" from "down".
  */
-async function broadcastToCloud(camNum, buffer) {
-  if (!CONFIG.bridgeKey || CONFIG.bridgeKey.length < 24) {
-    throw new Error('CCTV_BRIDGE_KEY is missing or too short');
-  }
-  const cloudUrl = `${CONFIG.cloudApiUrl}/weighbridge/cctv/broadcast`;
-  const base64 = buffer.toString('base64');
-  const payload = JSON.stringify({ cam: camNum, image: base64 });
-
+function cloudRequest(method, pathAndQuery, { body = null, contentType = null } = {}) {
+  const cloudUrl = `${CONFIG.cloudApiUrl}${pathAndQuery}`;
   return new Promise((resolve, reject) => {
     const isHttps = cloudUrl.startsWith('https:');
     const lib = isHttps ? https : http;
     const urlObj = new URL(cloudUrl);
+    const headers = {
+      'X-CCTV-Bridge-Key': CONFIG.bridgeKey,
+      'Connection': 'keep-alive',
+    };
+    if (body) {
+      headers['Content-Type'] = contentType;
+      headers['Content-Length'] = body.length;
+    }
 
     const req = lib.request(
       {
         hostname: urlObj.hostname,
         port: urlObj.port || (isHttps ? 443 : 80),
         path: urlObj.pathname + urlObj.search,
-        method: 'POST',
+        method,
         agent: isHttps ? httpsAgent : httpAgent,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payload),
-          'X-CCTV-Bridge-Key': CONFIG.bridgeKey,
-          'Connection': 'keep-alive',
-        },
+        headers,
         timeout: 6000,
       },
       (res) => {
-        res.on('error', (err) => {
-          reject(err);
-        });
+        res.on('error', reject);
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
-          reject(new Error(`Broadcast HTTP ${res.statusCode}`));
+          const err = new Error(`HTTP ${res.statusCode}`);
+          err.statusCode = res.statusCode;
+          reject(err);
           return;
         }
-        // Read the body rather than discarding it: it carries the server's
-        // relay directive. It is a couple of hundred bytes.
-        let body = '';
+        let text = '';
         res.setEncoding('utf8');
         res.on('data', (chunk) => {
           // Never let a misbehaving response grow unbounded in cabin memory.
-          if (body.length < 4096) body += chunk;
+          if (text.length < 4096) text += chunk;
         });
         res.on('end', () => {
           try {
-            resolve(JSON.parse(body)?.relay ?? null);
+            resolve(JSON.parse(text));
           } catch {
-            // An older server, or a proxy error page. The upload still
-            // succeeded; we simply have no directive to act on.
             resolve(null);
           }
         });
       }
     );
-
-    req.on('error', (err) => {
-      reject(err);
-    });
+    req.on('error', reject);
     req.on('timeout', () => {
       try { req.destroy(); } catch {}
       reject(new Error('Timeout'));
     });
-
-    req.write(payload);
+    if (body) req.write(body);
     req.end();
   });
 }
 
 /**
- * Cloud upload timer (pushes to Render cloud every 600ms)
+ * Raw JPEG bytes, not base64 in JSON: a third smaller on the wire, and the
+ * server holds one Buffer instead of text + parsed object + decoded bytes.
+ * Falls back to JSON for a server that predates raw uploads (it answers 400).
+ */
+let uploadAsJson = false;
+
+async function broadcastToCloud(camNum, buffer) {
+  if (!CONFIG.bridgeKey || CONFIG.bridgeKey.length < 24) {
+    throw new Error('CCTV_BRIDGE_KEY is missing or too short');
+  }
+  if (!uploadAsJson) {
+    try {
+      const reply = await cloudRequest('POST', `/weighbridge/cctv/broadcast?cam=${camNum}`, {
+        body: buffer,
+        contentType: 'image/jpeg',
+      });
+      return reply?.relay ?? null;
+    } catch (err) {
+      if (err.statusCode !== 400 && err.statusCode !== 415) throw err;
+      uploadAsJson = true;
+      console.log('[CCTV-BRIDGE] Cloud server does not take raw JPEG uploads yet - using JSON');
+    }
+  }
+  const payload = Buffer.from(JSON.stringify({ cam: camNum, image: buffer.toString('base64') }));
+  const reply = await cloudRequest('POST', '/weighbridge/cctv/broadcast', {
+    body: payload,
+    contentType: 'application/json',
+  });
+  return reply?.relay ?? null;
+}
+
+/**
+ * Apply the server's directive for one camera: send pictures or stay quiet.
+ * The server turns a camera on while a lorry is on the weighbridge (and a
+ * short while after it drives off), or while somebody away from the cabin is
+ * watching it. The rest of the time nothing is uploaded.
+ */
+function applyDirective(num, relay) {
+  const upload = cloudUpload[num];
+  if (!relay || typeof relay.wanted !== 'boolean') return;
+  const wasWanted = upload.relayWanted;
+  upload.relayWanted = relay.wanted;
+  upload.relayReason = relay.reason ?? null;
+  upload.relayIntervalMs = Number.isFinite(relay.intervalMs) && relay.intervalMs > 0 ? relay.intervalMs : null;
+  if (wasWanted !== upload.relayWanted) {
+    const why = relay.reason === 'WEIGHING' ? 'a lorry is on the weighbridge'
+      : relay.reason === 'VIEWER' ? 'someone is watching from outside the cabin'
+      : 'no lorry, nobody watching';
+    console.log(`[CCTV-BRIDGE] Cam ${num} cloud relay ${upload.relayWanted ? 'ON' : 'OFF'} - ${why}`);
+  }
+}
+
+/**
+ * The idle check: "should I be sending pictures?" every few seconds, a few
+ * hundred bytes with no image. `demandSupported` stays null until the first
+ * answer; a server without the endpoint (404) puts the bridge back on the old
+ * behaviour, where the directive rides back on each upload instead.
+ */
+let demandSupported = null;
+let demandInFlight = false;
+let demandLastErrorAt = 0;
+
+setInterval(async () => {
+  if (demandSupported === false || demandInFlight) return;
+  if (!CONFIG.bridgeKey || CONFIG.bridgeKey.length < 24) return;
+  demandInFlight = true;
+  try {
+    const reply = await cloudRequest('GET', '/weighbridge/cctv/demand');
+    if (reply && reply.cams) {
+      if (demandSupported !== true) {
+        console.log('[CCTV-BRIDGE] Cloud relay is on-demand: pictures go up only while weighing or watched');
+      }
+      demandSupported = true;
+      applyDirective(1, reply.cams[1]);
+      applyDirective(2, reply.cams[2]);
+    }
+  } catch (err) {
+    if (err.statusCode === 404) {
+      demandSupported = false;
+      for (const num of [1, 2]) cloudUpload[num].relayWanted = true;
+      console.log('[CCTV-BRIDGE] Cloud server has no demand check yet - relaying the old way');
+    } else if (Date.now() - demandLastErrorAt > 30000) {
+      demandLastErrorAt = Date.now();
+      console.warn(`[CCTV-BRIDGE] Cloud demand check: ${err.message}`);
+    }
+  } finally {
+    demandInFlight = false;
+  }
+}, CONFIG.demandCheckIntervalMs);
+
+/**
+ * Upload timer. Sends a camera's latest frame only while the server wants it.
  */
 setInterval(() => {
   for (const num of [1, 2]) {
     const frame = latestFrames[num];
     const upload = cloudUpload[num];
-    // Hold off until the server's requested interval has elapsed. While nobody
-    // has the Kata screen open this throttles us from a frame a second to a
-    // slow trickle - the trickle is what lets the server tell us to speed up
-    // again, so we never stop entirely.
+    // Quiet unless the server has asked for this camera. On an old server
+    // (no demand check) relayWanted is forced on and the upload replies steer
+    // the rate, as before.
+    if (!upload.relayWanted && demandSupported !== false) continue;
     if (Date.now() < upload.nextUploadAt) continue;
     if (frame && frame.buffer && Date.now() - frame.timestamp < 3000 && !upload.inFlight) {
       upload.inFlight = true;
@@ -607,24 +691,10 @@ setInterval(() => {
           upload.lastSuccessAt = Date.now();
           upload.lastError = null;
           upload.consecutiveErrors = 0;
-          if (relay && Number.isFinite(relay.intervalMs) && relay.intervalMs > 0) {
-            const wasWanted = upload.relayWanted;
-            upload.relayWanted = relay.wanted !== false;
-            upload.relayIntervalMs = relay.intervalMs;
-            // Measure the gap from when this upload STARTED, not from when the
-            // reply came back. Adding the round trip on top would push each
-            // send a few hundred ms later than the tick that should carry it,
-            // and the live view would quietly drop to half the intended rate.
-            upload.nextUploadAt = upload.lastAttemptAt + relay.intervalMs;
-            if (wasWanted !== upload.relayWanted) {
-              console.log(
-                `[CCTV-BRIDGE] Cam ${num} cloud relay ${upload.relayWanted ? 'resumed - a viewer is watching' : 'idling - nobody is watching'} (every ${relay.intervalMs}ms)`
-              );
-            }
-          } else {
-            upload.relayIntervalMs = null;
-            upload.nextUploadAt = 0;
-          }
+          applyDirective(num, relay);
+          // Measure the gap from when this upload STARTED, so the round trip
+          // does not quietly halve the rate.
+          upload.nextUploadAt = upload.relayIntervalMs ? upload.lastAttemptAt + upload.relayIntervalMs : 0;
         })
         .catch((err) => {
           upload.lastError = err.message;
@@ -633,8 +703,6 @@ setInterval(() => {
           // every tick, capped so we recover promptly once it is back.
           upload.nextUploadAt =
             Date.now() + Math.min(30_000, CONFIG.cloudBroadcastIntervalMs * upload.consecutiveErrors);
-          // Log at most once every 30s: a temporary network outage must not
-          // fill the terminal's log or hide the useful RTSP diagnostics.
           if (Date.now() - upload.lastErrorAt > 30000) {
             upload.lastErrorAt = Date.now();
             console.warn(`[CCTV-BRIDGE] Cloud relay Cam ${num}: ${err.message}`);
@@ -727,12 +795,13 @@ function startLocalServer() {
             sizeBytes: latestFrames[1].buffer?.length || 0,
             method: latestFrames[1].method,
             ip: CONFIG.cameras[1].ip,
-            cloudRelayOnline: Date.now() - cloudUpload[1].lastSuccessAt < 10000,
+            cloudRelayOnline: Date.now() - cloudUpload[1].lastSuccessAt < 10000 || (!cloudUpload[1].relayWanted && !cloudUpload[1].lastError),
             cloudRelayConfigured: CONFIG.bridgeKey.length >= 24,
             cloudRelayLastAttempt: cloudUpload[1].lastAttemptAt || null,
             cloudRelayLastSuccess: cloudUpload[1].lastSuccessAt || null,
             cloudRelayError: cloudUpload[1].lastError,
             cloudRelayMode: cloudUpload[1].relayWanted ? 'ACTIVE' : 'IDLE',
+            cloudRelayReason: cloudUpload[1].relayReason,
             cloudRelayIntervalMs: cloudUpload[1].relayIntervalMs ?? CONFIG.cloudBroadcastIntervalMs,
           },
           cam2: {
@@ -741,12 +810,13 @@ function startLocalServer() {
             sizeBytes: latestFrames[2].buffer?.length || 0,
             method: latestFrames[2].method,
             ip: CONFIG.cameras[2].ip,
-            cloudRelayOnline: Date.now() - cloudUpload[2].lastSuccessAt < 10000,
+            cloudRelayOnline: Date.now() - cloudUpload[2].lastSuccessAt < 10000 || (!cloudUpload[2].relayWanted && !cloudUpload[2].lastError),
             cloudRelayConfigured: CONFIG.bridgeKey.length >= 24,
             cloudRelayLastAttempt: cloudUpload[2].lastAttemptAt || null,
             cloudRelayLastSuccess: cloudUpload[2].lastSuccessAt || null,
             cloudRelayError: cloudUpload[2].lastError,
             cloudRelayMode: cloudUpload[2].relayWanted ? 'ACTIVE' : 'IDLE',
+            cloudRelayReason: cloudUpload[2].relayReason,
             cloudRelayIntervalMs: cloudUpload[2].relayIntervalMs ?? CONFIG.cloudBroadcastIntervalMs,
           },
         })

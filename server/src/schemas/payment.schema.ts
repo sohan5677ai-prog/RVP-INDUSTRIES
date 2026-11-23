@@ -18,6 +18,15 @@ export const createPaymentSchema = z.object({
   // Agency-level freight payment (single-owner fleets): the agency is the
   // counterparty and no lorry number is sent. See Payment.transportId.
   transportId: z.string().optional().nullable(),
+  // Agency payments only: the trips (SaleDispatch ids) this transfer covers, so
+  // they show as Paid. Multipart posts send it as a JSON string, hence the
+  // preprocess.
+  dispatchIds: z.preprocess((v) => {
+    if (typeof v === 'string') {
+      try { return JSON.parse(v); } catch { return v.split(',').map((s) => s.trim()).filter(Boolean); }
+    }
+    return v;
+  }, z.array(z.string()).optional()),
   payee: z.string().optional().nullable(),
   reference: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
@@ -36,6 +45,7 @@ export const updatePaymentSchema = createPaymentSchema.omit({
   purchaseId: true,
   hamaliVerificationId: true,
   transportId: true,
+  dispatchIds: true,
 });
 
 export type UpdatePaymentInput = z.infer<typeof updatePaymentSchema>;

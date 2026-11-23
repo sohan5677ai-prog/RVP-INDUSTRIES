@@ -539,6 +539,8 @@ export interface SaleDispatch {
   customKata?: string | number | null;
   freightAdditions?: FreightCostItem[] | null;
   freightDeductions?: FreightCostItem[] | null;
+  /** Agency (on-account) payment this trip was ticked off against - shows as Paid. */
+  agencyPaymentId?: string | null;
   // XS Pappu: kg of this shipment served from yield surplus above the assumed
   // 60% out-turn. Draws no black seed and carries no seed cost. A quantity, not
   // a flag - one lorry can be part-backed and part-surplus.

@@ -33,6 +33,8 @@ interface RetentionRow {
   destination: string | null;
   amount: number;
   released: boolean;
+  /** Ticked off in a Pay Agency payment (SaleDispatch.agencyPaymentId). */
+  paid: boolean;
   transportKey: string;
   transportName: string;
   // Lorry receipt (GC note) written for this trip, when one has been issued.
@@ -222,6 +224,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
           destination: o.destination ?? null,
           amount: retentionAmount(d, transportKey),
           released: d.status === 'DELIVERED',
+          paid: Boolean(d.agencyPaymentId),
           transportKey,
           transportName,
           product: o.product,
@@ -269,7 +272,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
       const matchDest = (r.destination ?? '').toLowerCase().includes(q);
       const matchDriver = (r.driverName ?? '').toLowerCase().includes(q);
       const matchGc = (r.gcNumber ?? '').toLowerCase().includes(q);
-      const matchStatus = (r.released ? 'delivered' : 'in transit').includes(q);
+      const matchStatus = (r.released ? 'delivered' : 'in transit').includes(q) || (r.paid ? 'paid' : 'unpaid').includes(q);
       return matchBuyer || matchLorry || matchInvoice || matchDest || matchDriver || matchGc || matchStatus;
     });
   }, [allRows, activeTabInfo.key, search]);
@@ -289,6 +292,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
         hamali: r.hamali,
         kata: r.kata,
         retention: r.amount,
+        paid: r.paid,
         otherDeductions: r.otherDeductions,
         extraCosts: r.extraCosts,
       })),
@@ -307,6 +311,7 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
       ? [{ header: 'Retention', value: (r: RetentionRow) => rupees(r.amount), excel: (r: RetentionRow) => r.amount, numFmt: '#,##0.00', align: 'right' as const }]
       : []),
     { header: 'Status', value: (r) => (r.released ? 'Delivered' : 'In Transit') },
+    { header: 'Payment', value: (r) => (r.paid ? 'Paid' : 'Unpaid') },
   ];
 
   const totalReleased = rows.filter((r) => r.released).reduce((s, r) => s + r.amount, 0);
@@ -485,9 +490,16 @@ export default function SuryaRoadTransport({ embedded = false }: { embedded?: bo
                           <TableCell className="text-right font-bold text-primary">{rupees(r.amount)}</TableCell>
                         )}
                         <TableCell>
-                          <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
-                            {r.released ? 'Delivered' : 'In Transit'}
-                          </Badge>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge variant={r.released ? 'default' : 'outline'} className="text-[10px]">
+                              {r.released ? 'Delivered' : 'In Transit'}
+                            </Badge>
+                            {r.paid && (
+                              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
+                                Paid
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

@@ -43,8 +43,17 @@ export interface TransportLedgerTrip {
   kata: number;
   /** Retention held back on this trip (₹0 for agencies with no retention). */
   retention: number;
+  /** Already ticked off in an earlier Pay Agency payment. */
+  paid?: boolean;
   otherDeductions: { label: string; amount: number }[];
   extraCosts: { label: string; amount: number }[];
+}
+
+/** What the agency is owed for one trip: freight less everything taken off it. */
+function tripNet(t: TransportLedgerTrip): number {
+  const ded = t.otherDeductions.reduce((s, d) => s + d.amount, 0);
+  const add = t.extraCosts.reduce((s, a) => s + a.amount, 0);
+  return Math.round(t.freight - t.hamali - t.kata - t.retention - ded + add);
 }
 
 /**
@@ -133,6 +142,29 @@ export function TransportLedger({
   const [payScreenshot, setPayScreenshot] = useState<File | null>(null);
   // Remounts the drop zone on each open so a previous file's preview is gone.
   const [payFormKey, setPayFormKey] = useState(0);
+  // Lorries this payment covers - they show as Paid on the retention table.
+  const [paySelected, setPaySelected] = useState<Set<string>>(() => new Set());
+
+  // Trips still waiting to be paid, oldest first (the order they get settled).
+  const unpaidTrips = useMemo(
+    () => trips.filter((t) => !t.paid).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+    [trips]
+  );
+
+  const applySelection = (next: Set<string>) => {
+    setPaySelected(next);
+    // The amount follows the ticked lorries; still overtypeable afterwards.
+    const sum = unpaidTrips.filter((t) => next.has(t.id)).reduce((s, t) => s + tripNet(t), 0);
+    setPayAmount(next.size > 0 ? String(Math.max(0, sum)) : payableNow > 0 ? String(payableNow) : '');
+  };
+  const toggleTrip = (id: string) => {
+    const next = new Set(paySelected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    applySelection(next);
+  };
+  const toggleAllTrips = () => {
+    applySelection(paySelected.size === unpaidTrips.length ? new Set() : new Set(unpaidTrips.map((t) => t.id)));
+  };
 
   const entries: LedgerEntry[] = useMemo(() => {
     // A freight payment is tagged with a lorry number, never with the agency,
@@ -299,6 +331,9 @@ export function TransportLedger({
   const payMutation = useMutation({
     mutationFn: () => {
       if (!transport?.id) throw new Error('No transport agency selected');
+      const picked = unpaidTrips.filter((t) => paySelected.has(t.id));
+      const lorries = picked.map((t) => t.lorryNumber).filter(Boolean).join(', ');
+      const dispatchIds = picked.map((t) => t.id);
       const fields = {
         date: payDate,
         amount: Number(payAmount) || 0,
@@ -308,7 +343,9 @@ export function TransportLedger({
         transportId: transport.id,
         payee: transportName,
         reference: payReference || null,
-        description: `Freight payment on account - ${transportName}`,
+        description: lorries
+          ? `Freight payment - ${transportName} (${lorries})`
+          : `Freight payment on account - ${transportName}`,
       };
       // With a proof screenshot the create goes multipart, the same way the
       // Payments register does it: the server stores the file and WhatsApps it
@@ -318,15 +355,17 @@ export function TransportLedger({
         for (const [k, v] of Object.entries(fields)) {
           if (v !== null && v !== undefined) fd.append(k, String(v));
         }
+        if (dispatchIds.length) fd.append('dispatchIds', JSON.stringify(dispatchIds));
         fd.append('screenshot', payScreenshot);
         return api<Payment>('/payments', { method: 'POST', body: fd, multipart: true });
       }
-      return api<Payment>('/payments', { method: 'POST', body: fields });
+      return api<Payment>('/payments', { method: 'POST', body: { ...fields, dispatchIds } });
     },
     onSuccess: () => {
       void invalidatePayments(qc);
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      qc.invalidateQueries({ queryKey: ['sale-orders'] });
       toast.success(
         payScreenshot
           ? 'Agency payment recorded - receipt sent with the screenshot'
@@ -336,6 +375,7 @@ export function TransportLedger({
       setPayAmount('');
       setPayReference('');
       setPayScreenshot(null);
+      setPaySelected(new Set());
       setPayFormKey((k) => k + 1);
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -357,6 +397,7 @@ export function TransportLedger({
     setPayReference('');
     setPayDate(new Date().toISOString().slice(0, 10));
     setPayScreenshot(null);
+    setPaySelected(new Set());
     setPayFormKey((k) => k + 1);
     setPayOpen(true);
   };
@@ -611,12 +652,12 @@ export function TransportLedger({
           him". Guessing which trips a round figure covered would put a wrong
           paid date on real trips. */}
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Pay {transportName}</DialogTitle>
             <DialogDescription>
               {payableNow > 0
-                ? <>Outstanding on this account: <strong>{rupees(payableNow)}</strong>. The payment debits the account as a whole - no lorry is tagged.</>
+                ? <>Outstanding on this account: <strong>{rupees(payableNow)}</strong>. Tick the lorries this transfer pays - they will show as Paid.</>
                 : <>Nothing outstanding on this account right now. A payment recorded here will sit as an advance.</>}
             </DialogDescription>
           </DialogHeader>
@@ -629,6 +670,53 @@ export function TransportLedger({
               onExtracted={applyExtracted}
               onFile={setPayScreenshot}
             />
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>Lorries being paid</Label>
+                {unpaidTrips.length > 0 && (
+                  <button type="button" onClick={toggleAllTrips} className="text-xs font-medium text-primary hover:underline">
+                    {paySelected.size === unpaidTrips.length ? 'Clear all' : 'Select all'}
+                  </button>
+                )}
+              </div>
+              {unpaidTrips.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic rounded-md border px-3 py-2">
+                  Every trip shown is already marked Paid.
+                </p>
+              ) : (
+                <div className="rounded-md border max-h-56 overflow-y-auto divide-y">
+                  {unpaidTrips.map((t) => {
+                    const checked = paySelected.has(t.id);
+                    return (
+                      <label
+                        key={t.id}
+                        className={`flex items-center gap-3 px-3 py-2 text-sm cursor-pointer hover:bg-muted/40 ${checked ? 'bg-primary/5' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-primary"
+                          checked={checked}
+                          onChange={() => toggleTrip(t.id)}
+                        />
+                        <span className="font-medium w-28 shrink-0">{t.lorryNumber ?? '-'}</span>
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">{shortDate(t.date)}</span>
+                        <span className="text-xs text-muted-foreground flex-1 truncate">
+                          {[t.invoice, t.destination].filter(Boolean).join(' · ')}
+                        </span>
+                        <span className="tabular-nums font-semibold">{rupees(tripNet(t))}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {paySelected.size > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {paySelected.size} lorr{paySelected.size === 1 ? 'y' : 'ies'} selected · net{' '}
+                  <strong>{rupees(unpaidTrips.filter((t) => paySelected.has(t.id)).reduce((s, t) => s + tripNet(t), 0))}</strong>
+                </p>
+              )}
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

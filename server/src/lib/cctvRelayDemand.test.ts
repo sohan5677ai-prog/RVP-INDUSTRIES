@@ -6,7 +6,6 @@ import {
   LORRY_ON_SCALE_KG,
   LORRY_TAIL_MS,
   PARKED_MS,
-  VIEWER_TTL_MS,
   getRelayDirective,
   isBridgeAlive,
   isRelayWanted,
@@ -76,14 +75,14 @@ describe('CCTV relay demand', () => {
     expect(isRelayWanted(1, now + 10_000 + LORRY_TAIL_MS + 1)).toBe(false);
   });
 
-  it('turns one camera on for a remote viewer, and lets it lapse', () => {
+  it('does NOT turn a camera on just because someone is viewing it', () => {
     const now = 1_000_000;
-    markViewerInterest(2, now);
-    expect(getRelayDirective(1, now).wanted).toBe(false);
-    const d = getRelayDirective(2, now + 1_000);
-    expect(d.wanted).toBe(true);
-    expect(d.reason).toBe('VIEWER');
-    expect(isRelayWanted(2, now + VIEWER_TTL_MS + 1)).toBe(false);
+    // A camera box polled every 5 s with the scale empty.
+    for (let t = 0; t < 60_000; t += 5_000) markViewerInterest(2, now + t);
+    const d = getRelayDirective(2, now + 60_000);
+    expect(d.wanted).toBe(false);
+    expect(d.reason).toBeNull();
+    expect(d.idleForMs).toBe(5_000);
   });
 
   it('knows the bridge is alive from its demand checks', () => {

@@ -614,9 +614,9 @@ async function broadcastToCloud(camNum, buffer) {
 
 /**
  * Apply the server's directive for one camera: send pictures or stay quiet.
- * The server turns a camera on while a lorry is on the weighbridge (and a
- * short while after it drives off), or while somebody away from the cabin is
- * watching it. The rest of the time nothing is uploaded.
+ * The server turns the cameras on only while the weighbridge weight is
+ * moving (and a short while after the lorry drives off). The rest of the
+ * time nothing is uploaded.
  */
 function applyDirective(num, relay) {
   const upload = cloudUpload[num];
@@ -627,8 +627,7 @@ function applyDirective(num, relay) {
   upload.relayIntervalMs = Number.isFinite(relay.intervalMs) && relay.intervalMs > 0 ? relay.intervalMs : null;
   if (wasWanted !== upload.relayWanted) {
     const why = relay.reason === 'WEIGHING' ? 'a lorry is on the weighbridge'
-      : relay.reason === 'VIEWER' ? 'someone is watching from outside the cabin'
-      : 'no lorry, nobody watching';
+      : 'no weight movement on the weighbridge';
     console.log(`[CCTV-BRIDGE] Cam ${num} cloud relay ${upload.relayWanted ? 'ON' : 'OFF'} - ${why}`);
   }
 }
@@ -651,7 +650,7 @@ setInterval(async () => {
     const reply = await cloudRequest('GET', '/weighbridge/cctv/demand');
     if (reply && reply.cams) {
       if (demandSupported !== true) {
-        console.log('[CCTV-BRIDGE] Cloud relay is on-demand: pictures go up only while weighing or watched');
+        console.log('[CCTV-BRIDGE] Cloud relay is on-demand: pictures go up only while the weighbridge weight moves');
       }
       demandSupported = true;
       applyDirective(1, reply.cams[1]);
